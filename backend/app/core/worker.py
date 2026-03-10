@@ -65,6 +65,12 @@ class WorkerExecutor:
         task.started_at = datetime.utcnow()
         await db.commit()
 
+        # Send "starting" notification to issue
+        try:
+            self._notify_task_started(task)
+        except Exception as e:
+            logger.warning(f"Failed to send start notification: {e}")
+
         container = None
 
         try:
@@ -116,19 +122,44 @@ class WorkerExecutor:
                 task.status = TaskStatus.COMPLETED
                 task.completed_at = datetime.utcnow()
 
-                # Parse MR URL from logs (simplified)
-                # In production, you'd want more robust parsing
+                # Parse MR URL from logs
+                # Handle both "MR created: http://..." and multi-line logs
                 for line in logs.split("\n"):
                     if "MR created:" in line:
                         mr_url = line.split("MR created:")[-1].strip()
-                        task.merge_request_url = mr_url
+                        # If URL is incomplete (e.g., "http://host/path" without full path),
+                        # try to get the next line which contains the full URL
+                        if mr_url and not "/merge_requests/" in mr_url:
+                            # Continue to next iteration to find the full URL
+                            continue
+                        if mr_url:
+                            task.merge_request_url = mr_url
+                            break
+                # If still not found, try to find merge_requests pattern in any line
+                if not task.merge_request_url:
+                    for line in logs.split("\n"):
+                        if "/merge_requests/" in line:
+                            task.merge_request_url = line.strip()
+                            break
 
                 logger.info(f"Task {task_id} completed successfully")
+
+                # Send "completed" notification with MR URL
+                try:
+                    self._notify_task_completed(task, success=True)
+                except Exception as e:
+                    logger.warning(f"Failed to send completion notification: {e}")
             else:
                 task.status = TaskStatus.FAILED
                 task.completed_at = datetime.utcnow()
                 task.error_message = logs[-500:]  # Store last 500 chars
                 logger.error(f"Task {task_id} failed with exit code {exit_code}")
+
+                # Send "failed" notification
+                try:
+                    self._notify_task_completed(task, success=False)
+                except Exception as e:
+                    logger.warning(f"Failed to send failure notification: {e}")
 
             # Add log entry
             log_entry = TaskLog(
@@ -154,7 +185,61 @@ class WorkerExecutor:
             task.completed_at = datetime.utcnow()
             task.error_message = str(e)[:500]
             await db.commit()
+
+            # Send failure notification for exceptions
+            try:
+                self._notify_task_completed(task, success=False)
+            except Exception as notify_error:
+                logger.warning(f"Failed to send failure notification: {notify_error}")
+
             return False
+
+    def _notify_task_started(self, task: Task) -> None:
+        """Send notification when task starts execution.
+
+        Args:
+            task: Task object
+        """
+        message = "🔄 开始处理请求..."
+        self.gitlab.create_note(
+            task.project_id,
+            task.issue_iid,
+            message,
+        )
+        logger.info(f"Sent start notification for task {task.id}")
+
+    def _notify_task_completed(self, task: Task, success: bool) -> None:
+        """Send notification when task completes.
+
+        Args:
+            task: Task object
+            success: Whether the task succeeded
+        """
+        if success and task.merge_request_url:
+            # Extract MR IID from URL (e.g., /merge_requests/14 -> !14)
+            mr_iid = None
+            if "/merge_requests/" in task.merge_request_url:
+                try:
+                    mr_iid = task.merge_request_url.split("/merge_requests/")[-1].split("/")[0].split("?")[0]
+                except (IndexError, ValueError):
+                    pass
+
+            if mr_iid:
+                message = f"✅ MR 已创建: !{mr_iid}"
+            else:
+                message = f"✅ MR 已创建: {task.merge_request_url}"
+        elif success:
+            message = "✅ 任务已完成"
+        else:
+            error_msg = task.error_message[:200] if task.error_message else "未知错误"
+            message = f"❌ 任务失败: {error_msg}"
+
+        self.gitlab.create_note(
+            task.project_id,
+            task.issue_iid,
+            message,
+        )
+        logger.info(f"Sent completion notification for task {task.id}, success={success}")
 
     async def process_pending_tasks(self, db: AsyncSession) -> int:
         """Process all pending tasks.

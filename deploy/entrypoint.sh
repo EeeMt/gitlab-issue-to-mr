@@ -322,7 +322,7 @@ if [ -n "$CHANGES" ]; then
     if [ -z "$MR_WEB_URL" ]; then
         MR_WEB_URL=$(cat /workspace/mr_response.json | grep -o '"web_url":"[^"]*"' | cut -d'"' -f4)
     fi
-    echo "MR: ${MR_WEB_URL}"
+    echo "MR created: ${MR_WEB_URL}"
 
     # Comment on issue with MR link
     echo "Commenting on issue..."

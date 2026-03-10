@@ -353,6 +353,14 @@ PROGRESS.md                     # 本文档
 | 1.5.1 | 添加调度配置 | ✅ | `app/config.py` |
 | 1.5.2 | 添加 target_branch 配置 | ✅ | `app/config.py` |
 
+#### 1.6 用户反馈通知 ✅ 已完成
+
+| # | 任务 | 状态 | 文件 |
+|---|---|---|---|
+| 1.6.1 | 任务开始时发送 "开始处理" 通知 | ✅ | `app/core/worker.py` |
+| 1.6.2 | 任务完成时发送 "MR已创建/失败" 通知 | ✅ | `app/core/worker.py` |
+| 1.6.3 | 单元测试 | ✅ | `test_notifications.py` |
+
 ---
 
 ## 任务依赖图

@@ -42,12 +42,23 @@ cd frontend && npm run build
 ### Deployment
 
 ```bash
-# Start all services (PostgreSQL + Backend)
-cd deploy && docker-compose up -d
+# Build and start all services (PostgreSQL + Backend)
+cd deploy && docker-compose up -d --build
 
 # View logs
 cd deploy && docker-compose logs -f
 ```
+
+> **Important**: After modifying source code, you must rebuild the Docker images:
+>
+> ```bash
+> # Rebuild backend image
+> docker build -f deploy/Dockerfile.backend -t deploy-backend .
+> docker-compose -f deploy/docker-compose.yml up -d backend
+>
+> # Rebuild worker image (if deploy/entrypoint.sh was modified)
+> docker build -f deploy/Dockerfile.worker -t gitlab-issues-to-mr-worker:latest .
+> ```
 
 ## Architecture
 
