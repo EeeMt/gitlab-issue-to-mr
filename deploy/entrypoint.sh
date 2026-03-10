@@ -92,11 +92,13 @@ echo "Running Claude API..."
 echo "Prompt: ${USER_PROMPT}"
 echo ""
 
-# Create Python script to call Claude API
+# Create Python script to call Claude API with Tool Use support
 cat > /tmp/claude_call.py << 'PYTHON_SCRIPT'
 import os
 import json
+import subprocess
 import anthropic
+from anthropic import Anthropic
 
 # Get environment variables
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -110,30 +112,135 @@ client = anthropic.Anthropic(
     base_url=ANTHROPIC_BASE_URL,
 )
 
-# Call Claude API with tools disabled to get direct output
+# Define available tools for the container
+# Container has access to git, curl, file operations
+TOOLS = [
+    {
+        "name": "Bash",
+        "description": "Execute shell commands in the container. Use this to run git, python, or other CLI tools.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "Shell command to execute"},
+                "description": {"type": "string", "description": "What the command does"}
+            },
+            "required": ["command"]
+        }
+    },
+    {
+        "name": "Read",
+        "description": "Read a file from the filesystem",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Path to the file to read"}
+            },
+            "required": ["file_path"]
+        }
+    },
+    {
+        "name": "Write",
+        "description": "Write content to a file",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "content": {"type": "string", "description": "Content to write"},
+                "file_path": {"type": "string", "description": "Path to write to"}
+            },
+            "required": ["file_path", "content"]
+        }
+    }
+]
+
+def execute_tool(tool_name, tool_input):
+    """Execute a tool and return the result."""
+    try:
+        if tool_name == "Bash":
+            command = tool_input.get("command", "")
+            result = subprocess.run(
+                command,
+                shell=True,
+                cwd="/workspace",
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+            return {
+                "output": result.stdout + ("\nstderr: " + result.stderr if result.stderr else ""),
+                "exit_code": result.returncode
+            }
+        elif tool_name == "Read":
+            file_path = tool_input.get("file_path", "")
+            with open(file_path, "r") as f:
+                return {"content": f.read()}
+        elif tool_name == "Write":
+            file_path = tool_input.get("file_path", "")
+            content = tool_input.get("content", "")
+            with open(file_path, "w") as f:
+                f.write(content)
+            return {"success": True, "file_path": file_path}
+        else:
+            return {"error": f"Unknown tool: {tool_name}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+def call_claude(messages, tools=None, max_iterations=10):
+    """Call Claude API with tool use support."""
+    for i in range(max_iterations):
+        response = client.messages.create(
+            model=ANTHROPIC_MODEL,
+            max_tokens=4096,
+            messages=messages,
+            tools=tools or []
+        )
+
+        # Check for tool use
+        tool_use_blocks = [block for block in response.content if hasattr(block, 'type') and block.type == 'tool_use']
+
+        if not tool_use_blocks:
+            # No tool use, return the response
+            return response
+
+        # Process tool use
+        for block in tool_use_blocks:
+            tool_name = block.name
+            tool_input = block.input
+
+            # Execute tool
+            result = execute_tool(tool_name, tool_input)
+
+            # Add tool result to messages
+            messages.append({
+                "role": "assistant",
+                "content": [block]
+            })
+            messages.append({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": json.dumps(result)
+                }]
+            })
+
+    # Max iterations reached
+    return response
+
+# Main execution
 try:
-    message = client.messages.create(
-        model=ANTHROPIC_MODEL,
-        max_tokens=4096,
-        messages=[
-            {"role": "user", "content": USER_PROMPT}
-        ],
-        tools=[]  # Disable tools to get direct output
-    )
-    # Handle different response types - check block type
+    messages = [{"role": "user", "content": USER_PROMPT}]
+    response = call_claude(messages, TOOLS)
+
+    # Extract text output
     output = []
-    for block in message.content:
-        block_type = getattr(block, 'type', None)
-        if block_type == 'text':
+    for block in response.content:
+        if hasattr(block, 'type') and block.type == 'text':
             output.append(block.text)
-        elif block_type == 'thinking':
-            # Skip thinking for now
-            pass
+
     if output:
         print('\n'.join(output))
     else:
-        # If no text output, print thinking for debugging
-        print(f"# API returned no text content. Content: {message.content}", file=__import__('sys').stderr)
+        print(f"# No text output. Content: {response.content}", file=__import__('sys').stderr)
         exit(1)
 except Exception as e:
     print(f"Error: {e}", file=__import__('sys').stderr)
