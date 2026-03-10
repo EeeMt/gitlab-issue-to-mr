@@ -404,7 +404,7 @@ report_md = f"""## ✅ 实现完成
 {USER_PROMPT}
 
 ### 变更文件
-{changed_files if changed_files || '无'}
+{changed_files if changed_files else '无'}
 
 ### 执行摘要
 - 总步骤: {len(steps)}
