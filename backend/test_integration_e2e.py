@@ -542,6 +542,29 @@ def main():
             else:
                 logger.warning("No MR link found in issue comments")
 
+            # Step 9: Verify MR description contains required fields
+            logger.info("\n[Step 9] Verifying MR description...")
+            mr_description = mr.get("description", "")
+
+            # Check required fields in description
+            required_fields = {
+                "Prompt": "Prompt" in mr_description or "Req:" in mr_description,
+                "Files": "Files:" in mr_description or "New:" in mr_description,
+                "Issue reference": f"!{issue_iid}" in mr_description or f"#{issue_iid}" in mr_description,
+                "Commit": "Commit:" in mr_description or "`" in mr_description,
+            }
+
+            all_passed = True
+            for field, passed in required_fields.items():
+                if passed:
+                    logger.info(f"  ✓ {field} found in MR description")
+                else:
+                    logger.warning(f"  ✗ {field} NOT found in MR description")
+                    all_passed = False
+
+            if not all_passed:
+                logger.warning(f"MR description: {mr_description[:200]}")
+
             logger.info("\n" + "=" * 60)
             logger.info("✅ E2E TEST PASSED!")
             logger.info(f"  Issue: #{issue_iid}")
