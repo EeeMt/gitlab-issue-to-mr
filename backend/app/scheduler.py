@@ -9,14 +9,18 @@ from typing import Set
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
+from app.config import get_effective_settings
 from app.core.docker_client import get_docker_client
 from app.core.worker import WorkerExecutor
 from app.database import AsyncSessionLocal
 from app.models import Task, TaskStatus
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
+
+
+def get_settings():
+    """Get effective settings (with runtime overrides)."""
+    return get_effective_settings()
 WORKER_CONTAINER_PATTERN = re.compile(r"^gimr-\d+-p\d+-i\d+$")
 
 
@@ -44,6 +48,7 @@ class Scheduler:
                 await self._run_cycle()
             except Exception as e:
                 logger.exception("Scheduler cycle failed")
+            settings = get_settings()
             await asyncio.sleep(settings.scheduler_interval)
 
         logger.info("Scheduler stopped")
@@ -55,6 +60,7 @@ class Scheduler:
 
     async def _run_cycle(self) -> None:
         """Run one scheduler cycle."""
+        settings = get_settings()
         async with AsyncSessionLocal() as db:
             # Count running tasks for concurrency control
             running_count = await self._get_running_count(db)

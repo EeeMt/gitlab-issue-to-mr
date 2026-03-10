@@ -7,13 +7,17 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
+from app.config import get_settings, get_effective_settings
 from app.core.docker_client import DockerClientWrapper, get_docker_client
 from app.core.gitlab_client import GitLabClient, get_gitlab_client
 from app.models import Task, TaskLog, TaskStatus
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
+
+
+def get_settings():
+    """Get effective settings with runtime overrides."""
+    return get_effective_settings()
 
 
 class WorkerExecutor:

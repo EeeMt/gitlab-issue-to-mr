@@ -1,0 +1,270 @@
+"""Task management API endpoints."""
+
+import logging
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import get_db
+from app.models import Task, TaskLog, TaskStatus
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+
+@router.get("/tasks")
+async def list_tasks(
+    status_filter: Optional[str] = None,
+    project_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """List tasks with optional filtering.
+
+    Args:
+        status_filter: Filter by task status
+        project_id: Filter by project ID
+        db: Database session
+
+    Returns:
+        List of tasks
+    """
+    query = select(Task).order_by(Task.created_at.desc())
+
+    if status_filter:
+        try:
+            task_status = TaskStatus(status_filter)
+            query = query.where(Task.status == task_status)
+        except ValueError:
+            pass
+
+    if project_id:
+        query = query.where(Task.project_id == project_id)
+
+    result = await db.execute(query.limit(100))
+    tasks = result.scalars().all()
+
+    return [
+        {
+            "id": task.id,
+            "project_id": task.project_id,
+            "issue_iid": task.issue_iid,
+            "issue_id": task.issue_id,
+            "note_id": task.note_id,
+            "user_prompt": task.user_prompt,
+            "branch_name": task.branch_name,
+            "merge_request_iid": task.merge_request_iid,
+            "merge_request_url": task.merge_request_url,
+            "status": task.status.value,
+            "priority": task.priority,
+            "scheduled_at": task.scheduled_at.isoformat() if task.scheduled_at else None,
+            "container_id": task.container_id,
+            "target_branch": task.target_branch,
+            "commit_sha": task.commit_sha,
+            "error_message": task.error_message,
+            "created_at": task.created_at.isoformat(),
+            "updated_at": task.updated_at.isoformat(),
+            "started_at": task.started_at.isoformat() if task.started_at else None,
+            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        }
+        for task in tasks
+    ]
+
+
+@router.get("/tasks/{task_id}")
+async def get_task(task_id: int, db: AsyncSession = Depends(get_db)):
+    """Get task by ID.
+
+    Args:
+        task_id: Task ID
+        db: Database session
+
+    Returns:
+        Task details
+    """
+    result = await db.execute(select(Task).where(Task.id == task_id))
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task {task_id} not found",
+        )
+
+    return {
+        "id": task.id,
+        "project_id": task.project_id,
+        "issue_iid": task.issue_iid,
+        "issue_id": task.issue_id,
+        "note_id": task.note_id,
+        "user_prompt": task.user_prompt,
+        "branch_name": task.branch_name,
+        "merge_request_iid": task.merge_request_iid,
+        "merge_request_url": task.merge_request_url,
+        "status": task.status.value,
+        "priority": task.priority,
+        "scheduled_at": task.scheduled_at.isoformat() if task.scheduled_at else None,
+        "container_id": task.container_id,
+        "target_branch": task.target_branch,
+        "commit_sha": task.commit_sha,
+        "error_message": task.error_message,
+        "created_at": task.created_at.isoformat(),
+        "updated_at": task.updated_at.isoformat(),
+        "started_at": task.started_at.isoformat() if task.started_at else None,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+    }
+
+
+@router.get("/tasks/{task_id}/logs")
+async def get_task_logs(task_id: int, db: AsyncSession = Depends(get_db)):
+    """Get task logs.
+
+    Args:
+        task_id: Task ID
+        db: Database session
+
+    Returns:
+        List of task log entries
+    """
+    # Check if task exists
+    result = await db.execute(select(Task).where(Task.id == task_id))
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task {task_id} not found",
+        )
+
+    # Get logs
+    result = await db.execute(
+        select(TaskLog)
+        .where(TaskLog.task_id == task_id)
+        .order_by(TaskLog.created_at.asc())
+    )
+    logs = result.scalars().all()
+
+    return [
+        {
+            "id": log.id,
+            "task_id": log.task_id,
+            "log_level": log.log_level,
+            "message": log.message,
+            "created_at": log.created_at.isoformat(),
+        }
+        for log in logs
+    ]
+
+
+@router.post("/tasks/{task_id}/cancel")
+async def cancel_task(task_id: int, db: AsyncSession = Depends(get_db)):
+    """Cancel a task.
+
+    Args:
+        task_id: Task ID
+        db: Database session
+
+    Returns:
+        Success message
+    """
+    result = await db.execute(select(Task).where(Task.id == task_id))
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task {task_id} not found",
+        )
+
+    if task.status not in [TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot cancel task with status {task.status.value}",
+        )
+
+    task.status = TaskStatus.CANCELLED
+    task.completed_at = datetime.utcnow()
+    task.error_message = "Cancelled by user"
+    await db.commit()
+
+    logger.info(f"Task {task_id} cancelled via API")
+
+    return {"status": "success", "message": f"Task {task_id} cancelled"}
+
+
+@router.post("/tasks/{task_id}/retry")
+async def retry_task(task_id: int, db: AsyncSession = Depends(get_db)):
+    """Retry a failed or cancelled task.
+
+    Args:
+        task_id: Task ID
+        db: Database session
+
+    Returns:
+        Success message
+    """
+    result = await db.execute(select(Task).where(Task.id == task_id))
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task {task_id} not found",
+        )
+
+    if task.status not in [TaskStatus.FAILED, TaskStatus.CANCELLED]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot retry task with status {task.status.value}",
+        )
+
+    task.status = TaskStatus.PENDING
+    task.error_message = None
+    task.completed_at = None
+    task.started_at = None
+    task.container_id = None
+    task.merge_request_url = None
+    task.merge_request_iid = None
+    task.commit_sha = None
+    await db.commit()
+
+    logger.info(f"Task {task_id} reset for retry")
+
+    return {"status": "success", "message": f"Task {task_id} reset for retry"}
+
+
+@router.post("/tasks/{task_id}/execute")
+async def execute_task(task_id: int, db: AsyncSession = Depends(get_db)):
+    """Trigger immediate execution of a pending task.
+
+    Args:
+        task_id: Task ID
+        db: Database session
+
+    Returns:
+        Success message
+    """
+    result = await db.execute(select(Task).where(Task.id == task_id))
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task {task_id} not found",
+        )
+
+    if task.status != TaskStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Task must be in PENDING status to execute immediately, current: {task.status.value}",
+        )
+
+    # Remove scheduled_at to execute immediately
+    task.scheduled_at = None
+    await db.commit()
+
+    logger.info(f"Task {task_id} scheduled for immediate execution")
+
+    return {"status": "success", "message": f"Task {task_id} scheduled for immediate execution"}

@@ -61,3 +61,27 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Get settings instance."""
     return Settings()
+
+
+# Runtime configuration overrides (can be changed via API)
+_runtime_config: dict = {}
+
+
+def get_runtime_config() -> dict:
+    """Get runtime configuration overrides."""
+    return _runtime_config
+
+
+def update_runtime_config(key: str, value: any) -> None:
+    """Update runtime configuration override."""
+    _runtime_config[key] = value
+
+
+def get_effective_settings() -> Settings:
+    """Get effective settings with runtime overrides applied."""
+    settings = get_settings()
+    # Apply runtime overrides
+    for key in _runtime_config:
+        if hasattr(settings, key):
+            setattr(settings, key, _runtime_config[key])
+    return settings
