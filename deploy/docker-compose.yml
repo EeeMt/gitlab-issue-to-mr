@@ -1,0 +1,43 @@
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    container_name: gimr-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../backend/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://gimr:gimr_password@postgres:5432/gimr
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DOCKER_TLS_CA=
+      - DOCKER_TLS_CERT=
+      - DOCKER_TLS_KEY=
+    depends_on:
+      - postgres
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    networks:
+      - gimr-network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: gimr-postgres
+    environment:
+      POSTGRES_USER: gimr
+      POSTGRES_PASSWORD: gimr_password
+      POSTGRES_DB: gimr
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - gimr-network
+
+volumes:
+  postgres_data:
+
+networks:
+  gimr-network:
+    driver: bridge

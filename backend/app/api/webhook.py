@@ -1,0 +1,306 @@
+"""GitLab Webhook endpoint."""
+
+import logging
+import secrets
+from datetime import datetime, timedelta
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import get_settings
+from app.core.gitlab_client import get_gitlab_client
+from app.core.parser import BotCommand, parse_ai_bot_command
+from app.database import get_db
+from app.models import Task, TaskStatus
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+settings = get_settings()
+
+
+async def verify_gitlab_webhook(
+    request: Request,
+    x_gitlab_token: Optional[str] = Header(None, alias="X-Gitlab-Token"),
+) -> dict:
+    """Verify GitLab webhook request.
+
+    Args:
+        request: FastAPI request
+        x_gitlab_token: GitLab webhook token from header
+
+    Returns:
+        Request payload
+
+    Raises:
+        HTTPException: If verification fails
+    """
+    # Verify webhook secret
+    if settings.gitlab_webhook_secret:
+        if not x_gitlab_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing X-Gitlab-Token header",
+            )
+        if not secrets.compare_digest(x_gitlab_token, settings.gitlab_webhook_secret):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid X-Gitlab-Token",
+            )
+
+    # Parse JSON body
+    try:
+        payload = await request.json()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid JSON payload: {e}",
+        )
+
+    return payload
+
+
+@router.post("/webhook/gitlab")
+async def gitlab_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    x_gitlab_token: Optional[str] = Header(None, alias="X-Gitlab-Token"),
+) -> dict:
+    """Handle GitLab webhook events.
+
+    Listens for:
+    - Note (comment) events on issues
+
+    Args:
+        request: FastAPI request
+        db: Database session
+        x_gitlab_token: GitLab webhook token
+
+    Returns:
+        Response dict
+    """
+    # Verify webhook
+    payload = await verify_gitlab_webhook(request, x_gitlab_token)
+
+    # Only handle note (comment) events
+    event_type = payload.get("object_kind")
+    if event_type != "note":
+        logger.debug(f"Ignoring event type: {event_type}")
+        return {"status": "ignored", "reason": f"event_type {event_type} not supported"}
+
+    # Get note (comment) data
+    note = payload.get("note", {})
+    note_id = note.get("id")
+    note_type = note.get("noteable_type")
+
+    # Only handle issue comments
+    if note_type != "Issue":
+        logger.debug(f"Ignoring noteable type: {note_type}")
+        return {"status": "ignored", "reason": f"noteable_type {note_type} not supported"}
+
+    # Get comment body
+    comment_body = note.get("body", "")
+    if not comment_body:
+        return {"status": "ignored", "reason": "empty comment body"}
+
+    # Parse @ai-bot command
+    command = parse_ai_bot_command(comment_body)
+    if not command:
+        logger.debug("No @ai-bot command found in comment")
+        return {"status": "ignored", "reason": "no @ai-bot command found"}
+
+    # Get issue and project info
+    issue = payload.get("issue", {})
+    project = payload.get("project", {})
+
+    project_id = project.get("id")
+    issue_id = issue.get("id")
+    issue_iid = issue.get("iid")
+
+    if not all([project_id, issue_id, issue_iid, note_id]):
+        logger.error(f"Missing required fields: {payload}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing required fields in webhook payload",
+        )
+
+    # Handle cancel command
+    if command.command == "cancel":
+        return await _handle_cancel_command(db, project_id, issue_iid)
+
+    # Handle status command
+    if command.command == "status":
+        return await _handle_status_command(db, project_id, issue_iid)
+
+    # Handle generate command
+    return await _handle_generate_command(
+        db, project_id, issue_id, issue_iid, note_id, command
+    )
+
+
+async def _handle_cancel_command(
+    db: AsyncSession,
+    project_id: int,
+    issue_iid: int,
+) -> dict:
+    """Handle @ai-bot cancel command."""
+    # Find running task for this issue
+    result = await db.execute(
+        select(Task).where(
+            Task.project_id == project_id,
+            Task.issue_iid == issue_iid,
+            Task.status == TaskStatus.RUNNING,
+        )
+    )
+    task = result.scalar_one_or_none()
+
+    if task:
+        task.status = TaskStatus.CANCELLED
+        task.completed_at = datetime.utcnow()
+        task.error_message = "Cancelled by user"
+        await db.commit()
+
+        # TODO: Stop container if running
+        logger.info(f"Cancelled task {task.id}")
+        return {
+            "status": "success",
+            "message": f"Task {task.id} cancelled",
+            "task_id": task.id,
+        }
+
+    # Check for pending tasks
+    result = await db.execute(
+        select(Task).where(
+            Task.project_id == project_id,
+            Task.issue_iid == issue_iid,
+            Task.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED]),
+        )
+    )
+    pending_tasks = result.scalars().all()
+
+    if pending_tasks:
+        for task in pending_tasks:
+            task.status = TaskStatus.CANCELLED
+            task.completed_at = datetime.utcnow()
+        await db.commit()
+        return {
+            "status": "success",
+            "message": f"Cancelled {len(pending_tasks)} pending tasks",
+        }
+
+    return {
+        "status": "ignored",
+        "message": "No running or pending tasks found",
+    }
+
+
+async def _handle_status_command(
+    db: AsyncSession,
+    project_id: int,
+    issue_iid: int,
+) -> dict:
+    """Handle @ai-bot status command."""
+    # Find latest task for this issue
+    result = await db.execute(
+        select(Task).where(
+            Task.project_id == project_id,
+            Task.issue_iid == issue_iid,
+        ).order_by(Task.created_at.desc()).limit(1)
+    )
+    task = result.scalar_one_or_none()
+
+    if not task:
+        return {
+            "status": "ignored",
+            "message": "No tasks found for this issue",
+        }
+
+    response = {
+        "status": "success",
+        "task": {
+            "id": task.id,
+            "status": task.status.value,
+            "created_at": task.created_at.isoformat(),
+            "branch": task.branch_name,
+            "mr_url": task.merge_request_url,
+        },
+    }
+
+    # Add error message if failed
+    if task.status == TaskStatus.FAILED and task.error_message:
+        response["task"]["error"] = task.error_message
+
+    # Reply to issue with status
+    try:
+        gitlab = get_gitlab_client()
+        status_text = f"Task Status: **{task.status.value}**"
+        if task.merge_request_url:
+            status_text += f"\nMR: {task.merge_request_url}"
+        if task.status == TaskStatus.FAILED and task.error_message:
+            status_text += f"\nError: {task.error_message[:200]}"
+
+        gitlab.create_note(project_id, issue_iid, status_text)
+    except Exception as e:
+        logger.warning(f"Failed to reply to issue: {e}")
+
+    return response
+
+
+async def _handle_generate_command(
+    db: AsyncSession,
+    project_id: int,
+    issue_id: int,
+    issue_iid: int,
+    note_id: int,
+    command: BotCommand,
+) -> dict:
+    """Handle @ai-bot generate command."""
+    # Check for duplicate (idempotency)
+    result = await db.execute(
+        select(Task).where(Task.note_id == note_id)
+    )
+    existing_task = result.scalar_one_or_none()
+
+    if existing_task:
+        logger.info(f"Task for note {note_id} already exists, skipping")
+        return {"status": "duplicate", "message": "Task already processed"}
+
+    # Calculate scheduled_at if delay is specified
+    scheduled_at = None
+    if command.delay_seconds:
+        scheduled_at = datetime.utcnow() + timedelta(seconds=command.delay_seconds)
+
+    # Determine target branch
+    target_branch = command.target_branch or settings.default_target_branch
+
+    # Create new task
+    task = Task(
+        project_id=project_id,
+        issue_id=issue_id,
+        issue_iid=issue_iid,
+        note_id=note_id,
+        user_prompt=command.args,
+        branch_name=f"gimr/issue-{issue_iid}",
+        priority=command.priority,
+        scheduled_at=scheduled_at,
+        target_branch=target_branch,
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+
+    logger.info(
+        f"Created task {task.id} for issue {project_id}/{issue_iid}, "
+        f"note {note_id}, priority={command.priority}, delay={command.delay_seconds}"
+    )
+
+    # Note: Scheduler will pick up the task automatically
+
+    return {
+        "status": "success",
+        "message": "Task created and queued for execution",
+        "task_id": task.id,
+        "priority": command.priority,
+        "scheduled_at": scheduled_at.isoformat() if scheduled_at else None,
+    }
