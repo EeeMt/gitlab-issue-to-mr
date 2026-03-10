@@ -47,11 +47,12 @@
 | 前端 | Vue 3 + Vite + Naive UI (或 Element Plus) |
 | 调度 | 自研：asyncio + 数据库队列 |
 | 任务隔离 | Docker 容器 (每个任务独立容器，完整 OS 级隔离) |
-| 数据库 | SQLite (aiosqlite) |
+| 数据库 | PostgreSQL (asyncpg) |
 | ORM | SQLAlchemy 2.0 (async) |
 | Git 操作 | 容器内 git 命令 |
 | GitLab API | python-gitlab (宿主机调度器调用) |
-| Claude CLI | 容器内调用 |
+| 容器管理 | Docker Engine HTTP API (TLS) |
+| Claude CLI | 容器内调用（agentic 模式，自动迭代） |
 
 ## 五、系统架构
 
@@ -84,9 +85,9 @@
 │  └──────────────┘   │  │  Worker   │  │     │                │
 │                     │  │  Manager  │  │     │                │
 │         ┌───────────┤  └─────┬─────┘  │     │                │
-│         │  SQLite   │        │docker  │     │                │
-│         │  (tasks,  │        │run     │     │                │
-│         │   logs,   │        │        │     │                │
+│         │PostgreSQL │        │Docker  │     │                │
+│         │  (tasks,  │        │HTTP API│     │                │
+│         │   logs,   │        │(TLS)   │     │                │
 │         │   config) │        ▼        │     │                │
 │         └───────────┘                 │     │                │
 │  ┌────────────────────────────────────┼─────┼──────────────┐ │
@@ -132,6 +133,15 @@
 | CPU/内存 | cgroups 限制，单任务 OOM 不影响全局 |
 | 临时文件 | 独立 /tmp，无锁文件冲突 |
 | 任务清理 | docker stop/rm 一条命令，进程树全部清理 |
+
+容器管理 — 通过 Docker Engine HTTP API (TLS) 管理 Worker 容器，不挂载 docker.sock：
+
+| 项 | 说明 |
+|---|---|
+| 通信方式 | HTTPS 访问 Docker Engine API (`https://localhost:2376`) |
+| 认证 | TLS 双向认证 (client cert + key + CA cert) |
+| 优势 | 避免挂载 docker.sock 带来的 root 等效权限风险 |
+| 配置 | Docker daemon 启动时添加 `--tlsverify --tlscacert --tlscert --tlskey` |
 
 磁盘优化 — 共享只读数据，避免重复占用：
 
@@ -195,6 +205,7 @@ POST /api/webhook/gitlab
 - 接收 GitLab Note Hook (评论事件)
 - 校验 Secret Token
 - 只处理包含 `@bot` 的评论
+- **幂等性保证**：以 `gitlab_note_id` 做唯一性校验，防止 GitLab 重试 Webhook 产生重复任务
 - 解析指令语法，例如：
 
 ```
@@ -205,17 +216,37 @@ POST /api/webhook/gitlab
 @ai-bot status                            # 查询任务状态
 ```
 
+幂等性处理逻辑：
+
+```python
+async def handle_webhook(payload):
+    note_id = payload["object_attributes"]["id"]
+
+    # 幂等校验: 同一条评论不重复处理
+    existing = await db.execute(
+        select(Task).where(Task.gitlab_note_id == note_id)
+    )
+    if existing.scalar_one_or_none():
+        logger.info(f"Note {note_id} already processed, skipping (idempotent)")
+        return {"status": "duplicate", "note_id": note_id}
+
+    # 正常处理...
+    task = Task(gitlab_note_id=note_id, ...)
+    db.add(task)
+    await db.commit()
+```
+
 ### 7.2 Task Manager
 
-数据模型（核心表）：
+数据模型（核心表，PostgreSQL）：
 
 ```sql
 -- 任务表
 CREATE TABLE tasks (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    id                  SERIAL PRIMARY KEY,
     gitlab_project_id   INTEGER NOT NULL,
     gitlab_issue_iid    INTEGER NOT NULL,
-    gitlab_note_id      INTEGER,
+    gitlab_note_id      INTEGER UNIQUE,     -- 唯一约束, 保证 Webhook 幂等
     trigger_user        TEXT NOT NULL,
     instruction         TEXT NOT NULL,      -- 用户指令内容
     task_type           TEXT NOT NULL,      -- new_task / follow_up / cancel
@@ -223,25 +254,30 @@ CREATE TABLE tasks (
                                            -- pending/queued/scheduled/running/
                                            -- success/failed/cancelled/timeout
     priority            INTEGER DEFAULT 0,  -- 优先级，数字越大越优先
-    scheduled_at        DATETIME,           -- 计划执行时间 (延迟执行)
-    started_at          DATETIME,
-    finished_at         DATETIME,
+    scheduled_at        TIMESTAMP WITH TIME ZONE,  -- 计划执行时间 (延迟执行)
+    started_at          TIMESTAMP WITH TIME ZONE,
+    finished_at         TIMESTAMP WITH TIME ZONE,
     branch_name         TEXT,               -- 关联的 git 分支
     mr_iid              INTEGER,            -- 关联的 MR iid
     container_name      TEXT,               -- Docker 容器名（用于 stop/logs，格式: gimr-{task_id}-p{project_id}-i{issue_iid}）
-    container_id        TEXT,               -- Docker 容器 ID（docker run 返回的完整 ID）
+    container_id        TEXT,               -- Docker 容器 ID（docker create 返回的完整 ID）
     error_message       TEXT,
-    created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at          TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at          TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- 同一 Issue 互斥调度索引 (查询当前 issue 是否有正在执行的任务)
+CREATE INDEX idx_tasks_issue_running
+    ON tasks (gitlab_project_id, gitlab_issue_iid)
+    WHERE status IN ('queued', 'running');
 
 -- 任务日志表
 CREATE TABLE task_logs (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    id              SERIAL PRIMARY KEY,
     task_id         INTEGER NOT NULL REFERENCES tasks(id),
     level           TEXT NOT NULL DEFAULT 'info',  -- info/warn/error
     message         TEXT NOT NULL,
-    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- 系统配置表
@@ -262,9 +298,45 @@ CREATE TABLE system_config (
   2. 查询当前 running 任务数
   3. 查询 vLLM 负载 (可选: GET vllm/v1/models 或自定义监控端点)
   4. 计算可并发槽位 = min(max_concurrency, 动态上限) - running_count
-  5. 从 queued 中按优先级取 N 个任务
-  6. 为每个任务启动 Docker 容器 (docker run)
-  7. 检查超时任务 → 标记 timeout 并 docker stop 容器
+  5. 从 queued 中按优先级取 N 个任务 (需通过 Issue 互斥检查)
+  6. 为每个任务启动 Docker 容器 (Docker HTTP API)
+  7. 检查超时任务 → 标记 timeout 并停止容器
+```
+
+**Issue 级互斥调度**：同一 Issue 同一时刻只允许一个任务在执行（queued 或 running），后续对同一 Issue 的 `@bot` 请求会排队等待，避免分支并发写入冲突：
+
+```python
+async def pick_ready_tasks(max_slots: int) -> list[Task]:
+    """从队列中挑选可执行的任务，遵循 Issue 互斥约束"""
+    # 查询所有 queued 任务，按优先级排序
+    queued_tasks = await db.execute(
+        select(Task)
+        .where(Task.status == "queued")
+        .order_by(Task.priority.desc(), Task.created_at.asc())
+    )
+
+    ready = []
+    # 已有正在运行/排队中的 issue 集合
+    busy_issues = set(await get_busy_issues())  # {(project_id, issue_iid), ...}
+
+    for task in queued_tasks.scalars():
+        if len(ready) >= max_slots:
+            break
+        issue_key = (task.gitlab_project_id, task.gitlab_issue_iid)
+        if issue_key not in busy_issues:
+            ready.append(task)
+            busy_issues.add(issue_key)  # 本轮已选中，不再选同 issue
+
+    return ready
+
+async def get_busy_issues() -> list[tuple]:
+    """获取当前有任务正在 running 的 issue 列表"""
+    result = await db.execute(
+        select(Task.gitlab_project_id, Task.gitlab_issue_iid)
+        .where(Task.status == "running")
+        .distinct()
+    )
+    return result.all()
 ```
 
 动态并发控制策略：
@@ -274,7 +346,34 @@ CREATE TABLE system_config (
 
 ### 7.4 Worker 执行器 (Docker 容器)
 
-#### 7.4.1 基础镜像
+#### 7.4.1 Claude CLI Agentic 模式说明
+
+Claude CLI 以 **agentic 模式** 运行（`claude -p "..."`），单次调用即可完成完整的开发迭代循环：
+
+- Claude CLI 会自动读取项目根目录的 **CLAUDE.md**（项目约定、编码规范、架构说明等）
+- 自动调用内置工具：读写文件、执行 shell 命令（如 `mvn compile`、`mvn test`、`npm run build`）
+- 如果编译/测试失败，Claude 会 **自动分析错误并修复**，无需外部反馈循环
+- 整个迭代过程（编码 → 编译 → 测试 → 修复）在一次 `claude -p` 调用内自动完成
+
+**项目约定**：所有接入 Bot 的仓库根目录应放置 `CLAUDE.md` 文件，内容包括：
+
+```markdown
+# CLAUDE.md 示例
+## 项目概述
+本项目是 xxx 服务，使用 Spring Boot 3.x + Java 17。
+
+## 构建与测试
+- 构建: mvn compile
+- 测试: mvn test
+- 代码风格: Google Java Style
+
+## 架构约定
+- Controller → Service → Repository 分层
+- 所有 API 返回统一 ResponseWrapper
+- 异常统一在 GlobalExceptionHandler 处理
+```
+
+#### 7.4.2 基础镜像
 
 构建包含所有工具的基础镜像，离线环境提前 build 好：
 
@@ -307,36 +406,41 @@ COPY entrypoint.sh /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
 ```
 
-#### 7.4.2 容器内执行脚本 (entrypoint.sh)
+#### 7.4.3 容器内执行脚本 (entrypoint.sh)
 
 ```bash
 #!/bin/bash
 set -e
 
-# 1. 从本地裸仓库 clone (快速, 不走网络)
+# 1. 从本地裸仓库 clone (快速, 利用只读缓存)
 git clone /repos/bare /workspace/repo
 cd /workspace/repo
-git remote set-url origin "$GITLAB_URL/$PROJECT_PATH.git"
 
-# 2. 分支管理
+# 2. 设置远程为 GitLab 真实地址, 从 GitLab 拉取最新代码
+#    (裸仓库仅作为初始缓存加速 clone, 最新代码从 GitLab 获取)
+git remote set-url origin "$GITLAB_URL/$PROJECT_PATH.git"
+git fetch origin
+
+# 3. 分支管理
 if [ "$TASK_TYPE" = "new_task" ]; then
     git checkout -b "$TASK_BRANCH" origin/main
 else
-    git fetch origin "$TASK_BRANCH"
-    git checkout "$TASK_BRANCH"
-    git pull origin "$TASK_BRANCH"
+    # 追加修改: 拉取已有分支的最新代码
+    git checkout -b "$TASK_BRANCH" "origin/$TASK_BRANCH"
 fi
 
-# 3. 复制共享 .m2 为可写层 (避免只读挂载问题)
+# 4. 复制共享 .m2 为可写层 (避免只读挂载问题)
 if [ -d /shared/.m2/repository ]; then
     cp -al /shared/.m2/repository /root/.m2-local/repository 2>/dev/null || true
     export MAVEN_OPTS="-Dmaven.repo.local=/root/.m2-local/repository"
 fi
 
-# 4. 调用 Claude CLI
+# 5. 调用 Claude CLI (agentic 模式)
+#    Claude CLI 会自动读取项目根目录的 CLAUDE.md 了解项目约定
+#    自动进行 编码 → 编译 → 测试 → 修复 的迭代循环
 claude -p "$(cat /task/prompt.txt)" --output-format json > /task/result.json 2>&1
 
-# 5. 提交 & 推送
+# 6. 提交 & 推送
 git add -A
 if git diff --cached --quiet; then
     echo '{"status":"no_changes"}' > /task/result.json
@@ -347,9 +451,9 @@ else
 fi
 ```
 
-#### 7.4.3 容器命名规范
+#### 7.4.4 容器命名规范
 
-所有 Worker 容器使用统一前缀 `gimr-`（gitlab-mr 缩写），便于识别和批量操作：
+所有 Worker 容器使用统一前缀 `gimr-`（gitlab issue-mr 缩写），便于识别和批量操作：
 
 ```
 格式:  gimr-{task_id}-p{project_id}-i{issue_iid}
@@ -380,9 +484,26 @@ docker ps --filter "name=gimr-.*-p17"
 docker ps --filter "name=gimr-.*-i123"
 ```
 
-#### 7.4.4 宿主机 Worker Manager
+#### 7.4.5 宿主机 Worker Manager
+
+通过 Docker Engine HTTP API (TLS) 管理容器，避免挂载 docker.sock：
 
 ```python
+import httpx
+
+# Docker Engine HTTP API 客户端
+DOCKER_HOST = "https://localhost:2376"
+DOCKER_CERT = ("/etc/docker/tls/client-cert.pem",
+               "/etc/docker/tls/client-key.pem")
+DOCKER_CA   = "/etc/docker/tls/ca.pem"
+
+docker_client = httpx.AsyncClient(
+    base_url=DOCKER_HOST,
+    cert=DOCKER_CERT,
+    verify=DOCKER_CA,
+    timeout=httpx.Timeout(connect=10, read=None)  # read=None: 等待容器执行完
+)
+
 # 容器命名前缀
 CONTAINER_PREFIX = "gimr"
 
@@ -390,70 +511,68 @@ async def execute_task(task):
     container_name = f"{CONTAINER_PREFIX}-{task.id}-p{task.gitlab_project_id}-i{task.gitlab_issue_iid}"
     branch = f"gimr/issue-{task.gitlab_issue_iid}"
 
-    # 确保裸仓库存在并已 fetch 最新
+    # 确保裸仓库存在 (仅首次初始化, 不做 fetch — fetch 由容器内完成)
     bare_repo = f"/data/repos/{task.gitlab_project_id}/.bare"
     if not exists(bare_repo):
         await run(f"git clone --bare {repo_url} {bare_repo}")
-    await run(f"git -C {bare_repo} fetch origin")
 
     # 将 prompt 写入临时文件, 挂载进容器
     prompt = build_prompt(issue_title, issue_body, user_instruction)
     prompt_dir = f"/tmp/{container_name}"
     write_file(f"{prompt_dir}/prompt.txt", prompt)
 
-    # 启动 Docker 容器
-    docker_cmd = [
-        "docker", "run",
-        "--name", container_name,
-        "--rm",                                        # 执行完自动清理
+    # 1. 创建容器 (Docker HTTP API)
+    create_resp = await docker_client.post("/containers/create", params={
+        "name": container_name
+    }, json={
+        "Image": "bot-worker:latest",
+        "Cmd": [],
+        "Env": [
+            f"GITLAB_URL={gitlab_url}",
+            f"PROJECT_PATH={project_path}",
+            f"TASK_TYPE={task.task_type}",
+            f"TASK_BRANCH={branch}",
+            f"ISSUE_IID={task.gitlab_issue_iid}",
+            f"COMMIT_MSG={short_description}",
+            f"ANTHROPIC_BASE_URL={anthropic_base_url}",
+            f"ANTHROPIC_API_KEY={anthropic_api_key}",
+            f"ANTHROPIC_MODEL={anthropic_model}",
+        ],
+        "HostConfig": {
+            "Binds": [
+                f"{bare_repo}:/repos/bare:ro",
+                "/data/shared/.m2/repository:/shared/.m2/repository:ro",
+                "/data/config/claude:/root/.claude:ro",
+                f"{prompt_dir}:/task",
+            ],
+            "NetworkMode": "gimr-network",
+            "NanoCpus": 4_000_000_000,  # 4 CPUs
+            "Memory": 8 * 1024**3,       # 8GB
+            "AutoRemove": True,
+        },
+    })
+    container_id = create_resp.json()["Id"]
 
-        # 资源限制
-        "--cpus", "4",
-        "--memory", "8g",
-
-        # 网络: 需要访问 GitLab 和 vLLM
-        "--network", "bot-network",
-
-        # 挂载共享裸仓库 (只读, 加速 clone)
-        "-v", f"{bare_repo}:/repos/bare:ro",
-
-        # 挂载共享 Maven 仓库 (只读, 省去下载依赖)
-        "-v", "/data/shared/.m2/repository:/shared/.m2/repository:ro",
-
-        # 挂载 Claude CLI 配置 (只读)
-        "-v", "/data/config/claude:/root/.claude:ro",
-
-        # 挂载 prompt 和结果交换目录
-        "-v", f"{prompt_dir}:/task",
-
-        # 环境变量
-        "-e", f"GITLAB_URL={gitlab_url}",
-        "-e", f"PROJECT_PATH={project_path}",
-        "-e", f"TASK_TYPE={task.task_type}",
-        "-e", f"TASK_BRANCH={branch}",
-        "-e", f"ISSUE_IID={task.gitlab_issue_iid}",
-        "-e", f"COMMIT_MSG={short_description}",
-
-        "bot-worker:latest"
-    ]
-
-    process = await asyncio.create_subprocess_exec(*docker_cmd,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-
-    # 获取容器 ID 并与 container_name 一起记录到任务表
-    container_id = await get_container_id(container_name)
+    # 记录容器信息到任务表
     await update_task(task.id,
         container_name=container_name,
-        container_id=container_id)
+        container_id=container_id,
+        status="running", started_at=datetime.utcnow())
 
-    stdout, stderr = await asyncio.wait_for(
-        process.communicate(), timeout=TASK_TIMEOUT)
+    # 2. 启动容器
+    await docker_client.post(f"/containers/{container_id}/start")
+
+    # 3. 等待容器执行完成
+    wait_resp = await docker_client.post(
+        f"/containers/{container_id}/wait",
+        timeout=httpx.Timeout(connect=10, read=TASK_TIMEOUT))
+    exit_code = wait_resp.json()["StatusCode"]
 
     # 读取容器执行结果
     result = read_json(f"{prompt_dir}/result.json")
 
     # 宿主机负责 GitLab API 操作 (创建 MR、回复评论)
-    if result["status"] == "success":
+    if exit_code == 0 and result.get("status") == "success":
         if task.task_type == "new_task":
             mr = gitlab.create_mr(
                 source=branch, target=default_branch,
@@ -465,27 +584,196 @@ async def execute_task(task):
             f"任务已完成\n分支: `{branch}`\nMR: !{mr.iid}")
 ```
 
-#### 7.4.5 任务取消与清理
+#### 7.4.6 任务取消与清理
 
 ```python
 async def cancel_task(task):
-    # 一条命令, 进程树全部干掉, 容器自动清理 (--rm)
-    await asyncio.create_subprocess_exec("docker", "stop", task.container_name)
+    """通过 Docker HTTP API 停止容器, AutoRemove=True 会自动清理"""
+    await docker_client.post(f"/containers/{task.container_id}/stop",
+        params={"t": 10})  # 10s 优雅停止超时
 
 async def cleanup_stale_containers():
     """服务启动时调用: 清理上次异常退出残留的容器"""
-    proc = await asyncio.create_subprocess_exec(
-        "docker", "ps", "-aq", "--filter", f"name={CONTAINER_PREFIX}-",
-        stdout=asyncio.subprocess.PIPE)
-    stdout, _ = await proc.communicate()
-    if stdout.strip():
-        await asyncio.create_subprocess_exec(
-            "docker", "rm", "-f", *stdout.decode().split())
+    resp = await docker_client.get("/containers/json", params={
+        "all": True,
+        "filters": json.dumps({"name": [f"^/{CONTAINER_PREFIX}-"]})
+    })
+    for container in resp.json():
+        container_id = container["Id"]
+        logger.info(f"Cleaning up stale container: {container['Names']}")
+        await docker_client.post(f"/containers/{container_id}/stop", params={"t": 5})
+        await docker_client.delete(f"/containers/{container_id}")
 ```
 
-### 7.5 Web Admin Dashboard
+#### 7.4.7 崩溃恢复
 
-#### 7.5.1 认证：GitLab OIDC 集成
+服务启动时执行完整的恢复流程，确保异常退出后状态一致：
+
+```python
+async def startup_recovery():
+    """服务启动时的恢复逻辑, 在 FastAPI lifespan 中调用"""
+
+    # 1. 清理残留容器 (上次崩溃可能留下的 Worker 容器)
+    await cleanup_stale_containers()
+
+    # 2. 修复数据库中卡住的任务状态
+    #    running 状态的任务: 服务已重启, 容器已被清理, 标记为 failed 可重试
+    stuck_running = await db.execute(
+        update(Task)
+        .where(Task.status == "running")
+        .values(
+            status="failed",
+            error_message="服务异常重启，任务被中断。可点击重试。",
+            finished_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        .returning(Task.id)
+    )
+    stuck_ids = [row.id for row in stuck_running.fetchall()]
+    if stuck_ids:
+        logger.warning(f"Recovered {len(stuck_ids)} stuck running tasks: {stuck_ids}")
+
+    # 3. queued 状态的任务保持不变, Scheduler 启动后会自动重新调度
+
+    await db.commit()
+    logger.info("Startup recovery completed")
+```
+
+恢复策略总结：
+
+| 崩溃前状态 | 恢复后状态 | 说明 |
+|---|---|---|
+| `running` | `failed` | 容器已清理，任务中断，用户可手动重试 |
+| `queued` | `queued` (不变) | Scheduler 重启后自动调度 |
+| `scheduled` | `scheduled` (不变) | 到时间后自动进入 queued |
+| `pending` | `pending` (不变) | 等待入队 |
+
+### 7.5 实时日志流方案
+
+任务执行过程中，Dashboard 需要实时展示容器内的执行日志。采用 **Docker Logs API + SSE (Server-Sent Events)** 方案：
+
+```
+┌──────────┐     SSE 连接       ┌───────────┐   Docker HTTP API   ┌───────────────┐
+│ Dashboard │ ◄──────────────── │  FastAPI   │ ◄────────────────── │ Worker 容器    │
+│ (浏览器)  │  GET /api/tasks/  │  Backend   │  GET /containers/   │ (stdout/stderr)│
+│           │  :id/logs/stream  │            │  {id}/logs?follow=1 │               │
+└──────────┘                    └───────────┘                      └───────────────┘
+```
+
+#### 7.5.1 后端 SSE 端点
+
+```python
+from fastapi.responses import StreamingResponse
+
+@router.get("/api/tasks/{task_id}/logs/stream")
+async def stream_task_logs(task_id: int, current_user: User = Depends(get_current_user)):
+    task = await get_task_with_permission(task_id, current_user)
+    if not task or not task.container_id:
+        raise HTTPException(404, "Task or container not found")
+
+    async def log_generator():
+        try:
+            # 通过 Docker HTTP API 获取容器日志流
+            async with docker_client.stream(
+                "GET",
+                f"/containers/{task.container_id}/logs",
+                params={
+                    "follow": True,     # 持续跟踪
+                    "stdout": True,
+                    "stderr": True,
+                    "timestamps": True, # 带时间戳
+                    "tail": 100,        # 先返回最近 100 行历史
+                }
+            ) as response:
+                async for chunk in response.aiter_bytes():
+                    # Docker log stream 每帧前 8 字节是 header (stream type + size)
+                    log_line = parse_docker_log_frame(chunk)
+                    yield f"data: {json.dumps({'line': log_line})}\n\n"
+        except httpx.RemoteProtocolError:
+            # 容器已停止, 发送结束信号
+            yield f"data: {json.dumps({'event': 'finished'})}\n\n"
+
+    return StreamingResponse(
+        log_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲
+        }
+    )
+```
+
+#### 7.5.2 前端 SSE 消费
+
+```typescript
+// composables/useTaskLogs.ts
+export function useTaskLogs(taskId: number) {
+  const logs = ref<string[]>([])
+  const isStreaming = ref(false)
+  let eventSource: EventSource | null = null
+
+  function startStreaming() {
+    eventSource = new EventSource(`/api/tasks/${taskId}/logs/stream`)
+    isStreaming.value = true
+
+    eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data)
+      if (data.event === 'finished') {
+        stopStreaming()
+        return
+      }
+      logs.value.push(data.line)
+    }
+
+    eventSource.onerror = () => {
+      stopStreaming()
+    }
+  }
+
+  function stopStreaming() {
+    eventSource?.close()
+    isStreaming.value = false
+  }
+
+  onUnmounted(() => stopStreaming())
+  return { logs, isStreaming, startStreaming, stopStreaming }
+}
+```
+
+#### 7.5.3 已完成任务的日志
+
+对于已完成（success/failed/cancelled/timeout）的任务，日志不再流式推送，而是从数据库中查询 `task_logs` 表的历史记录：
+
+```python
+@router.get("/api/tasks/{task_id}/logs")
+async def get_task_logs(task_id: int, current_user: User = Depends(get_current_user)):
+    task = await get_task_with_permission(task_id, current_user)
+    # 已完成的任务: 从 task_logs 表查询
+    logs = await db.execute(
+        select(TaskLog).where(TaskLog.task_id == task_id)
+        .order_by(TaskLog.created_at.asc())
+    )
+    return logs.scalars().all()
+```
+
+Worker Manager 在容器执行完毕后，将完整日志持久化到 `task_logs` 表：
+
+```python
+async def persist_container_logs(task_id: int, container_id: str):
+    """容器停止后, 将日志写入数据库以供后续查询"""
+    resp = await docker_client.get(f"/containers/{container_id}/logs", params={
+        "stdout": True, "stderr": True, "timestamps": True
+    })
+    for line in parse_docker_logs(resp.content):
+        await db.execute(insert(TaskLog).values(
+            task_id=task_id, level=line.level, message=line.text
+        ))
+    await db.commit()
+```
+
+### 7.6 Web Admin Dashboard
+
+#### 7.6.1 认证：GitLab OIDC 集成
 
 Dashboard 通过 GitLab 18 EE 的 OIDC Provider 实现单点登录，用户无需单独注册账号：
 
@@ -536,7 +824,7 @@ Confidential:   Yes
 }
 ```
 
-#### 7.5.2 角色与权限模型
+#### 7.6.2 角色与权限模型
 
 角色通过 `system_config` 中配置的管理员列表 + GitLab 用户身份自动判定：
 
@@ -564,15 +852,15 @@ Confidential:   Yes
 ```sql
 -- 用户表 (OIDC 登录后自动创建)
 CREATE TABLE users (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    id              SERIAL PRIMARY KEY,
     gitlab_user_id  INTEGER NOT NULL UNIQUE,  -- GitLab 用户 ID (OIDC sub)
     username        TEXT NOT NULL UNIQUE,      -- GitLab 用户名
     display_name    TEXT,                      -- 显示名称
     email           TEXT,
     avatar_url      TEXT,
     role            TEXT NOT NULL DEFAULT 'user',  -- user / admin
-    last_login_at   DATETIME,
-    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+    last_login_at   TIMESTAMP WITH TIME ZONE,
+    created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 ```
 
@@ -586,7 +874,7 @@ key:   admin_gitlab_groups
 value: ["devops", "platform-team"]
 ```
 
-#### 7.5.3 页面规划
+#### 7.6.3 页面规划
 
 | 页面 | user 可见 | admin 可见 | 功能 |
 |---|---|---|---|
@@ -598,7 +886,7 @@ value: ["devops", "platform-team"]
 | 配置管理 | X | O | Bot 名称、并发数、超时、GitLab Token、管理员列表 |
 | 项目管理 | X | O | 管理哪些 GitLab 项目启用了 bot |
 
-#### 7.5.4 页面布局详细设计
+#### 7.6.4 页面布局详细设计
 
 ##### 整体框架 (Layout)
 
@@ -902,7 +1190,7 @@ value: ["devops", "platform-team"]
 │  │                                                                 │ │
 │  │ CPU 限制(核)        [4    ]                                     │ │
 │  │ 内存限制            [8g   ]                                     │ │
-│  │ Docker 网络         [bot-network      ]                         │ │
+│  │ Docker 网络         [gimr-network      ]                         │ │
 │  │ Worker 镜像         [bot-worker:latest]                         │ │
 │  └─────────────────────────────────────────────────────────────────┘ │
 │                                                                      │
@@ -1040,7 +1328,7 @@ value: ["devops", "platform-team"]
 - **任务状态分布**：饼图/环形图展示全局状态占比
 - 顶部时间范围选择器：预设（今天/7天/30天/全部）+ 自定义日期范围，切换后所有图表联动刷新
 
-#### 7.5.5 API 路由规划
+#### 7.6.5 API 路由规划
 
 ```
 # --- 认证 (无需登录) ---
@@ -1058,7 +1346,8 @@ GET    /api/tasks/:id                # 任务详情 (user: 仅自己, admin: 全
 POST   /api/tasks/:id/cancel         # 取消任务 (user: 仅自己, admin: 全部)
 POST   /api/tasks/:id/retry          # 重试任务 (user: 仅自己, admin: 全部)
 POST   /api/tasks/:id/run-now        # 立即执行 (admin only)
-GET    /api/tasks/:id/logs           # 任务日志 (user: 仅自己, admin: 全部)
+GET    /api/tasks/:id/logs           # 任务日志 - 已完成任务 (user: 仅自己, admin: 全部)
+GET    /api/tasks/:id/logs/stream    # 任务日志 - 实时 SSE 流 (运行中任务, Docker logs)
 
 # --- 监控 (需登录) ---
 GET    /api/stats                    # 统计概览 (user: 自己的统计, admin: 全局统计)
@@ -1089,7 +1378,7 @@ gitlab_issues_to_mr/
 │   ├── app/
 │   │   ├── main.py                 # FastAPI 入口
 │   │   ├── config.py               # 配置管理
-│   │   ├── database.py             # SQLite/SQLAlchemy
+│   │   ├── database.py             # PostgreSQL/SQLAlchemy (asyncpg)
 │   │   ├── models.py               # 数据模型 (tasks, task_logs, users, system_config)
 │   │   ├── api/
 │   │   │   ├── auth.py             # OIDC 登录/回调/注销/me
@@ -1100,7 +1389,9 @@ gitlab_issues_to_mr/
 │   │   │   └── monitor.py          # 监控 API
 │   │   ├── core/
 │   │   │   ├── scheduler.py        # 调度器
-│   │   │   ├── worker.py           # Worker 执行器 (Docker 容器管理)
+│   │   │   ├── worker.py           # Worker 执行器 (Docker HTTP API 容器管理)
+│   │   │   ├── docker_client.py    # Docker Engine HTTP API 客户端 (TLS)
+│   │   │   ├── log_streamer.py     # 实时日志流 (Docker logs → SSE)
 │   │   │   ├── git_ops.py          # Git 操作封装
 │   │   │   ├── gitlab_client.py    # GitLab API 封装
 │   │   │   ├── claude_cli.py       # Claude CLI 封装
@@ -1111,7 +1402,7 @@ gitlab_issues_to_mr/
 │   │       ├── parser.py           # 指令解析
 │   │       └── logger.py           # 日志工具
 │   ├── requirements.txt
-│   └── alembic/                    # 数据库迁移 (可选)
+│   └── alembic/                    # 数据库迁移 (PostgreSQL)
 ├── frontend/
 │   ├── src/
 │   │   ├── views/
@@ -1125,7 +1416,8 @@ gitlab_issues_to_mr/
 │   │   │   └── Settings.vue        # 配置管理 (admin only)
 │   │   ├── components/
 │   │   ├── composables/
-│   │   │   └── useAuth.ts          # 认证状态管理 (用户信息/角色/登出)
+│   │   │   ├── useAuth.ts          # 认证状态管理 (用户信息/角色/登出)
+│   │   │   └── useTaskLogs.ts      # 任务日志实时流 (SSE)
 │   │   ├── api/                    # API 封装
 │   │   ├── router/
 │   │   │   └── index.ts            # 路由守卫 (登录检查, 角色权限)
@@ -1135,9 +1427,14 @@ gitlab_issues_to_mr/
 │   ├── package.json
 │   └── vite.config.ts
 ├── deploy/
-│   ├── Dockerfile
+│   ├── Dockerfile.backend          # 后端镜像
+│   ├── Dockerfile.frontend         # 前端构建 → 静态文件
 │   ├── docker-compose.yml
-│   └── nginx.conf                  # 前端代理
+│   ├── nginx.conf                  # Nginx: 托管前端静态文件 + 反向代理后端 API
+│   └── docker-tls/                 # Docker Engine TLS 证书
+│       ├── ca.pem
+│       ├── client-cert.pem
+│       └── client-key.pem
 ├── DESIGN.md                       # 本设计文档
 └── CLAUDE.md                       # Claude CLI 项目上下文
 ```
@@ -1146,9 +1443,9 @@ gitlab_issues_to_mr/
 
 | 阶段 | 内容 | 交付物 |
 |---|---|---|
-| **P0 - 最小可用** | Webhook 接收 → 解析 @bot → Docker 容器内执行单个任务 → 创建分支/MR → 回复 issue | 能跑通完整流程的 MVP |
-| **P1 - 队列调度** | 任务入队、调度器循环、并发控制、延迟执行、任务状态流转 | 可靠的异步任务系统 |
-| **P2 - 管理后台** | Vue 3 Dashboard、任务列表/详情/日志、手动操作（取消/重试/立即执行）、配置管理 | 可视化管理界面 |
+| **P0 - 最小可用** | Webhook 接收 → 解析 @bot (幂等) → Docker 容器内执行 (agentic Claude CLI) → 创建分支/MR → 回复 issue | 能跑通完整流程的 MVP |
+| **P1 - 队列调度** | 任务入队、调度器循环、Issue 互斥、并发控制、延迟执行、崩溃恢复 | 可靠的异步任务系统 |
+| **P2 - 管理后台** | Vue 3 Dashboard、任务列表/详情、实时日志流 (SSE)、手动操作、配置管理 | 可视化管理界面 |
 | **P3 - 认证与权限** | GitLab OIDC 集成、用户自动注册、角色权限 (user/admin)、任务归属与可见性隔离 | 多用户安全访问 |
 | **P4 - 高级特性** | vLLM 负载监控、动态并发、追加修改(follow-up)、指令扩展、Docker Compose 一键部署 | 生产就绪 |
 
@@ -1158,12 +1455,12 @@ gitlab_issues_to_mr/
 
 目标：从 @bot 到 MR 的完整链路跑通。
 
-- FastAPI 骨架 + SQLite 初始化
-- Webhook handler 接收 GitLab Note Hook
+- FastAPI 骨架 + PostgreSQL 初始化
+- Webhook handler 接收 GitLab Note Hook（含幂等校验）
 - 解析 @bot 指令 (仅基本触发)
-- Worker: 构建基础镜像、entrypoint.sh
-- Worker: Docker 容器内 git clone → claude -p → commit → push
-- 宿主机: 创建 MR、回复 issue 评论
+- Worker: 构建基础镜像、entrypoint.sh（含 CLAUDE.md 约定）
+- Worker: Docker 容器内 git clone → git fetch → claude -p (agentic) → commit → push
+- 宿主机: 通过 Docker HTTP API 管理容器、创建 MR、回复 issue 评论
 - 单任务同步执行 (无队列, webhook 收到即执行)
 
 ### P1 - 队列调度
@@ -1172,12 +1469,13 @@ gitlab_issues_to_mr/
 
 - 任务入队 (webhook 不再同步执行, 写入 DB 后立即返回)
 - Scheduler asyncio 循环 (轮询 + 调度)
+- **Issue 级互斥调度** (同一 Issue 同一时刻只执行一个任务)
 - 并发控制 (可配置 max_concurrency)
 - 延迟/定时执行 (scheduled_at)
 - 任务状态流转完整实现
-- 任务超时检测 + docker stop
+- 任务超时检测 + 容器停止 (Docker HTTP API)
 - 容器命名规范 (gimr-{id}-p{pid}-i{iid})
-- 服务启动时清理残留容器
+- **崩溃恢复** (服务启动时清理残留容器 + 修复 stuck running 任务状态)
 
 ### P2 - 管理后台
 
@@ -1186,6 +1484,7 @@ gitlab_issues_to_mr/
 - Vue 3 + Vite + Naive UI 项目搭建
 - 任务看板 (列表、状态筛选、实时刷新)
 - 任务详情 (日志、Claude CLI 输出、git diff)
+- **实时日志流** (Docker logs → SSE 推送到浏览器)
 - 手动操作 (取消、重试、立即执行)
 - 系统监控页 (队列深度、运行中容器)
 - 配置管理页 (并发数、超时时间等)
@@ -1209,7 +1508,7 @@ gitlab_issues_to_mr/
 - vLLM 负载监控 + 动态并发调整
 - 追加修改 (follow-up @bot, 在已有分支上继续)
 - 指令扩展 (priority, cancel, status)
-- Docker Compose 一键部署 (FastAPI + Nginx + SQLite 卷)
+- Docker Compose 一键部署 (FastAPI + PostgreSQL + Nginx 静态托管)
 - 操作审计日志
 
 ## 十、配置方案 (已确定)
@@ -1242,9 +1541,15 @@ ANTHROPIC_MODEL=your-model-name              # 模型名称
 VLLM_METRICS_URL=http://10.0.1.5:8000/metrics  # vLLM Prometheus 端点
 
 # ===== 服务自身 =====
-DATABASE_URL=sqlite:///data/db/gimr.sqlite   # SQLite 数据库路径
+DATABASE_URL=postgresql+asyncpg://gimr:password@localhost:5432/gimr  # PostgreSQL 连接
 SECRET_KEY=your-session-secret-key           # JWT Session 签名密钥
 LOG_LEVEL=INFO
+
+# ===== Docker Engine HTTP API =====
+DOCKER_HOST=https://localhost:2376           # Docker Engine API 端点
+DOCKER_TLS_CA=/etc/docker/tls/ca.pem
+DOCKER_TLS_CERT=/etc/docker/tls/client-cert.pem
+DOCKER_TLS_KEY=/etc/docker/tls/client-key.pem
 ```
 
 #### 运行时可配置项（Dashboard 配置管理页可热更新，存 system_config 表）
@@ -1264,7 +1569,7 @@ vllm_load_threshold_percent: 80          # vLLM 负载阈值
 # 容器资源
 container_cpus: "4"                      # 容器 CPU 限制
 container_memory: "8g"                   # 容器内存限制
-container_network: "bot-network"         # Docker 网络名
+container_network: "gimr-network"         # Docker 网络名
 worker_image: "bot-worker:latest"        # Worker 镜像
 
 # 权限
@@ -1296,12 +1601,9 @@ ANTHROPIC_BASE_URL=http://10.0.1.5:8000/v1
 ANTHROPIC_API_KEY=your-vllm-api-key
 ANTHROPIC_MODEL=your-model-name
 
-# docker run 时透传
-docker run \
-  -e ANTHROPIC_BASE_URL \
-  -e ANTHROPIC_API_KEY \
-  -e ANTHROPIC_MODEL \
-  ...
+# 通过 Docker HTTP API 创建容器时, 在 Env 字段中透传:
+# "Env": ["ANTHROPIC_BASE_URL=...", "ANTHROPIC_API_KEY=...", "ANTHROPIC_MODEL=..."]
+# 详见 7.4.5 Worker Manager 代码
 ```
 
 #### 3. 触发词
@@ -1348,41 +1650,78 @@ Issue #456 → 分支 gimr/issue-456
 
 #### 7. 部署方式
 
-Docker Compose 一键部署，包含三个服务：
+Docker Compose 一键部署，包含三个服务（前端构建为静态文件，由 Nginx 直接托管）：
 
 ```yaml
 # docker-compose.yml
 services:
-  backend:
-    build: ./backend
-    env_file: .env
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: gimr
+      POSTGRES_USER: gimr
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  # 控制 Worker 容器
-      - gimr-data:/data                            # SQLite + 裸仓库
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gimr"]
+      interval: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://gimr:${POSTGRES_PASSWORD}@postgres:5432/gimr
+    volumes:
+      - gimr-repos:/data/repos                        # 裸仓库缓存
+      - gimr-shared:/data/shared                      # 共享依赖
+      - ./deploy/docker-tls:/etc/docker/tls:ro        # Docker TLS 证书
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "8080:8000"
 
-  frontend:
-    build: ./frontend
-    depends_on:
-      - backend
-
+  # 前端多阶段构建: Node 构建 → Nginx 托管静态文件
   nginx:
-    image: nginx:alpine
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.frontend          # 多阶段: npm build → nginx
     ports:
       - "443:443"
     volumes:
       - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf
     depends_on:
       - backend
-      - frontend
 
 volumes:
-  gimr-data:
+  pgdata:
+  gimr-repos:
+  gimr-shared:
 
 networks:
   default:
-    name: bot-network      # Worker 容器也加入此网络
+    name: gimr-network      # Worker 容器也加入此网络
+```
+
+**前端多阶段 Dockerfile** (`deploy/Dockerfile.frontend`)：
+
+```dockerfile
+# 阶段 1: 构建
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ .
+RUN npm run build
+
+# 阶段 2: Nginx 托管静态文件
+FROM nginx:alpine
+COPY --from=builder /app/dist /usr/share/nginx/html
+# nginx.conf 通过 volume mount 注入
 ```
 
 #### 8. vLLM 监控端点
