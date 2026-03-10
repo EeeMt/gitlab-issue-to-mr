@@ -228,7 +228,7 @@ CREATE TABLE tasks (
     finished_at         DATETIME,
     branch_name         TEXT,               -- 关联的 git 分支
     mr_iid              INTEGER,            -- 关联的 MR iid
-    container_name      TEXT,               -- Docker 容器名（用于 stop/logs，格式: glmr-{task_id}-p{project_id}-i{issue_iid}）
+    container_name      TEXT,               -- Docker 容器名（用于 stop/logs，格式: gimr-{task_id}-p{project_id}-i{issue_iid}）
     container_id        TEXT,               -- Docker 容器 ID（docker run 返回的完整 ID）
     error_message       TEXT,
     created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -349,14 +349,14 @@ fi
 
 #### 7.4.3 容器命名规范
 
-所有 Worker 容器使用统一前缀 `glmr-`（gitlab-mr 缩写），便于识别和批量操作：
+所有 Worker 容器使用统一前缀 `gimr-`（gitlab-mr 缩写），便于识别和批量操作：
 
 ```
-格式:  glmr-{task_id}-p{project_id}-i{issue_iid}
-示例:  glmr-42-p17-i123
+格式:  gimr-{task_id}-p{project_id}-i{issue_iid}
+示例:  gimr-42-p17-i123
 ```
 
-- `glmr-` 前缀：标识属于本系统的容器，与其他容器区分
+- `gimr-` 前缀：标识属于本系统的容器，与其他容器区分
 - `{task_id}`：任务 ID，唯一标识
 - `p{project_id}`：GitLab 项目 ID
 - `i{issue_iid}`：Issue 编号
@@ -365,30 +365,30 @@ fi
 
 ```bash
 # 查看所有 bot 容器
-docker ps --filter "name=glmr-"
+docker ps --filter "name=gimr-"
 
 # 批量停止所有 bot 容器 (紧急情况)
-docker stop $(docker ps -q --filter "name=glmr-")
+docker stop $(docker ps -q --filter "name=gimr-")
 
 # 清理所有已停止的 bot 容器 (如果没用 --rm)
-docker rm $(docker ps -aq --filter "name=glmr-" --filter "status=exited")
+docker rm $(docker ps -aq --filter "name=gimr-" --filter "status=exited")
 
 # 查看某个项目的所有容器
-docker ps --filter "name=glmr-.*-p17"
+docker ps --filter "name=gimr-.*-p17"
 
 # 查看某个 issue 的容器
-docker ps --filter "name=glmr-.*-i123"
+docker ps --filter "name=gimr-.*-i123"
 ```
 
 #### 7.4.4 宿主机 Worker Manager
 
 ```python
 # 容器命名前缀
-CONTAINER_PREFIX = "glmr"
+CONTAINER_PREFIX = "gimr"
 
 async def execute_task(task):
     container_name = f"{CONTAINER_PREFIX}-{task.id}-p{task.gitlab_project_id}-i{task.gitlab_issue_iid}"
-    branch = f"glmr/issue-{task.gitlab_issue_iid}"
+    branch = f"gimr/issue-{task.gitlab_issue_iid}"
 
     # 确保裸仓库存在并已 fetch 最新
     bare_repo = f"/data/repos/{task.gitlab_project_id}/.bare"
@@ -758,7 +758,7 @@ value: ["devops", "platform-team"]
 │  │ ┌──────────────────────────┬──────────────────────────────────┐ │ │
 │  │ │ 项目     myapp           │ 触发用户   张三                   │ │ │
 │  │ │ Issue    #123 实现用户登录 → │ 类型      新建任务              │ │ │
-│  │ │ 分支     glmr/issue-123  │ 容器      glmr-42-p17-i123      │ │ │
+│  │ │ 分支     gimr/issue-123  │ 容器      gimr-42-p17-i123      │ │ │
 │  │ │ MR       !46 (Draft) →   │ 优先级    普通                   │ │ │
 │  │ │ 创建时间  2026-03-08 10:30│ 开始时间  2026-03-08 10:31      │ │ │
 │  │ └──────────────────────────┴──────────────────────────────────┘ │ │
@@ -780,14 +780,14 @@ value: ["devops", "platform-team"]
 │  │                                                              │    │
 │  │  Tab 1: 执行日志                                             │    │
 │  │  ┌──────────────────────────────────────────────────────┐    │    │
-│  │  │ 10:31:01 [INFO]  启动容器 glmr-42-p17-i123          │    │    │
+│  │  │ 10:31:01 [INFO]  启动容器 gimr-42-p17-i123          │    │    │
 │  │  │ 10:31:02 [INFO]  git clone 完成 (1.2s)               │    │    │
-│  │  │ 10:31:02 [INFO]  创建分支 glmr/issue-123             │    │    │
+│  │  │ 10:31:02 [INFO]  创建分支 gimr/issue-123             │    │    │
 │  │  │ 10:31:03 [INFO]  开始调用 Claude CLI...               │    │    │
 │  │  │ 10:32:45 [INFO]  Claude CLI 执行完成 (102s)           │    │    │
 │  │  │ 10:32:46 [INFO]  git add -A (5 files changed)        │    │    │
 │  │  │ 10:32:46 [INFO]  git commit: bot: implement #123     │    │    │
-│  │  │ 10:32:48 [INFO]  git push origin glmr/issue-123      │    │    │
+│  │  │ 10:32:48 [INFO]  git push origin gimr/issue-123      │    │    │
 │  │  │ 10:32:49 [INFO]  创建 MR !46                         │    │    │
 │  │  │ 10:32:50 [INFO]  任务完成                             │    │    │
 │  │  │                                                      │    │    │
@@ -842,10 +842,10 @@ value: ["devops", "platform-team"]
 │  │ ┌──────────────────────┬──────┬────────┬──────┬───────┬──────┐ │ │
 │  │ │ 容器名               │ 用户 │ Issue  │ CPU  │ 内存  │ 运行 │ │ │
 │  │ ├──────────────────────┼──────┼────────┼──────┼───────┼──────┤ │ │
-│  │ │ glmr-42-p17-i123     │ 张三 │ #123   │ 2.3c │ 1.8G  │ 3m   │ │ │
-│  │ │ glmr-43-p17-i124     │ 张三 │ #124   │ 1.1c │ 0.9G  │ 1m   │ │ │
-│  │ │ glmr-44-p22-i56      │ 李四 │ #56    │ 3.8c │ 4.2G  │ 8m   │ │ │
-│  │ │ glmr-45-p22-i57      │ 王五 │ #57    │ 0.5c │ 0.3G  │ 30s  │ │ │
+│  │ │ gimr-42-p17-i123     │ 张三 │ #123   │ 2.3c │ 1.8G  │ 3m   │ │ │
+│  │ │ gimr-43-p17-i124     │ 张三 │ #124   │ 1.1c │ 0.9G  │ 1m   │ │ │
+│  │ │ gimr-44-p22-i56      │ 李四 │ #56    │ 3.8c │ 4.2G  │ 8m   │ │ │
+│  │ │ gimr-45-p22-i57      │ 王五 │ #57    │ 0.5c │ 0.3G  │ 30s  │ │ │
 │  │ └──────────────────────┴──────┴────────┴──────┴───────┴──────┘ │ │
 │  └─────────────────────────────────────────────────────────────────┘ │
 │                                                                      │
@@ -884,7 +884,7 @@ value: ["devops", "platform-team"]
 │  │                                                                 │ │
 │  │ Bot 触发词          [@ai-bot          ]                         │ │
 │  │ 默认分支            [main             ]                         │ │
-│  │ 分支命名模板        [glmr/issue-{iid} ]                         │ │
+│  │ 分支命名模板        [gimr/issue-{iid} ]                         │ │
 │  └─────────────────────────────────────────────────────────────────┘ │
 │                                                                      │
 │  ┌─────────────────────────────────────────────────────────────────┐ │
@@ -1176,7 +1176,7 @@ gitlab_issues_to_mr/
 - 延迟/定时执行 (scheduled_at)
 - 任务状态流转完整实现
 - 任务超时检测 + docker stop
-- 容器命名规范 (glmr-{id}-p{pid}-i{iid})
+- 容器命名规范 (gimr-{id}-p{pid}-i{iid})
 - 服务启动时清理残留容器
 
 ### P2 - 管理后台
@@ -1229,7 +1229,7 @@ GITLAB_WEBHOOK_SECRET=your-webhook-secret    # Webhook 校验密钥
 
 # ===== OIDC 认证 =====
 OIDC_ISSUER_URL=https://gitlab.internal.com  # GitLab OIDC issuer (可配置)
-OIDC_CLIENT_ID=glmr-bot-dashboard            # GitLab OAuth Application ID
+OIDC_CLIENT_ID=gimr-bot-dashboard            # GitLab OAuth Application ID
 OIDC_CLIENT_SECRET=xxxxxxxxxxxxxxxx          # GitLab OAuth Application Secret
 OIDC_REDIRECT_URI=https://bot.internal.com/api/auth/callback
 
@@ -1242,7 +1242,7 @@ ANTHROPIC_MODEL=your-model-name              # 模型名称
 VLLM_METRICS_URL=http://10.0.1.5:8000/metrics  # vLLM Prometheus 端点
 
 # ===== 服务自身 =====
-DATABASE_URL=sqlite:///data/db/glmr.sqlite   # SQLite 数据库路径
+DATABASE_URL=sqlite:///data/db/gimr.sqlite   # SQLite 数据库路径
 SECRET_KEY=your-session-secret-key           # JWT Session 签名密钥
 LOG_LEVEL=INFO
 ```
@@ -1252,7 +1252,7 @@ LOG_LEVEL=INFO
 ```yaml
 # Bot 行为
 bot_trigger_keyword: "@ai-bot"          # 触发词 (可配置)
-branch_name_template: "glmr/issue-{iid}" # 分支命名模板
+branch_name_template: "gimr/issue-{iid}" # 分支命名模板
 
 # 调度
 max_concurrency: 6                       # 最大并发容器数
@@ -1337,13 +1337,13 @@ if task.status == "running":
 
 #### 6. 分支命名规则
 
-模板：`glmr/issue-{iid}`，通过 `branch_name_template` 可配置。
+模板：`gimr/issue-{iid}`，通过 `branch_name_template` 可配置。
 
 示例：
 
 ```
-Issue #123 → 分支 glmr/issue-123
-Issue #456 → 分支 glmr/issue-456
+Issue #123 → 分支 gimr/issue-123
+Issue #456 → 分支 gimr/issue-456
 ```
 
 #### 7. 部署方式
@@ -1358,7 +1358,7 @@ services:
     env_file: .env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # 控制 Worker 容器
-      - glmr-data:/data                            # SQLite + 裸仓库
+      - gimr-data:/data                            # SQLite + 裸仓库
     ports:
       - "8080:8000"
 
@@ -1378,7 +1378,7 @@ services:
       - frontend
 
 volumes:
-  glmr-data:
+  gimr-data:
 
 networks:
   default:
