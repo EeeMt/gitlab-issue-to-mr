@@ -1,0 +1,15 @@
+{
+  "object_kind": "note",
+  "note": {
+    "id": 999999,
+    "noteable_type": "Issue",
+    "body": "@ai-bot create a hello world function"
+  },
+  "issue": {
+    "id": 12345,
+    "iid": 100
+  },
+  "project": {
+    "id": 1
+  }
+}
