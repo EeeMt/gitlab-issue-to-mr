@@ -47,6 +47,9 @@ class WorkerExecutor:
         Returns:
             True if successful, False otherwise
         """
+        # Get settings
+        settings = get_settings()
+
         # Fetch task
         result = await db.execute(select(Task).where(Task.id == task_id))
         task = result.scalar_one_or_none()
@@ -65,9 +68,9 @@ class WorkerExecutor:
         container = None
 
         try:
-            # Pull worker image
+            # Pull worker image (force pull for development)
             try:
-                self.docker.pull_image(settings.worker_image)
+                self.docker.pull_image(settings.worker_image, force=True)
             except Exception as e:
                 logger.warning(f"Failed to pull image: {e}, trying to use existing")
 

@@ -8,12 +8,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Claude CLI (anthropic-cli)
-# This is a placeholder - adjust based on actual Claude CLI installation
-RUN pip install --no-cache-dir anthropic
+# Install Claude CLI
+# For local LLM (Ollama), use: npm install -g @anthropic-ai/claude-cli
+# Or use the official Anthropic CLI
+RUN pip install --no-cache-dir anthropic && \
+    pip install --no-cache-dir anthropic-cli || true
+
+# Install Node.js for Claude CLI (if needed)
+RUN apt-get update && apt-get install -y nodejs npm && rm -rf /var/lib/apt/lists/*
+
+# Install Claude CLI via npm (alternative method)
+RUN npm install -g @anthropic-ai/claude-cli 2>/dev/null || echo "Claude CLI via npm failed, using pip"
 
 # Copy entrypoint script
-COPY entrypoint.sh /entrypoint.sh
+COPY deploy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Set environment variables

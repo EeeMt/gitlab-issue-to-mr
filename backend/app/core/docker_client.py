@@ -34,15 +34,35 @@ class DockerClientWrapper:
         self.client = docker.DockerClient(**docker_kwargs)
         logger.info(f"Docker client initialized: {settings.docker_host}")
 
-    def pull_image(self, image: str) -> None:
-        """Pull Docker image from registry.
+    def pull_image(self, image: str, force: bool = False) -> None:
+        """Pull Docker image from registry if not exists locally.
 
         Args:
             image: Image name (e.g., 'nginx:latest')
+            force: Force pull even if image exists locally (default: False)
         """
+        # Check if image exists locally first
+        if not force:
+            try:
+                self.client.images.get(image)
+                logger.info(f"Image already exists locally: {image}")
+                return
+            except docker.errors.NotFound:
+                pass
+
+        # Pull image (force pull or if not exists)
         logger.info(f"Pulling image: {image}")
-        self.client.images.pull(image)
-        logger.info(f"Image pulled: {image}")
+        try:
+            self.client.images.pull(image)
+            logger.info(f"Image pulled: {image}")
+        except Exception as e:
+            # If pull fails (e.g., local image, no registry), try to use existing
+            try:
+                self.client.images.get(image)
+                logger.info(f"Pull failed but using existing local image: {image}")
+            except docker.errors.NotFound:
+                logger.warning(f"Image not found locally or in registry: {image}")
+                raise
 
     def create_container(
         self,
