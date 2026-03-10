@@ -32,6 +32,9 @@ cd backend && python test_integration_e2e.py --skip-startup
 # Run E2E mock test (no GitLab required)
 cd backend && python test_integration_e2e_mock.py --skip-startup
 
+# Run P0.1 tests (initial MR creation, MR_IID passing)
+cd backend && python test_p01.py
+
 # Run frontend dev server
 cd frontend && npm run dev
 

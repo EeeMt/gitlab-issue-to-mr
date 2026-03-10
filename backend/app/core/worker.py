@@ -83,6 +83,35 @@ class WorkerExecutor:
             # Prepare environment variables
             target_branch = task.target_branch or settings.default_target_branch
 
+            # Create initial MR (draft) before running worker for P0.1 planning support
+            # This allows the worker to update MR description during execution
+            mr_iid = None
+            mr_web_url = None
+            try:
+                initial_mr_desc = f"""## 📋 等待 AI 规划...
+
+### 需求
+{task.user_prompt}
+
+---
+*AI 正在分析需求并制定实现计划...*"""
+
+                mr_response = self.gitlab.gl.projects.get(task.project_id).mergerequests.create({
+                    "source_branch": task.branch_name,
+                    "target_branch": target_branch,
+                    "title": f"AI: {task.user_prompt[:50]}...",
+                    "description": initial_mr_desc,
+                    "draft": True,  # Create as draft MR
+                })
+                mr_iid = mr_response.iid
+                mr_web_url = mr_response.web_url
+                task.merge_request_iid = mr_iid
+                task.merge_request_url = mr_web_url
+                await db.commit()
+                logger.info(f"[Task {task_id}] Created initial draft MR !{mr_iid}")
+            except Exception as e:
+                logger.warning(f"[Task {task_id}] Failed to create initial MR: {e}, continuing without MR")
+
             environment = {
                 "GITLAB_URL": settings.gitlab_url,
                 "GITLAB_TOKEN": settings.gitlab_bot_token,
@@ -95,6 +124,10 @@ class WorkerExecutor:
                 "ANTHROPIC_API_KEY": settings.anthropic_api_key,
                 "ANTHROPIC_MODEL": settings.anthropic_model,
             }
+
+            # Pass MR_IID to worker if MR was created (for P0.1 planning updates)
+            if mr_iid:
+                environment["MR_IID"] = str(mr_iid)
 
             # Generate container name with naming convention: gimr-{id}-p{pid}-i{iid}
             container_name = f"gimr-{task.id}-p{task.project_id}-i{task.issue_iid}"
@@ -145,6 +178,19 @@ class WorkerExecutor:
                         logger.warning(f"Failed to get MR from API: {e}")
 
                 logger.info(f"Task {task_id} completed successfully")
+
+                # Remove draft status from MR if it was created
+                if task.merge_request_iid:
+                    try:
+                        self.gitlab.gl.projects.get(task.project_id).mergerequests.get(task.merge_request_iid)
+                        # Update MR to remove draft status
+                        self.gitlab.gl.projects.get(task.project_id).mergerequests.update(
+                            task.merge_request_iid,
+                            {"draft": False}
+                        )
+                        logger.info(f"[Task {task_id}] Removed draft status from MR !{task.merge_request_iid}")
+                    except Exception as e:
+                        logger.warning(f"[Task {task_id}] Failed to update MR draft status: {e}")
 
                 # Send "completed" notification with MR URL
                 try:

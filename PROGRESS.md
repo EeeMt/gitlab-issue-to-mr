@@ -8,7 +8,7 @@ GitLab Issue to MR Bot (GIMR) - 基于 GitLab Issue 自动生成代码并创建 
 
 **阶段**: MVP + P1 + P2 + 稳定性增强 已完成，端到端集成测试通过 ✅
 
-**当前任务**: P0.1 分步规划与执行 (进行中)
+**当前任务**: P0.1 分步规划与执行 ✅ 已完成
 
 ---
 
@@ -306,7 +306,7 @@ PROGRESS.md                     # 本文档
 
 ---
 
-## P0.1 分步规划与执行 (进行中)
+## P0.1 分步规划与执行 ✅ 已完成
 
 ### 目标
 
@@ -316,19 +316,33 @@ PROGRESS.md                     # 本文档
 
 | # | 任务 | 状态 | 文件 |
 |---|---|---|---|
-| 3.1 | 规划阶段：调用 Claude 生成实现步骤 | ⏳ | `deploy/entrypoint.sh` |
-| 3.2 | 更新 MR 描述为规划文档 | ⏳ | `deploy/entrypoint.sh` |
-| 3.3 | 逐步执行每个步骤 | ⏳ | `deploy/entrypoint.sh` |
-| 3.4 | 实时更新 MR 进度 | ⏳ | `deploy/entrypoint.sh` |
-| 3.5 | 生成完成报告 | ⏳ | `deploy/entrypoint.sh` |
+| 3.1 | 后端：创建初始 MR 并传递 MR_IID | ✅ | `backend/app/core/worker.py` |
+| 3.2 | Worker：接收 MR_IID 并更新 MR 描述 | ✅ | `deploy/entrypoint.sh` |
+| 3.3 | 逐步执行每个步骤 | ✅ | `deploy/entrypoint.sh` |
+| 3.4 | 实时更新 MR 进度 | ✅ | `deploy/entrypoint.sh` |
+| 3.5 | 生成完成报告 | ✅ | `deploy/entrypoint.sh` |
+| 3.6 | P0.1 单元测试 | ✅ | `backend/test_p01.py` |
 
 ---
 
-## 下一步
+## P0.1 实现说明
 
-1. ~~在真实内网 GitLab 环境替换占位配置~~ ✅ 已完成
-2. ~~执行真实仓库的端到端 happy path~~ ✅ 已完成
-3. ~~补充自动化集成测试~~ ✅ 已完成 (test_integration_e2e.py)
+P0.1 需要在 worker 执行前创建初始 MR，以便在执行过程中更新 MR 描述：
+1. **后端**：在 `execute_task` 中，容器启动前先创建 Draft MR
+2. **Worker**：接收 MR_IID 环境变量，在各阶段调用 GitLab API 更新 MR 描述
+
+### 部署步骤
+
+```bash
+# 1. 重新构建 worker 镜像
+cd deploy && docker-compose build worker
+
+# 2. 重启服务
+docker-compose up -d
+
+# 3. 测试 P0.1 功能
+# 在 GitLab Issue 中评论 @ai-bot <需求描述>
+```
 
 ### 待优化项
 

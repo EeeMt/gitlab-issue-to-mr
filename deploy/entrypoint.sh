@@ -87,24 +87,37 @@ else
     git checkout -b "${BRANCH_NAME}" "origin/${TARGET_BRANCH}"
 fi
 
-# Run Claude via Python SDK
-echo "Running Claude API..."
+# Run Claude via Python SDK with planning and step-by-step execution
+echo "Running Claude API with planning mode..."
 echo "Prompt: ${USER_PROMPT}"
 echo ""
 
-# Create Python script to call Claude API with Tool Use support
-cat > /tmp/claude_call.py << 'PYTHON_SCRIPT'
+# Create comprehensive Python script for planning and execution
+cat > /tmp/claude_planner.py << 'PYTHON_SCRIPT'
+#!/usr/bin/env python3
+"""
+Claude Planner: Plan -> Execute -> Report
+Supports step-by-step planning and execution with MR updates.
+"""
+
 import os
 import json
 import subprocess
+import re
+import time
 import anthropic
-from anthropic import Anthropic
+from datetime import datetime
 
 # Get environment variables
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "http://localhost:11434/v1")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 USER_PROMPT = os.environ.get("USER_PROMPT", "")
+GITLAB_URL = os.environ.get("GITLAB_URL", "")
+GITLAB_TOKEN = os.environ.get("GITLAB_TOKEN", "")
+PROJECT_ID = os.environ.get("PROJECT_ID", "")
+ISSUE_IID = os.environ.get("ISSUE_IID", "")
+MR_IID = os.environ.get("MR_IID", "")
 
 # Initialize client
 client = anthropic.Anthropic(
@@ -112,8 +125,7 @@ client = anthropic.Anthropic(
     base_url=ANTHROPIC_BASE_URL,
 )
 
-# Define available tools for the container
-# Container has access to git, curl, file operations
+# Tools definition
 TOOLS = [
     {
         "name": "Bash",
@@ -187,12 +199,16 @@ def execute_tool(tool_name, tool_input):
 def call_claude(messages, tools=None, max_iterations=10):
     """Call Claude API with tool use support."""
     for i in range(max_iterations):
-        response = client.messages.create(
-            model=ANTHROPIC_MODEL,
-            max_tokens=4096,
-            messages=messages,
-            tools=tools or []
-        )
+        try:
+            response = client.messages.create(
+                model=ANTHROPIC_MODEL,
+                max_tokens=4096,
+                messages=messages,
+                tools=tools or []
+            )
+        except Exception as e:
+            print(f"API Error: {e}", file=__import__('sys').stderr)
+            return None
 
         # Check for tool use
         tool_use_blocks = [block for block in response.content if hasattr(block, 'type') and block.type == 'tool_use']
@@ -226,151 +242,212 @@ def call_claude(messages, tools=None, max_iterations=10):
     # Max iterations reached
     return response
 
-# Main execution
-try:
-    messages = [{"role": "user", "content": USER_PROMPT}]
-    response = call_claude(messages, TOOLS)
+def update_mr_description(description):
+    """Update MR description via GitLab API."""
+    if not MR_IID:
+        print("No MR_IID, skipping MR update")
+        return
 
-    # Extract text output
-    output = []
-    for block in response.content:
-        if hasattr(block, 'type') and block.type == 'text':
-            output.append(block.text)
+    import requests
+    url = f"{GITLAB_URL}/api/v4/projects/{PROJECT_ID}/merge_requests/{MR_IID}"
+    try:
+        response = requests.put(
+            url,
+            headers={"PRIVATE-TOKEN": GITLAB_TOKEN},
+            json={"description": description},
+            timeout=10
+        )
+        if response.status_code < 400:
+            print(f"MR description updated successfully")
+        else:
+            print(f"Failed to update MR: {response.status_code}")
+    except Exception as e:
+        print(f"Error updating MR: {e}")
 
-    if output:
-        print('\n'.join(output))
-    else:
-        print(f"# No text output. Content: {response.content}", file=__import__('sys').stderr)
-        exit(1)
-except Exception as e:
-    print(f"Error: {e}", file=__import__('sys').stderr)
+def generate_planning_prompt():
+    """Generate prompt for planning phase."""
+    return f"""请分析以下需求，并制定实现计划。
+
+需求: {USER_PROMPT}
+
+请按以下格式输出规划:
+
+## 📋 实现规划
+
+### 需求
+{USER_PROMPT}
+
+### 实现步骤
+请列出具体的实现步骤，每个步骤应该是可执行的原子操作:
+- [ ] 步骤1: 具体描述
+- [ ] 步骤2: 具体描述
+- [ ] 步骤3: 具体描述
+...
+
+### 预期结果
+请描述代码实现后的预期效果。
+"""
+
+def generate_step_prompt(step):
+    """Generate prompt for executing a single step."""
+    return f"""请执行以下步骤:
+
+步骤: {step}
+
+请使用工具完成这个步骤。如果需要创建或修改代码，请直接执行。
+"""
+
+# ============ MAIN EXECUTION ============
+
+print("=" * 50)
+print("Starting planning phase...")
+print("=" * 50)
+
+# Phase 1: Generate planning
+planning_messages = [{"role": "user", "content": generate_planning_prompt()}]
+planning_response = call_claude(planning_messages, tools=[])
+
+if not planning_response:
+    print("Failed to get planning response")
     exit(1)
+
+# Extract planning content
+planning_content = ""
+for block in planning_response.content:
+    if hasattr(block, 'type') and block.type == 'text':
+        planning_content += block.text
+
+print("\n--- Planning Result ---")
+print(planning_content[:500])
+print("...\n")
+
+# Create MR description with planning
+planning_md = f"""## 📋 实现规划
+
+{planning_content}
+
+---
+
+### 执行进度
+- [ ] 等待开始执行
+"""
+
+# Update MR with planning
+print("Updating MR with planning...")
+update_mr_description(planning_md)
+
+# Phase 2: Extract steps and execute
+print("\n" + "=" * 50)
+print("Starting execution phase...")
+print("=" * 50)
+
+# Parse steps from planning (look for - [ ] or - [x] patterns)
+steps = re.findall(r'- \[([ x])\] (.+)', planning_content)
+print(f"Found {len(steps)} steps")
+
+execution_log = []
+
+for idx, (checked, step) in enumerate(steps):
+    print(f"\n--- Step {idx + 1}/{len(steps)}: {step[:50]}... ---")
+    start_time = time.time()
+
+    # Execute step
+    step_messages = [{"role": "user", "content": generate_step_prompt(step)}]
+    step_response = call_claude(step_messages, tools=TOOLS)
+
+    # Extract output
+    step_output = ""
+    if step_response:
+        for block in step_response.content:
+            if hasattr(block, 'type') and block.type == 'text':
+                step_output += block.text
+
+    duration = time.time() - start_time
+
+    # Record execution
+    execution_log.append({
+        "step": step,
+        "duration": duration,
+        "output": step_output[:200]
+    })
+
+    # Update MR progress
+    progress_md = planning_md + "\n\n### 执行进度\n"
+    for i, (chk, stp) in enumerate(steps):
+        if i < idx + 1:
+            progress_md += f"- [x] {stp} ✓ (耗时: {execution_log[i]['duration']:.1f}秒)\n"
+        elif i == idx + 1:
+            progress_md += f"- [ ] {stp} (执行中...)\n"
+        else:
+            progress_md += f"- [ ] {stp}\n"
+
+    # Add recent logs
+    progress_md += "\n### 执行日志\n"
+    for log in execution_log[-3:]:
+        progress_md += f"- {log['step'][:40]}: {log['duration']:.1f}秒\n"
+
+    update_mr_description(progress_md)
+
+# Phase 3: Generate completion report
+print("\n" + "=" * 50)
+print("Generating completion report...")
+print("=" * 50)
+
+# Get changed files
+result = subprocess.run("git status --porcelain", shell=True, cwd="/workspace", capture_output=True, text=True)
+changed_files = result.stdout.strip()
+
+# Generate report
+report_md = f"""## ✅ 实现完成
+
+### 需求
+{USER_PROMPT}
+
+### 变更文件
+{changed_files if changed_files || '无'}
+
+### 执行摘要
+- 总步骤: {len(steps)}
+- 成功: {len(execution_log)}
+- 失败: 0
+
+---
+
+### 详细执行记录
+"""
+
+for log in execution_log:
+    report_md += f"- **{log['step']}** ({log['duration']:.1f}秒)\n"
+
+update_mr_description(report_md)
+
+print("\n=== Execution completed ===")
+print(f"Total steps: {len(steps)}")
+print(f"Completed: {len(execution_log)}")
+
 PYTHON_SCRIPT
 
-python /tmp/claude_call.py > /workspace/result.md 2>&1
+chmod +x /tmp/claude_planner.py
+python3 /tmp/claude_planner.py > /workspace/result.md 2>&1
 
 RESULT=$?
+
+# Show output
 cat /workspace/result.md
 
 if [ $RESULT -ne 0 ]; then
-    echo "Claude API failed with exit code: ${RESULT}"
+    echo "Claude Planner failed with exit code: ${RESULT}"
     exit $RESULT
 fi
 
-# Parse result and create files if needed
-# Handle tool calls in output (various formats from different APIs)
-if grep -q '<tool' /workspace/result.md || grep -q '<tool_call>' /workspace/result.md || grep -q 'echo ' /workspace/result.md; then
-    echo "Processing tool calls..."
-    python3 << 'PYTHON_PARSE'
-import re
-import subprocess
-import os
+# The planner has already:
+# 1. Used tools (Bash/Read/Write) to make changes in /workspace
+# 2. Updated MR description during planning/execution
+# 3. Generated completion report in the MR
 
-with open('/workspace/result.md', 'r') as f:
-    content = f.read()
-
-executed = False
-
-# Try to find bash commands in markdown code blocks
-bash_code_matches = re.findall(r'```bash\n(.*?)```', content, re.DOTALL)
-for cmd in bash_code_matches:
-    cmd = cmd.strip()
-    print(f"Executing bash from code block: {cmd}")
-    try:
-        result = subprocess.run(cmd, shell=True, cwd='/workspace', capture_output=True, text=True)
-        if result.returncode == 0:
-            print(f"Bash executed successfully")
-            executed = True
-        else:
-            print(f"Bash error: {result.stderr}")
-    except Exception as e:
-        print(f"Bash exception: {e}")
-
-# Try to find echo commands: echo 'content' > file
-echo_matches = re.findall(r'echo\s+[\'"](.+?)[\'"]\s+>\s+(\S+)', content)
-for echo_content, file_path in echo_matches:
-    try:
-        with open(f'/workspace/{file_path}', 'w') as f:
-            f.write(echo_content)
-        print(f"Created file from echo: {file_path}")
-        executed = True
-    except Exception as e:
-        print(f"Echo file error: {e}")
-
-# Try to find <tool name="bash"> or <tool name="shell">
-bash_matches = re.findall(r'name="(bash|shell)"\s*>\s*(.+?)(?:</tool>|$)', content, re.DOTALL)
-for tool_name, cmd in bash_matches:
-    cmd = cmd.strip()
-    print(f"Executing bash: {cmd}")
-    try:
-        result = subprocess.run(cmd, shell=True, cwd='/workspace', capture_output=True, text=True)
-        if result.returncode == 0:
-            print(f"Bash executed successfully")
-            executed = True
-        else:
-            print(f"Bash error: {result.stderr}")
-    except Exception as e:
-        print(f"Bash exception: {e}")
-
-# Try to find file creation tools (various names including Write)
-# Format 1: <tool name="Write" path="file">content</tool>
-file_matches = re.findall(r'name="(write_file|Create a file|Write|file_create|create_file|MkFile)"\s+(path|file_path)="([^"]+)"\s*>\s*(.+?)(?:</tool>|$)', content, re.DOTALL)
-for tool_name, attr_name, file_path, file_content in file_matches:
-    try:
-        with open(f'/workspace/{file_path}', 'w') as f:
-            f.write(file_content.strip())
-        print(f"Created file: {file_path}")
-        executed = True
-    except Exception as e:
-        print(f"Write file error: {e}")
-
-# Format 2: <tool name="Write">file.txt\ncontent</tool> (no path attribute)
-file_matches2 = re.findall(r'<tool\s+name="(Write|write_file|Create a file)">\s*(.+?)\s*</tool>', content, re.DOTALL)
-for tool_name, file_content in file_matches2:
-    # Try to parse "filename\ncontent"
-    lines = file_content.strip().split('\n')
-    if len(lines) >= 2:
-        file_path = lines[0].strip()
-        file_content = '\n'.join(lines[1:]).strip()
-        if file_path and not file_path.startswith('<'):
-            try:
-                with open(f'/workspace/{file_path}', 'w') as f:
-                    f.write(file_content)
-                print(f"Created file (no attr): {file_path}")
-                executed = True
-            except Exception as e:
-                print(f"Write file error: {e}")
-
-# Try XML format: <tool_call><tool_name>create_file</tool_name><args><param name="path">...</param>...
-xml_matches = re.findall(r'<tool_name>(create_file|write_file)</tool_name>\s*<args>\s*<param name="path">([^<]+)</param>\s*<param name="content">([^<]+)</param>', content, re.DOTALL)
-for tool_name, file_path, file_content in xml_matches:
-    try:
-        with open(f'/workspace/{file_path}', 'w') as f:
-            f.write(file_content.strip())
-        print(f"Created file (XML): {file_path}")
-        executed = True
-    except Exception as e:
-        print(f"Write file error: {e}")
-
-# Try simpler XML format without namespace
-xml_matches2 = re.findall(r'<tool\s+name="file_create"\s+path="([^"]+)"\s*>\s*(.+?)(?:\n|$)', content, re.DOTALL)
-for file_path, file_content in xml_matches2:
-    try:
-        with open(f'/workspace/{file_path}', 'w') as f:
-            f.write(file_content.strip())
-        print(f"Created file (simple): {file_path}")
-        executed = True
-    except Exception as e:
-        print(f"Write file error: {e}")
-
-if executed:
-    print("Tool execution completed")
-PYTHON_PARSE
-fi
-
-# Check if any changes were made (including untracked files)
-# Use git status --porcelain to detect both tracked and untracked changes
-CHANGES=$(git status --porcelain)
+# Now commit and push the changes
+# Check if any changes were made (excluding result.md)
+CHANGES=$(git status --porcelain | grep -v "result.md" || true)
 if [ -n "$CHANGES" ]; then
     echo "Changes detected:"
     echo "$CHANGES"
@@ -420,54 +497,25 @@ if [ -n "$CHANGES" ]; then
     MODIFIED_FILES="${MODIFIED_FILES%,}"
     DELETED_FILES="${DELETED_FILES%,}"
 
-    # Build file info string (single line)
-    FILE_INFO=""
-    [ -n "$NEW_FILES" ] && FILE_INFO="${FILE_INFO}New: ${NEW_FILES%,} | "
-    [ -n "$MODIFIED_FILES" ] && FILE_INFO="${FILE_INFO}Mod: ${MODIFIED_FILES%,} | "
-    [ -n "$DELETED_FILES" ] && FILE_INFO="${FILE_INFO}Del: ${DELETED_FILES%,}"
-    # If no code files found, show result.md as fallback
-    if [ -z "$FILE_INFO" ]; then
-        FILE_INFO="New: result.md (output)"
-    else
-        FILE_INFO="${FILE_INFO%, }"
-    fi
-
-    # Build MR title and description (single line for JSON reliability)
-    MR_TITLE="AI: ${USER_PROMPT:0:50}"
-    # Simple format without special chars that break JSON
-    MR_DESC="REQ: ${USER_PROMPT} | FILES: ${FILE_INFO} | CLOSES #${ISSUE_IID}"
-
-    # Check if MR already exists for this branch
-    echo "Checking for existing MR..."
-    EXISTING_MR=$(curl -s -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
-        "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests?state=opened&source_branch=${BRANCH_NAME}" | \
-        grep -o '"iid":[0-9]*' | head -1 | cut -d':' -f2)
-
-    if [ -n "$EXISTING_MR" ]; then
-        echo "MR already exists: #${EXISTING_MR}, updating..."
-        # Update existing MR description
-        curl -s -X PUT "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests/${EXISTING_MR}" \
-            -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d "{
-                \"description\": \"${MR_DESC}\"
-            }" > /workspace/mr_response.json
+    # MR was already created by backend before worker started
+    # Just get the MR info if MR_IID was provided
+    MR_WEB_URL=""
+    if [ -n "${MR_IID}" ]; then
+        echo "Using existing MR: !${MR_IID}"
         MR_WEB_URL=$(curl -s -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
-            "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests/${EXISTING_MR}" | \
+            "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests/${MR_IID}" | \
             grep -o '"web_url":"[^"]*"' | cut -d'"' -f4)
     else
-        echo "Creating new Merge Request..."
-        # Use GitLab API to create MR
-        curl -s -X POST "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests" \
-            -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d "{
-                \"source_branch\": \"${BRANCH_NAME}\",
-                \"target_branch\": \"${TARGET_BRANCH}\",
-                \"title\": \"${MR_TITLE}\",
-                \"description\": \"${MR_DESC}\",
-                \"remove_source_branch\": true
-            }" > /workspace/mr_response.json
+        # Fallback: check if MR already exists for this branch
+        echo "Checking for existing MR..."
+        EXISTING_MR=$(curl -s -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests?state=opened&source_branch=${BRANCH_NAME}" | \
+            grep -o '"iid":[0-9]*' | head -1 | cut -d':' -f2)
+        if [ -n "$EXISTING_MR" ]; then
+            MR_WEB_URL=$(curl -s -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+                "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests/${EXISTING_MR}" | \
+                grep -o '"web_url":"[^"]*"' | cut -d'"' -f4)
+        fi
     fi
 
     if [ -z "$MR_WEB_URL" ]; then

@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Claude CLI
 # For local LLM (Ollama), use: npm install -g @anthropic-ai/claude-cli
 # Or use the official Anthropic CLI
-RUN pip install --no-cache-dir anthropic && \
+RUN pip install --no-cache-dir anthropic requests && \
     pip install --no-cache-dir anthropic-cli || true
 
 # Install Node.js for Claude CLI (if needed)
