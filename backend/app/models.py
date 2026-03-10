@@ -74,6 +74,9 @@ class Task(Base):
     commit_sha: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Retry tracking
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow

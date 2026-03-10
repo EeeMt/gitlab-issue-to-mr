@@ -55,10 +55,10 @@ class WorkerExecutor:
         task = result.scalar_one_or_none()
 
         if not task:
-            logger.error(f"Task {task_id} not found")
+            logger.error(f"[Task {task_id}] Task not found in database")
             return False
 
-        logger.info(f"Executing task {task_id} for issue {task.issue_iid}")
+        logger.info(f"[Task {task_id}] Executing for project={task.project_id} issue_iid={task.issue_iid} priority={task.priority}")
 
         # Update task status to running
         task.status = TaskStatus.RUNNING
@@ -121,7 +121,6 @@ class WorkerExecutor:
             if exit_code == 0:
                 task.status = TaskStatus.COMPLETED
                 task.completed_at = datetime.utcnow()
-
                 # Parse MR URL from logs
                 # Try to find web_url in any line of logs
                 for line in logs.split("\n"):
@@ -156,7 +155,16 @@ class WorkerExecutor:
                 task.status = TaskStatus.FAILED
                 task.completed_at = datetime.utcnow()
                 task.error_message = logs[-500:]  # Store last 500 chars
-                logger.error(f"Task {task_id} failed with exit code {exit_code}")
+                logger.error(f"[Task {task_id}] Failed with exit code {exit_code}")
+
+                # Check if we should retry
+                settings = get_settings()
+                if settings.max_retries > 0 and task.retry_count < settings.max_retries:
+                    # Schedule retry
+                    task.retry_count += 1
+                    task.status = TaskStatus.PENDING
+                    task.scheduled_at = datetime.utcnow()
+                    logger.info(f"[Task {task_id}] Scheduling retry {task.retry_count}/{settings.max_retries}")
 
                 # Send "failed" notification
                 try:
@@ -183,11 +191,19 @@ class WorkerExecutor:
             return exit_code == 0
 
         except Exception as e:
-            logger.exception(f"Task {task_id} failed with exception")
+            logger.exception(f"Task {task_id} failed with exception: {e}")
             task.status = TaskStatus.FAILED
             task.completed_at = datetime.utcnow()
             task.error_message = str(e)[:500]
             await db.commit()
+
+            # Cleanup container on exception
+            if container:
+                try:
+                    self.docker.remove_container(container, force=True)
+                    logger.info(f"Cleaned up container after exception: {container.id}")
+                except Exception as cleanup_error:
+                    logger.warning(f"Failed to cleanup container: {cleanup_error}")
 
             # Send failure notification for exceptions
             try:
@@ -243,6 +259,55 @@ class WorkerExecutor:
             message,
         )
         logger.info(f"Sent completion notification for task {task.id}, success={success}")
+
+        # Send webhook alert if configured
+        if not success:
+            self._send_failure_alert(task)
+
+    def _send_failure_alert(self, task: Task) -> None:
+        """Send failure alert to webhook URL.
+
+        Args:
+            task: Task object
+        """
+        settings = get_settings()
+
+        # Check if alerts are enabled
+        if not settings.alert_on_failure or not settings.alert_webhook_url:
+            return
+
+        # Build alert message
+        error_msg = task.error_message[:500] if task.error_message else "Unknown error"
+        alert_data = {
+            "text": f"🚨 Task Failed",
+            "attachments": [{
+                "color": "danger",
+                "fields": [
+                    {"title": "Task ID", "value": str(task.id), "short": True},
+                    {"title": "Project ID", "value": str(task.project_id), "short": True},
+                    {"title": "Issue", "value": f"!{task.issue_iid}", "short": True},
+                    {"title": "Error", "value": error_msg},
+                ]
+            }]
+        }
+
+        # Send webhook request
+        try:
+            import httpx
+            # Note: httpx is already used in the project
+            # Using synchronous request for simplicity
+            import requests
+            response = requests.post(
+                settings.alert_webhook_url,
+                json=alert_data,
+                timeout=10
+            )
+            if response.status_code < 400:
+                logger.info(f"Sent failure alert for task {task.id}")
+            else:
+                logger.warning(f"Failed to send failure alert: {response.status_code}")
+        except Exception as e:
+            logger.warning(f"Failed to send failure alert: {e}")
 
     async def process_pending_tasks(self, db: AsyncSession) -> int:
         """Process all pending tasks.

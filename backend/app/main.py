@@ -14,10 +14,11 @@ from app.scheduler import start_scheduler, stop_scheduler
 
 settings = get_settings()
 
-# Configure logging
+# Configure logging with structured format
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper()),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
 
@@ -82,8 +83,34 @@ async def root() -> dict:
 
 @app.get("/health")
 async def health() -> dict:
-    """Health check endpoint."""
-    return {"status": "healthy"}
+    """Health check endpoint with dependency checks."""
+    health_status = {"status": "healthy", "checks": {}}
+
+    # Check database connection
+    try:
+        from app.database import engine_sync
+        with engine_sync.connect() as conn:
+            conn.execute("SELECT 1")
+        health_status["checks"]["database"] = "ok"
+    except Exception as e:
+        health_status["checks"]["database"] = f"error: {str(e)[:50]}"
+        health_status["status"] = "unhealthy"
+
+    # Check Docker connection
+    try:
+        import docker
+        client = docker.from_env()
+        client.ping()
+        health_status["checks"]["docker"] = "ok"
+    except Exception as e:
+        health_status["checks"]["docker"] = f"error: {str(e)[:50]}"
+        health_status["status"] = "degraded"
+
+    # Set appropriate status code
+    status_code = 200 if health_status["status"] == "healthy" else 503
+
+    from fastapi.responses import JSONResponse
+    return JSONResponse(content=health_status, status_code=status_code)
 
 
 # Import and include routers

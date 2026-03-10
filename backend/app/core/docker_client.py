@@ -116,17 +116,39 @@ class DockerClientWrapper:
 
         Returns:
             Tuple of (exit_code, logs)
-        """
-        logger.info(f"Waiting for container: {container.id}")
 
-        # Wait for container to finish
-        result = container.wait(timeout=timeout)
-        exit_code = result.get("StatusCode", 1)
+        Raises:
+            TimeoutError: If container execution times out
+            ContainerError: If container exits with non-zero code
+        """
+        logger.info(f"Waiting for container: {container.id}, timeout: {timeout}s")
+
+        try:
+            # Wait for container to finish
+            result = container.wait(timeout=timeout)
+            exit_code = result.get("StatusCode", 1)
+        except Exception as e:
+            logger.error(f"Container wait failed: {e}")
+            # Try to get logs even if wait failed
+            try:
+                logs = container.logs(stdout=True, stderr=True).decode("utf-8")
+            except:
+                logs = f"Failed to get logs: {e}"
+            return -1, logs
 
         # Get logs
-        logs = container.logs(stdout=True, stderr=True).decode("utf-8")
+        try:
+            logs = container.logs(stdout=True, stderr=True).decode("utf-8")
+        except Exception as e:
+            logger.warning(f"Failed to get container logs: {e}")
+            logs = f"Failed to decode logs: {e}"
 
-        logger.info(f"Container {container.id} exited with code: {exit_code}")
+        # Log exit code and status
+        if exit_code == 0:
+            logger.info(f"Container {container.id} completed successfully")
+        else:
+            logger.warning(f"Container {container.id} exited with code: {exit_code}")
+
         return exit_code, logs
 
     def get_container_logs(self, container: Any, follow: bool = False) -> BinaryIO:

@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     scheduler_interval: int = Field(default=5)  # seconds
     default_target_branch: str = Field(default="main")
 
+    # Alert Configuration
+    alert_webhook_url: Optional[str] = Field(default=None)  # Slack/Discord webhook URL
+    alert_on_failure: bool = Field(default=False)  # Send alert when task fails
+
+    # Retry Configuration
+    max_retries: int = Field(default=0)  # Max retry attempts for failed tasks
+    retry_delay: int = Field(default=60)  # Delay between retries in seconds
+
     # Get absolute path for the project root
     @property
     def project_root(self) -> Path:
