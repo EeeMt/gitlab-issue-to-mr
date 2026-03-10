@@ -326,7 +326,10 @@ def get_issue_notes(project_id: int, issue_iid: int) -> list:
 def verify_mr_closes_issue(mr: dict, issue_iid: int) -> bool:
     """Verify that the MR is configured to close the issue."""
     description = mr.get("description", "")
-    return f"Closes #{issue_iid}" in description or f"Fixes #{issue_iid}" in description
+    # Check both "Closes" and "CLOSES" formats
+    return (f"Closes #{issue_iid}" in description or
+            f"CLOSES #{issue_iid}" in description or
+            f"Fixes #{issue_iid}" in description)
 
 
 def cleanup_test_project(project_id: int):
@@ -521,37 +524,57 @@ def main():
             mr = wait_for_mr(project_id, branch_name, timeout=TEST_TIMEOUT)
             logger.info(f"MR created: #{mr['iid']} - {mr['web_url']}")
 
-            # Step 7: Verify MR closes issue
+            # Step 7: Verify MR closes issue (MR 描述中包含 Closes #)
             logger.info("\n[Step 7] Verifying MR closes issue...")
-            closes_issue = verify_mr_closes_issue(mr, issue_iid)
+            mr_description = mr.get("description", "")
+            closes_issue = (f"Closes #{issue_iid}" in mr_description or
+                            f"CLOSES #{issue_iid}" in mr_description)
             if closes_issue:
                 logger.info("MR is configured to close the issue!")
             else:
                 logger.warning("MR does not mention closing the issue")
 
-            # Step 8: Check issue comments for MR link
+            # Step 8: Check issue comments for MR link and notification messages
             logger.info("\n[Step 8] Checking issue comments...")
             notes = get_issue_notes(project_id, issue_iid)
-            mr_linked = any(
-                "merge request" in n.get("body", "").lower() or
-                "mr:" in n.get("body", "").lower()
+
+            # Check for start notification
+            start_notification = any("开始处理" in n.get("body", "") for n in notes)
+            if start_notification:
+                logger.info("  ✓ Start notification found")
+            else:
+                logger.warning("  ✗ Start notification NOT found")
+
+            # Check for completion notification with MR reference
+            completion_notification = any("MR 已创建" in n.get("body", "") for n in notes)
+            if completion_notification:
+                # Check if MR reference is correct (!iid format)
+                mr_ref_in_comment = any(f"!{mr['iid']}" in n.get("body", "") for n in notes)
+                if mr_ref_in_comment:
+                    logger.info("  ✓ Completion notification with MR reference found")
+                else:
+                    logger.warning("  ✗ Completion notification missing MR reference")
+            else:
+                logger.warning("  ✗ Completion notification NOT found")
+
+            # Check for GitLab system message about MR
+            system_mr_link = any(
+                "mentioned in merge request" in n.get("body", "").lower()
                 for n in notes
             )
-            if mr_linked:
-                logger.info("MR link found in issue comments!")
+            if system_mr_link:
+                logger.info("  ✓ GitLab MR system message found")
             else:
-                logger.warning("No MR link found in issue comments")
+                logger.warning("  ✗ GitLab MR system message NOT found")
 
             # Step 9: Verify MR description contains required fields
             logger.info("\n[Step 9] Verifying MR description...")
-            mr_description = mr.get("description", "")
 
             # Check required fields in description
             required_fields = {
-                "Prompt": "Prompt" in mr_description or "Req:" in mr_description,
-                "Files": "Files:" in mr_description or "New:" in mr_description,
-                "Issue reference": f"!{issue_iid}" in mr_description or f"#{issue_iid}" in mr_description,
-                "Commit": "Commit:" in mr_description or "`" in mr_description,
+                "User Prompt": "Req:" in mr_description or "需求" in mr_description or "REQ:" in mr_description,
+                "Files Changed": "Files:" in mr_description or "变更" in mr_description or "FILES:" in mr_description,
+                "Closes Issue": f"Closes #{issue_iid}" in mr_description or f"CLOSES #{issue_iid}" in mr_description,
             }
 
             all_passed = True
