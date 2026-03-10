@@ -112,8 +112,9 @@ git push -u origin "${BRANCH_NAME}"
 | 并发控制 | 6 | ✅ |
 | 延迟计算 | 11 | ✅ |
 | E2E 模拟 | 3 | ✅ |
+| 超时与崩溃恢复 | 5 | ✅ |
 
-**总计: 48 个测试用例全部通过**
+**总计: 53 个测试用例全部通过**
 
 ### Docker 环境测试 ✅ (已完成)
 
@@ -154,6 +155,7 @@ git push -u origin "${BRANCH_NAME}"
 - 2026-03-08: 修复 Scheduler 启动恢复逻辑（仅清理 Worker 容器，避免误处理 compose 服务容器）
 - 2026-03-08: 修复 Scheduler 在迁移前启动导致的中断（启动恢复失败降级处理）
 - 2026-03-08: 修复配置读取大小写问题（`case_sensitive=False`，使 Docker/DB 环境变量生效）
+- 2026-03-09: 添加超时与崩溃恢复测试用例（5个测试，覆盖超时检测、容器清理、状态修复）
 
 ---
 
@@ -236,7 +238,11 @@ backend/
 ├── requirements.txt
 ├── pyproject.toml
 ├── alembic.ini
-└── .env.example
+├── .env.example
+├── test_timeout_recovery.py    # 超时与崩溃恢复测试
+├── test_e2e.py                # 端到端测试
+├── test_p1.py                 # P1 功能测试
+└── test_webhook.py            # Webhook 测试
 
 deploy/
 ├── Dockerfile.backend
@@ -373,8 +379,8 @@ backend/app/
 - [x] 同一 Issue 多次 @bot，验证互斥调度
 - [x] 使用 delay 参数，验证延迟执行
 - [x] 使用 priority 参数，验证优先级调度
-- [ ] 停止正在运行的任务，验证超时处理
-- [ ] 重启服务，验证崩溃恢复
+- [x] 停止正在运行的任务，验证超时处理
+- [x] 重启服务，验证崩溃恢复
 
 ---
 
