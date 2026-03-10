@@ -93,13 +93,16 @@ def parse_ai_bot_command(comment_body: str) -> Optional[BotCommand]:
     Returns:
         BotCommand if found, None otherwise
     """
+    # Support both @ai-bot and @ci_bot aliases
+    bot_names = ["ai-bot", "ci-bot", "ci_bot"]
+
     # First, check for special commands (cancel, status)
-    special_commands = [
-        (r"@ai-bot\s+cancel", "cancel"),
-        (r"@ai-bot:\s+cancel", "cancel"),
-        (r"@ai-bot\s+status", "status"),
-        (r"@ai-bot:\s+status", "status"),
-    ]
+    special_commands = []
+    for bot in bot_names:
+        special_commands.append(("@" + bot + r"\s+cancel", "cancel"))
+        special_commands.append(("@" + bot + r":\s+cancel", "cancel"))
+        special_commands.append(("@" + bot + r"\s+status", "status"))
+        special_commands.append(("@" + bot + r":\s+status", "status"))
 
     for pattern, command in special_commands:
         if re.search(pattern, comment_body, re.IGNORECASE):
@@ -109,11 +112,11 @@ def parse_ai_bot_command(comment_body: str) -> Optional[BotCommand]:
                 raw_mention=re.search(pattern, comment_body, re.IGNORECASE).group(0),
             )
 
-    # Parse main generate command
-    patterns = [
-        r"@ai-bot\s+(.+)$",
-        r"@ai-bot:\s+(.+)$",
-    ]
+    # Parse main generate command (support both @ai-bot and @ci-bot)
+    patterns = []
+    for bot in bot_names:
+        patterns.append("@" + bot + r"\s+(.+)$")
+        patterns.append("@" + bot + r":\s+(.+)$")
 
     for pattern in patterns:
         match = re.search(pattern, comment_body, re.IGNORECASE | re.DOTALL)
