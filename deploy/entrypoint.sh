@@ -325,9 +325,10 @@ if [ -n "$CHANGES" ]; then
         FILE_INFO="${FILE_INFO%, }"
     fi
 
-    # Build MR title and description (single line for reliability)
+    # Build MR title and description (single line for JSON reliability)
     MR_TITLE="AI: ${USER_PROMPT:0:50}"
-    MR_DESC="**Prompt**: ${USER_PROMPT} | **Files**: ${FILE_INFO} | !${ISSUE_IID} | \`${COMMIT_SHA:0:8}\` | ${BRANCH_NAME}→${TARGET_BRANCH}"
+    # Simple format without special chars that break JSON
+    MR_DESC="REQ: ${USER_PROMPT} | FILES: ${FILE_INFO} | CLOSES #${ISSUE_IID}"
 
     # Check if MR already exists for this branch
     echo "Checking for existing MR..."

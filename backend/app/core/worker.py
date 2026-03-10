@@ -123,24 +123,27 @@ class WorkerExecutor:
                 task.completed_at = datetime.utcnow()
 
                 # Parse MR URL from logs
-                # Handle both "MR created: http://..." and multi-line logs
+                # Try to find web_url in any line of logs
                 for line in logs.split("\n"):
-                    if "MR created:" in line:
-                        mr_url = line.split("MR created:")[-1].strip()
-                        # If URL is incomplete (e.g., "http://host/path" without full path),
-                        # try to get the next line which contains the full URL
-                        if mr_url and not "/merge_requests/" in mr_url:
-                            # Continue to next iteration to find the full URL
-                            continue
-                        if mr_url:
-                            task.merge_request_url = mr_url
+                    if "/merge_requests/" in line:
+                        # Extract URL from line containing merge_requests
+                        import re
+                        match = re.search(r'http[^\s]*merge_requests/\d+', line)
+                        if match:
+                            task.merge_request_url = match.group(0)
                             break
-                # If still not found, try to find merge_requests pattern in any line
+
+                # If not found in logs, try to get MR from GitLab API by branch name
                 if not task.merge_request_url:
-                    for line in logs.split("\n"):
-                        if "/merge_requests/" in line:
-                            task.merge_request_url = line.strip()
-                            break
+                    try:
+                        mrs = self.gitlab.gl.projects.get(task.project_id).mergerequests.list(
+                            source_branch=task.branch_name,
+                            state='opened'
+                        )
+                        if mrs:
+                            task.merge_request_url = mrs[0].web_url
+                    except Exception as e:
+                        logger.warning(f"Failed to get MR from API: {e}")
 
                 logger.info(f"Task {task_id} completed successfully")
 
