@@ -6,7 +6,7 @@ GitLab Issue to MR Bot (GIMR) - 基于 GitLab Issue 自动生成代码并创建 
 
 ## 当前状态
 
-**阶段**: MVP + P1 已完成，端到端测试已调通
+**阶段**: MVP + P1 已完成，端到端集成测试通过 ✅
 
 ---
 
@@ -126,25 +126,49 @@ git push -u origin "${BRANCH_NAME}"
 | Root 端点 `/` | ✅ |
 | Health 端点 `/health` | ✅ |
 
-### 端到端测试结果 ✅ (已完成)
+### 端到端集成测试 ✅ (2026-03-10)
 
-- [x] 数据库迁移测试 (`alembic upgrade head`)  
-  - 已修复 Alembic 配置与迁移脚本，容器内可成功迁移到 `002_queue_scheduling`
-- [x] Webhook 端到端测试  
-  - `POST /api/webhook/gitlab` 可成功创建任务，幂等校验（重复 note_id）生效
-- [x] Worker 容器执行测试  
-  - Scheduler 可拉起 Worker 容器并回写任务状态（本地测试为 `failed`，原因是示例 GitLab 地址不可达）
-- [x] 状态查询/取消链路测试  
-  - `@ai-bot status` / `@ai-bot cancel` 均可正常执行并返回正确任务状态
-- [x] 完整链路验证（本地）  
-  - Webhook → 入库 → Scheduler → Worker → 回写状态 全链路已验证
+| 测试项 | 状态 | 说明 |
+|--------|------|------|
+| Docker Compose 启动 | ✅ | PostgreSQL + Backend 正常启动 |
+| GitLab API 连接 | ✅ | 可访问 http://192.168.50.129:8080 |
+| 数据库迁移 | ✅ | alembic upgrade head 成功 |
+| Issue 创建 | ✅ | 通过 GitLab API 创建 Issue |
+| @ai-bot 命令解析 | ✅ | Webhook 正确解析命令 |
+| Task 创建 | ✅ | Task 创建成功 |
+| Worker 容器执行 | ✅ | 容器成功拉起并执行 |
+| 代码提交 | ✅ | 分支创建成功 |
+| MR 创建 | ✅ | MR 创建成功 |
+| Issue 关联 | ✅ | MR 配置了 `Closes #issue` |
+
+**测试脚本**:
+- `backend/test_integration_e2e.py` - 真实 GitLab 端到端测试
+- `backend/test_integration_e2e_mock.py` - Mock 模式测试
+
+**使用方式**:
+```bash
+# 完整测试
+python3 backend/test_integration_e2e.py
+
+# 跳过 Docker 启动
+python3 backend/test_integration_e2e.py --skip-startup
+
+# 保持服务运行
+python3 backend/test_integration_e2e.py --keep-running
+
+# Mock 模式测试
+python3 backend/test_integration_e2e_mock.py --skip-startup
+```
+
+---
+
+### 单元测试 ✅ (历史)
 
 ---
 
 ## 已知问题
 
-1. **真实 GitLab 集成依赖外部环境**  
-   当前测试使用 `gitlab.example.com` 占位配置，Worker 在 clone 阶段会失败；属于测试环境限制，不是调度链路故障。
+无 - 端到端集成测试已通过 ✅
 
 ### 修复记录
 
@@ -156,6 +180,9 @@ git push -u origin "${BRANCH_NAME}"
 - 2026-03-08: 修复 Scheduler 在迁移前启动导致的中断（启动恢复失败降级处理）
 - 2026-03-08: 修复配置读取大小写问题（`case_sensitive=False`，使 Docker/DB 环境变量生效）
 - 2026-03-09: 添加超时与崩溃恢复测试用例（5个测试，覆盖超时检测、容器清理、状态修复）
+- 2026-03-10: 添加端到端集成测试脚本 (test_integration_e2e.py, test_integration_e2e_mock.py)
+- 2026-03-10: 修复 note_id int32 范围问题
+- 2026-03-10: 端到端集成测试通过（真实 GitLab + Worker 容器执行 + MR 创建）
 
 ---
 
@@ -164,6 +191,9 @@ git push -u origin "${BRANCH_NAME}"
 ### 环境变量
 
 ```bash
+# Backend
+BACKEND_URL=http://localhost:8000  # 后端服务地址
+
 # GitLab
 GITLAB_URL=https://gitlab.example.com
 GITLAB_BOT_TOKEN=glpat-xxx  # 需要 api, read_repository, write_repository 权限
@@ -188,16 +218,7 @@ MAX_CONCURRENCY=3              # 最大并发任务数
 TASK_TIMEOUT=1800             # 任务超时时间(秒)
 SCHEDULER_INTERVAL=5           # 调度器轮询间隔(秒)
 DEFAULT_TARGET_BRANCH=main     # 默认目标分支
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
-
-# PostgreSQL
-DATABASE_URL=postgresql+asyncpg://gimr:gimr_password@postgres:5432/gimr
-
-# Docker Engine
-DOCKER_HOST=tcp://docker.example.com:2376
-
-# Worker
-WORKER_IMAGE=gitlab-issues-to-mr-worker:latest
+```
 ```
 
 ### GitLab 配置
@@ -240,9 +261,11 @@ backend/
 ├── alembic.ini
 ├── .env.example
 ├── test_timeout_recovery.py    # 超时与崩溃恢复测试
-├── test_e2e.py                # 端到端测试
+├── test_e2e.py                # 端到端模拟测试
 ├── test_p1.py                 # P1 功能测试
-└── test_webhook.py            # Webhook 测试
+├── test_webhook.py            # Webhook 测试
+├── test_integration_e2e.py    # 真实 GitLab 端到端集成测试
+└── test_integration_e2e_mock.py  # Mock 模式端到端集成测试
 
 deploy/
 ├── Dockerfile.backend
@@ -265,9 +288,15 @@ PROGRESS.md                     # 本文档
 
 ## 下一步
 
-1. 在真实内网 GitLab 环境替换占位配置（`GITLAB_URL`、`GITLAB_BOT_TOKEN`）
-2. 执行真实仓库的端到端 happy path（任务成功、push 成功、自动创建 MR）
-3. 补充自动化集成测试（docker compose + webhook 回放 + 任务状态断言）
+1. ~~在真实内网 GitLab 环境替换占位配置~~ ✅ 已完成
+2. ~~执行真实仓库的端到端 happy path~~ ✅ 已完成
+3. ~~补充自动化集成测试~~ ✅ 已完成 (test_integration_e2e.py)
+
+### 待优化项
+
+- [ ] 添加更多错误场景测试
+- [ ] 添加单元测试覆盖率报告
+- [ ] 添加前端 UI 测试
 
 ---
 
