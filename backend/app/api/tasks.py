@@ -158,6 +158,40 @@ async def get_task_logs(task_id: int, db: AsyncSession = Depends(get_db)):
     ]
 
 
+@router.get("/tasks/{task_id}/stats")
+async def get_task_stats(task_id: int, db: AsyncSession = Depends(get_db)):
+    """Get MR statistics for a task.
+
+    Args:
+        task_id: Task ID
+        db: Database session
+
+    Returns:
+        MR change statistics (additions, deletions, total)
+    """
+    result = await db.execute(select(Task).where(Task.id == task_id))
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task {task_id} not found",
+        )
+
+    if not task.merge_request_iid:
+        return {"additions": 0, "deletions": 0, "total": 0}
+
+    from app.core.gitlab_client import get_gitlab_client
+    gitlab = get_gitlab_client()
+
+    stats = gitlab.get_merge_request_stats(task.project_id, task.merge_request_iid)
+
+    if not stats:
+        return {"additions": 0, "deletions": 0, "total": 0}
+
+    return stats
+
+
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_task(task_id: int, db: AsyncSession = Depends(get_db)):
     """Cancel a task.

@@ -37,7 +37,7 @@ import { ref, onMounted, h, watch, computed } from 'vue'
 import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, useMessage, DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useWindowSize } from '@vueuse/core'
-import { getTasks, type Task } from '../api'
+import { getTasks, getTaskStats, type Task, type TaskStats } from '../api'
 
 const router = useRouter()
 const message = useMessage()
@@ -46,6 +46,7 @@ const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
 const tasks = ref<Task[]>([])
+const taskStats = ref<Record<number, TaskStats>>({})
 const loading = ref(false)
 const statusFilter = ref<string | null>(null)
 
@@ -139,6 +140,19 @@ const desktopColumns: DataTableColumns<Task> = [
     render: (row) => row.merge_request_url ? h('a', { href: row.merge_request_url, target: '_blank' }, row.merge_request_url.split('/').pop()) : '-'
   },
   {
+    title: 'Changes',
+    key: 'stats',
+    width: 100,
+    render: (row) => {
+      const stats = taskStats.value[row.id]
+      if (!stats || stats.total === 0) return '-'
+      return h('span', { style: 'display: flex; align-items: center; gap: 4px;' }, [
+        h('span', { style: 'color: #18a053' }, '+' + stats.additions),
+        h('span', { style: 'color: #db3b21; margin-left: 8px' }, '-' + stats.deletions)
+      ])
+    }
+  },
+  {
     title: 'Created',
     key: 'created_at',
     width: 160,
@@ -162,6 +176,19 @@ async function fetchTasks() {
       params.status = statusFilter.value
     }
     tasks.value = await getTasks(params)
+
+    // Fetch stats for completed tasks
+    const statsMap: Record<number, TaskStats> = {}
+    for (const task of tasks.value) {
+      if (task.merge_request_iid && task.status === 'completed') {
+        try {
+          statsMap[task.id] = await getTaskStats(task.id)
+        } catch {
+          statsMap[task.id] = { additions: 0, deletions: 0, total: 0 }
+        }
+      }
+    }
+    taskStats.value = statsMap
   } catch (error) {
     message.error('Failed to fetch tasks')
   } finally {

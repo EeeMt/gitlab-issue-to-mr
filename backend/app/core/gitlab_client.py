@@ -132,6 +132,50 @@ class GitLabClient:
             logger.warning(f"MR not found: {project_id}/{mr_iid}")
             return None
 
+    def get_merge_request_stats(
+        self, project_id: int, mr_iid: int
+    ) -> Optional[dict]:
+        """Get merge request change statistics.
+
+        Args:
+            project_id: GitLab project ID
+            mr_iid: Merge request IID
+
+        Returns:
+            Dict with additions, deletions, and total changes, or None
+        """
+        project = self.get_project(project_id)
+
+        try:
+            # Get the merge request
+            mr = project.mergerequests.get(mr_iid)
+
+            # Get the diff stats
+            changes = project.mergerequests.get(mr_iid, lazy=False)
+
+            # Calculate stats from changes
+            additions = 0
+            deletions = 0
+
+            if hasattr(changes, 'changes') and changes.changes:
+                for change in changes.changes:
+                    diff = change.get('diff', '')
+                    # Count lines starting with + (additions) and - (deletions)
+                    for line in diff.split('\n'):
+                        if line.startswith('+') and not line.startswith('+++'):
+                            additions += 1
+                        elif line.startswith('-') and not line.startswith('---'):
+                            deletions += 1
+
+            return {
+                "additions": additions,
+                "deletions": deletions,
+                "total": additions + deletions
+            }
+        except GitlabGetError:
+            logger.warning(f"Failed to get MR stats: {project_id}/{mr_iid}")
+            return None
+
     def create_note(
         self, project_id: int, issue_iid: int, body: str
     ) -> dict:

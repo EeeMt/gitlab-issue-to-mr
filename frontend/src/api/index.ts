@@ -37,6 +37,12 @@ export interface TaskLog {
   created_at: string
 }
 
+export interface TaskStats {
+  additions: number
+  deletions: number
+  total: number
+}
+
 export interface Container {
   id: string
   name: string
@@ -77,6 +83,11 @@ export async function getTask(id: number): Promise<Task> {
 
 export async function getTaskLogs(id: number): Promise<TaskLog[]> {
   const response = await api.get(`/tasks/${id}/logs`)
+  return response.data
+}
+
+export async function getTaskStats(id: number): Promise<TaskStats> {
+  const response = await api.get(`/tasks/${id}/stats`)
   return response.data
 }
 
