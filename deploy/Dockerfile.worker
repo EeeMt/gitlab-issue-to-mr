@@ -2,11 +2,17 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies including Java and Maven
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
+    default-jdk \
+    maven \
     && rm -rf /var/lib/apt/lists/*
+
+# Set JAVA_HOME
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
 # Install Claude CLI
 # For local LLM (Ollama), use: npm install -g @anthropic-ai/claude-cli

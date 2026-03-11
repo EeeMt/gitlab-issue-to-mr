@@ -52,9 +52,9 @@ WEBHOOK_URL = f"{BACKEND_URL}/api/webhook/gitlab"
 # Test configuration - use existing gimr_test project
 TEST_PROJECT_ID = 1  # root/gimr_test
 TEST_PROJECT_NAME = "gimr_test"
-TEST_ISSUE_TITLE = "E2E Test: Add a hello world function"
+TEST_TITLE = "E2E Test: Add a hello world function"
 TEST_ISSUE_DESCRIPTION = "This is an end-to-end integration test issue."
-TEST_BOT_PROMPT = "Create a simple hello.py file with hello() function"
+TEST_PROMPT = "Create a simple hello.py file with hello() function"
 TEST_TIMEOUT = 300  # 5 minutes
 
 logging.basicConfig(
@@ -157,7 +157,7 @@ def create_test_issue(project_id: int) -> dict:
     """Create a test issue."""
     logger.info(f"Creating test issue in project {project_id}")
     resp = gitlab_request("POST", f"/projects/{project_id}/issues", json={
-        "title": TEST_ISSUE_TITLE,
+        "title": TEST_TITLE,
         "description": TEST_ISSUE_DESCRIPTION
     })
     issue = resp.json()
@@ -191,7 +191,7 @@ def trigger_via_webhook(project_id: int, issue_iid: int, note_id: int, comment_b
         "issue": {
             "id": project_id * 100 + issue_iid,
             "iid": issue_iid,
-            "title": TEST_ISSUE_TITLE,
+            "title": TEST_TITLE,
             "web_url": f"{GITLAB_URL}/{TEST_PROJECT_NAME}/-/issues/{issue_iid}"
         },
         "note": {
@@ -249,7 +249,7 @@ def create_task_via_backend_api(project_id: int, issue_iid: int, prompt: str) ->
         "issue": {
             "id": issue_id,
             "iid": issue_iid,
-            "title": TEST_ISSUE_TITLE,
+            "title": TEST_TITLE,
             "web_url": f"{GITLAB_URL}/{TEST_PROJECT_NAME}/-/issues/{issue_iid}"
         },
         "note": {
@@ -460,11 +460,28 @@ def main():
                        help="Only cleanup test project and exit")
     parser.add_argument("--keep-running", action="store_true",
                        help="Keep services running after test")
+    parser.add_argument("--java", action="store_true",
+                       help="Run Java project test instead of Python")
+    parser.add_argument("--test-type", choices=["python", "java"], default="python",
+                       help="Test type: python or java (default: python)")
     args = parser.parse_args()
+
+    # Override test type if --java is specified
+    if args.java:
+        args.test_type = "java"
 
     logger.info("=" * 60)
     logger.info("GIMR End-to-End Integration Test")
+    logger.info(f"Test type: {args.test_type}")
     logger.info("=" * 60)
+
+    # Select test prompts based on test type
+    if args.test_type == "java":
+        TEST_PROMPT = "Create a simple Java project with a HelloWorld class that has a main method printing 'Hello World'"
+        TEST_TITLE = "E2E Test: Create Java HelloWorld"
+    else:
+        TEST_PROMPT = "Create a simple hello.py file with hello() function"
+        TEST_TITLE = "E2E Test: Add a hello world function"
 
     project = None
 
@@ -505,13 +522,13 @@ def main():
 
         # Step 4: Add @ai-bot comment to trigger bot
         logger.info("\n[Step 4] Adding @ai-bot comment...")
-        comment = f"@ai-bot {TEST_BOT_PROMPT}"
+        comment = f"@ai-bot {TEST_PROMPT}"
         note = add_comment_to_issue(project_id, issue_iid, comment)
         note_id = note["id"]
 
         # Step 5: Create task via webhook endpoint
         logger.info("\n[Step 5] Creating task via webhook...")
-        result = create_task_via_backend_api(project_id, issue_iid, TEST_BOT_PROMPT)
+        result = create_task_via_backend_api(project_id, issue_iid, TEST_PROMPT)
         logger.info(f"Task creation result: {result}")
 
         if result.get("status") == "success":
@@ -604,6 +621,28 @@ def main():
             has_commits = mr_details.get("sha") is not None
             if has_commits:
                 logger.info(f"  ✓ MR has commits: {mr_details.get('sha')[:10]}...")
+
+                # Check for expected file type based on test type
+                commit_sha = mr_details.get("sha")
+                if commit_sha:
+                    diff_resp = gitlab_request("GET", f"/projects/{project_id}/repository/commits/{commit_sha}/diff")
+                    diffs = diff_resp.json()
+                    changed_files = [d.get("new_path", d.get("old_path", "")) for d in diffs]
+
+                    if args.test_type == "java":
+                        # Check for Java files
+                        java_files = [f for f in changed_files if f.endswith(".java")]
+                        if java_files:
+                            logger.info(f"  ✓ Java files found: {java_files}")
+                        else:
+                            logger.warning(f"  ✗ No Java files found in commit. Files: {changed_files}")
+                    else:
+                        # Check for Python files
+                        py_files = [f for f in changed_files if f.endswith(".py")]
+                        if py_files:
+                            logger.info(f"  ✓ Python files found: {py_files}")
+                        else:
+                            logger.warning(f"  ✗ No Python files found in commit. Files: {changed_files}")
             else:
                 logger.warning("  ✗ MR has NO commits (SHA is null)")
 
