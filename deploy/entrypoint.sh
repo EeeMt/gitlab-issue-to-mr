@@ -336,10 +336,8 @@ if planning_text.strip().startswith("##"):
     if first_newline > 0:
         planning_text = planning_text[first_newline+1:]
 
-# Create MR description with planning (header will be added by AI response or use default)
-planning_md = f"""## 📋 实现规划
-
-{planning_text}
+# Create MR description with planning (AI response already includes the heading)
+planning_md = f"""{planning_text}
 
 ---
 
