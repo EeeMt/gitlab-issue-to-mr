@@ -58,6 +58,7 @@ async def verify_gitlab_webhook(
             detail=f"Invalid JSON payload: {e}",
         )
 
+    logger.info(f"Webhook received: object_kind={payload.get('object_kind')}, event_type={payload.get('event_type')}")
     return payload
 
 
@@ -89,34 +90,38 @@ async def gitlab_webhook(
         logger.debug(f"Ignoring event type: {event_type}")
         return {"status": "ignored", "reason": f"event_type {event_type} not supported"}
 
-    # Get note (comment) data
-    note = payload.get("note", {})
-    note_id = note.get("id")
-    note_type = note.get("noteable_type")
+    # Get note (comment) data from object_attributes (GitLab uses this field)
+    object_attrs = payload.get("object_attributes", {})
+    note_id = object_attrs.get("id")
+    note_type = object_attrs.get("noteable_type")
+    comment_body = object_attrs.get("note", "")
+
+    # Get issue info - may be in object_attributes or at root level
+    issue = payload.get("issue", {}) or object_attrs.get("issue", {})
+    project = payload.get("project", {})
+
+    logger.info(f"Note type: {note_type}, Note ID: {note_id}, Comment: '{comment_body[:50] if comment_body else ''}'")
 
     # Only handle issue comments
     if note_type != "Issue":
         logger.debug(f"Ignoring noteable type: {note_type}")
         return {"status": "ignored", "reason": f"noteable_type {note_type} not supported"}
 
-    # Get comment body
-    comment_body = note.get("body", "")
     if not comment_body:
+        logger.warning("Empty comment body - ignoring")
         return {"status": "ignored", "reason": "empty comment body"}
 
     # Parse @ai-bot command
     command = parse_ai_bot_command(comment_body)
     if not command:
-        logger.debug("No @ai-bot command found in comment")
+        logger.info(f"No @ai-bot command found in comment: '{comment_body[:50]}'")
         return {"status": "ignored", "reason": "no @ai-bot command found"}
-
-    # Get issue and project info
-    issue = payload.get("issue", {})
-    project = payload.get("project", {})
 
     project_id = project.get("id")
     issue_id = issue.get("id")
     issue_iid = issue.get("iid")
+
+    logger.info(f"Project: {project_id}, Issue: {issue_iid}, Note: {note_id}")
 
     if not all([project_id, issue_id, issue_iid, note_id]):
         logger.error(f"Missing required fields: {payload}")

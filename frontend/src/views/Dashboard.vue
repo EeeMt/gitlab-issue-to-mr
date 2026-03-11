@@ -37,7 +37,7 @@ import { ref, onMounted, h, watch, computed } from 'vue'
 import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, useMessage, DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useWindowSize } from '@vueuse/core'
-import { getTasks, getTaskStats, type Task, type TaskStats } from '../api'
+import { getTasks, type Task, type TaskStats } from '../api'
 
 const router = useRouter()
 const message = useMessage()
@@ -177,18 +177,9 @@ async function fetchTasks() {
     }
     tasks.value = await getTasks(params)
 
-    // Fetch stats for completed tasks
-    const statsMap: Record<number, TaskStats> = {}
-    for (const task of tasks.value) {
-      if (task.merge_request_iid && task.status === 'completed') {
-        try {
-          statsMap[task.id] = await getTaskStats(task.id)
-        } catch {
-          statsMap[task.id] = { additions: 0, deletions: 0, total: 0 }
-        }
-      }
-    }
-    taskStats.value = statsMap
+    // Skip stats fetching - too slow for many tasks
+    // Stats can be viewed individually in task details
+    taskStats.value = {}
   } catch (error) {
     message.error('Failed to fetch tasks')
   } finally {

@@ -64,8 +64,8 @@
 </template>
 
 <script setup lang="ts">
-import { h, ref, computed, watch } from 'vue'
-import { NLayout, NLayoutSider, NLayoutContent, NMenu, NConfigProvider, NMessageProvider, NText, NIcon, NDrawer, NDrawerContent, NButton, useDrawer } from 'naive-ui'
+import { h, ref, computed } from 'vue'
+import { NLayout, NLayoutSider, NMenu, NConfigProvider, NMessageProvider, NText, NIcon, NDrawer, NDrawerContent, NButton } from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
 import { useRouter, useRoute } from 'vue-router'
 import { RocketOutline, GridOutline, SpeedometerOutline, SettingsOutline, MenuOutline } from '@vicons/ionicons5'

@@ -147,25 +147,28 @@ class GitLabClient:
         project = self.get_project(project_id)
 
         try:
-            # Get the merge request
+            # Get the merge request changes (diff)
             mr = project.mergerequests.get(mr_iid)
 
-            # Get the diff stats
-            changes = project.mergerequests.get(mr_iid, lazy=False)
-
-            # Calculate stats from changes
+            # Calculate stats from MR
             additions = 0
             deletions = 0
 
-            if hasattr(changes, 'changes') and changes.changes:
-                for change in changes.changes:
-                    diff = change.get('diff', '')
-                    # Count lines starting with + (additions) and - (deletions)
-                    for line in diff.split('\n'):
-                        if line.startswith('+') and not line.startswith('+++'):
-                            additions += 1
-                        elif line.startswith('-') and not line.startswith('---'):
-                            deletions += 1
+            # Try to get changes if available
+            try:
+                mr_changes = project.mergerequests.get(mr_iid, iterator=True)
+                # The changes property returns the diff
+                if hasattr(mr, 'changes') and mr.changes:
+                    for change in mr.changes.get('changes', []):
+                        diff = change.get('diff', '')
+                        # Count lines starting with + (additions) and - (deletions)
+                        for line in diff.split('\n'):
+                            if line.startswith('+') and not line.startswith('+++'):
+                                additions += 1
+                            elif line.startswith('-') and not line.startswith('---'):
+                                deletions += 1
+            except Exception as e:
+                logger.warning(f"Could not get MR changes: {e}")
 
             return {
                 "additions": additions,

@@ -1,4 +1,17 @@
 services:
+  nginx:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+    container_name: gimr-nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - gimr-network
+
   backend:
     build:
       context: ..
