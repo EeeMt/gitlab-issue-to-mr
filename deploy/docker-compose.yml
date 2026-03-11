@@ -35,6 +35,28 @@ services:
     networks:
       - gimr-network
 
+  scheduler:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    container_name: gimr-scheduler
+    command: ["python", "-m", "app.scheduler_service"]
+    env_file:
+      - .env.test
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://gimr:gimr_password@postgres:5432/gimr
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DOCKER_TLS_CA=
+      - DOCKER_TLS_CERT=
+      - DOCKER_TLS_KEY=
+    depends_on:
+      - postgres
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    networks:
+      - gimr-network
+
   postgres:
     image: postgres:16-alpine
     container_name: gimr-postgres

@@ -1,6 +1,5 @@
 """FastAPI application entry point."""
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -10,7 +9,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import close_db, init_db
-from app.scheduler import start_scheduler, stop_scheduler
 
 settings = get_settings()
 
@@ -38,17 +36,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error(f"Failed to initialize database: {e}")
         raise
 
-    # Start scheduler in background
-    scheduler_task = asyncio.create_task(start_scheduler())
-
     yield
 
     # Shutdown
     logger.info("Shutting down...")
-
-    # Stop scheduler
-    await stop_scheduler()
-    await scheduler_task
 
     await close_db()
     logger.info("Database connection closed")
