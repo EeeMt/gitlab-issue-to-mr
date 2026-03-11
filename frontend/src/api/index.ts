@@ -86,6 +86,16 @@ export async function getTaskLogs(id: number): Promise<TaskLog[]> {
   return response.data
 }
 
+export async function getTaskContainerLogs(id: number): Promise<{
+  container_id: string | null
+  container_status: string
+  logs: string
+  status: string
+}> {
+  const response = await api.get(`/tasks/${id}/container-logs`)
+  return response.data
+}
+
 export async function getTaskStats(id: number): Promise<TaskStats> {
   const response = await api.get(`/tasks/${id}/stats`)
   return response.data

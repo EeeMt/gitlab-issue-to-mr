@@ -77,10 +77,22 @@
 
         <n-card title="Logs" style="margin-top: 16px">
           <template #header-extra>
-            <n-button size="small" @click="refreshLogs">Refresh</n-button>
+            <n-space>
+              <n-tag v-if="task?.status === 'running'" type="warning" size="small">Real-time</n-tag>
+              <n-button size="small" @click="refreshLogs">Refresh</n-button>
+            </n-space>
           </template>
           <n-spin :show="logsLoading">
-            <pre class="log-content">{{ logs || 'No logs available' }}</pre>
+            <!-- Show container logs for running tasks -->
+            <div v-if="task?.status === 'running' || task?.status === 'pending' || task?.status === 'queued'">
+              <n-spin :show="containerLogsLoading">
+                <pre class="log-content">{{ containerLogs || 'Waiting for logs...' }}</pre>
+              </n-spin>
+            </div>
+            <!-- Show database logs for completed/failed tasks -->
+            <div v-else>
+              <pre class="log-content">{{ logs || 'No logs available' }}</pre>
+            </div>
           </n-spin>
         </n-card>
       </n-spin>
@@ -92,7 +104,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { NButton, NSpace, NCard, NDescriptions, NDescriptionsItem, NTag, NGrid, NGi, NSpin, NAlert, NText, useMessage } from 'naive-ui'
-import { getTask, getTaskLogs, cancelTask, retryTask, executeTask, type Task } from '../api'
+import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, type Task } from '../api'
 
 const route = useRoute()
 const message = useMessage()
@@ -101,8 +113,10 @@ const taskId = computed(() => Number(route.params.id))
 
 const task = ref<Task | null>(null)
 const logs = ref('')
+const containerLogs = ref('')
 const loading = ref(false)
 const logsLoading = ref(false)
+const containerLogsLoading = ref(false)
 const actionLoading = ref(false)
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
@@ -141,13 +155,31 @@ async function fetchLogs() {
   }
 }
 
+async function fetchContainerLogs() {
+  if (!task.value?.container_id) {
+    containerLogs.value = ''
+    return
+  }
+  containerLogsLoading.value = true
+  try {
+    const result = await getTaskContainerLogs(taskId.value)
+    containerLogs.value = result.logs
+  } catch (error) {
+    containerLogs.value = 'Failed to fetch container logs'
+  } finally {
+    containerLogsLoading.value = false
+  }
+}
+
 function refreshTask() {
   fetchTask()
   fetchLogs()
+  fetchContainerLogs()
 }
 
 function refreshLogs() {
   fetchLogs()
+  fetchContainerLogs()
 }
 
 async function handleCancel() {
@@ -192,12 +224,14 @@ async function handleExecute() {
 onMounted(() => {
   fetchTask()
   fetchLogs()
-  // Auto-refresh
+  fetchContainerLogs()
+  // Auto-refresh for running tasks - more frequent for container logs
   setInterval(() => {
     if (task.value?.status === 'running' || task.value?.status === 'pending' || task.value?.status === 'queued') {
       fetchTask()
+      fetchContainerLogs()
     }
-  }, 5000)
+  }, 3000)
 })
 </script>
 
