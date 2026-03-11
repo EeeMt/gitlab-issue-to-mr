@@ -147,19 +147,34 @@ class GitLabClient:
         project = self.get_project(project_id)
 
         try:
-            # Get the merge request changes (diff)
-            mr = project.mergerequests.get(mr_iid)
+            # Get the merge request with changes
+            mr = project.mergerequests.get(mr_iid, include_diverged_commits_count=True)
 
-            # Calculate stats from MR
+            # Try to get stats directly from MR object (GitLab 15.2+)
+            if hasattr(mr, 'changes_count') and mr.changes_count:
+                # Format: "10 files" or "10 files, +100 -50"
+                changes_count = mr.changes_count
+                logger.info(f"MR {mr_iid} changes_count: {changes_count}")
+                # Parse additions/deletions from changes_count string
+                # Example: "10 files, +100 -50"
+                import re
+                match = re.search(r'\+(\d+)\s+-(\d+)', changes_count)
+                if match:
+                    return {
+                        "additions": int(match.group(1)),
+                        "deletions": int(match.group(2)),
+                        "total": int(match.group(1)) + int(match.group(2))
+                    }
+
+            # Fallback: calculate from diff
             additions = 0
             deletions = 0
 
-            # Try to get changes if available
             try:
-                mr_changes = project.mergerequests.get(mr_iid, iterator=True)
-                # The changes property returns the diff
-                if hasattr(mr, 'changes') and mr.changes:
-                    for change in mr.changes.get('changes', []):
+                # Get MR changes
+                mr_with_changes = project.mergerequests.get(mr_iid, lazy=False)
+                if hasattr(mr_with_changes, 'changes') and mr_with_changes.changes:
+                    for change in mr_with_changes.changes.get('changes', []):
                         diff = change.get('diff', '')
                         # Count lines starting with + (additions) and - (deletions)
                         for line in diff.split('\n'):
@@ -168,7 +183,7 @@ class GitLabClient:
                             elif line.startswith('-') and not line.startswith('---'):
                                 deletions += 1
             except Exception as e:
-                logger.warning(f"Could not get MR changes: {e}")
+                logger.warning(f"Could not get MR changes from diff: {e}")
 
             return {
                 "additions": additions,

@@ -221,6 +221,22 @@ class WorkerExecutor:
 
                 logger.info(f"Task {task_id} completed successfully")
 
+                # Get MR change stats after MR is created
+                if task.merge_request_iid:
+                    try:
+                        stats = self.gitlab.get_merge_request_stats(
+                            task.project_id, task.merge_request_iid
+                        )
+                        if stats:
+                            task.additions = stats.get("additions", 0)
+                            task.deletions = stats.get("deletions", 0)
+                            task.total_changes = stats.get("total", 0)
+                            logger.info(
+                                f"[Task {task_id}] MR stats: +{task.additions} -{task.deletions} ({task.total_changes} total)"
+                            )
+                    except Exception as e:
+                        logger.warning(f"[Task {task_id}] Failed to get MR stats: {e}")
+
                 # Remove draft status from MR if it was created
                 if task.merge_request_iid:
                     try:
