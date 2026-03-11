@@ -145,6 +145,10 @@ async def verify_gitlab_webhook(
         )
 
     logger.info(f"Webhook received: object_kind={payload.get('object_kind')}, event_type={payload.get('event_type')}")
+    # Debug: log full payload structure
+    logger.info(f"Webhook payload keys: {list(payload.keys())}")
+    if payload.get("object_attributes"):
+        logger.info(f"Object attributes keys: {list(payload.get('object_attributes', {}).keys())}")
     return payload
 
 
@@ -176,14 +180,14 @@ async def gitlab_webhook(
         logger.debug(f"Ignoring event type: {event_type}")
         return {"status": "ignored", "reason": f"event_type {event_type} not supported"}
 
-    # Get note (comment) data from object_attributes (GitLab uses this field)
-    object_attrs = payload.get("object_attributes", {})
-    note_id = object_attrs.get("id")
-    note_type = object_attrs.get("noteable_type")
-    comment_body = object_attrs.get("note", "")
+    # Get note (comment) data - GitLab webhook uses 'note' field directly (not object_attributes)
+    note_attrs = payload.get("note", {})
+    note_id = note_attrs.get("id")
+    note_type = note_attrs.get("noteable_type")
+    comment_body = note_attrs.get("body", "")
 
-    # Get issue info - may be in object_attributes or at root level
-    issue = payload.get("issue", {}) or object_attrs.get("issue", {})
+    # Get issue and project info from root level
+    issue = payload.get("issue", {})
     project = payload.get("project", {})
 
     logger.info(f"Note type: {note_type}, Note ID: {note_id}, Comment: '{comment_body[:50] if comment_body else ''}'")

@@ -420,7 +420,7 @@ DEFAULT_TARGET_BRANCH=main
     ])
 
     # Wait for backend
-    wait_for_service("http://localhost:8000/health", timeout=60, name="Backend")
+    wait_for_service(f"{BACKEND_URL}/health", timeout=60, name="Backend")
 
     # Check backend is ready
     logger.info("Backend is ready!")
@@ -504,7 +504,7 @@ def main():
 
         # Verify backend is accessible
         try:
-            resp = requests.get("http://localhost:8000/health", timeout=5)
+            resp = requests.get(f"{BACKEND_URL}/health", timeout=5)
             logger.info(f"Backend health check: {resp.status_code}")
         except Exception as e:
             logger.error(f"Backend is not accessible: {e}")
@@ -726,7 +726,7 @@ def main():
             stop_docker_compose()
         else:
             logger.info("\n[Info] Keeping services running (--keep-running)")
-            logger.info("  - Backend: http://localhost:8000")
+            logger.info(f"  - Backend: {BACKEND_URL}")
             logger.info("  - PostgreSQL: localhost:5432")
             logger.info("  - To stop: docker compose -f deploy/docker-compose.yml down")
 
