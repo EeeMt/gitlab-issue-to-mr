@@ -1,21 +1,21 @@
 <template>
-  <div>
+  <div class="dashboard">
     <n-space vertical :size="16">
-      <n-space align="center" justify="space-between">
+      <div class="header-row">
         <h2>Task Dashboard</h2>
-        <n-space>
+        <n-space align="center">
           <n-select
             v-model:value="statusFilter"
             :options="statusOptions"
-            placeholder="Filter by status"
+            placeholder="Filter"
             clearable
-            style="width: 180px"
+            style="width: 140px"
           />
-          <n-button @click="refreshTasks" :loading="loading">
+          <n-button @click="refreshTasks" :loading="loading" size="small">
             Refresh
           </n-button>
         </n-space>
-      </n-space>
+      </div>
 
       <n-card>
         <n-data-table
@@ -25,6 +25,7 @@
           :row-key="(row: Task) => row.id"
           :pagination="pagination"
           :bordered="false"
+          :scroll-x="800"
         />
       </n-card>
     </n-space>
@@ -32,20 +33,25 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, h, watch } from 'vue'
+import { ref, onMounted, h, watch, computed } from 'vue'
 import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, useMessage, DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
+import { useWindowSize } from '@vueuse/core'
 import { getTasks, type Task } from '../api'
 
 const router = useRouter()
 const message = useMessage()
+const { width } = useWindowSize()
+
+const isMobile = computed(() => width.value < 768)
 
 const tasks = ref<Task[]>([])
 const loading = ref(false)
 const statusFilter = ref<string | null>(null)
 
 const pagination = {
-  pageSize: 20
+  pageSize: 20,
+  responsive: true
 }
 
 const statusOptions = [
@@ -66,7 +72,32 @@ const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 
   cancelled: 'default'
 }
 
-const columns: DataTableColumns<Task> = [
+const mobileColumns: DataTableColumns<Task> = [
+  {
+    title: 'ID',
+    key: 'id',
+    width: 50
+  },
+  {
+    title: 'Issue',
+    key: 'issue_iid',
+    width: 60,
+    render: (row) => `!${row.issue_iid}`
+  },
+  {
+    title: 'Status',
+    key: 'status',
+    width: 80,
+    render: (row) => h(NTag, { type: statusColors[row.status], size: 'small' }, () => row.status)
+  },
+  {
+    title: 'Actions',
+    key: 'actions',
+    render: (row) => h(NButton, { size: 'tiny', onClick: () => router.push({ name: 'TaskView', params: { id: row.id } }) }, () => 'View')
+  }
+]
+
+const desktopColumns: DataTableColumns<Task> = [
   {
     title: 'ID',
     key: 'id',
@@ -121,6 +152,8 @@ const columns: DataTableColumns<Task> = [
   }
 ]
 
+const columns = computed(() => isMobile.value ? mobileColumns : desktopColumns)
+
 async function fetchTasks() {
   loading.value = true
   try {
@@ -150,3 +183,29 @@ onMounted(() => {
   setInterval(fetchTasks, 10000)
 })
 </script>
+
+<style scoped>
+.dashboard {
+  max-width: 100%;
+}
+.header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.header-row h2 {
+  margin: 0;
+  font-size: 18px;
+}
+@media (max-width: 768px) {
+  .header-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .header-row h2 {
+    font-size: 16px;
+  }
+}
+</style>
