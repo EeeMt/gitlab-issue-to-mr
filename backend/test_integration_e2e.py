@@ -323,6 +323,12 @@ def get_issue_notes(project_id: int, issue_iid: int) -> list:
     return resp.json()
 
 
+def get_mr_details(project_id: int, mr_iid: int) -> dict:
+    """Get MR details including SHA and conflict status."""
+    resp = gitlab_request("GET", f"/projects/{project_id}/merge_requests/{mr_iid}")
+    return resp.json()
+
+
 def verify_mr_closes_issue(mr: dict, issue_iid: int) -> bool:
     """Verify that the MR is configured to close the issue."""
     description = mr.get("description", "")
@@ -587,6 +593,62 @@ def main():
 
             if not all_passed:
                 logger.warning(f"MR description: {mr_description[:200]}")
+
+            # Step 10: Verify task completion and data sanitization
+            logger.info("\n[Step 10] Verifying task integrity...")
+
+            # Get task from database via API (if available) or check MR status
+            mr_details = get_mr_details(project_id, mr['iid'])
+
+            # Check 1: MR has actual commits (SHA not null)
+            has_commits = mr_details.get("sha") is not None
+            if has_commits:
+                logger.info(f"  ✓ MR has commits: {mr_details.get('sha')[:10]}...")
+            else:
+                logger.warning("  ✗ MR has NO commits (SHA is null)")
+
+            # Check 2: MR has no conflicts
+            has_conflicts = mr_details.get("has_conflicts", True)
+            if not has_conflicts:
+                logger.info("  ✓ MR has no conflicts")
+            else:
+                logger.warning("  ✗ MR has conflicts")
+
+            # Check 3: Verify task status via backend API (if accessible)
+            try:
+                # Try to get task info from backend
+                task_resp = requests.get(
+                    f"{BACKEND_URL}/api/tasks",
+                    headers={"PRIVATE-TOKEN": GITLAB_TOKEN},
+                    timeout=5
+                )
+                if task_resp.status_code == 200:
+                    tasks = task_resp.json()
+                    # Find our task by merge_request_url
+                    our_task = None
+                    for t in tasks:
+                        if str(mr['web_url']) in str(t.get('merge_request_url', '')):
+                            our_task = t
+                            break
+                    if our_task:
+                        task_status = our_task.get('status')
+                        if task_status == 'completed':
+                            logger.info(f"  ✓ Task status: {task_status}")
+                        elif task_status == 'failed':
+                            error_msg = our_task.get('error_message', '')
+                            logger.warning(f"  ✗ Task status: {task_status}")
+                            logger.warning(f"    Error: {error_msg[:100]}...")
+                        else:
+                            logger.warning(f"  ✗ Task status: {task_status} (expected: completed)")
+
+                        # Check 4: No sensitive data in error_message
+                        if task_status == 'failed' and error_msg:
+                            if 'glpat-' in error_msg or error_msg.count('sk-') > 0:
+                                logger.error("  ✗ SENSITIVE: Token found in error_message!")
+                            else:
+                                logger.info("  ✓ No sensitive data in error_message")
+            except Exception as e:
+                logger.info(f"  - Could not verify task status via API: {e}")
 
             logger.info("\n" + "=" * 60)
             logger.info("✅ E2E TEST PASSED!")
