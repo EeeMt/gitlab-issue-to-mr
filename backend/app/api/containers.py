@@ -134,3 +134,51 @@ async def get_container_logs(container_id: str):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/tasks/{task_id}/container-logs")
+async def get_task_container_logs(task_id: int, db: AsyncSession = Depends(get_db)):
+    """Get container logs for a task (polling endpoint).
+
+    Args:
+        task_id: Task ID
+        db: Database session
+
+    Returns:
+        Container logs
+    """
+    # Get task to find container_id
+    result = await db.execute(select(Task).where(Task.id == task_id))
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task {task_id} not found",
+        )
+
+    if not task.container_id:
+        return {
+            "container_id": None,
+            "logs": "",
+            "status": task.status,
+        }
+
+    try:
+        docker = get_docker_client()
+        container = docker.client.containers.get(task.container_id)
+        logs = container.logs(stdout=True, stderr=True, tail=200).decode("utf-8", errors="replace")
+        return {
+            "container_id": task.container_id,
+            "container_status": container.status,
+            "logs": logs,
+            "status": task.status,
+        }
+    except Exception as e:
+        logger.error(f"Error getting container logs: {e}")
+        return {
+            "container_id": task.container_id,
+            "logs": f"Error: {str(e)}",
+            "status": task.status,
+            "error": str(e),
+        }
