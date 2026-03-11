@@ -328,15 +328,21 @@ print("\n--- Planning Result ---")
 print(planning_content[:500])
 print("...\n")
 
-# Create MR description with planning
+# Clean up planning content - remove duplicate header if AI includes it
+planning_text = planning_content
+if planning_text.strip().startswith("##"):
+    # Remove the first heading if it exists (avoid duplicate)
+    first_newline = planning_text.find("\n")
+    if first_newline > 0:
+        planning_text = planning_text[first_newline+1:]
+
+# Create MR description with planning (header will be added by AI response or use default)
 planning_md = f"""## 📋 实现规划
 
-{planning_content}
+{planning_text}
 
 ---
 
-### 执行进度
-- [ ] 等待开始执行
 """
 
 # Update MR with planning
@@ -378,8 +384,8 @@ for idx, (checked, step) in enumerate(steps):
         "output": step_output[:200]
     })
 
-    # Update MR progress
-    progress_md = planning_md + "\n\n### 执行进度\n"
+    # Build progress section (only one 执行进度 section per update)
+    progress_md = planning_md + "### 执行进度\n"
     for i, (chk, stp) in enumerate(steps):
         if i < idx + 1:
             progress_md += f"- [x] {stp} ✓ (耗时: {execution_log[i]['duration']:.1f}秒)\n"
@@ -388,10 +394,14 @@ for idx, (checked, step) in enumerate(steps):
         else:
             progress_md += f"- [ ] {stp}\n"
 
-    # Add recent logs
+    # Add recent logs (limit to last 3 to avoid too long description)
     progress_md += "\n### 执行日志\n"
     for log in execution_log[-3:]:
         progress_md += f"- {log['step'][:40]}: {log['duration']:.1f}秒\n"
+
+    # GitLab has 1MB limit, but keep it reasonable - truncate if too long
+    if len(progress_md) > 50000:
+        progress_md = progress_md[:50000] + "\n\n...(内容已截断)"
 
     update_mr_description(progress_md)
 
