@@ -49,7 +49,8 @@ GIT_REPO_URL=$(echo "${GIT_REPO_URL}" | \
     sed "s|https://[^/]*|http://${GITLAB_TOKEN}@${GITLAB_HOST}|" | \
     sed "s|http://[^/]*|http://${GITLAB_TOKEN}@${GITLAB_HOST}|")
 
-echo "Repository URL: ${GIT_REPO_URL}"
+# Log repository URL without exposing token
+echo "Repository URL: http://[TOKEN]@${GITLAB_HOST}/${PROJECT_PATH}.git"
 
 # Configure git to allow insecure GitLab (self-signed cert)
 git config --global http.sslVerify false
@@ -90,6 +91,9 @@ fi
 # Run Claude via Python SDK with planning and step-by-step execution
 echo "Running Claude API with planning mode..."
 echo "Prompt: ${USER_PROMPT}"
+echo "ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL}"
+echo "ANTHROPIC_MODEL: ${ANTHROPIC_MODEL}"
+echo "ANTHROPIC_API_KEY set: $([ -n "$ANTHROPIC_API_KEY" ] && echo 'yes' || echo 'no')"
 echo ""
 
 # Create comprehensive Python script for planning and execution
@@ -207,7 +211,10 @@ def call_claude(messages, tools=None, max_iterations=10):
                 tools=tools or []
             )
         except Exception as e:
-            print(f"API Error: {e}", file=__import__('sys').stderr)
+            # Sanitize error message to avoid exposing API keys
+            error_str = str(e)
+            error_str = error_str.replace(ANTHROPIC_API_KEY, "[API_KEY]") if ANTHROPIC_API_KEY else error_str
+            print(f"API Error: {error_str}", file=__import__('sys').stderr)
             return None
 
         # Check for tool use
@@ -393,33 +400,11 @@ print("\n" + "=" * 50)
 print("Generating completion report...")
 print("=" * 50)
 
-# Get changed files
-result = subprocess.run("git status --porcelain", shell=True, cwd="/workspace", capture_output=True, text=True)
-changed_files = result.stdout.strip()
+# Note: Git status parsing happens in bash after this script completes
+# to properly show changed files in MR description
 
-# Generate report
-report_md = f"""## ✅ 实现完成
-
-### 需求
-{USER_PROMPT}
-
-### 变更文件
-{changed_files if changed_files else '无'}
-
-### 执行摘要
-- 总步骤: {len(steps)}
-- 成功: {len(execution_log)}
-- 失败: 0
-
----
-
-### 详细执行记录
-"""
-
-for log in execution_log:
-    report_md += f"- **{log['step']}** ({log['duration']:.1f}秒)\n"
-
-update_mr_description(report_md)
+print("\n=== Execution completed ===")
+print(f"Total steps completed")
 
 print("\n=== Execution completed ===")
 print(f"Total steps: {len(steps)}")
@@ -428,7 +413,17 @@ print(f"Completed: {len(execution_log)}")
 PYTHON_SCRIPT
 
 chmod +x /tmp/claude_planner.py
-python3 /tmp/claude_planner.py > /workspace/result.md 2>&1
+echo "Starting Python script..."
+set -x
+timeout 300 python3 /tmp/claude_planner.py > /workspace/result.md 2>&1 || echo "Script timed out or failed with: $?"
+set +x
+SCRIPT_RESULT=$?
+echo "Python script exited with code: ${SCRIPT_RESULT}"
+if [ -f /workspace/result.md ]; then
+    echo "=== result.md content ==="
+    cat /workspace/result.md
+    echo "=== end result.md ==="
+fi
 
 RESULT=$?
 
@@ -486,9 +481,12 @@ if [ -n "$CHANGES" ]; then
         [ "$filepath" = "result.md" ] && continue
         case "$status" in
             "A "*) NEW_FILES="${NEW_FILES}${filepath}," ;;
+            " M"*) MODIFIED_FILES="${MODIFIED_FILES}${filepath}," ;;
             "M "*) MODIFIED_FILES="${MODIFIED_FILES}${filepath}," ;;
+            " D") DELETED_FILES="${DELETED_FILES}${filepath}," ;;
             "D "*) DELETED_FILES="${DELETED_FILES}${filepath}," ;;
             "??")  NEW_FILES="${NEW_FILES}${filepath}," ;;
+            "?? ") NEW_FILES="${NEW_FILES}${filepath}," ;;
         esac
     done < <(git status --porcelain)
 

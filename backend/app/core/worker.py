@@ -1,6 +1,7 @@
 """Worker executor for running tasks in Docker containers."""
 
 import logging
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -13,6 +14,36 @@ from app.core.gitlab_client import GitLabClient, get_gitlab_client
 from app.models import Task, TaskLog, TaskStatus
 
 logger = logging.getLogger(__name__)
+
+
+def sanitize_sensitive_data(text: str) -> str:
+    """Remove sensitive data (tokens, passwords) from text.
+
+    Args:
+        text: Text to sanitize
+
+    Returns:
+        Sanitized text
+    """
+    if not text:
+        return text
+
+    # Remove GitLab personal access tokens (glpat-*)
+    text = re.sub(r'glpat-[a-zA-Z0-9\-]{10,}', '[GITLAB_TOKEN]', text)
+
+    # Remove Anthropic API keys (sk-*, sk-ant-*)
+    text = re.sub(r'sk-(?:cp|ant|api)-[a-zA-Z0-9\-]{10,}', '[ANTHROPIC_API_KEY]', text)
+
+    # Remove Authorization headers
+    text = re.sub(r'(PRIVATE-TOKEN:\s*)[^\s]+', r'\1[REDACTED]', text)
+
+    # Remove null bytes and other invalid UTF-8 sequences
+    text = text.replace('\x00', '')
+
+    # Replace other non-printable characters that might cause issues
+    text = ''.join(char if ord(char) < 0xFFFD else '?' for char in text)
+
+    return text
 
 
 def get_settings():
@@ -200,7 +231,9 @@ class WorkerExecutor:
             else:
                 task.status = TaskStatus.FAILED
                 task.completed_at = datetime.utcnow()
-                task.error_message = logs[-500:]  # Store last 500 chars
+                # Sanitize logs before storing (remove tokens/passwords)
+                sanitized_logs = sanitize_sensitive_data(logs)
+                task.error_message = sanitized_logs[-1000:]  # Store last 1000 chars
                 logger.error(f"[Task {task_id}] Failed with exit code {exit_code}")
 
                 # Check if we should retry
@@ -218,11 +251,12 @@ class WorkerExecutor:
                 except Exception as e:
                     logger.warning(f"Failed to send failure notification: {e}")
 
-            # Add log entry
+            # Add log entry (sanitized)
+            sanitized_logs = sanitize_sensitive_data(logs)
             log_entry = TaskLog(
                 task_id=task.id,
                 log_level="ERROR" if exit_code != 0 else "INFO",
-                message=logs[-2000:],  # Store last 2000 chars
+                message=sanitized_logs[-4000:],  # Store last 4000 chars
             )
             db.add(log_entry)
 
@@ -240,7 +274,8 @@ class WorkerExecutor:
             logger.exception(f"Task {task_id} failed with exception: {e}")
             task.status = TaskStatus.FAILED
             task.completed_at = datetime.utcnow()
-            task.error_message = str(e)[:500]
+            # Sanitize error message
+            task.error_message = sanitize_sensitive_data(str(e))[:1000]
             await db.commit()
 
             # Cleanup container on exception
@@ -297,6 +332,8 @@ class WorkerExecutor:
             message = "✅ 任务已完成"
         else:
             error_msg = task.error_message[:200] if task.error_message else "未知错误"
+            # Double sanitization for messages sent to external systems
+            error_msg = sanitize_sensitive_data(error_msg)
             message = f"❌ 任务失败: {error_msg}"
 
         self.gitlab.create_note(
