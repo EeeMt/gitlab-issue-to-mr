@@ -448,8 +448,13 @@ if [ -n "$CHANGES" ]; then
     echo "$CHANGES"
     echo "Changes detected, committing..."
 
-    # Add all changes
-    git add -A
+    # Remove result.md if it exists (it's the output log, not actual code)
+    rm -f /workspace/result.md
+    git rm -f result.md 2>/dev/null || true
+
+    # Add all files except result.md (it's the output log, not actual code)
+    # Use git add with exclusion pattern
+    git add -A -- ':!result.md'
 
     # Create commit
     git commit -m "AI: ${USER_PROMPT:0:50}..."
