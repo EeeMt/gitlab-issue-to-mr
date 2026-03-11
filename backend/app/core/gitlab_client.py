@@ -246,6 +246,27 @@ class GitLabClient:
             logger.warning(f"File not found: {file_path}@{ref}")
             return ""
 
+    def get_issue(self, project_id: int, issue_iid: int) -> Optional[dict]:
+        """Get issue details.
+
+        Args:
+            project_id: GitLab project ID
+            issue_iid: Issue IID
+
+        Returns:
+            Dict with issue title and description, or None
+        """
+        project = self.get_project(project_id)
+        try:
+            issue = project.issues.get(issue_iid)
+            return {
+                "title": issue.title,
+                "description": issue.description,
+            }
+        except GitlabGetError:
+            logger.warning(f"Issue not found: {project_id}/{issue_iid}")
+            return None
+
     def close(self) -> None:
         """Close GitLab client."""
         # No explicit close needed for python-gitlab

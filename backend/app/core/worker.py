@@ -154,6 +154,7 @@ class WorkerExecutor:
                 "ANTHROPIC_BASE_URL": settings.anthropic_base_url,
                 "ANTHROPIC_API_KEY": settings.anthropic_api_key,
                 "ANTHROPIC_MODEL": settings.anthropic_model,
+                "TASK_ID": str(task.id),
             }
 
             # Pass MR_IID to worker if MR was created (for P0.1 planning updates)

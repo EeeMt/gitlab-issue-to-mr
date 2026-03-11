@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Set
 
@@ -17,10 +18,14 @@ from app.models import Task, TaskStatus
 
 logger = logging.getLogger(__name__)
 
+# Thread pool for running worker tasks (to avoid blocking the event loop)
+_worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-")
+
 
 def get_settings():
     """Get effective settings (with runtime overrides)."""
     return get_effective_settings()
+
 WORKER_CONTAINER_PATTERN = re.compile(r"^gimr-\d+-p\d+-i\d+$")
 
 
@@ -111,7 +116,7 @@ class Scheduler:
         return result.scalar_one_or_none()
 
     async def _execute_task(self, db: AsyncSession, task: Task, issue_key: str) -> None:
-        """Execute a task."""
+        """Execute a task in a separate thread to avoid blocking the event loop."""
         logger.info(f"Executing task {task.id} for issue {issue_key}")
 
         # Mark as running
@@ -124,14 +129,10 @@ class Scheduler:
             task.started_at = datetime.utcnow()
             await db.commit()
 
-            # Execute via worker
-            worker = WorkerExecutor()
-            success = await worker.execute_task(db, task.id)
-
-            if success:
-                logger.info(f"Task {task.id} completed successfully")
-            else:
-                logger.error(f"Task {task.id} failed")
+            # Execute via worker in a thread pool WITHOUT waiting
+            # This allows multiple tasks to run in parallel
+            asyncio.create_task(self._run_task_background(task.id))
+            logger.info(f"Task {task.id} submitted to thread pool")
 
         except Exception as e:
             logger.exception(f"Task {task.id} failed with exception")
@@ -140,10 +141,44 @@ class Scheduler:
             task.completed_at = datetime.utcnow()
             await db.commit()
 
-        finally:
             # Clean up tracking
             self._running_tasks.discard(task.id)
             self._running_issues.discard(issue_key)
+
+    async def _run_task_background(self, task_id: int) -> None:
+        """Run task in background thread pool."""
+        issue_key = None
+        try:
+            loop = asyncio.get_event_loop()
+            success = await loop.run_in_executor(
+                _worker_executor,
+                _run_worker_task,
+                task_id,
+            )
+
+            if success:
+                logger.info(f"Task {task_id} completed successfully")
+            else:
+                logger.error(f"Task {task_id} failed")
+
+        except Exception as e:
+            logger.exception(f"Task {task_id} failed with exception in background")
+
+        finally:
+            # Clean up tracking
+            self._running_tasks.discard(task_id)
+            # Find the issue_key from database if needed
+            try:
+                async with AsyncSessionLocal() as db:
+                    result = await db.execute(
+                        select(Task).where(Task.id == task_id)
+                    )
+                    task = result.scalar_one_or_none()
+                    if task:
+                        issue_key = f"{task.project_id}:{task.issue_iid}"
+                        self._running_issues.discard(issue_key)
+            except Exception:
+                pass
 
     async def _crash_recovery(self) -> None:
         """Recover from crashes: clean up stuck tasks and containers."""
@@ -219,3 +254,33 @@ async def stop_scheduler() -> None:
     """Stop the scheduler."""
     if _scheduler:
         await _scheduler.stop()
+
+
+def _run_worker_task(task_id: int) -> bool:
+    """Run worker task in a separate thread with its own event loop.
+
+    This function creates a new asyncio event loop to run the async worker code.
+
+    Args:
+        task_id: Task ID to execute
+
+    Returns:
+        True if successful, False otherwise
+    """
+    # Create a new event loop for this thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    try:
+        # Create a new database session for this thread
+        from app.database import AsyncSessionLocal
+        from app.core.worker import WorkerExecutor
+
+        async def run_task():
+            async with AsyncSessionLocal() as db:
+                worker = WorkerExecutor()
+                return await worker.execute_task(db, task_id)
+
+        return loop.run_until_complete(run_task())
+    finally:
+        loop.close()

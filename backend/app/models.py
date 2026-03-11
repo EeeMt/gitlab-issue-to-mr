@@ -74,6 +74,11 @@ class Task(Base):
     commit_sha: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Change statistics
+    additions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    deletions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_changes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
     # Retry tracking
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 

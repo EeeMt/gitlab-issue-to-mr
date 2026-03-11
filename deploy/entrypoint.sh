@@ -496,6 +496,39 @@ if [ -n "$CHANGES" ]; then
     COMMIT_SHA=$(git rev-parse HEAD)
     echo "Committed: ${COMMIT_SHA}"
 
+    # Calculate change statistics using git diff --stat
+    echo "Calculating change statistics..."
+    DIFF_STATS=$(git diff --stat HEAD~1 HEAD 2>/dev/null || echo "0 files changed")
+    echo "Diff stats: ${DIFF_STATS}"
+
+    # Parse additions, deletions from git diff --stat output
+    # Format: " X files changed, Y insertions(+), Z deletions(-)"
+    # or: " X files changed, Y insertions(+), Z deletions(-), N files unresolved"
+    ADDITIONS=0
+    DELETIONS=0
+
+    # Extract insertions (additions)
+    INS_LINE=$(echo "${DIFF_STATS}" | grep -o '[0-9]\+ insertion' || echo "0 insertion")
+    ADDITIONS=$(echo "${INS_LINE}" | grep -o '[0-9]\+' || echo "0")
+
+    # Extract deletions
+    DEL_LINE=$(echo "${DIFF_STATS}" | grep -o '[0-9]\+ deletion' || echo "0 deletion")
+    DELETIONS=$(echo "${DEL_LINE}" | grep -o '[0-9]\+' || echo "0")
+
+    # Calculate total changes
+    TOTAL_CHANGES=$((ADDITIONS + DELETIONS))
+
+    echo "Changes: +${ADDITIONS} -${DELETIONS} (${TOTAL_CHANGES} total)"
+
+    # Save stats to backend database via API
+    if [ -n "${TASK_ID}" ]; then
+        echo "Saving stats to backend..."
+        curl -s -X PATCH "http://backend:8000/api/tasks/${TASK_ID}/stats" \
+            -H "Content-Type: application/json" \
+            -d "{\"additions\": ${ADDITIONS}, \"deletions\": ${DELETIONS}, \"total\": ${TOTAL_CHANGES}}" \
+            || echo "Warning: Failed to save stats to backend"
+    fi
+
     # Collect change statistics for MR description using git status --porcelain
     # Format: XY path, where X=index status, Y=work tree status
     # A=added, M=modified, D=deleted, ??=untracked

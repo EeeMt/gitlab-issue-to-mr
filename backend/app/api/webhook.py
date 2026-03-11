@@ -1,6 +1,7 @@
 """GitLab Webhook endpoint."""
 
 import logging
+import re
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional
@@ -16,6 +17,71 @@ from app.database import get_db
 from app.models import Task, TaskStatus
 
 logger = logging.getLogger(__name__)
+
+
+# Patterns that indicate user is referring to issue content
+GENERIC_PROMPT_PATTERNS = [
+    r"^实现这个(issue|需求)?$",
+    r"^实现这个(功能)?$",
+    r"^完成这个(issue|需求)?$",
+    r"^完成这个功能$",
+    r"^处理这个(issue|需求)?$",
+    r"^做这个(issue|需求)?$",
+    r"^帮我做$",
+    r"^帮我实现$",
+    r"^开始(实现|处理)$",
+    r"^start$",
+    r"^do\s*this$",
+    r"^implement\s*this$",
+    r"^fix\s*this$",
+    r"^this\s*issue$",
+    r"^这个issue$",
+]
+
+
+def is_generic_prompt(prompt: str) -> bool:
+    """Check if the user prompt is a generic reference to the issue.
+
+    Args:
+        prompt: User's prompt from the comment
+
+    Returns:
+        True if the prompt is generic and should use issue details
+    """
+    if not prompt or not prompt.strip():
+        return True
+
+    prompt_lower = prompt.lower().strip()
+    for pattern in GENERIC_PROMPT_PATTERNS:
+        if re.match(pattern, prompt_lower, re.IGNORECASE):
+            return True
+    return False
+
+
+def build_enhanced_prompt(prompt: str, issue_title: str, issue_description: Optional[str]) -> str:
+    """Build enhanced prompt using issue details.
+
+    Args:
+        prompt: Original user prompt
+        issue_title: Issue title from GitLab
+        issue_description: Issue description from GitLab
+
+    Returns:
+        Enhanced prompt with issue details
+    """
+    parts = []
+
+    # Add issue title
+    if issue_title:
+        parts.append(f"Issue: {issue_title}")
+
+    # Add issue description if available
+    if issue_description:
+        parts.append(f"\n需求描述:\n{issue_description}")
+    else:
+        parts.append("\n需求描述: (无详细描述)")
+
+    return "\n".join(parts)
 router = APIRouter()
 settings = get_settings()
 
@@ -271,6 +337,25 @@ async def _handle_generate_command(
         logger.info(f"Task for note {note_id} already exists, skipping")
         return {"status": "duplicate", "message": "Task already processed"}
 
+    # Check if prompt is generic and needs issue details
+    user_prompt = command.args
+    if is_generic_prompt(user_prompt):
+        logger.info(f"User prompt is generic, fetching issue details for {project_id}/{issue_iid}")
+        try:
+            gitlab = get_gitlab_client()
+            issue_details = gitlab.get_issue(project_id, issue_iid)
+            if issue_details:
+                user_prompt = build_enhanced_prompt(
+                    user_prompt,
+                    issue_details.get("title", ""),
+                    issue_details.get("description")
+                )
+                logger.info(f"Using issue details as prompt: {issue_details.get('title')}")
+            else:
+                logger.warning(f"Could not fetch issue details, using original prompt")
+        except Exception as e:
+            logger.warning(f"Failed to fetch issue details: {e}, using original prompt")
+
     # Calculate scheduled_at if delay is specified
     scheduled_at = None
     if command.delay_seconds:
@@ -285,7 +370,7 @@ async def _handle_generate_command(
         issue_id=issue_id,
         issue_iid=issue_iid,
         note_id=note_id,
-        user_prompt=command.args,
+        user_prompt=user_prompt,
         branch_name=f"gimr/issue-{issue_iid}",
         priority=command.priority,
         scheduled_at=scheduled_at,

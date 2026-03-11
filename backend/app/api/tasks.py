@@ -64,6 +64,9 @@ async def list_tasks(
             "target_branch": task.target_branch,
             "commit_sha": task.commit_sha,
             "error_message": task.error_message,
+            "additions": task.additions,
+            "deletions": task.deletions,
+            "total_changes": task.total_changes,
             "created_at": task.created_at.isoformat(),
             "updated_at": task.updated_at.isoformat(),
             "started_at": task.started_at.isoformat() if task.started_at else None,
@@ -110,6 +113,9 @@ async def get_task(task_id: int, db: AsyncSession = Depends(get_db)):
         "target_branch": task.target_branch,
         "commit_sha": task.commit_sha,
         "error_message": task.error_message,
+        "additions": task.additions,
+        "deletions": task.deletions,
+        "total_changes": task.total_changes,
         "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat(),
         "started_at": task.started_at.isoformat() if task.started_at else None,
@@ -178,6 +184,15 @@ async def get_task_stats(task_id: int, db: AsyncSession = Depends(get_db)):
             detail=f"Task {task_id} not found",
         )
 
+    # Return database stats if available (non-zero)
+    if task.additions > 0 or task.deletions > 0 or task.total_changes > 0:
+        return {
+            "additions": task.additions,
+            "deletions": task.deletions,
+            "total": task.total_changes,
+        }
+
+    # Fall back to GitLab API if no database stats
     if not task.merge_request_iid:
         return {"additions": 0, "deletions": 0, "total": 0}
 
@@ -190,6 +205,51 @@ async def get_task_stats(task_id: int, db: AsyncSession = Depends(get_db)):
         return {"additions": 0, "deletions": 0, "total": 0}
 
     return stats
+
+
+@router.patch("/tasks/{task_id}/stats")
+async def update_task_stats(
+    task_id: int,
+    additions: int,
+    deletions: int,
+    total: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update MR statistics for a task.
+
+    Args:
+        task_id: Task ID
+        additions: Number of additions
+        deletions: Number of deletions
+        total: Total number of changes
+        db: Database session
+
+    Returns:
+        Success message
+    """
+    result = await db.execute(select(Task).where(Task.id == task_id))
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task {task_id} not found",
+        )
+
+    task.additions = additions
+    task.deletions = deletions
+    task.total_changes = total
+    await db.commit()
+
+    logger.info(f"Task {task_id} stats updated: +{additions} -{deletions} ({total} total)")
+
+    return {
+        "status": "success",
+        "message": f"Task {task_id} stats updated",
+        "additions": additions,
+        "deletions": deletions,
+        "total": total,
+    }
 
 
 @router.post("/tasks/{task_id}/cancel")
@@ -262,6 +322,9 @@ async def retry_task(task_id: int, db: AsyncSession = Depends(get_db)):
     task.merge_request_url = None
     task.merge_request_iid = None
     task.commit_sha = None
+    task.additions = 0
+    task.deletions = 0
+    task.total_changes = 0
     await db.commit()
 
     logger.info(f"Task {task_id} reset for retry")
