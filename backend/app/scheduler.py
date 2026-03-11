@@ -259,7 +259,7 @@ async def stop_scheduler() -> None:
 def _run_worker_task(task_id: int) -> bool:
     """Run worker task in a separate thread with its own event loop.
 
-    This function creates a new asyncio event loop to run the async worker code.
+    This function creates a new asyncio event loop and database connection for the thread.
 
     Args:
         task_id: Task ID to execute
@@ -267,20 +267,48 @@ def _run_worker_task(task_id: int) -> bool:
     Returns:
         True if successful, False otherwise
     """
-    # Create a new event loop for this thread
+    import asyncio
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+    # Get database URL from settings
+    from app.config import get_settings
+    settings = get_settings()
+    from app.database import _database_url
+
+    # Create a new engine for this thread (not shared with main event loop)
+    engine = create_async_engine(
+        _database_url,
+        pool_pre_ping=True,
+        pool_size=2,
+        max_overflow=2,
+    )
+
+    # Create session maker for this engine
+    ThreadSessionLocal = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    # Import worker
+    from app.core.worker import WorkerExecutor
+
+    async def run_task():
+        async with ThreadSessionLocal() as db:
+            worker = WorkerExecutor()
+            return await worker.execute_task(db, task_id)
+
+    # Create new event loop for this thread
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     try:
-        # Create a new database session for this thread
-        from app.database import AsyncSessionLocal
-        from app.core.worker import WorkerExecutor
-
-        async def run_task():
-            async with AsyncSessionLocal() as db:
-                worker = WorkerExecutor()
-                return await worker.execute_task(db, task_id)
-
         return loop.run_until_complete(run_task())
     finally:
+        loop.close()
+        # Dispose the engine to close connections
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(engine.dispose())
         loop.close()
