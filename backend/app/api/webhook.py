@@ -101,7 +101,7 @@ def build_prompt_with_issue_context(prompt: str, issue_title: str, issue_descrip
     if not trimmed_prompt:
         return issue_context
 
-    return f"用户补充要求:\n{trimmed_prompt}\n\n{issue_context}"
+    return f"{issue_context}\n\n用户补充要求: {trimmed_prompt}"
 router = APIRouter()
 settings = get_settings()
 

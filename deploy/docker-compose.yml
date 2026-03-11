@@ -5,7 +5,7 @@ services:
       dockerfile: deploy/Dockerfile.frontend
     container_name: gimr-nginx
     ports:
-      - "80:80"
+      - "8880:80"
     depends_on:
       - backend
     restart: unless-stopped

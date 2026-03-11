@@ -2,36 +2,30 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies including Java and Maven
+# Install system dependencies (Java 21, Maven, Node.js) in single layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
-    default-jdk \
+    openjdk-21-jdk \
     maven \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
 
-# Set JAVA_HOME
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+# Set Java environment
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
-
-# Install Claude CLI
-# For local LLM (Ollama), use: npm install -g @anthropic-ai/claude-cli
-# Or use the official Anthropic CLI
-RUN pip install --no-cache-dir anthropic requests && \
-    pip install --no-cache-dir anthropic-cli || true
-
-# Install Node.js for Claude CLI (if needed)
-RUN apt-get update && apt-get install -y nodejs npm && rm -rf /var/lib/apt/lists/*
-
-# Install Claude CLI via npm (alternative method)
-RUN npm install -g @anthropic-ai/claude-cli 2>/dev/null || echo "Claude CLI via npm failed, using pip"
-
-# Copy entrypoint script
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-# Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+
+# Install Python dependencies and Claude CLI
+RUN pip install --no-cache-dir anthropic requests anthropic-cli
+
+# Install Claude CLI via npm
+RUN npm install -g @anthropic-ai/claude-cli 2>/dev/null || echo "Claude CLI via npm failed, using pip"
+
+# Copy and set entrypoint
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
