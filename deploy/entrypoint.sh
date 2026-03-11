@@ -394,10 +394,19 @@ for idx, (checked, step) in enumerate(steps):
         else:
             progress_md += f"- [ ] {stp}\n"
 
-    # Add recent logs (limit to last 3 to avoid too long description)
-    progress_md += "\n### 执行日志\n"
-    for log in execution_log[-3:]:
-        progress_md += f"- {log['step'][:40]}: {log['duration']:.1f}秒\n"
+    # After loop ends, update one final time to mark all steps as complete
+    # Build final progress with all steps marked complete
+    progress_md = planning_md + "### 执行进度\n"
+    for i, (chk, stp) in enumerate(steps):
+        progress_md += f"- [x] {stp} ✓ (耗时: {execution_log[i]['duration']:.1f}秒)\n"
+
+    # Calculate total duration
+    total_duration = sum(log['duration'] for log in execution_log)
+    minutes = int(total_duration // 60)
+    seconds = int(total_duration % 60)
+
+    # Add completion message at the end of loop
+    progress_md += f"\n---\n\n✅ **所有任务已完成！** 总耗时: {minutes}分{seconds}秒"
 
     # GitLab has 1MB limit, but keep it reasonable - truncate if too long
     if len(progress_md) > 50000:
