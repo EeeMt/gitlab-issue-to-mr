@@ -63,6 +63,22 @@ cd deploy && docker-compose logs -f
 > docker build -f deploy/Dockerfile.worker -t gitlab-issues-to-mr-worker:latest .
 > ```
 
+### Testing & Debugging
+
+See [backend/docs/e2e-debugging.md](backend/docs/e2e-debugging.md) for detailed debugging guide.
+
+Quick debug commands:
+```bash
+# View backend logs
+docker logs gimr-backend --tail 100
+
+# Check task status in database
+docker exec gimr-postgres psql -U gimr -d gimr -c "SELECT id, status, error_message FROM tasks ORDER BY id DESC LIMIT 3;"
+
+# Check GitLab issue comments (replace token from deploy/.env.test)
+curl -s -H "PRIVATE-TOKEN: glpat-xxx" "http://192.168.50.129:8080/api/v4/projects/1/issues/1/notes"
+```
+
 ## Architecture
 
 ### High-Level Flow
