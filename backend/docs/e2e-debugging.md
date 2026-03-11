@@ -2,6 +2,55 @@
 
 本文档记录调试 GIMR (GitLab Issue to MR Bot) E2E 测试时发现的问题和解决方案。
 
+## 环境配置
+
+### 配置文件说明
+
+| 文件 | 用途 |
+|------|------|
+| `deploy/.env.test` | 测试环境配置（用于 docker-compose） |
+| `backend/.env` | 本地开发配置（用于测试脚本） |
+
+**重要**：
+- `.env.test` 包含真实的 GitLab Token 和 API Key
+- 测试脚本从 `backend/.env` 读取配置
+- `.env.test` 不应提交到版本控制（已配置 .gitignore）
+
+### 关键配置项
+
+```bash
+# deploy/.env.test
+GITLAB_URL=http://192.168.50.129:8080        # GitLab 地址
+GITLAB_BOT_TOKEN=glpat-xxx                    # GitLab Personal Access Token
+ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic  # API 地址
+ANTHROPIC_API_KEY=sk-cp-xxx                   # Anthropic/MiniMax API Key
+ANTHROPIC_MODEL=MiniMax-M2.5                  # 使用的模型
+```
+
+### 重新构建镜像
+
+修改代码后必须重新构建 Docker 镜像：
+
+```bash
+# 1. 重新构建 worker 镜像（修改 entrypoint.sh 后需要）
+docker build -f deploy/Dockerfile.worker -t gitlab-issues-to-mr-worker:latest .
+
+# 2. 重新构建 backend 镜像（修改 worker.py 后需要）
+docker build -f deploy/Dockerfile.backend -t deploy-backend .
+
+# 3. 重启服务
+cd deploy && docker-compose up -d backend
+
+# 或者一次性构建所有镜像
+cd deploy && docker-compose up -d --build
+```
+
+**注意**：修改以下文件后需要重新构建：
+- `deploy/entrypoint.sh` → 重新构建 worker 镜像
+- `backend/app/core/worker.py` → 重新构建 backend 镜像
+
+---
+
 ## 常见问题及解决方案
 
 ### 1. Token 泄露问题
@@ -171,27 +220,63 @@ response = client.messages.create(
 ```bash
 # 1. 查看后端日志
 docker logs gimr-backend --tail 100
+docker logs gimr-backend --tail 100 2>&1 | grep -i "task\|error"
 
 # 2. 查看数据库任务状态
 docker exec gimr-postgres psql -U gimr -d gimr -c "SELECT id, status, error_message FROM tasks ORDER BY id DESC LIMIT 3;"
 
-# 3. 查看任务日志
+# 3. 查看任务日志（完整输出）
 docker exec gimr-postgres psql -U gimr -d gimr -c "SELECT message FROM task_logs WHERE task_id = <id>;"
 
-# 4. 查看 GitLab Issue 评论
-curl -s -H "PRIVATE-TOKEN: xxx" "http://gitlab/api/v4/projects/1/issues/1/notes"
+# 4. 查看 GitLab Issue 评论（真实 GitLab 地址）
+GITLAB_TOKEN="glpat-xxx"  # 从 deploy/.env.test 获取
+GITLAB_URL="http://192.168.50.129:8080"
+curl -s -H "PRIVATE-TOKEN: $GITLAB_URL" \
+  "$GITLAB_URL/api/v4/projects/1/issues/1/notes"
 
 # 5. 查看 MR 状态
-curl -s -H "PRIVATE-TOKEN: xxx" "http://gitlab/api/v4/projects/1/merge_requests/1"
+curl -s -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+  "$GITLAB_URL/api/v4/projects/1/merge_requests/1"
 
-# 6. 重新构建镜像
+# 6. 查看当前运行的容器
+docker ps -a | grep gimr
+
+# 7. 重新构建 worker 镜像（修改 entrypoint.sh 后需要）
 docker build -f deploy/Dockerfile.worker -t gitlab-issues-to-mr-worker:latest .
 
-# 7. 重启服务
-docker-compose -f deploy/docker-compose.yml up -d backend
+# 8. 重新构建 backend 镜像（修改 worker.py 后需要）
+docker build -f deploy/Dockerfile.backend -t deploy-backend .
 
-# 8. 运行 E2E 测试
+# 9. 重启服务
+cd deploy && docker-compose up -d backend
+
+# 10. 运行 E2E 测试（跳过 Docker 启动）
 cd backend && python3 test_integration_e2e.py --skip-startup
+
+# 11. 查看 .env.test 配置
+cat deploy/.env.test | grep -v "^#" | grep -v "^$"
+```
+
+### 常用 GitLab API 端点（开发环境）
+
+```
+GitLab 地址: http://192.168.50.129:8080
+项目 ID: 1 (root/gimr_test)
+
+# Issue 相关
+GET  /api/v4/projects/1/issues              # 列出 Issue
+GET  /api/v4/projects/1/issues/{iid}        # 获取 Issue
+POST /api/v4/projects/1/issues               # 创建 Issue
+GET  /api/v4/projects/1/issues/{iid}/notes  # 获取 Issue 评论
+
+# MR 相关
+GET  /api/v4/projects/1/merge_requests              # 列出 MR
+GET  /api/v4/projects/1/merge_requests/{iid}        # 获取 MR
+GET  /api/v4/projects/1/repository/commits?ref_name=branch  # 查看提交
+
+# 项目相关
+GET  /api/v4/projects/1                     # 获取项目信息
+GET  /api/v4/projects/1/repository/branches # 列出分支
 ```
 
 ---
@@ -211,6 +296,17 @@ cd backend && python3 test_integration_e2e.py --skip-startup
 
 ## 相关文件
 
+### 核心代码
 - `backend/app/core/worker.py` - Worker 执行器（包含脱敏函数）
 - `deploy/entrypoint.sh` - Worker 入口脚本
+
+### 测试相关
 - `backend/test_integration_e2e.py` - E2E 测试（包含 Step 10 验证）
+- `backend/test_integration_e2e_mock.py` - Mock 测试（无需真实 GitLab）
+- `backend/test_p01.py` - P0.1 功能测试
+
+### 配置文件
+- `deploy/.env.test` - 测试环境配置（docker-compose 使用）
+- `deploy/docker-compose.yml` - Docker Compose 配置
+- `deploy/Dockerfile.worker` - Worker 镜像构建
+- `deploy/Dockerfile.backend` - Backend 镜像构建
