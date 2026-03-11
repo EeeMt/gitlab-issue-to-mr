@@ -114,6 +114,16 @@ class WorkerExecutor:
             # Prepare environment variables
             target_branch = task.target_branch or settings.default_target_branch
 
+            # Use issue title as MR title when available.
+            mr_title = f"AI: Issue #{task.issue_iid}"
+            try:
+                issue_info = self.gitlab.get_issue(task.project_id, task.issue_iid)
+                issue_title = (issue_info or {}).get("title", "").strip() if issue_info else ""
+                if issue_title:
+                    mr_title = f"AI: {issue_title[:100]}"
+            except Exception as e:
+                logger.warning(f"[Task {task_id}] Failed to fetch issue title for MR title: {e}")
+
             # Create initial MR (draft) before running worker for P0.1 planning support
             # This allows the worker to update MR description during execution
             mr_iid = None
@@ -130,7 +140,7 @@ class WorkerExecutor:
                 mr_response = self.gitlab.gl.projects.get(task.project_id).mergerequests.create({
                     "source_branch": task.branch_name,
                     "target_branch": target_branch,
-                    "title": f"AI: {task.user_prompt[:50]}...",
+                    "title": mr_title,
                     "description": initial_mr_desc,
                     "draft": True,  # Create as draft MR
                 })

@@ -36,9 +36,10 @@ async def list_containers(db: AsyncSession = Depends(get_db)):
 
     try:
         docker = get_docker_client()
-        all_containers = docker.client.containers.list(
+        all_containers = await asyncio.to_thread(
+            docker.client.containers.list,
             all=True,
-            filters={"name": "gimr-"}
+            filters={"name": "gimr-"},
         )
 
         for container in all_containers:
@@ -96,10 +97,10 @@ async def get_container_logs(container_id: str):
 
             # Try to find container by ID or name
             try:
-                container = docker.client.containers.get(container_id)
+                container = await asyncio.to_thread(docker.client.containers.get, container_id)
             except Exception:
                 # Try by partial ID
-                containers = docker.client.containers.list(all=True)
+                containers = await asyncio.to_thread(docker.client.containers.list, all=True)
                 container = None
                 for c in containers:
                     if c.id.startswith(container_id):
@@ -111,12 +112,21 @@ async def get_container_logs(container_id: str):
                     return
 
             # Stream logs
-            logs = container.logs(stdout=True, stderr=True, follow=True, tail=100)
+            logs = await asyncio.to_thread(
+                container.logs,
+                stdout=True,
+                stderr=True,
+                follow=True,
+                tail=100,
+                stream=True,
+            )
 
             try:
-                for line in logs:
-                    if line:
-                        yield f"data: {line.decode('utf-8', errors='replace')}\n\n"
+                while True:
+                    line = await asyncio.to_thread(next, logs, None)
+                    if line is None:
+                        break
+                    yield f"data: {line.decode('utf-8', errors='replace')}\n\n"
             except Exception:
                 # Generator closed
                 pass
@@ -166,8 +176,9 @@ async def get_task_container_logs(task_id: int, db: AsyncSession = Depends(get_d
 
     try:
         docker = get_docker_client()
-        container = docker.client.containers.get(task.container_id)
-        logs = container.logs(stdout=True, stderr=True, tail=200).decode("utf-8", errors="replace")
+        container = await asyncio.to_thread(docker.client.containers.get, task.container_id)
+        raw_logs = await asyncio.to_thread(container.logs, stdout=True, stderr=True, tail=200)
+        logs = raw_logs.decode("utf-8", errors="replace")
         return {
             "container_id": task.container_id,
             "container_status": container.status,

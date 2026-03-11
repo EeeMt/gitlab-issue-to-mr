@@ -1,5 +1,6 @@
 """Task management API endpoints."""
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Optional
@@ -199,7 +200,11 @@ async def get_task_stats(task_id: int, db: AsyncSession = Depends(get_db)):
     from app.core.gitlab_client import get_gitlab_client
     gitlab = get_gitlab_client()
 
-    stats = gitlab.get_merge_request_stats(task.project_id, task.merge_request_iid)
+    stats = await asyncio.to_thread(
+        gitlab.get_merge_request_stats,
+        task.project_id,
+        task.merge_request_iid,
+    )
 
     if not stats:
         return {"additions": 0, "deletions": 0, "total": 0}

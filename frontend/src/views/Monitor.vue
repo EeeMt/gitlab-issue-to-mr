@@ -67,7 +67,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, h } from 'vue'
+import { ref, onMounted, onBeforeUnmount, h } from 'vue'
 import { NCard, NStatistic, NRow, NCol, NButton, NDataTable, NTag, useMessage, DataTableColumns } from 'naive-ui'
 import { getStats, getContainers, type Container, type Stats } from '../api'
 
@@ -85,6 +85,7 @@ const stats = ref<Stats>({
 
 const containers = ref<Container[]>([])
 const loading = ref(false)
+let pollTimer: number | null = null
 
 const columns: DataTableColumns<Container> = [
   {
@@ -123,6 +124,7 @@ const columns: DataTableColumns<Container> = [
 ]
 
 async function fetchData() {
+  if (loading.value) return
   loading.value = true
   try {
     const [statsData, containersData] = await Promise.all([
@@ -144,6 +146,16 @@ function refresh() {
 
 onMounted(() => {
   fetchData()
-  setInterval(fetchData, 5000)
+  pollTimer = window.setInterval(() => {
+    if (document.visibilityState !== 'visible') return
+    fetchData()
+  }, 10000)
+})
+
+onBeforeUnmount(() => {
+  if (pollTimer !== null) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
 })
 </script>

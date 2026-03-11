@@ -82,6 +82,26 @@ def build_enhanced_prompt(prompt: str, issue_title: str, issue_description: Opti
         parts.append("\n需求描述: (无详细描述)")
 
     return "\n".join(parts)
+
+
+def build_prompt_with_issue_context(prompt: str, issue_title: str, issue_description: Optional[str]) -> str:
+    """Build prompt that combines explicit instruction with issue context.
+
+    Args:
+        prompt: User prompt from comment
+        issue_title: Issue title
+        issue_description: Issue description
+
+    Returns:
+        Combined prompt text
+    """
+    issue_context = build_enhanced_prompt("", issue_title, issue_description)
+    trimmed_prompt = (prompt or "").strip()
+
+    if not trimmed_prompt:
+        return issue_context
+
+    return f"用户补充要求:\n{trimmed_prompt}\n\n{issue_context}"
 router = APIRouter()
 settings = get_settings()
 
@@ -337,24 +357,36 @@ async def _handle_generate_command(
         logger.info(f"Task for note {note_id} already exists, skipping")
         return {"status": "duplicate", "message": "Task already processed"}
 
-    # Check if prompt is generic and needs issue details
     user_prompt = command.args
-    if is_generic_prompt(user_prompt):
-        logger.info(f"User prompt is generic, fetching issue details for {project_id}/{issue_iid}")
-        try:
-            gitlab = get_gitlab_client()
-            issue_details = gitlab.get_issue(project_id, issue_iid)
-            if issue_details:
-                user_prompt = build_enhanced_prompt(
-                    user_prompt,
-                    issue_details.get("title", ""),
-                    issue_details.get("description")
-                )
-                logger.info(f"Using issue details as prompt: {issue_details.get('title')}")
-            else:
-                logger.warning(f"Could not fetch issue details, using original prompt")
-        except Exception as e:
-            logger.warning(f"Failed to fetch issue details: {e}, using original prompt")
+
+    # Always fetch issue details first. For generic/empty prompt, use issue context directly.
+    # For explicit prompt, keep user intent and append issue context.
+    issue_details = None
+    try:
+        gitlab = get_gitlab_client()
+        issue_details = gitlab.get_issue(project_id, issue_iid)
+    except Exception as e:
+        logger.warning(f"Failed to fetch issue details: {e}, using original prompt")
+
+    if issue_details:
+        issue_title = issue_details.get("title", "")
+        issue_description = issue_details.get("description")
+
+        if is_generic_prompt(user_prompt):
+            logger.info(f"User prompt is generic/empty, using issue context for {project_id}/{issue_iid}")
+            user_prompt = build_enhanced_prompt(
+                user_prompt,
+                issue_title,
+                issue_description,
+            )
+        else:
+            user_prompt = build_prompt_with_issue_context(
+                user_prompt,
+                issue_title,
+                issue_description,
+            )
+    else:
+        logger.warning("Could not fetch issue details, using original prompt")
 
     # Calculate scheduled_at if delay is specified
     scheduled_at = None

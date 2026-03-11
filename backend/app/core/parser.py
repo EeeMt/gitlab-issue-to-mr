@@ -112,6 +112,17 @@ def parse_ai_bot_command(comment_body: str) -> Optional[BotCommand]:
                 raw_mention=re.search(pattern, comment_body, re.IGNORECASE).group(0),
             )
 
+    # Support bare trigger: "@ai-bot" or "@ai-bot:" with no args.
+    for bot in bot_names:
+        bare_pattern = r"@" + bot + r"(?::)?\s*$"
+        bare_match = re.search(bare_pattern, comment_body, re.IGNORECASE)
+        if bare_match:
+            return BotCommand(
+                command="generate",
+                args="",
+                raw_mention=bare_match.group(0),
+            )
+
     # Parse main generate command (support both @ai-bot and @ci-bot)
     patterns = []
     for bot in bot_names:

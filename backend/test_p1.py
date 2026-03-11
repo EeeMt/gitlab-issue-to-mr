@@ -24,6 +24,8 @@ def test_parser():
     tests = [
         # (input, expected_command, expected_args, expected_priority, expected_delay)
         ("@ai-bot hello world", "generate", "hello world", PRIORITY_NORMAL, None),
+        ("@ai-bot", "generate", "", PRIORITY_NORMAL, None),
+        ("@ai-bot:", "generate", "", PRIORITY_NORMAL, None),
         ("@ai-bot: create a function", "generate", "create a function", PRIORITY_NORMAL, None),
         ("@ai-bot priority=low do something", "generate", "do something", PRIORITY_LOW, None),
         ("@ai-bot priority=high urgent task", "generate", "urgent task", PRIORITY_HIGH, None),
@@ -239,6 +241,34 @@ def test_issue_mutex():
     return True
 
 
+def test_issue_context_prompt_builders():
+    """Test issue-context prompt helpers for generic and explicit prompts."""
+    print("\n" + "=" * 60)
+    print("Testing Issue Context Prompt Builders")
+    print("=" * 60)
+
+    from app.api.webhook import build_enhanced_prompt, build_prompt_with_issue_context
+
+    title = "Implement search API"
+    desc = "Need pagination and fuzzy matching"
+
+    generic_prompt = build_enhanced_prompt("", title, desc)
+    if "Issue: Implement search API" not in generic_prompt or "Need pagination and fuzzy matching" not in generic_prompt:
+        print("❌ FAIL: build_enhanced_prompt missing issue context")
+        return False
+
+    combined = build_prompt_with_issue_context("Please use FastAPI", title, desc)
+    if "用户补充要求" not in combined or "Please use FastAPI" not in combined:
+        print("❌ FAIL: build_prompt_with_issue_context missing user prompt section")
+        return False
+    if "Issue: Implement search API" not in combined or "Need pagination and fuzzy matching" not in combined:
+        print("❌ FAIL: build_prompt_with_issue_context missing issue context")
+        return False
+
+    print("✅ PASS: Issue context prompt builders correct")
+    return True
+
+
 def main():
     """Run all tests."""
     print("\n" + "=" * 60)
@@ -252,6 +282,7 @@ def main():
     results.append(("Task Creation", test_task_creation()))
     results.append(("Scheduler Logic", test_scheduler_logic()))
     results.append(("Issue Mutex", test_issue_mutex()))
+    results.append(("Issue Context Prompt Builders", test_issue_context_prompt_builders()))
 
     print("\n" + "=" * 60)
     print("Test Summary")

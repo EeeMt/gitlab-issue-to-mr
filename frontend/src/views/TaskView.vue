@@ -101,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { NButton, NSpace, NCard, NDescriptions, NDescriptionsItem, NTag, NGrid, NGi, NSpin, NAlert, NText, useMessage } from 'naive-ui'
 import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, type Task } from '../api'
@@ -118,6 +118,9 @@ const loading = ref(false)
 const logsLoading = ref(false)
 const containerLogsLoading = ref(false)
 const actionLoading = ref(false)
+const taskRequestInFlight = ref(false)
+const containerRequestInFlight = ref(false)
+let pollTimer: number | null = null
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
   pending: 'default',
@@ -133,6 +136,8 @@ function formatDate(dateStr: string): string {
 }
 
 async function fetchTask() {
+  if (taskRequestInFlight.value) return
+  taskRequestInFlight.value = true
   loading.value = true
   try {
     task.value = await getTask(taskId.value)
@@ -140,6 +145,7 @@ async function fetchTask() {
     message.error('Failed to fetch task')
   } finally {
     loading.value = false
+    taskRequestInFlight.value = false
   }
 }
 
@@ -156,10 +162,12 @@ async function fetchLogs() {
 }
 
 async function fetchContainerLogs() {
+  if (containerRequestInFlight.value) return
   if (!task.value?.container_id) {
     containerLogs.value = ''
     return
   }
+  containerRequestInFlight.value = true
   containerLogsLoading.value = true
   try {
     const result = await getTaskContainerLogs(taskId.value)
@@ -168,6 +176,7 @@ async function fetchContainerLogs() {
     containerLogs.value = 'Failed to fetch container logs'
   } finally {
     containerLogsLoading.value = false
+    containerRequestInFlight.value = false
   }
 }
 
@@ -225,13 +234,22 @@ onMounted(() => {
   fetchTask()
   fetchLogs()
   fetchContainerLogs()
-  // Auto-refresh for running tasks - more frequent for container logs
-  setInterval(() => {
+  // Auto-refresh for active tasks; skip when tab is not visible.
+  pollTimer = window.setInterval(() => {
+    if (document.visibilityState !== 'visible') return
+
     if (task.value?.status === 'running' || task.value?.status === 'pending' || task.value?.status === 'queued') {
       fetchTask()
       fetchContainerLogs()
     }
-  }, 3000)
+  }, 5000)
+})
+
+onBeforeUnmount(() => {
+  if (pollTimer !== null) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
 })
 </script>
 

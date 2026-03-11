@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y nodejs npm && rm -rf /var/lib/apt/lists
 RUN npm install -g @anthropic-ai/claude-cli 2>/dev/null || echo "Claude CLI via npm failed, using pip"
 
 # Copy entrypoint script
-COPY deploy/entrypoint.sh /entrypoint.sh
+COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Set environment variables

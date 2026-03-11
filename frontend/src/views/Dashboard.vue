@@ -33,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, h, watch, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, h, watch, computed } from 'vue'
 import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, useMessage, DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useWindowSize } from '@vueuse/core'
@@ -49,6 +49,7 @@ const tasks = ref<Task[]>([])
 const taskStats = ref<Record<number, TaskStats>>({})
 const loading = ref(false)
 const statusFilter = ref<string | null>(null)
+let pollTimer: number | null = null
 
 const pagination = {
   pageSize: 20,
@@ -169,6 +170,7 @@ const desktopColumns: DataTableColumns<Task> = [
 const columns = computed(() => isMobile.value ? mobileColumns : desktopColumns)
 
 async function fetchTasks() {
+  if (loading.value) return
   loading.value = true
   try {
     const params: { status?: string } = {}
@@ -197,8 +199,18 @@ watch(statusFilter, () => {
 
 onMounted(() => {
   fetchTasks()
-  // Auto-refresh every 10 seconds
-  setInterval(fetchTasks, 10000)
+  // Auto-refresh every 15 seconds and skip when tab is not visible
+  pollTimer = window.setInterval(() => {
+    if (document.visibilityState !== 'visible') return
+    fetchTasks()
+  }, 15000)
+})
+
+onBeforeUnmount(() => {
+  if (pollTimer !== null) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
 })
 </script>
 
