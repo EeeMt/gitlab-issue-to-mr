@@ -355,7 +355,10 @@ print("Starting execution phase...")
 print("=" * 50)
 
 # Parse steps from planning (look for - [ ] or - [x] patterns)
-steps = re.findall(r'- \[([ x])\] (.+)', planning_content)
+# Use re.DOTALL to match multi-line steps
+steps_raw = re.findall(r'- \[([ x])\] (.+?)(?=\n- \[|$)', planning_content, re.DOTALL)
+# Clean up steps - remove newlines and extra spaces
+steps = [(checked, step.strip().replace('\n', ' ').replace('  ', ' ')) for checked, step in steps_raw]
 print(f"Found {len(steps)} steps")
 
 execution_log = []
@@ -388,7 +391,10 @@ for idx, (checked, step) in enumerate(steps):
     progress_md = planning_md + "### 执行进度\n"
     for i, (chk, stp) in enumerate(steps):
         if i < idx + 1:
-            progress_md += f"- [x] {stp} ✓ (耗时: {execution_log[i]['duration']:.1f}秒)\n"
+            if i < len(execution_log):
+                progress_md += f"- [x] {stp} ✓ (耗时: {execution_log[i]['duration']:.1f}秒)\n"
+            else:
+                progress_md += f"- [x] {stp} ✓\n"
         elif i == idx + 1:
             progress_md += f"- [ ] {stp} (执行中...)\n"
         else:
@@ -398,7 +404,10 @@ for idx, (checked, step) in enumerate(steps):
     # Build final progress with all steps marked complete
     progress_md = planning_md + "### 执行进度\n"
     for i, (chk, stp) in enumerate(steps):
-        progress_md += f"- [x] {stp} ✓ (耗时: {execution_log[i]['duration']:.1f}秒)\n"
+        if i < len(execution_log):
+            progress_md += f"- [x] {stp} ✓ (耗时: {execution_log[i]['duration']:.1f}秒)\n"
+        else:
+            progress_md += f"- [x] {stp} ✓\n"
 
     # Calculate total duration
     total_duration = sum(log['duration'] for log in execution_log)
