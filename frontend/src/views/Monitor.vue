@@ -3,14 +3,14 @@
     <n-space vertical :size="16">
       <h2>System Monitor</h2>
 
-      <!-- Merge both stat rows; xs=12 → 2-per-row on mobile, md=6 → 4-per-row on desktop -->
+      <!-- Merge both stat rows; isMobile → 2-per-row, desktop → 4-per-row -->
       <n-row :gutter="[16, 16]">
-        <n-col :xs="12" :md="6">
+        <n-col :span="isMobile ? 12 : 6">
           <n-card>
             <n-statistic label="Total Tasks" :value="stats.total" />
           </n-card>
         </n-col>
-        <n-col :xs="12" :md="6">
+        <n-col :span="isMobile ? 12 : 6">
           <n-card>
             <n-statistic label="Running" :value="stats.running">
               <template #prefix>
@@ -19,12 +19,12 @@
             </n-statistic>
           </n-card>
         </n-col>
-        <n-col :xs="12" :md="6">
+        <n-col :span="isMobile ? 12 : 6">
           <n-card>
             <n-statistic label="Pending/Queued" :value="stats.pending + stats.queued" />
           </n-card>
         </n-col>
-        <n-col :xs="12" :md="6">
+        <n-col :span="isMobile ? 12 : 6">
           <n-card>
             <n-statistic label="Completed" :value="stats.completed">
               <template #prefix>
@@ -33,7 +33,7 @@
             </n-statistic>
           </n-card>
         </n-col>
-        <n-col :xs="12" :md="6">
+        <n-col :span="isMobile ? 12 : 6">
           <n-card>
             <n-statistic label="Failed" :value="stats.failed">
               <template #prefix>
@@ -42,7 +42,7 @@
             </n-statistic>
           </n-card>
         </n-col>
-        <n-col :xs="12" :md="6">
+        <n-col :span="isMobile ? 12 : 6">
           <n-card>
             <n-statistic label="Cancelled" :value="stats.cancelled" />
           </n-card>
