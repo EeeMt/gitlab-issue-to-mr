@@ -79,9 +79,10 @@ async def health() -> dict:
 
     # Check database connection
     try:
-        from app.database import engine_sync
-        with engine_sync.connect() as conn:
-            conn.execute("SELECT 1")
+        from app.database import engine
+        from sqlalchemy import text
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
         health_status["checks"]["database"] = "ok"
     except Exception as e:
         health_status["checks"]["database"] = f"error: {str(e)[:50]}"
