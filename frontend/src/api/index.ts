@@ -23,6 +23,9 @@ export interface Task {
   target_branch: string
   commit_sha: string | null
   error_message: string | null
+  additions: number
+  deletions: number
+  total_changes: number
   created_at: string
   updated_at: string
   started_at: string | null
