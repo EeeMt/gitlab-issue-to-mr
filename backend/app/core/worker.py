@@ -126,10 +126,14 @@ class WorkerExecutor:
 
             # Create initial MR (draft) before running worker for P0.1 planning support
             # This allows the worker to update MR description during execution
-            mr_iid = None
-            mr_web_url = None
-            try:
-                initial_mr_desc = f"""## 📋 等待 AI 规划...
+            # For continuation tasks (existing merge_request_iid), use existing MR
+            mr_iid = task.merge_request_iid  # Use existing MR for continuation tasks
+            mr_web_url = task.merge_request_url
+
+            if not mr_iid:
+                # No existing MR - create a new one
+                try:
+                    initial_mr_desc = f"""## 📋 等待 AI 规划...
 
 ### 需求
 {task.user_prompt}
@@ -137,21 +141,21 @@ class WorkerExecutor:
 ---
 *AI 正在分析需求并制定实现计划...*"""
 
-                mr_response = self.gitlab.gl.projects.get(task.project_id).mergerequests.create({
-                    "source_branch": task.branch_name,
-                    "target_branch": target_branch,
-                    "title": mr_title,
-                    "description": initial_mr_desc,
-                    "draft": True,  # Create as draft MR
-                })
-                mr_iid = mr_response.iid
-                mr_web_url = mr_response.web_url
-                task.merge_request_iid = mr_iid
-                task.merge_request_url = mr_web_url
-                await db.commit()
-                logger.info(f"[Task {task_id}] Created initial draft MR !{mr_iid}")
-            except Exception as e:
-                logger.warning(f"[Task {task_id}] Failed to create initial MR: {e}, continuing without MR")
+                    mr_response = self.gitlab.gl.projects.get(task.project_id).mergerequests.create({
+                        "source_branch": task.branch_name,
+                        "target_branch": target_branch,
+                        "title": mr_title,
+                        "description": initial_mr_desc,
+                        "draft": True,  # Create as draft MR
+                    })
+                    mr_iid = mr_response.iid
+                    mr_web_url = mr_response.web_url
+                    task.merge_request_iid = mr_iid
+                    task.merge_request_url = mr_web_url
+                    await db.commit()
+                    logger.info(f"[Task {task_id}] Created initial draft MR !{mr_iid}")
+                except Exception as e:
+                    logger.warning(f"[Task {task_id}] Failed to create initial MR: {e}, continuing without MR")
 
             environment = {
                 "GITLAB_URL": settings.gitlab_url,
@@ -331,13 +335,25 @@ class WorkerExecutor:
         Args:
             task: Task object
         """
-        message = "🔄 开始处理请求..."
-        self.gitlab.create_note(
-            task.project_id,
-            task.issue_iid,
-            message,
-        )
-        logger.info(f"Sent start notification for task {task.id}")
+        settings = get_settings()
+        task_url = f"{settings.backend_url}/tasks/{task.id}"
+        message = f"🔄 开始处理请求... [任务 {task.id}]({task_url})"
+
+        # If this is a continuation task (has merge_request_iid), notify MR
+        if task.merge_request_iid:
+            self.gitlab.create_mr_note(
+                task.project_id,
+                task.merge_request_iid,
+                message,
+            )
+            logger.info(f"Sent start notification to MR !{task.merge_request_iid} for task {task.id}")
+        else:
+            self.gitlab.create_note(
+                task.project_id,
+                task.issue_iid,
+                message,
+            )
+            logger.info(f"Sent start notification for task {task.id}")
 
     def _notify_task_completed(self, task: Task, success: bool) -> None:
         """Send notification when task completes.
@@ -346,37 +362,94 @@ class WorkerExecutor:
             task: Task object
             success: Whether the task succeeded
         """
-        if success and task.merge_request_url:
-            # Extract MR IID from URL (e.g., /merge_requests/14 -> !14)
-            mr_iid = None
-            if "/merge_requests/" in task.merge_request_url:
-                try:
-                    mr_iid = task.merge_request_url.split("/merge_requests/")[-1].split("/")[0].split("?")[0]
-                except (IndexError, ValueError):
-                    pass
+        # Determine target: MR or Issue
+        mr_iid = task.merge_request_iid
+        is_continuation = mr_iid is not None
+        settings = get_settings()
+        task_url = f"{settings.backend_url}/tasks/{task.id}"
 
-            if mr_iid:
-                message = f"✅ MR 已创建: !{mr_iid}"
+        if success:
+            if task.merge_request_url:
+                # Extract MR IID from URL if not already set
+                if not mr_iid and "/merge_requests/" in task.merge_request_url:
+                    try:
+                        mr_iid = task.merge_request_url.split("/merge_requests/")[-1].split("/")[0].split("?")[0]
+                    except (IndexError, ValueError):
+                        pass
+
+                if mr_iid:
+                    message = f"✅ 代码已更新到 MR !{mr_iid} [任务 {task.id}]({task_url})"
+                else:
+                    message = f"✅ MR 已更新: [任务 {task.id}]({task_url})"
             else:
-                message = f"✅ MR 已创建: {task.merge_request_url}"
-        elif success:
-            message = "✅ 任务已完成"
+                message = f"✅ 任务已完成 [任务 {task.id}]({task_url})"
         else:
             error_msg = task.error_message[:200] if task.error_message else "未知错误"
             # Double sanitization for messages sent to external systems
             error_msg = sanitize_sensitive_data(error_msg)
-            message = f"❌ 任务失败: {error_msg}"
+            message = f"❌ 任务失败 [任务 {task.id}]({task_url}): {error_msg}"
 
-        self.gitlab.create_note(
-            task.project_id,
-            task.issue_iid,
-            message,
-        )
-        logger.info(f"Sent completion notification for task {task.id}, success={success}")
+        # Send notification to MR for continuation tasks, otherwise to issue
+        if is_continuation and mr_iid:
+            self.gitlab.create_mr_note(task.project_id, mr_iid, message)
+            logger.info(f"Sent completion notification to MR !{mr_iid} for task {task.id}, success={success}")
+
+            # Update MR description with execution progress
+            if success:
+                try:
+                    self._update_mr_description(task, mr_iid)
+                except Exception as e:
+                    logger.warning(f"Failed to update MR description: {e}")
+        else:
+            self.gitlab.create_note(
+                task.project_id,
+                task.issue_iid,
+                message,
+            )
+            logger.info(f"Sent completion notification for task {task.id}, success={success}")
 
         # Send webhook alert if configured
         if not success:
             self._send_failure_alert(task)
+
+    def _update_mr_description(self, task: Task, mr_iid: int) -> None:
+        """Update MR description with execution progress.
+
+        Args:
+            task: Task object
+            mr_iid: MR IID to update
+        """
+        # Get current MR details
+        mr = self.gitlab.get_merge_request(task.project_id, mr_iid)
+        if not mr:
+            logger.warning(f"Could not find MR !{mr_iid} to update description")
+            return
+
+        current_desc = mr.description or ""
+
+        # Parse current description to find execution progress section
+        execution_section = "\n---\n### 执行进度"
+
+        if execution_section in current_desc:
+            # Update existing section - append new progress
+            progress_update = f"\n- [x] 继续修改任务完成 (任务 {task.id})"
+            # Find position after "### 执行进度" and before next "---"
+            idx = current_desc.find(execution_section)
+            # Find next "---" after the section header
+            next_section = current_desc.find("\n---", idx + len(execution_section))
+            if next_section > 0:
+                new_desc = current_desc[:next_section] + progress_update + current_desc[next_section:]
+            else:
+                new_desc = current_desc + progress_update
+        else:
+            # Add new section
+            progress_update = f"{execution_section}\n- [x] 继续修改任务完成 (任务 {task.id})\n"
+            new_desc = current_desc + progress_update
+
+        # Update MR via API
+        mr.description = new_desc
+        mr.save()
+        logger.info(f"Updated MR !{mr_iid} description with task #{task.id} progress")
 
     def _send_failure_alert(self, task: Task) -> None:
         """Send failure alert to webhook URL.

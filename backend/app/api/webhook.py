@@ -189,18 +189,36 @@ async def gitlab_webhook(
     # Get issue and project info from root level
     issue = payload.get("issue", {})
     project = payload.get("project", {})
+    # Get MR info from root level (for MR comments)
+    merge_request = payload.get("merge_request", {})
 
     logger.info(f"Note type: {note_type}, Note ID: {note_id}, Comment: '{comment_body[:50] if comment_body else ''}'")
 
-    # Only handle issue comments
-    if note_type != "Issue":
+    # Handle issue comments
+    if note_type == "Issue":
+        return await _handle_issue_comment(
+            db, project, issue, note_id, comment_body
+        )
+    # Handle MR comments
+    elif note_type == "MergeRequest":
+        return await _handle_mr_comment(
+            db, project, merge_request, note_id, comment_body
+        )
+    else:
         logger.debug(f"Ignoring noteable type: {note_type}")
         return {"status": "ignored", "reason": f"noteable_type {note_type} not supported"}
 
-    if not comment_body:
-        logger.warning("Empty comment body - ignoring")
-        return {"status": "ignored", "reason": "empty comment body"}
+    return {"status": "ignored", "reason": "empty comment body"}
 
+
+async def _handle_issue_comment(
+    db: AsyncSession,
+    project: dict,
+    issue: dict,
+    note_id: int,
+    comment_body: str,
+) -> dict:
+    """Handle comment on a GitLab Issue."""
     # Parse @ai-bot command
     command = parse_ai_bot_command(comment_body)
     if not command:
@@ -214,7 +232,7 @@ async def gitlab_webhook(
     logger.info(f"Project: {project_id}, Issue: {issue_iid}, Note: {note_id}")
 
     if not all([project_id, issue_id, issue_iid, note_id]):
-        logger.error(f"Missing required fields: {payload}")
+        logger.error(f"Missing required fields for issue comment")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Missing required fields in webhook payload",
@@ -426,6 +444,174 @@ async def _handle_generate_command(
     return {
         "status": "success",
         "message": "Task created and queued for execution",
+        "task_id": task.id,
+        "priority": command.priority,
+        "scheduled_at": scheduled_at.isoformat() if scheduled_at else None,
+    }
+
+
+async def _handle_mr_comment(
+    db: AsyncSession,
+    project: dict,
+    merge_request: dict,
+    note_id: int,
+    comment_body: str,
+) -> dict:
+    """Handle comment on a GitLab Merge Request."""
+    # Parse @ai-bot command
+    command = parse_ai_bot_command(comment_body)
+    if not command:
+        logger.info(f"No @ai-bot command found in MR comment: '{comment_body[:50]}'")
+        return {"status": "ignored", "reason": "no @ai-bot command found"}
+
+    # Handle cancel/status commands on MR - redirect to issue
+    if command.command == "cancel":
+        # Try to find associated task via MR
+        project_id = project.get("id")
+        mr_iid = merge_request.get("iid")
+        if project_id and mr_iid:
+            result = await db.execute(
+                select(Task).where(
+                    Task.project_id == project_id,
+                    Task.merge_request_iid == mr_iid,
+                    Task.status == TaskStatus.RUNNING,
+                )
+            )
+            task = result.scalar_one_or_none()
+            if task:
+                return await _handle_cancel_command(db, project_id, task.issue_iid)
+        return {"status": "ignored", "reason": "no running task found for this MR"}
+
+    if command.command == "status":
+        project_id = project.get("id")
+        mr_iid = merge_request.get("iid")
+        if project_id and mr_iid:
+            result = await db.execute(
+                select(Task).where(
+                    Task.project_id == project_id,
+                    Task.merge_request_iid == mr_iid,
+                ).order_by(Task.created_at.desc()).limit(1)
+            )
+            task = result.scalar_one_or_none()
+            if task:
+                return await _handle_status_command(db, project_id, task.issue_iid)
+        return {"status": "ignored", "reason": "no task found for this MR"}
+
+    # Handle generate command - continue on existing branch
+    project_id = project.get("id")
+    mr_iid = merge_request.get("iid")
+
+    logger.info(f"Project: {project_id}, MR: {mr_iid}, Note: {note_id}")
+
+    if not all([project_id, mr_iid, note_id]):
+        logger.error(f"Missing required fields for MR comment")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing required fields in webhook payload",
+        )
+
+    # Check for duplicate (idempotency)
+    result = await db.execute(
+        select(Task).where(Task.note_id == note_id)
+    )
+    existing_task = result.scalar_one_or_none()
+
+    if existing_task:
+        logger.info(f"Task for note {note_id} already exists, skipping")
+        return {"status": "duplicate", "message": "Task already processed"}
+
+    # Find the associated task via merge_request_iid
+    result = await db.execute(
+        select(Task).where(
+            Task.project_id == project_id,
+            Task.merge_request_iid == mr_iid,
+            Task.status.in_([TaskStatus.COMPLETED, TaskStatus.FAILED]),
+        ).order_by(Task.created_at.desc()).limit(1)
+    )
+    parent_task = result.scalar_one_or_none()
+
+    if not parent_task:
+        # Try to find any task for this MR (might be still running)
+        result = await db.execute(
+            select(Task).where(
+                Task.project_id == project_id,
+                Task.merge_request_iid == mr_iid,
+            ).order_by(Task.created_at.desc()).limit(1)
+        )
+        parent_task = result.scalar_one_or_none()
+
+        if parent_task:
+            return {
+                "status": "ignored",
+                "reason": f"Task {parent_task.id} is still {parent_task.status.value}, please wait for it to complete",
+            }
+
+        return {
+            "status": "ignored",
+            "reason": f"No completed task found for MR !{mr_iid}. Please create a task from the Issue first.",
+        }
+
+    # Get MR details
+    gitlab = get_gitlab_client()
+    mr_details = gitlab.get_mr_by_iid(project_id, mr_iid)
+
+    if not mr_details:
+        return {"status": "error", "message": "Failed to get MR details"}
+
+    # Check if MR is open (GitLab uses "opened")
+    mr_state = mr_details.get("state", "")
+    if mr_state not in ["open", "opened"]:
+        return {"status": "ignored", "reason": f"MR !{mr_iid} is not open (state: {mr_state})"}
+
+    # Build prompt - use MR context
+    user_prompt = command.args
+    mr_title = mr_details.get("title", "")
+
+    if is_generic_prompt(user_prompt):
+        user_prompt = f"继续修改 MR !{mr_iid}: {mr_title}\n\n请继续在当前分支上进行修改。"
+    else:
+        user_prompt = f"MR !{mr_iid} 继续修改: {mr_title}\n\n用户补充要求: {user_prompt}"
+
+    # Calculate scheduled_at if delay is specified
+    scheduled_at = None
+    if command.delay_seconds:
+        scheduled_at = datetime.utcnow() + timedelta(seconds=command.delay_seconds)
+
+    # Create new task - continue on existing branch
+    task = Task(
+        project_id=project_id,
+        issue_id=parent_task.issue_id,
+        issue_iid=parent_task.issue_iid,
+        note_id=note_id,
+        user_prompt=user_prompt,
+        branch_name=parent_task.branch_name,  # Continue on existing branch
+        priority=command.priority,
+        scheduled_at=scheduled_at,
+        target_branch=parent_task.target_branch,
+        merge_request_iid=mr_iid,  # Link to existing MR
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+
+    logger.info(
+        f"Created task {task.id} for MR {project_id}/!{mr_iid}, "
+        f"note {note_id}, continuing on branch {parent_task.branch_name}"
+    )
+
+    # Send notification to MR comment
+    try:
+        gitlab = get_gitlab_client()
+        task_url = f"{settings.backend_url}/tasks/{task.id}"
+        notify_msg = f"🔄 开始处理请求... [任务 {task.id}]({task_url})"
+        gitlab.create_mr_note(project_id, mr_iid, notify_msg)
+        logger.info(f"Sent start notification to MR !{mr_iid}")
+    except Exception as e:
+        logger.warning(f"Failed to send MR notification: {e}")
+
+    return {
+        "status": "success",
+        "message": "Task created and queued for execution (continuing on existing branch)",
         "task_id": task.id,
         "priority": command.priority,
         "scheduled_at": scheduled_at.isoformat() if scheduled_at else None,

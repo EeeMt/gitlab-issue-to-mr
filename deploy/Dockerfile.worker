@@ -25,7 +25,7 @@ RUN pip install --no-cache-dir anthropic requests anthropic-cli
 RUN npm install -g @anthropic-ai/claude-cli 2>/dev/null || echo "Claude CLI via npm failed, using pip"
 
 # Copy and set entrypoint
-COPY entrypoint.sh /entrypoint.sh
+COPY deploy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

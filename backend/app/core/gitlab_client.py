@@ -132,6 +132,29 @@ class GitLabClient:
             logger.warning(f"MR not found: {project_id}/{mr_iid}")
             return None
 
+    def get_mr_by_iid(self, project_id: int, mr_iid: int) -> Optional[dict]:
+        """Get MR details by IID.
+
+        Args:
+            project_id: GitLab project ID
+            mr_iid: Merge request IID
+
+        Returns:
+            Dict with MR details (source_branch, target_branch, issue_iid, title, state) or None
+        """
+        mr = self.get_merge_request(project_id, mr_iid)
+        if not mr:
+            return None
+
+        return {
+            "source_branch": mr.source_branch,
+            "target_branch": mr.target_branch,
+            "title": mr.title,
+            "state": mr.state,
+            # Get related issue from description or references
+            "issue_iid": getattr(mr, 'issue_iid', None),
+        }
+
     def get_merge_request_stats(
         self, project_id: int, mr_iid: int
     ) -> Optional[dict]:
@@ -218,6 +241,29 @@ class GitLabClient:
         })
 
         logger.info(f"Comment created on issue {issue_iid}")
+        return note.__dict__["_attrs"]
+
+    def create_mr_note(
+        self, project_id: int, mr_iid: int, body: str
+    ) -> dict:
+        """Create a note (comment) on a merge request.
+
+        Args:
+            project_id: GitLab project ID
+            mr_iid: Merge request IID Comment body
+
+        Returns:
+            Note
+            body: object dict
+        """
+        project = self.get_project(project_id)
+        mr = project.mergerequests.get(mr_iid)
+
+        note = mr.notes.create({
+            "body": body,
+        })
+
+        logger.info(f"Comment created on MR !{mr_iid}")
         return note.__dict__["_attrs"]
 
     def update_note(
