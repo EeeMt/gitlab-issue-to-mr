@@ -29,10 +29,13 @@
                   <span v-else>-</span>
                 </n-descriptions-item>
                 <n-descriptions-item label="Changes">
-                  <span v-if="task.additions || task.deletions">
-                    <span style="color: #18a053">+{{ task.additions }}</span>
-                    <span style="color: #db3b21; margin-left: 8px">-{{ task.deletions }}</span>
-                    <span style="color: #888; margin-left: 8px">({{ task.total_changes }} total)</span>
+                  <span v-if="task.additions !== undefined || task.deletions !== undefined">
+                    <span v-if="task.additions || task.deletions">
+                      <span style="color: #18a053">+{{ task.additions || 0 }}</span>
+                      <span style="color: #db3b21; margin-left: 8px">-{{ task.deletions || 0 }}</span>
+                      <span style="color: #888; margin-left: 8px">({{ task.total_changes || 0 }} total)</span>
+                    </span>
+                    <span v-else>-</span>
                   </span>
                   <span v-else>-</span>
                 </n-descriptions-item>

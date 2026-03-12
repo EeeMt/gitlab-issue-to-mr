@@ -79,12 +79,28 @@ class MockGitLabHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         """Handle GET requests."""
-        if "/api/v4/projects/" in self.path and "/merge_requests" in self.path:
-            # Return empty MR list
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps([]).encode())
+        import re
+        if "/api/v4/projects/" in self.path and "/merge_requests/" in self.path:
+            # Get specific MR by IID: /api/v4/projects/:id/merge_requests/:iid
+            match = re.match(r"/api/v4/projects/(\d+)/merge_requests/(\d+)", self.path)
+            if match:
+                project_id = int(match.group(1))
+                mr_iid = int(match.group(2))
+                mr = MockGitLabHandler.merge_requests.get(mr_iid)
+                if mr:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps(mr).encode())
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+            else:
+                # Return empty MR list
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps([]).encode())
         elif "/api/v4/version" in self.path:
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

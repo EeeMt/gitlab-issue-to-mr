@@ -144,10 +144,11 @@ const desktopColumns: DataTableColumns<Task> = [
     key: 'changes',
     width: 120,
     render: (row) => {
+      if (row.additions === undefined && row.deletions === undefined) return '-'
       if (!row.additions && !row.deletions) return '-'
       return h('span', { style: 'display: flex; align-items: center; gap: 4px;' }, [
-        h('span', { style: 'color: #18a053' }, '+' + row.additions),
-        h('span', { style: 'color: #db3b21; margin-left: 8px' }, '-' + row.deletions)
+        h('span', { style: 'color: #18a053' }, '+' + (row.additions || 0)),
+        h('span', { style: 'color: #db3b21; margin-left: 8px' }, '-' + (row.deletions || 0))
       ])
     }
   },

@@ -167,57 +167,39 @@ class GitLabClient:
         Returns:
             Dict with additions, deletions, and total changes, or None
         """
-        project = self.get_project(project_id)
-
         try:
-            # Get the merge request with changes
-            mr = project.mergerequests.get(mr_iid, include_diverged_commits_count=True)
-
-            # Try to get stats directly from MR object (GitLab 15.2+)
-            logger.info(f"MR {mr_iid} has changes_count: {hasattr(mr, 'changes_count')}")
-            if hasattr(mr, 'changes_count') and mr.changes_count:
-                # Format: "1" (simple count) or "10 files, +100 -50"
-                changes_count = mr.changes_count
-                logger.info(f"MR {mr_iid} changes_count: {changes_count}")
-                # Parse additions/deletions from changes_count string
-                # Example: "10 files, +100 -50"
-                import re
-                match = re.search(r'\+(\d+)\s+-(\d+)', changes_count)
-                if match:
-                    return {
-                        "additions": int(match.group(1)),
-                        "deletions": int(match.group(2)),
-                        "total": int(match.group(1)) + int(match.group(2))
-                    }
-                # If changes_count is just a number (e.g., "1"), we need to get details from diff
-                logger.info(f"MR {mr_iid} changes_count is simple number, getting diff for details")
-
-            # Fallback: calculate from diff
             additions = 0
             deletions = 0
 
-            try:
-                # Get MR changes
-                mr_with_changes = project.mergerequests.get(mr_iid, lazy=False)
-                if hasattr(mr_with_changes, 'changes') and mr_with_changes.changes:
-                    for change in mr_with_changes.changes.get('changes', []):
-                        diff = change.get('diff', '')
-                        # Count lines starting with + (additions) and - (deletions)
-                        for line in diff.split('\n'):
-                            if line.startswith('+') and not line.startswith('+++'):
-                                additions += 1
-                            elif line.startswith('-') and not line.startswith('---'):
-                                deletions += 1
-            except Exception as e:
-                logger.warning(f"Could not get MR changes from diff: {e}")
+            # Use GitLab API directly via HTTP request
+            import requests
+            url = f"{settings.gitlab_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/changes"
+            response = requests.get(
+                url,
+                headers={"PRIVATE-TOKEN": settings.gitlab_bot_token},
+                timeout=30
+            )
+            response.raise_for_status()
+            data = response.json()
 
+            changes_list = data.get('changes', [])
+            for change in changes_list:
+                diff = change.get('diff', '')
+                # Count lines starting with + (additions) and - (deletions)
+                for line in diff.split('\n'):
+                    if line.startswith('+') and not line.startswith('+++'):
+                        additions += 1
+                    elif line.startswith('-') and not line.startswith('---'):
+                        deletions += 1
+
+            logger.info(f"MR {mr_iid} stats: +{additions} -{deletions}")
             return {
                 "additions": additions,
                 "deletions": deletions,
                 "total": additions + deletions
             }
-        except GitlabGetError:
-            logger.warning(f"Failed to get MR stats: {project_id}/{mr_iid}")
+        except Exception as e:
+            logger.warning(f"Failed to get MR stats: {project_id}/{mr_iid}: {e}")
             return None
 
     def create_note(
