@@ -18,14 +18,14 @@ router = APIRouter()
 
 @router.get("/tasks")
 async def list_tasks(
-    status_filter: Optional[str] = None,
+    status: Optional[str] = None,
     project_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
 ):
     """List tasks with optional filtering.
 
     Args:
-        status_filter: Filter by task status
+        status: Filter by task status
         project_id: Filter by project ID
         db: Database session
 
@@ -34,9 +34,9 @@ async def list_tasks(
     """
     query = select(Task).order_by(Task.created_at.desc())
 
-    if status_filter:
+    if status:
         try:
-            task_status = TaskStatus(status_filter)
+            task_status = TaskStatus(status)
             query = query.where(Task.status == task_status)
         except ValueError:
             pass
