@@ -37,7 +37,7 @@ import { ref, onMounted, onBeforeUnmount, h, watch, computed } from 'vue'
 import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, useMessage, DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useWindowSize } from '@vueuse/core'
-import { getTasks, type Task, type TaskStats } from '../api'
+import { getTasks, type Task } from '../api'
 
 const router = useRouter()
 const message = useMessage()
@@ -46,7 +46,6 @@ const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
 const tasks = ref<Task[]>([])
-const taskStats = ref<Record<number, TaskStats>>({})
 const loading = ref(false)
 const statusFilter = ref<string | null>(null)
 let pollTimer: number | null = null
@@ -142,14 +141,13 @@ const desktopColumns: DataTableColumns<Task> = [
   },
   {
     title: 'Changes',
-    key: 'stats',
-    width: 100,
+    key: 'changes',
+    width: 120,
     render: (row) => {
-      const stats = taskStats.value[row.id]
-      if (!stats || stats.total === 0) return '-'
+      if (!row.additions && !row.deletions) return '-'
       return h('span', { style: 'display: flex; align-items: center; gap: 4px;' }, [
-        h('span', { style: 'color: #18a053' }, '+' + stats.additions),
-        h('span', { style: 'color: #db3b21; margin-left: 8px' }, '-' + stats.deletions)
+        h('span', { style: 'color: #18a053' }, '+' + row.additions),
+        h('span', { style: 'color: #db3b21; margin-left: 8px' }, '-' + row.deletions)
       ])
     }
   },
@@ -178,10 +176,6 @@ async function fetchTasks() {
       params.status = statusFilter.value
     }
     tasks.value = await getTasks(params)
-
-    // Skip stats fetching - too slow for many tasks
-    // Stats can be viewed individually in task details
-    taskStats.value = {}
   } catch (error) {
     message.error('Failed to fetch tasks')
   } finally {

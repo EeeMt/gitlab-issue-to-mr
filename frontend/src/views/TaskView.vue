@@ -28,6 +28,14 @@
                   <a v-if="task.merge_request_url" :href="task.merge_request_url" target="_blank">{{ task.merge_request_url }}</a>
                   <span v-else>-</span>
                 </n-descriptions-item>
+                <n-descriptions-item label="Changes">
+                  <span v-if="task.additions || task.deletions">
+                    <span style="color: #18a053">+{{ task.additions }}</span>
+                    <span style="color: #db3b21; margin-left: 8px">-{{ task.deletions }}</span>
+                    <span style="color: #888; margin-left: 8px">({{ task.total_changes }} total)</span>
+                  </span>
+                  <span v-else>-</span>
+                </n-descriptions-item>
                 <n-descriptions-item label="Created">{{ formatDate(task.created_at) }}</n-descriptions-item>
                 <n-descriptions-item label="Started">{{ task.started_at ? formatDate(task.started_at) : '-' }}</n-descriptions-item>
                 <n-descriptions-item label="Completed">{{ task.completed_at ? formatDate(task.completed_at) : '-' }}</n-descriptions-item>
