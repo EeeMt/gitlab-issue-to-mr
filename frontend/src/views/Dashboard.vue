@@ -25,7 +25,7 @@
           :row-key="(row: Task) => row.id"
           :pagination="pagination"
           :bordered="false"
-          :scroll-x="800"
+          :scroll-x="isMobile ? undefined : 900"
         />
       </n-card>
     </n-space>
@@ -77,23 +77,26 @@ const mobileColumns: DataTableColumns<Task> = [
   {
     title: 'ID',
     key: 'id',
-    width: 50
+    width: 45
   },
   {
-    title: 'Issue',
-    key: 'issue_iid',
-    width: 60,
-    render: (row) => `!${row.issue_iid}`
+    title: 'Task',
+    key: 'task_info',
+    render: (row) => h('div', { style: 'line-height: 1.4' }, [
+      h('div', { style: 'font-size: 12px; color: #888' }, `P${row.project_id} · !${row.issue_iid}`),
+      h('div', { style: 'font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px' }, row.branch_name || '-')
+    ])
   },
   {
     title: 'Status',
     key: 'status',
-    width: 80,
+    width: 85,
     render: (row) => h(NTag, { type: statusColors[row.status], size: 'small' }, () => row.status)
   },
   {
-    title: 'Actions',
+    title: '',
     key: 'actions',
+    width: 52,
     render: (row) => h(NButton, { size: 'tiny', onClick: () => router.push({ name: 'TaskView', params: { id: row.id } }) }, () => 'View')
   }
 ]

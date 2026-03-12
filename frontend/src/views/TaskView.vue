@@ -1,17 +1,15 @@
 <template>
   <div>
     <n-space vertical :size="16">
-      <n-space align="center" justify="space-between">
+      <div class="task-header">
         <h2>Task #{{ taskId }}</h2>
-        <n-space>
-          <n-button @click="refreshTask" :loading="loading">
-            Refresh
-          </n-button>
-        </n-space>
-      </n-space>
+        <n-button @click="refreshTask" :loading="loading">
+          Refresh
+        </n-button>
+      </div>
 
       <n-spin :show="loading">
-        <n-grid :cols="2" :x-gap="16" :y-gap="16">
+        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
           <n-gi>
             <n-card title="Task Details">
               <n-descriptions :column="1" label-placement="left" v-if="task">
@@ -115,10 +113,13 @@
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { NButton, NSpace, NCard, NDescriptions, NDescriptionsItem, NTag, NGrid, NGi, NSpin, NAlert, NText, useMessage } from 'naive-ui'
+import { useWindowSize } from '@vueuse/core'
 import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, type Task } from '../api'
 
 const route = useRoute()
 const message = useMessage()
+const { width } = useWindowSize()
+const isMobile = computed(() => width.value < 768)
 
 const taskId = computed(() => Number(route.params.id))
 
@@ -276,5 +277,16 @@ onBeforeUnmount(() => {
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-all;
+}
+.task-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.task-header h2 {
+  margin: 0;
+  font-size: 18px;
 }
 </style>
