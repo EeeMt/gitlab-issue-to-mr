@@ -29,7 +29,7 @@
         </n-layout-sider>
 
         <!-- Mobile: collapsible drawer -->
-        <n-drawer v-else v-model:show="showDrawer" :width="280" placement="left">
+        <n-drawer v-if="isMobile" v-model:show="showDrawer" :width="280" placement="left">
           <n-drawer-content title="GitMR Admin">
             <div class="logo-mobile">
               <n-icon size="24" :component="RocketOutline" />
@@ -43,9 +43,9 @@
           </n-drawer-content>
         </n-drawer>
 
-        <!-- Mobile menu toggle button -->
-        <n-layout v-if="isMobile">
-          <div class="mobile-header">
+        <n-layout :native-scrollbar="false">
+          <!-- Mobile top bar (stacks vertically inside content layout) -->
+          <div v-if="isMobile" class="mobile-header">
             <n-button quaternary @click="showDrawer = true">
               <template #icon>
                 <n-icon :component="MenuOutline" />
@@ -53,10 +53,9 @@
             </n-button>
             <n-text strong>GitMR Admin</n-text>
           </div>
-        </n-layout>
-
-        <n-layout content-style="padding: 16px;" :native-scrollbar="false">
-          <router-view />
+          <n-layout content-style="padding: 16px;" :native-scrollbar="false">
+            <router-view />
+          </n-layout>
         </n-layout>
       </n-layout>
     </n-message-provider>
