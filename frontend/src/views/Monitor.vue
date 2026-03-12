@@ -3,13 +3,14 @@
     <n-space vertical :size="16">
       <h2>System Monitor</h2>
 
-      <n-row :gutter="16">
-        <n-col :span="6">
+      <!-- Merge both stat rows; xs=12 → 2-per-row on mobile, md=6 → 4-per-row on desktop -->
+      <n-row :gutter="[16, 16]">
+        <n-col :xs="12" :md="6">
           <n-card>
             <n-statistic label="Total Tasks" :value="stats.total" />
           </n-card>
         </n-col>
-        <n-col :span="6">
+        <n-col :xs="12" :md="6">
           <n-card>
             <n-statistic label="Running" :value="stats.running">
               <template #prefix>
@@ -18,12 +19,12 @@
             </n-statistic>
           </n-card>
         </n-col>
-        <n-col :span="6">
+        <n-col :xs="12" :md="6">
           <n-card>
             <n-statistic label="Pending/Queued" :value="stats.pending + stats.queued" />
           </n-card>
         </n-col>
-        <n-col :span="6">
+        <n-col :xs="12" :md="6">
           <n-card>
             <n-statistic label="Completed" :value="stats.completed">
               <template #prefix>
@@ -32,10 +33,7 @@
             </n-statistic>
           </n-card>
         </n-col>
-      </n-row>
-
-      <n-row :gutter="16">
-        <n-col :span="6">
+        <n-col :xs="12" :md="6">
           <n-card>
             <n-statistic label="Failed" :value="stats.failed">
               <template #prefix>
@@ -44,7 +42,7 @@
             </n-statistic>
           </n-card>
         </n-col>
-        <n-col :span="6">
+        <n-col :xs="12" :md="6">
           <n-card>
             <n-statistic label="Cancelled" :value="stats.cancelled" />
           </n-card>
@@ -56,10 +54,11 @@
           <n-button @click="refresh" :loading="loading">Refresh</n-button>
         </template>
         <n-data-table
-          :columns="columns"
+          :columns="isMobile ? mobileColumns : columns"
           :data="containers"
           :loading="loading"
           :bordered="false"
+          :scroll-x="isMobile ? undefined : 660"
         />
       </n-card>
     </n-space>
@@ -67,11 +66,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, h } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, h } from 'vue'
 import { NCard, NStatistic, NRow, NCol, NButton, NDataTable, NTag, useMessage, DataTableColumns } from 'naive-ui'
+import { useWindowSize } from '@vueuse/core'
 import { getStats, getContainers, type Container, type Stats } from '../api'
 
 const message = useMessage()
+const { width } = useWindowSize()
+const isMobile = computed(() => width.value < 768)
 
 const stats = ref<Stats>({
   total: 0,
@@ -120,6 +122,25 @@ const columns: DataTableColumns<Container> = [
     key: 'issue_iid',
     width: 80,
     render: (row) => row.issue_iid ? `!${row.issue_iid}` : '-'
+  }
+]
+
+const mobileColumns: DataTableColumns<Container> = [
+  {
+    title: 'Name',
+    key: 'name',
+    ellipsis: { tooltip: true }
+  },
+  {
+    title: 'Status',
+    key: 'status',
+    width: 85,
+    render: (row) => h(NTag, { type: row.status === 'running' ? 'warning' : 'default', size: 'small' }, () => row.status)
+  },
+  {
+    title: 'Task',
+    key: 'task_id',
+    width: 55
   }
 ]
 
