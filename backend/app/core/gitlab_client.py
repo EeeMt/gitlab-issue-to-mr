@@ -151,8 +151,9 @@ class GitLabClient:
             mr = project.mergerequests.get(mr_iid, include_diverged_commits_count=True)
 
             # Try to get stats directly from MR object (GitLab 15.2+)
+            logger.info(f"MR {mr_iid} has changes_count: {hasattr(mr, 'changes_count')}")
             if hasattr(mr, 'changes_count') and mr.changes_count:
-                # Format: "10 files" or "10 files, +100 -50"
+                # Format: "1" (simple count) or "10 files, +100 -50"
                 changes_count = mr.changes_count
                 logger.info(f"MR {mr_iid} changes_count: {changes_count}")
                 # Parse additions/deletions from changes_count string
@@ -165,6 +166,8 @@ class GitLabClient:
                         "deletions": int(match.group(2)),
                         "total": int(match.group(1)) + int(match.group(2))
                     }
+                # If changes_count is just a number (e.g., "1"), we need to get details from diff
+                logger.info(f"MR {mr_iid} changes_count is simple number, getting diff for details")
 
             # Fallback: calculate from diff
             additions = 0

@@ -224,9 +224,11 @@ class WorkerExecutor:
                 # Get MR change stats after MR is created
                 if task.merge_request_iid:
                     try:
+                        logger.info(f"[Task {task_id}] Getting MR stats for MR !{task.merge_request_iid}")
                         stats = self.gitlab.get_merge_request_stats(
                             task.project_id, task.merge_request_iid
                         )
+                        logger.info(f"[Task {task_id}] MR stats result: {stats}")
                         if stats:
                             task.additions = stats.get("additions", 0)
                             task.deletions = stats.get("deletions", 0)
@@ -234,6 +236,8 @@ class WorkerExecutor:
                             logger.info(
                                 f"[Task {task_id}] MR stats: +{task.additions} -{task.deletions} ({task.total_changes} total)"
                             )
+                        else:
+                            logger.warning(f"[Task {task_id}] MR stats returned None")
                     except Exception as e:
                         logger.warning(f"[Task {task_id}] Failed to get MR stats: {e}")
 
