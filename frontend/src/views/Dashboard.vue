@@ -162,6 +162,12 @@ const desktopColumns: DataTableColumns<Task> = [
     render: (row) => new Date(row.created_at).toLocaleString()
   },
   {
+    title: 'Scheduled',
+    key: 'scheduled_at',
+    width: 160,
+    render: (row) => row.scheduled_at ? new Date(row.scheduled_at).toLocaleString() : '-'
+  },
+  {
     title: 'Actions',
     key: 'actions',
     width: 100,

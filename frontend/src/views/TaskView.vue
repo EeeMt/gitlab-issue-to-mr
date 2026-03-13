@@ -38,6 +38,7 @@
                   <span v-else>-</span>
                 </n-descriptions-item>
                 <n-descriptions-item label="Created">{{ formatDate(task.created_at) }}</n-descriptions-item>
+                <n-descriptions-item label="Scheduled">{{ task.scheduled_at ? formatDate(task.scheduled_at) : '-' }}</n-descriptions-item>
                 <n-descriptions-item label="Started">{{ task.started_at ? formatDate(task.started_at) : '-' }}</n-descriptions-item>
                 <n-descriptions-item label="Completed">{{ task.completed_at ? formatDate(task.completed_at) : '-' }}</n-descriptions-item>
               </n-descriptions>
