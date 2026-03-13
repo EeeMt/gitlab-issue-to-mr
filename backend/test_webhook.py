@@ -349,6 +349,183 @@ def test_delay_calculation():
     return failed == 0
 
 
+def test_scheduled_datetime_parsing():
+    """Test scheduled datetime parsing with human-readable formats."""
+    print("\n" + "=" * 60)
+    print("Testing Scheduled Datetime Parsing")
+    print("=" * 60)
+
+    from app.core.parser import parse_scheduled_datetime
+
+    test_cases = [
+        # 24-hour format
+        ("14:30", True),           # Today at 14:30
+        ("9:00", True),            # Today at 09:00
+        ("23:59", True),           # Today at 23:59
+
+        # 12-hour format
+        ("3pm", True),             # Today at 15:00
+        ("3:30pm", True),          # Today at 15:30
+        ("12pm", True),            # Today at 12:00
+        ("12am", True),            # Today at 00:00
+        ("9am", True),              # Today at 09:00
+
+        # Tomorrow
+        ("tomorrow 14:30", True),  # Tomorrow at 14:30
+        ("tomorrow 3pm", True),     # Tomorrow at 15:00
+        ("tomorrow 9am", True),    # Tomorrow at 09:00
+
+        # Weekday
+        ("mon 9am", True),         # Next Monday at 09:00
+        ("tue 14:30", True),       # Next Tuesday at 14:30
+        ("wed 3pm", True),         # Next Wednesday at 15:00
+        ("thu 9am", True),         # Next Thursday at 09:00
+        ("fri 14:30", True),       # Next Friday at 14:30
+        ("sat 3pm", True),         # Next Saturday at 15:00
+        ("sun 9am", True),         # Next Sunday at 09:00
+        ("monday 14:30", True),    # Next Monday at 14:30
+        ("sunday 9am", True),      # Next Sunday at 09:00
+
+        # Invalid inputs
+        ("", False),
+        ("abc", False),
+        ("25:00", False),          # Invalid hour
+        ("14:60", False),          # Invalid minute
+    ]
+
+    passed = 0
+    failed = 0
+
+    for time_str, should_pass in test_cases:
+        result = parse_scheduled_datetime(time_str)
+        if should_pass:
+            if result is not None:
+                print(f"✅ PASS: '{time_str}' -> {result}")
+                passed += 1
+            else:
+                print(f"❌ FAIL: '{time_str}' -> None (expected datetime)")
+                failed += 1
+        else:
+            if result is None:
+                print(f"✅ PASS: '{time_str}' -> None (expected)")
+                passed += 1
+            else:
+                print(f"❌ FAIL: '{time_str}' -> {result} (expected: None)")
+                failed += 1
+
+    print(f"\nScheduled Datetime Parsing: {passed} passed, {failed} failed")
+    return failed == 0
+
+
+def test_scheduled_datetime_integration():
+    """Test full command parsing with at= parameter."""
+    print("\n" + "=" * 60)
+    print("Testing Scheduled Datetime in Command Parsing")
+    print("=" * 60)
+
+    from app.core.parser import parse_ai_bot_command
+
+    test_cases = [
+        # Simple at= cases
+        {
+            "name": "at=14:30",
+            "input": "@ai-bot at=14:30 fix the bug",
+            "expect_scheduled": True,
+            "expect_delay": False,
+        },
+        {
+            "name": "at=3pm",
+            "input": "@ai-bot at=3pm fix the bug",
+            "expect_scheduled": True,
+            "expect_delay": False,
+        },
+        {
+            "name": "at=tomorrow 14:30",
+            "input": "@ai-bot at=tomorrow 14:30 fix the bug",
+            "expect_scheduled": True,
+            "expect_delay": False,
+        },
+        {
+            "name": "at=mon 9am",
+            "input": "@ai-bot at=mon 9am fix the bug",
+            "expect_scheduled": True,
+            "expect_delay": False,
+        },
+        # Combined with other params
+        {
+            "name": "priority + at",
+            "input": "@ai-bot priority=high at=14:30 fix the bug",
+            "expect_scheduled": True,
+            "expect_priority": 2,
+        },
+        {
+            "name": "at + priority (at first)",
+            "input": "@ai-bot at=14:30 priority=high fix the bug",
+            "expect_scheduled": True,
+            "expect_priority": 1,  # priority parsed after at
+        },
+        # at takes precedence over delay
+        {
+            "name": "at + delay (at wins)",
+            "input": "@ai-bot at=14:30 delay=5m fix the bug",
+            "expect_scheduled": True,
+            "expect_delay": False,
+        },
+        # Just delay
+        {
+            "name": "delay=5m",
+            "input": "@ai-bot delay=5m fix the bug",
+            "expect_scheduled": False,
+            "expect_delay": True,
+            "expect_delay_seconds": 300,
+        },
+    ]
+
+    passed = 0
+    failed = 0
+
+    for tc in test_cases:
+        cmd = parse_ai_bot_command(tc["input"])
+        name = tc["name"]
+
+        if cmd is None:
+            print(f"❌ FAIL: {name} - command not parsed")
+            failed += 1
+            continue
+
+        # Check scheduled_datetime
+        has_scheduled = cmd.scheduled_datetime is not None
+        if has_scheduled != tc.get("expect_scheduled", False):
+            print(f"❌ FAIL: {name} - scheduled_datetime: {has_scheduled}, expected: {tc.get('expect_scheduled')}")
+            failed += 1
+        elif tc.get("expect_scheduled"):
+            print(f"✅ PASS: {name} - scheduled_datetime={cmd.scheduled_datetime}")
+            passed += 1
+        else:
+            print(f"✅ PASS: {name} - no scheduled_datetime")
+            passed += 1
+
+        # Check delay_seconds
+        has_delay = cmd.delay_seconds is not None
+        if has_delay != tc.get("expect_delay", False):
+            print(f"❌ FAIL: {name} - delay_seconds: {has_delay}, expected: {tc.get('expect_delay')}")
+            failed += 1
+        elif tc.get("expect_delay") and cmd.delay_seconds != tc.get("expect_delay_seconds"):
+            print(f"❌ FAIL: {name} - delay_seconds: {cmd.delay_seconds}, expected: {tc.get('expect_delay_seconds')}")
+            failed += 1
+
+        # Check priority
+        if "expect_priority" in tc:
+            if cmd.priority != tc["expect_priority"]:
+                print(f"❌ FAIL: {name} - priority: {cmd.priority}, expected: {tc['expect_priority']}")
+                failed += 1
+            else:
+                print(f"✅ PASS: {name} - priority={cmd.priority}")
+
+    print(f"\nScheduled Datetime Integration: {passed} passed, {failed} failed")
+    return failed == 0
+
+
 def main():
     """Run all tests."""
     print("\n" + "=" * 60)
@@ -362,6 +539,8 @@ def main():
     results.append(("Task Status Transitions", test_task_status_transitions()))
     results.append(("Concurrency Control", test_concurrency_control()))
     results.append(("Delay Calculation", test_delay_calculation()))
+    results.append(("Scheduled Datetime Parsing", test_scheduled_datetime_parsing()))
+    results.append(("Scheduled Datetime Integration", test_scheduled_datetime_integration()))
 
     print("\n" + "=" * 60)
     print("Test Summary")

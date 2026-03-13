@@ -114,7 +114,7 @@ def parse_scheduled_datetime(time_str: str) -> Optional[datetime]:
         "sun": 6, "sunday": 6,
     }
 
-    weekday_match = re.match(r"(mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s*(.*)$", time_str)
+    weekday_match = re.match(r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)\s*(.*)$", time_str)
     if weekday_match:
         weekday_name = weekday_match.group(1)
         time_str = weekday_match.group(2).strip()
