@@ -39,6 +39,7 @@ GITLAB_URL = os.getenv("GITLAB_URL", "http://192.168.50.129:8080")
 GITLAB_TOKEN = os.getenv("GITLAB_BOT_TOKEN", "")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 WEBHOOK_URL = f"{BACKEND_URL}/api/webhook/gitlab"
+WEBHOOK_SECRET = os.getenv("GITLAB_WEBHOOK_SECRET", "test_webhook_secret")
 
 TEST_PROJECT_ID = 1  # root/gimr_test
 TEST_PROJECT_NAME = "gimr_test"
@@ -93,9 +94,38 @@ def add_issue_comment(issue_iid: int, body: str) -> dict:
     return comment
 
 
-def trigger_webhook(payload: dict) -> requests.Response:
-    """Trigger the webhook with payload."""
-    headers = {"Content-Type": "application/json"}
+def trigger_webhook(note_id: int, comment_body: str, issue_iid: int, issue_id: int, project_id: int) -> requests.Response:
+    """Trigger the webhook with GitLab note event payload."""
+    payload = {
+        "object_kind": "note",
+        "event_type": "note",
+        "project": {
+            "id": project_id,
+            "name": TEST_PROJECT_NAME,
+            "path_with_namespace": TEST_PROJECT_NAME,
+            "web_url": f"{GITLAB_URL}/{TEST_PROJECT_NAME}"
+        },
+        "issue": {
+            "id": issue_id,
+            "iid": issue_iid,
+            "title": "Test Issue",
+            "web_url": f"{GITLAB_URL}/{TEST_PROJECT_NAME}/-/issues/{issue_iid}"
+        },
+        "note": {
+            "id": note_id,
+            "body": comment_body,
+            "noteable_type": "Issue"
+        },
+        "user": {
+            "id": 1,
+            "username": "root",
+            "name": "Administrator"
+        }
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "X-Gitlab-Token": WEBHOOK_SECRET
+    }
     response = requests.post(WEBHOOK_URL, json=payload, headers=headers)
     logger.info(f"Webhook response: {response.status_code}")
     return response
@@ -223,25 +253,8 @@ def test_scheduled_at():
             comment = add_issue_comment(issue_iid, comment_body)
             note_id = comment["id"]
 
-            # Build webhook payload
-            payload = {
-                "object_kind": "note",
-                "object_attributes": {
-                    "id": note_id,
-                    "noteable_type": "Issue",
-                    "body": comment_body,
-                },
-                "project": {"id": TEST_PROJECT_ID},
-                "issue": {
-                    "id": issue["id"],
-                    "iid": issue_iid,
-                    "title": issue["title"],
-                    "description": issue.get("description", ""),
-                }
-            }
-
             # Trigger webhook
-            response = trigger_webhook(payload)
+            response = trigger_webhook(note_id, comment_body, issue_iid, issue["id"], TEST_PROJECT_ID)
             if response.status_code not in [200, 201]:
                 logger.error(f"Webhook failed: {response.status_code} - {response.text}")
                 failed += 1
