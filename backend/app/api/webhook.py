@@ -410,9 +410,11 @@ async def _handle_generate_command(
     else:
         logger.warning("Could not fetch issue details, using original prompt")
 
-    # Calculate scheduled_at if delay is specified
+    # Calculate scheduled_at: scheduled_datetime (absolute) takes precedence over delay_seconds (relative)
     scheduled_at = None
-    if command.delay_seconds:
+    if command.scheduled_datetime:
+        scheduled_at = command.scheduled_datetime
+    elif command.delay_seconds:
         scheduled_at = datetime.utcnow() + timedelta(seconds=command.delay_seconds)
 
     # Determine target branch
@@ -572,9 +574,11 @@ async def _handle_mr_comment(
     else:
         user_prompt = f"MR !{mr_iid} 继续修改: {mr_title}\n\n用户补充要求: {user_prompt}"
 
-    # Calculate scheduled_at if delay is specified
+    # Calculate scheduled_at: scheduled_datetime (absolute) takes precedence over delay_seconds (relative)
     scheduled_at = None
-    if command.delay_seconds:
+    if command.scheduled_datetime:
+        scheduled_at = command.scheduled_datetime
+    elif command.delay_seconds:
         scheduled_at = datetime.utcnow() + timedelta(seconds=command.delay_seconds)
 
     # Create new task - continue on existing branch
