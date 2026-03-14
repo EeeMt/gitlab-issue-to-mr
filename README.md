@@ -47,6 +47,10 @@ alembic upgrade head
 
 See [GitLab Webhook Setup](GITLAB_WEBHOOK_SETUP.md) for instructions.
 
+### Configure GitLab OIDC Login
+
+See [GitLab OIDC Login Setup](GITLAB_OIDC_SETUP.md) for dashboard login configuration.
+
 ## Development
 
 ### Install Dependencies
