@@ -899,10 +899,22 @@ async def persist_container_logs(task_id: int, container_id: str):
 
 #### 7.6.1 认证：GitLab OIDC 集成
 
-Dashboard 通过 GitLab 18 EE 的 OIDC Provider 实现单点登录，用户无需单独注册账号：
+Dashboard 通过 GitLab OIDC Provider 实现单点登录，用户无需单独注册账号。本系统不单独维护密码，采用：
+
+- **GitLab OIDC** 负责“用户是谁”
+- **本地 session** 负责“浏览器登录态”
+- **GitLab 项目成员关系 + 本地平台角色** 负责“用户能做什么”
+
+设计目标：
+
+- 所有 Dashboard API 默认都需要登录
+- 复用 GitLab 账号，避免本地用户名密码体系
+- 支持多用户访问与任务可见性隔离
+- 为后续用户管理、审计、项目级授权保留扩展空间
 
 ```
-用户访问 Dashboard  →  跳转 GitLab 授权  →  回调获取 ID Token  →  解析用户身份/角色
+用户访问 Dashboard  →  跳转 GitLab OIDC 授权  →  回调获取 code  →  Backend 换 token
+→  校验 ID Token  →  创建/更新本地用户  →  创建 session  →  Set-Cookie
 ```
 
 **GitLab 侧配置 (Admin → Applications)：**
@@ -910,107 +922,244 @@ Dashboard 通过 GitLab 18 EE 的 OIDC Provider 实现单点登录，用户无�
 ```
 Name:           GLMR Bot Dashboard
 Redirect URI:   https://bot.internal.com/api/auth/callback
-Scopes:         openid profile email read_user
+Scopes:         openid profile email
 Confidential:   Yes
 ```
 
-**认证流程 (Authorization Code Flow)：**
+推荐使用 **Authorization Code Flow + state + nonce**。如 GitLab 版本/部署细节限制，可保留 OAuth2 兼容 fallback，但主设计以 OIDC 为准。
+
+**认证流程 (Authorization Code Flow, Backend Session)：**
 
 ```
-┌──────────┐     1. 访问 /dashboard     ┌───────────┐
-│  Browser  │ ──────────────────────────► │  FastAPI   │
-│           │ ◄─── 2. 302 → GitLab ───── │  Backend   │
-│           │                             └───────────┘
-│           │     3. 跳转 GitLab 登录
-│           │ ──────────────────────────► ┌───────────┐
-│           │ ◄─── 4. 用户授权 ────────── │  GitLab   │
-│           │                             │  OIDC     │
-│           │     5. 回调 /auth/callback  └───────────┘
-│           │        携带 code
-│           │ ──────────────────────────► ┌───────────┐
-│           │                             │  FastAPI   │
-│           │                             │  用 code   │
-│           │                             │  换 token  │
-│           │ ◄─── 6. Set-Cookie ──────── │  解析身份  │
-│           │        (JWT session)        └───────────┘
+┌──────────┐     1. 访问受保护页面       ┌───────────┐
+│ Browser  │ ───────────────────────────►│  Backend  │
+│          │ ◄──── 2. 302 /auth/login ── │           │
+│          │                              └─────┬─────┘
+│          │ 3. 跳转 GitLab authorize           │
+│          │ ───────────────────────────────────►│
+│          │ ◄──────── 4. 用户登录/授权 ────────│ GitLab
+│          │                                     │ OIDC
+│          │ 5. /auth/callback?code=...          │
+│          │ ───────────────────────────────────►│
+│          │                              ┌──────▼─────┐
+│          │                              │ Backend    │
+│          │                              │ - 校验state │
+│          │                              │ - 用code换token
+│          │                              │ - 校验id_token
+│          │                              │ - 创建/更新user
+│          │ ◄──── 6. Set-Cookie session ─│ - 创建session
+│          │      302 回前端页面          └────────────┘
 └──────────┘
 ```
 
-**从 ID Token 中提取的用户信息：**
+**从 ID Token / UserInfo 中提取的核心字段：**
 
 ```json
 {
   "sub": "12345",
+  "preferred_username": "zhangsan",
   "name": "张三",
   "preferred_username": "zhangsan",
   "email": "zhangsan@company.com",
-  "groups": ["devops", "backend-team"]
+  "picture": "https://gitlab.example.com/uploads/-/system/user/avatar/1/avatar.png"
 }
 ```
 
-#### 7.6.2 角色与权限模型
+说明：
 
-角色通过 `system_config` 中配置的管理员列表 + GitLab 用户身份自动判定：
+- `sub` 作为 OIDC 主身份标识，必须稳定保存
+- `preferred_username` / `email` / `name` / `picture` 用于本地用户资料同步
+- 不依赖 `groups` claim 作为唯一权限来源；GitLab 组/项目成员关系通过 GitLab API 查询更稳妥
 
-| 角色 | 判定规则 | 权限 |
-|---|---|---|
-| **admin** | `username` 在管理员列表中，或属于指定 GitLab 组 | 查看/管理所有任务，系统配置，用户管理 |
-| **user** | 通过 OIDC 登录的普通用户 | 仅查看/管理自己触发的任务 |
+**Session 设计：**
 
-权限矩阵：
+- 浏览器只持有 `HttpOnly + Secure` Cookie，例如 `gimr_session`
+- 数据库只保存 session token 的 hash，不保存明文
+- session 过期、注销、禁用用户后立即失效
+- API 不向前端暴露长期 access token / refresh token
 
-| 操作 | user | admin |
-|---|---|---|
-| 查看自己的任务列表 | O | O |
-| 查看自己的任务详情/日志 | O | O |
-| 取消/重试自己的任务 | O | O |
-| 查看所有用户的任务 | X | O |
-| 取消/重试他人的任务 | X | O |
-| 立即执行任务 (跳过延迟) | X | O |
-| 系统配置管理 | X | O |
-| 查看系统监控 (vLLM 负载) | O (只读) | O |
-| 用户/管理员管理 | X | O |
+#### 7.6.2 用户、Session 与授权数据模型
 
-数据模型新增 — 用户表：
+新增数据表建议如下：
 
 ```sql
--- 用户表 (OIDC 登录后自动创建)
+-- OIDC 登录后的本地用户表
 CREATE TABLE users (
-    id              SERIAL PRIMARY KEY,
-    gitlab_user_id  INTEGER NOT NULL UNIQUE,  -- GitLab 用户 ID (OIDC sub)
-    username        TEXT NOT NULL UNIQUE,      -- GitLab 用户名
-    display_name    TEXT,                      -- 显示名称
-    email           TEXT,
-    avatar_url      TEXT,
-    role            TEXT NOT NULL DEFAULT 'user',  -- user / admin
-    last_login_at   TIMESTAMP WITH TIME ZONE,
-    created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    id                  SERIAL PRIMARY KEY,
+    oidc_sub            TEXT NOT NULL UNIQUE,      -- OIDC sub
+    gitlab_user_id      INTEGER NOT NULL UNIQUE,   -- GitLab 用户 ID
+    username            TEXT NOT NULL UNIQUE,
+    display_name        TEXT,
+    email               TEXT,
+    avatar_url          TEXT,
+    platform_role       TEXT NOT NULL DEFAULT 'platform_user',
+                                                -- platform_admin / platform_user / disabled
+    state               TEXT NOT NULL DEFAULT 'active',
+                                                -- active / disabled
+    last_login_at       TIMESTAMP WITH TIME ZONE,
+    created_at          TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at          TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 浏览器会话表（仅保存 token hash）
+CREATE TABLE user_sessions (
+    id                  UUID PRIMARY KEY,
+    user_id             INTEGER NOT NULL REFERENCES users(id),
+    session_token_hash  TEXT NOT NULL UNIQUE,
+    csrf_token_hash     TEXT,
+    expires_at          TIMESTAMP WITH TIME ZONE NOT NULL,
+    last_seen_at        TIMESTAMP WITH TIME ZONE,
+    ip_address          TEXT,
+    user_agent          TEXT,
+    revoked_at          TIMESTAMP WITH TIME ZONE,
+    created_at          TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- GitLab 项目权限缓存，避免每次请求都查 GitLab API
+CREATE TABLE user_project_access_cache (
+    user_id             INTEGER NOT NULL REFERENCES users(id),
+    project_id          INTEGER NOT NULL,
+    gitlab_access_level INTEGER NOT NULL,         -- 10/20/30/40/50
+    checked_at          TIMESTAMP WITH TIME ZONE NOT NULL,
+    expires_at          TIMESTAMP WITH TIME ZONE NOT NULL,
+    PRIMARY KEY (user_id, project_id)
+);
+
+-- 认证与授权审计日志（推荐）
+CREATE TABLE auth_audit_logs (
+    id                  SERIAL PRIMARY KEY,
+    user_id             INTEGER REFERENCES users(id),
+    event_type          TEXT NOT NULL,            -- login_success/login_failed/logout/role_changed/disabled
+    detail              TEXT,
+    ip_address          TEXT,
+    created_at          TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 ```
 
-管理员列表配置（`system_config` 表）：
+现有 `tasks` 表建议补充用户归属字段：
+
+```sql
+ALTER TABLE tasks ADD COLUMN created_by_user_id INTEGER REFERENCES users(id);
+ALTER TABLE tasks ADD COLUMN created_by_gitlab_user_id INTEGER;
+ALTER TABLE tasks ADD COLUMN created_by_username TEXT;
+ALTER TABLE tasks ADD COLUMN created_via TEXT NOT NULL DEFAULT 'webhook';
+                                            -- webhook / manual / system
+```
+
+#### 7.6.3 角色与权限模型
+
+本系统采用“两层授权模型”：
+
+1. **平台角色（Platform Role）**
+2. **GitLab 项目成员权限（Project Access）**
+
+两者共同决定某个用户能否查看/操作某条任务。
+
+**平台角色：**
+
+| 角色 | 来源 | 作用 |
+|---|---|---|
+| **platform_admin** | `admin_usernames` / `admin_gitlab_groups` 命中，或人工提升 | 查看/管理全部任务、配置、用户、系统监控 |
+| **platform_user** | 默认首次登录角色 | 访问普通 Dashboard 功能，权限仍受项目级访问控制限制 |
+| **disabled** | 管理员人工禁用 | 不允许登录或继续访问 |
+
+**GitLab 项目权限（推荐映射）：**
+
+| GitLab Access Level | 含义 | Dashboard 权限建议 |
+|---|---|---|
+| 10 Guest | 访客 | 默认不授予任务访问权 |
+| 20 Reporter | 只读成员 | 可查看该项目任务 |
+| 30 Developer | 开发成员 | 可查看、手动创建、重试、执行 |
+| 40 Maintainer | 维护成员 | 可取消该项目任意任务、修改更高风险操作 |
+| 50 Owner | 拥有者 | 同 Maintainer |
+
+**最终授权规则：**
+
+- `platform_admin`：全局放行
+- `platform_user`：必须同时满足“对该项目有足够 GitLab 成员权限”
+- `disabled`：全部拒绝
+
+**任务可见性模式（推荐默认值：`project_member`）：**
+
+| 模式 | 规则 | 适用场景 |
+|---|---|---|
+| `creator_only` | 仅任务创建者和 admin 可见 | 最严格隔离 |
+| `project_member` | 同项目成员按 GitLab 权限可见 | 更符合团队协作，推荐 |
+
+默认使用 `project_member`，因为同一项目内的 AI 任务通常属于团队协作资产，而不是私人数据。
+
+管理员列表配置（`system_config` / 环境变量初始化）：
+
+```json
+{
+  "admin_usernames": ["zhangsan", "lisi", "admin"],
+  "admin_gitlab_groups": ["devops", "platform-team"]
+}
+```
+
+权限矩阵（推荐）：
+
+| 操作 | platform_user + Reporter | platform_user + Developer | platform_user + Maintainer | platform_admin |
+|---|---|---|---|---|
+| 查看项目任务列表/详情/日志 | O | O | O | O |
+| 手动创建任务 | X | O | O | O |
+| 重试自己或项目内任务 | X | O | O | O |
+| 取消项目任务 | X | X | O | O |
+| 立即执行任务 (跳过延迟) | X | X | O | O |
+| 查看系统监控/容器详情 | X | X | X | O |
+| 配置管理 | X | X | X | O |
+| 用户管理 / 角色调整 | X | X | X | O |
+
+#### 7.6.4 后端认证与权限控制
+
+新增后端模块建议：
 
 ```
-key:   admin_usernames
-value: ["zhangsan", "lisi", "admin"]
-
-key:   admin_gitlab_groups
-value: ["devops", "platform-team"]
+backend/app/api/auth.py
+backend/app/api/users.py
+backend/app/core/oidc.py
+backend/app/dependencies/auth.py
+backend/app/middleware/auth.py
 ```
 
-#### 7.6.3 页面规划
+关键依赖函数：
+
+```
+get_current_user()                 # 校验 session 并注入当前用户
+require_platform_admin()           # admin only
+require_project_view(project_id)   # 检查项目只读访问权
+require_project_operate(project_id)# 检查项目操作权限
+can_manage_task(task, action)      # 任务级权限判定
+```
+
+权限落点：
+
+- `/api/tasks`：返回当前用户有权限看到的任务
+- `/api/tasks/{id}`：校验该任务所属 project 的访问权
+- `/api/tasks/{id}/retry`：Developer+
+- `/api/tasks/{id}/cancel`：Maintainer+
+- `/api/config`、`/api/users`、`/api/containers`：admin only
+
+#### 7.6.5 前端页面与路由规划
 
 | 页面 | user 可见 | admin 可见 | 功能 |
 |---|---|---|---|
-| 我的任务 | O | O | 当前用户触发的任务列表，按状态筛选，实时刷新 |
-| 全部任务 | X | O | 所有用户的任务列表，支持按用户/项目/状态筛选 |
-| 任务详情 | O (仅自己) | O (全部) | 查看完整日志、Claude CLI 输出、git diff |
-| 系统监控 | O (只读) | O | vLLM 负载、队列深度、Worker 容器状态 |
-| 统计分析 | X | O | 用户排行、趋势对比、用户明细、项目维度、状态分布、导出 CSV |
-| 配置管理 | X | O | Bot 名称、并发数、超时、GitLab Token、管理员列表 |
-| 项目管理 | X | O | 管理哪些 GitLab 项目启用了 bot |
+| 登录页 | O | O | 跳转 GitLab OIDC 登录 |
+| 我的任务 / 项目任务 | O | O | 根据用户可见范围展示任务 |
+| 任务详情 | O | O | 查看完整日志、Claude CLI 输出、git diff |
+| 手动创建任务 | O (Developer+) | O | 对有操作权限的项目创建任务 |
+| 系统监控 | X | O | 队列、容器、系统指标 |
+| 配置管理 | X | O | 运行时配置、管理员名单、权限策略 |
+| 用户管理 | X | O | 查看用户列表、修改角色、禁用账号 |
 
-#### 7.6.4 页面布局详细设计
+前端登录态建议：
+
+- 启动时调用 `GET /api/auth/me`
+- 未登录则跳转 `/login`
+- 路由 `meta.requiresAuth = true`
+- 菜单和按钮按 `platform_role + capabilities` 动态显示
+
+#### 7.6.6 页面布局详细设计
 
 ##### 整体框架 (Layout)
 
@@ -1457,25 +1606,26 @@ value: ["devops", "platform-team"]
 ```
 # --- 认证 (无需登录) ---
 GET    /api/auth/login               # 跳转 GitLab OIDC 授权
-GET    /api/auth/callback            # OIDC 回调, 换取 token, 创建 session
+GET    /api/auth/callback            # OIDC 回调, 换取 token, 创建本地 session
 POST   /api/auth/logout              # 注销
-GET    /api/auth/me                  # 获取当前用户信息和角色
+GET    /api/auth/me                  # 获取当前用户、平台角色、可见能力
+POST   /api/auth/refresh-access      # 刷新当前用户的 GitLab 项目权限缓存（可选）
 
 # --- Webhook (Token 校验, 无需 OIDC) ---
 POST   /api/webhook/gitlab           # GitLab Webhook 入口
 
 # --- 任务 (需登录) ---
-GET    /api/tasks                    # 任务列表 (user: 仅自己, admin: 全部, ?user=xx 筛选)
-GET    /api/tasks/:id                # 任务详情 (user: 仅自己, admin: 全部)
-POST   /api/tasks/:id/cancel         # 取消任务 (user: 仅自己, admin: 全部)
-POST   /api/tasks/:id/retry          # 重试任务 (user: 仅自己, admin: 全部)
-POST   /api/tasks/:id/run-now        # 立即执行 (admin only)
-GET    /api/tasks/:id/logs           # 任务日志 - 已完成任务 (user: 仅自己, admin: 全部)
+GET    /api/tasks                    # 任务列表 (按项目访问权限过滤, admin 可看全部)
+GET    /api/tasks/:id                # 任务详情 (按项目访问权限过滤)
+POST   /api/tasks/:id/cancel         # 取消任务 (Maintainer+/admin)
+POST   /api/tasks/:id/retry          # 重试任务 (Developer+/admin)
+POST   /api/tasks/:id/run-now        # 立即执行 (Maintainer+/admin)
+GET    /api/tasks/:id/logs           # 任务日志 - 已完成任务 (按项目访问权限过滤)
 GET    /api/tasks/:id/logs/stream    # 任务日志 - 实时 SSE 流 (运行中任务, Docker logs)
 
 # --- 监控 (需登录) ---
-GET    /api/stats                    # 统计概览 (user: 自己的统计, admin: 全局统计)
-GET    /api/monitor/vllm             # vLLM 负载 (全员可读)
+GET    /api/stats                    # 统计概览 (可按用户可见任务聚合)
+GET    /api/monitor/vllm             # vLLM 负载 (admin only 或受控只读)
 GET    /api/monitor/containers       # 运行中的容器列表 (admin only)
 
 # --- 统计分析 (admin only) ---
@@ -1492,6 +1642,7 @@ GET    /api/config                   # 系统配置
 PUT    /api/config                   # 更新配置
 GET    /api/users                    # 用户列表
 PUT    /api/users/:id/role           # 修改用户角色
+PUT    /api/users/:id/state          # 禁用/启用用户
 ```
 
 ## 八、项目目录结构
@@ -1631,11 +1782,12 @@ gitlab_issues_to_mr/
 
 - GitLab OIDC 客户端 (Authorization Code Flow)
 - 用户自动注册 (首次 OIDC 登录 → 写入 users 表)
-- Session 管理 (JWT Cookie)
-- 角色判定 (admin_usernames / admin_gitlab_groups)
-- API 权限中间件 (user 只能操作自己的任务, admin 全部)
+- Session 管理 (服务端 session + HttpOnly Cookie)
+- 角色判定 (admin_usernames / admin_gitlab_groups + 本地 platform_role)
+- GitLab 项目成员权限缓存与任务可见性隔离
+- API 权限中间件 (project member / maintainer / admin 分层)
 - 前端路由守卫 + 角色感知 UI (菜单/按钮动态显示)
-- 用户管理页 (admin: 查看用户列表、修改角色)
+- 用户管理页 (admin: 查看用户列表、修改角色、禁用账号)
 
 ### P4 - 高级特性
 
@@ -1667,6 +1819,16 @@ OIDC_ISSUER_URL=https://gitlab.internal.com  # GitLab OIDC issuer (可配置)
 OIDC_CLIENT_ID=gimr-bot-dashboard            # GitLab OAuth Application ID
 OIDC_CLIENT_SECRET=xxxxxxxxxxxxxxxx          # GitLab OAuth Application Secret
 OIDC_REDIRECT_URI=https://bot.internal.com/api/auth/callback
+OIDC_ENABLED=true                            # 是否启用 OIDC 登录
+SESSION_COOKIE_NAME=gimr_session            # session cookie 名称
+SESSION_TTL_SECONDS=28800                   # session 有效期（秒）
+SESSION_SECRET=change-me                    # session/token hash 签名密钥
+COOKIE_SECURE=true                          # 生产环境必须为 true
+COOKIE_SAMESITE=lax                         # 推荐 lax
+TASK_VISIBILITY_MODE=project_member         # creator_only / project_member
+AUTH_ALLOWED_GITLAB_GROUPS=                 # 可登录 GitLab 组白名单（可选）
+AUTH_ADMIN_USERNAMES=admin1,admin2          # 初始平台管理员用户名
+AUTH_ADMIN_GITLAB_GROUPS=platform-team      # 初始平台管理员组
 
 # ===== Claude CLI (透传到 Worker 容器) =====
 ANTHROPIC_BASE_URL=http://10.0.1.5:8000/v1  # vLLM 端点
@@ -1908,6 +2070,12 @@ OIDC Discovery 端点将自动拼接为：
 ```
 {OIDC_ISSUER_URL}/.well-known/openid-configuration
 ```
+
+Web Dashboard 登录态采用 **服务端 session + HttpOnly Cookie**，而不是在前端长期持有 access token。这样更利于：
+
+- 降低前端 token 泄漏风险
+- 集中控制 session 失效、注销、禁用用户
+- 与同源 `/api` 部署方式更匹配
 
 #### 10. 管理员初始化
 
