@@ -9,9 +9,9 @@ const api = axios.create({
 export interface Task {
   id: number
   project_id: number
-  issue_iid: number
-  issue_id: number
-  note_id: number
+  issue_iid: number | null
+  issue_id: number | null
+  note_id: number | null
   user_prompt: string
   branch_name: string | null
   merge_request_iid: number | null
@@ -26,10 +26,33 @@ export interface Task {
   additions: number
   deletions: number
   total_changes: number
+  is_manual: boolean
   created_at: string
   updated_at: string
   started_at: string | null
   completed_at: string | null
+}
+
+// Project and Branch types for manual task creation
+export interface Project {
+  id: number
+  name: string
+  path_with_namespace: string
+}
+
+export interface Branch {
+  name: string
+}
+
+// Request types
+export interface CreateTaskRequest {
+  project_id?: number | null
+  branch_name: string
+  target_branch: string
+  user_prompt: string
+  priority?: number
+  delay_seconds?: number
+  scheduled_datetime?: string
 }
 
 export interface TaskLog {
@@ -138,6 +161,22 @@ export async function getConfig(): Promise<Config> {
 
 export async function updateConfig(config: Partial<Config>): Promise<Config> {
   const response = await api.patch('/config', config)
+  return response.data
+}
+
+// Manual task creation APIs
+export async function getProjects(): Promise<Project[]> {
+  const response = await api.get('/projects')
+  return response.data
+}
+
+export async function getBranches(projectId: number): Promise<Branch[]> {
+  const response = await api.get(`/projects/${projectId}/branches`)
+  return response.data
+}
+
+export async function createTask(request: CreateTaskRequest): Promise<Task> {
+  const response = await api.post('/tasks', request)
   return response.data
 }
 

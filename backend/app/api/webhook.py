@@ -3,7 +3,7 @@
 import logging
 import re
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.core.gitlab_client import get_gitlab_client
 from app.core.parser import BotCommand, parse_ai_bot_command
+from app.core.scheduling import resolve_scheduled_at
 from app.database import get_db
 from app.models import Task, TaskStatus
 
@@ -410,12 +411,10 @@ async def _handle_generate_command(
     else:
         logger.warning("Could not fetch issue details, using original prompt")
 
-    # Calculate scheduled_at: scheduled_datetime (absolute) takes precedence over delay_seconds (relative)
-    scheduled_at = None
-    if command.scheduled_datetime:
-        scheduled_at = command.scheduled_datetime
-    elif command.delay_seconds:
-        scheduled_at = datetime.utcnow() + timedelta(seconds=command.delay_seconds)
+    scheduled_at = resolve_scheduled_at(
+        command.scheduled_datetime,
+        command.delay_seconds,
+    )
 
     # Determine target branch
     target_branch = command.target_branch or settings.default_target_branch
@@ -574,12 +573,10 @@ async def _handle_mr_comment(
     else:
         user_prompt = f"MR !{mr_iid} 继续修改: {mr_title}\n\n用户补充要求: {user_prompt}"
 
-    # Calculate scheduled_at: scheduled_datetime (absolute) takes precedence over delay_seconds (relative)
-    scheduled_at = None
-    if command.scheduled_datetime:
-        scheduled_at = command.scheduled_datetime
-    elif command.delay_seconds:
-        scheduled_at = datetime.utcnow() + timedelta(seconds=command.delay_seconds)
+    scheduled_at = resolve_scheduled_at(
+        command.scheduled_datetime,
+        command.delay_seconds,
+    )
 
     # Create new task - continue on existing branch
     task = Task(

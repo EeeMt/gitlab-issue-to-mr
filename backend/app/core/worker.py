@@ -68,6 +68,25 @@ class WorkerExecutor:
         self.docker = docker_client or get_docker_client()
         self.gitlab = gitlab_client or get_gitlab_client()
 
+    def _build_initial_mr_title(self, task: Task) -> str:
+        """Build a reasonable initial MR title before AI execution finishes."""
+        if task.issue_iid:
+            try:
+                issue_info = self.gitlab.get_issue(task.project_id, task.issue_iid)
+                issue_title = (issue_info or {}).get("title", "").strip() if issue_info else ""
+                if issue_title:
+                    return f"AI: {issue_title[:100]}"
+            except Exception as e:
+                logger.warning(f"[Task {task.id}] Failed to fetch issue title for MR title: {e}")
+
+        prompt = re.sub(r"\s+", " ", task.user_prompt or "").strip()
+        if prompt:
+            short_prompt = re.split(r"[;\n。！？.!?]", prompt, maxsplit=1)[0].strip()
+            if short_prompt:
+                return f"AI: {short_prompt[:100]}"
+
+        return f"AI: Task {task.id}"
+
     async def execute_task(self, db: AsyncSession, task_id: int) -> bool:
         """Execute a task.
 
@@ -114,32 +133,39 @@ class WorkerExecutor:
             # Prepare environment variables
             target_branch = task.target_branch or settings.default_target_branch
 
-            # Use issue title as MR title when available.
-            mr_title = f"AI: Issue #{task.issue_iid}"
-            try:
-                issue_info = self.gitlab.get_issue(task.project_id, task.issue_iid)
-                issue_title = (issue_info or {}).get("title", "").strip() if issue_info else ""
-                if issue_title:
-                    mr_title = f"AI: {issue_title[:100]}"
-            except Exception as e:
-                logger.warning(f"[Task {task_id}] Failed to fetch issue title for MR title: {e}")
+            mr_title = self._build_initial_mr_title(task)
 
-            # Create initial MR (draft) before running worker for P0.1 planning support
-            # This allows the worker to update MR description during execution
+            # Create initial MR (draft) before running worker so execution can update it
             # For continuation tasks (existing merge_request_iid), use existing MR
             mr_iid = task.merge_request_iid  # Use existing MR for continuation tasks
             mr_web_url = task.merge_request_url
 
             if not mr_iid:
+                try:
+                    existing_mrs = self.gitlab.gl.projects.get(task.project_id).mergerequests.list(
+                        source_branch=task.branch_name,
+                        state="opened",
+                    )
+                    if existing_mrs:
+                        mr_iid = existing_mrs[0].iid
+                        mr_web_url = self.gitlab.normalize_web_url(existing_mrs[0].web_url)
+                        task.merge_request_iid = mr_iid
+                        task.merge_request_url = mr_web_url
+                        await db.commit()
+                        logger.info(f"[Task {task_id}] Reusing existing MR !{mr_iid} for branch {task.branch_name}")
+                except Exception as e:
+                    logger.warning(f"[Task {task_id}] Failed to look up existing MR: {e}")
+
+            if not mr_iid:
                 # No existing MR - create a new one
                 try:
-                    initial_mr_desc = f"""## 📋 等待 AI 规划...
+                    initial_mr_desc = f"""## 🚀 AI 正在执行
 
 ### 需求
 {task.user_prompt}
 
 ---
-*AI 正在分析需求并制定实现计划...*"""
+*AI 正在直接实施变更...*"""
 
                     mr_response = self.gitlab.gl.projects.get(task.project_id).mergerequests.create({
                         "source_branch": task.branch_name,
@@ -149,7 +175,7 @@ class WorkerExecutor:
                         "draft": True,  # Create as draft MR
                     })
                     mr_iid = mr_response.iid
-                    mr_web_url = mr_response.web_url
+                    mr_web_url = self.gitlab.normalize_web_url(mr_response.web_url)
                     task.merge_request_iid = mr_iid
                     task.merge_request_url = mr_web_url
                     await db.commit()
@@ -161,7 +187,6 @@ class WorkerExecutor:
                 "GITLAB_URL": settings.gitlab_url,
                 "GITLAB_TOKEN": settings.gitlab_bot_token,
                 "PROJECT_ID": str(task.project_id),
-                "ISSUE_IID": str(task.issue_iid),
                 "BRANCH_NAME": task.branch_name,
                 "USER_PROMPT": task.user_prompt,
                 "TARGET_BRANCH": target_branch,
@@ -171,12 +196,25 @@ class WorkerExecutor:
                 "TASK_ID": str(task.id),
             }
 
-            # Pass MR_IID to worker if MR was created (for P0.1 planning updates)
+            # Add optional fields for webhook-triggered tasks
+            if task.issue_iid:
+                environment["ISSUE_IID"] = str(task.issue_iid)
+
+            # Add BASE_BRANCH if different from TARGET_BRANCH (for manual tasks)
+            # Base branch is the branch to create new branch from
+            # If user specifies a base branch, pass it to the worker
+            if task.branch_name and target_branch:
+                # Check if base branch should be passed - this is handled in the entrypoint
+                # For now, we let the entrypoint use TARGET_BRANCH as default
+                pass
+
+            # Pass MR_IID to worker so execution can update the MR description
             if mr_iid:
                 environment["MR_IID"] = str(mr_iid)
 
-            # Generate container name with naming convention: gimr-{id}-p{pid}-i{iid}
-            container_name = f"gimr-{task.id}-p{task.project_id}-i{task.issue_iid}"
+            # Generate container name with naming convention: gimr-{id}-p{pid}-[i{iid}|manual]
+            issue_suffix = f"i{task.issue_iid}" if task.issue_iid else "manual"
+            container_name = f"gimr-{task.id}-p{task.project_id}-{issue_suffix}"
 
             # Create and run container
             container = self.docker.create_container(
@@ -205,21 +243,30 @@ class WorkerExecutor:
                 for line in logs.split("\n"):
                     if "/merge_requests/" in line:
                         # Extract URL from line containing merge_requests
-                        import re
                         match = re.search(r'http[^\s]*merge_requests/\d+', line)
                         if match:
-                            task.merge_request_url = match.group(0)
+                            task.merge_request_url = self.gitlab.normalize_web_url(match.group(0))
+                            iid_match = re.search(r'/merge_requests/(\d+)', match.group(0))
+                            if iid_match:
+                                task.merge_request_iid = int(iid_match.group(1))
                             break
 
+                # If URL is present but IID is still missing, derive it from the URL.
+                if task.merge_request_url and not task.merge_request_iid:
+                    iid_match = re.search(r'/merge_requests/(\d+)', task.merge_request_url)
+                    if iid_match:
+                        task.merge_request_iid = int(iid_match.group(1))
+
                 # If not found in logs, try to get MR from GitLab API by branch name
-                if not task.merge_request_url:
+                if not task.merge_request_iid or not task.merge_request_url:
                     try:
                         mrs = self.gitlab.gl.projects.get(task.project_id).mergerequests.list(
                             source_branch=task.branch_name,
                             state='opened'
                         )
                         if mrs:
-                            task.merge_request_url = mrs[0].web_url
+                            task.merge_request_iid = mrs[0].iid
+                            task.merge_request_url = self.gitlab.normalize_web_url(mrs[0].web_url)
                     except Exception as e:
                         logger.warning(f"Failed to get MR from API: {e}")
 
@@ -335,6 +382,11 @@ class WorkerExecutor:
         Args:
             task: Task object
         """
+        # Skip notifications for manual tasks (no issue to notify)
+        if task.is_manual:
+            logger.info(f"Skipping start notification for manual task {task.id}")
+            return
+
         settings = get_settings()
         task_url = f"{settings.backend_url}/tasks/{task.id}"
         message = f"🔄 开始处理请求... [任务 {task.id}]({task_url})"
@@ -347,7 +399,7 @@ class WorkerExecutor:
                 message,
             )
             logger.info(f"Sent start notification to MR !{task.merge_request_iid} for task {task.id}")
-        else:
+        elif task.issue_iid:
             self.gitlab.create_note(
                 task.project_id,
                 task.issue_iid,
@@ -362,6 +414,11 @@ class WorkerExecutor:
             task: Task object
             success: Whether the task succeeded
         """
+        # Skip notifications for manual tasks (no issue to notify)
+        if task.is_manual:
+            logger.info(f"Skipping completion notification for manual task {task.id}")
+            return
+
         # Determine target: MR or Issue
         mr_iid = task.merge_request_iid
         is_continuation = mr_iid is not None
@@ -400,7 +457,7 @@ class WorkerExecutor:
                     self._update_mr_description(task, mr_iid)
                 except Exception as e:
                     logger.warning(f"Failed to update MR description: {e}")
-        else:
+        elif task.issue_iid:
             self.gitlab.create_note(
                 task.project_id,
                 task.issue_iid,
@@ -517,4 +574,3 @@ class WorkerExecutor:
                 processed += 1
 
         return processed
-

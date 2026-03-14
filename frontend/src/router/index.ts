@@ -3,6 +3,7 @@ import Dashboard from '../views/Dashboard.vue'
 import TaskView from '../views/TaskView.vue'
 import Monitor from '../views/Monitor.vue'
 import Config from '../views/Config.vue'
+import CreateTask from '../views/CreateTask.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -15,6 +16,11 @@ const router = createRouter({
       path: '/dashboard',
       name: 'Dashboard',
       component: Dashboard
+    },
+    {
+      path: '/create-task',
+      name: 'CreateTask',
+      component: CreateTask
     },
     {
       path: '/tasks/:id',

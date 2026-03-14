@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import close_db, init_db
+from app.migrations import run_migrations
 
 settings = get_settings()
 
@@ -29,6 +30,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     # Startup
     logger.info("Starting GitLab Issue to MR Bot...")
+
+    # Run database migrations first
+    try:
+        run_migrations()
+    except Exception as e:
+        logger.error(f"Migration failed: {e}")
+        raise
+
+    # Initialize database connection
     try:
         await init_db()
         logger.info("Database connection established")

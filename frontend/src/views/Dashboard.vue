@@ -4,6 +4,9 @@
       <div class="header-row">
         <h2>Task Dashboard</h2>
         <n-space align="center">
+          <n-button type="primary" @click="router.push('/create-task')" size="small">
+            Create Task
+          </n-button>
           <n-select
             v-model:value="statusFilter"
             :options="statusOptions"
@@ -38,6 +41,7 @@ import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, useMessage, DataTabl
 import { useRouter } from 'vue-router'
 import { useWindowSize } from '@vueuse/core'
 import { getTasks, type Task } from '../api'
+import { formatDateTimeUtc8 } from '../utils/datetime'
 
 const router = useRouter()
 const message = useMessage()
@@ -159,13 +163,13 @@ const desktopColumns: DataTableColumns<Task> = [
     title: 'Created',
     key: 'created_at',
     width: 160,
-    render: (row) => new Date(row.created_at).toLocaleString()
+    render: (row) => formatDateTimeUtc8(row.created_at)
   },
   {
     title: 'Scheduled',
     key: 'scheduled_at',
     width: 160,
-    render: (row) => row.scheduled_at ? new Date(row.scheduled_at).toLocaleString() : '-'
+    render: (row) => row.scheduled_at ? formatDateTimeUtc8(row.scheduled_at) : '-'
   },
   {
     title: 'Actions',

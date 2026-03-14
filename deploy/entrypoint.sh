@@ -8,24 +8,34 @@ set -e
 GITLAB_URL="${GITLAB_URL:?Missing GITLAB_URL}"
 GITLAB_TOKEN="${GITLAB_TOKEN:?Missing GITLAB_TOKEN}"
 PROJECT_ID="${PROJECT_ID:?Missing PROJECT_ID}"
-ISSUE_IID="${ISSUE_IID:?Missing ISSUE_IID}"
 BRANCH_NAME="${BRANCH_NAME:?Missing BRANCH_NAME}"
 USER_PROMPT="${USER_PROMPT:?Missing USER_PROMPT}"
 
 # Optional environment variables
+# ISSUE_IID - required for webhook-triggered tasks, optional for manual tasks
+ISSUE_IID="${ISSUE_IID:-}"
+# BASE_BRANCH - base branch to create new branch from (defaults to TARGET_BRANCH if not set)
+BASE_BRANCH="${BASE_BRANCH:-}"
+TARGET_BRANCH="${TARGET_BRANCH:-main}"
+
 ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-http://localhost:11434/v1}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}"
-TARGET_BRANCH="${TARGET_BRANCH:-main}"
 
 echo "========================================"
 echo "GitLab Issue to MR Worker"
 echo "========================================"
 echo "Project: ${PROJECT_ID}"
-echo "Issue: ${ISSUE_IID}"
+echo "Issue: ${ISSUE_IID:-N/A (manual task)}"
 echo "Branch: ${BRANCH_NAME}"
+echo "Base Branch: ${BASE_BRANCH:-${TARGET_BRANCH}}"
 echo "Target: ${TARGET_BRANCH}"
 echo "========================================"
+
+# Set BASE_BRANCH to TARGET_BRANCH if not explicitly set
+if [ -z "${BASE_BRANCH}" ]; then
+    BASE_BRANCH="${TARGET_BRANCH}"
+fi
 
 # Extract hostname from GITLAB_URL for git operations
 GITLAB_HOST=$(echo "${GITLAB_URL}" | sed 's|https://||' | sed 's|http://||')
@@ -38,16 +48,17 @@ GIT_REPO_URL=$(echo "${GITLAB_API_RESPONSE}" | grep -o '"http_url_to_repo":"[^"]
 PROJECT_PATH=$(echo "${GITLAB_API_RESPONSE}" | grep -o '"path_with_namespace":"[^"]*"' | cut -d'"' -f4)
 
 # Fallback to constructed URL if API fails
-if [ -z "${GIT_REPO_URL}" ]; then
-    echo "Warning: Could not get URL from API, using constructed URL"
-    GIT_REPO_URL="https://${GITLAB_TOKEN}@${GITLAB_HOST}/projects/${PROJECT_ID}.git"
+if [ -z "${PROJECT_PATH}" ] && [ -n "${GIT_REPO_URL}" ]; then
+    PROJECT_PATH=$(echo "${GIT_REPO_URL}" | sed -E 's|https?://[^/]+/||; s|\.git$||')
 fi
 
-# Replace hostname in URL with our actual GITLAB_HOST (handles GitLab external_url misconfiguration)
-# Use HTTP (not HTTPS) since GitLab is configured for HTTP
-GIT_REPO_URL=$(echo "${GIT_REPO_URL}" | \
-    sed "s|https://[^/]*|http://${GITLAB_TOKEN}@${GITLAB_HOST}|" | \
-    sed "s|http://[^/]*|http://${GITLAB_TOKEN}@${GITLAB_HOST}|")
+if [ -z "${PROJECT_PATH}" ]; then
+    echo "Warning: Could not get URL from API, using constructed URL"
+    PROJECT_PATH="projects/${PROJECT_ID}"
+fi
+
+# Build repo URL with the actual configured host and let credential helper provide auth.
+GIT_REPO_URL="http://${GITLAB_HOST}/${PROJECT_PATH}.git"
 
 # Log repository URL without exposing token
 echo "Repository URL: http://[TOKEN]@${GITLAB_HOST}/${PROJECT_PATH}.git"
@@ -76,6 +87,7 @@ cd /workspace
 # Configure git
 git config --global user.email "bot@gimr.local"
 git config --global user.name "GIMR Bot"
+git config --global --add safe.directory /workspace
 
 # Checkout/create branch
 echo "Checking out branch: ${BRANCH_NAME}"
@@ -84,387 +96,224 @@ if git checkout "${BRANCH_NAME}" 2>/dev/null; then
     echo "Branch already exists, pulling latest..."
     git pull origin "${BRANCH_NAME}"
 else
-    echo "Creating new branch from ${TARGET_BRANCH}..."
-    git checkout -b "${BRANCH_NAME}" "origin/${TARGET_BRANCH}"
+    echo "Creating new branch from ${BASE_BRANCH}..."
+    git checkout -b "${BRANCH_NAME}" "origin/${BASE_BRANCH}"
 fi
 
-# Run Claude via Python SDK with planning and step-by-step execution
-echo "Running Claude API with planning mode..."
+# Run Claude Code CLI in direct execution mode
+echo "Running Claude Code CLI in direct execution mode..."
 echo "Prompt: ${USER_PROMPT}"
 echo "ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL}"
 echo "ANTHROPIC_MODEL: ${ANTHROPIC_MODEL}"
 echo "ANTHROPIC_API_KEY set: $([ -n "$ANTHROPIC_API_KEY" ] && echo 'yes' || echo 'no')"
 echo ""
 
-# Create comprehensive Python script for planning and execution
-cat > /tmp/claude_planner.py << 'PYTHON_SCRIPT'
-#!/usr/bin/env python3
-"""
-Claude Planner: Plan -> Execute -> Report
-Supports step-by-step planning and execution with MR updates.
-"""
+update_mr() {
+    local title="${1:-}"
+    local description="${2:-}"
+    if [ -z "${MR_IID:-}" ]; then
+        echo "No MR_IID, skipping MR update"
+        return 0
+    fi
 
-import os
-import json
-import subprocess
-import re
-import time
-import anthropic
-from datetime import datetime
+    local response_code
+    local curl_args=(
+        -sS
+        -o /tmp/mr_update_response.txt
+        -w "%{http_code}"
+        -X PUT
+        -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}"
+    )
 
-# Get environment variables
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-ANTHROPIC_BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "http://localhost:11434/v1")
-ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
-USER_PROMPT = os.environ.get("USER_PROMPT", "")
-GITLAB_URL = os.environ.get("GITLAB_URL", "")
-GITLAB_TOKEN = os.environ.get("GITLAB_TOKEN", "")
-PROJECT_ID = os.environ.get("PROJECT_ID", "")
-ISSUE_IID = os.environ.get("ISSUE_IID", "")
-MR_IID = os.environ.get("MR_IID", "")
+    if [ -n "${title}" ]; then
+        curl_args+=(--data-urlencode "title=${title}")
+    fi
 
-# Initialize client
-client = anthropic.Anthropic(
-    api_key=ANTHROPIC_API_KEY,
-    base_url=ANTHROPIC_BASE_URL,
-)
+    if [ -n "${description}" ]; then
+        curl_args+=(--data-urlencode "description=${description}")
+    fi
 
-# Tools definition
-TOOLS = [
-    {
-        "name": "Bash",
-        "description": "Execute shell commands in the container. Use this to run git, python, or other CLI tools.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "command": {"type": "string", "description": "Shell command to execute"},
-                "description": {"type": "string", "description": "What the command does"}
-            },
-            "required": ["command"]
-        }
-    },
-    {
-        "name": "Read",
-        "description": "Read a file from the filesystem",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "file_path": {"type": "string", "description": "Path to the file to read"}
-            },
-            "required": ["file_path"]
-        }
-    },
-    {
-        "name": "Write",
-        "description": "Write content to a file",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "content": {"type": "string", "description": "Content to write"},
-                "file_path": {"type": "string", "description": "Path to write to"}
-            },
-            "required": ["file_path", "content"]
-        }
+    response_code=$(curl "${curl_args[@]}" \
+        "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests/${MR_IID}") || {
+        echo "Error updating MR description"
+        cat /tmp/mr_update_response.txt 2>/dev/null || true
+        return 1
     }
-]
 
-def execute_tool(tool_name, tool_input):
-    """Execute a tool and return the result."""
-    try:
-        if tool_name == "Bash":
-            command = tool_input.get("command", "")
-            result = subprocess.run(
-                command,
-                shell=True,
-                cwd="/workspace",
-                capture_output=True,
-                text=True,
-                timeout=300
-            )
-            return {
-                "output": result.stdout + ("\nstderr: " + result.stderr if result.stderr else ""),
-                "exit_code": result.returncode
-            }
-        elif tool_name == "Read":
-            file_path = tool_input.get("file_path", "")
-            with open(file_path, "r") as f:
-                return {"content": f.read()}
-        elif tool_name == "Write":
-            file_path = tool_input.get("file_path", "")
-            content = tool_input.get("content", "")
-            with open(file_path, "w") as f:
-                f.write(content)
-            return {"success": True, "file_path": file_path}
-        else:
-            return {"error": f"Unknown tool: {tool_name}"}
-    except Exception as e:
-        return {"error": str(e)}
+    if [ "${response_code}" -ge 400 ] 2>/dev/null; then
+        echo "Failed to update MR: ${response_code}"
+        cat /tmp/mr_update_response.txt 2>/dev/null || true
+        return 1
+    fi
 
-def call_claude(messages, tools=None, max_iterations=10):
-    """Call Claude API with tool use support."""
-    for i in range(max_iterations):
-        try:
-            response = client.messages.create(
-                model=ANTHROPIC_MODEL,
-                max_tokens=4096,
-                messages=messages,
-                tools=tools or []
-            )
-        except Exception as e:
-            # Sanitize error message to avoid exposing API keys
-            error_str = str(e)
-            error_str = error_str.replace(ANTHROPIC_API_KEY, "[API_KEY]") if ANTHROPIC_API_KEY else error_str
-            print(f"API Error: {error_str}", file=__import__('sys').stderr)
-            return None
+    echo "MR description updated successfully"
+}
 
-        # Check for tool use
-        tool_use_blocks = [block for block in response.content if hasattr(block, 'type') and block.type == 'tool_use']
+update_mr_description() {
+    update_mr "" "$1"
+}
 
-        if not tool_use_blocks:
-            # No tool use, return the response
-            return response
-
-        # Process tool use
-        for block in tool_use_blocks:
-            tool_name = block.name
-            tool_input = block.input
-
-            # Execute tool
-            result = execute_tool(tool_name, tool_input)
-
-            # Add tool result to messages
-            messages.append({
-                "role": "assistant",
-                "content": [block]
-            })
-            messages.append({
-                "role": "user",
-                "content": [{
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": json.dumps(result)
-                }]
-            })
-
-    # Max iterations reached
-    return response
-
-def update_mr_description(description):
-    """Update MR description via GitLab API."""
-    if not MR_IID:
-        print("No MR_IID, skipping MR update")
-        return
-
-    import requests
-    url = f"{GITLAB_URL}/api/v4/projects/{PROJECT_ID}/merge_requests/{MR_IID}"
-    try:
-        response = requests.put(
-            url,
-            headers={"PRIVATE-TOKEN": GITLAB_TOKEN},
-            json={"description": description},
-            timeout=10
-        )
-        if response.status_code < 400:
-            print(f"MR description updated successfully")
-        else:
-            print(f"Failed to update MR: {response.status_code}")
-    except Exception as e:
-        print(f"Error updating MR: {e}")
-
-def generate_planning_prompt():
-    """Generate prompt for planning phase."""
-    return f"""请分析以下需求，并制定实现计划。
-
-需求: {USER_PROMPT}
-
-请按以下格式输出规划:
-
-## 📋 实现规划
+build_running_mr_description() {
+    cat <<EOF
+## 🚀 AI 正在执行
 
 ### 需求
-{USER_PROMPT}
-
-### 实现步骤
-请列出具体的实现步骤，每个步骤应该是可执行的原子操作:
-- [ ] 步骤1: 具体描述
-- [ ] 步骤2: 具体描述
-- [ ] 步骤3: 具体描述
-...
-
-### 预期结果
-请描述代码实现后的预期效果。
-"""
-
-def generate_step_prompt(step):
-    """Generate prompt for executing a single step."""
-    return f"""请执行以下步骤:
-
-步骤: {step}
-
-请使用工具完成这个步骤。如果需要创建或修改代码，请直接执行。
-"""
-
-# ============ MAIN EXECUTION ============
-
-print("=" * 50)
-print("Starting planning phase...")
-print("=" * 50)
-
-# Phase 1: Generate planning
-planning_messages = [{"role": "user", "content": generate_planning_prompt()}]
-planning_response = call_claude(planning_messages, tools=[])
-
-if not planning_response:
-    print("Failed to get planning response")
-    exit(1)
-
-# Extract planning content
-planning_content = ""
-for block in planning_response.content:
-    if hasattr(block, 'type') and block.type == 'text':
-        planning_content += block.text
-
-print("\n--- Planning Result ---")
-print(planning_content[:500])
-print("...\n")
-
-# Clean up planning content - remove duplicate header if AI includes it
-planning_text = planning_content
-if planning_text.strip().startswith("##"):
-    # Remove the first heading if it exists (avoid duplicate)
-    first_newline = planning_text.find("\n")
-    if first_newline > 0:
-        planning_text = planning_text[first_newline+1:]
-
-# Create MR description with planning (AI response already includes the heading)
-planning_md = f"""{planning_text}
+${USER_PROMPT}
 
 ---
 
-"""
+*Claude Code CLI 正在直接实施变更...*
+EOF
+}
 
-# Update MR with planning
-print("Updating MR with planning...")
-update_mr_description(planning_md)
+build_completed_mr_description() {
+    local summary_text="$1"
+    local changed_files_text="$2"
+    cat <<EOF
+## ✅ AI 执行完成
 
-# Phase 2: Extract steps and execute
-print("\n" + "=" * 50)
-print("Starting execution phase...")
-print("=" * 50)
+### 需求
+${USER_PROMPT}
 
-# Parse steps from planning (look for - [ ] or - [x] patterns)
-# Use re.DOTALL to match multi-line steps
-steps_raw = re.findall(r'- \[([ x])\] (.+?)(?=\n- \[|$)', planning_content, re.DOTALL)
-# Clean up steps - remove newlines and extra spaces
-steps = [(checked, step.strip().replace('\n', ' ').replace('  ', ' ')) for checked, step in steps_raw]
-print(f"Found {len(steps)} steps")
+### 涉及文件
+${changed_files_text}
 
-execution_log = []
+### 执行摘要
+${summary_text}
+EOF
+}
 
-for idx, (checked, step) in enumerate(steps):
-    print(f"\n--- Step {idx + 1}/{len(steps)}: {step[:50]}... ---")
-    start_time = time.time()
+build_mr_title_prompt() {
+    local changed_files_text="$1"
+    cat <<EOF
+请根据下面的需求和最终改动，生成一个简洁明确的 GitLab Merge Request 标题。
 
-    # Execute step
-    step_messages = [{"role": "user", "content": generate_step_prompt(step)}]
-    step_response = call_claude(step_messages, tools=TOOLS)
+要求：
+1. 只输出标题文本，不要引号、编号、前缀、解释或 markdown。
+2. 中文优先，尽量控制在 30 个字以内。
+3. 体现主要结果，不要写“实现功能”“更新代码”这类空泛表述。
 
-    # Extract output
-    step_output = ""
-    if step_response:
-        for block in step_response.content:
-            if hasattr(block, 'type') and block.type == 'text':
-                step_output += block.text
+需求：
+${USER_PROMPT}
 
-    duration = time.time() - start_time
+改动文件：
+${changed_files_text}
+EOF
+}
 
-    # Record execution
-    execution_log.append({
-        "step": step,
-        "duration": duration,
-        "output": step_output[:200]
-    })
+build_commit_message_prompt() {
+    local changed_files_text="$1"
+    local diff_stats_text="$2"
+    local summary_text="$3"
+    cat <<EOF
+请根据下面的信息，生成一条符合 Conventional Commits 规范的 git commit message。
 
-    # Build progress section (only one 执行进度 section per update)
-    progress_md = planning_md + "### 执行进度\n"
-    for i, (chk, stp) in enumerate(steps):
-        if i < idx + 1:
-            if i < len(execution_log):
-                progress_md += f"- [x] {stp} ✓ (耗时: {execution_log[i]['duration']:.1f}秒)\n"
-            else:
-                progress_md += f"- [x] {stp} ✓\n"
-        elif i == idx + 1:
-            progress_md += f"- [ ] {stp} (执行中...)\n"
-        else:
-            progress_md += f"- [ ] {stp}\n"
+要求：
+1. 使用中文。
+2. 第一行必须使用 Conventional Commits 格式：<type>: <description>。
+3. type 从 feat、fix、refactor、docs、test、build、chore、ci 中选择最合适的一个。
+4. description 简洁明确，尽量控制在 50 个字符内，最多不超过 72 个字符。
+5. 如果需要正文，subject 后空一行，再用 1-3 行简短说明“做了什么/为什么”。
+6. 最后添加 footer：AI-Generated: true
+7. 不要使用 markdown、代码块、引号，也不要包含 Co-authored-by trailer，我会自行追加。
 
-    # After loop ends, update one final time to mark all steps as complete
-    # Build final progress with all steps marked complete
-    progress_md = planning_md + "### 执行进度\n"
-    for i, (chk, stp) in enumerate(steps):
-        if i < len(execution_log):
-            progress_md += f"- [x] {stp} ✓ (耗时: {execution_log[i]['duration']:.1f}秒)\n"
-        else:
-            progress_md += f"- [x] {stp} ✓\n"
+用户需求：
+${USER_PROMPT}
 
-    # Calculate total duration
-    total_duration = sum(log['duration'] for log in execution_log)
-    minutes = int(total_duration // 60)
-    seconds = int(total_duration % 60)
+改动文件：
+${changed_files_text}
 
-    # Add completion message at the end of loop
-    progress_md += f"\n---\n\n✅ **所有任务已完成！** 总耗时: {minutes}分{seconds}秒"
+Diff 统计：
+${diff_stats_text}
 
-    # GitLab has 1MB limit, but keep it reasonable - truncate if too long
-    if len(progress_md) > 50000:
-        progress_md = progress_md[:50000] + "\n\n...(内容已截断)"
+执行摘要：
+${summary_text}
+EOF
+}
 
-    update_mr_description(progress_md)
+cat > /tmp/claude_prompt.txt <<EOF
+你在 /workspace 中工作，请直接完成下面的需求，不要先输出规划或步骤清单。
 
-# Phase 3: Generate completion report
-print("\n" + "=" * 50)
-print("Generating completion report...")
-print("=" * 50)
+需求:
+${USER_PROMPT}
 
-# Note: Git status parsing happens in bash after this script completes
-# to properly show changed files in MR description
+上下文:
+- GitLab project id: ${PROJECT_ID}
+- Issue IID: ${ISSUE_IID:-N/A (manual task)}
+- 当前工作分支: ${BRANCH_NAME}
+- 目标分支: ${TARGET_BRANCH}
 
-print("\n=== Execution completed ===")
-print(f"Total steps completed")
+要求:
+1. 直接检查代码库并实施修改。
+2. 仅在当前仓库内工作，优先做精确修改，不要引入无关改动。
+3. 完成后运行相关验证命令；如果仓库里没有对应命令，就明确说明。
+4. 最终输出简短执行摘要，至少包含：
+   - 修改了哪些文件
+   - 做了什么
+   - 运行了哪些验证
+5. 不要要求人工确认，除非你真的被阻塞。
+EOF
 
-print("\n=== Execution completed ===")
-print(f"Total steps: {len(steps)}")
-print(f"Completed: {len(execution_log)}")
+chmod 644 /tmp/claude_prompt.txt
+cat > /tmp/run_claude.sh <<'EOF'
+#!/bin/bash
+set -e
+export HOME=/home/gimr
+export PATH="/usr/local/bin:/usr/bin:/bin:${JAVA_HOME}/bin"
+cd /workspace
+/usr/local/bin/claude -p \
+    --dangerously-skip-permissions \
+    --no-session-persistence \
+    --output-format text \
+    --verbose \
+    --max-turns 20 \
+    --model "${ANTHROPIC_MODEL}" \
+    "$(cat /tmp/claude_prompt.txt)"
+EOF
+chmod +x /tmp/run_claude.sh
+chown -R gimr:gimr /workspace /tmp/claude_prompt.txt /tmp/run_claude.sh
 
-PYTHON_SCRIPT
+export ANTHROPIC_BASE_URL
+export ANTHROPIC_API_KEY
+export ANTHROPIC_AUTH_TOKEN="${ANTHROPIC_AUTH_TOKEN:-${ANTHROPIC_API_KEY}}"
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-1}"
+FINAL_SUMMARY_CONTENT=""
+FINAL_CHANGED_FILES_TEXT=""
+FINAL_MR_TITLE=""
+FINAL_COMMIT_MESSAGE=""
 
-chmod +x /tmp/claude_planner.py
-echo "Starting Python script..."
+echo "Claude CLI version: $(/usr/local/bin/claude --version)"
+echo "Updating MR with execution status..."
+update_mr_description "$(build_running_mr_description)" || true
+
+echo "Starting Claude CLI..."
 set -x
-timeout 300 python3 /tmp/claude_planner.py > /workspace/result.md 2>&1 || echo "Script timed out or failed with: $?"
+set +e
+set -o pipefail
+env HOME=/home/gimr timeout 300 su -m -s /bin/bash gimr -c '/tmp/run_claude.sh' 2>&1 | tee /workspace/result.md
+SCRIPT_RESULT=${PIPESTATUS[0]}
+set +o pipefail
+set -e
 set +x
-SCRIPT_RESULT=$?
-echo "Python script exited with code: ${SCRIPT_RESULT}"
-if [ -f /workspace/result.md ]; then
-    echo "=== result.md content ==="
-    cat /workspace/result.md
-    echo "=== end result.md ==="
-fi
+echo "Claude CLI exited with code: ${SCRIPT_RESULT}"
+echo "Execution output saved to /workspace/result.md"
 
-RESULT=$?
-
-# Show output
-cat /workspace/result.md
+RESULT=${SCRIPT_RESULT}
 
 if [ $RESULT -ne 0 ]; then
-    echo "Claude Planner failed with exit code: ${RESULT}"
+    echo "Claude execution failed with exit code: ${RESULT}"
     exit $RESULT
 fi
 
-# The planner has already:
-# 1. Used tools (Bash/Read/Write) to make changes in /workspace
-# 2. Updated MR description during planning/execution
-# 3. Generated completion report in the MR
+if [ -f /workspace/result.md ]; then
+    SUMMARY_CONTENT=$(cat /workspace/result.md)
+    if [ ${#SUMMARY_CONTENT} -gt 45000 ]; then
+        SUMMARY_CONTENT="${SUMMARY_CONTENT:0:45000}
+
+...(内容已截断)"
+    fi
+    FINAL_SUMMARY_CONTENT="${SUMMARY_CONTENT}"
+fi
 
 # Now commit and push the changes
 # Check if any changes were made (excluding result.md)
@@ -481,9 +330,6 @@ if [ -n "$CHANGES" ]; then
     # Add all files except result.md (it's the output log, not actual code)
     # Use git add with exclusion pattern
     git add -A -- ':!result.md'
-
-    # Create commit
-    git commit -m "AI: ${USER_PROMPT:0:50}..."
 
     # Push to remote using git push
     echo "Pushing to remote..."
@@ -529,35 +375,70 @@ if [ -n "$CHANGES" ]; then
             || echo "Warning: Failed to save stats to backend"
     fi
 
-    # Collect change statistics for MR description using git status --porcelain
-    # Format: XY path, where X=index status, Y=work tree status
-    # A=added, M=modified, D=deleted, ??=untracked
-    # Use process substitution to avoid subshell issues
+    # Collect changed file lists from the staged diff before committing.
     NEW_FILES=""
     MODIFIED_FILES=""
     DELETED_FILES=""
-
+    STAGED_NAME_STATUS=$(git diff --cached --name-status --no-renames || true)
     while IFS= read -r line; do
         [ -z "$line" ] && continue
-        status="${line:0:2}"
-        filepath="${line:3}"
-        # Skip result.md (it's the output file, not actual code)
+        status=$(printf '%s' "$line" | awk '{print $1}')
+        filepath=$(printf '%s' "$line" | cut -f2-)
         [ "$filepath" = "result.md" ] && continue
         case "$status" in
-            "A "*) NEW_FILES="${NEW_FILES}${filepath}," ;;
-            " M"*) MODIFIED_FILES="${MODIFIED_FILES}${filepath}," ;;
-            "M "*) MODIFIED_FILES="${MODIFIED_FILES}${filepath}," ;;
-            " D") DELETED_FILES="${DELETED_FILES}${filepath}," ;;
-            "D "*) DELETED_FILES="${DELETED_FILES}${filepath}," ;;
-            "??")  NEW_FILES="${NEW_FILES}${filepath}," ;;
-            "?? ") NEW_FILES="${NEW_FILES}${filepath}," ;;
+            A) NEW_FILES="${NEW_FILES}${filepath}," ;;
+            M) MODIFIED_FILES="${MODIFIED_FILES}${filepath}," ;;
+            D) DELETED_FILES="${DELETED_FILES}${filepath}," ;;
         esac
-    done < <(git status --porcelain)
+    done <<< "${STAGED_NAME_STATUS}"
 
     # Remove trailing commas
     NEW_FILES="${NEW_FILES%,}"
     MODIFIED_FILES="${MODIFIED_FILES%,}"
     DELETED_FILES="${DELETED_FILES%,}"
+
+    CHANGED_FILES_TEXT="新增: ${NEW_FILES:-无}
+修改: ${MODIFIED_FILES:-无}
+删除: ${DELETED_FILES:-无}"
+    FINAL_CHANGED_FILES_TEXT="${CHANGED_FILES_TEXT}"
+
+    COMMIT_DIFF_STATS=$(git diff --cached --stat || echo "0 files changed")
+    COMMIT_MESSAGE_PROMPT=$(build_commit_message_prompt "${CHANGED_FILES_TEXT}" "${COMMIT_DIFF_STATS}" "${FINAL_SUMMARY_CONTENT}")
+    printf '%s\n' "${COMMIT_MESSAGE_PROMPT}" > /tmp/commit_message_prompt.txt
+    chmod 644 /tmp/commit_message_prompt.txt
+    chown gimr:gimr /tmp/commit_message_prompt.txt
+
+    set +e
+    GENERATED_COMMIT_MESSAGE=$(env HOME=/home/gimr timeout 60 su -m -s /bin/bash gimr -c '/usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" "$(cat /tmp/commit_message_prompt.txt)"' 2>/dev/null)
+    COMMIT_MESSAGE_RESULT=$?
+    set -e
+
+    if [ ${COMMIT_MESSAGE_RESULT} -eq 0 ]; then
+        FINAL_COMMIT_MESSAGE=$(printf '%s\n' "${GENERATED_COMMIT_MESSAGE}" | sed 's/\r$//')
+    fi
+
+    if [ -z "${FINAL_COMMIT_MESSAGE}" ]; then
+        FINAL_COMMIT_MESSAGE="chore: 更新 ${BRANCH_NAME} 分支实现
+
+- 完成用户请求对应的代码修改
+- 同步更新相关文件与验证结果
+
+AI-Generated: true"
+    fi
+
+    if ! printf '%s\n' "${FINAL_COMMIT_MESSAGE}" | grep -q '^AI-Generated: true$'; then
+        FINAL_COMMIT_MESSAGE="${FINAL_COMMIT_MESSAGE}
+
+AI-Generated: true"
+    fi
+
+    {
+        printf '%s\n' "${FINAL_COMMIT_MESSAGE}"
+        printf '\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>\n'
+    } > /tmp/commit_message.txt
+
+    # Create commit
+    git commit -F /tmp/commit_message.txt
 
     # MR was already created by backend before worker started
     # Just get the MR info if MR_IID was provided
@@ -574,6 +455,7 @@ if [ -n "$CHANGES" ]; then
             "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests?state=opened&source_branch=${BRANCH_NAME}" | \
             grep -o '"iid":[0-9]*' | head -1 | cut -d':' -f2)
         if [ -n "$EXISTING_MR" ]; then
+            MR_IID="${EXISTING_MR}"
             MR_WEB_URL=$(curl -s -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
                 "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests/${EXISTING_MR}" | \
                 grep -o '"web_url":"[^"]*"' | cut -d'"' -f4)
@@ -585,14 +467,43 @@ if [ -n "$CHANGES" ]; then
     fi
     echo "MR created: ${MR_WEB_URL}"
 
+    if [ -n "${MR_IID}" ]; then
+        TITLE_PROMPT=$(build_mr_title_prompt "${CHANGED_FILES_TEXT}")
+        printf '%s\n' "${TITLE_PROMPT}" > /tmp/mr_title_prompt.txt
+        chmod 644 /tmp/mr_title_prompt.txt
+        chown gimr:gimr /tmp/mr_title_prompt.txt
+
+        set +e
+        GENERATED_MR_TITLE=$(env HOME=/home/gimr timeout 60 su -m -s /bin/bash gimr -c '/usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" "$(cat /tmp/mr_title_prompt.txt)"' 2>/dev/null)
+        TITLE_RESULT=$?
+        set -e
+
+        if [ ${TITLE_RESULT} -eq 0 ]; then
+            FINAL_MR_TITLE=$(printf '%s' "${GENERATED_MR_TITLE}" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g; s/^ *//; s/ *$//')
+            FINAL_MR_TITLE="${FINAL_MR_TITLE:0:120}"
+        fi
+
+        if [ -z "${FINAL_MR_TITLE}" ]; then
+            FINAL_MR_TITLE="AI: ${USER_PROMPT:0:60}"
+        fi
+
+        if [ -n "${FINAL_SUMMARY_CONTENT}" ]; then
+            update_mr "${FINAL_MR_TITLE}" "$(build_completed_mr_description "${FINAL_SUMMARY_CONTENT}" "${FINAL_CHANGED_FILES_TEXT}")" || true
+        else
+            update_mr "${FINAL_MR_TITLE}" "" || true
+        fi
+    fi
+
     # Comment on issue with MR link
     echo "Commenting on issue..."
-    curl -s -X POST "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/issues/${ISSUE_IID}/notes" \
-        -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
-        -H "Content-Type: application/json" \
-        -d "{
-            \"body\": \"I've created a merge request: ${MR_WEB_URL}\\n\\nPlease review the changes.\"
-        }"
+    if [ -n "${ISSUE_IID}" ]; then
+        curl -s -X POST "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/issues/${ISSUE_IID}/notes" \
+            -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{
+                \"body\": \"I've created a merge request: ${MR_WEB_URL}\\n\\nPlease review the changes.\"
+            }"
+    fi
 
     echo "========================================"
     echo "Task completed successfully!"

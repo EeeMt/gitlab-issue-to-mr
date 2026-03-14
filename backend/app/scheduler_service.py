@@ -6,6 +6,7 @@ import signal
 
 from app.config import get_settings
 from app.database import close_db, init_db
+from app.migrations import run_migrations
 from app.scheduler import start_scheduler, stop_scheduler
 
 settings = get_settings()
@@ -22,6 +23,9 @@ logger = logging.getLogger(__name__)
 async def run_scheduler_service() -> None:
     """Run scheduler as a dedicated process."""
     logger.info("Starting scheduler service...")
+
+    # Run migrations first
+    run_migrations()
 
     await init_db()
     stop_event = asyncio.Event()

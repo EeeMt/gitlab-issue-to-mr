@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import DateTime, Enum as SQLEnum, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Enum as SQLEnum, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -41,9 +41,12 @@ class Task(Base):
 
     # GitLab identifiers
     project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    issue_iid: Mapped[int] = mapped_column(Integer, nullable=False)
-    issue_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    note_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    issue_iid: Mapped[int] = mapped_column(Integer, nullable=True)
+    issue_id: Mapped[int] = mapped_column(Integer, nullable=True)
+    note_id: Mapped[int] = mapped_column(Integer, nullable=True, unique=True)
+
+    # Manual task flag
+    is_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Task details
     user_prompt: Mapped[str] = mapped_column(Text, nullable=False)

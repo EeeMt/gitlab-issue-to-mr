@@ -6,9 +6,11 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.scheduling import resolve_scheduled_at
 from app.database import get_db
 from app.models import Task, TaskLog, TaskStatus
 
@@ -68,6 +70,7 @@ async def list_tasks(
             "additions": task.additions,
             "deletions": task.deletions,
             "total_changes": task.total_changes,
+            "is_manual": task.is_manual,
             "created_at": task.created_at.isoformat(),
             "updated_at": task.updated_at.isoformat(),
             "started_at": task.started_at.isoformat() if task.started_at else None,
@@ -117,6 +120,7 @@ async def get_task(task_id: int, db: AsyncSession = Depends(get_db)):
         "additions": task.additions,
         "deletions": task.deletions,
         "total_changes": task.total_changes,
+        "is_manual": task.is_manual,
         "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat(),
         "started_at": task.started_at.isoformat() if task.started_at else None,
@@ -324,8 +328,6 @@ async def retry_task(task_id: int, db: AsyncSession = Depends(get_db)):
     task.completed_at = None
     task.started_at = None
     task.container_id = None
-    task.merge_request_url = None
-    task.merge_request_iid = None
     task.commit_sha = None
     task.additions = 0
     task.deletions = 0
@@ -370,3 +372,98 @@ async def execute_task(task_id: int, db: AsyncSession = Depends(get_db)):
     logger.info(f"Task {task_id} scheduled for immediate execution")
 
     return {"status": "success", "message": f"Task {task_id} scheduled for immediate execution"}
+
+
+# Pydantic models for manual task creation
+class CreateTaskRequest(BaseModel):
+    """Request model for creating a manual task."""
+    project_id: int
+    branch_name: str
+    target_branch: str = "main"
+    user_prompt: str
+    priority: int = 0
+    delay_seconds: Optional[int] = None
+    scheduled_datetime: Optional[datetime] = None
+
+
+@router.get("/projects")
+async def list_projects():
+    """List accessible GitLab projects.
+
+    Returns:
+        List of projects with id, name, and path
+    """
+    from app.core.gitlab_client import get_gitlab_client
+    gitlab = get_gitlab_client()
+    projects = await asyncio.to_thread(gitlab.get_projects)
+    return projects
+
+
+@router.get("/projects/{project_id}/branches")
+async def list_branches(project_id: int):
+    """List branches for a GitLab project.
+
+    Args:
+        project_id: GitLab project ID
+
+    Returns:
+        List of branch names
+    """
+    from app.core.gitlab_client import get_gitlab_client
+    gitlab = get_gitlab_client()
+    branches = await asyncio.to_thread(gitlab.get_branches, project_id)
+    return branches
+
+
+@router.post("/tasks")
+async def create_task(request: CreateTaskRequest, db: AsyncSession = Depends(get_db)):
+    """Create a new manual task.
+
+    Args:
+        request: Task creation request
+        db: Database session
+
+    Returns:
+        Created task details
+    """
+    scheduled_at = resolve_scheduled_at(
+        request.scheduled_datetime,
+        request.delay_seconds,
+    )
+
+    # Create task
+    task = Task(
+        project_id=request.project_id,
+        user_prompt=request.user_prompt,
+        branch_name=request.branch_name,
+        target_branch=request.target_branch,
+        priority=request.priority,
+        scheduled_at=scheduled_at,
+        is_manual=True,
+        # These are nullable for manual tasks
+        issue_iid=None,
+        issue_id=None,
+        note_id=None,
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+
+    logger.info(
+        f"Created manual task {task.id} for project {request.project_id}, "
+        f"branch={request.branch_name}, target={request.target_branch}, "
+        f"priority={request.priority}, delay={request.delay_seconds}"
+    )
+
+    return {
+        "id": task.id,
+        "project_id": task.project_id,
+        "user_prompt": task.user_prompt,
+        "branch_name": task.branch_name,
+        "target_branch": task.target_branch,
+        "status": task.status.value,
+        "priority": task.priority,
+        "scheduled_at": task.scheduled_at.isoformat() if task.scheduled_at else None,
+        "is_manual": task.is_manual,
+        "created_at": task.created_at.isoformat(),
+    }

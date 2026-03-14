@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     secret_key: str = Field(default="change-me-in-production")
     log_level: str = Field(default="INFO")
     backend_url: str = Field(default="http://localhost:8000")  # Frontend/Backend URL for links
+    auto_migrate: bool = Field(default=True)  # Auto-run migrations on startup
 
     # Worker Configuration
     worker_image: str = Field(default="gitlab-issues-to-mr-worker:latest")

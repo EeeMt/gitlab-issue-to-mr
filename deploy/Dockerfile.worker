@@ -10,19 +10,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     maven \
     nodejs \
     npm \
+    ripgrep \
     && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --shell /bin/bash --uid 1000 gimr
 
 # Set Java environment
 ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
-ENV PATH="${JAVA_HOME}/bin:${PATH}"
+ENV PATH="${JAVA_HOME}/bin:/usr/local/bin:${PATH}"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Install Python dependencies and Claude CLI
-RUN pip install --no-cache-dir anthropic requests anthropic-cli
-
-# Install Claude CLI via npm
-RUN npm install -g @anthropic-ai/claude-cli 2>/dev/null || echo "Claude CLI via npm failed, using pip"
+# Install official Claude Code CLI via native installer
+RUN curl -fL --retry 5 --retry-delay 2 --retry-all-errors https://claude.ai/install.sh | bash -s stable \
+    && install -m 755 "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude \
+    && claude --version
 
 # Copy and set entrypoint
 COPY deploy/entrypoint.sh /entrypoint.sh

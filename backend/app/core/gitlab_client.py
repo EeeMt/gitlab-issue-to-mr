@@ -2,6 +2,7 @@
 
 import logging
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import gitlab
 from gitlab import Gitlab
@@ -107,9 +108,28 @@ class GitLabClient:
 
         logger.info(f"Creating MR: {source_branch} -> {target_branch}")
         mr = project.mergerequests.create(mr_data)
-        logger.info(f"MR created: {mr.web_url}")
+        logger.info(f"MR created: {self.normalize_web_url(mr.web_url)}")
 
         return mr
+
+    def normalize_web_url(self, url: Optional[str]) -> Optional[str]:
+        """Normalize GitLab web URLs to the configured GitLab base URL."""
+        if not url:
+            return url
+
+        configured = urlsplit(settings.gitlab_url.rstrip("/"))
+        parsed = urlsplit(url)
+
+        if not configured.scheme or not configured.netloc or not parsed.path:
+            return url
+
+        return urlunsplit((
+            configured.scheme,
+            configured.netloc,
+            parsed.path,
+            parsed.query,
+            parsed.fragment,
+        ))
 
     def get_merge_request(
         self, project_id: int, mr_iid: int
@@ -312,6 +332,44 @@ class GitLabClient:
         except GitlabGetError:
             logger.warning(f"Issue not found: {project_id}/{issue_iid}")
             return None
+
+    def get_projects(self, per_page: int = 100) -> list:
+        """Get list of accessible projects.
+
+        Args:
+            per_page: Number of projects per page
+
+        Returns:
+            List of project dicts with id, name, path_with_namespace
+        """
+        logger.info("Fetching accessible projects")
+        projects = self.gl.projects.list(per_page=per_page, membership=True)
+        return [
+            {
+                "id": p.id,
+                "name": p.name,
+                "path_with_namespace": p.path_with_namespace,
+            }
+            for p in projects
+        ]
+
+    def get_branches(self, project_id: int) -> list:
+        """Get list of branches for a project.
+
+        Args:
+            project_id: GitLab project ID
+
+        Returns:
+            List of branch dicts with name
+        """
+        logger.info(f"Fetching branches for project: {project_id}")
+        # Use http_list with iterator to get all branches
+        # The correct endpoint is /projects/:id/repository/branches
+        all_branches = list(self.gl.http_list(
+            f"/projects/{project_id}/repository/branches",
+            per_page=100
+        ))
+        return [{"name": b["name"]} for b in all_branches]
 
     def close(self) -> None:
         """Close GitLab client."""

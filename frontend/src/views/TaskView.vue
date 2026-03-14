@@ -116,6 +116,7 @@ import { useRoute } from 'vue-router'
 import { NButton, NSpace, NCard, NDescriptions, NDescriptionsItem, NTag, NGrid, NGi, NSpin, NAlert, NText, useMessage } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
 import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, type Task } from '../api'
+import { formatDateTimeUtc8 } from '../utils/datetime'
 
 const route = useRoute()
 const message = useMessage()
@@ -134,6 +135,8 @@ const actionLoading = ref(false)
 const taskRequestInFlight = ref(false)
 const containerRequestInFlight = ref(false)
 let pollTimer: number | null = null
+let logEventSource: EventSource | null = null
+let logStreamContainerId: string | null = null
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
   pending: 'default',
@@ -145,7 +148,57 @@ const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 
 }
 
 function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleString()
+  return formatDateTimeUtc8(dateStr)
+}
+
+function isActiveTaskStatus(status?: string | null): boolean {
+  return status === 'running' || status === 'pending' || status === 'queued'
+}
+
+function trimLogBuffer(content: string): string {
+  const maxLogSize = 200_000
+  return content.length > maxLogSize ? content.slice(-maxLogSize) : content
+}
+
+function closeLogStream() {
+  if (logEventSource) {
+    logEventSource.close()
+    logEventSource = null
+  }
+  logStreamContainerId = null
+}
+
+function connectLogStream() {
+  if (typeof EventSource === 'undefined') return
+
+  const containerId = task.value?.container_id
+  if (!containerId || !isActiveTaskStatus(task.value?.status)) {
+    closeLogStream()
+    return
+  }
+
+  if (logEventSource && logStreamContainerId === containerId) {
+    return
+  }
+
+  closeLogStream()
+  containerLogs.value = ''
+  containerLogsLoading.value = true
+  logStreamContainerId = containerId
+  logEventSource = new EventSource(`/api/containers/${containerId}/logs`)
+
+  logEventSource.onmessage = (event) => {
+    containerLogsLoading.value = false
+    const chunk = event.data.endsWith('\n') ? event.data : `${event.data}\n`
+    containerLogs.value = trimLogBuffer(containerLogs.value + chunk)
+  }
+
+  logEventSource.onerror = () => {
+    containerLogsLoading.value = false
+    if (!isActiveTaskStatus(task.value?.status) || task.value?.container_id !== logStreamContainerId) {
+      closeLogStream()
+    }
+  }
 }
 
 async function fetchTask() {
@@ -153,7 +206,13 @@ async function fetchTask() {
   taskRequestInFlight.value = true
   loading.value = true
   try {
+    const previousStatus = task.value?.status
     task.value = await getTask(taskId.value)
+    connectLogStream()
+
+    if (isActiveTaskStatus(previousStatus) && !isActiveTaskStatus(task.value.status)) {
+      await fetchLogs()
+    }
   } catch (error) {
     message.error('Failed to fetch task')
   } finally {
@@ -180,6 +239,10 @@ async function fetchContainerLogs() {
     containerLogs.value = ''
     return
   }
+  if (typeof EventSource !== 'undefined' && isActiveTaskStatus(task.value.status)) {
+    connectLogStream()
+    return
+  }
   containerRequestInFlight.value = true
   containerLogsLoading.value = true
   try {
@@ -193,15 +256,21 @@ async function fetchContainerLogs() {
   }
 }
 
-function refreshTask() {
-  fetchTask()
-  fetchLogs()
-  fetchContainerLogs()
+async function refreshTask() {
+  await fetchTask()
+  if (isActiveTaskStatus(task.value?.status)) {
+    await fetchContainerLogs()
+    return
+  }
+  await fetchLogs()
 }
 
-function refreshLogs() {
-  fetchLogs()
-  fetchContainerLogs()
+async function refreshLogs() {
+  if (isActiveTaskStatus(task.value?.status)) {
+    await fetchContainerLogs()
+    return
+  }
+  await fetchLogs()
 }
 
 async function handleCancel() {
@@ -243,22 +312,30 @@ async function handleExecute() {
   }
 }
 
-onMounted(() => {
-  fetchTask()
-  fetchLogs()
-  fetchContainerLogs()
+onMounted(async () => {
+  await fetchTask()
+  if (isActiveTaskStatus(task.value?.status)) {
+    await fetchContainerLogs()
+  } else {
+    await fetchLogs()
+  }
   // Auto-refresh for active tasks; skip when tab is not visible.
   pollTimer = window.setInterval(() => {
     if (document.visibilityState !== 'visible') return
-
-    if (task.value?.status === 'running' || task.value?.status === 'pending' || task.value?.status === 'queued') {
+ 
+    if (isActiveTaskStatus(task.value?.status)) {
       fetchTask()
-      fetchContainerLogs()
+      if (!logEventSource) {
+        fetchContainerLogs()
+      }
+    } else {
+      closeLogStream()
     }
   }, 5000)
 })
 
 onBeforeUnmount(() => {
+  closeLogStream()
   if (pollTimer !== null) {
     clearInterval(pollTimer)
     pollTimer = null
