@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import secrets
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from hashlib import sha256
 
@@ -18,6 +19,15 @@ from app.models import User, UserSession
 
 def _utcnow() -> datetime:
     return datetime.utcnow()
+
+
+@dataclass
+class SessionAuthResult:
+    """Resolved user/session pair plus an optional authentication failure detail."""
+
+    user: User | None
+    session: UserSession | None
+    failure_detail: str | None = None
 
 
 def hash_session_token(token: str) -> str:
@@ -36,6 +46,7 @@ async def create_user_session(
     ip_address: str | None = None,
     user_agent: str | None = None,
     gitlab_access_token: str | None = None,
+    gitlab_refresh_token: str | None = None,
     max_expires_at: datetime | None = None,
 ) -> str:
     """Create a new session row and return the raw session token."""
@@ -51,6 +62,9 @@ async def create_user_session(
         gitlab_access_token_encrypted=(
             encrypt_config_secret(gitlab_access_token) if gitlab_access_token else None
         ),
+        gitlab_refresh_token_encrypted=(
+            encrypt_config_secret(gitlab_refresh_token) if gitlab_refresh_token else None
+        ),
         expires_at=expires_at,
         last_seen_at=_utcnow(),
         ip_address=ip_address,
@@ -61,12 +75,12 @@ async def create_user_session(
     return raw_token
 
 
-async def get_user_and_session_from_session_token(
+async def resolve_session_authentication(
     db: AsyncSession, token: str | None
-) -> tuple[User | None, UserSession | None]:
+) -> SessionAuthResult:
     """Resolve a user and session row from a raw session token."""
     if not token:
-        return None, None
+        return SessionAuthResult(user=None, session=None)
 
     token_hash = hash_session_token(token)
     result = await db.execute(
@@ -79,18 +93,43 @@ async def get_user_and_session_from_session_token(
     )
     row = result.first()
     if not row:
-        return None, None
+        return SessionAuthResult(
+            user=None,
+            session=None,
+            failure_detail="Session not found or already signed out. Please sign in again.",
+        )
 
     user, session = row
     now = _utcnow()
-    if session.expires_at <= now or user.state != "active":
+    if session.expires_at <= now:
         session.revoked_at = now
         await db.flush()
-        return None, None
+        return SessionAuthResult(
+            user=None,
+            session=None,
+            failure_detail="Your dashboard session expired. Please sign in again.",
+        )
+
+    if user.state != "active":
+        session.revoked_at = now
+        await db.flush()
+        return SessionAuthResult(
+            user=None,
+            session=None,
+            failure_detail="Your dashboard account is disabled.",
+        )
 
     session.last_seen_at = now
     await db.flush()
-    return user, session
+    return SessionAuthResult(user=user, session=session)
+
+
+async def get_user_and_session_from_session_token(
+    db: AsyncSession, token: str | None
+) -> tuple[User | None, UserSession | None]:
+    """Resolve a user and session row from a raw session token."""
+    result = await resolve_session_authentication(db, token)
+    return result.user, result.session
 
 
 async def get_user_from_session_token(db: AsyncSession, token: str | None) -> User | None:
@@ -106,6 +145,35 @@ def get_gitlab_access_token_from_session(session: UserSession) -> str | None:
     return decrypt_config_secret(session.gitlab_access_token_encrypted)
 
 
+def get_gitlab_refresh_token_from_session(session: UserSession) -> str | None:
+    """Decrypt the GitLab refresh token stored for a session, if present."""
+    if not session.gitlab_refresh_token_encrypted:
+        return None
+    return decrypt_config_secret(session.gitlab_refresh_token_encrypted)
+
+
+async def update_session_gitlab_tokens(
+    db: AsyncSession,
+    session: UserSession,
+    *,
+    gitlab_access_token: str | None,
+    gitlab_refresh_token: str | None = None,
+    max_expires_at: datetime | None = None,
+) -> None:
+    """Update encrypted GitLab tokens and optional session expiry."""
+    session.gitlab_access_token_encrypted = (
+        encrypt_config_secret(gitlab_access_token) if gitlab_access_token else None
+    )
+    if gitlab_refresh_token is not None:
+        session.gitlab_refresh_token_encrypted = (
+            encrypt_config_secret(gitlab_refresh_token) if gitlab_refresh_token else None
+        )
+    if max_expires_at is not None and max_expires_at < session.expires_at:
+        session.expires_at = max_expires_at
+    session.last_seen_at = _utcnow()
+    await db.flush()
+
+
 async def revoke_session_token(db: AsyncSession, token: str | None) -> None:
     """Revoke one session token if it exists."""
     if not token:
@@ -119,3 +187,33 @@ async def revoke_session_token(db: AsyncSession, token: str | None) -> None:
     if session and session.revoked_at is None:
         session.revoked_at = _utcnow()
         await db.flush()
+
+
+async def revoke_user_sessions(db: AsyncSession, user_id: int) -> int:
+    """Revoke all active sessions for a user and return the number revoked."""
+    result = await db.execute(
+        select(UserSession).where(
+            UserSession.user_id == user_id,
+            UserSession.revoked_at.is_(None),
+        )
+    )
+    sessions = list(result.scalars().all())
+    now = _utcnow()
+    revoked_count = 0
+    for session in sessions:
+        session.revoked_at = now
+        revoked_count += 1
+    if sessions:
+        await db.flush()
+    return revoked_count
+
+
+async def revoke_session_by_id(db: AsyncSession, session_id: str) -> bool:
+    """Revoke one session by its database id."""
+    result = await db.execute(select(UserSession).where(UserSession.id == session_id))
+    session = result.scalar_one_or_none()
+    if session is None or session.revoked_at is not None:
+        return False
+    session.revoked_at = _utcnow()
+    await db.flush()
+    return True

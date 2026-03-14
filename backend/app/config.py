@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     cookie_samesite: str = Field(default="lax")
     auth_admin_usernames: str = Field(default="")
     auth_admin_gitlab_groups: str = Field(default="")
+    auth_break_glass_enabled: bool = Field(default=False)
+    auth_break_glass_username: str = Field(default="")
+    auth_break_glass_password_hash: str = Field(default="")
 
     # Worker Configuration
     worker_image: str = Field(default="gitlab-issues-to-mr-worker:latest")
@@ -109,6 +112,14 @@ class Settings(BaseSettings):
     @property
     def admin_gitlab_groups(self) -> set[str]:
         return {item.strip() for item in self.auth_admin_gitlab_groups.split(",") if item.strip()}
+
+    @property
+    def break_glass_enabled(self) -> bool:
+        return (
+            self.auth_break_glass_enabled
+            and bool(self.auth_break_glass_username.strip())
+            and bool(self.auth_break_glass_password_hash.strip())
+        )
 
 
 @lru_cache

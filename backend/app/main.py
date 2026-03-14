@@ -126,7 +126,7 @@ async def health() -> dict:
 
 
 # Import and include routers
-from app.api import auth, webhook, tasks, containers, stats, config
+from app.api import admin_users, auth, webhook, tasks, containers, stats, config
 
 app.include_router(auth.router, prefix="/api", tags=["auth"])
 app.include_router(webhook.router, prefix="/api", tags=["webhook"])
@@ -152,5 +152,11 @@ app.include_router(
     config.router,
     prefix="/api",
     tags=["config"],
+    dependencies=[Depends(require_admin_user)],
+)
+app.include_router(
+    admin_users.router,
+    prefix="/api",
+    tags=["admin-users"],
     dependencies=[Depends(require_admin_user)],
 )

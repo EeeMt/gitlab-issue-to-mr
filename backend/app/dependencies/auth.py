@@ -10,8 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings
 from app.core.session import (
+    get_gitlab_refresh_token_from_session,
     get_gitlab_access_token_from_session,
-    get_user_and_session_from_session_token,
+    resolve_session_authentication,
 )
 from app.database import get_db
 from app.models import User, UserSession
@@ -24,6 +25,7 @@ class AuthContext:
     user: User
     session: UserSession
     gitlab_access_token: str | None
+    gitlab_refresh_token: str | None
 
 
 async def get_optional_auth_context(
@@ -36,13 +38,15 @@ async def get_optional_auth_context(
         return None
 
     token = request.cookies.get(settings.session_cookie_name)
-    user, session = await get_user_and_session_from_session_token(db, token)
-    if user is None or session is None:
+    result = await resolve_session_authentication(db, token)
+    request.state.auth_failure_detail = result.failure_detail
+    if result.user is None or result.session is None:
         return None
     return AuthContext(
-        user=user,
-        session=session,
-        gitlab_access_token=get_gitlab_access_token_from_session(session),
+        user=result.user,
+        session=result.session,
+        gitlab_access_token=get_gitlab_access_token_from_session(result.session),
+        gitlab_refresh_token=get_gitlab_refresh_token_from_session(result.session),
     )
 
 
@@ -54,6 +58,7 @@ async def get_optional_current_user(
 
 
 async def require_authenticated_context(
+    request: Request,
     auth_context: Optional[AuthContext] = Depends(get_optional_auth_context),
 ) -> Optional[AuthContext]:
     """Require an authenticated request context when OIDC is enabled."""
@@ -63,7 +68,7 @@ async def require_authenticated_context(
     if auth_context is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
+            detail=getattr(request.state, "auth_failure_detail", None) or "Authentication required",
         )
     return auth_context
 

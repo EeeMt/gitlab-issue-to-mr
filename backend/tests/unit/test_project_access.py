@@ -26,6 +26,7 @@ class ProjectAccessTests(unittest.IsolatedAsyncioTestCase):
             user=User(id=1, oidc_sub="1", gitlab_user_id=1, username="admin", platform_role="platform_admin"),
             session=UserSession(id="session-1", user_id=1, session_token_hash="hash"),
             gitlab_access_token=None,
+            gitlab_refresh_token=None,
         )
 
         with patch(
@@ -42,6 +43,7 @@ class ProjectAccessTests(unittest.IsolatedAsyncioTestCase):
             user=User(id=2, oidc_sub="2", gitlab_user_id=2, username="alice", platform_role="platform_user"),
             session=UserSession(id="session-2", user_id=2, session_token_hash="hash"),
             gitlab_access_token="token-123",
+            gitlab_refresh_token=None,
         )
 
         with patch(
@@ -63,6 +65,7 @@ class ProjectAccessTests(unittest.IsolatedAsyncioTestCase):
             user=User(id=3, oidc_sub="3", gitlab_user_id=3, username="bob", platform_role="platform_user"),
             session=UserSession(id="session-3", user_id=3, session_token_hash="hash"),
             gitlab_access_token=None,
+            gitlab_refresh_token=None,
         )
 
         with patch(

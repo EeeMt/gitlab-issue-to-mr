@@ -151,6 +151,9 @@ class User(Base):
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     avatar_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     platform_role: Mapped[str] = mapped_column(String(32), nullable=False, default="platform_user")
+    platform_role_source: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="bootstrap"
+    )
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -172,6 +175,7 @@ class UserSession(Base):
     )
     session_token_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     gitlab_access_token_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    gitlab_refresh_token_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     ip_address: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
@@ -179,4 +183,24 @@ class UserSession(Base):
     revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow
+    )
+
+
+class AuthAuditLog(Base):
+    """Audit trail for authentication-related security events."""
+
+    __tablename__ = "auth_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, index=True
     )

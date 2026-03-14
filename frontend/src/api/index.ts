@@ -15,7 +15,10 @@ api.interceptors.response.use(
       !window.location.pathname.startsWith('/login')
     ) {
       const next = `${window.location.pathname}${window.location.search}`
-      window.location.assign(`/login?next=${encodeURIComponent(next)}`)
+      const detail =
+        typeof error?.response?.data?.detail === 'string' ? error.response.data.detail : ''
+      const reason = detail ? `&reason=${encodeURIComponent(detail)}` : ''
+      window.location.assign(`/login?next=${encodeURIComponent(next)}${reason}`)
     }
     return Promise.reject(error)
   }
@@ -169,8 +172,68 @@ export interface AuthUser {
 
 export interface AuthStatus {
   oidc_enabled: boolean
+  break_glass_enabled?: boolean
+  break_glass_username?: string | null
   authenticated: boolean
   user: AuthUser | null
+}
+
+export interface AdminUser {
+  id: number
+  gitlab_user_id: number
+  username: string
+  display_name: string | null
+  email: string | null
+  avatar_url: string | null
+  platform_role: string
+  platform_role_source: string
+  state: string
+  last_login_at: string | null
+  created_at: string
+  active_session_count: number
+  last_session_seen_at: string | null
+  is_current_user: boolean
+}
+
+export interface AdminUserUpdateRequest {
+  platform_role?: string
+  state?: string
+}
+
+export interface RevokeUserSessionsResponse {
+  status: string
+  revoked_count: number
+}
+
+export interface BreakGlassLoginRequest {
+  username: string
+  password: string
+  next?: string
+}
+
+export interface BreakGlassLoginResponse {
+  status: string
+  next_path: string
+}
+
+export interface SessionInfo {
+  id: string
+  created_at: string
+  last_seen_at: string | null
+  expires_at: string
+  revoked_at: string | null
+  ip_address: string | null
+  user_agent: string | null
+  status: string
+  current: boolean
+  has_gitlab_access_token: boolean
+  has_gitlab_refresh_token: boolean
+}
+
+export interface RevokeSessionResponse {
+  status: string
+  session_id: string
+  current_session_revoked: boolean
 }
 
 // API functions
@@ -258,6 +321,39 @@ export async function testOidcConfig(auth: AuthConfigUpdate): Promise<OidcConfig
 
 export async function getAuthStatus(): Promise<AuthStatus> {
   const response = await api.get('/auth/me')
+  return response.data
+}
+
+export async function breakGlassLogin(payload: BreakGlassLoginRequest): Promise<BreakGlassLoginResponse> {
+  const response = await api.post('/auth/break-glass/login', payload)
+  return response.data
+}
+
+export async function getSessions(): Promise<SessionInfo[]> {
+  const response = await api.get('/auth/sessions')
+  return response.data
+}
+
+export async function revokeSession(sessionId: string): Promise<RevokeSessionResponse> {
+  const response = await api.post(`/auth/sessions/${sessionId}/revoke`)
+  return response.data
+}
+
+export async function getAdminUsers(): Promise<AdminUser[]> {
+  const response = await api.get('/admin/users')
+  return response.data
+}
+
+export async function updateAdminUser(
+  userId: number,
+  payload: AdminUserUpdateRequest
+): Promise<AdminUser> {
+  const response = await api.patch(`/admin/users/${userId}`, payload)
+  return response.data
+}
+
+export async function revokeAdminUserSessions(userId: number): Promise<RevokeUserSessionsResponse> {
+  const response = await api.post(`/admin/users/${userId}/sessions/revoke`)
   return response.data
 }
 

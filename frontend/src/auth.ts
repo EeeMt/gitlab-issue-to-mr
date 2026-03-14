@@ -5,6 +5,8 @@ interface AuthState {
   initialized: boolean
   loading: boolean
   oidcEnabled: boolean
+  breakGlassEnabled: boolean
+  breakGlassUsername: string | null
   authenticated: boolean
   user: AuthUser | null
 }
@@ -13,6 +15,8 @@ export const authState = reactive<AuthState>({
   initialized: false,
   loading: false,
   oidcEnabled: false,
+  breakGlassEnabled: false,
+  breakGlassUsername: null,
   authenticated: false,
   user: null
 })
@@ -21,11 +25,13 @@ let inFlight: Promise<AuthStatus> | null = null
 
 export async function initializeAuth(force = false): Promise<AuthStatus> {
   if (authState.initialized && !force) {
-    return {
-      oidc_enabled: authState.oidcEnabled,
-      authenticated: authState.authenticated,
-      user: authState.user
-    }
+      return {
+        oidc_enabled: authState.oidcEnabled,
+        break_glass_enabled: authState.breakGlassEnabled,
+        break_glass_username: authState.breakGlassUsername,
+        authenticated: authState.authenticated,
+        user: authState.user
+      }
   }
 
   if (inFlight && !force) {
@@ -36,6 +42,8 @@ export async function initializeAuth(force = false): Promise<AuthStatus> {
   inFlight = getAuthStatus()
     .then((status) => {
       authState.oidcEnabled = status.oidc_enabled
+      authState.breakGlassEnabled = Boolean(status.break_glass_enabled)
+      authState.breakGlassUsername = status.break_glass_username ?? null
       authState.authenticated = status.authenticated
       authState.user = status.user
       authState.initialized = true
@@ -44,10 +52,14 @@ export async function initializeAuth(force = false): Promise<AuthStatus> {
     .catch(() => {
       const fallback = {
         oidc_enabled: true,
+        break_glass_enabled: false,
+        break_glass_username: null,
         authenticated: false,
         user: null
       }
       authState.oidcEnabled = fallback.oidc_enabled
+      authState.breakGlassEnabled = fallback.break_glass_enabled
+      authState.breakGlassUsername = fallback.break_glass_username
       authState.authenticated = fallback.authenticated
       authState.user = fallback.user
       authState.initialized = true

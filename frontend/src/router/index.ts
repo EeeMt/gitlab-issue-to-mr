@@ -4,6 +4,8 @@ import Dashboard from '../views/Dashboard.vue'
 import TaskView from '../views/TaskView.vue'
 import Monitor from '../views/Monitor.vue'
 import Config from '../views/Config.vue'
+import AccessManagement from '../views/AccessManagement.vue'
+import Sessions from '../views/Sessions.vue'
 import CreateTask from '../views/CreateTask.vue'
 import Login from '../views/Login.vue'
 
@@ -39,6 +41,12 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
+      path: '/sessions',
+      name: 'Sessions',
+      component: Sessions,
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/monitor',
       name: 'Monitor',
       component: Monitor,
@@ -48,6 +56,12 @@ const router = createRouter({
       path: '/config',
       name: 'Config',
       component: Config,
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/access-management',
+      name: 'AccessManagement',
+      component: AccessManagement,
       meta: { requiresAuth: true, requiresAdmin: true }
     }
   ]

@@ -136,9 +136,11 @@ import type { MenuOption } from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
 import {
   AddCircleOutline,
+  FingerPrintOutline,
   GridOutline,
   LogOutOutline,
   MenuOutline,
+  PeopleOutline,
   RocketOutline,
   SettingsOutline,
   SpeedometerOutline
@@ -161,8 +163,10 @@ const showShell = computed(() => !isLoginRoute.value)
 const menuLabels: Record<string, string> = {
   Dashboard: 'Dashboard',
   CreateTask: 'Create Task',
+  Sessions: 'Sessions',
   Monitor: 'Monitor',
-  Config: 'Configuration'
+  Config: 'Configuration',
+  AccessManagement: 'Access Management'
 }
 
 const currentPageLabel = computed(() => menuLabels[activeKey.value] || 'Navigation')
@@ -185,12 +189,25 @@ const menuOptions = computed<MenuOption[]>(() => {
     }
   ]
 
+  if (authState.oidcEnabled) {
+    items.push({
+      label: 'Sessions',
+      key: 'Sessions',
+      icon: renderIcon(FingerPrintOutline)
+    })
+  }
+
   if (!authState.oidcEnabled || isAdmin.value) {
     items.push(
       {
         label: 'Monitor',
         key: 'Monitor',
         icon: renderIcon(SpeedometerOutline)
+      },
+      {
+        label: 'Access Management',
+        key: 'AccessManagement',
+        icon: renderIcon(PeopleOutline)
       },
       {
         label: 'Config',

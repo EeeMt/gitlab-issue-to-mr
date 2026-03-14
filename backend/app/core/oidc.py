@@ -72,7 +72,7 @@ async def build_authorization_url_for_settings(settings: Settings, state: str, n
         "client_id": settings.oidc_client_id,
         "redirect_uri": settings.oidc_redirect_uri,
         "response_type": "code",
-        "scope": "openid profile email read_api",
+        "scope": "openid profile email read_api offline_access",
         "state": state,
         "nonce": nonce,
     }
@@ -93,6 +93,28 @@ async def exchange_code_for_tokens(code: str) -> dict[str, Any]:
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": settings.oidc_redirect_uri,
+        "client_id": settings.oidc_client_id,
+        "client_secret": settings.oidc_client_secret,
+    }
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.post(
+            discovery["token_endpoint"],
+            data=payload,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def exchange_refresh_token(refresh_token: str) -> dict[str, Any]:
+    """Exchange a refresh token for a new access token."""
+    settings = get_effective_settings()
+    ensure_oidc_configured(settings)
+    discovery = await get_oidc_discovery_document_for_settings(settings)
+    payload = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
         "client_id": settings.oidc_client_id,
         "client_secret": settings.oidc_client_secret,
     }

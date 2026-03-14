@@ -15,16 +15,56 @@
         OIDC login is not enabled yet. Dashboard auth is currently bypassed.
       </n-alert>
 
+      <n-alert v-if="loginReason" type="warning" :show-icon="false">
+        {{ loginReason }}
+      </n-alert>
+
+      <n-alert v-if="authState.breakGlassEnabled" type="warning" :show-icon="false">
+        Emergency admin access is enabled. Use it only for OIDC recovery or administrator lockout scenarios.
+      </n-alert>
+
       <n-space vertical :size="16" class="login-card__body">
         <n-button
+          v-if="authState.oidcEnabled"
           type="primary"
           size="large"
           block
-          :disabled="!authState.oidcEnabled"
           @click="handleLogin"
         >
           Continue with GitLab
         </n-button>
+
+        <div v-if="authState.breakGlassEnabled" class="login-card__break-glass">
+          <n-divider>Emergency access</n-divider>
+          <n-space vertical :size="12">
+            <n-input
+              v-model:value="breakGlassUsername"
+              placeholder="Emergency username"
+              autocomplete="username"
+            />
+            <n-input
+              v-model:value="breakGlassPassword"
+              type="password"
+              show-password-on="click"
+              placeholder="Emergency password"
+              autocomplete="current-password"
+              @keyup.enter="handleBreakGlassLogin"
+            />
+            <n-button
+              type="warning"
+              secondary
+              strong
+              block
+              :loading="breakGlassLoading"
+              @click="handleBreakGlassLogin"
+            >
+              Sign in with emergency access
+            </n-button>
+            <n-text depth="3" class="login-card__hint">
+              This path is environment-controlled and should stay disabled during normal operation.
+            </n-text>
+          </n-space>
+        </div>
 
         <n-text depth="3" class="login-card__hint">
           This dashboard uses GitLab OIDC and stores a server-side session in a secure cookie.
@@ -35,20 +75,66 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { NAlert, NButton, NCard, NIcon, NSpace, NText } from 'naive-ui'
+import axios from 'axios'
+import { computed, ref, watch } from 'vue'
+import { NAlert, NButton, NCard, NDivider, NIcon, NInput, NSpace, NText, useMessage } from 'naive-ui'
 import { RocketOutline } from '@vicons/ionicons5'
 import { useRoute } from 'vue-router'
 import { authState, startLogin } from '../auth'
+import { breakGlassLogin } from '../api'
 
 const route = useRoute()
+const message = useMessage()
 const nextTarget = computed(() => {
   const next = route.query.next
   return typeof next === 'string' ? next : '/dashboard'
 })
+const loginReason = computed(() => {
+  const reason = route.query.reason
+  return typeof reason === 'string' ? reason : ''
+})
+
+const breakGlassUsername = ref(authState.breakGlassUsername || '')
+const breakGlassPassword = ref('')
+const breakGlassLoading = ref(false)
+
+watch(
+  () => authState.breakGlassUsername,
+  (value) => {
+    breakGlassUsername.value = value || ''
+  },
+  { immediate: true }
+)
 
 function handleLogin() {
   startLogin(nextTarget.value)
+}
+
+async function handleBreakGlassLogin() {
+  if (!breakGlassUsername.value.trim() || !breakGlassPassword.value) {
+    message.error('Enter the emergency username and password')
+    return
+  }
+
+  breakGlassLoading.value = true
+  try {
+    const result = await breakGlassLogin({
+      username: breakGlassUsername.value.trim(),
+      password: breakGlassPassword.value,
+      next: nextTarget.value
+    })
+    window.location.assign(result.next_path || nextTarget.value)
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      const detail = error.response?.data?.detail
+      message.error(typeof detail === 'string' ? detail : 'Emergency login failed')
+    } else {
+      message.error('Emergency login failed')
+    }
+  } finally {
+    breakGlassLoading.value = false
+    breakGlassPassword.value = ''
+  }
 }
 </script>
 
@@ -106,6 +192,10 @@ function handleLogin() {
 
 .login-card__body {
   margin-top: 20px;
+}
+
+.login-card__break-glass {
+  width: 100%;
 }
 
 .login-card__hint {
