@@ -1,12 +1,12 @@
 <template>
   <div class="analytics-page">
-    <n-spin :show="initialLoading" description="Loading analytics...">
+    <n-spin :show="initialLoading" :description="t('analytics.loading')">
       <n-space vertical :size="20">
         <div class="analytics-page__hero">
           <div>
-            <h2 class="analytics-page__title">Task Analytics</h2>
+            <h2 class="analytics-page__title">{{ t('analytics.title') }}</h2>
             <p class="analytics-page__subtitle">
-              Track workload, reliability, execution speed, queueing pressure, and failure patterns over recent time windows.
+              {{ t('analytics.subtitle') }}
             </p>
           </div>
           <n-space align="center" wrap>
@@ -15,12 +15,12 @@
               :options="windowOptions"
               style="width: 140px"
             />
-            <n-button @click="refresh" :loading="loading">Refresh</n-button>
+            <n-button @click="refresh" :loading="loading">{{ t('common.refresh') }}</n-button>
           </n-space>
         </div>
 
         <n-alert type="info" :show-icon="false">
-          Project analytics include historical tasks. Initiator analytics only include tasks created after initiator tracking was introduced.
+          {{ t('analytics.projectInfo') }}
         </n-alert>
 
         <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 2 : 3" :x-gap="16" :y-gap="16">
@@ -38,8 +38,8 @@
             <template #header>
               <div class="analytics-card__header">
                 <div>
-                  <div class="analytics-card__title">Task Volume Trend</div>
-                  <div class="analytics-card__subtitle">Daily task count across the selected window</div>
+                    <div class="analytics-card__title">{{ t('analytics.taskVolumeTrend') }}</div>
+                    <div class="analytics-card__subtitle">{{ t('analytics.taskVolumeTrendSubtitle') }}</div>
                 </div>
               </div>
             </template>
@@ -61,8 +61,8 @@
             <template #header>
               <div class="analytics-card__header">
                 <div>
-                  <div class="analytics-card__title">Changed Lines Trend</div>
-                  <div class="analytics-card__subtitle">Daily total changed lines (additions + deletions)</div>
+                    <div class="analytics-card__title">{{ t('analytics.changedLinesTrend') }}</div>
+                    <div class="analytics-card__subtitle">{{ t('analytics.changedLinesTrendSubtitle') }}</div>
                 </div>
               </div>
             </template>
@@ -84,8 +84,8 @@
             <template #header>
               <div class="analytics-card__header">
                 <div>
-                  <div class="analytics-card__title">Execution Duration Trend</div>
-                  <div class="analytics-card__subtitle">Average runtime for finished tasks each day</div>
+                    <div class="analytics-card__title">{{ t('analytics.executionDurationTrend') }}</div>
+                    <div class="analytics-card__subtitle">{{ t('analytics.executionDurationTrendSubtitle') }}</div>
                 </div>
               </div>
             </template>
@@ -110,8 +110,8 @@
               <template #header>
                 <div class="analytics-card__header">
                   <div>
-                    <div class="analytics-card__title">By Project</div>
-                    <div class="analytics-card__subtitle">Success rate and timing performance per project</div>
+                      <div class="analytics-card__title">{{ t('analytics.byProject') }}</div>
+                      <div class="analytics-card__subtitle">{{ t('analytics.byProjectSubtitle') }}</div>
                   </div>
                 </div>
               </template>
@@ -131,8 +131,8 @@
               <template #header>
                 <div class="analytics-card__header">
                   <div>
-                    <div class="analytics-card__title">By Initiator</div>
-                    <div class="analytics-card__subtitle">Only tasks with tracked initiator metadata are included</div>
+                      <div class="analytics-card__title">{{ t('analytics.byInitiator') }}</div>
+                      <div class="analytics-card__subtitle">{{ t('analytics.byInitiatorSubtitle') }}</div>
                   </div>
                 </div>
               </template>
@@ -154,8 +154,8 @@
               <template #header>
                 <div class="analytics-card__header">
                   <div>
-                    <div class="analytics-card__title">Queue Wait by Priority</div>
-                    <div class="analytics-card__subtitle">Average and worst-case wait before execution starts</div>
+                      <div class="analytics-card__title">{{ t('analytics.queueWaitByPriority') }}</div>
+                      <div class="analytics-card__subtitle">{{ t('analytics.queueWaitByPrioritySubtitle') }}</div>
                   </div>
                 </div>
               </template>
@@ -174,8 +174,8 @@
               <template #header>
                 <div class="analytics-card__header">
                   <div>
-                    <div class="analytics-card__title">Failure Breakdown</div>
-                    <div class="analytics-card__subtitle">Categorized from failed task error messages in the selected window</div>
+                      <div class="analytics-card__title">{{ t('analytics.failureBreakdown') }}</div>
+                      <div class="analytics-card__subtitle">{{ t('analytics.failureBreakdownSubtitle') }}</div>
                   </div>
                 </div>
               </template>
@@ -211,6 +211,7 @@ import {
   type DataTableColumns
 } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
+import { useI18n } from 'vue-i18n'
 import {
   getAnalytics,
   type AnalyticsErrorRow,
@@ -219,6 +220,7 @@ import {
   type AnalyticsProjectRow,
   type AnalyticsResponse
 } from '../api'
+import { formatDateTimeLocal, formatMonthDayLocal } from '../utils/datetime'
 
 type TrendBar = {
   key: string
@@ -229,6 +231,7 @@ type TrendBar = {
 }
 
 const message = useMessage()
+const { t } = useI18n()
 const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
@@ -237,11 +240,11 @@ const loading = ref(false)
 const hasLoadedOnce = ref(false)
 const windowDays = ref<number>(30)
 
-const windowOptions = [
-  { label: 'Last 7 days', value: 7 },
-  { label: 'Last 30 days', value: 30 },
-  { label: 'Last 90 days', value: 90 }
-]
+const windowOptions = computed(() => [
+  { label: t('analytics.last7Days'), value: 7 },
+  { label: t('analytics.last30Days'), value: 30 },
+  { label: t('analytics.last90Days'), value: 90 }
+])
 
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 const trendChartMinWidth = computed(() => {
@@ -252,20 +255,14 @@ const trendChartMinWidth = computed(() => {
 })
 
 function formatShortDate(value: string) {
-  return new Intl.DateTimeFormat('en-GB', { month: '2-digit', day: '2-digit' }).format(new Date(value))
+  return formatMonthDayLocal(value)
 }
 
 function formatDateTime(value: string | null) {
   if (!value) {
     return '—'
   }
-  return new Intl.DateTimeFormat('en-GB', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(new Date(value))
+  return formatDateTimeLocal(value)
 }
 
 function formatDuration(value: number | null | undefined) {
@@ -293,7 +290,7 @@ function formatPercentage(value: number | null | undefined) {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return '—'
   }
-  return `${(value * 100).toFixed(1)}%`
+    return `${(value * 100).toFixed(1)}%`
 }
 
 function buildTrendBars(values: { key: string; label: string; value: number; displayValue?: string }[]) {
@@ -312,42 +309,42 @@ const summaryItems = computed(() => {
   }
 
   return [
-    { label: 'Tasks', value: String(summary.total_tasks), note: `${windowDays.value}-day window` },
+    { label: t('analytics.tasks'), value: String(summary.total_tasks), note: t('analytics.dayWindow', { days: windowDays.value }) },
     {
-      label: 'Success Rate',
+      label: t('analytics.successRate'),
       value: formatPercentage(summary.success_rate),
       note:
         summary.finished_tasks > 0
-          ? `${summary.completed_tasks} completed / ${summary.failed_tasks} failed / ${summary.cancelled_tasks} cancelled`
-          : 'No finished tasks yet'
+          ? t('analytics.finishedBreakdown', { completed: summary.completed_tasks, failed: summary.failed_tasks, cancelled: summary.cancelled_tasks })
+          : t('analytics.noFinishedTasksYet')
     },
     {
-      label: 'Avg Duration',
+      label: t('analytics.avgDuration'),
       value: formatDuration(summary.avg_execution_seconds),
       note:
         summary.max_execution_seconds !== null
-          ? `Max ${formatDuration(summary.max_execution_seconds)}`
-          : 'No execution data yet'
+          ? t('analytics.maxDuration', { value: formatDuration(summary.max_execution_seconds) })
+          : t('analytics.noExecutionData')
     },
     {
-      label: 'Avg Queue Wait',
+      label: t('analytics.avgQueueWait'),
       value: formatDuration(summary.avg_queue_wait_seconds),
       note:
         summary.max_queue_wait_seconds !== null
-          ? `Max ${formatDuration(summary.max_queue_wait_seconds)}`
-          : 'No queue wait data yet'
+          ? t('analytics.maxQueueWait', { value: formatDuration(summary.max_queue_wait_seconds) })
+          : t('analytics.noQueueData')
     },
     {
-      label: 'Changed Lines',
+      label: t('analytics.changedLines'),
       value: String(summary.total_changes),
-      note: `+${summary.total_additions} / -${summary.total_deletions}`
+      note: t('analytics.changeBreakdown', { additions: summary.total_additions, deletions: summary.total_deletions })
     },
     {
-      label: 'Tracked Initiators',
+      label: t('analytics.trackedInitiators'),
       value: String(summary.tracked_initiator_tasks),
       note: summary.initiator_tracking_started_at
-        ? `Since ${formatDateTime(summary.initiator_tracking_started_at)}`
-        : 'No tracked initiators yet'
+        ? t('analytics.since', { time: formatDateTime(summary.initiator_tracking_started_at) })
+        : t('analytics.noTrackedInitiators')
     }
   ]
 })
@@ -385,9 +382,9 @@ const durationTrendBars = computed(() =>
   )
 )
 
-const projectColumns: DataTableColumns<AnalyticsProjectRow> = [
+const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
   {
-    title: 'Project',
+    title: t('common.project'),
     key: 'project_name',
     minWidth: 180,
     render: (row) =>
@@ -398,133 +395,133 @@ const projectColumns: DataTableColumns<AnalyticsProjectRow> = [
           : null
       ])
   },
-  { title: 'Tasks', key: 'task_count', width: 80 },
+  { title: t('analytics.tasks'), key: 'task_count', width: 80 },
   {
-    title: 'Success',
+    title: t('analytics.success'),
     key: 'success_rate',
     width: 110,
     render: (row) => formatPercentage(row.success_rate)
   },
   {
-    title: 'Avg Duration',
+    title: t('analytics.avgDuration'),
     key: 'avg_execution_seconds',
     width: 120,
     render: (row) => formatDuration(row.avg_execution_seconds)
   },
   {
-    title: 'Avg Wait',
+    title: t('analytics.avgWait'),
     key: 'avg_queue_wait_seconds',
     width: 120,
     render: (row) => formatDuration(row.avg_queue_wait_seconds)
   },
   {
-    title: 'Changes',
+    title: t('common.changes'),
     key: 'total_changes',
     width: 110,
     render: (row) =>
       h('div', { class: 'analytics-table__primary' }, [
         h('div', String(row.total_changes)),
-        h('div', { class: 'analytics-table__secondary' }, `+${row.additions} / -${row.deletions}`)
+        h('div', { class: 'analytics-table__secondary' }, t('analytics.changeBreakdown', { additions: row.additions, deletions: row.deletions }))
       ])
   },
   {
-    title: 'Last Task',
+    title: t('analytics.lastTask'),
     key: 'last_task_at',
     width: 150,
     render: (row) => formatDateTime(row.last_task_at)
   }
-]
+])
 
-const initiatorColumns: DataTableColumns<AnalyticsInitiatorRow> = [
+const initiatorColumns = computed<DataTableColumns<AnalyticsInitiatorRow>>(() => [
   {
-    title: 'Initiator',
+    title: t('analytics.initiator'),
     key: 'initiator_username',
     minWidth: 160,
     render: (row) =>
       h('div', { class: 'analytics-table__primary' }, [
         h('div', row.initiator_username),
         row.initiator_gitlab_user_id !== null
-          ? h('div', { class: 'analytics-table__secondary' }, `GitLab ID: ${row.initiator_gitlab_user_id}`)
+          ? h('div', { class: 'analytics-table__secondary' }, t('analytics.gitlabId', { id: row.initiator_gitlab_user_id }))
           : null
       ])
   },
-  { title: 'Tasks', key: 'task_count', width: 80 },
+  { title: t('analytics.tasks'), key: 'task_count', width: 80 },
   {
-    title: 'Success',
+    title: t('analytics.success'),
     key: 'success_rate',
     width: 110,
     render: (row) => formatPercentage(row.success_rate)
   },
   {
-    title: 'Avg Duration',
+    title: t('analytics.avgDuration'),
     key: 'avg_execution_seconds',
     width: 120,
     render: (row) => formatDuration(row.avg_execution_seconds)
   },
   {
-    title: 'Avg Wait',
+    title: t('analytics.avgWait'),
     key: 'avg_queue_wait_seconds',
     width: 120,
     render: (row) => formatDuration(row.avg_queue_wait_seconds)
   },
   {
-    title: 'Changes',
+    title: t('common.changes'),
     key: 'total_changes',
     width: 110,
     render: (row) =>
       h('div', { class: 'analytics-table__primary' }, [
         h('div', String(row.total_changes)),
-        h('div', { class: 'analytics-table__secondary' }, `+${row.additions} / -${row.deletions}`)
+        h('div', { class: 'analytics-table__secondary' }, t('analytics.changeBreakdown', { additions: row.additions, deletions: row.deletions }))
       ])
   },
   {
-    title: 'Last Task',
+    title: t('analytics.lastTask'),
     key: 'last_task_at',
     width: 150,
     render: (row) => formatDateTime(row.last_task_at)
   }
-]
+])
 
-const priorityColumns: DataTableColumns<AnalyticsPriorityWaitRow> = [
-  { title: 'Priority', key: 'priority', width: 90 },
-  { title: 'Started Tasks', key: 'task_count', width: 120 },
+const priorityColumns = computed<DataTableColumns<AnalyticsPriorityWaitRow>>(() => [
+  { title: t('common.priority'), key: 'priority', width: 90 },
+  { title: t('analytics.startedTasks'), key: 'task_count', width: 120 },
   {
-    title: 'Avg Wait',
+    title: t('analytics.avgWait'),
     key: 'avg_queue_wait_seconds',
     width: 130,
     render: (row) => formatDuration(row.avg_queue_wait_seconds)
   },
   {
-    title: 'Max Wait',
+    title: t('analytics.maxWait'),
     key: 'max_queue_wait_seconds',
     width: 130,
     render: (row) => formatDuration(row.max_queue_wait_seconds)
   }
-]
+])
 
-const errorColumns: DataTableColumns<AnalyticsErrorRow> = [
-  { title: 'Category', key: 'category', width: 130 },
-  { title: 'Failures', key: 'count', width: 90 },
+const errorColumns = computed<DataTableColumns<AnalyticsErrorRow>>(() => [
+  { title: t('analytics.category'), key: 'category', width: 130 },
+  { title: t('analytics.failures'), key: 'count', width: 90 },
   {
-    title: 'Share',
+    title: t('analytics.share'),
     key: 'share_of_failed',
     width: 100,
     render: (row) => formatPercentage(row.share_of_failed)
   },
   {
-    title: 'Example',
+    title: t('analytics.example'),
     key: 'sample_message',
     minWidth: 280,
     render: (row) => row.sample_message || '—'
   }
-]
+])
 
 async function fetchAnalytics() {
   loading.value = true
   try {
     analytics.value = await getAnalytics(windowDays.value)
   } catch (error: any) {
-    message.error(error?.response?.data?.detail || 'Failed to load analytics')
+    message.error(error?.response?.data?.detail || t('analytics.failedToLoad'))
   } finally {
     hasLoadedOnce.value = true
     loading.value = false

@@ -3,24 +3,22 @@
     <n-space vertical :size="16">
       <div class="config-page__hero">
         <div>
-          <h2 class="config-page__title">Configuration</h2>
+          <h2 class="config-page__title">{{ t('config.title') }}</h2>
           <p class="config-page__subtitle">
-            Manage scheduler behavior and GitLab OIDC login from one place. Saved values override
-            env configuration and survive restarts.
+            {{ t('config.subtitle') }}
           </p>
         </div>
         <n-space :size="8" wrap>
-          <n-tag v-if="isDirty" size="small" round type="warning">Unsaved changes</n-tag>
-          <n-tag v-else size="small" round type="success">In sync</n-tag>
-          <n-tag size="small" round type="info">DB override</n-tag>
-          <n-tag size="small" round>env fallback</n-tag>
-          <n-tag size="small" round>default fallback</n-tag>
+          <n-tag v-if="isDirty" size="small" round type="warning">{{ t('config.unsavedChanges') }}</n-tag>
+          <n-tag v-else size="small" round type="success">{{ t('config.inSync') }}</n-tag>
+          <n-tag size="small" round type="info">{{ t('config.dbOverride') }}</n-tag>
+          <n-tag size="small" round>{{ t('config.envFallback') }}</n-tag>
+          <n-tag size="small" round>{{ t('config.defaultFallback') }}</n-tag>
         </n-space>
       </div>
 
       <n-alert type="info" :show-icon="false">
-        OIDC secrets are stored server-side and never returned to the browser. Leave the client
-        secret blank to keep the current stored value.
+        {{ t('config.secretInfo') }}
       </n-alert>
 
       <n-grid :cols="isMobile ? 1 : 4" :x-gap="16" :y-gap="16">
@@ -39,17 +37,17 @@
                 <template #header>
                   <div class="config-card-header">
                     <div>
-                      <div class="config-card-header__title">Runtime Settings</div>
-                      <div class="config-card-header__subtitle">Scheduler and task execution behavior</div>
+                      <div class="config-card-header__title">{{ t('config.runtimeSettings') }}</div>
+                      <div class="config-card-header__subtitle">{{ t('config.runtimeSettingsSubtitle') }}</div>
                     </div>
                   </div>
                 </template>
 
                 <div class="config-form__section">
-                  <div class="config-form__section-title">Scheduler</div>
+                  <div class="config-form__section-title">{{ t('config.scheduler') }}</div>
                   <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                     <n-gi>
-                      <n-form-item label="Max Concurrency" path="max_concurrency">
+                      <n-form-item :label="t('config.maxConcurrency')" path="max_concurrency">
                         <n-input-number
                           v-model:value="formValue.max_concurrency"
                           :min="1"
@@ -57,12 +55,12 @@
                           class="config-form__input"
                         />
                         <template #feedback>
-                          Maximum number of tasks that can run at the same time.
+                          {{ t('config.maxConcurrencyHint') }}
                         </template>
                       </n-form-item>
                     </n-gi>
                     <n-gi>
-                      <n-form-item label="Scheduler Interval (seconds)" path="scheduler_interval">
+                      <n-form-item :label="t('config.schedulerInterval')" path="scheduler_interval">
                         <n-input-number
                           v-model:value="formValue.scheduler_interval"
                           :min="1"
@@ -70,12 +68,12 @@
                           class="config-form__input"
                         />
                         <template #feedback>
-                          How often the scheduler checks for work.
+                          {{ t('config.schedulerIntervalHint') }}
                         </template>
                       </n-form-item>
                     </n-gi>
                     <n-gi>
-                      <n-form-item label="Task Timeout (seconds)" path="task_timeout">
+                      <n-form-item :label="t('config.taskTimeout')" path="task_timeout">
                         <n-input-number
                           v-model:value="formValue.task_timeout"
                           :min="60"
@@ -83,19 +81,19 @@
                           class="config-form__input"
                         />
                         <template #feedback>
-                          Maximum execution time before a task is marked failed.
+                          {{ t('config.taskTimeoutHint') }}
                         </template>
                       </n-form-item>
                     </n-gi>
                     <n-gi>
-                      <n-form-item label="Default Target Branch" path="default_target_branch">
+                      <n-form-item :label="t('config.defaultTargetBranch')" path="default_target_branch">
                         <n-input
                           v-model:value="formValue.default_target_branch"
                           placeholder="main"
                           class="config-form__input"
                         />
                         <template #feedback>
-                          Default branch used when a task does not specify one.
+                          {{ t('config.defaultTargetBranchHint') }}
                         </template>
                       </n-form-item>
                     </n-gi>
@@ -107,44 +105,44 @@
                 <template #header>
                   <div class="config-card-header">
                     <div>
-                      <div class="config-card-header__title">Shared Page Access</div>
-                      <div class="config-card-header__subtitle">Choose which read-only pages can also be opened by platform users</div>
+                       <div class="config-card-header__title">{{ t('config.sharedPageAccess') }}</div>
+                       <div class="config-card-header__subtitle">{{ t('config.sharedPageAccessSubtitle') }}</div>
                     </div>
                   </div>
                 </template>
 
                 <div class="config-form__section">
-                  <div class="config-form__section-title">Page permissions</div>
+                   <div class="config-form__section-title">{{ t('config.pagePermissions') }}</div>
                   <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                     <n-gi>
-                      <n-form-item label="Allow Monitor for platform users">
+                       <n-form-item :label="t('config.allowMonitor')">
                         <n-switch v-model:value="formValue.allow_monitor_for_users" />
                         <template #feedback>
-                          Non-admin users can open the Monitor page with project-scoped stats and containers.
+                           {{ t('config.allowMonitorHint') }}
                         </template>
                       </n-form-item>
                     </n-gi>
                     <n-gi>
-                      <n-form-item label="Allow Schedule Overview for platform users">
+                       <n-form-item :label="t('config.allowScheduleOverview')">
                         <n-switch v-model:value="formValue.allow_schedule_overview_for_users" />
                         <template #feedback>
-                          Non-admin users can inspect the scheduled queue for projects they can access.
+                           {{ t('config.allowScheduleOverviewHint') }}
                         </template>
                       </n-form-item>
                     </n-gi>
                     <n-gi>
-                      <n-form-item label="Allow Analytics for platform users">
+                       <n-form-item :label="t('config.allowAnalytics')">
                         <n-switch v-model:value="formValue.allow_analytics_for_users" />
                         <template #feedback>
-                          Non-admin users can open the Analytics page and only see data for projects they can access.
+                           {{ t('config.allowAnalyticsHint') }}
                         </template>
                       </n-form-item>
                     </n-gi>
                     <n-gi>
-                      <n-form-item label="Allow OIDC Diagnostics for platform users">
+                       <n-form-item :label="t('config.allowOidcDiagnostics')">
                         <n-switch v-model:value="formValue.allow_oidc_diagnostics_for_users" />
                         <template #feedback>
-                          Non-admin users can open the diagnostics snapshot page.
+                           {{ t('config.allowOidcDiagnosticsHint') }}
                         </template>
                       </n-form-item>
                     </n-gi>
@@ -156,35 +154,35 @@
                 <template #header>
                   <div class="config-card-header">
                     <div>
-                      <div class="config-card-header__title">GitLab OIDC</div>
-                      <div class="config-card-header__subtitle">Identity provider and callback configuration</div>
+                       <div class="config-card-header__title">{{ t('config.gitlabOidc') }}</div>
+                       <div class="config-card-header__subtitle">{{ t('config.gitlabOidcSubtitle') }}</div>
                     </div>
                   </div>
                 </template>
 
                 <div class="config-form__section">
-                  <div class="config-form__section-title">Provider basics</div>
+                   <div class="config-form__section-title">{{ t('config.providerBasics') }}</div>
                   <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                     <n-gi>
-                      <n-form-item label="Enable OIDC Login" path="oidc_enabled">
+                       <n-form-item :label="t('config.enableOidcLogin')" path="oidc_enabled">
                         <n-switch v-model:value="formValue.oidc_enabled" />
                         <template #feedback>
-                          When enabled, dashboard APIs require GitLab sign-in.
+                           {{ t('config.enableOidcLoginHint') }}
                         </template>
                       </n-form-item>
                     </n-gi>
                     <n-gi>
-                      <n-form-item label="Client Secret Status">
+                       <n-form-item :label="t('config.clientSecretStatus')">
                         <n-tag :type="formValue.oidc_client_secret_configured ? 'success' : 'warning'" round>
-                          {{ formValue.oidc_client_secret_configured ? 'Configured' : 'Missing' }}
+                           {{ formValue.oidc_client_secret_configured ? t('config.configured') : t('config.missing') }}
                         </n-tag>
                         <template #feedback>
-                          The actual secret is never returned to the browser.
+                           {{ t('config.clientSecretStatusHint') }}
                         </template>
                       </n-form-item>
                     </n-gi>
                     <n-gi>
-                      <n-form-item label="Issuer URL" path="oidc_issuer_url">
+                       <n-form-item :label="t('config.issuerUrl')" path="oidc_issuer_url">
                         <n-input
                           v-model:value="formValue.oidc_issuer_url"
                           placeholder="https://gitlab.example.com"
@@ -193,30 +191,30 @@
                       </n-form-item>
                     </n-gi>
                     <n-gi>
-                      <n-form-item label="Client ID" path="oidc_client_id">
+                       <n-form-item :label="t('config.clientId')" path="oidc_client_id">
                         <n-input v-model:value="formValue.oidc_client_id" class="config-form__input" />
                       </n-form-item>
                     </n-gi>
                     <n-gi :span="isMobile ? 1 : 2">
-                      <n-form-item label="Client Secret">
+                       <n-form-item :label="t('config.clientSecret')">
                         <n-input
                           v-model:value="formValue.oidc_client_secret_input"
                           type="password"
                           show-password-on="click"
                           :placeholder="
                             formValue.oidc_client_secret_configured
-                              ? 'Configured. Enter a new value to rotate it.'
-                              : 'Enter client secret'
+                               ? t('config.configuredEnterNew')
+                               : t('config.enterClientSecret')
                           "
                           class="config-form__input"
                         />
                         <template #feedback>
-                          Leave blank to keep the stored secret unchanged.
+                           {{ t('config.clientSecretHint') }}
                         </template>
                       </n-form-item>
                     </n-gi>
                     <n-gi :span="isMobile ? 1 : 2">
-                      <n-form-item label="Redirect URI" path="oidc_redirect_uri">
+                       <n-form-item :label="t('config.redirectUri')" path="oidc_redirect_uri">
                         <n-input
                           v-model:value="formValue.oidc_redirect_uri"
                           placeholder="https://your-domain.example.com/api/auth/callback"
@@ -232,22 +230,22 @@
                 <template #header>
                   <div class="config-card-header">
                     <div>
-                      <div class="config-card-header__title">Session & Access</div>
-                      <div class="config-card-header__subtitle">Cookie policy and admin bootstrap settings</div>
+                       <div class="config-card-header__title">{{ t('config.sessionAccess') }}</div>
+                       <div class="config-card-header__subtitle">{{ t('config.sessionAccessSubtitle') }}</div>
                     </div>
                   </div>
                 </template>
 
                 <div class="config-form__section">
-                  <div class="config-form__section-title">Session policy</div>
+                   <div class="config-form__section-title">{{ t('config.sessionPolicy') }}</div>
                   <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                     <n-gi>
-                      <n-form-item label="Session Cookie Name" path="session_cookie_name">
+                       <n-form-item :label="t('config.sessionCookieName')" path="session_cookie_name">
                         <n-input v-model:value="formValue.session_cookie_name" class="config-form__input" />
                       </n-form-item>
                     </n-gi>
                     <n-gi>
-                      <n-form-item label="Session TTL (seconds)" path="session_ttl_seconds">
+                       <n-form-item :label="t('config.sessionTtl')" path="session_ttl_seconds">
                         <n-input-number
                           v-model:value="formValue.session_ttl_seconds"
                           :min="300"
@@ -257,15 +255,15 @@
                       </n-form-item>
                     </n-gi>
                     <n-gi>
-                      <n-form-item label="Cookie Secure" path="cookie_secure">
+                       <n-form-item :label="t('config.cookieSecure')" path="cookie_secure">
                         <n-switch v-model:value="formValue.cookie_secure" />
                         <template #feedback>
-                          Keep this enabled for HTTPS deployments.
+                           {{ t('config.cookieSecureHint') }}
                         </template>
                       </n-form-item>
                     </n-gi>
                     <n-gi>
-                      <n-form-item label="Cookie SameSite" path="cookie_samesite">
+                       <n-form-item :label="t('config.cookieSameSite')" path="cookie_samesite">
                         <n-select
                           v-model:value="formValue.cookie_samesite"
                           :options="sameSiteOptions"
@@ -277,29 +275,29 @@
                 </div>
 
                 <div class="config-form__section">
-                  <div class="config-form__section-title">Admin bootstrap</div>
+                   <div class="config-form__section-title">{{ t('config.adminBootstrap') }}</div>
                   <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                     <n-gi>
-                      <n-form-item label="Admin Usernames">
+                       <n-form-item :label="t('config.adminUsernames')">
                         <n-input
                           v-model:value="formValue.auth_admin_usernames"
-                          placeholder="alice,bob"
+                           :placeholder="t('config.adminUsernamesPlaceholder')"
                           class="config-form__input"
                         />
                         <template #feedback>
-                          Comma-separated GitLab usernames bootstrapped as platform admins.
+                           {{ t('config.adminUsernamesHint') }}
                         </template>
                       </n-form-item>
                     </n-gi>
                     <n-gi>
-                      <n-form-item label="Admin GitLab Groups">
+                       <n-form-item :label="t('config.adminGitlabGroups')">
                         <n-input
                           v-model:value="formValue.auth_admin_gitlab_groups"
-                          placeholder="platform-team"
+                           :placeholder="t('config.adminGitlabGroupsPlaceholder')"
                           class="config-form__input"
                         />
                         <template #feedback>
-                          Optional group names checked during login.
+                           {{ t('config.adminGitlabGroupsHint') }}
                         </template>
                       </n-form-item>
                     </n-gi>
@@ -311,8 +309,8 @@
                 <template #header>
                   <div class="config-card-header">
                     <div>
-                      <div class="config-card-header__title">Actions</div>
-                      <div class="config-card-header__subtitle">Validate, save, reload, or reset configuration</div>
+                       <div class="config-card-header__title">{{ t('config.actions') }}</div>
+                       <div class="config-card-header__subtitle">{{ t('config.actionsSubtitle') }}</div>
                     </div>
                   </div>
                 </template>
@@ -325,26 +323,26 @@
                       :loading="saving"
                       :disabled="loading || saving || !isDirty"
                     >
-                      Save changes
+                       {{ t('config.saveChanges') }}
                     </n-button>
-                    <n-button @click="handleTestOidc" :loading="testing" :disabled="loading || saving || testing">
-                      Test OIDC connection
-                    </n-button>
-                    <n-button @click="router.push('/oidc-diagnostics')" :disabled="loading || saving || testing">
-                      Open OIDC diagnostics
-                    </n-button>
+                     <n-button @click="handleTestOidc" :loading="testing" :disabled="loading || saving || testing">
+                       {{ t('config.testOidcConnection') }}
+                     </n-button>
+                     <n-button @click="router.push('/oidc-diagnostics')" :disabled="loading || saving || testing">
+                       {{ t('config.openOidcDiagnostics') }}
+                     </n-button>
                     <n-button
                       @click="handleClearSecret"
                       :disabled="loading || saving || testing || !formValue.oidc_client_secret_configured"
                     >
-                      Clear stored secret
-                    </n-button>
-                    <n-button @click="handleReload" :disabled="loading || saving || testing">
-                      Reload
-                    </n-button>
-                    <n-button @click="handleReset" :disabled="loading || saving || testing" secondary>
-                      Reset to env/defaults
-                    </n-button>
+                       {{ t('config.clearStoredSecret') }}
+                     </n-button>
+                     <n-button @click="handleReload" :disabled="loading || saving || testing">
+                       {{ t('common.reload') }}
+                     </n-button>
+                     <n-button @click="handleReset" :disabled="loading || saving || testing" secondary>
+                       {{ t('config.resetEnvDefaults') }}
+                     </n-button>
                   </n-space>
                 </div>
 
@@ -382,6 +380,7 @@ import {
   type FormRules
 } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
+import { useI18n } from 'vue-i18n'
 import {
   getConfig,
   resetConfig,
@@ -422,6 +421,7 @@ type OidcTestState = {
 
 const message = useMessage()
 const router = useRouter()
+const { t } = useI18n()
 const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
@@ -431,11 +431,11 @@ const testing = ref(false)
 const formRef = ref<FormInst | null>(null)
 const oidcTestState = ref<OidcTestState | null>(null)
 
-const sameSiteOptions = [
+const sameSiteOptions = computed(() => [
   { label: 'Lax', value: 'lax' },
   { label: 'Strict', value: 'strict' },
   { label: 'None', value: 'none' }
-]
+])
 
 const formValue = ref<ConfigForm>({
   max_concurrency: 3,
@@ -479,65 +479,65 @@ const isDirty = computed(() => {
 })
 
 const summaryItems = computed(() => [
-  { label: 'Max Concurrency', value: String(formValue.value.max_concurrency) },
-  { label: 'Task Timeout', value: `${formValue.value.task_timeout}s` },
+  { label: t('config.maxConcurrency'), value: String(formValue.value.max_concurrency) },
+  { label: t('config.taskTimeout'), value: `${formValue.value.task_timeout}s` },
   {
-    label: 'Shared Pages',
+    label: t('config.sharedPages'),
     value:
       [
-        formValue.value.allow_monitor_for_users ? 'Monitor' : null,
-        formValue.value.allow_schedule_overview_for_users ? 'Schedule' : null,
-        formValue.value.allow_analytics_for_users ? 'Analytics' : null,
-        formValue.value.allow_oidc_diagnostics_for_users ? 'OIDC Diag' : null
+        formValue.value.allow_monitor_for_users ? t('nav.monitor') : null,
+        formValue.value.allow_schedule_overview_for_users ? t('nav.scheduleOverview') : null,
+        formValue.value.allow_analytics_for_users ? t('nav.analytics') : null,
+        formValue.value.allow_oidc_diagnostics_for_users ? t('nav.oidcDiagnostics') : null
       ]
         .filter(Boolean)
-        .join(', ') || 'Admin only'
+        .join(', ') || t('config.adminOnly')
   },
-  { label: 'OIDC Login', value: formValue.value.oidc_enabled ? 'Enabled' : 'Disabled' },
+  { label: t('config.oidcLogin'), value: formValue.value.oidc_enabled ? t('common.enabled') : t('common.disabled') },
   {
-    label: 'Client Secret',
-    value: formValue.value.oidc_client_secret_configured ? 'Configured' : 'Missing'
+    label: t('config.clientSecret'),
+    value: formValue.value.oidc_client_secret_configured ? t('config.configured') : t('config.missing')
   }
 ])
 
 const rules: FormRules = {
-  max_concurrency: { required: true, type: 'number', message: 'Enter max concurrency', trigger: 'blur' },
-  task_timeout: { required: true, type: 'number', message: 'Enter task timeout', trigger: 'blur' },
+  max_concurrency: { required: true, type: 'number', message: t('config.enterMaxConcurrency'), trigger: 'blur' },
+  task_timeout: { required: true, type: 'number', message: t('config.enterTaskTimeout'), trigger: 'blur' },
   scheduler_interval: {
     required: true,
     type: 'number',
-    message: 'Enter scheduler interval',
+    message: t('config.enterSchedulerInterval'),
     trigger: 'blur'
   },
   default_target_branch: {
     required: true,
-    message: 'Enter default target branch',
+    message: t('config.enterDefaultTargetBranch'),
     trigger: 'blur'
   },
   oidc_issuer_url: {
     validator: () =>
-      !formValue.value.oidc_enabled || !!formValue.value.oidc_issuer_url.trim() || new Error('Issuer URL is required'),
+      !formValue.value.oidc_enabled || !!formValue.value.oidc_issuer_url.trim() || new Error(t('config.issuerRequired')),
     trigger: ['blur', 'input']
   },
   oidc_client_id: {
     validator: () =>
-      !formValue.value.oidc_enabled || !!formValue.value.oidc_client_id.trim() || new Error('Client ID is required'),
+      !formValue.value.oidc_enabled || !!formValue.value.oidc_client_id.trim() || new Error(t('config.clientIdRequired')),
     trigger: ['blur', 'input']
   },
   oidc_redirect_uri: {
     validator: () =>
-      !formValue.value.oidc_enabled || !!formValue.value.oidc_redirect_uri.trim() || new Error('Redirect URI is required'),
+      !formValue.value.oidc_enabled || !!formValue.value.oidc_redirect_uri.trim() || new Error(t('config.redirectUriRequired')),
     trigger: ['blur', 'input']
   },
   session_cookie_name: {
     required: true,
-    message: 'Enter session cookie name',
+    message: t('config.enterSessionCookieName'),
     trigger: 'blur'
   },
   session_ttl_seconds: {
     required: true,
     type: 'number',
-    message: 'Enter session TTL',
+    message: t('config.enterSessionTtl'),
     trigger: 'blur'
   }
 }
@@ -607,7 +607,7 @@ async function fetchConfig() {
   try {
     syncForm(await getConfig())
   } catch (error) {
-    message.error('Failed to fetch config')
+    message.error(t('config.failedToFetchConfig'))
   } finally {
     loading.value = false
   }
@@ -623,9 +623,9 @@ async function handleSave() {
   try {
     syncForm(await updateConfig(buildPayload()))
     oidcTestState.value = null
-    message.success('Configuration saved')
+    message.success(t('config.configurationSaved'))
   } catch (error: any) {
-    message.error(error?.response?.data?.detail || 'Failed to save config')
+    message.error(error?.response?.data?.detail || t('config.failedToSaveConfig'))
   } finally {
     saving.value = false
   }
@@ -635,13 +635,16 @@ async function handleTestOidc() {
   testing.value = true
   try {
     const result = await testOidcConfig(buildPayload().auth || {})
-    oidcTestState.value = {
+      oidcTestState.value = {
       type: 'success',
-      message: `OIDC discovery succeeded for issuer ${result.issuer || formValue.value.oidc_issuer_url}. Required scopes: ${result.required_scopes.join(', ')}.`
+      message: t('config.oidcDiscoverySucceeded', {
+        issuer: result.issuer || formValue.value.oidc_issuer_url,
+        scopes: result.required_scopes.join(', ')
+      })
     }
-    message.success('OIDC connection test passed')
+    message.success(t('config.oidcConnectionPassed'))
   } catch (error: any) {
-    const detail = error?.response?.data?.detail || 'OIDC connection test failed'
+    const detail = error?.response?.data?.detail || t('config.oidcConnectionFailed')
     oidcTestState.value = { type: 'error', message: detail }
     message.error(detail)
   } finally {
@@ -653,9 +656,9 @@ async function handleClearSecret() {
   saving.value = true
   try {
     syncForm(await resetConfigKey('oidc_client_secret'))
-    message.success('Stored OIDC client secret cleared')
+    message.success(t('config.storedSecretCleared'))
   } catch (error: any) {
-    message.error(error?.response?.data?.detail || 'Failed to clear stored secret')
+    message.error(error?.response?.data?.detail || t('config.failedToClearSecret'))
   } finally {
     saving.value = false
   }
@@ -666,9 +669,9 @@ async function handleReset() {
   try {
     syncForm(await resetConfig())
     oidcTestState.value = null
-    message.success('Configuration reset to env/default values')
+    message.success(t('config.resetToDefaults'))
   } catch (error: any) {
-    message.error(error?.response?.data?.detail || 'Failed to reset config')
+    message.error(error?.response?.data?.detail || t('config.failedToResetConfig'))
   } finally {
     saving.value = false
   }

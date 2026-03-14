@@ -3,15 +3,15 @@
     <n-space vertical :size="20">
       <div class="create-task-page__hero">
         <div>
-          <h2 class="create-task-page__title">Create Manual Task</h2>
+          <h2 class="create-task-page__title">{{ t('createTask.title') }}</h2>
           <p class="create-task-page__subtitle">
-            Start a task directly from the dashboard by choosing the repository, branches, prompt, priority, and schedule.
+            {{ t('createTask.subtitle') }}
           </p>
         </div>
         <n-space :size="8" wrap>
-          <n-tag size="small" round type="info">Manual trigger</n-tag>
-          <n-tag size="small" round>Scheduler aware</n-tag>
-          <n-tag size="small" round>GitLab branch workflow</n-tag>
+          <n-tag size="small" round type="info">{{ t('createTask.manualTrigger') }}</n-tag>
+          <n-tag size="small" round>{{ t('createTask.schedulerAware') }}</n-tag>
+          <n-tag size="small" round>{{ t('createTask.gitlabBranchWorkflow') }}</n-tag>
         </n-space>
       </div>
 
@@ -19,107 +19,107 @@
         <template #header>
           <div class="create-task-card__header">
             <div>
-              <div class="create-task-card__title">Task Details</div>
-              <div class="create-task-card__subtitle">Configure source, branch strategy, priority, and execution timing</div>
+              <div class="create-task-card__title">{{ t('createTask.taskDetails') }}</div>
+              <div class="create-task-card__subtitle">{{ t('createTask.taskDetailsSubtitle') }}</div>
             </div>
           </div>
         </template>
         <n-spin :show="loading">
           <n-form ref="formRef" :model="formValue" :rules="rules" label-placement="top" class="create-task-form">
             <div class="create-task-form__section">
-              <div class="create-task-form__section-title">Repository & Branches</div>
+              <div class="create-task-form__section-title">{{ t('createTask.repositoryBranches') }}</div>
               <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                 <n-gi>
-                  <n-form-item label="Project" path="project_id">
+                  <n-form-item :label="t('createTask.project')" path="project_id">
                     <n-select
                       v-model:value="formValue.project_id"
                       :options="projectOptions"
                       :loading="projectsLoading"
-                      placeholder="Select a project"
+                      :placeholder="t('createTask.selectProject')"
                       @update:value="handleProjectChange"
                     />
                   </n-form-item>
                 </n-gi>
                 <n-gi>
-                  <n-form-item label="Base Branch" path="base_branch">
+                  <n-form-item :label="t('createTask.baseBranch')" path="base_branch">
                     <n-select
                       v-model:value="formValue.base_branch"
                       :options="branchOptions"
                       :loading="branchesLoading"
-                      placeholder="Select base branch"
+                      :placeholder="t('createTask.selectBaseBranch')"
                       :disabled="!formValue.project_id"
                       @update:value="handleBaseBranchChange"
                     />
                     <template #feedback>
-                      Branch to base changes on.
+                      {{ t('createTask.baseBranchHint') }}
                     </template>
                   </n-form-item>
                 </n-gi>
                 <n-gi>
-                  <n-form-item label="New Branch Name" path="new_branch_name">
+                  <n-form-item :label="t('createTask.newBranchName')" path="new_branch_name">
                     <n-input
                       v-model:value="formValue.new_branch_name"
-                      placeholder="Optional: feature/my-task"
+                      :placeholder="t('createTask.newBranchPlaceholder')"
                       :disabled="!formValue.project_id || !formValue.base_branch"
                     />
                     <template #feedback>
-                      Leave empty to work on the base branch.
+                      {{ t('createTask.newBranchHint') }}
                     </template>
                   </n-form-item>
                 </n-gi>
                 <n-gi>
-                  <n-form-item label="Target Branch" path="target_branch">
+                  <n-form-item :label="t('createTask.targetBranch')" path="target_branch">
                     <n-select
                       v-model:value="formValue.target_branch"
                       :options="targetBranchOptions"
                       :disabled="!formValue.project_id"
-                      placeholder="Select target branch"
+                      :placeholder="t('createTask.selectTargetBranch')"
                     />
                     <template #feedback>
-                      Branch to merge changes into.
+                      {{ t('createTask.targetBranchHint') }}
                     </template>
                   </n-form-item>
                   <div v-if="sameBranchConflict" class="create-task-form__warning">
-                    Manual tasks must use a different source branch and target branch to produce a merge request.
+                    {{ t('createTask.branchConflict') }}
                   </div>
                 </n-gi>
               </n-grid>
             </div>
 
             <div class="create-task-form__section">
-              <div class="create-task-form__section-title">Implementation Prompt</div>
-              <n-form-item label="Prompt" path="user_prompt">
+              <div class="create-task-form__section-title">{{ t('createTask.implementationPrompt') }}</div>
+              <n-form-item :label="t('createTask.prompt')" path="user_prompt">
                 <n-input
                   v-model:value="formValue.user_prompt"
                   type="textarea"
                   :rows="6"
-                  placeholder="Describe what you want the AI to implement..."
+                  :placeholder="t('createTask.promptPlaceholder')"
                 />
               </n-form-item>
             </div>
 
             <div class="create-task-form__section">
-              <div class="create-task-form__section-title">Priority & Schedule</div>
+              <div class="create-task-form__section-title">{{ t('createTask.prioritySchedule') }}</div>
               <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                 <n-gi>
-                  <n-form-item label="Priority" path="priority">
+                  <n-form-item :label="t('common.priority')" path="priority">
                     <n-radio-group v-model:value="formValue.priority">
                       <n-space vertical :size="8">
-                        <n-radio :value="0">P0 (Highest)</n-radio>
-                        <n-radio :value="1">P1 (High)</n-radio>
-                        <n-radio :value="2">P2 (Normal)</n-radio>
+                        <n-radio :value="0">{{ t('createTask.p0') }}</n-radio>
+                        <n-radio :value="1">{{ t('createTask.p1') }}</n-radio>
+                        <n-radio :value="2">{{ t('createTask.p2') }}</n-radio>
                       </n-space>
                     </n-radio-group>
                   </n-form-item>
                 </n-gi>
                 <n-gi>
-                  <n-form-item label="Schedule" path="schedule_type">
+                  <n-form-item :label="t('createTask.schedule')" path="schedule_type">
                     <n-space vertical :size="10" style="width: 100%">
                       <n-radio-group v-model:value="scheduleType" name="scheduleType">
                         <n-space vertical :size="8">
-                          <n-radio value="now">Execute Now</n-radio>
-                          <n-radio value="delay">Delay</n-radio>
-                          <n-radio value="scheduled">Schedule at</n-radio>
+                          <n-radio value="now">{{ t('createTask.executeNow') }}</n-radio>
+                          <n-radio value="delay">{{ t('createTask.delay') }}</n-radio>
+                          <n-radio value="scheduled">{{ t('createTask.scheduleAt') }}</n-radio>
                         </n-space>
                       </n-radio-group>
 
@@ -133,9 +133,9 @@
                         <n-select
                           v-model:value="delayUnit"
                           :options="[
-                            { label: 'seconds', value: 'seconds' },
-                            { label: 'minutes', value: 'minutes' },
-                            { label: 'hours', value: 'hours' }
+                            { label: t('createTask.delaySeconds'), value: 'seconds' },
+                            { label: t('createTask.delayMinutes'), value: 'minutes' },
+                            { label: t('createTask.delayHours'), value: 'hours' }
                           ]"
                           style="width: 140px"
                         />
@@ -146,7 +146,7 @@
                         v-model:value="scheduledDatetime"
                         type="datetime"
                         style="width: min(100%, 320px)"
-                        placeholder="Select date and time"
+                        :placeholder="t('createTask.selectDateTime')"
                       />
 
                       <div class="create-task-form__hint">
@@ -161,10 +161,10 @@
             <div class="create-task-form__actions">
               <n-space justify="end" wrap>
                 <n-button secondary strong round @click="handleReset">
-                  Reset
+                  {{ t('common.reset') }}
                 </n-button>
                 <n-button type="primary" strong round @click="handleSubmit" :loading="submitting">
-                  Create Task
+                  {{ t('common.createTask') }}
                 </n-button>
               </n-space>
             </div>
@@ -173,12 +173,12 @@
       </n-card>
 
       <!-- Success Dialog -->
-      <n-modal v-model:show="showSuccessModal" preset="dialog" title="Task Created">
+      <n-modal v-model:show="showSuccessModal" preset="dialog" :title="t('createTask.successTitle')">
         <n-space vertical>
-          <p>Task #{{ createdTaskId }} has been created successfully!</p>
+          <p>{{ t('createTask.successMessage', { id: createdTaskId }) }}</p>
           <n-space>
-            <n-button @click="viewTask">View Task</n-button>
-            <n-button type="primary" @click="createAnother">Create Another</n-button>
+            <n-button @click="viewTask">{{ t('common.viewTask') }}</n-button>
+            <n-button type="primary" @click="createAnother">{{ t('common.createAnother') }}</n-button>
           </n-space>
         </n-space>
       </n-modal>
@@ -195,11 +195,13 @@ import {
   NDatePicker, NTag, NGrid, NGi, useMessage, FormInst, FormRules
 } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
+import { useI18n } from 'vue-i18n'
 import { getProjects, getBranches, createTask, type Project, type Branch, type CreateTaskRequest } from '../api'
 import { formatDateTimeUtc8 } from '../utils/datetime'
 
 const router = useRouter()
 const message = useMessage()
+const { t } = useI18n()
 const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
@@ -283,21 +285,26 @@ const sameBranchConflict = computed(() => {
 
 const scheduleSummary = computed(() => {
   if (scheduleType.value === 'now') {
-    return 'This task will execute immediately after creation.'
+    return t('createTask.runsImmediately')
   }
 
   if (scheduleType.value === 'delay') {
     if (!delayValue.value || delayValue.value <= 0) {
-      return 'Enter a delay greater than 0 before creating the task.'
+      return t('createTask.delayGreaterThanZero')
     }
-    return `This task will run after ${delayValue.value} ${delayUnit.value}.`
+    const unitKey = delayUnit.value === 'seconds'
+      ? 'createTask.delaySeconds'
+      : delayUnit.value === 'minutes'
+        ? 'createTask.delayMinutes'
+        : 'createTask.delayHours'
+    return t('createTask.taskWillRunAfter', { value: delayValue.value, unit: t(unitKey) })
   }
 
   if (!scheduledDatetime.value) {
-    return 'Select a future date and time before creating the task.'
+    return t('createTask.selectFutureTime')
   }
 
-  return `This task will run at ${formatDateTimeUtc8(scheduledDatetime.value)} (UTC+8).`
+  return t('createTask.taskWillRunAt', { time: formatDateTimeUtc8(scheduledDatetime.value) })
 })
 
 // Validation rules
@@ -305,32 +312,32 @@ const rules: FormRules = {
   project_id: {
     required: true,
     type: 'number',
-    message: 'Please select a project',
+    message: t('createTask.pleaseSelectProject'),
     trigger: 'change'
   },
   base_branch: {
     required: true,
-    message: 'Please select a base branch',
+    message: t('createTask.pleaseSelectBaseBranch'),
     trigger: 'change'
   },
   new_branch_name: {
     validator: () =>
-      !sameBranchConflict.value || new Error('Source branch and target branch must be different'),
+      !sameBranchConflict.value || new Error(t('createTask.sourceTargetDifferent')),
     trigger: ['blur', 'input', 'change']
   },
   target_branch: {
     required: true,
     validator: () => {
       if (!formValue.value.target_branch) {
-        return new Error('Please select target branch')
+        return new Error(t('createTask.pleaseSelectTargetBranch'))
       }
-      return !sameBranchConflict.value || new Error('Source branch and target branch must be different')
+      return !sameBranchConflict.value || new Error(t('createTask.sourceTargetDifferent'))
     },
     trigger: ['blur', 'change', 'input']
   },
   user_prompt: {
     required: true,
-    message: 'Please enter a prompt',
+    message: t('createTask.pleaseEnterPrompt'),
     trigger: 'blur'
   }
 }
@@ -341,7 +348,7 @@ async function fetchProjects() {
   try {
     projects.value = await getProjects()
   } catch (error) {
-    message.error('Failed to fetch projects')
+    message.error(t('createTask.failedToFetchProjects'))
   } finally {
     projectsLoading.value = false
   }
@@ -355,7 +362,7 @@ async function fetchBranches(projectId: number) {
     // Reset branch selection
     formValue.value.branch_name = ''
   } catch (error) {
-    message.error('Failed to fetch branches')
+    message.error(t('createTask.failedToFetchBranches'))
   } finally {
     branchesLoading.value = false
   }
@@ -395,7 +402,7 @@ function handleReset() {
 function buildScheduleRequest(): Pick<CreateTaskRequest, 'delay_seconds' | 'scheduled_datetime'> {
   if (scheduleType.value === 'delay') {
     if (delayValue.value === null || !Number.isFinite(delayValue.value) || delayValue.value <= 0) {
-      throw new Error('Please enter a valid delay greater than 0')
+      throw new Error(t('createTask.invalidDelay'))
     }
 
     const multipliers: Record<'seconds' | 'minutes' | 'hours', number> = {
@@ -411,11 +418,11 @@ function buildScheduleRequest(): Pick<CreateTaskRequest, 'delay_seconds' | 'sche
 
   if (scheduleType.value === 'scheduled') {
     if (!scheduledDatetime.value) {
-      throw new Error('Please select a scheduled date and time')
+      throw new Error(t('createTask.pleaseSelectScheduledTime'))
     }
 
     if (scheduledDatetime.value <= Date.now()) {
-      throw new Error('Scheduled time must be in the future')
+      throw new Error(t('createTask.scheduledTimeFuture'))
     }
 
     return {
@@ -442,7 +449,7 @@ async function handleSubmit() {
     const branchName = formValue.value.new_branch_name || formValue.value.base_branch || ''
 
     if (branchName === formValue.value.target_branch) {
-      message.error('Source branch and target branch must be different for manual tasks')
+      message.error(t('createTask.manualTaskBranchConflict'))
       return
     }
 
@@ -461,7 +468,7 @@ async function handleSubmit() {
     createdTaskId.value = task.id
     showSuccessModal.value = true
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Failed to create task'
+    const errorMessage = error instanceof Error ? error.message : t('createTask.failedToCreateTask')
     message.error(errorMessage)
   } finally {
     submitting.value = false

@@ -3,14 +3,13 @@
     <n-space vertical :size="16">
       <div class="diagnostics-page__hero">
         <div>
-          <h2 class="diagnostics-page__title">OIDC Diagnostics</h2>
+          <h2 class="diagnostics-page__title">{{ t('oidcDiagnostics.title') }}</h2>
           <p class="diagnostics-page__subtitle">
-            Inspect issuer discovery, endpoint metadata, cookie policy, required scopes, and the
-            current auth mode from one admin-only page.
+            {{ t('oidcDiagnostics.subtitle') }}
           </p>
         </div>
         <n-button @click="fetchDiagnostics" :loading="loading" :disabled="loading">
-          Refresh diagnostics
+          {{ t('oidcDiagnostics.refreshDiagnostics') }}
         </n-button>
       </div>
 
@@ -26,7 +25,7 @@
       <n-spin :show="loading">
         <n-space v-if="diagnostics" vertical :size="16">
           <n-alert v-if="diagnostics.warnings.length" type="warning" :show-icon="false">
-            <div class="diagnostics-alert__title">Operator warnings</div>
+            <div class="diagnostics-alert__title">{{ t('oidcDiagnostics.operatorWarnings') }}</div>
             <ul class="diagnostics-alert__list">
               <li v-for="warning in diagnostics.warnings" :key="warning">{{ warning }}</li>
             </ul>
@@ -36,8 +35,8 @@
             <template #header>
               <div class="diagnostics-card__header">
                 <div>
-                  <div class="diagnostics-card__title">Checks</div>
-                  <div class="diagnostics-card__subtitle">Live diagnostics against effective runtime config</div>
+                    <div class="diagnostics-card__title">{{ t('oidcDiagnostics.checks') }}</div>
+                    <div class="diagnostics-card__subtitle">{{ t('oidcDiagnostics.checksSubtitle') }}</div>
                 </div>
               </div>
             </template>
@@ -52,7 +51,7 @@
                 <div class="diagnostics-check__top">
                   <span class="diagnostics-check__label">{{ check.label }}</span>
                   <n-tag size="small" round :type="tagType(check.status)">
-                    {{ check.status }}
+                     {{ check.status === 'ok' ? t('status.ok') : check.status === 'warning' ? t('oidcDiagnostics.warning') : t('oidcDiagnostics.error') }}
                   </n-tag>
                 </div>
                 <div class="diagnostics-check__detail">{{ check.detail }}</div>
@@ -66,35 +65,35 @@
                 <template #header>
                   <div class="diagnostics-card__header">
                     <div>
-                      <div class="diagnostics-card__title">Auth mode summary</div>
-                      <div class="diagnostics-card__subtitle">Current effective settings and safety posture</div>
+                       <div class="diagnostics-card__title">{{ t('oidcDiagnostics.authModeSummary') }}</div>
+                       <div class="diagnostics-card__subtitle">{{ t('oidcDiagnostics.authModeSummarySubtitle') }}</div>
                     </div>
                   </div>
                 </template>
 
                 <div class="diagnostics-detail-list">
                   <div class="diagnostics-detail-list__item">
-                    <span>OIDC login</span>
-                    <strong>{{ diagnostics.oidc_enabled ? 'Enabled' : 'Disabled' }}</strong>
+                     <span>{{ t('oidcDiagnostics.oidcLogin') }}</span>
+                     <strong>{{ diagnostics.oidc_enabled ? t('common.enabled') : t('common.disabled') }}</strong>
                   </div>
                   <div class="diagnostics-detail-list__item">
-                    <span>Break-glass</span>
-                    <strong>{{ diagnostics.break_glass_enabled ? 'Enabled' : 'Disabled' }}</strong>
+                     <span>{{ t('oidcDiagnostics.breakGlass') }}</span>
+                     <strong>{{ diagnostics.break_glass_enabled ? t('common.enabled') : t('common.disabled') }}</strong>
                   </div>
                   <div class="diagnostics-detail-list__item">
-                    <span>Client ID</span>
-                    <strong>{{ diagnostics.client_id_configured ? 'Configured' : 'Missing' }}</strong>
+                     <span>{{ t('oidcDiagnostics.clientId') }}</span>
+                     <strong>{{ diagnostics.client_id_configured ? t('config.configured') : t('config.missing') }}</strong>
                   </div>
                   <div class="diagnostics-detail-list__item">
-                    <span>Client secret</span>
-                    <strong>{{ diagnostics.client_secret_configured ? 'Configured' : 'Missing' }}</strong>
+                     <span>{{ t('oidcDiagnostics.clientSecret') }}</span>
+                     <strong>{{ diagnostics.client_secret_configured ? t('config.configured') : t('config.missing') }}</strong>
                   </div>
                   <div class="diagnostics-detail-list__item">
-                    <span>Cookie policy</span>
-                    <strong>{{ diagnostics.cookie_secure ? 'Secure' : 'Insecure' }} / {{ diagnostics.cookie_samesite }}</strong>
+                     <span>{{ t('oidcDiagnostics.cookiePolicy') }}</span>
+                     <strong>{{ diagnostics.cookie_secure ? t('oidcDiagnostics.secure') : t('oidcDiagnostics.insecure') }} / {{ diagnostics.cookie_samesite }}</strong>
                   </div>
                   <div class="diagnostics-detail-list__item">
-                    <span>Session TTL</span>
+                     <span>{{ t('oidcDiagnostics.sessionTtl') }}</span>
                     <strong>{{ diagnostics.session_ttl_seconds }}s</strong>
                   </div>
                 </div>
@@ -106,35 +105,35 @@
                 <template #header>
                   <div class="diagnostics-card__header">
                     <div>
-                      <div class="diagnostics-card__title">Provider metadata</div>
-                      <div class="diagnostics-card__subtitle">Discovery and endpoint values currently in use</div>
+                       <div class="diagnostics-card__title">{{ t('oidcDiagnostics.providerMetadata') }}</div>
+                       <div class="diagnostics-card__subtitle">{{ t('oidcDiagnostics.providerMetadataSubtitle') }}</div>
                     </div>
                   </div>
                 </template>
 
                 <div class="diagnostics-detail-list">
                   <div class="diagnostics-detail-list__item">
-                    <span>Issuer URL</span>
+                     <span>{{ t('oidcDiagnostics.issuerUrl') }}</span>
                     <code>{{ diagnostics.issuer_url || '—' }}</code>
                   </div>
                   <div class="diagnostics-detail-list__item">
-                    <span>Discovery issuer</span>
+                     <span>{{ t('oidcDiagnostics.discoveryIssuer') }}</span>
                     <code>{{ diagnostics.discovery_issuer || '—' }}</code>
                   </div>
                   <div class="diagnostics-detail-list__item">
-                    <span>Redirect URI</span>
+                     <span>{{ t('oidcDiagnostics.redirectUri') }}</span>
                     <code>{{ diagnostics.redirect_uri || '—' }}</code>
                   </div>
                   <div class="diagnostics-detail-list__item">
-                    <span>Authorization endpoint</span>
+                     <span>{{ t('oidcDiagnostics.authorizationEndpoint') }}</span>
                     <code>{{ diagnostics.authorization_endpoint || '—' }}</code>
                   </div>
                   <div class="diagnostics-detail-list__item">
-                    <span>Token endpoint</span>
+                     <span>{{ t('oidcDiagnostics.tokenEndpoint') }}</span>
                     <code>{{ diagnostics.token_endpoint || '—' }}</code>
                   </div>
                   <div class="diagnostics-detail-list__item">
-                    <span>Userinfo endpoint</span>
+                     <span>{{ t('oidcDiagnostics.userinfoEndpoint') }}</span>
                     <code>{{ diagnostics.userinfo_endpoint || '—' }}</code>
                   </div>
                 </div>
@@ -146,8 +145,8 @@
             <template #header>
               <div class="diagnostics-card__header">
                 <div>
-                  <div class="diagnostics-card__title">Required scopes</div>
-                  <div class="diagnostics-card__subtitle">Scopes the GitLab OAuth application should allow</div>
+                   <div class="diagnostics-card__title">{{ t('oidcDiagnostics.requiredScopes') }}</div>
+                   <div class="diagnostics-card__subtitle">{{ t('oidcDiagnostics.requiredScopesSubtitle') }}</div>
                 </div>
               </div>
             </template>
@@ -157,12 +156,12 @@
             </n-space>
 
             <div class="diagnostics-scope-string">
-              <span class="diagnostics-scope-string__label">Authorization scope string</span>
+               <span class="diagnostics-scope-string__label">{{ t('oidcDiagnostics.authorizationScopeString') }}</span>
               <code>{{ diagnostics.required_scope_string }}</code>
             </div>
 
             <div v-if="diagnostics.authorization_url_preview" class="diagnostics-scope-string">
-              <span class="diagnostics-scope-string__label">Authorization URL preview</span>
+               <span class="diagnostics-scope-string__label">{{ t('oidcDiagnostics.authorizationUrlPreview') }}</span>
               <code>{{ diagnostics.authorization_url_preview }}</code>
             </div>
           </n-card>
@@ -186,9 +185,11 @@ import {
   useMessage
 } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
+import { useI18n } from 'vue-i18n'
 import { getOidcDiagnostics, type OidcDiagnosticsResult } from '../api'
 
 const message = useMessage()
+const { t } = useI18n()
 const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
@@ -203,10 +204,10 @@ const summaryItems = computed(() => {
   const warningCount = diagnostics.value.checks.filter((check) => check.status === 'warning').length
   const errorCount = diagnostics.value.checks.filter((check) => check.status === 'error').length
   return [
-    { label: 'OIDC Login', value: diagnostics.value.oidc_enabled ? 'Enabled' : 'Disabled' },
-    { label: 'Healthy Checks', value: String(okCount) },
-    { label: 'Warnings', value: String(warningCount) },
-    { label: 'Errors', value: String(errorCount) }
+    { label: t('oidcDiagnostics.oidcLoginSummary'), value: diagnostics.value.oidc_enabled ? t('common.enabled') : t('common.disabled') },
+    { label: t('oidcDiagnostics.healthyChecks'), value: String(okCount) },
+    { label: t('oidcDiagnostics.warnings'), value: String(warningCount) },
+    { label: t('oidcDiagnostics.errors'), value: String(errorCount) }
   ]
 })
 
@@ -228,7 +229,7 @@ async function fetchDiagnostics() {
   try {
     diagnostics.value = await getOidcDiagnostics()
   } catch (error: any) {
-    message.error(error?.response?.data?.detail || 'Failed to fetch OIDC diagnostics')
+    message.error(error?.response?.data?.detail || t('oidcDiagnostics.failedToFetch'))
   } finally {
     loading.value = false
   }

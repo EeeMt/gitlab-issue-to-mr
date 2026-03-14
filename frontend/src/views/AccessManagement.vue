@@ -3,20 +3,18 @@
     <n-space vertical :size="16">
       <div class="access-page__hero">
         <div>
-          <h2 class="access-page__title">Access Management</h2>
+          <h2 class="access-page__title">{{ t('accessManagement.title') }}</h2>
           <p class="access-page__subtitle">
-            Manage dashboard users, explicit admin overrides, disabled accounts, and active
-            sessions from a dedicated admin page.
+            {{ t('accessManagement.subtitle') }}
           </p>
         </div>
         <n-button @click="fetchUsers" :loading="usersLoading" :disabled="usersLoading">
-          Reload users
+          {{ t('accessManagement.reloadUsers') }}
         </n-button>
       </div>
 
       <n-alert type="info" :show-icon="false" class="user-management__intro">
-        Manual role changes override bootstrap username/group rules for that user. Disabling a
-        user immediately revokes their active sessions.
+        {{ t('accessManagement.intro') }}
       </n-alert>
 
       <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 1 : 4" :x-gap="16" :y-gap="16">
@@ -33,7 +31,7 @@
           <n-space :size="12" wrap>
             <n-input
               v-model:value="userSearch"
-              placeholder="Search by username, display name, or email"
+               :placeholder="t('accessManagement.searchPlaceholder')"
               clearable
               class="user-management__search"
             />
@@ -41,20 +39,20 @@
               v-model:value="roleFilter"
               :options="roleFilterOptions"
               clearable
-              placeholder="Filter by role"
+               :placeholder="t('accessManagement.filterByRole')"
               class="user-management__filter"
             />
             <n-select
               v-model:value="stateFilter"
               :options="stateFilterOptions"
               clearable
-              placeholder="Filter by state"
+               :placeholder="t('accessManagement.filterByState')"
               class="user-management__filter"
             />
           </n-space>
         </div>
 
-        <n-spin :show="initialLoading" description="Loading users...">
+         <n-spin :show="initialLoading" :description="t('accessManagement.loading')">
           <div v-if="hasLoadedOnce && filteredUsers.length" class="user-management__grid">
             <n-card
               v-for="user in filteredUsers"
@@ -74,15 +72,15 @@
                         {{ user.display_name || user.username }}
                       </span>
                       <n-tag size="small" round :type="user.state === 'active' ? 'success' : 'error'">
-                        {{ user.state }}
+                         {{ t(`status.${user.state}`) }}
                       </n-tag>
                       <n-tag size="small" round :type="user.platform_role === 'platform_admin' ? 'warning' : 'default'">
-                        {{ user.platform_role }}
+                         {{ user.platform_role === 'platform_admin' ? t('accessManagement.platformAdmin') : t('accessManagement.platformUser') }}
                       </n-tag>
                       <n-tag size="small" round>
                         {{ roleSourceLabel(user.platform_role_source) }}
                       </n-tag>
-                      <n-tag v-if="user.is_current_user" size="small" round type="info">Current user</n-tag>
+                       <n-tag v-if="user.is_current_user" size="small" round type="info">{{ t('accessManagement.currentUser') }}</n-tag>
                     </div>
                     <div class="user-management__meta">
                       <span>@{{ user.username }}</span>
@@ -93,11 +91,11 @@
                 </div>
                 <div class="user-management__stats">
                   <div>
-                    <div class="user-management__stat-label">Active sessions</div>
+                     <div class="user-management__stat-label">{{ t('accessManagement.activeSessions') }}</div>
                     <div class="user-management__stat-value">{{ user.active_session_count }}</div>
                   </div>
                   <div>
-                    <div class="user-management__stat-label">Last seen</div>
+                     <div class="user-management__stat-label">{{ t('accessManagement.lastSeen') }}</div>
                     <div class="user-management__stat-value">
                       {{ formatTimestamp(user.last_session_seen_at || user.last_login_at) }}
                     </div>
@@ -107,18 +105,18 @@
 
               <div class="user-management__details">
                 <div class="user-management__detail">
-                  <span class="user-management__detail-label">Created</span>
+                   <span class="user-management__detail-label">{{ t('common.created') }}</span>
                   <span>{{ formatTimestamp(user.created_at) }}</span>
                 </div>
                 <div class="user-management__detail">
-                  <span class="user-management__detail-label">Last login</span>
+                   <span class="user-management__detail-label">{{ t('accessManagement.lastLogin') }}</span>
                   <span>{{ formatTimestamp(user.last_login_at) }}</span>
                 </div>
               </div>
 
               <n-grid :cols="isMobile ? 1 : 2" :x-gap="12" :y-gap="8">
                 <n-gi>
-                  <n-form-item label="Role" class="user-management__field">
+                   <n-form-item :label="t('accessManagement.role')" class="user-management__field">
                     <n-select
                       v-model:value="userDrafts[user.id].platform_role"
                       :options="roleOptions"
@@ -127,7 +125,7 @@
                   </n-form-item>
                 </n-gi>
                 <n-gi>
-                  <n-form-item label="State" class="user-management__field">
+                   <n-form-item :label="t('accessManagement.state')" class="user-management__field">
                     <n-select
                       v-model:value="userDrafts[user.id].state"
                       :options="stateOptions"
@@ -145,24 +143,24 @@
                   :loading="isUserSaving(user.id)"
                   :disabled="user.is_current_user || !isUserDirty(user)"
                 >
-                  Save access
+                   {{ t('accessManagement.saveAccess') }}
                 </n-button>
                 <n-button
                   @click="handleRevokeUserSessions(user)"
                   :loading="isUserRevoking(user.id)"
                   :disabled="user.is_current_user || isUserRevoking(user.id)"
                 >
-                  Revoke sessions
+                   {{ t('accessManagement.revokeSessions') }}
                 </n-button>
               </div>
 
               <p v-if="user.is_current_user" class="user-management__hint">
-                Your own role and state are read-only here to avoid accidental lockout.
+                 {{ t('accessManagement.selfReadonly') }}
               </p>
             </n-card>
           </div>
 
-          <n-empty v-else-if="hasLoadedOnce" description="No matching dashboard users yet." />
+           <n-empty v-else-if="hasLoadedOnce" :description="t('accessManagement.noUsers')" />
         </n-spin>
       </n-card>
     </n-space>
@@ -188,12 +186,14 @@ import {
   useMessage
 } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
+import { useI18n } from 'vue-i18n'
 import {
   getAdminUsers,
   revokeAdminUserSessions,
   updateAdminUser,
   type AdminUser
 } from '../api'
+import { formatDateTimeLocal } from '../utils/datetime'
 
 type AdminUserDraft = {
   platform_role: string
@@ -201,6 +201,7 @@ type AdminUserDraft = {
 }
 
 const message = useMessage()
+const { t } = useI18n()
 const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
@@ -215,35 +216,35 @@ const savingUserIds = ref<number[]>([])
 const revokingUserIds = ref<number[]>([])
 const initialLoading = computed(() => usersLoading.value && !hasLoadedOnce.value)
 
-const roleOptions = [
-  { label: 'Platform admin', value: 'platform_admin' },
-  { label: 'Platform user', value: 'platform_user' }
-]
+const roleOptions = computed(() => [
+  { label: t('accessManagement.platformAdmin'), value: 'platform_admin' },
+  { label: t('accessManagement.platformUser'), value: 'platform_user' }
+])
 
-const stateOptions = [
-  { label: 'Active', value: 'active' },
-  { label: 'Disabled', value: 'disabled' }
-]
+const stateOptions = computed(() => [
+  { label: t('status.active'), value: 'active' },
+  { label: t('status.disabled'), value: 'disabled' }
+])
 
-const roleFilterOptions = [
-  { label: 'Platform admin', value: 'platform_admin' },
-  { label: 'Platform user', value: 'platform_user' }
-]
+const roleFilterOptions = computed(() => [
+  { label: t('accessManagement.platformAdmin'), value: 'platform_admin' },
+  { label: t('accessManagement.platformUser'), value: 'platform_user' }
+])
 
-const stateFilterOptions = [
-  { label: 'Active', value: 'active' },
-  { label: 'Disabled', value: 'disabled' }
-]
+const stateFilterOptions = computed(() => [
+  { label: t('status.active'), value: 'active' },
+  { label: t('status.disabled'), value: 'disabled' }
+])
 
 const summaryItems = computed(() => {
   const adminUsers = users.value.filter((user) => user.platform_role === 'platform_admin').length
   const disabledUsers = users.value.filter((user) => user.state === 'disabled').length
   const activeSessions = users.value.reduce((total, user) => total + user.active_session_count, 0)
   return [
-    { label: 'Known Users', value: String(users.value.length) },
-    { label: 'Platform Admins', value: String(adminUsers) },
-    { label: 'Disabled Users', value: String(disabledUsers) },
-    { label: 'Active Sessions', value: String(activeSessions) }
+    { label: t('accessManagement.knownUsers'), value: String(users.value.length) },
+    { label: t('accessManagement.platformAdmins'), value: String(adminUsers) },
+    { label: t('accessManagement.disabledUsers'), value: String(disabledUsers) },
+    { label: t('accessManagement.activeSessions'), value: String(activeSessions) }
   ]
 })
 
@@ -284,25 +285,19 @@ function userAvatarFallback(user: AdminUser) {
 
 function roleSourceLabel(source: string) {
   if (source === 'manual') {
-    return 'Manual override'
+    return t('accessManagement.manualOverride')
   }
   if (source === 'break_glass') {
-    return 'Break-glass'
+    return t('accessManagement.breakGlass')
   }
-  return 'Bootstrap'
+  return t('accessManagement.bootstrap')
 }
 
 function formatTimestamp(value: string | null) {
   if (!value) {
     return '—'
   }
-  return new Intl.DateTimeFormat('en-GB', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(new Date(value))
+  return formatDateTimeLocal(value)
 }
 
 function isUserSaving(userId: number) {
@@ -351,7 +346,7 @@ async function fetchUsers() {
     users.value = result
     syncUserDrafts(result)
   } catch (error: any) {
-    message.error(error?.response?.data?.detail || 'Failed to fetch users')
+    message.error(error?.response?.data?.detail || t('accessManagement.failedToFetchUsers'))
   } finally {
     hasLoadedOnce.value = true
     usersLoading.value = false
@@ -379,9 +374,9 @@ async function handleSaveUser(user: AdminUser) {
   try {
     const updatedUser = await updateAdminUser(user.id, payload)
     replaceUser(updatedUser)
-    message.success(`Updated access for @${updatedUser.username}`)
+    message.success(t('accessManagement.updatedAccess', { username: updatedUser.username }))
   } catch (error: any) {
-    message.error(error?.response?.data?.detail || 'Failed to update user access')
+    message.error(error?.response?.data?.detail || t('accessManagement.failedToUpdateUser'))
   } finally {
     setSavingUser(user.id, false)
   }
@@ -394,11 +389,11 @@ async function handleRevokeUserSessions(user: AdminUser) {
     await fetchUsers()
     message.success(
       result.revoked_count > 0
-        ? `Revoked ${result.revoked_count} active session(s) for @${user.username}`
-        : `No active sessions found for @${user.username}`
+        ? t('accessManagement.revokedSessions', { count: result.revoked_count, username: user.username })
+        : t('accessManagement.noActiveSessions', { username: user.username })
     )
   } catch (error: any) {
-    message.error(error?.response?.data?.detail || 'Failed to revoke user sessions')
+    message.error(error?.response?.data?.detail || t('accessManagement.failedToRevokeSessions'))
   } finally {
     setRevokingUser(user.id, false)
   }

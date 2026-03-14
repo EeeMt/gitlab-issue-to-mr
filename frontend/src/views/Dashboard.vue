@@ -1,24 +1,24 @@
 <template>
   <div class="dashboard">
-    <n-spin :show="initialLoading" description="Loading tasks...">
+    <n-spin :show="initialLoading" :description="t('common.loadingTasks')">
       <n-space vertical :size="16">
         <div class="dashboard__hero">
           <div>
-            <h2 class="dashboard__title">Task Dashboard</h2>
+            <h2 class="dashboard__title">{{ t('dashboard.title') }}</h2>
             <p class="dashboard__subtitle">
-              Track queued work, running jobs, and completed merge request tasks from a single view.
+              {{ t('dashboard.subtitle') }}
             </p>
           </div>
           <n-space align="center" wrap>
             <n-select
               v-model:value="statusFilter"
               :options="statusOptions"
-              placeholder="Filter"
+              :placeholder="t('common.filter')"
               clearable
               style="width: 140px"
             />
             <n-button @click="refreshTasks" :loading="loading" size="small">
-              Refresh
+              {{ t('common.refresh') }}
             </n-button>
           </n-space>
         </div>
@@ -54,11 +54,13 @@ import { ref, onMounted, onBeforeUnmount, h, watch, computed } from 'vue'
 import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useWindowSize } from '@vueuse/core'
+import { useI18n } from 'vue-i18n'
 import { getTasks, type Task } from '../api'
-import { formatDateTimeUtc8 } from '../utils/datetime'
+import { formatDateTimeUtc8Compact } from '../utils/datetime'
 
 const router = useRouter()
 const message = useMessage()
+const { t } = useI18n()
 const { width } = useWindowSize()
 
 const isMobile = computed(() => width.value < 768)
@@ -74,14 +76,14 @@ const pagination = {
   responsive: true
 }
 
-const statusOptions = [
-  { label: 'Pending', value: 'pending' },
-  { label: 'Queued', value: 'queued' },
-  { label: 'Running', value: 'running' },
-  { label: 'Completed', value: 'completed' },
-  { label: 'Failed', value: 'failed' },
-  { label: 'Cancelled', value: 'cancelled' }
-]
+const statusOptions = computed(() => [
+  { label: t('status.pending'), value: 'pending' },
+  { label: t('status.queued'), value: 'queued' },
+  { label: t('status.running'), value: 'running' },
+  { label: t('status.completed'), value: 'completed' },
+  { label: t('status.failed'), value: 'failed' },
+  { label: t('status.cancelled'), value: 'cancelled' }
+])
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
   pending: 'default',
@@ -93,7 +95,7 @@ const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 
 }
 
 function getProjectLabel(task: Task): string {
-  return task.project_path_with_namespace || task.project_name || `Project #${task.project_id}`
+  return task.project_path_with_namespace || task.project_name || t('dashboard.projectFallback', { id: task.project_id })
 }
 
 function renderExternalLink(label: string, href?: string | null) {
@@ -125,7 +127,7 @@ function formatCompactDateTime(value?: string | null): string {
     return '-'
   }
 
-  return formatDateTimeUtc8(value).slice(0, 16)
+  return formatDateTimeUtc8Compact(value)
 }
 
 function goToTask(task: Task) {
@@ -154,107 +156,136 @@ function getRowProps(row: Task) {
   }
 }
 
-const mobileColumns: DataTableColumns<Task> = [
-  {
-    title: 'ID',
-    key: 'id',
-    width: 45
-  },
-  {
-    title: 'Task',
-    key: 'task_info',
-    render: (row) => h('div', { style: 'line-height: 1.4' }, [
-      h('div', { style: 'font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px' }, getProjectSecondaryLabel(row)),
-      h('div', { style: 'font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px' }, row.branch_name ? renderExternalLink(row.branch_name, row.branch_url) : '-')
-    ])
-  },
-  {
-    title: 'Status',
-    key: 'status',
-    width: 85,
-    render: (row) => h(NTag, { type: statusColors[row.status], size: 'small' }, () => row.status)
-  }
-]
+const columns = computed<DataTableColumns<Task>>(() => {
+  const renderStatus = (row: Task) =>
+    h(NTag, { type: statusColors[row.status], size: 'small' }, () => t(`status.${row.status}`))
 
-const desktopColumns: DataTableColumns<Task> = [
-  {
-    title: 'ID',
-    key: 'id',
-    width: 60
-  },
-  {
-    title: 'Project',
-    key: 'project',
-    width: 180,
-    ellipsis: { tooltip: true },
-    render: (row) => h('div', { style: 'line-height: 1.4' }, [
-      h('div', renderExternalLink(getProjectLabel(row), row.project_url)),
-      h('div', { style: 'font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;' }, `#${row.project_id}`)
-    ])
-  },
-  {
-    title: 'Issue',
-    key: 'issue_iid',
-    width: 60,
-    render: (row) => row.issue_iid ? renderExternalLink(`!${row.issue_iid}`, row.issue_url) : '-'
-  },
-  {
-    title: 'Status',
-    key: 'status',
-    width: 90,
-    render: (row) => h(NTag, { type: statusColors[row.status], size: 'small' }, () => row.status)
-  },
-  {
-    title: 'Priority',
-    key: 'priority',
-    width: 68,
-    render: (row) => formatPriority(row.priority)
-  },
-  {
-    title: 'Branch',
-    key: 'branch_name',
-    width: 140,
-    ellipsis: { tooltip: true },
-    render: (row) => row.branch_name ? renderExternalLink(row.branch_name, row.branch_url) : '-'
-  },
-  {
-    title: 'MR',
-    key: 'merge_request_url',
-    width: 76,
-    render: (row) => {
-      if (!row.merge_request_url) return '-'
-      const label = row.merge_request_iid ? `!${row.merge_request_iid}` : 'Open'
-      return h('a', { href: row.merge_request_url, target: '_blank', rel: 'noopener noreferrer', class: 'app-link' }, label)
+  const mobileColumns: DataTableColumns<Task> = [
+    {
+      title: t('dashboard.id'),
+      key: 'id',
+      width: 45
+    },
+    {
+      title: t('dashboard.task'),
+      key: 'task_info',
+      render: (row) =>
+        h('div', { style: 'line-height: 1.4' }, [
+          h(
+            'div',
+            {
+              style:
+                'font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px'
+            },
+            getProjectSecondaryLabel(row)
+          ),
+          h(
+            'div',
+            {
+              style:
+                'font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px'
+            },
+            row.branch_name ? renderExternalLink(row.branch_name, row.branch_url) : '-'
+          )
+        ])
+    },
+    {
+      title: t('dashboard.status'),
+      key: 'status',
+      width: 85,
+      render: renderStatus
     }
-  },
-  {
-    title: 'Changes',
-    key: 'changes',
-    width: 92,
-    render: (row) => {
-      if (row.additions === undefined && row.deletions === undefined) return '-'
-      if (!row.additions && !row.deletions) return '-'
-      return h('span', { style: 'display: flex; align-items: center; gap: 4px; font-size: 12px;' }, [
-        h('span', { style: 'color: #18a053' }, '+' + (row.additions || 0)),
-        h('span', { style: 'color: #db3b21; margin-left: 4px' }, '-' + (row.deletions || 0))
-      ])
-    }
-  },
-  {
-    title: 'Created',
-    key: 'created_at',
-    width: 132,
-    render: (row) => formatCompactDateTime(row.created_at)
-  },
-  {
-    title: 'Scheduled',
-    key: 'scheduled_at',
-    width: 132,
-    render: (row) => formatCompactDateTime(row.scheduled_at)
-  }
-]
+  ]
 
-const columns = computed(() => isMobile.value ? mobileColumns : desktopColumns)
+  const desktopColumns: DataTableColumns<Task> = [
+    {
+      title: t('dashboard.id'),
+      key: 'id',
+      width: 60
+    },
+    {
+      title: t('dashboard.project'),
+      key: 'project',
+      width: 180,
+      ellipsis: { tooltip: true },
+      render: (row) =>
+        h('div', { style: 'line-height: 1.4' }, [
+          h('div', renderExternalLink(getProjectLabel(row), row.project_url)),
+          h(
+            'div',
+            { style: 'font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;' },
+            `#${row.project_id}`
+          )
+        ])
+    },
+    {
+      title: t('dashboard.issue'),
+      key: 'issue_iid',
+      width: 60,
+      render: (row) => (row.issue_iid ? renderExternalLink(`!${row.issue_iid}`, row.issue_url) : '-')
+    },
+    {
+      title: t('dashboard.status'),
+      key: 'status',
+      width: 90,
+      render: renderStatus
+    },
+    {
+      title: t('dashboard.priority'),
+      key: 'priority',
+      width: 68,
+      render: (row) => formatPriority(row.priority)
+    },
+    {
+      title: t('dashboard.branch'),
+      key: 'branch_name',
+      width: 140,
+      ellipsis: { tooltip: true },
+      render: (row) => (row.branch_name ? renderExternalLink(row.branch_name, row.branch_url) : '-')
+    },
+    {
+      title: t('dashboard.mergeRequest'),
+      key: 'merge_request_url',
+      width: 76,
+      render: (row) => {
+        if (!row.merge_request_url) return '-'
+        const label = row.merge_request_iid ? `!${row.merge_request_iid}` : t('dashboard.open')
+        return h(
+          'a',
+          { href: row.merge_request_url, target: '_blank', rel: 'noopener noreferrer', class: 'app-link' },
+          label
+        )
+      }
+    },
+    {
+      title: t('dashboard.changes'),
+      key: 'changes',
+      width: 92,
+      render: (row) => {
+        if (row.additions === undefined && row.deletions === undefined) return '-'
+        if (!row.additions && !row.deletions) return '-'
+        return h('span', { style: 'display: flex; align-items: center; gap: 4px; font-size: 12px;' }, [
+          h('span', { style: 'color: #18a053' }, '+' + (row.additions || 0)),
+          h('span', { style: 'color: #db3b21; margin-left: 4px' }, '-' + (row.deletions || 0))
+        ])
+      }
+    },
+    {
+      title: t('common.created'),
+      key: 'created_at',
+      width: 132,
+      render: (row) => formatCompactDateTime(row.created_at)
+    },
+    {
+      title: t('dashboard.scheduled'),
+      key: 'scheduled_at',
+      width: 132,
+      render: (row) => formatCompactDateTime(row.scheduled_at)
+    }
+  ]
+
+  return isMobile.value ? mobileColumns : desktopColumns
+})
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
 const summaryItems = computed(() => {
@@ -271,10 +302,10 @@ const summaryItems = computed(() => {
   )
 
   return [
-    { label: 'Visible Tasks', value: String(summary.total) },
-    { label: 'Running', value: String(summary.running) },
-    { label: 'Pending / Queued', value: String(summary.pending) },
-    { label: 'Completed', value: String(summary.completed) }
+    { label: t('dashboard.visibleTasks'), value: String(summary.total) },
+    { label: t('dashboard.running'), value: String(summary.running) },
+    { label: t('dashboard.pendingQueued'), value: String(summary.pending) },
+    { label: t('dashboard.completed'), value: String(summary.completed) }
   ]
 })
 
@@ -288,7 +319,7 @@ async function fetchTasks() {
     }
     tasks.value = await getTasks(params)
   } catch (error) {
-    message.error('Failed to fetch tasks')
+    message.error(t('dashboard.failedToFetchTasks'))
   } finally {
     hasLoadedOnce.value = true
     loading.value = false

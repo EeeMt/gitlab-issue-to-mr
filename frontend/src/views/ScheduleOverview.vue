@@ -1,30 +1,30 @@
 <template>
   <div class="schedule-overview">
-    <n-spin :show="initialLoading" description="Loading schedule overview...">
+    <n-spin :show="initialLoading" :description="t('scheduleOverview.loading')">
       <n-space vertical :size="20">
         <div class="schedule-overview__hero">
           <div>
-            <h2 class="schedule-overview__title">Schedule Overview</h2>
+            <h2 class="schedule-overview__title">{{ t('scheduleOverview.title') }}</h2>
             <p class="schedule-overview__subtitle">
-              Review active scheduled tasks, understand hourly load, and spot busy versus idle time windows.
+              {{ t('scheduleOverview.subtitle') }}
             </p>
           </div>
           <n-space align="center" wrap>
             <n-select
               v-model:value="statusFilter"
               :options="statusOptions"
-              placeholder="Status"
+              :placeholder="t('scheduleOverview.statusPlaceholder')"
               clearable
               style="width: 140px"
             />
             <n-input
               v-model:value="searchTerm"
-              placeholder="Search project, branch, prompt"
+              :placeholder="t('scheduleOverview.searchPlaceholder')"
               clearable
               style="width: min(280px, 60vw)"
             />
             <n-button @click="refresh" :loading="loading">
-              Refresh
+              {{ t('common.refresh') }}
             </n-button>
           </n-space>
         </div>
@@ -45,8 +45,8 @@
               <template #header>
                 <div class="schedule-card__header">
                   <div>
-                    <div class="schedule-card__title">Next 24 Hours</div>
-                    <div class="schedule-card__subtitle">Scheduled task count per hour in UTC+8</div>
+                    <div class="schedule-card__title">{{ t('scheduleOverview.next24Hours') }}</div>
+                    <div class="schedule-card__subtitle">{{ t('scheduleOverview.next24HoursSubtitle') }}</div>
                   </div>
                 </div>
               </template>
@@ -75,33 +75,33 @@
               <template #header>
                 <div class="schedule-card__header">
                   <div>
-                    <div class="schedule-card__title">Busy & Idle Windows</div>
-                    <div class="schedule-card__subtitle">Quick read of the next 24 hours</div>
+                    <div class="schedule-card__title">{{ t('scheduleOverview.busyIdleWindows') }}</div>
+                    <div class="schedule-card__subtitle">{{ t('scheduleOverview.busyIdleWindowsSubtitle') }}</div>
                   </div>
                 </div>
               </template>
 
               <div class="window-insights">
                 <div class="window-insights__group">
-                  <div class="window-insights__heading">Busiest slots</div>
+                  <div class="window-insights__heading">{{ t('scheduleOverview.busiestSlots') }}</div>
                   <div v-if="busyWindows.length" class="window-insights__list">
                     <div v-for="bucket in busyWindows" :key="bucket.key" class="window-insights__item">
                       <span>{{ bucket.label }}</span>
                       <n-tag size="small" type="warning">{{ bucket.count }}</n-tag>
                     </div>
                   </div>
-                  <div v-else class="window-insights__empty">No scheduled work in the next 24 hours.</div>
+                  <div v-else class="window-insights__empty">{{ t('scheduleOverview.noScheduledWork24h') }}</div>
                 </div>
 
                 <div class="window-insights__group">
-                  <div class="window-insights__heading">Idle slots</div>
+                  <div class="window-insights__heading">{{ t('scheduleOverview.idleSlots') }}</div>
                   <div v-if="idleWindows.length" class="window-insights__list">
                     <div v-for="bucket in idleWindows" :key="bucket.key" class="window-insights__item">
                       <span>{{ bucket.label }}</span>
-                      <n-tag size="small">Idle</n-tag>
+                      <n-tag size="small">{{ t('scheduleOverview.idle') }}</n-tag>
                     </div>
                   </div>
-                  <div v-else class="window-insights__empty">Every upcoming hour already has scheduled work.</div>
+                  <div v-else class="window-insights__empty">{{ t('scheduleOverview.everyHourBusy') }}</div>
                 </div>
               </div>
             </n-card>
@@ -112,18 +112,18 @@
           <template #header>
             <div class="schedule-card__header">
               <div>
-                <div class="schedule-card__title">7-Day Heatmap</div>
-                <div class="schedule-card__subtitle">Darker cells indicate heavier scheduled load (UTC+8)</div>
+                  <div class="schedule-card__title">{{ t('scheduleOverview.heatmap') }}</div>
+                  <div class="schedule-card__subtitle">{{ t('scheduleOverview.heatmapSubtitle') }}</div>
               </div>
               <div class="heatmap-legend">
-                <span class="heatmap-legend__label">Light</span>
+                <span class="heatmap-legend__label">{{ t('scheduleOverview.light') }}</span>
                 <div class="heatmap-legend__scale">
                   <span class="heatmap-legend__swatch heatmap-legend__swatch--1"></span>
                   <span class="heatmap-legend__swatch heatmap-legend__swatch--2"></span>
                   <span class="heatmap-legend__swatch heatmap-legend__swatch--3"></span>
                   <span class="heatmap-legend__swatch heatmap-legend__swatch--4"></span>
                 </div>
-                <span class="heatmap-legend__label">Busy</span>
+                <span class="heatmap-legend__label">{{ t('scheduleOverview.busy') }}</span>
               </div>
             </div>
           </template>
@@ -145,7 +145,7 @@
                 :key="cell.key"
                 class="heatmap__cell"
                 :style="heatmapCellStyle(cell.count, heatmapMax)"
-                :title="`${cell.label}: ${cell.count} task(s)`"
+                  :title="t('scheduleOverview.taskCountTitle', { label: cell.label, count: cell.count })"
               >
                 {{ cell.count > 0 ? cell.count : '' }}
               </div>
@@ -157,8 +157,8 @@
           <template #header>
             <div class="schedule-card__header">
               <div>
-                <div class="schedule-card__title">Scheduled Tasks</div>
-                <div class="schedule-card__subtitle">Active scheduled tasks only: pending, queued, and running</div>
+                  <div class="schedule-card__title">{{ t('scheduleOverview.scheduledTasks') }}</div>
+                  <div class="schedule-card__subtitle">{{ t('scheduleOverview.scheduledTasksSubtitle') }}</div>
               </div>
             </div>
           </template>
@@ -197,8 +197,9 @@ import {
 } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { getScheduledTasks, type Task } from '../api'
-import { formatDateTimeUtc8, parseUtcDate } from '../utils/datetime'
+import { formatDateTimeUtc8Compact, formatMonthDayTimeUtc8, formatMonthDayWeekdayUtc8, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
 
 type HourBucket = {
   key: string
@@ -228,6 +229,7 @@ type HeatmapRow = {
 
 const message = useMessage()
 const router = useRouter()
+const { t } = useI18n()
 const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
@@ -243,11 +245,11 @@ const pagination = {
   responsive: true,
 }
 
-const statusOptions = [
-  { label: 'Pending', value: 'pending' },
-  { label: 'Queued', value: 'queued' },
-  { label: 'Running', value: 'running' },
-]
+const statusOptions = computed(() => [
+  { label: t('status.pending'), value: 'pending' },
+  { label: t('status.queued'), value: 'queued' },
+  { label: t('status.running'), value: 'running' },
+])
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
   pending: 'default',
@@ -267,15 +269,8 @@ const shanghaiPartsFormatter = new Intl.DateTimeFormat('en-CA', {
   hour12: false,
 })
 
-const shanghaiDayLabelFormatter = new Intl.DateTimeFormat('zh-CN', {
-  timeZone: 'Asia/Shanghai',
-  month: '2-digit',
-  day: '2-digit',
-  weekday: 'short',
-})
-
 function getProjectLabel(task: Task): string {
-  return task.project_path_with_namespace || task.project_name || `Project #${task.project_id}`
+  return task.project_path_with_namespace || task.project_name || t('dashboard.projectFallback', { id: task.project_id })
 }
 
 function getStatusTagType(status: string) {
@@ -296,7 +291,7 @@ function formatPriority(priority?: string | number | null): string {
 
 function formatShortDateTime(value?: string | null): string {
   if (!value) return '-'
-  return formatDateTimeUtc8(value).slice(0, 16)
+  return formatDateTimeUtc8Compact(value)
 }
 
 function getScheduledTimestamp(value?: string | null): number | null {
@@ -342,11 +337,11 @@ function buildHeatmapDays(days: number): HeatmapDay[] {
     const year = date.getUTCFullYear()
     const month = String(date.getUTCMonth() + 1).padStart(2, '0')
     const day = String(date.getUTCDate()).padStart(2, '0')
-    return {
-      dateKey: `${year}-${month}-${day}`,
-      label: shanghaiDayLabelFormatter.format(date),
-    }
-  })
+      return {
+        dateKey: `${year}-${month}-${day}`,
+        label: formatMonthDayWeekdayUtc8(date),
+      }
+    })
 }
 
 const filteredTasks = computed(() => {
@@ -390,15 +385,15 @@ const summaryItems = computed(() => {
   const busiest = [...hourlyBuckets.value].sort((left, right) => right.count - left.count)[0]
 
   return [
-    { label: 'Scheduled Queue', value: String(filteredTasks.value.length), note: 'Active scheduled tasks' },
-    { label: 'Ready Now', value: String(readyNow), note: 'Already due to run' },
-    { label: 'Next 24 Hours', value: String(next24HoursCount), note: 'Upcoming scheduled work' },
-    { label: 'After 24 Hours', value: String(laterCount), note: 'Later backlog' },
-    { label: 'Queued / Running', value: `${queuedCount} / ${runningCount}`, note: 'Execution state split' },
+    { label: t('scheduleOverview.scheduledQueue'), value: String(filteredTasks.value.length), note: t('scheduleOverview.activeScheduledTasks') },
+    { label: t('scheduleOverview.readyNow'), value: String(readyNow), note: t('scheduleOverview.alreadyDue') },
+    { label: t('scheduleOverview.upcoming24h'), value: String(next24HoursCount), note: t('scheduleOverview.upcomingScheduledWork') },
+    { label: t('scheduleOverview.after24h'), value: String(laterCount), note: t('scheduleOverview.laterBacklog') },
+    { label: t('scheduleOverview.queuedRunning'), value: `${queuedCount} / ${runningCount}`, note: t('scheduleOverview.executionStateSplit') },
     {
-      label: 'Busiest Hour',
+      label: t('scheduleOverview.busiestHour'),
       value: busiest && busiest.count > 0 ? String(busiest.count) : '0',
-      note: busiest && busiest.count > 0 ? busiest.label : 'No scheduled work',
+      note: busiest && busiest.count > 0 ? busiest.label : t('scheduleOverview.noScheduledWork'),
     },
   ]
 })
@@ -410,13 +405,13 @@ const hourlyBuckets = computed<HourBucket[]>(() => {
   const buckets = Array.from({ length: 24 }, (_, index) => {
     const bucketStartMs = startMs + index * 60 * 60 * 1000
     const bucketDate = new Date(bucketStartMs)
-    return {
-      key: `${bucketStartMs}`,
-      label: formatDateTimeUtc8(bucketDate).slice(5, 16),
-      shortLabel: formatDateTimeUtc8(bucketDate).slice(11, 16),
-      count: 0,
-      heightPercent: 0,
-      startMs: bucketStartMs,
+      return {
+        key: `${bucketStartMs}`,
+        label: formatMonthDayTimeUtc8(bucketDate),
+        shortLabel: formatTimeUtc8(bucketDate),
+        count: 0,
+        heightPercent: 0,
+        startMs: bucketStartMs,
     }
   })
 
@@ -531,71 +526,69 @@ function getRowProps(row: Task) {
   }
 }
 
-const mobileColumns: DataTableColumns<Task> = [
-  {
-    title: 'Task',
-    key: 'task',
-    render: (row) =>
-      h('div', { style: 'line-height: 1.45' }, [
-        h('div', { style: 'font-weight: 600;' }, `#${row.id} · ${getProjectLabel(row)}`),
-        h('div', { style: 'font-size: 12px; color: rgba(15, 23, 42, 0.58);' }, formatShortDateTime(row.scheduled_at)),
-      ]),
-  },
-  {
-    title: 'Status',
-    key: 'status',
-    width: 92,
-    render: (row) => h(NTag, { size: 'small', type: getStatusTagType(row.status) }, () => row.status),
-  },
-]
+const columns = computed<DataTableColumns<Task>>(() => {
+  const mobileColumns: DataTableColumns<Task> = [
+    {
+      title: t('scheduleOverview.task'),
+      key: 'task',
+      render: (row) =>
+        h('div', { style: 'line-height: 1.45' }, [
+          h('div', { style: 'font-weight: 600;' }, `#${row.id} · ${getProjectLabel(row)}`),
+          h('div', { style: 'font-size: 12px; color: rgba(15, 23, 42, 0.58);' }, formatShortDateTime(row.scheduled_at)),
+        ]),
+    },
+    {
+      title: t('common.status'),
+      key: 'status',
+      width: 92,
+      render: (row) => h(NTag, { size: 'small', type: getStatusTagType(row.status) }, () => t(`status.${row.status}`)),
+    },
+  ]
 
-const desktopColumns: DataTableColumns<Task> = [
-  {
-    title: 'ID',
-    key: 'id',
-    width: 64,
-  },
-  {
-    title: 'Project',
-    key: 'project',
-    width: 180,
-    ellipsis: { tooltip: true },
-    render: (row) => getProjectLabel(row),
-  },
-  {
-    title: 'Status',
-    key: 'status',
-    width: 96,
-    render: (row) => h(NTag, { size: 'small', type: getStatusTagType(row.status) }, () => row.status),
-  },
-  {
-    title: 'Priority',
-    key: 'priority',
-    width: 72,
-    render: (row) => formatPriority(row.priority),
-  },
-  {
-    title: 'Scheduled',
-    key: 'scheduled_at',
-    width: 150,
-    render: (row) => formatShortDateTime(row.scheduled_at),
-  },
-  {
-    title: 'Branch',
-    key: 'branch_name',
-    width: 150,
-    ellipsis: { tooltip: true },
-    render: (row) => row.branch_name || '-',
-  },
-  {
-    title: 'Prompt',
-    key: 'user_prompt',
-    width: 320,
-    render: (row) => h('div', { class: 'schedule-table__ellipsis', title: row.user_prompt }, row.user_prompt),
-  },
-]
+  const desktopColumns: DataTableColumns<Task> = [
+    { title: t('scheduleOverview.id'), key: 'id', width: 64 },
+    {
+      title: t('common.project'),
+      key: 'project',
+      width: 180,
+      ellipsis: { tooltip: true },
+      render: (row) => getProjectLabel(row),
+    },
+    {
+      title: t('common.status'),
+      key: 'status',
+      width: 96,
+      render: (row) => h(NTag, { size: 'small', type: getStatusTagType(row.status) }, () => t(`status.${row.status}`)),
+    },
+    {
+      title: t('common.priority'),
+      key: 'priority',
+      width: 72,
+      render: (row) => formatPriority(row.priority),
+    },
+    {
+      title: t('common.scheduled'),
+      key: 'scheduled_at',
+      width: 150,
+      render: (row) => formatShortDateTime(row.scheduled_at),
+    },
+    {
+      title: t('common.branch'),
+      key: 'branch_name',
+      width: 150,
+      ellipsis: { tooltip: true },
+      render: (row) => row.branch_name || '-',
+    },
+    {
+      title: t('scheduleOverview.prompt'),
+      key: 'user_prompt',
+      width: 320,
+      render: (row) => h('div', { class: 'schedule-table__ellipsis', title: row.user_prompt }, row.user_prompt),
+    },
+  ]
 
-const columns = computed(() => (isMobile.value ? mobileColumns : desktopColumns))
+  return isMobile.value ? mobileColumns : desktopColumns
+})
 
 async function fetchData() {
   if (loading.value) return
@@ -604,7 +597,7 @@ async function fetchData() {
     tasks.value = await getScheduledTasks()
     hasLoadedOnce.value = true
   } catch (error) {
-    message.error('Failed to fetch scheduled tasks')
+    message.error(t('scheduleOverview.failedToFetch'))
   } finally {
     hasLoadedOnce.value = true
     loading.value = false

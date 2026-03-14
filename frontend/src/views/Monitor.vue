@@ -1,15 +1,15 @@
 <template>
   <div class="monitor-page">
-    <n-spin :show="initialLoading" description="Loading monitor...">
+    <n-spin :show="initialLoading" :description="t('monitor.loading')">
       <n-space vertical :size="20">
         <div class="monitor-page__hero">
           <div>
-            <h2 class="monitor-page__title">System Monitor</h2>
+            <h2 class="monitor-page__title">{{ t('monitor.title') }}</h2>
             <p class="monitor-page__subtitle">
-              Watch global task health and currently running worker containers.
+              {{ t('monitor.subtitle') }}
             </p>
           </div>
-          <n-button @click="refresh" :loading="loading">Refresh</n-button>
+          <n-button @click="refresh" :loading="loading">{{ t('common.refresh') }}</n-button>
         </div>
 
         <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
@@ -25,11 +25,11 @@
           <template #header>
             <div class="monitor-card__header">
               <div>
-                <div class="monitor-card__title">Running Containers</div>
-                <div class="monitor-card__subtitle">Live worker containers currently visible to the backend</div>
+                  <div class="monitor-card__title">{{ t('monitor.runningContainers') }}</div>
+                  <div class="monitor-card__subtitle">{{ t('monitor.runningContainersSubtitle') }}</div>
+                </div>
               </div>
-            </div>
-          </template>
+            </template>
           <n-data-table
             :columns="isMobile ? mobileColumns : columns"
             :data="containers"
@@ -47,9 +47,11 @@
 import { ref, computed, onMounted, onBeforeUnmount, h } from 'vue'
 import { NCard, NButton, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, DataTableColumns } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
+import { useI18n } from 'vue-i18n'
 import { getStats, getContainers, type Container, type Stats } from '../api'
 
 const message = useMessage()
+const { t } = useI18n()
 const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
@@ -69,69 +71,75 @@ const hasLoadedOnce = ref(false)
 let pollTimer: number | null = null
 
 const summaryItems = computed(() => [
-  { label: 'Total Tasks', value: String(stats.value.total) },
-  { label: 'Running', value: String(stats.value.running) },
-  { label: 'Pending / Queued', value: String(stats.value.pending + stats.value.queued) },
-  { label: 'Completed', value: String(stats.value.completed) },
-  { label: 'Failed', value: String(stats.value.failed) },
-  { label: 'Cancelled', value: String(stats.value.cancelled) }
+  { label: t('monitor.totalTasks'), value: String(stats.value.total) },
+  { label: t('monitor.running'), value: String(stats.value.running) },
+  { label: t('monitor.pendingQueued'), value: String(stats.value.pending + stats.value.queued) },
+  { label: t('monitor.completed'), value: String(stats.value.completed) },
+  { label: t('monitor.failed'), value: String(stats.value.failed) },
+  { label: t('monitor.cancelled'), value: String(stats.value.cancelled) }
 ])
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
-const columns: DataTableColumns<Container> = [
+function containerStatusLabel(status: string) {
+  return status === 'running' ? t('status.running') : status
+}
+
+const columns = computed<DataTableColumns<Container>>(() => [
   {
-    title: 'Container ID',
+    title: t('monitor.containerId'),
     key: 'id',
     width: 140,
     render: (row) => row.id.substring(0, 12)
   },
   {
-    title: 'Name',
+    title: t('monitor.name'),
     key: 'name',
     width: 180
   },
   {
-    title: 'Status',
+    title: t('monitor.status'),
     key: 'status',
     width: 100,
-    render: (row) => h(NTag, { type: row.status === 'running' ? 'warning' : 'default', size: 'small' }, () => row.status)
+    render: (row) =>
+      h(NTag, { type: row.status === 'running' ? 'warning' : 'default', size: 'small' }, () => containerStatusLabel(row.status))
   },
   {
-    title: 'Task ID',
+    title: t('monitor.taskId'),
     key: 'task_id',
     width: 80
   },
   {
-    title: 'Project',
+    title: t('common.project'),
     key: 'project_id',
     width: 80
   },
   {
-    title: 'Issue',
+    title: t('common.issue'),
     key: 'issue_iid',
     width: 80,
-    render: (row) => row.issue_iid ? `!${row.issue_iid}` : '-'
+    render: (row) => (row.issue_iid ? `!${row.issue_iid}` : '-')
   }
-]
+])
 
-const mobileColumns: DataTableColumns<Container> = [
+const mobileColumns = computed<DataTableColumns<Container>>(() => [
   {
-    title: 'Name',
+    title: t('monitor.name'),
     key: 'name',
     ellipsis: { tooltip: true }
   },
   {
-    title: 'Status',
+    title: t('monitor.status'),
     key: 'status',
     width: 85,
-    render: (row) => h(NTag, { type: row.status === 'running' ? 'warning' : 'default', size: 'small' }, () => row.status)
+    render: (row) =>
+      h(NTag, { type: row.status === 'running' ? 'warning' : 'default', size: 'small' }, () => containerStatusLabel(row.status))
   },
   {
-    title: 'Task',
+    title: t('monitor.task'),
     key: 'task_id',
     width: 55
   }
-]
+])
 
 async function fetchData() {
   if (loading.value) return
@@ -144,7 +152,7 @@ async function fetchData() {
     stats.value = statsData
     containers.value = containersData
   } catch (error) {
-    message.error('Failed to fetch monitor data')
+    message.error(t('monitor.failedToFetchData'))
   } finally {
     hasLoadedOnce.value = true
     loading.value = false

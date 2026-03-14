@@ -4,15 +4,15 @@
       <div class="task-view__hero">
         <div>
           <div class="task-view__headline">
-            <h2 class="task-view__title">Task #{{ taskId }}</h2>
-            <n-tag v-if="task" :type="statusColors[task.status]" round>{{ task.status }}</n-tag>
+            <h2 class="task-view__title">{{ t('taskView.title', { id: taskId }) }}</h2>
+            <n-tag v-if="task" :type="statusColors[task.status]" round>{{ t(`status.${task.status}`) }}</n-tag>
           </div>
           <p class="task-view__subtitle">
-            Inspect execution metadata, logs, and task control actions in one place.
+            {{ t('taskView.subtitle') }}
           </p>
         </div>
         <n-button @click="refreshTask" :loading="loading">
-          Refresh
+          {{ t('common.refresh') }}
         </n-button>
       </div>
 
@@ -33,55 +33,55 @@
                 <template #header>
                   <div class="task-card__header">
                     <div>
-                      <div class="task-card__title">Task Details</div>
-                      <div class="task-card__subtitle">Project, branch, timing, and merge request metadata</div>
+                      <div class="task-card__title">{{ t('taskView.taskDetails') }}</div>
+                      <div class="task-card__subtitle">{{ t('taskView.taskDetailsSubtitle') }}</div>
                     </div>
                   </div>
                 </template>
                 <n-descriptions :column="1" label-placement="left" v-if="task">
-                  <n-descriptions-item label="Status">
-                    <n-tag :type="statusColors[task.status]">{{ task.status }}</n-tag>
+                  <n-descriptions-item :label="t('common.status')">
+                    <n-tag :type="statusColors[task.status]">{{ t(`status.${task.status}`) }}</n-tag>
                   </n-descriptions-item>
-                  <n-descriptions-item label="Project">
+                  <n-descriptions-item :label="t('common.project')">
                     <div>
                       <a v-if="task.project_url" :href="task.project_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ projectDisplayName }}</a>
                       <span v-else>{{ projectDisplayName }}</span>
                     </div>
                     <div style="font-size: 12px; color: #888">ID: {{ task.project_id }}</div>
                   </n-descriptions-item>
-                  <n-descriptions-item label="Issue">
+                  <n-descriptions-item :label="t('common.issue')">
                     <a v-if="task.issue_iid && task.issue_url" :href="task.issue_url" target="_blank" rel="noopener noreferrer" class="app-link">!{{ task.issue_iid }}</a>
                     <span v-else>{{ task.issue_iid ? `!${task.issue_iid}` : '-' }}</span>
                   </n-descriptions-item>
-                  <n-descriptions-item label="Priority">{{ formatPriority(task.priority) }}</n-descriptions-item>
-                  <n-descriptions-item label="Branch">
+                  <n-descriptions-item :label="t('common.priority')">{{ formatPriority(task.priority) }}</n-descriptions-item>
+                  <n-descriptions-item :label="t('common.branch')">
                     <a v-if="task.branch_name && task.branch_url" :href="task.branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.branch_name }}</a>
                     <span v-else>{{ task.branch_name || '-' }}</span>
                   </n-descriptions-item>
-                  <n-descriptions-item label="Target Branch">
+                  <n-descriptions-item :label="t('common.targetBranch')">
                     <a v-if="task.target_branch && task.target_branch_url" :href="task.target_branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.target_branch }}</a>
                     <span v-else>{{ task.target_branch }}</span>
                   </n-descriptions-item>
-                  <n-descriptions-item label="Container ID">{{ task.container_id || '-' }}</n-descriptions-item>
-                  <n-descriptions-item label="MR URL">
+                  <n-descriptions-item :label="t('taskView.containerId')">{{ task.container_id || '-' }}</n-descriptions-item>
+                  <n-descriptions-item :label="t('taskView.mrUrl')">
                     <a v-if="task.merge_request_url" :href="task.merge_request_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.merge_request_url }}</a>
                     <span v-else>-</span>
                   </n-descriptions-item>
-                  <n-descriptions-item label="Changes">
+                  <n-descriptions-item :label="t('common.changes')">
                     <span v-if="task.additions !== undefined || task.deletions !== undefined">
                       <span v-if="task.additions || task.deletions">
                         <span style="color: #18a053">+{{ task.additions || 0 }}</span>
                         <span style="color: #db3b21; margin-left: 8px">-{{ task.deletions || 0 }}</span>
-                        <span style="color: #888; margin-left: 8px">({{ task.total_changes || 0 }} total)</span>
+                        <span style="color: #888; margin-left: 8px">({{ t('taskView.totalSuffix', { total: task.total_changes || 0 }) }})</span>
                       </span>
                       <span v-else>-</span>
                     </span>
                     <span v-else>-</span>
                   </n-descriptions-item>
-                  <n-descriptions-item label="Created">{{ formatDate(task.created_at) }}</n-descriptions-item>
-                  <n-descriptions-item label="Scheduled">{{ task.scheduled_at ? formatDate(task.scheduled_at) : '-' }}</n-descriptions-item>
-                  <n-descriptions-item label="Started">{{ task.started_at ? formatDate(task.started_at) : '-' }}</n-descriptions-item>
-                  <n-descriptions-item label="Completed">{{ task.completed_at ? formatDate(task.completed_at) : '-' }}</n-descriptions-item>
+                  <n-descriptions-item :label="t('common.created')">{{ formatDate(task.created_at) }}</n-descriptions-item>
+                  <n-descriptions-item :label="t('common.scheduled')">{{ task.scheduled_at ? formatDate(task.scheduled_at) : '-' }}</n-descriptions-item>
+                  <n-descriptions-item :label="t('common.started')">{{ task.started_at ? formatDate(task.started_at) : '-' }}</n-descriptions-item>
+                  <n-descriptions-item :label="t('common.completed')">{{ task.completed_at ? formatDate(task.completed_at) : '-' }}</n-descriptions-item>
                 </n-descriptions>
               </n-card>
             </n-gi>
@@ -91,15 +91,15 @@
                 <template #header>
                   <div class="task-card__header">
                     <div>
-                      <div class="task-card__title">Actions</div>
-                      <div class="task-card__subtitle">Only actions valid for the current task state are shown</div>
+                      <div class="task-card__title">{{ t('taskView.actions') }}</div>
+                      <div class="task-card__subtitle">{{ t('taskView.actionsSubtitle') }}</div>
                     </div>
                   </div>
                 </template>
 
                 <div class="task-actions">
                   <div class="task-actions__intro" v-if="hasActions">
-                    Choose the next step based on the current task state. Actions are limited to the operations that are safe right now.
+                    {{ t('taskView.actionsIntro') }}
                   </div>
 
                   <div
@@ -107,9 +107,9 @@
                     class="task-actions__item task-actions__item--error"
                   >
                     <div class="task-actions__meta">
-                      <div class="task-actions__label">Cancel Task</div>
+                      <div class="task-actions__label">{{ t('taskView.cancelTask') }}</div>
                       <div class="task-actions__description">
-                        Stop execution for the current task while keeping the latest status and logs available for review.
+                        {{ t('taskView.cancelTaskDescription') }}
                       </div>
                     </div>
                     <n-button
@@ -120,7 +120,7 @@
                       @click="handleCancel"
                       :loading="actionLoading"
                     >
-                      Cancel
+                      {{ t('common.cancel') }}
                     </n-button>
                   </div>
 
@@ -129,9 +129,9 @@
                     class="task-actions__item task-actions__item--warning"
                   >
                     <div class="task-actions__meta">
-                      <div class="task-actions__label">Retry Task</div>
+                      <div class="task-actions__label">{{ t('taskView.retryTask') }}</div>
                       <div class="task-actions__description">
-                        Re-queue the task with the same prompt and branch configuration to run it again.
+                        {{ t('taskView.retryTaskDescription') }}
                       </div>
                     </div>
                     <n-button
@@ -142,7 +142,7 @@
                       @click="handleRetry"
                       :loading="actionLoading"
                     >
-                      Retry
+                      {{ t('common.retry') }}
                     </n-button>
                   </div>
 
@@ -151,9 +151,9 @@
                     class="task-actions__item task-actions__item--info"
                   >
                     <div class="task-actions__meta">
-                      <div class="task-actions__label">Execute Now</div>
+                      <div class="task-actions__label">{{ t('taskView.executeNow') }}</div>
                       <div class="task-actions__description">
-                        Remove scheduling delay and send the task straight to execution as soon as the worker is available.
+                        {{ t('taskView.executeNowDescription') }}
                       </div>
                     </div>
                     <n-button
@@ -164,12 +164,12 @@
                       @click="handleExecute"
                       :loading="actionLoading"
                     >
-                      Execute
+                      {{ t('common.execute') }}
                     </n-button>
                   </div>
 
                   <div v-if="!hasActions" class="task-actions__empty">
-                    No manual action is available for the current task state.
+                    {{ t('taskView.noManualAction') }}
                   </div>
                 </div>
               </n-card>
@@ -178,10 +178,10 @@
                 <template #header>
                   <div class="task-card__header">
                     <div>
-                      <div class="task-card__title">Error</div>
-                      <div class="task-card__subtitle">Most recent failure reported by the task runner</div>
+                        <div class="task-card__title">{{ t('taskView.error') }}</div>
+                        <div class="task-card__subtitle">{{ t('taskView.errorSubtitle') }}</div>
+                      </div>
                     </div>
-                  </div>
                 </template>
                 <n-alert type="error">{{ task.error_message }}</n-alert>
               </n-card>
@@ -192,10 +192,10 @@
             <template #header>
               <div class="task-card__header">
                 <div>
-                  <div class="task-card__title">User Prompt</div>
-                  <div class="task-card__subtitle">Original instruction captured for this task</div>
+                    <div class="task-card__title">{{ t('taskView.userPrompt') }}</div>
+                    <div class="task-card__subtitle">{{ t('taskView.userPromptSubtitle') }}</div>
+                  </div>
                 </div>
-              </div>
             </template>
             <n-text>{{ task.user_prompt }}</n-text>
           </n-card>
@@ -203,26 +203,26 @@
           <n-card class="task-card" :bordered="false">
             <template #header-extra>
               <n-space>
-                <n-tag v-if="task?.status === 'running'" type="warning" size="small">Real-time</n-tag>
-                <n-button size="small" @click="refreshLogs">Refresh</n-button>
+                <n-tag v-if="task?.status === 'running'" type="warning" size="small">{{ t('taskView.realTime') }}</n-tag>
+                <n-button size="small" @click="refreshLogs">{{ t('common.refresh') }}</n-button>
               </n-space>
             </template>
             <template #header>
               <div class="task-card__header">
                 <div>
-                  <div class="task-card__title">Logs</div>
-                  <div class="task-card__subtitle">Streaming container output for active tasks and stored logs otherwise</div>
+                  <div class="task-card__title">{{ t('taskView.logs') }}</div>
+                  <div class="task-card__subtitle">{{ t('taskView.logsSubtitle') }}</div>
                 </div>
               </div>
             </template>
             <n-spin :show="logsLoading">
               <div v-if="task?.status === 'running' || task?.status === 'pending' || task?.status === 'queued'">
                 <n-spin :show="containerLogsLoading">
-                  <pre class="log-content">{{ containerLogs || 'Waiting for logs...' }}</pre>
+                  <pre class="log-content">{{ containerLogs || t('taskView.waitingForLogs') }}</pre>
                 </n-spin>
               </div>
               <div v-else>
-                <pre class="log-content">{{ logs || 'No logs available' }}</pre>
+                <pre class="log-content">{{ logs || t('taskView.noLogsAvailable') }}</pre>
               </div>
             </n-spin>
           </n-card>
@@ -237,11 +237,13 @@ import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { NButton, NSpace, NCard, NDescriptions, NDescriptionsItem, NTag, NGrid, NGi, NSpin, NAlert, NText, useMessage } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
+import { useI18n } from 'vue-i18n'
 import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, type Task } from '../api'
 import { formatDateTimeUtc8 } from '../utils/datetime'
 
 const route = useRoute()
 const message = useMessage()
+const { t } = useI18n()
 const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
@@ -271,7 +273,7 @@ const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 
 
 const projectDisplayName = computed(() => {
   if (!task.value) return '-'
-  return task.value.project_path_with_namespace || task.value.project_name || `Project #${task.value.project_id}`
+  return task.value.project_path_with_namespace || task.value.project_name || t('dashboard.projectFallback', { id: task.value.project_id })
 })
 
 const summaryItems = computed(() => {
@@ -285,10 +287,10 @@ const summaryItems = computed(() => {
       : '-'
 
   return [
-    { label: 'Priority', value: formatPriority(task.value.priority) },
-    { label: 'Target Branch', value: task.value.target_branch || '-' },
-    { label: 'Merge Request', value: task.value.merge_request_url ? 'Created' : 'Pending' },
-    { label: 'Changes (+/-)', value: changeValue }
+    { label: t('common.priority'), value: formatPriority(task.value.priority) },
+    { label: t('common.targetBranch'), value: task.value.target_branch || '-' },
+    { label: t('common.mergeRequest'), value: task.value.merge_request_url ? t('taskView.mergeRequestCreated') : t('taskView.mergeRequestPending') },
+    { label: `${t('common.changes')} (+/-)`, value: changeValue }
   ]
 })
 
@@ -378,7 +380,7 @@ async function fetchTask() {
       await fetchLogs()
     }
   } catch (error) {
-    message.error('Failed to fetch task')
+    message.error(t('taskView.failedToFetchTask'))
   } finally {
     loading.value = false
     taskRequestInFlight.value = false
@@ -391,7 +393,7 @@ async function fetchLogs() {
     const logEntries = await getTaskLogs(taskId.value)
     logs.value = logEntries.map(l => `[${l.created_at}] [${l.log_level}] ${l.message}`).join('\n')
   } catch (error) {
-    logs.value = 'Failed to fetch logs'
+    logs.value = t('taskView.failedToFetchLogs')
   } finally {
     logsLoading.value = false
   }
@@ -413,7 +415,7 @@ async function fetchContainerLogs() {
     const result = await getTaskContainerLogs(taskId.value)
     containerLogs.value = result.logs
   } catch (error) {
-    containerLogs.value = 'Failed to fetch container logs'
+    containerLogs.value = t('taskView.failedToFetchContainerLogs')
   } finally {
     containerLogsLoading.value = false
     containerRequestInFlight.value = false
@@ -441,10 +443,10 @@ async function handleCancel() {
   actionLoading.value = true
   try {
     await cancelTask(taskId.value)
-    message.success('Task cancelled')
+    message.success(t('taskView.taskCancelled'))
     refreshTask()
   } catch (error) {
-    message.error('Failed to cancel task')
+    message.error(t('taskView.failedToCancelTask'))
   } finally {
     actionLoading.value = false
   }
@@ -454,10 +456,10 @@ async function handleRetry() {
   actionLoading.value = true
   try {
     await retryTask(taskId.value)
-    message.success('Task retry scheduled')
+    message.success(t('taskView.taskRetryScheduled'))
     refreshTask()
   } catch (error) {
-    message.error('Failed to retry task')
+    message.error(t('taskView.failedToRetryTask'))
   } finally {
     actionLoading.value = false
   }
@@ -467,10 +469,10 @@ async function handleExecute() {
   actionLoading.value = true
   try {
     await executeTask(taskId.value)
-    message.success('Task execution started')
+    message.success(t('taskView.taskExecutionStarted'))
     refreshTask()
   } catch (error) {
-    message.error('Failed to execute task')
+    message.error(t('taskView.failedToExecuteTask'))
   } finally {
     actionLoading.value = false
   }

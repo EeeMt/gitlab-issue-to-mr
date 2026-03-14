@@ -1,18 +1,21 @@
 <template>
   <div class="login-page">
+    <div class="login-page__language-switcher">
+      <n-select v-model:value="localeValue" :options="languageOptions" size="small" />
+    </div>
     <n-card class="login-card" :bordered="false">
       <div class="login-card__brand">
         <div class="login-card__mark">
           <n-icon size="26" :component="RocketOutline" />
         </div>
         <div>
-          <h1 class="login-card__title">GIMR Admin</h1>
-          <p class="login-card__subtitle">Sign in with GitLab to access the dashboard.</p>
+          <h1 class="login-card__title">{{ t('app.brandTitle') }}</h1>
+          <p class="login-card__subtitle">{{ t('login.subtitle') }}</p>
         </div>
       </div>
 
       <n-alert v-if="!authState.oidcEnabled && authState.initialized" type="warning" :show-icon="false">
-        OIDC login is not enabled yet. Dashboard auth is currently bypassed.
+        {{ t('login.oidcDisabled') }}
       </n-alert>
 
       <n-alert v-if="loginReason" type="warning" :show-icon="false">
@@ -20,7 +23,7 @@
       </n-alert>
 
       <n-alert v-if="authState.breakGlassEnabled" type="warning" :show-icon="false">
-        Emergency admin access is enabled. Use it only for OIDC recovery or administrator lockout scenarios.
+        {{ t('login.breakGlassEnabled') }}
       </n-alert>
 
       <n-space vertical :size="16" class="login-card__body">
@@ -31,22 +34,22 @@
           block
           @click="handleLogin"
         >
-          Continue with GitLab
+          {{ t('login.continueWithGitlab') }}
         </n-button>
 
         <div v-if="authState.breakGlassEnabled" class="login-card__break-glass">
-          <n-divider>Emergency access</n-divider>
+          <n-divider>{{ t('login.emergencyAccess') }}</n-divider>
           <n-space vertical :size="12">
             <n-input
               v-model:value="breakGlassUsername"
-              placeholder="Emergency username"
+              :placeholder="t('login.emergencyUsername')"
               autocomplete="username"
             />
             <n-input
               v-model:value="breakGlassPassword"
               type="password"
               show-password-on="click"
-              placeholder="Emergency password"
+              :placeholder="t('login.emergencyPassword')"
               autocomplete="current-password"
               @keyup.enter="handleBreakGlassLogin"
             />
@@ -58,16 +61,16 @@
               :loading="breakGlassLoading"
               @click="handleBreakGlassLogin"
             >
-              Sign in with emergency access
+              {{ t('login.emergencySignIn') }}
             </n-button>
             <n-text depth="3" class="login-card__hint">
-              This path is environment-controlled and should stay disabled during normal operation.
+              {{ t('login.emergencyHint') }}
             </n-text>
           </n-space>
         </div>
 
         <n-text depth="3" class="login-card__hint">
-          This dashboard uses GitLab OIDC and stores a server-side session in a secure cookie.
+          {{ t('login.sessionHint') }}
         </n-text>
       </n-space>
     </n-card>
@@ -77,14 +80,17 @@
 <script setup lang="ts">
 import axios from 'axios'
 import { computed, ref, watch } from 'vue'
-import { NAlert, NButton, NCard, NDivider, NIcon, NInput, NSpace, NText, useMessage } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
+import { NAlert, NButton, NCard, NDivider, NIcon, NInput, NSpace, NSelect, NText, useMessage } from 'naive-ui'
 import { RocketOutline } from '@vicons/ionicons5'
 import { useRoute } from 'vue-router'
 import { authState, startLogin } from '../auth'
 import { breakGlassLogin } from '../api'
+import { currentLocale, setAppLocale, type AppLocale } from '../i18n'
 
 const route = useRoute()
 const message = useMessage()
+const { t } = useI18n()
 const nextTarget = computed(() => {
   const next = route.query.next
   return typeof next === 'string' ? next : '/dashboard'
@@ -97,6 +103,14 @@ const loginReason = computed(() => {
 const breakGlassUsername = ref(authState.breakGlassUsername || '')
 const breakGlassPassword = ref('')
 const breakGlassLoading = ref(false)
+const localeValue = computed({
+  get: () => currentLocale.value,
+  set: (value) => setAppLocale(value as AppLocale)
+})
+const languageOptions = computed(() => [
+  { label: t('locale.en'), value: 'en' },
+  { label: t('locale.zhCN'), value: 'zh-CN' }
+])
 
 watch(
   () => authState.breakGlassUsername,
@@ -112,7 +126,7 @@ function handleLogin() {
 
 async function handleBreakGlassLogin() {
   if (!breakGlassUsername.value.trim() || !breakGlassPassword.value) {
-    message.error('Enter the emergency username and password')
+    message.error(t('login.missingEmergencyCredentials'))
     return
   }
 
@@ -127,9 +141,9 @@ async function handleBreakGlassLogin() {
   } catch (error) {
     if (axios.isAxiosError(error)) {
       const detail = error.response?.data?.detail
-      message.error(typeof detail === 'string' ? detail : 'Emergency login failed')
+      message.error(typeof detail === 'string' ? detail : t('login.emergencyLoginFailed'))
     } else {
-      message.error('Emergency login failed')
+      message.error(t('login.emergencyLoginFailed'))
     }
   } finally {
     breakGlassLoading.value = false
@@ -142,6 +156,7 @@ async function handleBreakGlassLogin() {
 .login-page {
   min-height: 100dvh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   width: 100%;
@@ -149,6 +164,13 @@ async function handleBreakGlassLogin() {
   padding: 24px;
   padding-top: max(24px, env(safe-area-inset-top));
   padding-bottom: max(24px, env(safe-area-inset-bottom));
+}
+
+.login-page__language-switcher {
+  width: min(460px, 100%);
+  margin: 0 auto 16px;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .login-card {

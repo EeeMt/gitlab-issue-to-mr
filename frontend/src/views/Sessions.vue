@@ -3,13 +3,12 @@
     <n-space vertical :size="16">
       <div class="sessions-page__hero">
         <div>
-          <h2 class="sessions-page__title">Sessions</h2>
+          <h2 class="sessions-page__title">{{ t('sessions.title') }}</h2>
           <p class="sessions-page__subtitle">
-            Review your active dashboard sessions, see whether token refresh is available, and
-            revoke sessions you no longer trust.
+            {{ t('sessions.subtitle') }}
           </p>
         </div>
-        <n-button @click="fetchSessions" :loading="loading" :disabled="loading">Reload sessions</n-button>
+        <n-button @click="fetchSessions" :loading="loading" :disabled="loading">{{ t('sessions.reloadSessions') }}</n-button>
       </div>
 
       <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 1 : 4" :x-gap="16" :y-gap="16">
@@ -22,11 +21,10 @@
       </n-grid>
 
       <n-alert type="info" :show-icon="false">
-        If a session has no refresh token, GitLab access expiry will require a fresh sign-in even if
-        the dashboard cookie still exists.
+        {{ t('sessions.refreshTokenInfo') }}
       </n-alert>
 
-      <n-spin :show="initialLoading" description="Loading sessions...">
+      <n-spin :show="initialLoading" :description="t('common.loadingSessions')">
         <div v-if="hasLoadedOnce && sessions.length" class="sessions-grid">
           <n-card
             v-for="session in sessions"
@@ -39,16 +37,16 @@
               <div>
                 <div class="sessions-card__title-row">
                   <span class="sessions-card__title">
-                    {{ session.current ? 'Current browser session' : 'Saved session' }}
+                    {{ session.current ? t('sessions.currentBrowserSession') : t('sessions.savedSession') }}
                   </span>
                   <n-tag size="small" round :type="tagTypeForStatus(session.status)">
-                    {{ session.status }}
+                    {{ t(`status.${session.status}`) }}
                   </n-tag>
-                  <n-tag v-if="session.current" size="small" round type="info">Current</n-tag>
+                  <n-tag v-if="session.current" size="small" round type="info">{{ t('sessions.current') }}</n-tag>
                 </div>
                 <div class="sessions-card__meta">
                   <span>{{ shortId(session.id) }}</span>
-                  <span>{{ session.ip_address || 'IP unavailable' }}</span>
+                  <span>{{ session.ip_address || t('sessions.ipUnavailable') }}</span>
                 </div>
               </div>
               <n-button
@@ -56,35 +54,35 @@
                 :loading="revokingIds.includes(session.id)"
                 :disabled="session.status !== 'active' || revokingIds.includes(session.id)"
               >
-                Revoke
+                {{ t('common.revoke') }}
               </n-button>
             </div>
 
             <div class="sessions-card__details">
               <div class="sessions-card__detail">
-                <span class="sessions-card__detail-label">Created</span>
+                <span class="sessions-card__detail-label">{{ t('sessions.created') }}</span>
                 <span>{{ formatTimestamp(session.created_at) }}</span>
               </div>
               <div class="sessions-card__detail">
-                <span class="sessions-card__detail-label">Last seen</span>
+                <span class="sessions-card__detail-label">{{ t('sessions.lastSeen') }}</span>
                 <span>{{ formatTimestamp(session.last_seen_at) }}</span>
               </div>
               <div class="sessions-card__detail">
-                <span class="sessions-card__detail-label">Expires</span>
+                <span class="sessions-card__detail-label">{{ t('sessions.expires') }}</span>
                 <span>{{ formatTimestamp(session.expires_at) }}</span>
               </div>
               <div class="sessions-card__detail">
-                <span class="sessions-card__detail-label">Refresh support</span>
-                <span>{{ session.has_gitlab_refresh_token ? 'Available' : 'Unavailable' }}</span>
+                <span class="sessions-card__detail-label">{{ t('sessions.refreshSupport') }}</span>
+                <span>{{ session.has_gitlab_refresh_token ? t('sessions.available') : t('sessions.unavailable') }}</span>
               </div>
             </div>
 
             <div class="sessions-card__tokens">
               <n-tag size="small" round :type="session.has_gitlab_access_token ? 'success' : 'warning'">
-                Access token {{ session.has_gitlab_access_token ? 'stored' : 'missing' }}
+                {{ session.has_gitlab_access_token ? t('sessions.accessTokenStored') : t('sessions.accessTokenMissing') }}
               </n-tag>
               <n-tag size="small" round :type="session.has_gitlab_refresh_token ? 'success' : 'default'">
-                Refresh token {{ session.has_gitlab_refresh_token ? 'stored' : 'missing' }}
+                {{ session.has_gitlab_refresh_token ? t('sessions.refreshTokenStored') : t('sessions.refreshTokenMissing') }}
               </n-tag>
             </div>
 
@@ -92,7 +90,7 @@
           </n-card>
         </div>
 
-        <n-empty v-else-if="hasLoadedOnce" description="No dashboard sessions found." />
+        <n-empty v-else-if="hasLoadedOnce" :description="t('sessions.noSessions')" />
       </n-spin>
     </n-space>
   </div>
@@ -113,10 +111,13 @@ import {
   useMessage
 } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
+import { useI18n } from 'vue-i18n'
 import { getSessions, revokeSession, type SessionInfo } from '../api'
 import { initializeAuth, logoutAndClearAuth } from '../auth'
+import { formatDateTimeLocal } from '../utils/datetime'
 
 const message = useMessage()
+const { t } = useI18n()
 const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
@@ -131,10 +132,10 @@ const summaryItems = computed(() => {
   const refreshCapable = sessions.value.filter((session) => session.has_gitlab_refresh_token).length
   const current = sessions.value.find((session) => session.current)
   return [
-    { label: 'Known Sessions', value: String(sessions.value.length) },
-    { label: 'Active Sessions', value: String(active) },
-    { label: 'Refresh-Capable', value: String(refreshCapable) },
-    { label: 'Current Session', value: current ? shortId(current.id) : '—' }
+    { label: t('sessions.knownSessions'), value: String(sessions.value.length) },
+    { label: t('sessions.activeSessions'), value: String(active) },
+    { label: t('sessions.refreshCapable'), value: String(refreshCapable) },
+    { label: t('sessions.currentSession'), value: current ? shortId(current.id) : '—' }
   ]
 })
 
@@ -146,13 +147,7 @@ function formatTimestamp(value: string | null) {
   if (!value) {
     return '—'
   }
-  return new Intl.DateTimeFormat('en-GB', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(new Date(value))
+  return formatDateTimeLocal(value)
 }
 
 function tagTypeForStatus(status: string): 'success' | 'warning' | 'error' | 'default' {
@@ -173,7 +168,7 @@ async function fetchSessions() {
   try {
     sessions.value = await getSessions()
   } catch (error: any) {
-    message.error(error?.response?.data?.detail || 'Failed to fetch sessions')
+    message.error(error?.response?.data?.detail || t('sessions.failedToFetchSessions'))
   } finally {
     hasLoadedOnce.value = true
     loading.value = false
@@ -185,16 +180,16 @@ async function handleRevoke(session: SessionInfo) {
   try {
     const result = await revokeSession(session.id)
     if (result.current_session_revoked) {
-      message.success('Current session revoked. Redirecting to login.')
+      message.success(t('sessions.currentSessionRevoked'))
       await logoutAndClearAuth()
       return
     }
 
-    message.success('Session revoked')
+    message.success(t('sessions.sessionRevoked'))
     await fetchSessions()
     await initializeAuth(true)
   } catch (error: any) {
-    message.error(error?.response?.data?.detail || 'Failed to revoke session')
+    message.error(error?.response?.data?.detail || t('sessions.failedToRevokeSession'))
   } finally {
     revokingIds.value = revokingIds.value.filter((id) => id !== session.id)
   }

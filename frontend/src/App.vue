@@ -1,5 +1,5 @@
 <template>
-  <n-config-provider>
+  <n-config-provider :locale="naiveUiLocale" :date-locale="naiveUiDateLocale">
     <n-message-provider>
       <div v-if="!authState.initialized" class="app-loading">
         <n-spin size="large" />
@@ -27,8 +27,8 @@
               <n-icon size="22" :component="RocketOutline" />
             </div>
             <div v-if="!collapsed" class="logo__copy">
-              <n-text strong class="logo__title">GIMR Admin</n-text>
-              <n-text depth="3" class="logo__subtitle">Task operations console</n-text>
+              <n-text strong class="logo__title">{{ t('app.brandTitle') }}</n-text>
+              <n-text depth="3" class="logo__subtitle">{{ t('app.brandSubtitle') }}</n-text>
             </div>
           </div>
 
@@ -47,15 +47,15 @@
             <template #header>
               <div class="mobile-drawer-header">
                 <div class="mobile-drawer-header__brand">
-                  <div class="logo__mark logo__mark--mobile">
-                    <n-icon size="20" :component="RocketOutline" />
-                  </div>
-                  <div class="logo__copy">
-                    <n-text strong class="logo__title">GIMR Admin</n-text>
-                    <n-text depth="3" class="logo__subtitle">Navigation</n-text>
-                  </div>
-                </div>
-              </div>
+                   <div class="logo__mark logo__mark--mobile">
+                     <n-icon size="20" :component="RocketOutline" />
+                   </div>
+                   <div class="logo__copy">
+                     <n-text strong class="logo__title">{{ t('app.brandTitle') }}</n-text>
+                     <n-text depth="3" class="logo__subtitle">{{ t('app.navigation') }}</n-text>
+                   </div>
+                 </div>
+               </div>
             </template>
 
             <n-menu
@@ -76,16 +76,24 @@
               <div class="nav-user-panel__copy">
                 <n-text strong>{{ userDisplayName }}</n-text>
                 <n-text depth="3" class="nav-user-panel__role">
-                  {{ authState.user?.platform_role === 'platform_admin' ? 'Admin' : 'Signed in with GitLab' }}
+                  {{ authState.user?.platform_role === 'platform_admin' ? t('shell.admin') : t('shell.signedInWithGitlab') }}
                 </n-text>
               </div>
             </div>
-            <n-button tertiary class="app-shell__logout-button" @click="handleLogout">
-              <template #icon>
-                <n-icon :component="LogOutOutline" />
-              </template>
-              Logout
-            </n-button>
+            <div class="app-shell__topbar-actions">
+              <n-select
+                v-model:value="localeValue"
+                :options="languageOptions"
+                size="small"
+                class="app-shell__language-select"
+              />
+              <n-button tertiary class="app-shell__logout-button" @click="handleLogout">
+                <template #icon>
+                  <n-icon :component="LogOutOutline" />
+                </template>
+                {{ t('shell.logout') }}
+              </n-button>
+            </div>
           </div>
 
           <div v-if="isMobile" class="mobile-header">
@@ -96,13 +104,16 @@
                 </template>
               </n-button>
               <div class="mobile-header__copy">
-                <n-text depth="3" class="mobile-header__eyebrow">GIMR Admin</n-text>
+                <n-text depth="3" class="mobile-header__eyebrow">{{ t('app.brandTitle') }}</n-text>
                 <n-text strong class="mobile-header__title">{{ currentPageLabel }}</n-text>
               </div>
             </div>
-            <div class="mobile-header__badge">
-              {{ authState.oidcEnabled && authState.authenticated ? userInitial : 'AI' }}
-            </div>
+            <n-select
+              v-model:value="localeValue"
+              :options="languageOptions"
+              size="small"
+              class="mobile-header__language-select"
+            />
           </div>
 
           <n-layout content-style="padding: 20px;" :native-scrollbar="false" class="app-shell__content">
@@ -129,11 +140,13 @@ import {
   NLayoutSider,
   NMenu,
   NMessageProvider,
+  NSelect,
   NSpin,
   NText
 } from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import {
   AddCircleOutline,
   BarChartOutline,
@@ -150,9 +163,17 @@ import {
 } from '@vicons/ionicons5'
 import { useWindowSize } from '@vueuse/core'
 import { authState, canAccessSharedPage, initializeAuth, isAdmin, logoutAndClearAuth } from './auth'
+import {
+  currentLocale,
+  naiveUiDateLocale,
+  naiveUiLocale,
+  setAppLocale,
+  type AppLocale
+} from './i18n'
 
 const router = useRouter()
 const route = useRoute()
+const { t } = useI18n()
 const collapsed = ref(false)
 const showDrawer = ref(false)
 
@@ -164,33 +185,43 @@ const isLoginRoute = computed(() => route.name === 'Login')
 const showShell = computed(() => !isLoginRoute.value)
 
 const menuLabels: Record<string, string> = {
-  Dashboard: 'Dashboard',
-  CreateTask: 'Create Task',
-  Sessions: 'Sessions',
-  Monitor: 'Monitor',
-  ScheduleOverview: 'Schedule Overview',
-  Analytics: 'Analytics',
-  Config: 'Configuration',
-  AccessManagement: 'Access Management',
-  OidcDiagnostics: 'OIDC Diagnostics'
+  Dashboard: 'nav.dashboard',
+  CreateTask: 'nav.createTask',
+  Sessions: 'nav.sessions',
+  Monitor: 'nav.monitor',
+  ScheduleOverview: 'nav.scheduleOverview',
+  Analytics: 'nav.analytics',
+  Config: 'nav.config',
+  AccessManagement: 'nav.accessManagement',
+  OidcDiagnostics: 'nav.oidcDiagnostics'
 }
 
-const currentPageLabel = computed(() => menuLabels[activeKey.value] || 'Navigation')
-const userDisplayName = computed(() => authState.user?.display_name || authState.user?.username || 'GitLab user')
+const currentPageLabel = computed(() => t(menuLabels[activeKey.value] || 'app.navigation'))
+const userDisplayName = computed(
+  () => authState.user?.display_name || authState.user?.username || t('shell.gitlabUser')
+)
 const userInitial = computed(() => userDisplayName.value.slice(0, 1).toUpperCase())
+const localeValue = computed({
+  get: () => currentLocale.value,
+  set: (value) => setAppLocale(value as AppLocale)
+})
+const languageOptions = computed(() => [
+  { label: t('locale.en'), value: 'en' },
+  { label: t('locale.zhCN'), value: 'zh-CN' }
+])
 
 const renderIcon = (icon: any) => () => h(NIcon, null, { default: () => h(icon) })
 const shouldGroupMenu = computed(() => !collapsed.value || isMobile.value)
 
-function buildMenuItem(label: string, key: string, icon: any): MenuOption {
+function buildMenuItem(labelKey: string, key: string, icon: any): MenuOption {
   return {
-    label,
+    label: t(labelKey),
     key,
     icon: renderIcon(icon)
   }
 }
 
-function buildMenuSection(label: string, children: MenuOption[]): MenuOption[] {
+function buildMenuSection(labelKey: string, children: MenuOption[]): MenuOption[] {
   if (!children.length) {
     return []
   }
@@ -202,8 +233,8 @@ function buildMenuSection(label: string, children: MenuOption[]): MenuOption[] {
   return [
     {
       type: 'group',
-      key: `group-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-      label,
+      key: `group-${labelKey.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+      label: t(labelKey),
       children
     }
   ]
@@ -211,43 +242,43 @@ function buildMenuSection(label: string, children: MenuOption[]): MenuOption[] {
 
 const menuOptions = computed<MenuOption[]>(() => {
   const workspaceItems: MenuOption[] = [
-    buildMenuItem('Dashboard', 'Dashboard', GridOutline),
-    buildMenuItem('Create Task', 'CreateTask', AddCircleOutline)
+    buildMenuItem('nav.dashboard', 'Dashboard', GridOutline),
+    buildMenuItem('nav.createTask', 'CreateTask', AddCircleOutline)
   ]
 
   if (authState.oidcEnabled) {
-    workspaceItems.push(buildMenuItem('Sessions', 'Sessions', FingerPrintOutline))
+    workspaceItems.push(buildMenuItem('nav.sessions', 'Sessions', FingerPrintOutline))
   }
 
   const insightsItems: MenuOption[] = []
 
   if (canAccessSharedPage('analytics')) {
-    insightsItems.push(buildMenuItem('Analytics', 'Analytics', BarChartOutline))
+    insightsItems.push(buildMenuItem('nav.analytics', 'Analytics', BarChartOutline))
   }
 
   if (canAccessSharedPage('schedule_overview')) {
-    insightsItems.push(buildMenuItem('Schedule Overview', 'ScheduleOverview', CalendarOutline))
+    insightsItems.push(buildMenuItem('nav.scheduleOverview', 'ScheduleOverview', CalendarOutline))
   }
 
   if (canAccessSharedPage('monitor')) {
-    insightsItems.push(buildMenuItem('Monitor', 'Monitor', SpeedometerOutline))
+    insightsItems.push(buildMenuItem('nav.monitor', 'Monitor', SpeedometerOutline))
   }
 
   const adminItems: MenuOption[] = []
 
   if (canAccessSharedPage('oidc_diagnostics')) {
-    adminItems.push(buildMenuItem('OIDC Diagnostics', 'OidcDiagnostics', PulseOutline))
+    adminItems.push(buildMenuItem('nav.oidcDiagnostics', 'OidcDiagnostics', PulseOutline))
   }
 
   if (!authState.oidcEnabled || isAdmin.value) {
-    adminItems.push(buildMenuItem('Access Management', 'AccessManagement', PeopleOutline))
-    adminItems.push(buildMenuItem('Configuration', 'Config', SettingsOutline))
+    adminItems.push(buildMenuItem('nav.accessManagement', 'AccessManagement', PeopleOutline))
+    adminItems.push(buildMenuItem('nav.config', 'Config', SettingsOutline))
   }
 
   return [
-    ...buildMenuSection('Workspace', workspaceItems),
-    ...buildMenuSection('Insights & Operations', insightsItems),
-    ...buildMenuSection('Administration', adminItems)
+    ...buildMenuSection('nav.workspace', workspaceItems),
+    ...buildMenuSection('nav.insights', insightsItems),
+    ...buildMenuSection('nav.administration', adminItems)
   ]
 })
 
@@ -338,6 +369,16 @@ body {
 
 .app-shell__logout-button {
   flex-shrink: 0;
+}
+
+.app-shell__topbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.app-shell__language-select {
+  width: 116px;
 }
 
 .logo {
@@ -517,6 +558,11 @@ body {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
+}
+
+.mobile-header__language-select {
+  width: 116px;
+  flex-shrink: 0;
 }
 
 .mobile-drawer-header {
