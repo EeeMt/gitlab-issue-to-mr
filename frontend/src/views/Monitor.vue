@@ -1,6 +1,6 @@
 <template>
   <div class="monitor-page">
-    <n-space vertical :size="16">
+    <n-space vertical :size="20">
       <div class="monitor-page__hero">
         <div>
           <h2 class="monitor-page__title">System Monitor</h2>
@@ -169,6 +169,10 @@ onBeforeUnmount(() => {
 <style scoped>
 .monitor-page {
   max-width: 1240px;
+}
+
+.monitor-table-card {
+  margin-top: 4px;
 }
 
 .monitor-page__hero {

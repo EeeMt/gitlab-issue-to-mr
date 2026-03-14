@@ -153,12 +153,6 @@ const mobileColumns: DataTableColumns<Task> = [
     key: 'status',
     width: 85,
     render: (row) => h(NTag, { type: statusColors[row.status], size: 'small' }, () => row.status)
-  },
-  {
-    title: '',
-    key: 'actions',
-    width: 52,
-    render: (row) => h(NButton, { size: 'tiny', onClick: () => goToTask(row) }, () => 'View')
   }
 ]
 
@@ -233,12 +227,6 @@ const desktopColumns: DataTableColumns<Task> = [
     key: 'scheduled_at',
     width: 160,
     render: (row) => row.scheduled_at ? formatDateTimeUtc8(row.scheduled_at) : '-'
-  },
-  {
-    title: 'Actions',
-    key: 'actions',
-    width: 100,
-    render: (row) => h(NButton, { size: 'small', onClick: () => goToTask(row) }, () => 'View')
   }
 ]
 

@@ -17,173 +17,216 @@
       </div>
 
       <n-spin :show="loading">
-        <n-grid :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16" class="task-view__summary" v-if="task">
-          <n-gi v-for="item in summaryItems" :key="item.label">
-            <n-card size="small" class="task-summary-card" :bordered="false">
-              <div class="task-summary-card__label">{{ item.label }}</div>
-              <div class="task-summary-card__value">{{ item.value }}</div>
-            </n-card>
-          </n-gi>
-        </n-grid>
+        <div class="task-view__content">
+          <n-grid :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16" class="task-view__summary" v-if="task">
+            <n-gi v-for="item in summaryItems" :key="item.label">
+              <n-card size="small" class="task-summary-card" :bordered="false">
+                <div class="task-summary-card__label">{{ item.label }}</div>
+                <div class="task-summary-card__value">{{ item.value }}</div>
+              </n-card>
+            </n-gi>
+          </n-grid>
 
-        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
-          <n-gi>
-            <n-card class="task-card" :bordered="false">
-              <template #header>
-                <div class="task-card__header">
-                  <div>
-                    <div class="task-card__title">Task Details</div>
-                    <div class="task-card__subtitle">Project, branch, timing, and merge request metadata</div>
+          <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
+            <n-gi>
+              <n-card class="task-card" :bordered="false">
+                <template #header>
+                  <div class="task-card__header">
+                    <div>
+                      <div class="task-card__title">Task Details</div>
+                      <div class="task-card__subtitle">Project, branch, timing, and merge request metadata</div>
+                    </div>
                   </div>
-                </div>
-              </template>
-              <n-descriptions :column="1" label-placement="left" v-if="task">
-                <n-descriptions-item label="Status">
-                  <n-tag :type="statusColors[task.status]">{{ task.status }}</n-tag>
-                </n-descriptions-item>
-                <n-descriptions-item label="Project">
-                  <div>
-                    <a v-if="task.project_url" :href="task.project_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ projectDisplayName }}</a>
-                    <span v-else>{{ projectDisplayName }}</span>
-                  </div>
-                  <div style="font-size: 12px; color: #888">ID: {{ task.project_id }}</div>
-                </n-descriptions-item>
-                <n-descriptions-item label="Issue">
-                  <a v-if="task.issue_iid && task.issue_url" :href="task.issue_url" target="_blank" rel="noopener noreferrer" class="app-link">!{{ task.issue_iid }}</a>
-                  <span v-else>{{ task.issue_iid ? `!${task.issue_iid}` : '-' }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="Priority">{{ task.priority }}</n-descriptions-item>
-                <n-descriptions-item label="Branch">
-                  <a v-if="task.branch_name && task.branch_url" :href="task.branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.branch_name }}</a>
-                  <span v-else>{{ task.branch_name || '-' }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="Target Branch">
-                  <a v-if="task.target_branch && task.target_branch_url" :href="task.target_branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.target_branch }}</a>
-                  <span v-else>{{ task.target_branch }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="Container ID">{{ task.container_id || '-' }}</n-descriptions-item>
-                <n-descriptions-item label="MR URL">
-                  <a v-if="task.merge_request_url" :href="task.merge_request_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.merge_request_url }}</a>
-                  <span v-else>-</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="Changes">
-                  <span v-if="task.additions !== undefined || task.deletions !== undefined">
-                    <span v-if="task.additions || task.deletions">
-                      <span style="color: #18a053">+{{ task.additions || 0 }}</span>
-                      <span style="color: #db3b21; margin-left: 8px">-{{ task.deletions || 0 }}</span>
-                      <span style="color: #888; margin-left: 8px">({{ task.total_changes || 0 }} total)</span>
+                </template>
+                <n-descriptions :column="1" label-placement="left" v-if="task">
+                  <n-descriptions-item label="Status">
+                    <n-tag :type="statusColors[task.status]">{{ task.status }}</n-tag>
+                  </n-descriptions-item>
+                  <n-descriptions-item label="Project">
+                    <div>
+                      <a v-if="task.project_url" :href="task.project_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ projectDisplayName }}</a>
+                      <span v-else>{{ projectDisplayName }}</span>
+                    </div>
+                    <div style="font-size: 12px; color: #888">ID: {{ task.project_id }}</div>
+                  </n-descriptions-item>
+                  <n-descriptions-item label="Issue">
+                    <a v-if="task.issue_iid && task.issue_url" :href="task.issue_url" target="_blank" rel="noopener noreferrer" class="app-link">!{{ task.issue_iid }}</a>
+                    <span v-else>{{ task.issue_iid ? `!${task.issue_iid}` : '-' }}</span>
+                  </n-descriptions-item>
+                  <n-descriptions-item label="Priority">{{ formatPriority(task.priority) }}</n-descriptions-item>
+                  <n-descriptions-item label="Branch">
+                    <a v-if="task.branch_name && task.branch_url" :href="task.branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.branch_name }}</a>
+                    <span v-else>{{ task.branch_name || '-' }}</span>
+                  </n-descriptions-item>
+                  <n-descriptions-item label="Target Branch">
+                    <a v-if="task.target_branch && task.target_branch_url" :href="task.target_branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.target_branch }}</a>
+                    <span v-else>{{ task.target_branch }}</span>
+                  </n-descriptions-item>
+                  <n-descriptions-item label="Container ID">{{ task.container_id || '-' }}</n-descriptions-item>
+                  <n-descriptions-item label="MR URL">
+                    <a v-if="task.merge_request_url" :href="task.merge_request_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.merge_request_url }}</a>
+                    <span v-else>-</span>
+                  </n-descriptions-item>
+                  <n-descriptions-item label="Changes">
+                    <span v-if="task.additions !== undefined || task.deletions !== undefined">
+                      <span v-if="task.additions || task.deletions">
+                        <span style="color: #18a053">+{{ task.additions || 0 }}</span>
+                        <span style="color: #db3b21; margin-left: 8px">-{{ task.deletions || 0 }}</span>
+                        <span style="color: #888; margin-left: 8px">({{ task.total_changes || 0 }} total)</span>
+                      </span>
+                      <span v-else>-</span>
                     </span>
                     <span v-else>-</span>
-                  </span>
-                  <span v-else>-</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="Created">{{ formatDate(task.created_at) }}</n-descriptions-item>
-                <n-descriptions-item label="Scheduled">{{ task.scheduled_at ? formatDate(task.scheduled_at) : '-' }}</n-descriptions-item>
-                <n-descriptions-item label="Started">{{ task.started_at ? formatDate(task.started_at) : '-' }}</n-descriptions-item>
-                <n-descriptions-item label="Completed">{{ task.completed_at ? formatDate(task.completed_at) : '-' }}</n-descriptions-item>
-              </n-descriptions>
-            </n-card>
-          </n-gi>
+                  </n-descriptions-item>
+                  <n-descriptions-item label="Created">{{ formatDate(task.created_at) }}</n-descriptions-item>
+                  <n-descriptions-item label="Scheduled">{{ task.scheduled_at ? formatDate(task.scheduled_at) : '-' }}</n-descriptions-item>
+                  <n-descriptions-item label="Started">{{ task.started_at ? formatDate(task.started_at) : '-' }}</n-descriptions-item>
+                  <n-descriptions-item label="Completed">{{ task.completed_at ? formatDate(task.completed_at) : '-' }}</n-descriptions-item>
+                </n-descriptions>
+              </n-card>
+            </n-gi>
 
-          <n-gi>
-            <n-card class="task-card" :bordered="false">
-              <template #header>
-                <div class="task-card__header">
-                  <div>
-                    <div class="task-card__title">Actions</div>
-                    <div class="task-card__subtitle">Only actions valid for the current task state are shown</div>
+            <n-gi>
+              <n-card class="task-card" :bordered="false">
+                <template #header>
+                  <div class="task-card__header">
+                    <div>
+                      <div class="task-card__title">Actions</div>
+                      <div class="task-card__subtitle">Only actions valid for the current task state are shown</div>
+                    </div>
+                  </div>
+                </template>
+
+                <div class="task-actions">
+                  <div class="task-actions__intro" v-if="hasActions">
+                    Choose the next step based on the current task state. Actions are limited to the operations that are safe right now.
+                  </div>
+
+                  <div
+                    v-if="task && ['pending', 'queued', 'running'].includes(task.status)"
+                    class="task-actions__item task-actions__item--error"
+                  >
+                    <div class="task-actions__meta">
+                      <div class="task-actions__label">Cancel Task</div>
+                      <div class="task-actions__description">
+                        Stop execution for the current task while keeping the latest status and logs available for review.
+                      </div>
+                    </div>
+                    <n-button
+                      type="error"
+                      secondary
+                      strong
+                      round
+                      @click="handleCancel"
+                      :loading="actionLoading"
+                    >
+                      Cancel
+                    </n-button>
+                  </div>
+
+                  <div
+                    v-if="task && ['failed', 'cancelled'].includes(task.status)"
+                    class="task-actions__item task-actions__item--warning"
+                  >
+                    <div class="task-actions__meta">
+                      <div class="task-actions__label">Retry Task</div>
+                      <div class="task-actions__description">
+                        Re-queue the task with the same prompt and branch configuration to run it again.
+                      </div>
+                    </div>
+                    <n-button
+                      type="warning"
+                      secondary
+                      strong
+                      round
+                      @click="handleRetry"
+                      :loading="actionLoading"
+                    >
+                      Retry
+                    </n-button>
+                  </div>
+
+                  <div
+                    v-if="task && task.status === 'pending'"
+                    class="task-actions__item task-actions__item--info"
+                  >
+                    <div class="task-actions__meta">
+                      <div class="task-actions__label">Execute Now</div>
+                      <div class="task-actions__description">
+                        Remove scheduling delay and send the task straight to execution as soon as the worker is available.
+                      </div>
+                    </div>
+                    <n-button
+                      type="info"
+                      secondary
+                      strong
+                      round
+                      @click="handleExecute"
+                      :loading="actionLoading"
+                    >
+                      Execute
+                    </n-button>
+                  </div>
+
+                  <div v-if="!hasActions" class="task-actions__empty">
+                    No manual action is available for the current task state.
                   </div>
                 </div>
-              </template>
+              </n-card>
 
-              <div class="task-actions">
-                <n-button
-                  v-if="task && ['pending', 'queued', 'running'].includes(task.status)"
-                  block
-                  type="error"
-                  @click="handleCancel"
-                  :loading="actionLoading"
-                >
-                  Cancel Task
-                </n-button>
-                <n-button
-                  v-if="task && ['failed', 'cancelled'].includes(task.status)"
-                  block
-                  type="warning"
-                  @click="handleRetry"
-                  :loading="actionLoading"
-                >
-                  Retry Task
-                </n-button>
-                <n-button
-                  v-if="task && task.status === 'pending'"
-                  block
-                  type="info"
-                  @click="handleExecute"
-                  :loading="actionLoading"
-                >
-                  Execute Now
-                </n-button>
-                <div v-if="!hasActions" class="task-actions__empty">
-                  No manual action is available for the current task state.
-                </div>
-              </div>
-            </n-card>
-
-            <n-card class="task-card task-card--spaced" :bordered="false" v-if="task?.error_message">
-              <template #header>
-                <div class="task-card__header">
-                  <div>
-                    <div class="task-card__title">Error</div>
-                    <div class="task-card__subtitle">Most recent failure reported by the task runner</div>
+              <n-card class="task-card task-card--spaced" :bordered="false" v-if="task?.error_message">
+                <template #header>
+                  <div class="task-card__header">
+                    <div>
+                      <div class="task-card__title">Error</div>
+                      <div class="task-card__subtitle">Most recent failure reported by the task runner</div>
+                    </div>
                   </div>
+                </template>
+                <n-alert type="error">{{ task.error_message }}</n-alert>
+              </n-card>
+            </n-gi>
+          </n-grid>
+
+          <n-card class="task-card" :bordered="false" v-if="task">
+            <template #header>
+              <div class="task-card__header">
+                <div>
+                  <div class="task-card__title">User Prompt</div>
+                  <div class="task-card__subtitle">Original instruction captured for this task</div>
                 </div>
-              </template>
-              <n-alert type="error">{{ task.error_message }}</n-alert>
-            </n-card>
-          </n-gi>
-        </n-grid>
-
-        <n-card class="task-card" :bordered="false" v-if="task">
-          <template #header>
-            <div class="task-card__header">
-              <div>
-                <div class="task-card__title">User Prompt</div>
-                <div class="task-card__subtitle">Original instruction captured for this task</div>
               </div>
-            </div>
-          </template>
-          <n-text>{{ task.user_prompt }}</n-text>
-        </n-card>
+            </template>
+            <n-text>{{ task.user_prompt }}</n-text>
+          </n-card>
 
-        <n-card class="task-card" :bordered="false">
-          <template #header-extra>
-            <n-space>
-              <n-tag v-if="task?.status === 'running'" type="warning" size="small">Real-time</n-tag>
-              <n-button size="small" @click="refreshLogs">Refresh</n-button>
-            </n-space>
-          </template>
-          <template #header>
-            <div class="task-card__header">
-              <div>
-                <div class="task-card__title">Logs</div>
-                <div class="task-card__subtitle">Streaming container output for active tasks and stored logs otherwise</div>
+          <n-card class="task-card" :bordered="false">
+            <template #header-extra>
+              <n-space>
+                <n-tag v-if="task?.status === 'running'" type="warning" size="small">Real-time</n-tag>
+                <n-button size="small" @click="refreshLogs">Refresh</n-button>
+              </n-space>
+            </template>
+            <template #header>
+              <div class="task-card__header">
+                <div>
+                  <div class="task-card__title">Logs</div>
+                  <div class="task-card__subtitle">Streaming container output for active tasks and stored logs otherwise</div>
+                </div>
               </div>
-            </div>
-          </template>
-          <n-spin :show="logsLoading">
-            <!-- Show container logs for running tasks -->
-            <div v-if="task?.status === 'running' || task?.status === 'pending' || task?.status === 'queued'">
-              <n-spin :show="containerLogsLoading">
-                <pre class="log-content">{{ containerLogs || 'Waiting for logs...' }}</pre>
-              </n-spin>
-            </div>
-            <!-- Show database logs for completed/failed tasks -->
-            <div v-else>
-              <pre class="log-content">{{ logs || 'No logs available' }}</pre>
-            </div>
-          </n-spin>
-        </n-card>
+            </template>
+            <n-spin :show="logsLoading">
+              <div v-if="task?.status === 'running' || task?.status === 'pending' || task?.status === 'queued'">
+                <n-spin :show="containerLogsLoading">
+                  <pre class="log-content">{{ containerLogs || 'Waiting for logs...' }}</pre>
+                </n-spin>
+              </div>
+              <div v-else>
+                <pre class="log-content">{{ logs || 'No logs available' }}</pre>
+              </div>
+            </n-spin>
+          </n-card>
+        </div>
       </n-spin>
     </n-space>
   </div>
@@ -242,7 +285,7 @@ const summaryItems = computed(() => {
       : '-'
 
   return [
-    { label: 'Priority', value: task.value.priority || '-' },
+    { label: 'Priority', value: formatPriority(task.value.priority) },
     { label: 'Target Branch', value: task.value.target_branch || '-' },
     { label: 'Merge Request', value: task.value.merge_request_url ? 'Created' : 'Pending' },
     { label: 'Changes (+/-)', value: changeValue }
@@ -256,6 +299,20 @@ const hasActions = computed(() => {
 
 function formatDate(dateStr: string): string {
   return formatDateTimeUtc8(dateStr)
+}
+
+function formatPriority(priority?: string | number | null): string {
+  if (priority === null || priority === undefined || priority === '') {
+    return '-'
+  }
+
+  const normalized = String(priority).toLowerCase().trim()
+
+  if (normalized === '0' || normalized === 'p0') return 'P0'
+  if (normalized === '1' || normalized === 'p1') return 'P1'
+  if (normalized === '2' || normalized === 'p2') return 'P2'
+
+  return String(priority)
 }
 
 function isActiveTaskStatus(status?: string | null): boolean {
@@ -467,6 +524,11 @@ onBeforeUnmount(() => {
   max-width: 1240px;
 }
 
+.task-view__content {
+  display: grid;
+  gap: 20px;
+}
+
 .task-view__hero {
   display: flex;
   justify-content: space-between;
@@ -543,9 +605,60 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
+.task-actions__intro {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.035);
+  color: rgba(15, 23, 42, 0.66);
+  line-height: 1.5;
+}
+
+.task-actions__item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  border: 1px solid transparent;
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.task-actions__item--error {
+  border-color: rgba(208, 48, 80, 0.14);
+  background: linear-gradient(180deg, rgba(208, 48, 80, 0.06), rgba(208, 48, 80, 0.02));
+}
+
+.task-actions__item--warning {
+  border-color: rgba(240, 160, 32, 0.16);
+  background: linear-gradient(180deg, rgba(240, 160, 32, 0.07), rgba(240, 160, 32, 0.025));
+}
+
+.task-actions__item--info {
+  border-color: rgba(32, 128, 240, 0.16);
+  background: linear-gradient(180deg, rgba(32, 128, 240, 0.07), rgba(32, 128, 240, 0.025));
+}
+
+.task-actions__meta {
+  min-width: 0;
+}
+
+.task-actions__label {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--n-text-color-1);
+}
+
+.task-actions__description {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(15, 23, 42, 0.64);
+}
+
 .task-actions__empty {
-  padding: 12px 14px;
-  border-radius: 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
   background: rgba(15, 23, 42, 0.04);
   color: rgba(15, 23, 42, 0.64);
 }
@@ -559,6 +672,11 @@ onBeforeUnmount(() => {
 
   .task-view__title {
     font-size: 24px;
+  }
+
+  .task-actions__item {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
 </style>

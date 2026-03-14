@@ -1,128 +1,161 @@
 <template>
-  <div>
-    <n-space vertical :size="16">
-      <h2>Create Manual Task</h2>
+  <div class="create-task-page">
+    <n-space vertical :size="20">
+      <div class="create-task-page__hero">
+        <div>
+          <h2 class="create-task-page__title">Create Manual Task</h2>
+          <p class="create-task-page__subtitle">
+            Start a task directly from the dashboard by choosing the repository, branches, prompt, priority, and schedule.
+          </p>
+        </div>
+        <n-space :size="8" wrap>
+          <n-tag size="small" round type="info">Manual trigger</n-tag>
+          <n-tag size="small" round>Scheduler aware</n-tag>
+          <n-tag size="small" round>GitLab branch workflow</n-tag>
+        </n-space>
+      </div>
 
-      <n-card title="Task Details">
+      <n-card class="create-task-card" :bordered="false">
+        <template #header>
+          <div class="create-task-card__header">
+            <div>
+              <div class="create-task-card__title">Task Details</div>
+              <div class="create-task-card__subtitle">Configure source, branch strategy, priority, and execution timing</div>
+            </div>
+          </div>
+        </template>
         <n-spin :show="loading">
-          <n-form ref="formRef" :model="formValue" :rules="rules">
-            <!-- Project Selection -->
-            <n-form-item label="Project" path="project_id">
-              <n-select
-                v-model:value="formValue.project_id"
-                :options="projectOptions"
-                :loading="projectsLoading"
-                placeholder="Select a project"
-                @update:value="handleProjectChange"
-              />
-            </n-form-item>
+          <n-form ref="formRef" :model="formValue" :rules="rules" label-placement="top" class="create-task-form">
+            <div class="create-task-form__section">
+              <div class="create-task-form__section-title">Repository & Branches</div>
+              <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                <n-gi>
+                  <n-form-item label="Project" path="project_id">
+                    <n-select
+                      v-model:value="formValue.project_id"
+                      :options="projectOptions"
+                      :loading="projectsLoading"
+                      placeholder="Select a project"
+                      @update:value="handleProjectChange"
+                    />
+                  </n-form-item>
+                </n-gi>
+                <n-gi>
+                  <n-form-item label="Base Branch" path="base_branch">
+                    <n-select
+                      v-model:value="formValue.base_branch"
+                      :options="branchOptions"
+                      :loading="branchesLoading"
+                      placeholder="Select base branch"
+                      :disabled="!formValue.project_id"
+                      @update:value="handleBaseBranchChange"
+                    />
+                    <template #feedback>
+                      Branch to base changes on.
+                    </template>
+                  </n-form-item>
+                </n-gi>
+                <n-gi>
+                  <n-form-item label="New Branch Name" path="new_branch_name">
+                    <n-input
+                      v-model:value="formValue.new_branch_name"
+                      placeholder="Optional: feature/my-task"
+                      :disabled="!formValue.project_id || !formValue.base_branch"
+                    />
+                    <template #feedback>
+                      Leave empty to work on the base branch.
+                    </template>
+                  </n-form-item>
+                </n-gi>
+                <n-gi>
+                  <n-form-item label="Target Branch" path="target_branch">
+                    <n-select
+                      v-model:value="formValue.target_branch"
+                      :options="targetBranchOptions"
+                      :disabled="!formValue.project_id"
+                      placeholder="Select target branch"
+                    />
+                    <template #feedback>
+                      Branch to merge changes into.
+                    </template>
+                  </n-form-item>
+                </n-gi>
+              </n-grid>
+            </div>
 
-            <!-- Base Branch (Code Baseline) -->
-            <n-form-item label="Base Branch" path="base_branch">
-              <n-select
-                v-model:value="formValue.base_branch"
-                :options="branchOptions"
-                :loading="branchesLoading"
-                placeholder="Select base branch"
-                :disabled="!formValue.project_id"
-                @update:value="handleBaseBranchChange"
-              />
-              <template #feedback>
-                Branch to base changes on (code baseline)
-              </template>
-            </n-form-item>
-
-            <!-- New Branch Name -->
-            <n-form-item label="New Branch Name" path="new_branch_name">
-              <n-input
-                v-model:value="formValue.new_branch_name"
-                placeholder="Optional: enter to create new branch (e.g., feature/my-task)"
-                :disabled="!formValue.project_id || !formValue.base_branch"
-              />
-              <template #feedback>
-                Leave empty to use base branch, or enter a name to create new branch based on base branch
-              </template>
-            </n-form-item>
-
-            <!-- Target Branch -->
-            <n-form-item label="Target Branch" path="target_branch">
-              <n-select
-                v-model:value="formValue.target_branch"
-                :options="targetBranchOptions"
-                :disabled="!formValue.project_id"
-                placeholder="Select target branch"
-              />
-              <template #feedback>
-                Branch to merge changes into
-              </template>
-            </n-form-item>
-
-            <!-- Prompt -->
-            <n-form-item label="Prompt" path="user_prompt">
-              <n-input
-                v-model:value="formValue.user_prompt"
-                type="textarea"
-                :rows="5"
-                placeholder="Describe what you want the AI to implement..."
-              />
-            </n-form-item>
-
-            <!-- Priority -->
-            <n-form-item label="Priority" path="priority">
-              <n-radio-group v-model:value="formValue.priority">
-                <n-space>
-                  <n-radio :value="0">P0 (Highest)</n-radio>
-                  <n-radio :value="1">P1 (High)</n-radio>
-                  <n-radio :value="2">P2 (Normal)</n-radio>
-                </n-space>
-              </n-radio-group>
-            </n-form-item>
-
-            <!-- Scheduling -->
-            <n-form-item label="Schedule" path="schedule_type">
-              <n-space vertical :size="8" style="width: 100%">
-                <n-radio-group v-model:value="scheduleType" name="scheduleType">
-                  <n-space>
-                    <n-radio value="now">Execute Now</n-radio>
-                    <n-radio value="delay">Delay</n-radio>
-                    <n-radio value="scheduled">Schedule at</n-radio>
-                  </n-space>
-                </n-radio-group>
-
-                <n-space v-if="scheduleType === 'delay'" align="center">
-                  <n-input-number
-                    v-model:value="delayValue"
-                    :min="1"
-                    :max="86400"
-                    style="width: 120px"
-                  />
-                  <n-select
-                    v-model:value="delayUnit"
-                    :options="[
-                      { label: 'seconds', value: 'seconds' },
-                      { label: 'minutes', value: 'minutes' },
-                      { label: 'hours', value: 'hours' }
-                    ]"
-                    style="width: 120px"
-                  />
-                </n-space>
-
-                <n-date-picker
-                  v-if="scheduleType === 'scheduled'"
-                  v-model:value="scheduledDatetime"
-                  type="datetime"
-                  style="width: 300px"
-                  placeholder="Select date and time"
+            <div class="create-task-form__section">
+              <div class="create-task-form__section-title">Implementation Prompt</div>
+              <n-form-item label="Prompt" path="user_prompt">
+                <n-input
+                  v-model:value="formValue.user_prompt"
+                  type="textarea"
+                  :rows="6"
+                  placeholder="Describe what you want the AI to implement..."
                 />
+              </n-form-item>
+            </div>
 
-                <div style="color: #666; font-size: 12px;">
-                  {{ scheduleSummary }}
-                </div>
-              </n-space>
-            </n-form-item>
+            <div class="create-task-form__section">
+              <div class="create-task-form__section-title">Priority & Schedule</div>
+              <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                <n-gi>
+                  <n-form-item label="Priority" path="priority">
+                    <n-radio-group v-model:value="formValue.priority">
+                      <n-space vertical :size="8">
+                        <n-radio :value="0">P0 (Highest)</n-radio>
+                        <n-radio :value="1">P1 (High)</n-radio>
+                        <n-radio :value="2">P2 (Normal)</n-radio>
+                      </n-space>
+                    </n-radio-group>
+                  </n-form-item>
+                </n-gi>
+                <n-gi>
+                  <n-form-item label="Schedule" path="schedule_type">
+                    <n-space vertical :size="10" style="width: 100%">
+                      <n-radio-group v-model:value="scheduleType" name="scheduleType">
+                        <n-space vertical :size="8">
+                          <n-radio value="now">Execute Now</n-radio>
+                          <n-radio value="delay">Delay</n-radio>
+                          <n-radio value="scheduled">Schedule at</n-radio>
+                        </n-space>
+                      </n-radio-group>
 
-            <!-- Submit -->
-            <n-form-item>
+                      <n-space v-if="scheduleType === 'delay'" align="center" wrap>
+                        <n-input-number
+                          v-model:value="delayValue"
+                          :min="1"
+                          :max="86400"
+                          style="width: 120px"
+                        />
+                        <n-select
+                          v-model:value="delayUnit"
+                          :options="[
+                            { label: 'seconds', value: 'seconds' },
+                            { label: 'minutes', value: 'minutes' },
+                            { label: 'hours', value: 'hours' }
+                          ]"
+                          style="width: 140px"
+                        />
+                      </n-space>
+
+                      <n-date-picker
+                        v-if="scheduleType === 'scheduled'"
+                        v-model:value="scheduledDatetime"
+                        type="datetime"
+                        style="width: min(100%, 320px)"
+                        placeholder="Select date and time"
+                      />
+
+                      <div class="create-task-form__hint">
+                        {{ scheduleSummary }}
+                      </div>
+                    </n-space>
+                  </n-form-item>
+                </n-gi>
+              </n-grid>
+            </div>
+
+            <div class="create-task-form__actions">
               <n-space>
                 <n-button type="primary" @click="handleSubmit" :loading="submitting">
                   Create Task
@@ -131,7 +164,7 @@
                   Reset
                 </n-button>
               </n-space>
-            </n-form-item>
+            </div>
           </n-form>
         </n-spin>
       </n-card>
@@ -156,13 +189,16 @@ import { useRouter } from 'vue-router'
 import {
   NCard, NForm, NFormItem, NSelect, NInput, NInputNumber,
   NButton, NSpin, NSpace, NRadioGroup, NRadio, NModal,
-  NDatePicker, useMessage, FormInst, FormRules
+  NDatePicker, NTag, NGrid, NGi, useMessage, FormInst, FormRules
 } from 'naive-ui'
+import { useWindowSize } from '@vueuse/core'
 import { getProjects, getBranches, createTask, type Project, type Branch, type CreateTaskRequest } from '../api'
 import { formatDateTimeUtc8 } from '../utils/datetime'
 
 const router = useRouter()
 const message = useMessage()
+const { width } = useWindowSize()
+const isMobile = computed(() => width.value < 768)
 
 // Loading states
 const loading = ref(false)
@@ -416,3 +452,81 @@ onMounted(() => {
   fetchProjects()
 })
 </script>
+
+<style scoped>
+.create-task-page {
+  max-width: 1240px;
+}
+
+.create-task-page__hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.create-task-page__title {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.create-task-page__subtitle {
+  margin: 8px 0 0;
+  color: rgba(15, 23, 42, 0.68);
+  max-width: 760px;
+}
+
+.create-task-card {
+  border-radius: 18px;
+}
+
+.create-task-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.create-task-card__title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.create-task-card__subtitle {
+  margin-top: 4px;
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.58);
+}
+
+.create-task-form__section + .create-task-form__section,
+.create-task-form__actions {
+  margin-top: 20px;
+}
+
+.create-task-form__section-title {
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(15, 23, 42, 0.62);
+  text-transform: uppercase;
+}
+
+.create-task-form__hint {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.64);
+}
+
+@media (max-width: 768px) {
+  .create-task-page__hero,
+  .create-task-card__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .create-task-page__title {
+    font-size: 24px;
+  }
+}
+</style>
