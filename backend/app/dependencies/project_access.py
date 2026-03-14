@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime, timedelta
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from app.dependencies.auth import AuthContext, require_authenticated_context
 
 _ACCESS_CACHE_TTL_SECONDS = 60
 _project_access_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -126,20 +128,49 @@ def require_project_access(project_id: int, scope: ProjectAccessScope) -> None:
 async def _refresh_auth_context_tokens(auth_context: AuthContext, db: AsyncSession) -> bool:
     """Refresh an expired GitLab access token for the current session when possible."""
     if not auth_context.gitlab_refresh_token:
+        logger.info(
+            "GitLab token refresh skipped because no refresh token is stored for session %s (user_id=%s)",
+            auth_context.session.id,
+            auth_context.user.id,
+        )
         return False
 
     try:
         tokens = await exchange_refresh_token(auth_context.gitlab_refresh_token)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code in {400, 401, 403}:
+            logger.warning(
+                "GitLab token refresh rejected for session %s (user_id=%s, status=%s); revoking session",
+                auth_context.session.id,
+                auth_context.user.id,
+                exc.response.status_code,
+            )
             auth_context.session.revoked_at = datetime.utcnow()
             await db.flush()
             _project_access_cache.pop(auth_context.session.id, None)
             return False
+        logger.exception(
+            "GitLab token refresh failed unexpectedly for session %s (user_id=%s, status=%s)",
+            auth_context.session.id,
+            auth_context.user.id,
+            exc.response.status_code,
+        )
+        raise
+    except httpx.HTTPError:
+        logger.exception(
+            "GitLab token refresh request errored for session %s (user_id=%s)",
+            auth_context.session.id,
+            auth_context.user.id,
+        )
         raise
 
     access_token = tokens.get("access_token")
     if not access_token:
+        logger.warning(
+            "GitLab token refresh returned no access token for session %s (user_id=%s); revoking session",
+            auth_context.session.id,
+            auth_context.user.id,
+        )
         auth_context.session.revoked_at = datetime.utcnow()
         await db.flush()
         _project_access_cache.pop(auth_context.session.id, None)

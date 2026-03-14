@@ -9,12 +9,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from hashlib import sha256
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings, get_settings
 from app.core.config_crypto import decrypt_config_secret, encrypt_config_secret
 from app.models import User, UserSession
+
+SESSION_RETENTION_DAYS = 30
 
 
 def _utcnow() -> datetime:
@@ -217,3 +219,18 @@ async def revoke_session_by_id(db: AsyncSession, session_id: str) -> bool:
     session.revoked_at = _utcnow()
     await db.flush()
     return True
+
+
+async def cleanup_stale_sessions(
+    db: AsyncSession,
+    *,
+    retention_days: int = SESSION_RETENTION_DAYS,
+) -> int:
+    """Delete sessions that expired or were revoked before the retention cutoff."""
+    cutoff = _utcnow() - timedelta(days=retention_days)
+    result = await db.execute(
+        delete(UserSession).where(
+            func.coalesce(UserSession.revoked_at, UserSession.expires_at) < cutoff
+        )
+    )
+    return result.rowcount or 0

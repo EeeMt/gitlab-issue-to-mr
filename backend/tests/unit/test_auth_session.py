@@ -11,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app.core.session import (
+    cleanup_stale_sessions,
     create_user_session,
     get_user_from_session_token,
     get_gitlab_refresh_token_from_session,
@@ -197,6 +198,21 @@ class AuthSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(active_one.revoked_at)
         self.assertIsNotNone(active_two.revoked_at)
         mock_db.flush.assert_awaited_once()
+
+    async def test_cleanup_stale_sessions_deletes_rows_before_retention_cutoff(self) -> None:
+        mock_result = MagicMock()
+        mock_result.rowcount = 3
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        deleted_count = await cleanup_stale_sessions(mock_db)
+
+        self.assertEqual(deleted_count, 3)
+        mock_db.execute.assert_awaited_once()
+        delete_statement = mock_db.execute.await_args.args[0]
+        self.assertIn("DELETE FROM user_sessions", str(delete_statement))
+        compiled_sql = str(delete_statement.compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("coalesce(user_sessions.revoked_at, user_sessions.expires_at)", compiled_sql)
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ from jwt import PyJWKClient
 from app.config import Settings, get_effective_settings
 
 _discovery_cache: dict[str, Any] = {"issuer": "", "expires_at": 0.0, "document": None}
-REQUIRED_OIDC_SCOPES = ("openid", "profile", "email", "read_api", "offline_access")
+REQUIRED_OIDC_SCOPES = ("openid", "profile", "email", "read_api")
 
 
 def get_required_oidc_scopes() -> tuple[str, ...]:

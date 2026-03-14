@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Set
@@ -13,12 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings
 from app.core.docker_client import get_docker_client
+from app.core.session import cleanup_stale_sessions
 from app.core.worker import WorkerExecutor
 from app.database import AsyncSessionLocal
 from app.models import Task, TaskStatus
 from app.runtime_config import load_runtime_config_from_db
 
 logger = logging.getLogger(__name__)
+_SESSION_CLEANUP_INTERVAL_SECONDS = 3600
 
 # Thread pool for running worker tasks (to avoid blocking the event loop)
 _worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-")
@@ -38,6 +41,7 @@ class Scheduler:
         self.running = False
         self._running_tasks: Set[int] = set()  # task_ids currently running
         self._running_issues: Set[str] = set()  # "project_id:issue_iid" pairs
+        self._last_session_cleanup_at = 0.0
 
     async def start(self) -> None:
         """Start the scheduler loop."""
@@ -69,6 +73,7 @@ class Scheduler:
         """Run one scheduler cycle."""
         async with AsyncSessionLocal() as db:
             await load_runtime_config_from_db(db)
+            await self._maybe_cleanup_sessions(db)
             settings = get_settings()
             # Count running tasks for concurrency control
             running_count = await self._get_running_count(db)
@@ -91,6 +96,18 @@ class Scheduler:
 
             # Execute task
             await self._execute_task(db, task, issue_key)
+
+    async def _maybe_cleanup_sessions(self, db: AsyncSession) -> None:
+        """Periodically delete long-stale dashboard sessions."""
+        now = time.time()
+        if now - self._last_session_cleanup_at < _SESSION_CLEANUP_INTERVAL_SECONDS:
+            return
+
+        deleted_count = await cleanup_stale_sessions(db)
+        if deleted_count:
+            await db.commit()
+            logger.info("Cleaned up %s stale dashboard sessions", deleted_count)
+        self._last_session_cleanup_at = now
 
     async def _get_running_count(self, db: AsyncSession) -> int:
         """Get count of currently running tasks."""

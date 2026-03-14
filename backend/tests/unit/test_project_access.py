@@ -7,6 +7,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import httpx
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from fastapi import HTTPException
@@ -14,6 +16,7 @@ from fastapi import HTTPException
 from app.dependencies.auth import AuthContext
 from app.dependencies.project_access import (
     ProjectAccessScope,
+    _refresh_auth_context_tokens,
     require_project_access,
     require_project_access_scope,
 )
@@ -76,6 +79,28 @@ class ProjectAccessTests(unittest.IsolatedAsyncioTestCase):
                 await require_project_access_scope(context)
 
         self.assertEqual(exc.exception.status_code, 401)
+
+    async def test_refresh_logs_and_revokes_on_invalid_refresh_token(self) -> None:
+        context = AuthContext(
+            user=User(id=4, oidc_sub="4", gitlab_user_id=4, username="carol", platform_role="platform_user"),
+            session=UserSession(id="session-4", user_id=4, session_token_hash="hash"),
+            gitlab_access_token=None,
+            gitlab_refresh_token="refresh-token",
+        )
+        db = AsyncMock()
+        response = httpx.Response(status_code=401, request=httpx.Request("POST", "https://gitlab.example.com/oauth/token"))
+        error = httpx.HTTPStatusError("unauthorized", request=response.request, response=response)
+
+        with patch(
+            "app.dependencies.project_access.exchange_refresh_token",
+            AsyncMock(side_effect=error),
+        ), self.assertLogs("app.dependencies.project_access", level="WARNING") as captured:
+            refreshed = await _refresh_auth_context_tokens(context, db)
+
+        self.assertFalse(refreshed)
+        self.assertIsNotNone(context.session.revoked_at)
+        db.flush.assert_awaited_once()
+        self.assertIn("GitLab token refresh rejected for session session-4", captured.output[0])
 
     def test_require_project_access_rejects_inaccessible_project(self) -> None:
         scope = ProjectAccessScope(

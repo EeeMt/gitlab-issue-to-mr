@@ -35,7 +35,6 @@ Open your GitLab instance and create an OAuth application:
       - `profile`
       - `email`
       - `read_api`
-      - `offline_access`
 4. Save the application
 5. Copy:
    - **Application ID**
@@ -438,13 +437,14 @@ Current session hardening behavior includes:
 - GitLab `refresh_token` is stored encrypted at rest when GitLab issues one
 - project access checks refresh the GitLab access token automatically when possible
 - project access caching is keyed by dashboard session instead of only by user id
+- the scheduler automatically removes sessions that have been expired or revoked for more than 30 days
 - the login screen now preserves clearer reasons when the previous session expired or lost GitLab access
 - authenticated users can review and revoke their own sessions on the **Sessions** page
 
 ### Operator notes
 
-- users must sign in again after this rollout to obtain refresh-capable sessions
-- if the GitLab OAuth application does not allow `offline_access`, refresh tokens will not be issued
+- users must sign in again after OIDC changes so new sessions pick up the current auth settings
+- some self-managed GitLab instances reject `offline_access`; the default login flow therefore requests the GitLab-compatible scopes `openid profile email read_api`
 - sessions without refresh tokens still work, but once the GitLab access token expires the user must log in again
 - revoking the current session from `/sessions` immediately signs that browser out
 
@@ -465,14 +465,14 @@ Current diagnostics behavior includes:
 - an admin-only `/oidc-diagnostics` page
 - a backend diagnostics snapshot endpoint at `/api/config/oidc/diagnostics`
 - richer `Test OIDC connection` output with required scopes and warnings
-- warnings for callback path mismatches, cookie security mismatches, long session TTLs, and disabled break-glass recovery
+- warnings for callback path mismatches, cookie security mismatches, long session TTLs, disabled break-glass recovery, and group-based admin bootstrap prerequisites
 
 Recommended use:
 
 1. open `/oidc-diagnostics`
 2. confirm **OIDC discovery** is healthy
 3. confirm the discovered authorization/token/userinfo endpoints are present
-4. verify the required scope string includes `openid profile email read_api offline_access`
+4. verify the required scope string includes `openid profile email read_api`
 5. review warnings before enabling or changing OIDC settings
 
 ## 10. Troubleshooting
@@ -495,7 +495,7 @@ Check:
 - redirect URI matches exactly in GitLab and env
 - GitLab is reachable from the backend container
 - system clock is correct
-- GitLab application scopes include `openid`, `profile`, `email`, `read_api`, and `offline_access`
+- GitLab application scopes include `openid`, `profile`, `email`, and `read_api`
 
 ### Browser never keeps the session
 
@@ -510,7 +510,6 @@ Check:
 Check:
 
 - the GitLab OAuth application includes `read_api`
-- the user signed in again after `offline_access` was added
 - `/sessions` shows whether the current session has a refresh token
 - GitLab refresh token exchange is reachable from the backend container
 
@@ -550,6 +549,6 @@ Recommended order:
 4. Enable `OIDC_ENABLED=true`
 5. Rebuild and restart services
 6. Test login with one admin account first
-7. Re-login once after enabling `offline_access` so new sessions can store refresh tokens
+7. Re-login once after enabling OIDC so new sessions are created with the current auth settings
 
 This avoids locking yourself out during the first rollout.

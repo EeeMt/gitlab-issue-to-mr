@@ -24,7 +24,7 @@
       </n-grid>
 
       <n-spin :show="loading">
-        <template v-if="diagnostics">
+        <n-space v-if="diagnostics" vertical :size="16">
           <n-alert v-if="diagnostics.warnings.length" type="warning" :show-icon="false">
             <div class="diagnostics-alert__title">Operator warnings</div>
             <ul class="diagnostics-alert__list">
@@ -166,7 +166,7 @@
               <code>{{ diagnostics.authorization_url_preview }}</code>
             </div>
           </n-card>
-        </template>
+        </n-space>
       </n-spin>
     </n-space>
   </div>

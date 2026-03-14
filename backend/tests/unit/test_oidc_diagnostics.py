@@ -13,12 +13,12 @@ from app.core.oidc import get_required_oidc_scope_string, get_required_oidc_scop
 
 
 class OIDCDiagnosticsTests(unittest.TestCase):
-    def test_required_scope_string_includes_offline_access(self) -> None:
+    def test_required_scope_string_matches_gitlab_compatible_scopes(self) -> None:
         self.assertEqual(
             get_required_oidc_scopes(),
-            ("openid", "profile", "email", "read_api", "offline_access"),
+            ("openid", "profile", "email", "read_api"),
         )
-        self.assertIn("offline_access", get_required_oidc_scope_string())
+        self.assertEqual(get_required_oidc_scope_string(), "openid profile email read_api")
 
     def test_diagnostics_warnings_cover_cookie_and_callback_shape(self) -> None:
         settings = SimpleNamespace(
@@ -27,6 +27,7 @@ class OIDCDiagnosticsTests(unittest.TestCase):
             session_ttl_seconds=90000,
             cookie_samesite="none",
             break_glass_enabled=False,
+            admin_gitlab_groups={"platform-team"},
         )
 
         warnings = _build_oidc_diagnostics_warnings(settings)
@@ -35,6 +36,7 @@ class OIDCDiagnosticsTests(unittest.TestCase):
         self.assertTrue(any("COOKIE_SECURE=true" in warning for warning in warnings))
         self.assertTrue(any("24 hours" in warning for warning in warnings))
         self.assertTrue(any("Break-glass recovery" in warning for warning in warnings))
+        self.assertTrue(any("Group-based admin bootstrap" in warning for warning in warnings))
 
     def test_diagnostics_warn_when_samesite_none_is_not_secure(self) -> None:
         settings = SimpleNamespace(
@@ -43,6 +45,7 @@ class OIDCDiagnosticsTests(unittest.TestCase):
             session_ttl_seconds=3600,
             cookie_samesite="none",
             break_glass_enabled=True,
+            admin_gitlab_groups=set(),
         )
 
         warnings = _build_oidc_diagnostics_warnings(settings)

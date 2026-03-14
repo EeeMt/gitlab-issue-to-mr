@@ -329,6 +329,11 @@ def _build_oidc_diagnostics_warnings(settings: Settings) -> list[str]:
     if not settings.break_glass_enabled:
         warnings.append("Break-glass recovery is currently disabled.")
 
+    if settings.admin_gitlab_groups:
+        warnings.append(
+            "Group-based admin bootstrap is enabled. Verify GitLab OIDC returns groups in claims or userinfo; otherwise those admin grants will not apply."
+        )
+
     return warnings
 
 

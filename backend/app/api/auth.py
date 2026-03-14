@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -37,6 +38,7 @@ from app.dependencies.auth import (
 )
 from app.models import AuthAuditLog, User, UserSession
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 STATE_COOKIE_NAME = "gimr_oidc_state"
@@ -187,9 +189,26 @@ async def _upsert_user(db: AsyncSession, claims: dict[str, Any], userinfo: dict[
 
     settings = get_effective_settings()
     groups = set()
+    has_group_payload = False
     for source in (userinfo.get("groups"), claims.get("groups")):
+        if source is not None:
+            has_group_payload = True
         if isinstance(source, list):
             groups.update(str(item) for item in source)
+
+    if settings.admin_gitlab_groups and not groups:
+        logger.warning(
+            "OIDC login for username=%s did not include usable GitLab groups while auth_admin_gitlab_groups is configured; has_userinfo_groups=%s has_claim_groups=%s configured_groups=%s",
+            username,
+            userinfo.get("groups") is not None,
+            claims.get("groups") is not None,
+            sorted(settings.admin_gitlab_groups),
+        )
+    elif settings.admin_gitlab_groups and has_group_payload:
+        logger.info(
+            "OIDC login for username=%s included GitLab groups for admin bootstrap evaluation",
+            username,
+        )
 
     apply_platform_access_policy(
         user,
