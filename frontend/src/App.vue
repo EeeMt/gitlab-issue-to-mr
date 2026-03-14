@@ -1,7 +1,7 @@
 <template>
   <n-config-provider>
     <n-message-provider>
-      <div v-if="authState.loading && !authState.initialized" class="app-loading">
+      <div v-if="!authState.initialized" class="app-loading">
         <n-spin size="large" />
       </div>
 
@@ -136,6 +136,7 @@ import type { MenuOption } from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
 import {
   AddCircleOutline,
+  BarChartOutline,
   FingerPrintOutline,
   GridOutline,
   LogOutOutline,
@@ -148,7 +149,7 @@ import {
   SpeedometerOutline
 } from '@vicons/ionicons5'
 import { useWindowSize } from '@vueuse/core'
-import { authState, initializeAuth, isAdmin, logoutAndClearAuth } from './auth'
+import { authState, canAccessSharedPage, initializeAuth, isAdmin, logoutAndClearAuth } from './auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -168,6 +169,7 @@ const menuLabels: Record<string, string> = {
   Sessions: 'Sessions',
   Monitor: 'Monitor',
   ScheduleOverview: 'Schedule Overview',
+  Analytics: 'Analytics',
   Config: 'Configuration',
   AccessManagement: 'Access Management',
   OidcDiagnostics: 'OIDC Diagnostics'
@@ -201,34 +203,52 @@ const menuOptions = computed<MenuOption[]>(() => {
     })
   }
 
+  if (canAccessSharedPage('monitor')) {
+    items.push({
+      label: 'Monitor',
+      key: 'Monitor',
+      icon: renderIcon(SpeedometerOutline)
+    })
+  }
+
+  if (canAccessSharedPage('schedule_overview')) {
+    items.push({
+      label: 'Schedule Overview',
+      key: 'ScheduleOverview',
+      icon: renderIcon(CalendarOutline)
+    })
+  }
+
+  if (canAccessSharedPage('analytics')) {
+    items.push({
+      label: 'Analytics',
+      key: 'Analytics',
+      icon: renderIcon(BarChartOutline)
+    })
+  }
+
   if (!authState.oidcEnabled || isAdmin.value) {
-    items.push(
-      {
-        label: 'Monitor',
-        key: 'Monitor',
-        icon: renderIcon(SpeedometerOutline)
-      },
-      {
-        label: 'Schedule Overview',
-        key: 'ScheduleOverview',
-        icon: renderIcon(CalendarOutline)
-      },
-      {
-        label: 'Access Management',
-        key: 'AccessManagement',
-        icon: renderIcon(PeopleOutline)
-      },
-      {
-        label: 'OIDC Diagnostics',
-        key: 'OidcDiagnostics',
-        icon: renderIcon(PulseOutline)
-      },
-      {
-        label: 'Configuration',
-        key: 'Config',
-        icon: renderIcon(SettingsOutline)
-      }
-    )
+    items.push({
+      label: 'Access Management',
+      key: 'AccessManagement',
+      icon: renderIcon(PeopleOutline)
+    })
+  }
+
+  if (canAccessSharedPage('oidc_diagnostics')) {
+    items.push({
+      label: 'OIDC Diagnostics',
+      key: 'OidcDiagnostics',
+      icon: renderIcon(PulseOutline)
+    })
+  }
+
+  if (!authState.oidcEnabled || isAdmin.value) {
+    items.push({
+      label: 'Configuration',
+      key: 'Config',
+      icon: renderIcon(SettingsOutline)
+    })
   }
 
   return items

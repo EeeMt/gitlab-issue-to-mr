@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
+from app.dependencies.auth import require_admin_user, require_page_access
+from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
 from app.models import Task
 from app.core.docker_client import get_docker_client
 
@@ -23,7 +25,11 @@ WORKER_CONTAINER_PATTERN = re.compile(r"^gimr-\d+-p\d+-i\d+$")
 
 
 @router.get("/containers")
-async def list_containers(db: AsyncSession = Depends(get_db)):
+async def list_containers(
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_page_access("monitor")),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
     """List running worker containers.
 
     Args:
@@ -61,6 +67,13 @@ async def list_containers(db: AsyncSession = Depends(get_db)):
             except (ValueError, IndexError):
                 pass
 
+            if (
+                project_id is not None
+                and not access_scope.is_unrestricted
+                and project_id not in access_scope.accessible_project_ids
+            ):
+                continue
+
             containers_info.append({
                 "id": container.id,
                 "name": container.name,
@@ -82,7 +95,10 @@ async def list_containers(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/containers/{container_id}/logs")
-async def get_container_logs(container_id: str):
+async def get_container_logs(
+    container_id: str,
+    _current_user=Depends(require_admin_user),
+):
     """Stream container logs via SSE.
 
     Args:
@@ -147,7 +163,11 @@ async def get_container_logs(container_id: str):
 
 
 @router.get("/tasks/{task_id}/container-logs")
-async def get_task_container_logs(task_id: int, db: AsyncSession = Depends(get_db)):
+async def get_task_container_logs(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_admin_user),
+):
     """Get container logs for a task (polling endpoint).
 
     Args:

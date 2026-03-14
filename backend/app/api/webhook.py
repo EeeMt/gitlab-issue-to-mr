@@ -107,6 +107,22 @@ router = APIRouter()
 settings = get_settings()
 
 
+def _coerce_int(value: object) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_str(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
 async def verify_gitlab_webhook(
     request: Request,
     x_gitlab_token: Optional[str] = Header(None, alias="X-Gitlab-Token"),
@@ -190,6 +206,7 @@ async def gitlab_webhook(
     # Get issue and project info from root level
     issue = payload.get("issue", {})
     project = payload.get("project", {})
+    initiator = payload.get("user", {})
     # Get MR info from root level (for MR comments)
     merge_request = payload.get("merge_request", {})
 
@@ -198,12 +215,12 @@ async def gitlab_webhook(
     # Handle issue comments
     if note_type == "Issue":
         return await _handle_issue_comment(
-            db, project, issue, note_id, comment_body
+            db, project, issue, note_id, comment_body, initiator
         )
     # Handle MR comments
     elif note_type == "MergeRequest":
         return await _handle_mr_comment(
-            db, project, merge_request, note_id, comment_body
+            db, project, merge_request, note_id, comment_body, initiator
         )
     else:
         logger.debug(f"Ignoring noteable type: {note_type}")
@@ -218,6 +235,7 @@ async def _handle_issue_comment(
     issue: dict,
     note_id: int,
     comment_body: str,
+    initiator: Optional[dict] = None,
 ) -> dict:
     """Handle comment on a GitLab Issue."""
     # Parse @ai-bot command
@@ -249,7 +267,7 @@ async def _handle_issue_comment(
 
     # Handle generate command
     return await _handle_generate_command(
-        db, project_id, issue_id, issue_iid, note_id, command
+        db, project_id, issue_id, issue_iid, note_id, command, initiator
     )
 
 
@@ -368,6 +386,7 @@ async def _handle_generate_command(
     issue_iid: int,
     note_id: int,
     command: BotCommand,
+    initiator: Optional[dict] = None,
 ) -> dict:
     """Handle @ai-bot generate command."""
     # Check for duplicate (idempotency)
@@ -426,6 +445,8 @@ async def _handle_generate_command(
         issue_iid=issue_iid,
         note_id=note_id,
         user_prompt=user_prompt,
+        initiator_gitlab_user_id=_coerce_int(initiator.get("id")) if initiator else None,
+        initiator_username=_coerce_str(initiator.get("username")) if initiator else None,
         branch_name=f"gimr/issue-{issue_iid}",
         priority=command.priority,
         scheduled_at=scheduled_at,
@@ -457,6 +478,7 @@ async def _handle_mr_comment(
     merge_request: dict,
     note_id: int,
     comment_body: str,
+    initiator: Optional[dict] = None,
 ) -> dict:
     """Handle comment on a GitLab Merge Request."""
     # Parse @ai-bot command
@@ -585,6 +607,8 @@ async def _handle_mr_comment(
         issue_iid=parent_task.issue_iid,
         note_id=note_id,
         user_prompt=user_prompt,
+        initiator_gitlab_user_id=_coerce_int(initiator.get("id")) if initiator else None,
+        initiator_username=_coerce_str(initiator.get("username")) if initiator else None,
         branch_name=parent_task.branch_name,  # Continue on existing branch
         priority=command.priority,
         scheduled_at=scheduled_at,

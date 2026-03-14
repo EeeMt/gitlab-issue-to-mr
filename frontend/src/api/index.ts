@@ -114,11 +114,111 @@ export interface Stats {
   cancelled: number
 }
 
+export interface AnalyticsSummary {
+  total_tasks: number
+  total_additions: number
+  total_deletions: number
+  total_changes: number
+  completed_tasks: number
+  failed_tasks: number
+  cancelled_tasks: number
+  finished_tasks: number
+  success_rate: number | null
+  failure_rate: number | null
+  tracked_initiator_tasks: number
+  initiator_tracking_started_at: string | null
+  avg_execution_seconds: number | null
+  max_execution_seconds: number | null
+  avg_queue_wait_seconds: number | null
+  max_queue_wait_seconds: number | null
+}
+
+export interface AnalyticsProjectRow {
+  project_id: number
+  project_name: string
+  project_path_with_namespace: string | null
+  task_count: number
+  completed_tasks: number
+  failed_tasks: number
+  cancelled_tasks: number
+  success_rate: number | null
+  additions: number
+  deletions: number
+  total_changes: number
+  avg_execution_seconds: number | null
+  avg_queue_wait_seconds: number | null
+  last_task_at: string | null
+}
+
+export interface AnalyticsInitiatorRow {
+  initiator_username: string
+  initiator_gitlab_user_id: number | null
+  task_count: number
+  completed_tasks: number
+  failed_tasks: number
+  cancelled_tasks: number
+  success_rate: number | null
+  additions: number
+  deletions: number
+  total_changes: number
+  avg_execution_seconds: number | null
+  avg_queue_wait_seconds: number | null
+  last_task_at: string | null
+}
+
+export interface AnalyticsTrendPoint {
+  date: string
+  task_count: number
+  completed_tasks: number
+  failed_tasks: number
+  cancelled_tasks: number
+  additions: number
+  deletions: number
+  total_changes: number
+  avg_execution_seconds: number | null
+}
+
+export interface AnalyticsPriorityWaitRow {
+  priority: number
+  task_count: number
+  avg_queue_wait_seconds: number | null
+  max_queue_wait_seconds: number | null
+}
+
+export interface AnalyticsErrorRow {
+  category: string
+  count: number
+  share_of_failed: number
+  sample_message: string | null
+}
+
+export interface AnalyticsResponse {
+  window_days: number
+  generated_at: string
+  summary: AnalyticsSummary
+  projects: AnalyticsProjectRow[]
+  initiators: AnalyticsInitiatorRow[]
+  trends: AnalyticsTrendPoint[]
+  priority_waits: AnalyticsPriorityWaitRow[]
+  error_breakdown: AnalyticsErrorRow[]
+}
+
+export interface PagePermissions {
+  monitor: boolean
+  schedule_overview: boolean
+  analytics: boolean
+  oidc_diagnostics: boolean
+}
+
 export interface RuntimeConfig {
   max_concurrency: number
   task_timeout: number
   scheduler_interval: number
   default_target_branch: string
+  allow_monitor_for_users: boolean
+  allow_schedule_overview_for_users: boolean
+  allow_analytics_for_users: boolean
+  allow_oidc_diagnostics_for_users: boolean
 }
 
 export interface AuthConfig {
@@ -206,6 +306,7 @@ export interface AuthStatus {
   break_glass_enabled?: boolean
   break_glass_username?: string | null
   authenticated: boolean
+  page_permissions: PagePermissions
   user: AuthUser | null
 }
 
@@ -327,6 +428,11 @@ export async function getContainerLogs(containerId: string): Promise<string> {
 
 export async function getStats(): Promise<Stats> {
   const response = await api.get('/stats')
+  return response.data
+}
+
+export async function getAnalytics(days: number): Promise<AnalyticsResponse> {
+  const response = await api.get('/stats/analytics', { params: { days } })
   return response.data
 }
 

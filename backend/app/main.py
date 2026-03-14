@@ -140,7 +140,7 @@ app.include_router(
     containers.router,
     prefix="/api",
     tags=["containers"],
-    dependencies=[Depends(require_admin_user)],
+    dependencies=[Depends(require_authenticated_user)],
 )
 app.include_router(
     stats.router,
@@ -152,7 +152,7 @@ app.include_router(
     config.router,
     prefix="/api",
     tags=["config"],
-    dependencies=[Depends(require_admin_user)],
+    dependencies=[Depends(require_authenticated_user)],
 )
 app.include_router(
     admin_users.router,

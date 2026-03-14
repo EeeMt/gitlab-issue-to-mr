@@ -103,6 +103,55 @@
                 </div>
             </n-card>
 
+            <n-card id="shared-page-settings" class="config-form-card" :bordered="false">
+                <template #header>
+                  <div class="config-card-header">
+                    <div>
+                      <div class="config-card-header__title">Shared Page Access</div>
+                      <div class="config-card-header__subtitle">Choose which read-only pages can also be opened by platform users</div>
+                    </div>
+                  </div>
+                </template>
+
+                <div class="config-form__section">
+                  <div class="config-form__section-title">Page permissions</div>
+                  <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                    <n-gi>
+                      <n-form-item label="Allow Monitor for platform users">
+                        <n-switch v-model:value="formValue.allow_monitor_for_users" />
+                        <template #feedback>
+                          Non-admin users can open the Monitor page with project-scoped stats and containers.
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item label="Allow Schedule Overview for platform users">
+                        <n-switch v-model:value="formValue.allow_schedule_overview_for_users" />
+                        <template #feedback>
+                          Non-admin users can inspect the scheduled queue for projects they can access.
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item label="Allow Analytics for platform users">
+                        <n-switch v-model:value="formValue.allow_analytics_for_users" />
+                        <template #feedback>
+                          Non-admin users can open the Analytics page and only see data for projects they can access.
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item label="Allow OIDC Diagnostics for platform users">
+                        <n-switch v-model:value="formValue.allow_oidc_diagnostics_for_users" />
+                        <template #feedback>
+                          Non-admin users can open the diagnostics snapshot page.
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                  </n-grid>
+                </div>
+            </n-card>
+
             <n-card id="oidc-settings" class="config-form-card" :bordered="false">
                 <template #header>
                   <div class="config-card-header">
@@ -348,6 +397,10 @@ type ConfigForm = {
   task_timeout: number
   scheduler_interval: number
   default_target_branch: string
+  allow_monitor_for_users: boolean
+  allow_schedule_overview_for_users: boolean
+  allow_analytics_for_users: boolean
+  allow_oidc_diagnostics_for_users: boolean
   oidc_enabled: boolean
   oidc_issuer_url: string
   oidc_client_id: string
@@ -389,6 +442,10 @@ const formValue = ref<ConfigForm>({
   task_timeout: 1800,
   scheduler_interval: 5,
   default_target_branch: 'main',
+  allow_monitor_for_users: false,
+  allow_schedule_overview_for_users: false,
+  allow_analytics_for_users: false,
+  allow_oidc_diagnostics_for_users: false,
   oidc_enabled: false,
   oidc_issuer_url: '',
   oidc_client_id: '',
@@ -424,6 +481,18 @@ const isDirty = computed(() => {
 const summaryItems = computed(() => [
   { label: 'Max Concurrency', value: String(formValue.value.max_concurrency) },
   { label: 'Task Timeout', value: `${formValue.value.task_timeout}s` },
+  {
+    label: 'Shared Pages',
+    value:
+      [
+        formValue.value.allow_monitor_for_users ? 'Monitor' : null,
+        formValue.value.allow_schedule_overview_for_users ? 'Schedule' : null,
+        formValue.value.allow_analytics_for_users ? 'Analytics' : null,
+        formValue.value.allow_oidc_diagnostics_for_users ? 'OIDC Diag' : null
+      ]
+        .filter(Boolean)
+        .join(', ') || 'Admin only'
+  },
   { label: 'OIDC Login', value: formValue.value.oidc_enabled ? 'Enabled' : 'Disabled' },
   {
     label: 'Client Secret',
@@ -479,6 +548,10 @@ function syncForm(config: Config) {
     task_timeout: config.runtime.task_timeout,
     scheduler_interval: config.runtime.scheduler_interval,
     default_target_branch: config.runtime.default_target_branch,
+    allow_monitor_for_users: config.runtime.allow_monitor_for_users,
+    allow_schedule_overview_for_users: config.runtime.allow_schedule_overview_for_users,
+    allow_analytics_for_users: config.runtime.allow_analytics_for_users,
+    allow_oidc_diagnostics_for_users: config.runtime.allow_oidc_diagnostics_for_users,
     oidc_enabled: config.auth.oidc_enabled,
     oidc_issuer_url: config.auth.oidc_issuer_url,
     oidc_client_id: config.auth.oidc_client_id,
@@ -501,7 +574,11 @@ function buildPayload(): ConfigUpdate {
       max_concurrency: formValue.value.max_concurrency,
       task_timeout: formValue.value.task_timeout,
       scheduler_interval: formValue.value.scheduler_interval,
-      default_target_branch: formValue.value.default_target_branch.trim()
+      default_target_branch: formValue.value.default_target_branch.trim(),
+      allow_monitor_for_users: formValue.value.allow_monitor_for_users,
+      allow_schedule_overview_for_users: formValue.value.allow_schedule_overview_for_users,
+      allow_analytics_for_users: formValue.value.allow_analytics_for_users,
+      allow_oidc_diagnostics_for_users: formValue.value.allow_oidc_diagnostics_for_users
     },
     auth: {
       oidc_enabled: formValue.value.oidc_enabled,

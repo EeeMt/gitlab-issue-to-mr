@@ -1,9 +1,11 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { authState, initializeAuth } from '../auth'
+import { authState, canAccessSharedPage, initializeAuth } from '../auth'
+import type { PagePermissions } from '../api'
 import Dashboard from '../views/Dashboard.vue'
 import TaskView from '../views/TaskView.vue'
 import Monitor from '../views/Monitor.vue'
 import ScheduleOverview from '../views/ScheduleOverview.vue'
+import Analytics from '../views/Analytics.vue'
 import Config from '../views/Config.vue'
 import AccessManagement from '../views/AccessManagement.vue'
 import OidcDiagnostics from '../views/OidcDiagnostics.vue'
@@ -52,13 +54,19 @@ const router = createRouter({
       path: '/monitor',
       name: 'Monitor',
       component: Monitor,
-      meta: { requiresAuth: true, requiresAdmin: true }
+      meta: { requiresAuth: true, pagePermission: 'monitor' }
     },
     {
       path: '/schedule-overview',
       name: 'ScheduleOverview',
       component: ScheduleOverview,
-      meta: { requiresAuth: true, requiresAdmin: true }
+      meta: { requiresAuth: true, pagePermission: 'schedule_overview' }
+    },
+    {
+      path: '/analytics',
+      name: 'Analytics',
+      component: Analytics,
+      meta: { requiresAuth: true, pagePermission: 'analytics' }
     },
     {
       path: '/config',
@@ -76,7 +84,7 @@ const router = createRouter({
       path: '/oidc-diagnostics',
       name: 'OidcDiagnostics',
       component: OidcDiagnostics,
-      meta: { requiresAuth: true, requiresAdmin: true }
+      meta: { requiresAuth: true, pagePermission: 'oidc_diagnostics' }
     }
   ]
 })
@@ -93,6 +101,7 @@ router.beforeEach(async (to) => {
 
   const requiresAuth = to.meta.requiresAuth !== false
   const requiresAdmin = to.meta.requiresAdmin === true
+  const pagePermission = to.meta.pagePermission as keyof PagePermissions | undefined
 
   if (to.name === 'Login') {
     if (authState.authenticated) {
@@ -109,6 +118,10 @@ router.beforeEach(async (to) => {
   }
 
   if (requiresAdmin && authState.user?.platform_role !== 'platform_admin') {
+    return { name: 'Dashboard' }
+  }
+
+  if (pagePermission && !canAccessSharedPage(pagePermission)) {
     return { name: 'Dashboard' }
   }
 

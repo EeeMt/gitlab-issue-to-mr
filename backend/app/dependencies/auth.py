@@ -16,6 +16,8 @@ from app.core.session import (
 )
 from app.database import get_db
 from app.models import User, UserSession
+from app.page_permissions import can_access_page
+from app.runtime_config import load_runtime_config_from_db
 
 
 @dataclass
@@ -33,6 +35,7 @@ async def get_optional_auth_context(
     db: AsyncSession = Depends(get_db),
 ) -> Optional[AuthContext]:
     """Resolve the current auth context from the session cookie if auth is enabled."""
+    await load_runtime_config_from_db(db)
     settings = get_effective_settings()
     if not settings.oidc_enabled:
         return None
@@ -97,3 +100,25 @@ async def require_admin_user(
             detail="Admin access required",
         )
     return current_user
+
+
+def require_page_access(page_key: str):
+    """Require access to a configured shared page."""
+
+    async def _require_page_access(
+        auth_context: Optional[AuthContext] = Depends(require_authenticated_context),
+    ) -> Optional[User]:
+        settings = get_effective_settings()
+        if not settings.oidc_enabled:
+            return None
+
+        current_user = auth_context.user if auth_context is not None else None
+        if can_access_page(page_key, current_user, settings):
+            return current_user
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access to this page is restricted",
+        )
+
+    return _require_page_access

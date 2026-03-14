@@ -50,6 +50,11 @@ class Task(Base):
 
     # Task details
     user_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    initiator_user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    initiator_gitlab_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    initiator_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
 
     # Branch and MR info
     branch_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

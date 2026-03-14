@@ -1,16 +1,44 @@
 """Statistics API endpoints."""
 
+from __future__ import annotations
+
+import asyncio
 import logging
-from fastapi import APIRouter, Depends
-from sqlalchemy import select, func, false
+from collections import defaultdict
+from datetime import datetime, timedelta
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import case, select, func, false
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.dependencies.auth import require_page_access
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
 from app.models import Task, TaskStatus
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+FINISHED_TASK_STATUSES = (
+    TaskStatus.COMPLETED,
+    TaskStatus.FAILED,
+    TaskStatus.CANCELLED,
+)
+
+ERROR_CATEGORY_PATTERNS = (
+    ("Timeout", ("timeout", "timed out", "deadline exceeded")),
+    ("Resource", ("out of memory", "oom", "no space left", "disk quota", "killed")),
+    ("Docker", ("docker", "container", "image pull", "oci runtime")),
+    ("Authentication", ("unauthorized", "forbidden", "authentication", "token", "permission denied")),
+    ("Network", ("connection", "connect", "dns", "tls", "ssl", "socket", "proxy")),
+    ("Git", ("merge conflict", "rebase", "checkout", "git ", "branch", "commit", "push failed")),
+    (
+        "Dependencies",
+        ("module not found", "modulenotfounderror", "importerror", "pip ", "npm ", "package"),
+    ),
+    ("Tests", ("pytest", "test failed", "assertionerror", "failing test", "unit test", "integration test")),
+    ("Code", ("syntaxerror", "indentationerror", "typeerror", "nameerror", "attributeerror", "traceback")),
+)
 
 
 @router.get("/stats")
@@ -53,4 +81,405 @@ async def get_stats(
         "completed": status_counts.get("completed", 0),
         "failed": status_counts.get("failed", 0),
         "cancelled": status_counts.get("cancelled", 0),
+    }
+
+
+async def _build_project_lookup(access_scope: ProjectAccessScope) -> dict[int, dict[str, str | None]]:
+    if not access_scope.is_unrestricted:
+        return {
+            int(project["id"]): {
+                "project_name": project.get("name"),
+                "project_path_with_namespace": project.get("path_with_namespace"),
+            }
+            for project in access_scope.accessible_projects
+        }
+
+    from app.core.gitlab_client import get_gitlab_client
+
+    try:
+        gitlab = get_gitlab_client()
+        projects = await asyncio.to_thread(gitlab.get_projects)
+        return {
+            int(project["id"]): {
+                "project_name": project.get("name"),
+                "project_path_with_namespace": project.get("path_with_namespace"),
+            }
+            for project in projects
+        }
+    except Exception as exc:
+        logger.warning("Failed to load project metadata for analytics: %s", exc)
+        return {}
+
+
+def _apply_project_scope(query, access_scope: ProjectAccessScope):
+    if access_scope.is_unrestricted:
+        return query
+
+    allowed_project_ids = access_scope.accessible_project_ids
+    if not allowed_project_ids:
+        return query.where(false())
+    return query.where(Task.project_id.in_(allowed_project_ids))
+
+
+def _build_error_breakdown(error_rows: list[tuple[str, int]], failed_tasks: int) -> list[dict]:
+    grouped: dict[str, dict[str, object]] = defaultdict(
+        lambda: {
+            "count": 0,
+            "sample_message": None,
+            "sample_count": 0,
+        }
+    )
+
+    for error_message, count in error_rows:
+        category = _categorize_error_message(error_message)
+        bucket = grouped[category]
+        bucket["count"] = int(bucket["count"]) + int(count)
+        if bucket["sample_message"] is None or int(count) > int(bucket["sample_count"]):
+            bucket["sample_message"] = _summarize_error_message(error_message)
+            bucket["sample_count"] = int(count)
+
+    rows = []
+    for category, values in grouped.items():
+        count = int(values["count"])
+        rows.append(
+            {
+                "category": category,
+                "count": count,
+                "share_of_failed": (count / failed_tasks) if failed_tasks else 0,
+                "sample_message": values["sample_message"],
+            }
+        )
+
+    rows.sort(key=lambda row: (-row["count"], row["category"]))
+    return rows
+
+
+def _categorize_error_message(error_message: str | None) -> str:
+    if not error_message:
+        return "Other"
+
+    normalized = error_message.lower()
+    for category, patterns in ERROR_CATEGORY_PATTERNS:
+        if any(pattern in normalized for pattern in patterns):
+            return category
+    return "Other"
+
+
+def _summarize_error_message(error_message: str | None) -> str | None:
+    if not error_message:
+        return None
+
+    first_line = next((line.strip() for line in error_message.splitlines() if line.strip()), "")
+    if not first_line:
+        return None
+    return first_line[:160]
+
+
+@router.get("/stats/analytics")
+async def get_analytics(
+    days: int = Query(default=30, ge=7, le=90),
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_page_access("analytics")),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Get analytics for recent tasks by project, initiator, and day."""
+    if days not in {7, 30, 90}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="days must be one of: 7, 30, 90",
+        )
+
+    now = datetime.utcnow()
+    since = now - timedelta(days=days - 1)
+
+    finished_task_expr = case((Task.status.in_(FINISHED_TASK_STATUSES), 1), else_=0)
+    execution_seconds_expr = case(
+        (
+            Task.started_at.is_not(None) & Task.completed_at.is_not(None),
+            func.extract("epoch", Task.completed_at - Task.started_at),
+        ),
+        else_=None,
+    )
+    queue_wait_seconds_expr = case(
+        (
+            Task.started_at.is_not(None),
+            func.extract("epoch", Task.started_at - Task.created_at),
+        ),
+        else_=None,
+    )
+
+    summary_query = _apply_project_scope(
+        select(
+            func.count(Task.id),
+            func.coalesce(func.sum(Task.additions), 0),
+            func.coalesce(func.sum(Task.deletions), 0),
+            func.coalesce(func.sum(Task.total_changes), 0),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0)), 0),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.FAILED, 1), else_=0)), 0),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.CANCELLED, 1), else_=0)), 0),
+            func.coalesce(func.sum(finished_task_expr), 0),
+            func.coalesce(func.sum(case((Task.initiator_username.is_not(None), 1), else_=0)), 0),
+            func.min(case((Task.initiator_username.is_not(None), Task.created_at), else_=None)),
+            func.avg(execution_seconds_expr),
+            func.max(execution_seconds_expr),
+            func.avg(queue_wait_seconds_expr),
+            func.max(queue_wait_seconds_expr),
+        ).where(Task.created_at >= since),
+        access_scope,
+    )
+    summary_result = await db.execute(summary_query)
+    (
+        total_tasks,
+        total_additions,
+        total_deletions,
+        total_changes,
+        completed_tasks,
+        failed_tasks,
+        cancelled_tasks,
+        finished_tasks,
+        tracked_initiator_tasks,
+        initiator_tracking_started_at,
+        avg_execution_seconds,
+        max_execution_seconds,
+        avg_queue_wait_seconds,
+        max_queue_wait_seconds,
+    ) = summary_result.one()
+
+    project_query = (
+        select(
+            Task.project_id,
+            func.count(Task.id).label("task_count"),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0)), 0).label(
+                "completed_tasks"
+            ),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.FAILED, 1), else_=0)), 0).label(
+                "failed_tasks"
+            ),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.CANCELLED, 1), else_=0)), 0).label(
+                "cancelled_tasks"
+            ),
+            func.coalesce(func.sum(Task.additions), 0).label("additions"),
+            func.coalesce(func.sum(Task.deletions), 0).label("deletions"),
+            func.coalesce(func.sum(Task.total_changes), 0).label("total_changes"),
+            func.avg(execution_seconds_expr).label("avg_execution_seconds"),
+            func.avg(queue_wait_seconds_expr).label("avg_queue_wait_seconds"),
+            func.max(Task.created_at).label("last_task_at"),
+        )
+        .where(Task.created_at >= since)
+        .group_by(Task.project_id)
+        .order_by(
+            func.count(Task.id).desc(),
+            func.coalesce(func.sum(Task.total_changes), 0).desc(),
+            Task.project_id.asc(),
+        )
+    )
+    project_query = _apply_project_scope(project_query, access_scope)
+    project_rows = (await db.execute(project_query)).all()
+    project_lookup = await _build_project_lookup(access_scope)
+
+    initiator_query = (
+        select(
+            Task.initiator_username,
+            Task.initiator_gitlab_user_id,
+            func.count(Task.id).label("task_count"),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0)), 0).label(
+                "completed_tasks"
+            ),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.FAILED, 1), else_=0)), 0).label(
+                "failed_tasks"
+            ),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.CANCELLED, 1), else_=0)), 0).label(
+                "cancelled_tasks"
+            ),
+            func.coalesce(func.sum(Task.additions), 0).label("additions"),
+            func.coalesce(func.sum(Task.deletions), 0).label("deletions"),
+            func.coalesce(func.sum(Task.total_changes), 0).label("total_changes"),
+            func.avg(execution_seconds_expr).label("avg_execution_seconds"),
+            func.avg(queue_wait_seconds_expr).label("avg_queue_wait_seconds"),
+            func.max(Task.created_at).label("last_task_at"),
+        )
+        .where(Task.created_at >= since, Task.initiator_username.is_not(None))
+        .group_by(Task.initiator_username, Task.initiator_gitlab_user_id)
+        .order_by(func.count(Task.id).desc(), func.coalesce(func.sum(Task.total_changes), 0).desc(), Task.initiator_username.asc())
+    )
+    initiator_query = _apply_project_scope(initiator_query, access_scope)
+    initiator_rows = (await db.execute(initiator_query)).all()
+
+    trend_query = (
+        select(
+            func.date(Task.created_at).label("day"),
+            func.count(Task.id).label("task_count"),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0)), 0).label(
+                "completed_tasks"
+            ),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.FAILED, 1), else_=0)), 0).label(
+                "failed_tasks"
+            ),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.CANCELLED, 1), else_=0)), 0).label(
+                "cancelled_tasks"
+            ),
+            func.coalesce(func.sum(Task.additions), 0).label("additions"),
+            func.coalesce(func.sum(Task.deletions), 0).label("deletions"),
+            func.coalesce(func.sum(Task.total_changes), 0).label("total_changes"),
+            func.avg(execution_seconds_expr).label("avg_execution_seconds"),
+        )
+        .where(Task.created_at >= since)
+        .group_by(func.date(Task.created_at))
+        .order_by(func.date(Task.created_at).asc())
+    )
+    trend_query = _apply_project_scope(trend_query, access_scope)
+    trend_rows = (await db.execute(trend_query)).all()
+    trend_map = {str(row.day): row for row in trend_rows}
+
+    priority_wait_query = (
+        select(
+            Task.priority,
+            func.count(Task.id).label("task_count"),
+            func.avg(queue_wait_seconds_expr).label("avg_queue_wait_seconds"),
+            func.max(queue_wait_seconds_expr).label("max_queue_wait_seconds"),
+        )
+        .where(Task.created_at >= since, Task.started_at.is_not(None))
+        .group_by(Task.priority)
+        .order_by(Task.priority.asc())
+    )
+    priority_wait_query = _apply_project_scope(priority_wait_query, access_scope)
+    priority_wait_rows = (await db.execute(priority_wait_query)).all()
+
+    error_query = (
+        select(Task.error_message, func.count(Task.id).label("count"))
+        .where(
+            Task.created_at >= since,
+            Task.status == TaskStatus.FAILED,
+            Task.error_message.is_not(None),
+        )
+        .group_by(Task.error_message)
+        .order_by(func.count(Task.id).desc(), Task.error_message.asc())
+    )
+    error_query = _apply_project_scope(error_query, access_scope)
+    error_rows = [
+        (str(row.error_message), int(row.count or 0))
+        for row in (await db.execute(error_query)).all()
+        if row.error_message
+    ]
+    error_breakdown = _build_error_breakdown(error_rows, int(failed_tasks or 0))
+
+    trends: list[dict] = []
+    for offset in range(days):
+        day = since.date() + timedelta(days=offset)
+        row = trend_map.get(day.isoformat())
+        trends.append(
+            {
+                "date": day.isoformat(),
+                "task_count": int(row.task_count) if row else 0,
+                "completed_tasks": int(row.completed_tasks) if row else 0,
+                "failed_tasks": int(row.failed_tasks) if row else 0,
+                "cancelled_tasks": int(row.cancelled_tasks) if row else 0,
+                "additions": int(row.additions) if row else 0,
+                "deletions": int(row.deletions) if row else 0,
+                "total_changes": int(row.total_changes) if row else 0,
+                "avg_execution_seconds": float(row.avg_execution_seconds) if row and row.avg_execution_seconds is not None else None,
+            }
+        )
+
+    success_rate = (int(completed_tasks or 0) / int(finished_tasks or 0)) if finished_tasks else None
+    failure_rate = (int(failed_tasks or 0) / int(finished_tasks or 0)) if finished_tasks else None
+
+    return {
+        "window_days": days,
+        "generated_at": now.isoformat(),
+        "summary": {
+            "total_tasks": int(total_tasks or 0),
+            "total_additions": int(total_additions or 0),
+            "total_deletions": int(total_deletions or 0),
+            "total_changes": int(total_changes or 0),
+            "completed_tasks": int(completed_tasks or 0),
+            "failed_tasks": int(failed_tasks or 0),
+            "cancelled_tasks": int(cancelled_tasks or 0),
+            "finished_tasks": int(finished_tasks or 0),
+            "success_rate": success_rate,
+            "failure_rate": failure_rate,
+            "tracked_initiator_tasks": int(tracked_initiator_tasks or 0),
+            "initiator_tracking_started_at": (
+                initiator_tracking_started_at.isoformat() if initiator_tracking_started_at else None
+            ),
+            "avg_execution_seconds": float(avg_execution_seconds) if avg_execution_seconds is not None else None,
+            "max_execution_seconds": float(max_execution_seconds) if max_execution_seconds is not None else None,
+            "avg_queue_wait_seconds": float(avg_queue_wait_seconds) if avg_queue_wait_seconds is not None else None,
+            "max_queue_wait_seconds": float(max_queue_wait_seconds) if max_queue_wait_seconds is not None else None,
+        },
+        "projects": [
+            {
+                "project_id": int(row.project_id),
+                "project_name": (project_lookup.get(int(row.project_id)) or {}).get("project_name")
+                or f"Project {row.project_id}",
+                "project_path_with_namespace": (project_lookup.get(int(row.project_id)) or {}).get(
+                    "project_path_with_namespace"
+                ),
+                "task_count": int(row.task_count or 0),
+                "completed_tasks": int(row.completed_tasks or 0),
+                "failed_tasks": int(row.failed_tasks or 0),
+                "cancelled_tasks": int(row.cancelled_tasks or 0),
+                "success_rate": (
+                    int(row.completed_tasks or 0)
+                    / max(int(row.completed_tasks or 0) + int(row.failed_tasks or 0) + int(row.cancelled_tasks or 0), 1)
+                )
+                if (int(row.completed_tasks or 0) + int(row.failed_tasks or 0) + int(row.cancelled_tasks or 0)) > 0
+                else None,
+                "additions": int(row.additions or 0),
+                "deletions": int(row.deletions or 0),
+                "total_changes": int(row.total_changes or 0),
+                "avg_execution_seconds": (
+                    float(row.avg_execution_seconds) if row.avg_execution_seconds is not None else None
+                ),
+                "avg_queue_wait_seconds": (
+                    float(row.avg_queue_wait_seconds) if row.avg_queue_wait_seconds is not None else None
+                ),
+                "last_task_at": row.last_task_at.isoformat() if row.last_task_at else None,
+            }
+            for row in project_rows
+        ],
+        "initiators": [
+            {
+                "initiator_username": row.initiator_username,
+                "initiator_gitlab_user_id": int(row.initiator_gitlab_user_id)
+                if row.initiator_gitlab_user_id is not None
+                else None,
+                "task_count": int(row.task_count or 0),
+                "completed_tasks": int(row.completed_tasks or 0),
+                "failed_tasks": int(row.failed_tasks or 0),
+                "cancelled_tasks": int(row.cancelled_tasks or 0),
+                "success_rate": (
+                    int(row.completed_tasks or 0)
+                    / max(int(row.completed_tasks or 0) + int(row.failed_tasks or 0) + int(row.cancelled_tasks or 0), 1)
+                )
+                if (int(row.completed_tasks or 0) + int(row.failed_tasks or 0) + int(row.cancelled_tasks or 0)) > 0
+                else None,
+                "additions": int(row.additions or 0),
+                "deletions": int(row.deletions or 0),
+                "total_changes": int(row.total_changes or 0),
+                "avg_execution_seconds": (
+                    float(row.avg_execution_seconds) if row.avg_execution_seconds is not None else None
+                ),
+                "avg_queue_wait_seconds": (
+                    float(row.avg_queue_wait_seconds) if row.avg_queue_wait_seconds is not None else None
+                ),
+                "last_task_at": row.last_task_at.isoformat() if row.last_task_at else None,
+            }
+            for row in initiator_rows
+        ],
+        "trends": trends,
+        "priority_waits": [
+            {
+                "priority": int(row.priority),
+                "task_count": int(row.task_count or 0),
+                "avg_queue_wait_seconds": (
+                    float(row.avg_queue_wait_seconds) if row.avg_queue_wait_seconds is not None else None
+                ),
+                "max_queue_wait_seconds": (
+                    float(row.max_queue_wait_seconds) if row.max_queue_wait_seconds is not None else None
+                ),
+            }
+            for row in priority_wait_rows
+        ],
+        "error_breakdown": error_breakdown,
     }

@@ -14,12 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.core.scheduling import resolve_scheduled_at
 from app.database import get_db
+from app.dependencies.auth import get_optional_current_user, require_page_access
 from app.dependencies.project_access import (
     ProjectAccessScope,
     require_project_access,
     require_project_access_scope,
 )
-from app.models import Task, TaskLog, TaskStatus
+from app.models import Task, TaskLog, TaskStatus, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -168,6 +169,7 @@ async def list_tasks(
 async def list_scheduled_tasks(
     project_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_page_access("schedule_overview")),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """List active scheduled tasks for queue analytics views."""
@@ -565,6 +567,7 @@ async def list_branches(
 async def create_task(
     request: CreateTaskRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Create a new manual task.
@@ -586,6 +589,9 @@ async def create_task(
     task = Task(
         project_id=request.project_id,
         user_prompt=request.user_prompt,
+        initiator_user_id=current_user.id if current_user is not None else None,
+        initiator_gitlab_user_id=current_user.gitlab_user_id if current_user is not None else None,
+        initiator_username=current_user.username if current_user is not None else None,
         branch_name=request.branch_name,
         target_branch=request.target_branch,
         priority=request.priority,

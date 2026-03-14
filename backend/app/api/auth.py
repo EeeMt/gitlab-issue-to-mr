@@ -37,6 +37,7 @@ from app.dependencies.auth import (
     require_authenticated_context,
 )
 from app.models import AuthAuditLog, User, UserSession
+from app.page_permissions import get_page_permissions
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -499,6 +500,7 @@ async def me(
             "break_glass_enabled": settings.break_glass_enabled,
             "break_glass_username": settings.auth_break_glass_username if settings.break_glass_enabled else None,
             "authenticated": False,
+            "page_permissions": get_page_permissions(None, settings),
             "user": None,
         }
 
@@ -508,6 +510,7 @@ async def me(
             "break_glass_enabled": settings.break_glass_enabled,
             "break_glass_username": settings.auth_break_glass_username if settings.break_glass_enabled else None,
             "authenticated": False,
+            "page_permissions": get_page_permissions(None, settings),
             "user": None,
         }
 
@@ -516,6 +519,7 @@ async def me(
         "break_glass_enabled": settings.break_glass_enabled,
         "break_glass_username": settings.auth_break_glass_username if settings.break_glass_enabled else None,
         "authenticated": True,
+        "page_permissions": get_page_permissions(current_user, settings),
         "user": {
             "id": current_user.id,
             "gitlab_user_id": current_user.gitlab_user_id,

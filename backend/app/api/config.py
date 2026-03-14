@@ -21,6 +21,7 @@ from app.core.oidc import (
     get_oidc_discovery_document_for_settings,
 )
 from app.database import get_db
+from app.dependencies.auth import require_admin_user, require_page_access
 from app.runtime_config import (
     load_runtime_config_from_db,
     reset_all_runtime_config_overrides,
@@ -37,6 +38,10 @@ class RuntimeConfigSection(BaseModel):
     task_timeout: int
     scheduler_interval: int
     default_target_branch: str
+    allow_monitor_for_users: bool
+    allow_schedule_overview_for_users: bool
+    allow_analytics_for_users: bool
+    allow_oidc_diagnostics_for_users: bool
 
 
 class AuthConfigSection(BaseModel):
@@ -63,6 +68,10 @@ class RuntimeConfigUpdate(BaseModel):
     task_timeout: Optional[int] = None
     scheduler_interval: Optional[int] = None
     default_target_branch: Optional[str] = None
+    allow_monitor_for_users: Optional[bool] = None
+    allow_schedule_overview_for_users: Optional[bool] = None
+    allow_analytics_for_users: Optional[bool] = None
+    allow_oidc_diagnostics_for_users: Optional[bool] = None
 
 
 class AuthConfigUpdate(BaseModel):
@@ -136,6 +145,10 @@ def _serialize_effective_config() -> ConfigResponse:
             task_timeout=settings.task_timeout,
             scheduler_interval=settings.scheduler_interval,
             default_target_branch=settings.default_target_branch,
+            allow_monitor_for_users=settings.allow_monitor_for_users,
+            allow_schedule_overview_for_users=settings.allow_schedule_overview_for_users,
+            allow_analytics_for_users=settings.allow_analytics_for_users,
+            allow_oidc_diagnostics_for_users=settings.allow_oidc_diagnostics_for_users,
         ),
         auth=AuthConfigSection(
             oidc_enabled=settings.oidc_enabled,
@@ -225,11 +238,17 @@ def _validate_config_value(key: str, value: object) -> object:
             )
         return value.strip()
 
-    if key == "oidc_enabled":
+    if key in {
+        "oidc_enabled",
+        "allow_monitor_for_users",
+        "allow_schedule_overview_for_users",
+        "allow_analytics_for_users",
+        "allow_oidc_diagnostics_for_users",
+    }:
         if not isinstance(value, bool):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="oidc_enabled must be a boolean",
+                detail=f"{key} must be a boolean",
             )
         return value
 
@@ -357,7 +376,10 @@ def _build_endpoint_checks(discovery: dict[str, Any]) -> list[OIDCDiagnosticsChe
 
 
 @router.get("/config")
-async def get_config(db: AsyncSession = Depends(get_db)):
+async def get_config(
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_admin_user),
+):
     """Get current configuration."""
     await load_runtime_config_from_db(db)
     return _serialize_effective_config()
@@ -367,6 +389,7 @@ async def get_config(db: AsyncSession = Depends(get_db)):
 async def update_config(
     config_update: ConfigUpdate,
     db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_admin_user),
 ):
     """Update persisted configuration overrides."""
     await load_runtime_config_from_db(db)
@@ -407,7 +430,10 @@ async def update_config(
 
 
 @router.post("/config/reset")
-async def reset_config(db: AsyncSession = Depends(get_db)):
+async def reset_config(
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_admin_user),
+):
     """Reset all persisted configuration overrides back to env/default values."""
     await reset_all_runtime_config_overrides(db)
     await load_runtime_config_from_db(db)
@@ -416,7 +442,11 @@ async def reset_config(db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/config/{key}")
-async def reset_config_key(key: str, db: AsyncSession = Depends(get_db)):
+async def reset_config_key(
+    key: str,
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_admin_user),
+):
     """Reset one persisted configuration override back to env/default value."""
     if key not in get_runtime_config_types():
         raise HTTPException(
@@ -434,6 +464,7 @@ async def reset_config_key(key: str, db: AsyncSession = Depends(get_db)):
 async def test_oidc_config(
     request: OIDCConfigTestRequest,
     db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_admin_user),
 ):
     """Validate OIDC connectivity with current or unsaved config values."""
     await load_runtime_config_from_db(db)
@@ -466,7 +497,10 @@ async def test_oidc_config(
 
 
 @router.get("/config/oidc/diagnostics", response_model=OIDCDiagnosticsResponse)
-async def get_oidc_diagnostics(db: AsyncSession = Depends(get_db)):
+async def get_oidc_diagnostics(
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_page_access("oidc_diagnostics")),
+):
     """Return a richer OIDC diagnostics snapshot for operators."""
     await load_runtime_config_from_db(db)
     settings = get_effective_settings()

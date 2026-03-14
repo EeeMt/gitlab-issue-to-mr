@@ -1,0 +1,698 @@
+<template>
+  <div class="analytics-page">
+    <n-spin :show="initialLoading" description="Loading analytics...">
+      <n-space vertical :size="20">
+        <div class="analytics-page__hero">
+          <div>
+            <h2 class="analytics-page__title">Task Analytics</h2>
+            <p class="analytics-page__subtitle">
+              Track workload, reliability, execution speed, queueing pressure, and failure patterns over recent time windows.
+            </p>
+          </div>
+          <n-space align="center" wrap>
+            <n-select
+              v-model:value="windowDays"
+              :options="windowOptions"
+              style="width: 140px"
+            />
+            <n-button @click="refresh" :loading="loading">Refresh</n-button>
+          </n-space>
+        </div>
+
+        <n-alert type="info" :show-icon="false">
+          Project analytics include historical tasks. Initiator analytics only include tasks created after initiator tracking was introduced.
+        </n-alert>
+
+        <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 2 : 3" :x-gap="16" :y-gap="16">
+          <n-gi v-for="item in summaryItems" :key="item.label">
+            <n-card size="small" class="analytics-summary-card" :bordered="false">
+              <div class="analytics-summary-card__label">{{ item.label }}</div>
+              <div class="analytics-summary-card__value">{{ item.value }}</div>
+              <div v-if="item.note" class="analytics-summary-card__note">{{ item.note }}</div>
+            </n-card>
+          </n-gi>
+        </n-grid>
+
+        <n-space vertical :size="16">
+          <n-card class="analytics-card" :bordered="false">
+            <template #header>
+              <div class="analytics-card__header">
+                <div>
+                  <div class="analytics-card__title">Task Volume Trend</div>
+                  <div class="analytics-card__subtitle">Daily task count across the selected window</div>
+                </div>
+              </div>
+            </template>
+
+            <div v-if="taskTrendBars.length" class="trend-chart-scroll">
+              <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
+                <div v-for="bar in taskTrendBars" :key="bar.key" class="trend-chart__item">
+                  <div class="trend-chart__count">{{ bar.displayValue }}</div>
+                  <div class="trend-chart__bar-wrap">
+                    <div class="trend-chart__bar" :style="{ height: `${bar.heightPercent}%` }" />
+                  </div>
+                  <div class="trend-chart__label">{{ bar.label }}</div>
+                </div>
+              </div>
+            </div>
+          </n-card>
+
+          <n-card class="analytics-card" :bordered="false">
+            <template #header>
+              <div class="analytics-card__header">
+                <div>
+                  <div class="analytics-card__title">Changed Lines Trend</div>
+                  <div class="analytics-card__subtitle">Daily total changed lines (additions + deletions)</div>
+                </div>
+              </div>
+            </template>
+
+            <div v-if="changeTrendBars.length" class="trend-chart-scroll">
+              <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
+                <div v-for="bar in changeTrendBars" :key="bar.key" class="trend-chart__item">
+                  <div class="trend-chart__count">{{ bar.displayValue }}</div>
+                  <div class="trend-chart__bar-wrap">
+                    <div class="trend-chart__bar trend-chart__bar--secondary" :style="{ height: `${bar.heightPercent}%` }" />
+                  </div>
+                  <div class="trend-chart__label">{{ bar.label }}</div>
+                </div>
+              </div>
+            </div>
+          </n-card>
+
+          <n-card class="analytics-card" :bordered="false">
+            <template #header>
+              <div class="analytics-card__header">
+                <div>
+                  <div class="analytics-card__title">Execution Duration Trend</div>
+                  <div class="analytics-card__subtitle">Average runtime for finished tasks each day</div>
+                </div>
+              </div>
+            </template>
+
+            <div v-if="durationTrendBars.length" class="trend-chart-scroll">
+              <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
+                <div v-for="bar in durationTrendBars" :key="bar.key" class="trend-chart__item">
+                  <div class="trend-chart__count">{{ bar.displayValue }}</div>
+                  <div class="trend-chart__bar-wrap">
+                    <div class="trend-chart__bar trend-chart__bar--accent" :style="{ height: `${bar.heightPercent}%` }" />
+                  </div>
+                  <div class="trend-chart__label">{{ bar.label }}</div>
+                </div>
+              </div>
+            </div>
+          </n-card>
+        </n-space>
+
+        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
+          <n-gi>
+            <n-card class="analytics-card" :bordered="false">
+              <template #header>
+                <div class="analytics-card__header">
+                  <div>
+                    <div class="analytics-card__title">By Project</div>
+                    <div class="analytics-card__subtitle">Success rate and timing performance per project</div>
+                  </div>
+                </div>
+              </template>
+
+              <n-data-table
+                :columns="projectColumns"
+                :data="analytics?.projects || []"
+                :bordered="false"
+                :pagination="{ pageSize: 8 }"
+                :scroll-x="isMobile ? undefined : 980"
+              />
+            </n-card>
+          </n-gi>
+
+          <n-gi>
+            <n-card class="analytics-card" :bordered="false">
+              <template #header>
+                <div class="analytics-card__header">
+                  <div>
+                    <div class="analytics-card__title">By Initiator</div>
+                    <div class="analytics-card__subtitle">Only tasks with tracked initiator metadata are included</div>
+                  </div>
+                </div>
+              </template>
+
+              <n-data-table
+                :columns="initiatorColumns"
+                :data="analytics?.initiators || []"
+                :bordered="false"
+                :pagination="{ pageSize: 8 }"
+                :scroll-x="isMobile ? undefined : 900"
+              />
+            </n-card>
+          </n-gi>
+        </n-grid>
+
+        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
+          <n-gi>
+            <n-card class="analytics-card" :bordered="false">
+              <template #header>
+                <div class="analytics-card__header">
+                  <div>
+                    <div class="analytics-card__title">Queue Wait by Priority</div>
+                    <div class="analytics-card__subtitle">Average and worst-case wait before execution starts</div>
+                  </div>
+                </div>
+              </template>
+
+              <n-data-table
+                :columns="priorityColumns"
+                :data="analytics?.priority_waits || []"
+                :bordered="false"
+                :pagination="false"
+              />
+            </n-card>
+          </n-gi>
+
+          <n-gi>
+            <n-card class="analytics-card" :bordered="false">
+              <template #header>
+                <div class="analytics-card__header">
+                  <div>
+                    <div class="analytics-card__title">Failure Breakdown</div>
+                    <div class="analytics-card__subtitle">Categorized from failed task error messages in the selected window</div>
+                  </div>
+                </div>
+              </template>
+
+              <n-data-table
+                :columns="errorColumns"
+                :data="analytics?.error_breakdown || []"
+                :bordered="false"
+                :pagination="{ pageSize: 8 }"
+                :scroll-x="isMobile ? undefined : 760"
+              />
+            </n-card>
+          </n-gi>
+        </n-grid>
+      </n-space>
+    </n-spin>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, h, onMounted, ref, watch } from 'vue'
+import {
+  NAlert,
+  NButton,
+  NCard,
+  NDataTable,
+  NGi,
+  NGrid,
+  NSelect,
+  NSpace,
+  NSpin,
+  useMessage,
+  type DataTableColumns
+} from 'naive-ui'
+import { useWindowSize } from '@vueuse/core'
+import {
+  getAnalytics,
+  type AnalyticsErrorRow,
+  type AnalyticsInitiatorRow,
+  type AnalyticsPriorityWaitRow,
+  type AnalyticsProjectRow,
+  type AnalyticsResponse
+} from '../api'
+
+type TrendBar = {
+  key: string
+  label: string
+  value: number
+  displayValue: string
+  heightPercent: number
+}
+
+const message = useMessage()
+const { width } = useWindowSize()
+const isMobile = computed(() => width.value < 768)
+
+const analytics = ref<AnalyticsResponse | null>(null)
+const loading = ref(false)
+const hasLoadedOnce = ref(false)
+const windowDays = ref<number>(30)
+
+const windowOptions = [
+  { label: 'Last 7 days', value: 7 },
+  { label: 'Last 30 days', value: 30 },
+  { label: 'Last 90 days', value: 90 }
+]
+
+const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
+const trendChartMinWidth = computed(() => {
+  const points = analytics.value?.trends.length || 0
+  const barWidth = isMobile.value ? 24 : 32
+  const gap = isMobile.value ? 8 : 10
+  return `${Math.max(points * barWidth + Math.max(points - 1, 0) * gap, isMobile.value ? 0 : 760)}px`
+})
+
+function formatShortDate(value: string) {
+  return new Intl.DateTimeFormat('en-GB', { month: '2-digit', day: '2-digit' }).format(new Date(value))
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) {
+    return '—'
+  }
+  return new Intl.DateTimeFormat('en-GB', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(new Date(value))
+}
+
+function formatDuration(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return '—'
+  }
+
+  const seconds = Math.max(Math.round(value), 0)
+  if (seconds < 60) {
+    return `${seconds}s`
+  }
+
+  if (seconds < 3600) {
+    const minutes = Math.floor(seconds / 60)
+    const remainder = seconds % 60
+    return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`
+  }
+
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`
+}
+
+function formatPercentage(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return '—'
+  }
+  return `${(value * 100).toFixed(1)}%`
+}
+
+function buildTrendBars(values: { key: string; label: string; value: number; displayValue?: string }[]) {
+  const max = Math.max(...values.map((item) => item.value), 1)
+  return values.map<TrendBar>((item) => ({
+    ...item,
+    displayValue: item.displayValue ?? String(item.value),
+    heightPercent: item.value === 0 ? 10 : Math.max((item.value / max) * 100, 14)
+  }))
+}
+
+const summaryItems = computed(() => {
+  const summary = analytics.value?.summary
+  if (!summary) {
+    return []
+  }
+
+  return [
+    { label: 'Tasks', value: String(summary.total_tasks), note: `${windowDays.value}-day window` },
+    {
+      label: 'Success Rate',
+      value: formatPercentage(summary.success_rate),
+      note:
+        summary.finished_tasks > 0
+          ? `${summary.completed_tasks} completed / ${summary.failed_tasks} failed / ${summary.cancelled_tasks} cancelled`
+          : 'No finished tasks yet'
+    },
+    {
+      label: 'Avg Duration',
+      value: formatDuration(summary.avg_execution_seconds),
+      note:
+        summary.max_execution_seconds !== null
+          ? `Max ${formatDuration(summary.max_execution_seconds)}`
+          : 'No execution data yet'
+    },
+    {
+      label: 'Avg Queue Wait',
+      value: formatDuration(summary.avg_queue_wait_seconds),
+      note:
+        summary.max_queue_wait_seconds !== null
+          ? `Max ${formatDuration(summary.max_queue_wait_seconds)}`
+          : 'No queue wait data yet'
+    },
+    {
+      label: 'Changed Lines',
+      value: String(summary.total_changes),
+      note: `+${summary.total_additions} / -${summary.total_deletions}`
+    },
+    {
+      label: 'Tracked Initiators',
+      value: String(summary.tracked_initiator_tasks),
+      note: summary.initiator_tracking_started_at
+        ? `Since ${formatDateTime(summary.initiator_tracking_started_at)}`
+        : 'No tracked initiators yet'
+    }
+  ]
+})
+
+const taskTrendBars = computed(() =>
+  buildTrendBars(
+    (analytics.value?.trends || []).map((point) => ({
+      key: `${point.date}-tasks`,
+      label: formatShortDate(point.date),
+      value: point.task_count,
+      displayValue: String(point.task_count)
+    }))
+  )
+)
+
+const changeTrendBars = computed(() =>
+  buildTrendBars(
+    (analytics.value?.trends || []).map((point) => ({
+      key: `${point.date}-changes`,
+      label: formatShortDate(point.date),
+      value: point.total_changes,
+      displayValue: String(point.total_changes)
+    }))
+  )
+)
+
+const durationTrendBars = computed(() =>
+  buildTrendBars(
+    (analytics.value?.trends || []).map((point) => ({
+      key: `${point.date}-duration`,
+      label: formatShortDate(point.date),
+      value: point.avg_execution_seconds ?? 0,
+      displayValue: formatDuration(point.avg_execution_seconds)
+    }))
+  )
+)
+
+const projectColumns: DataTableColumns<AnalyticsProjectRow> = [
+  {
+    title: 'Project',
+    key: 'project_name',
+    minWidth: 180,
+    render: (row) =>
+      h('div', { class: 'analytics-table__primary' }, [
+        h('div', row.project_name),
+        row.project_path_with_namespace
+          ? h('div', { class: 'analytics-table__secondary' }, row.project_path_with_namespace)
+          : null
+      ])
+  },
+  { title: 'Tasks', key: 'task_count', width: 80 },
+  {
+    title: 'Success',
+    key: 'success_rate',
+    width: 110,
+    render: (row) => formatPercentage(row.success_rate)
+  },
+  {
+    title: 'Avg Duration',
+    key: 'avg_execution_seconds',
+    width: 120,
+    render: (row) => formatDuration(row.avg_execution_seconds)
+  },
+  {
+    title: 'Avg Wait',
+    key: 'avg_queue_wait_seconds',
+    width: 120,
+    render: (row) => formatDuration(row.avg_queue_wait_seconds)
+  },
+  {
+    title: 'Changes',
+    key: 'total_changes',
+    width: 110,
+    render: (row) =>
+      h('div', { class: 'analytics-table__primary' }, [
+        h('div', String(row.total_changes)),
+        h('div', { class: 'analytics-table__secondary' }, `+${row.additions} / -${row.deletions}`)
+      ])
+  },
+  {
+    title: 'Last Task',
+    key: 'last_task_at',
+    width: 150,
+    render: (row) => formatDateTime(row.last_task_at)
+  }
+]
+
+const initiatorColumns: DataTableColumns<AnalyticsInitiatorRow> = [
+  {
+    title: 'Initiator',
+    key: 'initiator_username',
+    minWidth: 160,
+    render: (row) =>
+      h('div', { class: 'analytics-table__primary' }, [
+        h('div', row.initiator_username),
+        row.initiator_gitlab_user_id !== null
+          ? h('div', { class: 'analytics-table__secondary' }, `GitLab ID: ${row.initiator_gitlab_user_id}`)
+          : null
+      ])
+  },
+  { title: 'Tasks', key: 'task_count', width: 80 },
+  {
+    title: 'Success',
+    key: 'success_rate',
+    width: 110,
+    render: (row) => formatPercentage(row.success_rate)
+  },
+  {
+    title: 'Avg Duration',
+    key: 'avg_execution_seconds',
+    width: 120,
+    render: (row) => formatDuration(row.avg_execution_seconds)
+  },
+  {
+    title: 'Avg Wait',
+    key: 'avg_queue_wait_seconds',
+    width: 120,
+    render: (row) => formatDuration(row.avg_queue_wait_seconds)
+  },
+  {
+    title: 'Changes',
+    key: 'total_changes',
+    width: 110,
+    render: (row) =>
+      h('div', { class: 'analytics-table__primary' }, [
+        h('div', String(row.total_changes)),
+        h('div', { class: 'analytics-table__secondary' }, `+${row.additions} / -${row.deletions}`)
+      ])
+  },
+  {
+    title: 'Last Task',
+    key: 'last_task_at',
+    width: 150,
+    render: (row) => formatDateTime(row.last_task_at)
+  }
+]
+
+const priorityColumns: DataTableColumns<AnalyticsPriorityWaitRow> = [
+  { title: 'Priority', key: 'priority', width: 90 },
+  { title: 'Started Tasks', key: 'task_count', width: 120 },
+  {
+    title: 'Avg Wait',
+    key: 'avg_queue_wait_seconds',
+    width: 130,
+    render: (row) => formatDuration(row.avg_queue_wait_seconds)
+  },
+  {
+    title: 'Max Wait',
+    key: 'max_queue_wait_seconds',
+    width: 130,
+    render: (row) => formatDuration(row.max_queue_wait_seconds)
+  }
+]
+
+const errorColumns: DataTableColumns<AnalyticsErrorRow> = [
+  { title: 'Category', key: 'category', width: 130 },
+  { title: 'Failures', key: 'count', width: 90 },
+  {
+    title: 'Share',
+    key: 'share_of_failed',
+    width: 100,
+    render: (row) => formatPercentage(row.share_of_failed)
+  },
+  {
+    title: 'Example',
+    key: 'sample_message',
+    minWidth: 280,
+    render: (row) => row.sample_message || '—'
+  }
+]
+
+async function fetchAnalytics() {
+  loading.value = true
+  try {
+    analytics.value = await getAnalytics(windowDays.value)
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || 'Failed to load analytics')
+  } finally {
+    hasLoadedOnce.value = true
+    loading.value = false
+  }
+}
+
+function refresh() {
+  fetchAnalytics()
+}
+
+watch(windowDays, () => {
+  if (hasLoadedOnce.value) {
+    fetchAnalytics()
+  }
+})
+
+onMounted(() => {
+  fetchAnalytics()
+})
+</script>
+
+<style scoped>
+.analytics-page {
+  max-width: 1280px;
+}
+
+.analytics-page__hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.analytics-page__title {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.analytics-page__subtitle {
+  margin: 8px 0 0;
+  color: rgba(15, 23, 42, 0.68);
+  max-width: 760px;
+}
+
+.analytics-summary-card,
+.analytics-card {
+  border-radius: 18px;
+}
+
+.analytics-summary-card {
+  background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
+}
+
+.analytics-summary-card__label {
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.6);
+}
+
+.analytics-summary-card__value {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--n-text-color-1);
+}
+
+.analytics-summary-card__note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.56);
+}
+
+.analytics-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.analytics-card__title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.analytics-card__subtitle {
+  margin-top: 4px;
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.58);
+}
+
+.trend-chart {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(24px, 1fr));
+  gap: 10px;
+  align-items: end;
+  min-height: 220px;
+}
+
+.trend-chart-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 6px;
+}
+
+.trend-chart__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.trend-chart__count {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.7);
+}
+
+.trend-chart__bar-wrap {
+  width: 100%;
+  height: 150px;
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  background: rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.trend-chart__bar {
+  width: 100%;
+  background: linear-gradient(180deg, rgba(32, 128, 240, 0.92), rgba(32, 128, 240, 0.55));
+  border-radius: 10px 10px 0 0;
+}
+
+.trend-chart__bar--secondary {
+  background: linear-gradient(180deg, rgba(24, 160, 88, 0.92), rgba(24, 160, 88, 0.52));
+}
+
+.trend-chart__bar--accent {
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.92), rgba(245, 158, 11, 0.52));
+}
+
+.trend-chart__label {
+  font-size: 11px;
+  color: rgba(15, 23, 42, 0.62);
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+
+.analytics-table__primary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.analytics-table__secondary {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.58);
+}
+
+@media (max-width: 768px) {
+  .analytics-page__title {
+    font-size: 24px;
+  }
+
+  .trend-chart__label {
+    writing-mode: horizontal-tb;
+    transform: none;
+  }
+}
+</style>

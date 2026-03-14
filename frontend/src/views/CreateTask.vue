@@ -160,10 +160,10 @@
 
             <div class="create-task-form__actions">
               <n-space justify="end" wrap>
-                <n-button secondary @click="handleReset">
+                <n-button secondary strong round @click="handleReset">
                   Reset
                 </n-button>
-                <n-button type="primary" @click="handleSubmit" :loading="submitting">
+                <n-button type="primary" strong round @click="handleSubmit" :loading="submitting">
                   Create Task
                 </n-button>
               </n-space>

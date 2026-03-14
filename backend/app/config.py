@@ -14,6 +14,10 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "task_timeout": int,
     "scheduler_interval": int,
     "default_target_branch": str,
+    "allow_monitor_for_users": bool,
+    "allow_schedule_overview_for_users": bool,
+    "allow_analytics_for_users": bool,
+    "allow_oidc_diagnostics_for_users": bool,
     "oidc_enabled": bool,
     "oidc_issuer_url": str,
     "oidc_client_id": str,
@@ -91,6 +95,10 @@ class Settings(BaseSettings):
     task_timeout: int = Field(default=1800)  # 30 minutes
     scheduler_interval: int = Field(default=5)  # seconds
     default_target_branch: str = Field(default="main")
+    allow_monitor_for_users: bool = Field(default=False)
+    allow_schedule_overview_for_users: bool = Field(default=False)
+    allow_analytics_for_users: bool = Field(default=False)
+    allow_oidc_diagnostics_for_users: bool = Field(default=False)
 
     # Alert Configuration
     alert_webhook_url: Optional[str] = Field(default=None)  # Slack/Discord webhook URL
