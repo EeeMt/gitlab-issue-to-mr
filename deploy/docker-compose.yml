@@ -13,6 +13,7 @@ services:
       - gimr-network
 
   backend:
+    image: deploy-backend:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile.backend
@@ -27,6 +28,7 @@ services:
       - DOCKER_TLS_CA=
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
+      - AUTO_MIGRATE=false
     depends_on:
       - postgres
     volumes:
@@ -36,9 +38,7 @@ services:
       - gimr-network
 
   scheduler:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.backend
+    image: deploy-backend:latest
     container_name: gimr-scheduler
     command: ["python3", "-m", "app.scheduler_service"]
     env_file:
@@ -49,6 +49,7 @@ services:
       - DOCKER_TLS_CA=
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
+      - AUTO_MIGRATE=true
     depends_on:
       - postgres
     volumes:

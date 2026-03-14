@@ -1,0 +1,115 @@
+"""GitLab OIDC client helpers."""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from typing import Any
+from urllib.parse import urlencode
+
+import httpx
+import jwt
+from jwt import PyJWKClient
+
+from app.config import get_settings
+
+_discovery_cache: dict[str, Any] = {"expires_at": 0.0, "document": None}
+
+
+class OIDCConfigurationError(RuntimeError):
+    """OIDC is not configured correctly."""
+
+
+def ensure_oidc_enabled() -> None:
+    settings = get_settings()
+    if not settings.oidc_enabled:
+        raise OIDCConfigurationError("OIDC is disabled")
+    if not settings.oidc_issuer_url or not settings.oidc_client_id or not settings.oidc_client_secret:
+        raise OIDCConfigurationError("OIDC settings are incomplete")
+
+
+async def get_oidc_discovery_document() -> dict[str, Any]:
+    ensure_oidc_enabled()
+    now = time.time()
+    if _discovery_cache["document"] and _discovery_cache["expires_at"] > now:
+        return _discovery_cache["document"]
+
+    settings = get_settings()
+    issuer = settings.oidc_issuer_url.rstrip("/")
+    discovery_url = f"{issuer}/.well-known/openid-configuration"
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(discovery_url)
+        response.raise_for_status()
+        document = response.json()
+
+    _discovery_cache["document"] = document
+    _discovery_cache["expires_at"] = now + 300
+    return document
+
+
+async def build_authorization_url(state: str, nonce: str) -> str:
+    settings = get_settings()
+    discovery = await get_oidc_discovery_document()
+    params = {
+        "client_id": settings.oidc_client_id,
+        "redirect_uri": settings.oidc_redirect_uri,
+        "response_type": "code",
+        "scope": "openid profile email",
+        "state": state,
+        "nonce": nonce,
+    }
+    return f"{discovery['authorization_endpoint']}?{urlencode(params)}"
+
+
+async def exchange_code_for_tokens(code: str) -> dict[str, Any]:
+    settings = get_settings()
+    discovery = await get_oidc_discovery_document()
+    payload = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": settings.oidc_redirect_uri,
+        "client_id": settings.oidc_client_id,
+        "client_secret": settings.oidc_client_secret,
+    }
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.post(
+            discovery["token_endpoint"],
+            data=payload,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def fetch_userinfo(access_token: str) -> dict[str, Any]:
+    discovery = await get_oidc_discovery_document()
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(
+            discovery["userinfo_endpoint"],
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def validate_id_token(id_token: str, nonce: str) -> dict[str, Any]:
+    settings = get_settings()
+    discovery = await get_oidc_discovery_document()
+
+    def decode_token() -> dict[str, Any]:
+        jwk_client = PyJWKClient(discovery["jwks_uri"])
+        signing_key = jwk_client.get_signing_key_from_jwt(id_token)
+        return jwt.decode(
+            id_token,
+            signing_key.key,
+            algorithms=["RS256", "RS384", "RS512"],
+            audience=settings.oidc_client_id,
+            issuer=discovery["issuer"],
+        )
+
+    claims = await asyncio.to_thread(decode_token)
+    if claims.get("nonce") != nonce:
+        raise jwt.InvalidTokenError("OIDC nonce mismatch")
+    return claims

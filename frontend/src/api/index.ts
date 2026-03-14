@@ -2,8 +2,24 @@ import axios from 'axios'
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 30000
+  timeout: 30000,
+  withCredentials: true
 })
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (
+      error?.response?.status === 401 &&
+      typeof window !== 'undefined' &&
+      !window.location.pathname.startsWith('/login')
+    ) {
+      const next = `${window.location.pathname}${window.location.search}`
+      window.location.assign(`/login?next=${encodeURIComponent(next)}`)
+    }
+    return Promise.reject(error)
+  }
+)
 
 // Task types
 export interface Task {
@@ -102,6 +118,22 @@ export interface Config {
   default_target_branch: string
 }
 
+export interface AuthUser {
+  id: number
+  gitlab_user_id: number
+  username: string
+  display_name: string | null
+  email: string | null
+  avatar_url: string | null
+  platform_role: string
+}
+
+export interface AuthStatus {
+  oidc_enabled: boolean
+  authenticated: boolean
+  user: AuthUser | null
+}
+
 // API functions
 export async function getTasks(params?: { status?: string; project_id?: number }): Promise<Task[]> {
   const response = await api.get('/tasks', { params })
@@ -173,6 +205,15 @@ export async function updateConfig(config: Partial<Config>): Promise<Config> {
 export async function resetConfig(): Promise<Config> {
   const response = await api.post('/config/reset')
   return response.data
+}
+
+export async function getAuthStatus(): Promise<AuthStatus> {
+  const response = await api.get('/auth/me')
+  return response.data
+}
+
+export async function logout(): Promise<void> {
+  await api.post('/auth/logout')
 }
 
 // Manual task creation APIs

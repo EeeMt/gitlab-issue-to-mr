@@ -1,7 +1,13 @@
 <template>
   <n-config-provider>
     <n-message-provider>
-      <n-layout has-sider position="absolute" style="top: 0; bottom: 0" :native-scrollbar="false" class="app-shell">
+      <div v-if="authState.loading && !authState.initialized" class="app-loading">
+        <n-spin size="large" />
+      </div>
+
+      <router-view v-else-if="!showShell" />
+
+      <n-layout v-else has-sider position="absolute" style="top: 0; bottom: 0" :native-scrollbar="false" class="app-shell">
         <n-layout-sider
           v-if="!isMobile"
           bordered
@@ -34,6 +40,27 @@
             :value="activeKey"
             @update:value="handleMenuUpdate"
           />
+
+          <div v-if="authState.oidcEnabled && authState.authenticated && !collapsed" class="nav-user-panel">
+            <div class="nav-user-panel__identity">
+              <n-avatar
+                round
+                size="small"
+                :src="authState.user?.avatar_url || undefined"
+              >
+                {{ userInitial }}
+              </n-avatar>
+              <div class="nav-user-panel__copy">
+                <n-text strong>{{ userDisplayName }}</n-text>
+                <n-text depth="3" class="nav-user-panel__role">
+                  {{ authState.user?.platform_role === 'platform_admin' ? 'Admin' : 'Signed in with GitLab' }}
+                </n-text>
+              </div>
+            </div>
+            <n-button tertiary size="small" @click="handleLogout">
+              Logout
+            </n-button>
+          </div>
         </n-layout-sider>
 
         <n-drawer v-if="isMobile" v-model:show="showDrawer" :width="288" placement="left">
@@ -58,6 +85,23 @@
               :value="activeKey"
               @update:value="(key: string) => { handleMenuUpdate(key); showDrawer = false }"
             />
+
+            <div v-if="authState.oidcEnabled && authState.authenticated" class="mobile-user-panel">
+              <div class="nav-user-panel__identity">
+                <n-avatar round size="small" :src="authState.user?.avatar_url || undefined">
+                  {{ userInitial }}
+                </n-avatar>
+                <div class="nav-user-panel__copy">
+                  <n-text strong>{{ userDisplayName }}</n-text>
+                  <n-text depth="3" class="nav-user-panel__role">
+                    {{ authState.user?.platform_role === 'platform_admin' ? 'Admin' : 'GitLab user' }}
+                  </n-text>
+                </div>
+              </div>
+              <n-button tertiary size="small" @click="handleLogout">
+                Logout
+              </n-button>
+            </div>
           </n-drawer-content>
         </n-drawer>
 
@@ -74,7 +118,9 @@
                 <n-text strong class="mobile-header__title">{{ currentPageLabel }}</n-text>
               </div>
             </div>
-            <div class="mobile-header__badge">AI</div>
+            <div class="mobile-header__badge">
+              {{ authState.oidcEnabled && authState.authenticated ? userInitial : 'AI' }}
+            </div>
           </div>
 
           <n-layout content-style="padding: 20px;" :native-scrollbar="false" class="app-shell__content">
@@ -89,8 +135,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, ref } from 'vue'
+import { computed, h, onMounted, ref } from 'vue'
 import {
+  NAvatar,
   NButton,
   NConfigProvider,
   NDrawer,
@@ -100,12 +147,21 @@ import {
   NLayoutSider,
   NMenu,
   NMessageProvider,
+  NSpin,
   NText
 } from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
-import { GridOutline, MenuOutline, RocketOutline, SettingsOutline, SpeedometerOutline } from '@vicons/ionicons5'
+import {
+  AddCircleOutline,
+  GridOutline,
+  MenuOutline,
+  RocketOutline,
+  SettingsOutline,
+  SpeedometerOutline
+} from '@vicons/ionicons5'
 import { useWindowSize } from '@vueuse/core'
+import { authState, initializeAuth, isAdmin, logoutAndClearAuth } from './auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -116,38 +172,65 @@ const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
 const activeKey = computed(() => route.name as string)
+const isLoginRoute = computed(() => route.name === 'Login')
+const showShell = computed(() => !isLoginRoute.value)
 
 const menuLabels: Record<string, string> = {
   Dashboard: 'Dashboard',
+  CreateTask: 'Create Task',
   Monitor: 'Monitor',
   Config: 'Configuration'
 }
 
 const currentPageLabel = computed(() => menuLabels[activeKey.value] || 'Navigation')
+const userDisplayName = computed(() => authState.user?.display_name || authState.user?.username || 'GitLab user')
+const userInitial = computed(() => userDisplayName.value.slice(0, 1).toUpperCase())
 
 const renderIcon = (icon: any) => () => h(NIcon, null, { default: () => h(icon) })
 
-const menuOptions: MenuOption[] = [
-  {
-    label: 'Dashboard',
-    key: 'Dashboard',
-    icon: renderIcon(GridOutline)
-  },
-  {
-    label: 'Monitor',
-    key: 'Monitor',
-    icon: renderIcon(SpeedometerOutline)
-  },
-  {
-    label: 'Config',
-    key: 'Config',
-    icon: renderIcon(SettingsOutline)
+const menuOptions = computed<MenuOption[]>(() => {
+  const items: MenuOption[] = [
+    {
+      label: 'Dashboard',
+      key: 'Dashboard',
+      icon: renderIcon(GridOutline)
+    },
+    {
+      label: 'Create Task',
+      key: 'CreateTask',
+      icon: renderIcon(AddCircleOutline)
+    }
+  ]
+
+  if (!authState.oidcEnabled || isAdmin.value) {
+    items.push(
+      {
+        label: 'Monitor',
+        key: 'Monitor',
+        icon: renderIcon(SpeedometerOutline)
+      },
+      {
+        label: 'Config',
+        key: 'Config',
+        icon: renderIcon(SettingsOutline)
+      }
+    )
   }
-]
+
+  return items
+})
 
 function handleMenuUpdate(key: string) {
   router.push({ name: key })
 }
+
+async function handleLogout() {
+  await logoutAndClearAuth()
+}
+
+onMounted(() => {
+  initializeAuth()
+})
 </script>
 
 <style>
@@ -163,6 +246,13 @@ body {
   color: #0f172a;
 }
 
+.app-loading {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .app-shell {
   background:
     radial-gradient(circle at top left, rgba(32, 128, 240, 0.08), transparent 30%),
@@ -176,10 +266,7 @@ body {
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
 }
 
-.app-shell__main {
-  background: transparent;
-}
-
+.app-shell__main,
 .app-shell__content {
   background: transparent;
 }
@@ -268,6 +355,36 @@ body {
 
 .nav-menu .n-menu-item-content:hover {
   background: rgba(148, 163, 184, 0.12);
+}
+
+.nav-user-panel,
+.mobile-user-panel {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.nav-user-panel__identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.nav-user-panel__copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.nav-user-panel__role {
+  font-size: 12px;
+}
+
+.nav-user-panel .n-button,
+.mobile-user-panel .n-button {
+  margin-top: 10px;
 }
 
 .mobile-header {

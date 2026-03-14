@@ -48,9 +48,23 @@ class Settings(BaseSettings):
 
     # Application Configuration
     secret_key: str = Field(default="change-me-in-production")
+    session_secret: str = Field(default="change-me-in-production")
     log_level: str = Field(default="INFO")
     backend_url: str = Field(default="http://localhost:8000")  # Frontend/Backend URL for links
     auto_migrate: bool = Field(default=True)  # Auto-run migrations on startup
+
+    # OIDC Authentication
+    oidc_enabled: bool = Field(default=False)
+    oidc_issuer_url: str = Field(default="")
+    oidc_client_id: str = Field(default="")
+    oidc_client_secret: str = Field(default="")
+    oidc_redirect_uri: str = Field(default="")
+    session_cookie_name: str = Field(default="gimr_session")
+    session_ttl_seconds: int = Field(default=28800)
+    cookie_secure: bool = Field(default=True)
+    cookie_samesite: str = Field(default="lax")
+    auth_admin_usernames: str = Field(default="")
+    auth_admin_gitlab_groups: str = Field(default="")
 
     # Worker Configuration
     worker_image: str = Field(default="gitlab-issues-to-mr-worker:latest")
@@ -73,6 +87,14 @@ class Settings(BaseSettings):
     def project_root(self) -> Path:
         """Get the absolute path to the project root directory."""
         return Path(__file__).parent.parent.parent
+
+    @property
+    def admin_usernames(self) -> set[str]:
+        return {item.strip() for item in self.auth_admin_usernames.split(",") if item.strip()}
+
+    @property
+    def admin_gitlab_groups(self) -> set[str]:
+        return {item.strip() for item in self.auth_admin_gitlab_groups.split(",") if item.strip()}
 
 
 @lru_cache

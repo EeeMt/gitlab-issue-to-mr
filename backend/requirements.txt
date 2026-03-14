@@ -15,6 +15,7 @@ docker>=7.0.0
 
 # HTTP Client
 httpx>=0.26.0
+PyJWT[crypto]>=2.8.0
 
 # Environment
 python-dotenv>=1.0.0

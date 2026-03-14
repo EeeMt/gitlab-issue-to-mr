@@ -4,11 +4,12 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import close_db, init_db
+from app.dependencies.auth import require_admin_user, require_authenticated_user
 from app.migrations import run_migrations
 from app.runtime_config import load_runtime_config_from_db
 
@@ -67,7 +68,14 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:8880",
+        "http://127.0.0.1:8880",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -118,10 +126,31 @@ async def health() -> dict:
 
 
 # Import and include routers
-from app.api import webhook, tasks, containers, stats, config
+from app.api import auth, webhook, tasks, containers, stats, config
 
+app.include_router(auth.router, prefix="/api", tags=["auth"])
 app.include_router(webhook.router, prefix="/api", tags=["webhook"])
-app.include_router(tasks.router, prefix="/api", tags=["tasks"])
-app.include_router(containers.router, prefix="/api", tags=["containers"])
-app.include_router(stats.router, prefix="/api", tags=["stats"])
-app.include_router(config.router, prefix="/api", tags=["config"])
+app.include_router(
+    tasks.router,
+    prefix="/api",
+    tags=["tasks"],
+    dependencies=[Depends(require_authenticated_user)],
+)
+app.include_router(
+    containers.router,
+    prefix="/api",
+    tags=["containers"],
+    dependencies=[Depends(require_admin_user)],
+)
+app.include_router(
+    stats.router,
+    prefix="/api",
+    tags=["stats"],
+    dependencies=[Depends(require_authenticated_user)],
+)
+app.include_router(
+    config.router,
+    prefix="/api",
+    tags=["config"],
+    dependencies=[Depends(require_admin_user)],
+)
