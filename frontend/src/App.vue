@@ -17,7 +17,7 @@
           :collapsed="collapsed"
           show-trigger
           :native-scrollbar="false"
-          :content-style="collapsed ? 'padding: 18px 8px;' : 'padding: 18px 14px;'"
+          :content-style="collapsed ? 'padding: 18px 0;' : 'padding: 18px 14px;'"
           class="app-shell__sider"
           @collapse="collapsed = true"
           @expand="collapsed = false"
@@ -305,7 +305,13 @@ body {
 
 .logo--collapsed {
   justify-content: center;
-  padding: 12px 8px;
+  width: 72px;
+  margin-left: 0;
+  margin-right: 0;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .logo__mark {
@@ -355,17 +361,16 @@ body {
   margin: 4px 0;
 }
 
-.nav-menu.n-menu--collapsed .n-menu-item-content {
-  width: 56px;
-  margin-left: auto;
-  margin-right: auto;
+.nav-menu .n-menu-item-content--collapsed {
+  width: 72px;
+  min-height: 40px;
+  padding-right: 0 !important;
+  margin-left: 0;
+  margin-right: 0;
 }
 
-.nav-menu.n-menu--collapsed .n-menu-item-content-header,
-.nav-menu.n-menu--collapsed .n-menu-item-content__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.nav-menu .n-menu-item-content--collapsed .n-menu-item-content__icon {
+  margin-right: 0 !important;
 }
 
 .nav-menu .n-menu-item-content::before {
