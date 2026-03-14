@@ -3,6 +3,7 @@ import { authState, initializeAuth } from '../auth'
 import Dashboard from '../views/Dashboard.vue'
 import TaskView from '../views/TaskView.vue'
 import Monitor from '../views/Monitor.vue'
+import ScheduleOverview from '../views/ScheduleOverview.vue'
 import Config from '../views/Config.vue'
 import AccessManagement from '../views/AccessManagement.vue'
 import OidcDiagnostics from '../views/OidcDiagnostics.vue'
@@ -51,6 +52,12 @@ const router = createRouter({
       path: '/monitor',
       name: 'Monitor',
       component: Monitor,
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/schedule-overview',
+      name: 'ScheduleOverview',
+      component: ScheduleOverview,
       meta: { requiresAuth: true, requiresAdmin: true }
     },
     {

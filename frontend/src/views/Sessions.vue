@@ -12,7 +12,7 @@
         <n-button @click="fetchSessions" :loading="loading" :disabled="loading">Reload sessions</n-button>
       </div>
 
-      <n-grid :cols="isMobile ? 1 : 4" :x-gap="16" :y-gap="16">
+      <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 1 : 4" :x-gap="16" :y-gap="16">
         <n-gi v-for="item in summaryItems" :key="item.label">
           <n-card size="small" class="sessions-summary-card" :bordered="false">
             <div class="sessions-summary-card__label">{{ item.label }}</div>
@@ -26,8 +26,8 @@
         the dashboard cookie still exists.
       </n-alert>
 
-      <n-spin :show="loading">
-        <div v-if="sessions.length" class="sessions-grid">
+      <n-spin :show="initialLoading" description="Loading sessions...">
+        <div v-if="hasLoadedOnce && sessions.length" class="sessions-grid">
           <n-card
             v-for="session in sessions"
             :key="session.id"
@@ -92,7 +92,7 @@
           </n-card>
         </div>
 
-        <n-empty v-else description="No dashboard sessions found." />
+        <n-empty v-else-if="hasLoadedOnce" description="No dashboard sessions found." />
       </n-spin>
     </n-space>
   </div>
@@ -121,8 +121,10 @@ const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
 const loading = ref(false)
+const hasLoadedOnce = ref(false)
 const sessions = ref<SessionInfo[]>([])
 const revokingIds = ref<string[]>([])
+const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
 const summaryItems = computed(() => {
   const active = sessions.value.filter((session) => session.status === 'active').length
@@ -173,6 +175,7 @@ async function fetchSessions() {
   } catch (error: any) {
     message.error(error?.response?.data?.detail || 'Failed to fetch sessions')
   } finally {
+    hasLoadedOnce.value = true
     loading.value = false
   }
 }

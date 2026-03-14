@@ -140,6 +140,7 @@ import {
   GridOutline,
   LogOutOutline,
   MenuOutline,
+  CalendarOutline,
   PulseOutline,
   PeopleOutline,
   RocketOutline,
@@ -166,6 +167,7 @@ const menuLabels: Record<string, string> = {
   CreateTask: 'Create Task',
   Sessions: 'Sessions',
   Monitor: 'Monitor',
+  ScheduleOverview: 'Schedule Overview',
   Config: 'Configuration',
   AccessManagement: 'Access Management',
   OidcDiagnostics: 'OIDC Diagnostics'
@@ -205,6 +207,11 @@ const menuOptions = computed<MenuOption[]>(() => {
         label: 'Monitor',
         key: 'Monitor',
         icon: renderIcon(SpeedometerOutline)
+      },
+      {
+        label: 'Schedule Overview',
+        key: 'ScheduleOverview',
+        icon: renderIcon(CalendarOutline)
       },
       {
         label: 'Access Management',

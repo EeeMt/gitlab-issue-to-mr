@@ -18,6 +18,10 @@ function normalizeUtcInput(value: string | number | Date): string | number | Dat
   return hasTimezone ? value : `${value}Z`
 }
 
+export function parseUtcDate(value: string | number | Date): Date {
+  return new Date(normalizeUtcInput(value))
+}
+
 export function formatDateTimeUtc8(value: string | number | Date): string {
-  return UTC_PLUS_8_FORMATTER.format(new Date(normalizeUtcInput(value)))
+  return UTC_PLUS_8_FORMATTER.format(parseUtcDate(value))
 }

@@ -164,6 +164,46 @@ async def list_tasks(
     ]
 
 
+@router.get("/tasks/scheduled")
+async def list_scheduled_tasks(
+    project_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """List active scheduled tasks for queue analytics views."""
+    query = (
+        select(Task)
+        .where(
+            Task.scheduled_at.is_not(None),
+            Task.status.in_([
+                TaskStatus.PENDING,
+                TaskStatus.QUEUED,
+                TaskStatus.RUNNING,
+            ]),
+        )
+        .order_by(Task.scheduled_at.asc(), Task.priority.desc(), Task.created_at.asc())
+    )
+
+    if project_id:
+        require_project_access(project_id, access_scope)
+        query = query.where(Task.project_id == project_id)
+    elif not access_scope.is_unrestricted:
+        allowed_project_ids = access_scope.accessible_project_ids
+        if not allowed_project_ids:
+            query = query.where(false())
+        else:
+            query = query.where(Task.project_id.in_(allowed_project_ids))
+
+    result = await db.execute(query)
+    tasks = result.scalars().all()
+    project_lookup = await _build_project_lookup()
+
+    return [
+        _serialize_task(task, project_lookup.get(task.project_id))
+        for task in tasks
+    ]
+
+
 @router.get("/tasks/{task_id}")
 async def get_task(
     task_id: int,

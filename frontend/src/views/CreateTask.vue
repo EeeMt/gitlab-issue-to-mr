@@ -159,12 +159,12 @@
             </div>
 
             <div class="create-task-form__actions">
-              <n-space>
+              <n-space justify="end" wrap>
+                <n-button secondary @click="handleReset">
+                  Reset
+                </n-button>
                 <n-button type="primary" @click="handleSubmit" :loading="submitting">
                   Create Task
-                </n-button>
-                <n-button @click="handleReset">
-                  Reset
                 </n-button>
               </n-space>
             </div>
@@ -534,6 +534,13 @@ onMounted(() => {
   margin-top: 20px;
 }
 
+.create-task-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 20px;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
 .create-task-form__section-title {
   margin-bottom: 12px;
   font-size: 13px;
@@ -559,6 +566,10 @@ onMounted(() => {
   .create-task-card__header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .create-task-form__actions {
+    justify-content: stretch;
   }
 
   .create-task-page__title {

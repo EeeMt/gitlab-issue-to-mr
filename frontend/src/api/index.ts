@@ -273,6 +273,11 @@ export async function getTasks(params?: { status?: string; project_id?: number }
   return response.data
 }
 
+export async function getScheduledTasks(params?: { project_id?: number }): Promise<Task[]> {
+  const response = await api.get('/tasks/scheduled', { params })
+  return response.data
+}
+
 export async function getTask(id: number): Promise<Task> {
   const response = await api.get(`/tasks/${id}`)
   return response.data

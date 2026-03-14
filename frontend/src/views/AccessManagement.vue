@@ -19,7 +19,7 @@
         user immediately revokes their active sessions.
       </n-alert>
 
-      <n-grid :cols="isMobile ? 1 : 4" :x-gap="16" :y-gap="16">
+      <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 1 : 4" :x-gap="16" :y-gap="16">
         <n-gi v-for="item in summaryItems" :key="item.label">
           <n-card size="small" class="access-summary-card" :bordered="false">
             <div class="access-summary-card__label">{{ item.label }}</div>
@@ -54,8 +54,8 @@
           </n-space>
         </div>
 
-        <n-spin :show="usersLoading">
-          <div v-if="filteredUsers.length" class="user-management__grid">
+        <n-spin :show="initialLoading" description="Loading users...">
+          <div v-if="hasLoadedOnce && filteredUsers.length" class="user-management__grid">
             <n-card
               v-for="user in filteredUsers"
               :key="user.id"
@@ -162,7 +162,7 @@
             </n-card>
           </div>
 
-          <n-empty v-else description="No matching dashboard users yet." />
+          <n-empty v-else-if="hasLoadedOnce" description="No matching dashboard users yet." />
         </n-spin>
       </n-card>
     </n-space>
@@ -205,6 +205,7 @@ const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
 const usersLoading = ref(false)
+const hasLoadedOnce = ref(false)
 const users = ref<AdminUser[]>([])
 const userDrafts = ref<Record<number, AdminUserDraft>>({})
 const userSearch = ref('')
@@ -212,6 +213,7 @@ const roleFilter = ref<string | null>(null)
 const stateFilter = ref<string | null>(null)
 const savingUserIds = ref<number[]>([])
 const revokingUserIds = ref<number[]>([])
+const initialLoading = computed(() => usersLoading.value && !hasLoadedOnce.value)
 
 const roleOptions = [
   { label: 'Platform admin', value: 'platform_admin' },
@@ -351,6 +353,7 @@ async function fetchUsers() {
   } catch (error: any) {
     message.error(error?.response?.data?.detail || 'Failed to fetch users')
   } finally {
+    hasLoadedOnce.value = true
     usersLoading.value = false
   }
 }

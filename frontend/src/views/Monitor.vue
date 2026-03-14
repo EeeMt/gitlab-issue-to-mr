@@ -1,49 +1,51 @@
 <template>
   <div class="monitor-page">
-    <n-space vertical :size="20">
-      <div class="monitor-page__hero">
-        <div>
-          <h2 class="monitor-page__title">System Monitor</h2>
-          <p class="monitor-page__subtitle">
-            Watch global task health and currently running worker containers.
-          </p>
-        </div>
-        <n-button @click="refresh" :loading="loading">Refresh</n-button>
-      </div>
-
-      <n-grid :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
-        <n-gi v-for="item in summaryItems" :key="item.label">
-          <n-card size="small" class="monitor-summary-card" :bordered="false">
-            <div class="monitor-summary-card__label">{{ item.label }}</div>
-            <div class="monitor-summary-card__value">{{ item.value }}</div>
-          </n-card>
-        </n-gi>
-      </n-grid>
-
-      <n-card class="monitor-table-card" :bordered="false">
-        <template #header>
-          <div class="monitor-card__header">
-            <div>
-              <div class="monitor-card__title">Running Containers</div>
-              <div class="monitor-card__subtitle">Live worker containers currently visible to the backend</div>
-            </div>
+    <n-spin :show="initialLoading" description="Loading monitor...">
+      <n-space vertical :size="20">
+        <div class="monitor-page__hero">
+          <div>
+            <h2 class="monitor-page__title">System Monitor</h2>
+            <p class="monitor-page__subtitle">
+              Watch global task health and currently running worker containers.
+            </p>
           </div>
-        </template>
-        <n-data-table
-          :columns="isMobile ? mobileColumns : columns"
-          :data="containers"
-          :loading="loading"
-          :bordered="false"
-          :scroll-x="isMobile ? undefined : 660"
-        />
-      </n-card>
-    </n-space>
+          <n-button @click="refresh" :loading="loading">Refresh</n-button>
+        </div>
+
+        <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
+          <n-gi v-for="item in summaryItems" :key="item.label">
+            <n-card size="small" class="monitor-summary-card" :bordered="false">
+              <div class="monitor-summary-card__label">{{ item.label }}</div>
+              <div class="monitor-summary-card__value">{{ item.value }}</div>
+            </n-card>
+          </n-gi>
+        </n-grid>
+
+        <n-card class="monitor-table-card" :bordered="false">
+          <template #header>
+            <div class="monitor-card__header">
+              <div>
+                <div class="monitor-card__title">Running Containers</div>
+                <div class="monitor-card__subtitle">Live worker containers currently visible to the backend</div>
+              </div>
+            </div>
+          </template>
+          <n-data-table
+            :columns="isMobile ? mobileColumns : columns"
+            :data="containers"
+            :loading="loading"
+            :bordered="false"
+            :scroll-x="isMobile ? undefined : 660"
+          />
+        </n-card>
+      </n-space>
+    </n-spin>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, h } from 'vue'
-import { NCard, NButton, NDataTable, NTag, NGrid, NGi, useMessage, DataTableColumns } from 'naive-ui'
+import { NCard, NButton, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, DataTableColumns } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
 import { getStats, getContainers, type Container, type Stats } from '../api'
 
@@ -63,6 +65,7 @@ const stats = ref<Stats>({
 
 const containers = ref<Container[]>([])
 const loading = ref(false)
+const hasLoadedOnce = ref(false)
 let pollTimer: number | null = null
 
 const summaryItems = computed(() => [
@@ -73,6 +76,7 @@ const summaryItems = computed(() => [
   { label: 'Failed', value: String(stats.value.failed) },
   { label: 'Cancelled', value: String(stats.value.cancelled) }
 ])
+const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
 const columns: DataTableColumns<Container> = [
   {
@@ -142,6 +146,7 @@ async function fetchData() {
   } catch (error) {
     message.error('Failed to fetch monitor data')
   } finally {
+    hasLoadedOnce.value = true
     loading.value = false
   }
 }

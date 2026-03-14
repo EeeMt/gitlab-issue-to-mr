@@ -1,58 +1,57 @@
 <template>
   <div class="dashboard">
-    <n-space vertical :size="16">
-      <div class="dashboard__hero">
-        <div>
-          <h2 class="dashboard__title">Task Dashboard</h2>
-          <p class="dashboard__subtitle">
-            Track queued work, running jobs, and completed merge request tasks from a single view.
-          </p>
+    <n-spin :show="initialLoading" description="Loading tasks...">
+      <n-space vertical :size="16">
+        <div class="dashboard__hero">
+          <div>
+            <h2 class="dashboard__title">Task Dashboard</h2>
+            <p class="dashboard__subtitle">
+              Track queued work, running jobs, and completed merge request tasks from a single view.
+            </p>
+          </div>
+          <n-space align="center" wrap>
+            <n-select
+              v-model:value="statusFilter"
+              :options="statusOptions"
+              placeholder="Filter"
+              clearable
+              style="width: 140px"
+            />
+            <n-button @click="refreshTasks" :loading="loading" size="small">
+              Refresh
+            </n-button>
+          </n-space>
         </div>
-        <n-space align="center" wrap>
-          <n-button type="primary" @click="router.push('/create-task')" size="small">
-            Create Task
-          </n-button>
-          <n-select
-            v-model:value="statusFilter"
-            :options="statusOptions"
-            placeholder="Filter"
-            clearable
-            style="width: 140px"
+
+        <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
+          <n-gi v-for="item in summaryItems" :key="item.label">
+            <n-card size="small" class="dashboard-summary-card" :bordered="false">
+              <div class="dashboard-summary-card__label">{{ item.label }}</div>
+              <div class="dashboard-summary-card__value">{{ item.value }}</div>
+            </n-card>
+          </n-gi>
+        </n-grid>
+
+        <n-card class="dashboard-table-card" :bordered="false">
+          <n-data-table
+            :columns="columns"
+            :data="tasks"
+            :loading="loading"
+            :row-key="(row: Task) => row.id"
+            :row-props="getRowProps"
+            :pagination="pagination"
+            :bordered="false"
+            :scroll-x="isMobile ? undefined : undefined"
           />
-          <n-button @click="refreshTasks" :loading="loading" size="small">
-            Refresh
-          </n-button>
-        </n-space>
-      </div>
-
-      <n-grid :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
-        <n-gi v-for="item in summaryItems" :key="item.label">
-          <n-card size="small" class="dashboard-summary-card" :bordered="false">
-            <div class="dashboard-summary-card__label">{{ item.label }}</div>
-            <div class="dashboard-summary-card__value">{{ item.value }}</div>
-          </n-card>
-        </n-gi>
-      </n-grid>
-
-      <n-card class="dashboard-table-card" :bordered="false">
-        <n-data-table
-          :columns="columns"
-          :data="tasks"
-          :loading="loading"
-          :row-key="(row: Task) => row.id"
-          :row-props="getRowProps"
-          :pagination="pagination"
-          :bordered="false"
-          :scroll-x="isMobile ? undefined : undefined"
-        />
-      </n-card>
-    </n-space>
+        </n-card>
+      </n-space>
+    </n-spin>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, h, watch, computed } from 'vue'
-import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, NGrid, NGi, useMessage, DataTableColumns } from 'naive-ui'
+import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useWindowSize } from '@vueuse/core'
 import { getTasks, type Task } from '../api'
@@ -66,6 +65,7 @@ const isMobile = computed(() => width.value < 768)
 
 const tasks = ref<Task[]>([])
 const loading = ref(false)
+const hasLoadedOnce = ref(false)
 const statusFilter = ref<string | null>(null)
 let pollTimer: number | null = null
 
@@ -255,6 +255,7 @@ const desktopColumns: DataTableColumns<Task> = [
 ]
 
 const columns = computed(() => isMobile.value ? mobileColumns : desktopColumns)
+const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
 const summaryItems = computed(() => {
   const summary = tasks.value.reduce(
@@ -289,6 +290,7 @@ async function fetchTasks() {
   } catch (error) {
     message.error('Failed to fetch tasks')
   } finally {
+    hasLoadedOnce.value = true
     loading.value = false
   }
 }
