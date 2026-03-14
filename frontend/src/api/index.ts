@@ -9,11 +9,16 @@ const api = axios.create({
 export interface Task {
   id: number
   project_id: number
+  project_name?: string | null
+  project_path_with_namespace?: string | null
+  project_url?: string | null
   issue_iid: number | null
+  issue_url?: string | null
   issue_id: number | null
   note_id: number | null
   user_prompt: string
   branch_name: string | null
+  branch_url?: string | null
   merge_request_iid: number | null
   merge_request_url: string | null
   status: string
@@ -21,6 +26,7 @@ export interface Task {
   scheduled_at: string | null
   container_id: string | null
   target_branch: string
+  target_branch_url?: string | null
   commit_sha: string | null
   error_message: string | null
   additions: number

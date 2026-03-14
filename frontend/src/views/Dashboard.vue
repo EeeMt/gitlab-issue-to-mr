@@ -77,6 +77,22 @@ const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 
   cancelled: 'default'
 }
 
+function getProjectLabel(task: Task): string {
+  return task.project_path_with_namespace || task.project_name || `Project #${task.project_id}`
+}
+
+function renderExternalLink(label: string, href?: string | null) {
+  if (!href) {
+    return label
+  }
+  return h('a', { href, target: '_blank', rel: 'noopener noreferrer', class: 'app-link' }, label)
+}
+
+function getProjectSecondaryLabel(task: Task): string {
+  const issueLabel = task.issue_iid ? `!${task.issue_iid}` : '-'
+  return `${getProjectLabel(task)} · ${issueLabel}`
+}
+
 const mobileColumns: DataTableColumns<Task> = [
   {
     title: 'ID',
@@ -87,8 +103,8 @@ const mobileColumns: DataTableColumns<Task> = [
     title: 'Task',
     key: 'task_info',
     render: (row) => h('div', { style: 'line-height: 1.4' }, [
-      h('div', { style: 'font-size: 12px; color: #888' }, `P${row.project_id} · !${row.issue_iid}`),
-      h('div', { style: 'font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px' }, row.branch_name || '-')
+      h('div', { style: 'font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px' }, getProjectSecondaryLabel(row)),
+      h('div', { style: 'font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px' }, row.branch_name ? renderExternalLink(row.branch_name, row.branch_url) : '-')
     ])
   },
   {
@@ -113,14 +129,19 @@ const desktopColumns: DataTableColumns<Task> = [
   },
   {
     title: 'Project',
-    key: 'project_id',
-    width: 80
+    key: 'project',
+    width: 220,
+    ellipsis: { tooltip: true },
+    render: (row) => h('div', { style: 'line-height: 1.4' }, [
+      h('div', renderExternalLink(getProjectLabel(row), row.project_url)),
+      h('div', { style: 'font-size: 12px; color: #888' }, `ID: ${row.project_id}`)
+    ])
   },
   {
     title: 'Issue',
     key: 'issue_iid',
     width: 70,
-    render: (row) => `!${row.issue_iid}`
+    render: (row) => row.issue_iid ? renderExternalLink(`!${row.issue_iid}`, row.issue_url) : '-'
   },
   {
     title: 'Status',
@@ -137,14 +158,15 @@ const desktopColumns: DataTableColumns<Task> = [
     title: 'Branch',
     key: 'branch_name',
     width: 180,
-    ellipsis: { tooltip: true }
+    ellipsis: { tooltip: true },
+    render: (row) => row.branch_name ? renderExternalLink(row.branch_name, row.branch_url) : '-'
   },
   {
     title: 'MR',
     key: 'merge_request_url',
     width: 200,
     ellipsis: { tooltip: true },
-    render: (row) => row.merge_request_url ? h('a', { href: row.merge_request_url, target: '_blank' }, row.merge_request_url.split('/').pop()) : '-'
+    render: (row) => row.merge_request_url ? h('a', { href: row.merge_request_url, target: '_blank', rel: 'noopener noreferrer', class: 'app-link' }, row.merge_request_url.split('/').pop()) : '-'
   },
   {
     title: 'Changes',

@@ -166,6 +166,113 @@ ${USER_PROMPT}
 EOF
 }
 
+sanitize_summary_content() {
+    local summary_text="$1"
+
+    printf '%s\n' "${summary_text}" | awk '
+        BEGIN { skip = 0 }
+        /^## 执行摘要[[:space:]]*$/ { next }
+        /^### 修改的文件[[:space:]]*$/ { skip = 1; next }
+        /^### / {
+            if (skip == 1) {
+                skip = 0
+            }
+        }
+        skip == 1 { next }
+        /未跟踪/ { next }
+        /可按需提交/ { next }
+        { print }
+    '
+}
+
+describe_file_path() {
+    local filepath="$1"
+
+    case "${filepath}" in
+        .gitignore)
+            printf '%s' "Git 忽略规则配置"
+            ;;
+        pom.xml)
+            printf '%s' "Maven 项目配置"
+            ;;
+        src/main/java/*.java)
+            printf '%s' "Java 示例或业务源码"
+            ;;
+        src/main/resources/*)
+            printf '%s' "项目运行资源配置"
+            ;;
+        src/test/*)
+            printf '%s' "测试代码"
+            ;;
+        *.md)
+            printf '%s' "文档说明"
+            ;;
+        *)
+            printf '%s' "本次改动涉及的文件"
+            ;;
+    esac
+}
+
+extract_file_description_from_summary() {
+    local filepath="$1"
+    local summary_text="$2"
+    local line=""
+
+    line=$(printf '%s\n' "${summary_text}" | grep -F "**${filepath}** -" | head -1 || true)
+    if [ -n "${line}" ]; then
+        printf '%s\n' "${line}" | sed -E 's/^[0-9]+[.)]?[[:space:]]*\*\*[^*]+\*\*[[:space:]]*-[[:space:]]*//'
+        return 0
+    fi
+
+    describe_file_path "${filepath}"
+}
+
+append_changed_file_rows() {
+    local change_type="$1"
+    local csv_files="$2"
+    local summary_text="$3"
+
+    if [ -z "${csv_files}" ]; then
+        return 0
+    fi
+
+    local old_ifs="${IFS}"
+    IFS=','
+    read -ra files <<< "${csv_files}"
+    IFS="${old_ifs}"
+
+    local filepath=""
+    for filepath in "${files[@]}"; do
+        [ -z "${filepath}" ] && continue
+        printf '| %s | `%s` | %s |\n' \
+            "${change_type}" \
+            "${filepath}" \
+            "$(extract_file_description_from_summary "${filepath}" "${summary_text}")"
+    done
+}
+
+build_changed_files_table() {
+    local new_files="$1"
+    local modified_files="$2"
+    local deleted_files="$3"
+    local summary_text="$4"
+    local rows=""
+
+    rows+=$(append_changed_file_rows "新增" "${new_files}" "${summary_text}")
+    rows+=$(append_changed_file_rows "修改" "${modified_files}" "${summary_text}")
+    rows+=$(append_changed_file_rows "删除" "${deleted_files}" "${summary_text}")
+
+    if [ -z "${rows}" ]; then
+        rows='| 无 | 无 | 无 |'
+    fi
+
+    cat <<EOF
+| 类型 | 文件 | 说明 |
+| --- | --- | --- |
+${rows}
+EOF
+}
+
 build_completed_mr_description() {
     local summary_text="$1"
     local changed_files_text="$2"
@@ -211,7 +318,7 @@ build_commit_message_prompt() {
 要求：
 1. 使用中文。
 2. 第一行必须使用 Conventional Commits 格式：<type>: <description>。
-3. type 从 feat、fix、refactor、docs、test、build、chore、ci 中选择最合适的一个。
+3. type 从 feat、fix、refactor、docs、test、build、chore、ci 中选择最合适的一个；如果是新增可交付能力、初始化可运行项目、补充用户可见结果，优先使用 feat。
 4. description 简洁明确，尽量控制在 50 个字符内，最多不超过 72 个字符。
 5. 如果需要正文，subject 后空一行，再用 1-3 行简短说明“做了什么/为什么”。
 6. 最后添加 footer：AI-Generated: true
@@ -248,10 +355,11 @@ ${USER_PROMPT}
 2. 仅在当前仓库内工作，优先做精确修改，不要引入无关改动。
 3. 完成后运行相关验证命令；如果仓库里没有对应命令，就明确说明。
 4. 最终输出简短执行摘要，至少包含：
-   - 修改了哪些文件
-   - 做了什么
-   - 运行了哪些验证
-5. 不要要求人工确认，除非你真的被阻塞。
+    - 修改了哪些文件
+    - 做了什么
+    - 运行了哪些验证
+5. 不要描述“未跟踪文件”“待提交”“可按需提交”这类提交前状态，默认以已经完成并准备提交的口吻总结结果。
+6. 不要要求人工确认，除非你真的被阻塞。
 EOF
 
 chmod 644 /tmp/claude_prompt.txt
@@ -312,7 +420,7 @@ if [ -f /workspace/result.md ]; then
 
 ...(内容已截断)"
     fi
-    FINAL_SUMMARY_CONTENT="${SUMMARY_CONTENT}"
+    FINAL_SUMMARY_CONTENT="$(sanitize_summary_content "${SUMMARY_CONTENT}")"
 fi
 
 # Now commit and push the changes
@@ -320,7 +428,19 @@ fi
 CHANGES=$(git status --porcelain | grep -v "result.md" || true)
 if [ -n "$CHANGES" ]; then
     echo "Changes detected:"
-    echo "$CHANGES"
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        status=$(printf '%s' "$line" | cut -c1-2)
+        filepath=$(printf '%s' "$line" | cut -c4-)
+        case "$status" in
+            "??") echo "  [new] ${filepath}" ;;
+            " M"|"M "|"MM") echo "  [modified] ${filepath}" ;;
+            " D"|"D ") echo "  [deleted] ${filepath}" ;;
+            "A "|" A") echo "  [added] ${filepath}" ;;
+            "R "|" R") echo "  [renamed] ${filepath}" ;;
+            *) echo "  [${status}] ${filepath}" ;;
+        esac
+    done <<< "$CHANGES"
     echo "Changes detected, committing..."
 
     # Remove result.md if it exists (it's the output log, not actual code)
@@ -331,20 +451,9 @@ if [ -n "$CHANGES" ]; then
     # Use git add with exclusion pattern
     git add -A -- ':!result.md'
 
-    # Push to remote using git push
-    echo "Pushing to remote..."
-    # Use git push with http.extraHeader for token
-    git remote set-url origin "http://${GITLAB_HOST}/${PROJECT_PATH}.git"
-    git config --local http.extraHeader "PRIVATE-TOKEN: ${GITLAB_TOKEN}"
-    GIT_TERMINAL_PROMPT=0 git push -u origin "${BRANCH_NAME}"
-
-    # Get commit SHA
-    COMMIT_SHA=$(git rev-parse HEAD)
-    echo "Committed: ${COMMIT_SHA}"
-
-    # Calculate change statistics using git diff --stat
+    # Calculate change statistics from staged changes before committing.
     echo "Calculating change statistics..."
-    DIFF_STATS=$(git diff --stat HEAD~1 HEAD 2>/dev/null || echo "0 files changed")
+    DIFF_STATS=$(git diff --cached --stat || echo "0 files changed")
     echo "Diff stats: ${DIFF_STATS}"
 
     # Parse additions, deletions from git diff --stat output
@@ -365,15 +474,6 @@ if [ -n "$CHANGES" ]; then
     TOTAL_CHANGES=$((ADDITIONS + DELETIONS))
 
     echo "Changes: +${ADDITIONS} -${DELETIONS} (${TOTAL_CHANGES} total)"
-
-    # Save stats to backend database via API
-    if [ -n "${TASK_ID}" ]; then
-        echo "Saving stats to backend..."
-        curl -s -X PATCH "http://backend:8000/api/tasks/${TASK_ID}/stats" \
-            -H "Content-Type: application/json" \
-            -d "{\"additions\": ${ADDITIONS}, \"deletions\": ${DELETIONS}, \"total\": ${TOTAL_CHANGES}}" \
-            || echo "Warning: Failed to save stats to backend"
-    fi
 
     # Collect changed file lists from the staged diff before committing.
     NEW_FILES=""
@@ -400,7 +500,7 @@ if [ -n "$CHANGES" ]; then
     CHANGED_FILES_TEXT="新增: ${NEW_FILES:-无}
 修改: ${MODIFIED_FILES:-无}
 删除: ${DELETED_FILES:-无}"
-    FINAL_CHANGED_FILES_TEXT="${CHANGED_FILES_TEXT}"
+    FINAL_CHANGED_FILES_TEXT="$(build_changed_files_table "${NEW_FILES}" "${MODIFIED_FILES}" "${DELETED_FILES}" "${FINAL_SUMMARY_CONTENT}")"
 
     COMMIT_DIFF_STATS=$(git diff --cached --stat || echo "0 files changed")
     COMMIT_MESSAGE_PROMPT=$(build_commit_message_prompt "${CHANGED_FILES_TEXT}" "${COMMIT_DIFF_STATS}" "${FINAL_SUMMARY_CONTENT}")
@@ -439,6 +539,16 @@ AI-Generated: true"
 
     # Create commit
     git commit -F /tmp/commit_message.txt
+
+    # Push to remote using git push
+    echo "Pushing to remote..."
+    git remote set-url origin "http://${GITLAB_HOST}/${PROJECT_PATH}.git"
+    git config --local http.extraHeader "PRIVATE-TOKEN: ${GITLAB_TOKEN}"
+    GIT_TERMINAL_PROMPT=0 git push -u origin "${BRANCH_NAME}"
+
+    # Get commit SHA
+    COMMIT_SHA=$(git rev-parse HEAD)
+    echo "Committed: ${COMMIT_SHA}"
 
     # MR was already created by backend before worker started
     # Just get the MR info if MR_IID was provided

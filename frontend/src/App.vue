@@ -142,4 +142,28 @@ html, body, #app {
   border-bottom: 1px solid var(--n-border-color);
   background: var(--n-color);
 }
+
+a.app-link {
+  color: var(--n-text-color-1);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(32, 128, 240, 0.24);
+  transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+}
+
+a.app-link:hover {
+  color: #2080f0;
+  border-bottom-color: rgba(32, 128, 240, 0.55);
+}
+
+a.app-link:active {
+  color: #1a6fd9;
+}
+
+a.app-link:visited {
+  color: var(--n-text-color-1);
+}
+
+a.app-link:visited:hover {
+  color: #2080f0;
+}
 </style>

@@ -16,14 +16,29 @@
                 <n-descriptions-item label="Status">
                   <n-tag :type="statusColors[task.status]">{{ task.status }}</n-tag>
                 </n-descriptions-item>
-                <n-descriptions-item label="Project ID">{{ task.project_id }}</n-descriptions-item>
-                <n-descriptions-item label="Issue">!{{ task.issue_iid }}</n-descriptions-item>
+                <n-descriptions-item label="Project">
+                  <div>
+                    <a v-if="task.project_url" :href="task.project_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ projectDisplayName }}</a>
+                    <span v-else>{{ projectDisplayName }}</span>
+                  </div>
+                  <div style="font-size: 12px; color: #888">ID: {{ task.project_id }}</div>
+                </n-descriptions-item>
+                <n-descriptions-item label="Issue">
+                  <a v-if="task.issue_iid && task.issue_url" :href="task.issue_url" target="_blank" rel="noopener noreferrer" class="app-link">!{{ task.issue_iid }}</a>
+                  <span v-else>{{ task.issue_iid ? `!${task.issue_iid}` : '-' }}</span>
+                </n-descriptions-item>
                 <n-descriptions-item label="Priority">{{ task.priority }}</n-descriptions-item>
-                <n-descriptions-item label="Branch">{{ task.branch_name }}</n-descriptions-item>
-                <n-descriptions-item label="Target Branch">{{ task.target_branch }}</n-descriptions-item>
+                <n-descriptions-item label="Branch">
+                  <a v-if="task.branch_name && task.branch_url" :href="task.branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.branch_name }}</a>
+                  <span v-else>{{ task.branch_name || '-' }}</span>
+                </n-descriptions-item>
+                <n-descriptions-item label="Target Branch">
+                  <a v-if="task.target_branch && task.target_branch_url" :href="task.target_branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.target_branch }}</a>
+                  <span v-else>{{ task.target_branch }}</span>
+                </n-descriptions-item>
                 <n-descriptions-item label="Container ID">{{ task.container_id || '-' }}</n-descriptions-item>
                 <n-descriptions-item label="MR URL">
-                  <a v-if="task.merge_request_url" :href="task.merge_request_url" target="_blank">{{ task.merge_request_url }}</a>
+                  <a v-if="task.merge_request_url" :href="task.merge_request_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.merge_request_url }}</a>
                   <span v-else>-</span>
                 </n-descriptions-item>
                 <n-descriptions-item label="Changes">
@@ -146,6 +161,11 @@ const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 
   failed: 'error',
   cancelled: 'default'
 }
+
+const projectDisplayName = computed(() => {
+  if (!task.value) return '-'
+  return task.value.project_path_with_namespace || task.value.project_name || `Project #${task.value.project_id}`
+})
 
 function formatDate(dateStr: string): string {
   return formatDateTimeUtc8(dateStr)

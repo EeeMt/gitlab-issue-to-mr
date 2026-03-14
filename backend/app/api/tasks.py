@@ -3,19 +3,114 @@
 import asyncio
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.core.scheduling import resolve_scheduled_at
 from app.database import get_db
 from app.models import Task, TaskLog, TaskStatus
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _build_project_lookup() -> dict[int, dict[str, str]]:
+    """Build a project metadata lookup keyed by GitLab project ID."""
+    from app.core.gitlab_client import get_gitlab_client
+
+    try:
+        gitlab = get_gitlab_client()
+        projects = await asyncio.to_thread(gitlab.get_projects)
+        return {
+            project["id"]: {
+                "project_name": project["name"],
+                "project_path_with_namespace": project["path_with_namespace"],
+            }
+            for project in projects
+        }
+    except Exception as exc:
+        logger.warning(f"Failed to load project metadata: {exc}")
+        return {}
+
+
+async def _get_project_metadata(project_id: int) -> dict[str, Optional[str]]:
+    """Get project metadata for a single task response."""
+    from app.core.gitlab_client import get_gitlab_client
+
+    try:
+        gitlab = get_gitlab_client()
+        project = await asyncio.to_thread(gitlab.get_project, project_id)
+        return {
+            "project_name": getattr(project, "name", None),
+            "project_path_with_namespace": getattr(project, "path_with_namespace", None),
+        }
+    except Exception as exc:
+        logger.warning(f"Failed to load project {project_id} metadata: {exc}")
+        return {
+            "project_name": None,
+            "project_path_with_namespace": None,
+        }
+
+
+def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Serialize a task row for API responses."""
+    metadata = project_metadata or {}
+    settings = get_settings()
+    project_path = metadata.get("project_path_with_namespace")
+    project_url = f"{settings.gitlab_url.rstrip('/')}/{project_path}" if project_path else None
+    issue_url = (
+        f"{project_url}/-/issues/{task.issue_iid}"
+        if project_url and task.issue_iid
+        else None
+    )
+    branch_url = (
+        f"{project_url}/-/tree/{quote(task.branch_name, safe='')}"
+        if project_url and task.branch_name
+        else None
+    )
+    target_branch_url = (
+        f"{project_url}/-/tree/{quote(task.target_branch, safe='')}"
+        if project_url and task.target_branch
+        else None
+    )
+    return {
+        "id": task.id,
+        "project_id": task.project_id,
+        "project_name": metadata.get("project_name"),
+        "project_path_with_namespace": metadata.get("project_path_with_namespace"),
+        "project_url": project_url,
+        "issue_iid": task.issue_iid,
+        "issue_url": issue_url,
+        "issue_id": task.issue_id,
+        "note_id": task.note_id,
+        "user_prompt": task.user_prompt,
+        "branch_name": task.branch_name,
+        "branch_url": branch_url,
+        "merge_request_iid": task.merge_request_iid,
+        "merge_request_url": task.merge_request_url,
+        "status": task.status.value,
+        "priority": task.priority,
+        "scheduled_at": task.scheduled_at.isoformat() if task.scheduled_at else None,
+        "container_id": task.container_id,
+        "target_branch": task.target_branch,
+        "target_branch_url": target_branch_url,
+        "commit_sha": task.commit_sha,
+        "error_message": task.error_message,
+        "additions": task.additions,
+        "deletions": task.deletions,
+        "total_changes": task.total_changes,
+        "is_manual": task.is_manual,
+        "created_at": task.created_at.isoformat(),
+        "updated_at": task.updated_at.isoformat(),
+        "started_at": task.started_at.isoformat() if task.started_at else None,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+    }
 
 
 @router.get("/tasks")
@@ -48,34 +143,10 @@ async def list_tasks(
 
     result = await db.execute(query.limit(100))
     tasks = result.scalars().all()
+    project_lookup = await _build_project_lookup()
 
     return [
-        {
-            "id": task.id,
-            "project_id": task.project_id,
-            "issue_iid": task.issue_iid,
-            "issue_id": task.issue_id,
-            "note_id": task.note_id,
-            "user_prompt": task.user_prompt,
-            "branch_name": task.branch_name,
-            "merge_request_iid": task.merge_request_iid,
-            "merge_request_url": task.merge_request_url,
-            "status": task.status.value,
-            "priority": task.priority,
-            "scheduled_at": task.scheduled_at.isoformat() if task.scheduled_at else None,
-            "container_id": task.container_id,
-            "target_branch": task.target_branch,
-            "commit_sha": task.commit_sha,
-            "error_message": task.error_message,
-            "additions": task.additions,
-            "deletions": task.deletions,
-            "total_changes": task.total_changes,
-            "is_manual": task.is_manual,
-            "created_at": task.created_at.isoformat(),
-            "updated_at": task.updated_at.isoformat(),
-            "started_at": task.started_at.isoformat() if task.started_at else None,
-            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
-        }
+        _serialize_task(task, project_lookup.get(task.project_id))
         for task in tasks
     ]
 
@@ -100,32 +171,7 @@ async def get_task(task_id: int, db: AsyncSession = Depends(get_db)):
             detail=f"Task {task_id} not found",
         )
 
-    return {
-        "id": task.id,
-        "project_id": task.project_id,
-        "issue_iid": task.issue_iid,
-        "issue_id": task.issue_id,
-        "note_id": task.note_id,
-        "user_prompt": task.user_prompt,
-        "branch_name": task.branch_name,
-        "merge_request_iid": task.merge_request_iid,
-        "merge_request_url": task.merge_request_url,
-        "status": task.status.value,
-        "priority": task.priority,
-        "scheduled_at": task.scheduled_at.isoformat() if task.scheduled_at else None,
-        "container_id": task.container_id,
-        "target_branch": task.target_branch,
-        "commit_sha": task.commit_sha,
-        "error_message": task.error_message,
-        "additions": task.additions,
-        "deletions": task.deletions,
-        "total_changes": task.total_changes,
-        "is_manual": task.is_manual,
-        "created_at": task.created_at.isoformat(),
-        "updated_at": task.updated_at.isoformat(),
-        "started_at": task.started_at.isoformat() if task.started_at else None,
-        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
-    }
+    return _serialize_task(task, await _get_project_metadata(task.project_id))
 
 
 @router.get("/tasks/{task_id}/logs")
