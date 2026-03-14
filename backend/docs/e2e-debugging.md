@@ -251,7 +251,7 @@ docker build -f deploy/Dockerfile.backend -t deploy-backend .
 cd deploy && docker-compose up -d backend
 
 # 10. 运行 E2E 测试（跳过 Docker 启动）
-cd backend && python3 test_integration_e2e.py --skip-startup
+cd backend && python3 tests/gitlab_e2e/test_integration.py --skip-startup
 
 # 11. 查看 .env.test 配置
 cat deploy/.env.test | grep -v "^#" | grep -v "^$"
@@ -301,9 +301,9 @@ GET  /api/v4/projects/1/repository/branches # 列出分支
 - `deploy/entrypoint.sh` - Worker 入口脚本
 
 ### 测试相关
-- `backend/test_integration_e2e.py` - E2E 测试（包含 Step 10 验证）
-- `backend/test_integration_e2e_mock.py` - Mock 测试（无需真实 GitLab）
-- `backend/test_p01.py` - P0.1 功能测试
+- `backend/tests/gitlab_e2e/test_integration.py` - E2E 测试（包含 Step 10 验证）
+- `backend/tests/mock_e2e/test_integration.py` - Mock 测试（无需真实 GitLab）
+- `backend/tests/unit/test_priority.py` - P0.1 功能测试
 
 ### 配置文件
 - `deploy/.env.test` - 测试环境配置（docker-compose 使用）

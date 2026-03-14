@@ -7,7 +7,11 @@ Covers:
 """
 
 import asyncio
+import os
+import sys
 from unittest.mock import AsyncMock, patch
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
 async def test_web_lifespan_is_api_only() -> None:
@@ -19,11 +23,18 @@ async def test_web_lifespan_is_api_only() -> None:
 
     with patch("app.main.init_db", new_callable=AsyncMock) as init_db_mock, patch(
         "app.main.close_db", new_callable=AsyncMock
-    ) as close_db_mock:
+    ) as close_db_mock, patch(
+        "app.main.run_migrations"
+    ) as run_migrations_mock, patch(
+        "app.main.load_runtime_config_from_db",
+        new_callable=AsyncMock,
+    ) as load_runtime_config_mock:
         async with app_main.lifespan(app_main.app):
             pass
 
+        run_migrations_mock.assert_called_once()
         init_db_mock.assert_awaited_once()
+        load_runtime_config_mock.assert_awaited_once()
         close_db_mock.assert_awaited_once()
 
 
@@ -44,6 +55,11 @@ async def test_scheduler_service_lifecycle() -> None:
     with patch("app.scheduler_service.init_db", new_callable=AsyncMock) as init_db_mock, patch(
         "app.scheduler_service.close_db", new_callable=AsyncMock
     ) as close_db_mock, patch(
+        "app.scheduler_service.run_migrations"
+    ) as run_migrations_mock, patch(
+        "app.scheduler_service.load_runtime_config_from_db",
+        new_callable=AsyncMock,
+    ) as load_runtime_config_mock, patch(
         "app.scheduler_service.start_scheduler", side_effect=fake_start_scheduler
     ) as start_scheduler_mock, patch(
         "app.scheduler_service.stop_scheduler", side_effect=fake_stop_scheduler
@@ -52,7 +68,9 @@ async def test_scheduler_service_lifecycle() -> None:
     ):
         await scheduler_service.run_scheduler_service()
 
+        run_migrations_mock.assert_called_once()
         init_db_mock.assert_awaited_once()
+        load_runtime_config_mock.assert_awaited_once()
         close_db_mock.assert_awaited_once()
         start_scheduler_mock.assert_called_once()
         stop_scheduler_mock.assert_called_once()

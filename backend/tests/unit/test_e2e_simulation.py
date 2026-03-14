@@ -3,8 +3,9 @@
 End-to-end simulation test without external dependencies.
 """
 
+import os
 import sys
-sys.path.insert(0, '/Users/xiquan/Projects/gitlab_issues_to_mr/backend')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from datetime import datetime, timedelta
 from app.models import Task, TaskStatus
@@ -204,6 +205,18 @@ def simulate_priority_queue():
         return False
     print("=" * 60)
     return True
+
+
+def test_simulate_full_workflow():
+    assert simulate_full_workflow()
+
+
+def test_simulate_concurrent_issues():
+    assert simulate_concurrent_issues()
+
+
+def test_simulate_priority_queue():
+    assert simulate_priority_queue()
 
 
 def main():

@@ -9,8 +9,8 @@ Tests the at= scheduling feature with real GitLab:
 4. Verify MR is created
 
 Usage:
-    python test_scheduled_at_e2e.py
-    python test_scheduled_at_e2e.py --skip-startup
+    python tests/gitlab_e2e/test_scheduled_at.py
+    python tests/gitlab_e2e/test_scheduled_at.py --skip-startup
 """
 
 import os

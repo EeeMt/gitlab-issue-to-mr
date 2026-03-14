@@ -13,9 +13,9 @@ Workflow:
 8. Cleanup
 
 Usage:
-    python test_integration_e2e.py           # Full test
-    python test_integration_e2e.py --skip-startup  # Skip Docker startup
-    python test_integration_e2e.py --cleanup        # Only cleanup test project
+    python tests/gitlab_e2e/test_integration.py           # Full test
+    python tests/gitlab_e2e/test_integration.py --skip-startup  # Skip Docker startup
+    python tests/gitlab_e2e/test_integration.py --cleanup        # Only cleanup test project
 """
 
 import os

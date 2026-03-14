@@ -13,8 +13,8 @@ Workflow:
 5. Verify task completion
 
 Usage:
-    python test_integration_e2e_mock.py           # Full mock test
-    python test_integration_e2e_mock.py --skip-startup  # Skip backend startup
+    python tests/mock_e2e/test_integration.py           # Full mock test
+    python tests/mock_e2e/test_integration.py --skip-startup  # Skip backend startup
 """
 
 import os

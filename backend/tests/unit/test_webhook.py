@@ -3,8 +3,9 @@
 Test webhook processing logic without external dependencies.
 """
 
+import os
 import sys
-sys.path.insert(0, '/Users/xiquan/Projects/gitlab_issues_to_mr/backend')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from datetime import datetime
 from unittest.mock import MagicMock, AsyncMock, patch
@@ -112,7 +113,7 @@ def test_webhook_payload_parsing():
             passed += 1
 
     print(f"\nWebhook Payload Parsing: {passed} passed, {failed} failed")
-    return failed == 0
+    assert failed == 0
 
 
 def test_webhook_validation():
@@ -199,7 +200,7 @@ def test_webhook_validation():
             failed += 1
 
     print(f"\nWebhook Validation: {passed} passed, {failed} failed")
-    return failed == 0
+    assert failed == 0
 
 
 def test_task_status_transitions():
@@ -251,7 +252,7 @@ def test_task_status_transitions():
         failed += 1
 
     print(f"\nTask Status Transitions: {passed} passed, {failed} failed")
-    return failed == 0
+    assert failed == 0
 
 
 def test_concurrency_control():
@@ -298,7 +299,7 @@ def test_concurrency_control():
             failed += 1
 
     print(f"\nConcurrency Control: {passed} passed, {failed} failed")
-    return failed == 0
+    assert failed == 0
 
 
 def test_delay_calculation():
@@ -346,7 +347,7 @@ def test_delay_calculation():
             failed += 1
 
     print(f"\nDelay Calculation: {passed} passed, {failed} failed")
-    return failed == 0
+    assert failed == 0
 
 
 def test_scheduled_datetime_parsing():
@@ -414,7 +415,7 @@ def test_scheduled_datetime_parsing():
                 failed += 1
 
     print(f"\nScheduled Datetime Parsing: {passed} passed, {failed} failed")
-    return failed == 0
+    assert failed == 0
 
 
 def test_scheduled_datetime_integration():
@@ -523,7 +524,7 @@ def test_scheduled_datetime_integration():
                 print(f"✅ PASS: {name} - priority={cmd.priority}")
 
     print(f"\nScheduled Datetime Integration: {passed} passed, {failed} failed")
-    return failed == 0
+    assert failed == 0
 
 
 def main():
@@ -533,14 +534,22 @@ def main():
     print("=" * 60)
 
     results = []
+    test_cases = [
+        ("Webhook Payload Parsing", test_webhook_payload_parsing),
+        ("Webhook Validation", test_webhook_validation),
+        ("Task Status Transitions", test_task_status_transitions),
+        ("Concurrency Control", test_concurrency_control),
+        ("Delay Calculation", test_delay_calculation),
+        ("Scheduled Datetime Parsing", test_scheduled_datetime_parsing),
+        ("Scheduled Datetime Integration", test_scheduled_datetime_integration),
+    ]
 
-    results.append(("Webhook Payload Parsing", test_webhook_payload_parsing()))
-    results.append(("Webhook Validation", test_webhook_validation()))
-    results.append(("Task Status Transitions", test_task_status_transitions()))
-    results.append(("Concurrency Control", test_concurrency_control()))
-    results.append(("Delay Calculation", test_delay_calculation()))
-    results.append(("Scheduled Datetime Parsing", test_scheduled_datetime_parsing()))
-    results.append(("Scheduled Datetime Integration", test_scheduled_datetime_integration()))
+    for name, fn in test_cases:
+        try:
+            fn()
+            results.append((name, True))
+        except AssertionError:
+            results.append((name, False))
 
     print("\n" + "=" * 60)
     print("Test Summary")
