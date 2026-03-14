@@ -16,6 +16,8 @@ Current implementation notes:
 - when `OIDC_ENABLED=false`, dashboard auth is bypassed and existing behavior is preserved
 - when `OIDC_ENABLED=true`, dashboard APIs require login
 - admin-only pages and APIs are controlled by platform admin role
+- OIDC settings can now be managed in the dashboard **Configuration** page
+- secrets edited in the page are encrypted before being stored in the database
 
 ## 1. Create a GitLab OAuth application
 
@@ -39,13 +41,14 @@ If your deployment is behind the bundled nginx, the redirect URI should point to
 
 ## 2. Configure backend environment variables
 
-Set the following variables in your deployment environment, such as `deploy/.env.test` or your production env file:
+Set the following bootstrap variables in your deployment environment, such as `deploy/.env.test` or your production env file:
 
 ```bash
-# Turn on dashboard login
-OIDC_ENABLED=true
+# Required for encrypted page-managed secrets
+CONFIG_ENCRYPTION_KEY=replace-with-a-long-random-secret
 
-# GitLab OIDC
+# Optional bootstrap/fallback values for OIDC
+OIDC_ENABLED=false
 OIDC_ISSUER_URL=https://gitlab.example.com
 OIDC_CLIENT_ID=your_application_id
 OIDC_CLIENT_SECRET=your_application_secret
@@ -63,13 +66,27 @@ AUTH_ADMIN_USERNAMES=alice,bob
 AUTH_ADMIN_GITLAB_GROUPS=platform-team
 ```
 
+Recommended usage now:
+
+1. keep `OIDC_ENABLED=false` during first deploy
+2. deploy the new config UI/API
+3. open the dashboard **Configuration** page
+4. fill in OIDC settings there
+5. run the built-in **Test OIDC connection**
+6. enable OIDC in the page only after validation succeeds
+
 ## 3. What each variable means
 
 ### Required
 
+- `CONFIG_ENCRYPTION_KEY`
+  - Used to encrypt page-managed secret config values at rest.
+  - Keep this in environment variables, not in the database.
+
 - `OIDC_ENABLED`
   - Enables GitLab login and API protection.
-  - Use `false` until the rest of the values are ready.
+  - This can be managed in the page once the app is deployed.
+  - Keep it `false` during bootstrap until the rest of the values are ready.
 
 - `OIDC_ISSUER_URL`
   - Your GitLab base URL.
@@ -80,6 +97,7 @@ AUTH_ADMIN_GITLAB_GROUPS=platform-team
 
 - `OIDC_CLIENT_SECRET`
   - GitLab OAuth application secret.
+  - Can now be entered in the configuration page and will be stored encrypted.
 
 - `OIDC_REDIRECT_URI`
   - Must exactly match the redirect URI configured in GitLab.
@@ -132,10 +150,21 @@ Notes:
 
 - `backend` and `scheduler` share the same backend image in the current deployment setup
 - only `scheduler` runs automatic migrations during deploy
+- `CONFIG_ENCRYPTION_KEY` must be present before saving secrets from the page
 
 ## 5. Validation steps
 
 After deployment, validate in this order.
+
+### Open the configuration page
+
+Visit:
+
+```text
+https://your-domain.example.com/config
+```
+
+Fill in the GitLab OIDC fields, save them, and run **Test OIDC connection**.
 
 ### Check backend auth state
 
@@ -143,7 +172,7 @@ After deployment, validate in this order.
 curl -s https://your-domain.example.com/api/auth/me
 ```
 
-Expected before login:
+Expected before login after OIDC is enabled:
 
 ```json
 {
@@ -192,6 +221,7 @@ Platform admin is assigned when one of these is true:
 
 Usually one of these values is missing or invalid:
 
+- `CONFIG_ENCRYPTION_KEY` when trying to save a page-managed secret
 - `OIDC_ENABLED`
 - `OIDC_ISSUER_URL`
 - `OIDC_CLIENT_ID`

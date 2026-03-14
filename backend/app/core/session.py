@@ -11,7 +11,7 @@ from hashlib import sha256
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
+from app.config import get_effective_settings, get_settings
 from app.models import User, UserSession
 
 
@@ -36,7 +36,7 @@ async def create_user_session(
     user_agent: str | None = None,
 ) -> str:
     """Create a new session row and return the raw session token."""
-    settings = get_settings()
+    settings = get_effective_settings()
     raw_token = generate_session_token()
     expires_at = _utcnow() + timedelta(seconds=settings.session_ttl_seconds)
     session = UserSession(

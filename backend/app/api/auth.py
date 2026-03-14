@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
+from app.config import get_effective_settings
 from app.core.oidc import (
     OIDCConfigurationError,
     build_authorization_url,
@@ -34,7 +34,7 @@ NEXT_COOKIE_NAME = "gimr_oidc_next"
 
 
 def _build_cookie_kwargs() -> dict[str, Any]:
-    settings = get_settings()
+    settings = get_effective_settings()
     return {
         "httponly": True,
         "secure": settings.cookie_secure,
@@ -90,7 +90,7 @@ async def _upsert_user(db: AsyncSession, claims: dict[str, Any], userinfo: dict[
     user.avatar_url = avatar_url
     user.last_login_at = datetime.utcnow()
 
-    settings = get_settings()
+    settings = get_effective_settings()
     groups = set()
     for source in (userinfo.get("groups"), claims.get("groups")):
         if isinstance(source, list):
@@ -116,7 +116,7 @@ async def _upsert_user(db: AsyncSession, claims: dict[str, Any], userinfo: dict[
 @router.get("/auth/login")
 async def login(next: Optional[str] = Query(default=None)):
     """Redirect the browser to the GitLab OIDC authorize endpoint."""
-    settings = get_settings()
+    settings = get_effective_settings()
     if not settings.oidc_enabled:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -151,7 +151,7 @@ async def callback(
     db: AsyncSession = Depends(get_db),
 ):
     """Handle the GitLab OIDC callback."""
-    settings = get_settings()
+    settings = get_effective_settings()
     if not settings.oidc_enabled:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -215,7 +215,7 @@ async def logout(
     db: AsyncSession = Depends(get_db),
 ):
     """Log the current user out."""
-    settings = get_settings()
+    settings = get_effective_settings()
     token = request.cookies.get(settings.session_cookie_name)
     await revoke_session_token(db, token)
     response = JSONResponse({"status": "success"})
@@ -228,7 +228,7 @@ async def me(
     current_user: Optional[User] = Depends(get_optional_current_user),
 ):
     """Return current auth state for frontend bootstrapping."""
-    settings = get_settings()
+    settings = get_effective_settings()
     if not settings.oidc_enabled:
         return {
             "oidc_enabled": False,

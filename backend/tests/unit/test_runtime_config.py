@@ -20,8 +20,18 @@ from app.runtime_config import (
 
 
 class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self._original_config_encryption_key = os.environ.get("CONFIG_ENCRYPTION_KEY")
+        os.environ["CONFIG_ENCRYPTION_KEY"] = "unit-test-config-key"
+        get_settings.cache_clear()
+
     def tearDown(self) -> None:
         reset_runtime_config()
+        if self._original_config_encryption_key is None:
+            os.environ.pop("CONFIG_ENCRYPTION_KEY", None)
+        else:
+            os.environ["CONFIG_ENCRYPTION_KEY"] = self._original_config_encryption_key
+        get_settings.cache_clear()
 
     def test_effective_settings_use_runtime_overrides(self) -> None:
         set_runtime_config({
@@ -41,20 +51,28 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
     def test_runtime_values_round_trip_by_type(self) -> None:
         serialized_int = _serialize_runtime_value("max_concurrency", 5)
         serialized_str = _serialize_runtime_value("default_target_branch", "release")
+        serialized_secret = _serialize_runtime_value("oidc_client_secret", "super-secret")
 
         self.assertEqual(serialized_int, ("5", "int"))
         self.assertEqual(serialized_str, ("release", "str"))
+        self.assertEqual(serialized_secret[1], "secret_str")
         self.assertEqual(_deserialize_runtime_value("max_concurrency", "5", "int"), 5)
         self.assertEqual(
             _deserialize_runtime_value("default_target_branch", "release", "str"),
             "release",
         )
+        self.assertEqual(
+            _deserialize_runtime_value("oidc_client_secret", serialized_secret[0], serialized_secret[1]),
+            "super-secret",
+        )
 
     async def test_load_runtime_config_from_db_refreshes_cache(self) -> None:
+        serialized_secret, secret_type = _serialize_runtime_value("oidc_client_secret", "stored-secret")
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [
             SystemConfig(key="max_concurrency", value="4", value_type="int"),
             SystemConfig(key="default_target_branch", value="release", value_type="str"),
+            SystemConfig(key="oidc_client_secret", value=serialized_secret, value_type=secret_type),
         ]
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=mock_result)
@@ -64,7 +82,23 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(overrides["max_concurrency"], 4)
         self.assertEqual(overrides["default_target_branch"], "release")
+        self.assertEqual(overrides["oidc_client_secret"], "stored-secret")
         self.assertEqual(get_effective_settings().max_concurrency, 4)
+
+    def test_effective_settings_include_auth_overrides(self) -> None:
+        set_runtime_config({
+            "oidc_enabled": True,
+            "oidc_issuer_url": "https://gitlab.example.com",
+            "oidc_client_id": "gimr",
+            "oidc_client_secret": "stored-secret",
+            "oidc_redirect_uri": "https://bot.example.com/api/auth/callback",
+        })
+
+        settings = get_effective_settings()
+
+        self.assertTrue(settings.oidc_enabled)
+        self.assertEqual(settings.oidc_client_secret, "stored-secret")
+        self.assertEqual(settings.oidc_redirect_uri, "https://bot.example.com/api/auth/callback")
 
     async def test_save_runtime_config_override_updates_existing_record(self) -> None:
         existing = SystemConfig(key="task_timeout", value="1800", value_type="int")

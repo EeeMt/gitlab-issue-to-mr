@@ -40,27 +40,6 @@
             :value="activeKey"
             @update:value="handleMenuUpdate"
           />
-
-          <div v-if="authState.oidcEnabled && authState.authenticated && !collapsed" class="nav-user-panel">
-            <div class="nav-user-panel__identity">
-              <n-avatar
-                round
-                size="small"
-                :src="authState.user?.avatar_url || undefined"
-              >
-                {{ userInitial }}
-              </n-avatar>
-              <div class="nav-user-panel__copy">
-                <n-text strong>{{ userDisplayName }}</n-text>
-                <n-text depth="3" class="nav-user-panel__role">
-                  {{ authState.user?.platform_role === 'platform_admin' ? 'Admin' : 'Signed in with GitLab' }}
-                </n-text>
-              </div>
-            </div>
-            <n-button tertiary size="small" @click="handleLogout">
-              Logout
-            </n-button>
-          </div>
         </n-layout-sider>
 
         <n-drawer v-if="isMobile" v-model:show="showDrawer" :width="288" placement="left">
@@ -85,27 +64,30 @@
               :value="activeKey"
               @update:value="(key: string) => { handleMenuUpdate(key); showDrawer = false }"
             />
-
-            <div v-if="authState.oidcEnabled && authState.authenticated" class="mobile-user-panel">
-              <div class="nav-user-panel__identity">
-                <n-avatar round size="small" :src="authState.user?.avatar_url || undefined">
-                  {{ userInitial }}
-                </n-avatar>
-                <div class="nav-user-panel__copy">
-                  <n-text strong>{{ userDisplayName }}</n-text>
-                  <n-text depth="3" class="nav-user-panel__role">
-                    {{ authState.user?.platform_role === 'platform_admin' ? 'Admin' : 'GitLab user' }}
-                  </n-text>
-                </div>
-              </div>
-              <n-button tertiary size="small" @click="handleLogout">
-                Logout
-              </n-button>
-            </div>
           </n-drawer-content>
         </n-drawer>
 
         <n-layout :native-scrollbar="false" class="app-shell__main">
+          <div v-if="authState.oidcEnabled && authState.authenticated && !isMobile" class="app-shell__topbar">
+            <div class="app-shell__topbar-user">
+              <n-avatar round size="small" :src="authState.user?.avatar_url || undefined">
+                {{ userInitial }}
+              </n-avatar>
+              <div class="nav-user-panel__copy">
+                <n-text strong>{{ userDisplayName }}</n-text>
+                <n-text depth="3" class="nav-user-panel__role">
+                  {{ authState.user?.platform_role === 'platform_admin' ? 'Admin' : 'Signed in with GitLab' }}
+                </n-text>
+              </div>
+            </div>
+            <n-button tertiary class="app-shell__logout-button" @click="handleLogout">
+              <template #icon>
+                <n-icon :component="LogOutOutline" />
+              </template>
+              Logout
+            </n-button>
+          </div>
+
           <div v-if="isMobile" class="mobile-header">
             <div class="mobile-header__left">
               <n-button quaternary circle class="mobile-header__menu-button" @click="showDrawer = true">
@@ -155,6 +137,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   AddCircleOutline,
   GridOutline,
+  LogOutOutline,
   MenuOutline,
   RocketOutline,
   SettingsOutline,
@@ -275,6 +258,30 @@ body {
   min-height: calc(100vh - 40px);
 }
 
+.app-shell__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 14px 20px 0;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+
+.app-shell__topbar-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.app-shell__logout-button {
+  flex-shrink: 0;
+}
+
 .logo {
   display: flex;
   align-items: center;
@@ -357,15 +364,6 @@ body {
   background: rgba(148, 163, 184, 0.12);
 }
 
-.nav-user-panel,
-.mobile-user-panel {
-  margin-top: 16px;
-  padding: 12px;
-  border-radius: 16px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background: rgba(255, 255, 255, 0.66);
-}
-
 .nav-user-panel__identity {
   display: flex;
   align-items: center;
@@ -380,11 +378,6 @@ body {
 
 .nav-user-panel__role {
   font-size: 12px;
-}
-
-.nav-user-panel .n-button,
-.mobile-user-panel .n-button {
-  margin-top: 10px;
 }
 
 .mobile-header {

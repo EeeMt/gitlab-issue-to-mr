@@ -9,12 +9,25 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 RuntimeConfigValue = Union[int, str, bool]
 
-RUNTIME_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
+PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "max_concurrency": int,
     "task_timeout": int,
     "scheduler_interval": int,
     "default_target_branch": str,
+    "oidc_enabled": bool,
+    "oidc_issuer_url": str,
+    "oidc_client_id": str,
+    "oidc_client_secret": str,
+    "oidc_redirect_uri": str,
+    "session_cookie_name": str,
+    "session_ttl_seconds": int,
+    "cookie_secure": bool,
+    "cookie_samesite": str,
+    "auth_admin_usernames": str,
+    "auth_admin_gitlab_groups": str,
 }
+
+SECRET_CONFIG_KEYS = {"oidc_client_secret"}
 
 
 class Settings(BaseSettings):
@@ -49,6 +62,7 @@ class Settings(BaseSettings):
     # Application Configuration
     secret_key: str = Field(default="change-me-in-production")
     session_secret: str = Field(default="change-me-in-production")
+    config_encryption_key: str = Field(default="")
     log_level: str = Field(default="INFO")
     backend_url: str = Field(default="http://localhost:8000")  # Frontend/Backend URL for links
     auto_migrate: bool = Field(default=True)  # Auto-run migrations on startup
@@ -103,18 +117,23 @@ def get_settings() -> Settings:
     return Settings()
 
 
-# Runtime configuration overrides loaded from the database into each process.
+# Persisted configuration overrides loaded from the database into each process.
 _runtime_config: dict[str, RuntimeConfigValue] = {}
 
 
 def get_runtime_config() -> dict[str, RuntimeConfigValue]:
-    """Get runtime configuration overrides."""
+    """Get persisted configuration overrides."""
     return _runtime_config.copy()
 
 
 def get_runtime_config_types() -> dict[str, type[RuntimeConfigValue]]:
-    """Get supported runtime configuration keys and their types."""
-    return RUNTIME_CONFIG_TYPES.copy()
+    """Get supported persisted configuration keys and their types."""
+    return PERSISTED_CONFIG_TYPES.copy()
+
+
+def get_secret_config_keys() -> set[str]:
+    """Get config keys that should be encrypted at rest."""
+    return set(SECRET_CONFIG_KEYS)
 
 
 def set_runtime_config(overrides: dict[str, RuntimeConfigValue]) -> None:
@@ -124,8 +143,8 @@ def set_runtime_config(overrides: dict[str, RuntimeConfigValue]) -> None:
 
 
 def update_runtime_config(key: str, value: RuntimeConfigValue) -> None:
-    """Update runtime configuration override."""
-    if key not in RUNTIME_CONFIG_TYPES:
+    """Update persisted configuration override."""
+    if key not in PERSISTED_CONFIG_TYPES:
         raise KeyError(f"Unknown runtime config key: {key}")
     _runtime_config[key] = value
 

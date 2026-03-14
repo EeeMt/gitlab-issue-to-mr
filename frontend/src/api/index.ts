@@ -111,11 +111,50 @@ export interface Stats {
   cancelled: number
 }
 
-export interface Config {
+export interface RuntimeConfig {
   max_concurrency: number
   task_timeout: number
   scheduler_interval: number
   default_target_branch: string
+}
+
+export interface AuthConfig {
+  oidc_enabled: boolean
+  oidc_issuer_url: string
+  oidc_client_id: string
+  oidc_redirect_uri: string
+  session_cookie_name: string
+  session_ttl_seconds: number
+  cookie_secure: boolean
+  cookie_samesite: string
+  auth_admin_usernames: string
+  auth_admin_gitlab_groups: string
+  oidc_client_secret_configured: boolean
+}
+
+export interface Config {
+  runtime: RuntimeConfig
+  auth: AuthConfig
+}
+
+export interface RuntimeConfigUpdate extends Partial<RuntimeConfig> {}
+
+export interface AuthConfigUpdate extends Partial<Omit<AuthConfig, 'oidc_client_secret_configured'>> {
+  oidc_client_secret?: string
+  clear_oidc_client_secret?: boolean
+}
+
+export interface ConfigUpdate {
+  runtime?: RuntimeConfigUpdate
+  auth?: AuthConfigUpdate
+}
+
+export interface OidcConfigTestResult {
+  issuer: string
+  authorization_endpoint: string
+  token_endpoint: string
+  userinfo_endpoint: string
+  authorization_url_preview: string
 }
 
 export interface AuthUser {
@@ -197,13 +236,23 @@ export async function getConfig(): Promise<Config> {
   return response.data
 }
 
-export async function updateConfig(config: Partial<Config>): Promise<Config> {
+export async function updateConfig(config: ConfigUpdate): Promise<Config> {
   const response = await api.patch('/config', config)
   return response.data
 }
 
 export async function resetConfig(): Promise<Config> {
   const response = await api.post('/config/reset')
+  return response.data
+}
+
+export async function resetConfigKey(key: string): Promise<Config> {
+  const response = await api.delete(`/config/${key}`)
+  return response.data
+}
+
+export async function testOidcConfig(auth: AuthConfigUpdate): Promise<OidcConfigTestResult> {
+  const response = await api.post('/config/oidc/test', { auth })
   return response.data
 }
 

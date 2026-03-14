@@ -10,10 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import (
     RuntimeConfigValue,
+    get_secret_config_keys,
     get_runtime_config_types,
     reset_runtime_config,
     set_runtime_config,
     update_runtime_config,
+)
+from app.core.config_crypto import (
+    ConfigEncryptionError,
+    decrypt_config_secret,
+    encrypt_config_secret,
 )
 from app.database import AsyncSessionLocal
 from app.models import SystemConfig
@@ -22,6 +28,9 @@ logger = logging.getLogger(__name__)
 
 
 def _serialize_runtime_value(key: str, value: RuntimeConfigValue) -> tuple[str, str]:
+    if key in get_secret_config_keys():
+        return encrypt_config_secret(str(value)), "secret_str"
+
     expected_type = get_runtime_config_types()[key]
     if expected_type is int:
         return str(int(value)), "int"
@@ -31,6 +40,9 @@ def _serialize_runtime_value(key: str, value: RuntimeConfigValue) -> tuple[str, 
 
 
 def _deserialize_runtime_value(key: str, raw_value: str, value_type: str) -> RuntimeConfigValue:
+    if key in get_secret_config_keys():
+        return decrypt_config_secret(raw_value)
+
     expected_type = get_runtime_config_types()[key]
 
     if expected_type is int or value_type == "int":
@@ -57,7 +69,7 @@ async def load_runtime_config_from_db(db: Optional[AsyncSession] = None) -> dict
             continue
         try:
             overrides[row.key] = _deserialize_runtime_value(row.key, row.value, row.value_type)
-        except (TypeError, ValueError) as exc:
+        except (ConfigEncryptionError, TypeError, ValueError) as exc:
             logger.warning("Ignoring invalid system config value for %s: %s", row.key, exc)
 
     set_runtime_config(overrides)
