@@ -16,6 +16,7 @@ from app.core.docker_client import get_docker_client
 from app.core.worker import WorkerExecutor
 from app.database import AsyncSessionLocal
 from app.models import Task, TaskStatus
+from app.runtime_config import load_runtime_config_from_db
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +67,9 @@ class Scheduler:
 
     async def _run_cycle(self) -> None:
         """Run one scheduler cycle."""
-        settings = get_settings()
         async with AsyncSessionLocal() as db:
+            await load_runtime_config_from_db(db)
+            settings = get_settings()
             # Count running tasks for concurrency control
             running_count = await self._get_running_count(db)
 

@@ -1,41 +1,59 @@
 <template>
   <n-config-provider>
     <n-message-provider>
-      <n-layout has-sider position="absolute" style="top: 0; bottom: 0" :native-scrollbar="false">
+      <n-layout has-sider position="absolute" style="top: 0; bottom: 0" :native-scrollbar="false" class="app-shell">
         <n-layout-sider
           v-if="!isMobile"
           bordered
           collapse-mode="width"
-          :collapsed-width="64"
-          :width="240"
+          :collapsed-width="72"
+          :width="272"
           :collapsed="collapsed"
           show-trigger
           :native-scrollbar="false"
-          content-style="padding: 16px;"
+          content-style="padding: 18px 14px;"
+          class="app-shell__sider"
           @collapse="collapsed = true"
           @expand="collapsed = false"
         >
-          <div class="logo">
-            <n-icon size="24" :component="RocketOutline" />
-            <n-text v-if="!collapsed" strong>GitMR Admin</n-text>
+          <div class="logo" :class="{ 'logo--collapsed': collapsed }">
+            <div class="logo__mark">
+              <n-icon size="22" :component="RocketOutline" />
+            </div>
+            <div v-if="!collapsed" class="logo__copy">
+              <n-text strong class="logo__title">GitMR Admin</n-text>
+              <n-text depth="3" class="logo__subtitle">Task operations console</n-text>
+            </div>
           </div>
+
           <n-menu
+            class="nav-menu"
             :collapsed="collapsed"
-            :collapsed-width="64"
+            :collapsed-width="72"
             :options="menuOptions"
             :value="activeKey"
             @update:value="handleMenuUpdate"
           />
         </n-layout-sider>
 
-        <!-- Mobile: collapsible drawer -->
-        <n-drawer v-if="isMobile" v-model:show="showDrawer" :width="280" placement="left">
-          <n-drawer-content title="GitMR Admin">
-            <div class="logo-mobile">
-              <n-icon size="24" :component="RocketOutline" />
-              <n-text strong>GitMR Admin</n-text>
-            </div>
+        <n-drawer v-if="isMobile" v-model:show="showDrawer" :width="288" placement="left">
+          <n-drawer-content :native-scrollbar="false" body-content-style="padding: 18px 14px;" closable>
+            <template #header>
+              <div class="mobile-drawer-header">
+                <div class="mobile-drawer-header__brand">
+                  <div class="logo__mark logo__mark--mobile">
+                    <n-icon size="20" :component="RocketOutline" />
+                  </div>
+                  <div class="logo__copy">
+                    <n-text strong class="logo__title">GitMR Admin</n-text>
+                    <n-text depth="3" class="logo__subtitle">Navigation</n-text>
+                  </div>
+                </div>
+              </div>
+            </template>
+
             <n-menu
+              class="nav-menu"
               :options="menuOptions"
               :value="activeKey"
               @update:value="(key: string) => { handleMenuUpdate(key); showDrawer = false }"
@@ -43,18 +61,26 @@
           </n-drawer-content>
         </n-drawer>
 
-        <n-layout :native-scrollbar="false">
-          <!-- Mobile top bar (stacks vertically inside content layout) -->
+        <n-layout :native-scrollbar="false" class="app-shell__main">
           <div v-if="isMobile" class="mobile-header">
-            <n-button quaternary @click="showDrawer = true">
-              <template #icon>
-                <n-icon :component="MenuOutline" />
-              </template>
-            </n-button>
-            <n-text strong>GitMR Admin</n-text>
+            <div class="mobile-header__left">
+              <n-button quaternary circle class="mobile-header__menu-button" @click="showDrawer = true">
+                <template #icon>
+                  <n-icon :component="MenuOutline" />
+                </template>
+              </n-button>
+              <div class="mobile-header__copy">
+                <n-text depth="3" class="mobile-header__eyebrow">GitMR Admin</n-text>
+                <n-text strong class="mobile-header__title">{{ currentPageLabel }}</n-text>
+              </div>
+            </div>
+            <div class="mobile-header__badge">AI</div>
           </div>
-          <n-layout content-style="padding: 16px;" :native-scrollbar="false">
-            <router-view />
+
+          <n-layout content-style="padding: 20px;" :native-scrollbar="false" class="app-shell__content">
+            <div class="app-shell__content-inner">
+              <router-view />
+            </div>
           </n-layout>
         </n-layout>
       </n-layout>
@@ -63,11 +89,22 @@
 </template>
 
 <script setup lang="ts">
-import { h, ref, computed } from 'vue'
-import { NLayout, NLayoutSider, NMenu, NConfigProvider, NMessageProvider, NText, NIcon, NDrawer, NDrawerContent, NButton } from 'naive-ui'
+import { computed, h, ref } from 'vue'
+import {
+  NButton,
+  NConfigProvider,
+  NDrawer,
+  NDrawerContent,
+  NIcon,
+  NLayout,
+  NLayoutSider,
+  NMenu,
+  NMessageProvider,
+  NText
+} from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
-import { useRouter, useRoute } from 'vue-router'
-import { RocketOutline, GridOutline, SpeedometerOutline, SettingsOutline, MenuOutline } from '@vicons/ionicons5'
+import { useRoute, useRouter } from 'vue-router'
+import { GridOutline, MenuOutline, RocketOutline, SettingsOutline, SpeedometerOutline } from '@vicons/ionicons5'
 import { useWindowSize } from '@vueuse/core'
 
 const router = useRouter()
@@ -79,6 +116,14 @@ const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
 const activeKey = computed(() => route.name as string)
+
+const menuLabels: Record<string, string> = {
+  Dashboard: 'Dashboard',
+  Monitor: 'Monitor',
+  Config: 'Configuration'
+}
+
+const currentPageLabel = computed(() => menuLabels[activeKey.value] || 'Navigation')
 
 const renderIcon = (icon: any) => () => h(NIcon, null, { default: () => h(icon) })
 
@@ -111,36 +156,181 @@ html, body, #app {
   padding: 0;
   height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background: #f5f7fb;
 }
+
+body {
+  color: #0f172a;
+}
+
+.app-shell {
+  background:
+    radial-gradient(circle at top left, rgba(32, 128, 240, 0.08), transparent 30%),
+    linear-gradient(180deg, #f8fafc 0%, #f3f6fb 100%);
+}
+
+.app-shell__sider {
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(12px);
+  border-right: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+}
+
+.app-shell__main {
+  background: transparent;
+}
+
+.app-shell__content {
+  background: transparent;
+}
+
+.app-shell__content-inner {
+  min-height: calc(100vh - 40px);
+}
+
 .logo {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px;
-  font-size: 16px;
+  gap: 12px;
+  padding: 14px;
   margin-bottom: 16px;
-  color: var(--n-text-color-1);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(32, 128, 240, 0.12), rgba(32, 128, 240, 0.05));
+  border: 1px solid rgba(32, 128, 240, 0.14);
 }
-.logo .n-icon {
-  color: #2080f0;
+
+.logo--collapsed {
+  justify-content: center;
+  padding: 12px 8px;
 }
-.logo-mobile {
-  display: flex;
+
+.logo__mark {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px;
-  font-size: 16px;
-  margin-bottom: 16px;
-  color: var(--n-text-color-1);
-  border-bottom: 1px solid var(--n-border-color);
+  justify-content: center;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #2080f0, #36ad6a);
+  color: #fff;
+  box-shadow: 0 10px 20px rgba(32, 128, 240, 0.25);
+  flex-shrink: 0;
 }
+
+.logo__mark--mobile {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  box-shadow: 0 8px 18px rgba(32, 128, 240, 0.18);
+}
+
+.logo__copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.logo__title {
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.logo__subtitle {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.nav-menu .n-menu-item-content,
+.nav-menu .n-menu-item-content-header {
+  transition: all 0.2s ease;
+}
+
+.nav-menu .n-menu-item-content {
+  border-radius: 14px;
+  margin: 4px 0;
+}
+
+.nav-menu .n-menu-item-content::before {
+  border-radius: 14px !important;
+}
+
+.nav-menu .n-menu-item-content--selected {
+  background: linear-gradient(135deg, rgba(32, 128, 240, 0.18), rgba(32, 128, 240, 0.08));
+  box-shadow: inset 0 0 0 1px rgba(32, 128, 240, 0.16);
+}
+
+.nav-menu .n-menu-item-content--selected .n-menu-item-content-header,
+.nav-menu .n-menu-item-content--selected .n-icon {
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.nav-menu .n-menu-item-content:hover {
+  background: rgba(148, 163, 184, 0.12);
+}
+
 .mobile-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--n-border-color);
-  background: var(--n-color);
+  justify-content: space-between;
+  margin: 10px 12px 0;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+}
+
+.mobile-header__left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.mobile-header__menu-button {
+  background: rgba(32, 128, 240, 0.08);
+  color: #1d4ed8;
+}
+
+.mobile-header__copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.mobile-header__eyebrow {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.mobile-header__title {
+  margin-top: 1px;
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.mobile-header__badge {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(32, 128, 240, 0.1);
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.mobile-drawer-header {
+  padding: 2px 0 10px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.mobile-drawer-header__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 a.app-link {
@@ -165,5 +355,16 @@ a.app-link:visited {
 
 a.app-link:visited:hover {
   color: #2080f0;
+}
+
+@media (max-width: 767px) {
+  .app-shell__content-inner {
+    min-height: calc(100vh - 28px);
+  }
+
+  .nav-menu .n-menu-item-content {
+    margin: 2px 0;
+    border-radius: 12px;
+  }
 }
 </style>

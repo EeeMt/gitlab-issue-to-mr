@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.database import close_db, init_db
 from app.migrations import run_migrations
+from app.runtime_config import load_runtime_config_from_db
 
 settings = get_settings()
 
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize database connection
     try:
         await init_db()
+        await load_runtime_config_from_db()
         logger.info("Database connection established")
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")

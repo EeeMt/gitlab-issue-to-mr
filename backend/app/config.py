@@ -1,12 +1,20 @@
 """Application configuration management."""
 
-import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+RuntimeConfigValue = Union[int, str, bool]
+
+RUNTIME_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
+    "max_concurrency": int,
+    "task_timeout": int,
+    "scheduler_interval": int,
+    "default_target_branch": str,
+}
 
 
 class Settings(BaseSettings):
@@ -61,37 +69,57 @@ class Settings(BaseSettings):
     max_retries: int = Field(default=0)  # Max retry attempts for failed tasks
     retry_delay: int = Field(default=60)  # Delay between retries in seconds
 
-    # Get absolute path for the project root
     @property
     def project_root(self) -> Path:
         """Get the absolute path to the project root directory."""
         return Path(__file__).parent.parent.parent
 
 
+@lru_cache
 def get_settings() -> Settings:
     """Get settings instance."""
     return Settings()
 
 
-# Runtime configuration overrides (can be changed via API)
-_runtime_config: dict = {}
+# Runtime configuration overrides loaded from the database into each process.
+_runtime_config: dict[str, RuntimeConfigValue] = {}
 
 
-def get_runtime_config() -> dict:
+def get_runtime_config() -> dict[str, RuntimeConfigValue]:
     """Get runtime configuration overrides."""
-    return _runtime_config
+    return _runtime_config.copy()
 
 
-def update_runtime_config(key: str, value: any) -> None:
+def get_runtime_config_types() -> dict[str, type[RuntimeConfigValue]]:
+    """Get supported runtime configuration keys and their types."""
+    return RUNTIME_CONFIG_TYPES.copy()
+
+
+def set_runtime_config(overrides: dict[str, RuntimeConfigValue]) -> None:
+    """Replace in-memory runtime configuration overrides."""
+    _runtime_config.clear()
+    _runtime_config.update(overrides)
+
+
+def update_runtime_config(key: str, value: RuntimeConfigValue) -> None:
     """Update runtime configuration override."""
+    if key not in RUNTIME_CONFIG_TYPES:
+        raise KeyError(f"Unknown runtime config key: {key}")
     _runtime_config[key] = value
+
+
+def reset_runtime_config(key: Optional[str] = None) -> None:
+    """Reset one or all runtime configuration overrides."""
+    if key is None:
+        _runtime_config.clear()
+        return
+
+    _runtime_config.pop(key, None)
 
 
 def get_effective_settings() -> Settings:
     """Get effective settings with runtime overrides applied."""
     settings = get_settings()
-    # Apply runtime overrides
-    for key in _runtime_config:
-        if hasattr(settings, key):
-            setattr(settings, key, _runtime_config[key])
-    return settings
+    settings_data = settings.model_dump()
+    settings_data.update(_runtime_config)
+    return Settings(**settings_data)

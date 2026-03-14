@@ -1,484 +1,472 @@
-# 开发进度文档
+# 项目阶段性总结
 
-## 项目概述
+## 文档目的
 
-GitLab Issue to MR Bot (GIMR) - 基于 GitLab Issue 自动生成代码并创建 MR 的 AI 助手。
+本文档用于替代早期的开发快照，基于当前代码、`DESIGN.md`、以及最近一轮关键提交，对项目现状做一次阶段性回顾。重点回答 4 个问题：
 
-## 当前状态
-
-**阶段**: MVP + P1 + P2 + 稳定性增强 已完成，端到端集成测试通过 ✅
-
-**当前任务**: P0.1 分步规划与执行 ✅ 已完成
-
----
-
-## 已完成功能
-
-### 1. 项目初始化 ✅
-
-| 任务 | 状态 | 文件 |
-|------|------|------|
-| 创建项目目录结构 | ✅ | `backend/app/`, `backend/app/api/`, `backend/app/core/`, `deploy/` |
-| Python 依赖配置 | ✅ | `backend/requirements.txt`, `backend/pyproject.toml` |
-| Docker 环境配置 | ✅ | `deploy/Dockerfile.backend`, `deploy/docker-compose.yml` |
-| Alembic 配置 | ✅ | `backend/alembic.ini`, `backend/alembic/env.py` |
-| 环境变量模板 | ✅ | `backend/.env.example` |
-
-### 2. 基础设施 ✅
-
-| 任务 | 状态 | 文件 |
-|------|------|------|
-| 配置管理模块 | ✅ | `backend/app/config.py` |
-| 数据库连接 | ✅ | `backend/app/database.py` |
-| 数据模型 | ✅ | `backend/app/models.py` |
-| Alembic 迁移 | ✅ | `backend/alembic/versions/001_initial.py` |
-| FastAPI 入口 | ✅ | `backend/app/main.py` |
-
-### 3. 核心功能 - Webhook ✅
-
-| 任务 | 状态 | 文件 |
-|------|------|------|
-| Webhook handler | ✅ | `backend/app/api/webhook.py` |
-| 解析 @ai-bot 指令 | ✅ | `backend/app/core/parser.py` |
-| 幂等性校验 | ✅ | `backend/app/api/webhook.py` (note_id 唯一约束) |
-| 任务创建 | ✅ | `backend/app/api/webhook.py` |
-
-### 4. 核心功能 - Worker ✅
-
-| 任务 | 状态 | 文件 |
-|------|------|------|
-| Docker 客户端封装 | ✅ | `backend/app/core/docker_client.py` |
-| GitLab 客户端封装 | ✅ | `backend/app/core/gitlab_client.py` |
-| Worker 镜像 | ✅ | `deploy/Dockerfile.worker`, `deploy/entrypoint.sh` |
-| Worker 执行器 | ✅ | `backend/app/core/worker.py` |
-| MR 创建与 Issue 回复 | ✅ | `deploy/entrypoint.sh` |
-
-### 5. 文档 ✅
-
-| 任务 | 状态 | 文件 |
-|------|------|------|
-| GitLab Webhook 配置文档 | ✅ | `GITLAB_WEBHOOK_SETUP.md` |
-| README | ✅ | `README.md` |
+1. 设计里规划了什么
+2. 当前实际上实现了什么
+3. 哪些部分与设计一致，哪些采用了不同实现方式
+4. 接下来还缺什么，优先级如何
 
 ---
 
-## 技术实现细节
+## 一、当前结论
 
-### Webhook 端点
+**当前阶段判断：**
 
-- **URL**: `POST /api/webhook/gitlab`
-- **验证**: X-Gitlab-Token header
-- **触发条件**: Issue 评论包含 `@ai-bot` 指令
+- **P0（最小可用）**：已完成，并已在真实 GitLab + 远程 Docker 环境中反复验证
+- **P0.1（分步规划执行）**：曾实现，但当前主路径已回退为**直接执行模式**
+- **P1（队列调度）**：已完成
+- **P2（管理后台）**：核心能力已完成，并在本轮迭代中持续增强
+- **P3（认证与权限）**：尚未开始
+- **P4（高级特性）**：部分实现，仍有若干设计项未落地
 
-### 命令解析
+**当前系统已经具备的核心能力：**
 
-支持格式:
-- `@ai-bot <prompt>`
-- `@ai-bot: <prompt>`
+- 通过 GitLab Issue 评论 `@ai-bot` 触发任务
+- 任务入库、排队、调度、执行、失败回写、重试
+- Worker 容器内执行 Claude Code CLI 完成代码改动、提交、推送、创建/更新 MR
+- 手动任务创建、延迟执行、绝对时间调度
+- Web 管理后台（任务列表、详情、日志、配置、监控）
+- 实时日志流、MR 统计、MR 标题/描述自动优化、任务可点击导航
 
-### Git 认证方案
+**最近两次关键提交：**
 
-使用 Personal Access Token 嵌入 URL 方式:
+- `6c75a35 feat: streamline worker execution and task UX`
+- `eba81f7 feat: improve task navigation and MR summaries`
 
-```bash
-# Clone
-GIT_REPO_URL="https://${TOKEN}@gitlab.example.com/project/${PROJECT_ID}.git"
-git clone "${GIT_REPO_URL}" /workspace
-
-# Push
-git remote set-url origin "${GIT_REPO_URL}"
-git push -u origin "${BRANCH_NAME}"
-```
-
-### Worker 流程
-
-1. Clone 仓库 (带认证)
-2. 创建/切换分支
-3. 调用 Claude CLI 生成代码
-4. Commit 并 Push
-5. 创建 MR
-6. 评论 Issue
+它们基本代表了本阶段的主要落地结果：**Worker 从旧执行方式迁移到 Claude Code CLI，并把任务 UX、MR 元数据、可观测性、导航体验补齐到“可持续使用”的状态。**
 
 ---
 
-## 测试结果
+## 二、与 DESIGN.md 的对照结论
 
-### 本地单元测试 ✅ (已完成)
-
-| 测试类别 | 测试数 | 状态 |
-|---------|--------|------|
-| Parser 命令解析 | 12 | ✅ |
-| 数据模型 | 3 | ✅ |
-| Webhook 解析 | 5 | ✅ |
-| 任务状态 | 8 | ✅ |
-| 并发控制 | 6 | ✅ |
-| 延迟计算 | 11 | ✅ |
-| E2E 模拟 | 3 | ✅ |
-| 超时与崩溃恢复 | 5 | ✅ |
-
-**总计: 53 个测试用例全部通过**
-
-### Docker 环境测试 ✅ (已完成)
-
-| 测试项 | 状态 |
-|--------|------|
-| Docker Compose 启动 | ✅ |
-| 后端服务运行 (port 8000) | ✅ |
-| PostgreSQL 连接 | ✅ |
-| Root 端点 `/` | ✅ |
-| Health 端点 `/health` | ✅ |
-
-### 端到端集成测试 ✅ (2026-03-10)
-
-| 测试项 | 状态 | 说明 |
-|--------|------|------|
-| Docker Compose 启动 | ✅ | PostgreSQL + Backend 正常启动 |
-| GitLab API 连接 | ✅ | 可访问 http://192.168.50.129:8080 |
-| 数据库迁移 | ✅ | alembic upgrade head 成功 |
-| Issue 创建 | ✅ | 通过 GitLab API 创建 Issue |
-| @ai-bot 命令解析 | ✅ | Webhook 正确解析命令 |
-| Task 创建 | ✅ | Task 创建成功 |
-| Worker 容器执行 | ✅ | 容器成功拉起并执行 |
-| 代码提交 | ✅ | 分支创建成功 |
-| MR 创建 | ✅ | MR 创建成功 |
-| Issue 关联 | ✅ | MR 配置了 `Closes #issue` |
-
-**测试脚本**:
-- `backend/test_integration_e2e.py` - 真实 GitLab 端到端测试
-- `backend/test_integration_e2e_mock.py` - Mock 模式测试
-
-**使用方式**:
-```bash
-# 完整测试
-python3 backend/test_integration_e2e.py
-
-# 跳过 Docker 启动
-python3 backend/test_integration_e2e.py --skip-startup
-
-# 保持服务运行
-python3 backend/test_integration_e2e.py --keep-running
-
-# Mock 模式测试
-python3 backend/test_integration_e2e_mock.py --skip-startup
-```
-
----
-
-### 单元测试 ✅ (历史)
-
----
-
-## 已知问题
-
-无 - 端到端集成测试已通过 ✅
-
-### 修复记录
-
-- 2026-03-08: 修复 Alembic `env.py` 对私有属性 `config._sections` 的错误访问
-- 2026-03-08: 修复 Alembic 枚举迁移（避免 `taskstatus` 重复创建，补齐 queued/cancelled）
-- 2026-03-08: 修复 SQLAlchemy Enum 映射（存储枚举值而非 `PENDING` 大写名称）
-- 2026-03-08: 修复 Docker Client 初始化（`docker.from_env` 参数错误，改为 `docker.DockerClient`）
-- 2026-03-08: 修复 Scheduler 启动恢复逻辑（仅清理 Worker 容器，避免误处理 compose 服务容器）
-- 2026-03-08: 修复 Scheduler 在迁移前启动导致的中断（启动恢复失败降级处理）
-- 2026-03-08: 修复配置读取大小写问题（`case_sensitive=False`，使 Docker/DB 环境变量生效）
-- 2026-03-09: 添加超时与崩溃恢复测试用例（5个测试，覆盖超时检测、容器清理、状态修复）
-- 2026-03-10: 添加端到端集成测试脚本 (test_integration_e2e.py, test_integration_e2e_mock.py)
-- 2026-03-10: 修复 note_id int32 范围问题
-- 2026-03-10: 端到端集成测试通过（真实 GitLab + Worker 容器执行 + MR 创建）
-
----
-
-## 配置要求
-
-### 环境变量
-
-```bash
-# Backend
-BACKEND_URL=http://localhost:8000  # 后端服务地址
-
-# GitLab
-GITLAB_URL=https://gitlab.example.com
-GITLAB_BOT_TOKEN=glpat-xxx  # 需要 api, read_repository, write_repository 权限
-GITLAB_WEBHOOK_SECRET=your-secret
-
-# Claude CLI
-ANTHROPIC_BASE_URL=http://host.docker.internal:11434/v1
-ANTHROPIC_API_KEY=your-key
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
-
-# PostgreSQL
-DATABASE_URL=postgresql+asyncpg://gimr:gimr_password@postgres:5432/gimr
-
-# Docker Engine
-DOCKER_HOST=tcp://docker.example.com:2376
-
-# Worker
-WORKER_IMAGE=gitlab-issues-to-mr-worker:latest
-
-# 调度配置 (P1)
-MAX_CONCURRENCY=3              # 最大并发任务数
-TASK_TIMEOUT=1800             # 任务超时时间(秒)
-SCHEDULER_INTERVAL=5           # 调度器轮询间隔(秒)
-DEFAULT_TARGET_BRANCH=main     # 默认目标分支
-```
-```
-
-### GitLab 配置
-
-1. 创建 Personal Access Token (需要 `api`, `read_repository`, `write_repository` 权限)
-2. 在项目中配置 Webhook:
-   - URL: `{backend_url}/api/webhook/gitlab`
-   - Secret: `GITLAB_WEBHOOK_SECRET`
-   - Trigger: Issue comments
-
----
-
-## 文件清单
-
-```
-backend/
-├── app/
-│   ├── __init__.py
-│   ├── api/
-│   │   ├── __init__.py
-│   │   └── webhook.py          # Webhook 端点
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── docker_client.py    # Docker 客户端
-│   │   ├── gitlab_client.py    # GitLab 客户端
-│   │   ├── parser.py           # @ai-bot 命令解析 (P1 扩展)
-│   │   └── worker.py           # Worker 执行器 (P1 扩展)
-│   ├── config.py               # 配置管理 (P1 扩展)
-│   ├── database.py             # 数据库连接
-│   ├── main.py                 # FastAPI 入口 (P1 扩展)
-│   ├── models.py               # 数据模型 (P1 扩展)
-│   └── scheduler.py            # 任务调度器 (P1 新增)
-├── alembic/
-│   ├── env.py
-│   └── versions/
-│       ├── 001_initial.py       # 初始迁移
-│       └── 002_queue_scheduling.py  # P1 迁移
-├── requirements.txt
-├── pyproject.toml
-├── alembic.ini
-├── .env.example
-├── test_timeout_recovery.py    # 超时与崩溃恢复测试
-├── test_e2e.py                # 端到端模拟测试
-├── test_p1.py                 # P1 功能测试
-├── test_webhook.py            # Webhook 测试
-├── test_integration_e2e.py    # 真实 GitLab 端到端集成测试
-└── test_integration_e2e_mock.py  # Mock 模式端到端集成测试
-
-deploy/
-├── Dockerfile.backend
-├── Dockerfile.worker
-├── docker-compose.yml
-└── entrypoint.sh               # Worker 入口脚本
-
-README.md
-GITLAB_WEBHOOK_SETUP.md
-PROGRESS.md                     # 本文档
-```
-
----
-
-## 已知问题
-
-1. 需要真实 GitLab 地址 + Token 才能验证成功创建 MR 的 happy path（当前仅验证失败路径与状态回写）。
-
----
-
-## 稳定性增强 ✅ 已完成
-
-### 目标
-
-提升系统稳定性，增强错误处理和监控能力。
-
-### 任务列表
-
-| # | 任务 | 状态 |
-|---|---|---|
-| 2.1 | 完善 Worker 错误处理 (超时、容器异常、GitLab API 错误) | ✅ |
-| 2.2 | 优化日志输出 (结构化日志) | ✅ |
-| 2.3 | 添加健康检查端点 (/health) | ✅ |
-| 2.4 | 添加失败任务告警通知 | ✅ |
-| 2.5 | 添加任务自动重试机制 | ✅ |
-
----
-
-## P0.1 分步规划与执行 ✅ 已完成
-
-### 目标
-
-增强用户体验，提供可追踪的实现过程。先规划实现方案，再逐步执行，实时更新 MR 进度。
-
-### 任务列表
-
-| # | 任务 | 状态 | 文件 |
+| 阶段 | DESIGN.md 目标 | 当前状态 | 说明 |
 |---|---|---|---|
-| 3.1 | 后端：创建初始 MR 并传递 MR_IID | ✅ | `backend/app/core/worker.py` |
-| 3.2 | Worker：接收 MR_IID 并更新 MR 描述 | ✅ | `deploy/entrypoint.sh` |
-| 3.3 | 逐步执行每个步骤 | ✅ | `deploy/entrypoint.sh` |
-| 3.4 | 实时更新 MR 进度 | ✅ | `deploy/entrypoint.sh` |
-| 3.5 | 生成完成报告 | ✅ | `deploy/entrypoint.sh` |
-| 3.6 | P0.1 单元测试 | ✅ | `backend/test_p01.py` |
+| P0 | Webhook → 解析指令 → 容器执行 Claude CLI → 创建分支/MR → 回复 Issue | ✅ 已完成 | 主链路已跑通，且在真实 GitLab 环境验证过 |
+| P0.1 | 先规划、后逐步执行、实时更新 MR 进度 | ⚠️ 历史上实现过，当前已切换为直接执行 | 现有实现保留了 MR 执行中/执行后更新，但**不再走规划清单 + 分步执行** |
+| P1 | 调度、并发、Issue 互斥、延迟执行、崩溃恢复 | ✅ 已完成 | 也是当前系统稳定性的核心基础 |
+| P2 | Vue 3 Dashboard、任务详情、实时日志、手动操作、配置管理 | ✅ 核心完成 | 本阶段已补齐 manual task、SSE 日志、UTC+8、可点击跳转等 |
+| P3 | GitLab OIDC、用户/角色/权限隔离 | ❌ 未开始 | 当前 Dashboard 仍无登录与多租户隔离 |
+| P4 | vLLM 监控、动态并发、追加修改、指令扩展、生产强化 | 🟡 部分完成 | 已完成 follow-up 基础能力、MR 元数据增强、运行时修复；资源隔离、认证、vLLM 指标等仍未完成 |
 
 ---
 
-## P0.1 实现说明
+## 三、按模块看当前实现进度
 
-P0.1 需要在 worker 执行前创建初始 MR，以便在执行过程中更新 MR 描述：
-1. **后端**：在 `execute_task` 中，容器启动前先创建 Draft MR
-2. **Worker**：接收 MR_IID 环境变量，在各阶段调用 GitLab API 更新 MR 描述
+### 3.1 Webhook、任务创建与基础任务模型
 
-### 部署步骤
+**已实现：**
 
-```bash
-# 1. 重新构建 worker 镜像
-cd deploy && docker-compose build worker
+- GitLab webhook 接收与 token 校验
+- `@ai-bot` 指令解析
+- note 级幂等处理
+- Task / TaskLog 模型与状态流转
+- 任务列表、任务详情、任务日志 API
+- 手动任务创建 API
+- 任务立即执行、取消、重试接口
 
-# 2. 重启服务
-docker-compose up -d
+**本阶段新增/增强：**
 
-# 3. 测试 P0.1 功能
-# 在 GitLab Issue 中评论 @ai-bot <需求描述>
-```
+- `is_manual` 手动任务标识
+- `scheduled_at` 支持绝对时间调度与 delay 调度
+- 任务 API 补充项目元数据：`project_name`、`project_path_with_namespace`
+- 任务 API 在响应时动态拼装 GitLab 导航链接：`project_url`、`issue_url`、`branch_url`、`target_branch_url`
 
-### 待优化项
-
-- [ ] 添加更多错误场景测试
-- [ ] 添加单元测试覆盖率报告
-- [ ] 添加前端 UI 测试
+**状态判断：** ✅ 已完成并持续演进
 
 ---
 
-# P1 - 队列调度 ✅ 已完成
+### 3.2 Scheduler 与任务执行控制
 
-## 目标
+**已实现：**
 
-支持多任务并发、延迟执行、可靠的状态管理。
+- pending 任务轮询
+- 优先级排序
+- 同一 Issue 互斥
+- 最大并发控制
+- 延迟执行
+- 超时检测
+- 崩溃恢复与残留容器清理
 
-### 已完成功能
+**当前实现方式：**
 
-#### 1.1 数据模型扩展 ✅
+- 调度逻辑运行于后端服务内的后台循环
+- 运行时配置可通过 `/api/config` 动态修改
+- 当前运行时配置覆盖已改为**数据库持久化 override + 进程内缓存刷新**
+- 配置优先级为 **数据库 override > 环境变量 > 默认值**
+- 已支持通过 API 重置 override，服务重启后仍可保留配置
 
-| # | 任务 | 状态 | 文件 |
-|---|---|---|---|
-| 1.1.1 | 添加 scheduled_at 字段 | ✅ | `app/models.py` |
-| 1.1.2 | 添加 priority 字段 | ✅ | `app/models.py` |
-| 1.1.3 | 添加 container_id 字段 | ✅ | `app/models.py` |
-| 1.1.4 | 添加 target_branch 字段 | ✅ | `app/models.py` |
-| 1.1.5 | 创建数据库迁移 | ✅ | `alembic/versions/002_queue_scheduling.py` |
-
-#### 1.2 命令解析扩展 ✅
-
-| # | 任务 | 状态 | 文件 |
-|---|---|---|---|
-| 1.2.1 | 支持 priority 参数 | ✅ | `app/core/parser.py` |
-| 1.2.2 | 支持 delay 参数 | ✅ | `app/core/parser.py` |
-| 1.2.3 | 支持 cancel 指令 | ✅ | `app/api/webhook.py` |
-| 1.2.4 | 支持 status 指令 | ✅ | `app/api/webhook.py` |
-
-#### 1.3 任务调度器 ✅
-
-| # | 任务 | 状态 | 文件 |
-|---|---|---|---|
-| 1.3.1 | 创建 Scheduler 类 | ✅ | `app/scheduler.py` |
-| 1.3.2 | 轮询 pending 任务 | ✅ | `app/scheduler.py` |
-| 1.3.3 | Issue 级互斥 | ✅ | `app/scheduler.py` |
-| 1.3.4 | 并发控制 | ✅ | `app/scheduler.py` |
-| 1.3.5 | 延迟执行 | ✅ | `app/scheduler.py` |
-
-#### 1.4 超时与崩溃恢复 ✅
-
-| # | 任务 | 状态 | 文件 |
-|---|---|---|---|
-| 1.4.1 | 超时检测 | ✅ | `app/core/worker.py` |
-| 1.4.2 | 容器命名规范 | ✅ | `app/core/worker.py` |
-| 1.4.3 | 启动时清理 | ✅ | `app/scheduler.py` |
-| 1.4.4 | 状态修复 | ✅ | `app/scheduler.py` |
-
-#### 1.5 配置扩展 ✅
-
-| # | 任务 | 状态 | 文件 |
-|---|---|---|---|
-| 1.5.1 | 添加调度配置 | ✅ | `app/config.py` |
-| 1.5.2 | 添加 target_branch 配置 | ✅ | `app/config.py` |
-
-#### 1.6 用户反馈通知 ✅ 已完成
-
-| # | 任务 | 状态 | 文件 |
-|---|---|---|---|
-| 1.6.1 | 任务开始时发送 "开始处理" 通知 | ✅ | `app/core/worker.py` |
-| 1.6.2 | 任务完成时发送 "MR已创建/失败" 通知 | ✅ | `app/core/worker.py` |
-| 1.6.3 | 单元测试 | ✅ | `test_notifications.py` |
+**状态判断：** ✅ P1 已完成  
+**补充说明：** 当前与 `DESIGN.md` 的主要差异已不再是“是否持久化”，而是尚未形成更完整的配置中心能力，例如审计、更多配置项、细粒度操作与权限控制。
 
 ---
 
-## 任务依赖图
+### 3.3 Worker、Claude 执行链路与 GitLab 集成
 
-```
-1.1.1-1.1.4 数据模型扩展 ──► 1.1.5 数据库迁移
-      │
-      ▼
-1.2 命令解析扩展 ◄──────────┘
-      │
-      ▼
-1.3 任务调度器
-      │
-      ├──────────────────┐
-      ▼                  ▼
-1.4 超时与崩溃恢复    1.5 配置扩展
-```
+**当前主路径已实现：**
 
----
+1. 获取 GitLab 项目元信息
+2. Clone 仓库
+3. 创建/切换分支
+4. 以非 root 用户执行 Claude Code CLI
+5. 采集执行摘要与实时 stdout/stderr
+6. 生成 commit message
+7. commit & push
+8. 创建或复用 MR
+9. 更新 MR 标题/描述
+10. 回写 Issue / Task 状态
 
-## 关键文件变更
+**本阶段关键增强：**
 
-### 新增文件
+- Worker 已迁移为 **Claude Code CLI 直接执行模式**
+- Worker 镜像已补齐 Java / Maven / Node / npm / ripgrep 等运行环境
+- 修复 manual task 的 `ISSUE_IID` 可选处理
+- 修复私有仓库 clone 认证逻辑
+- 修复 push/commit 顺序错误导致“MR 有内容但远端分支无提交”问题
+- 修复 MR URL 在 GitLab 非 80 端口环境下的错误拼接
+- 改进 MR 标题、MR 描述、commit message 生成质量
+- commit message 已约束为 **Conventional Commits** 风格，并附 `AI-Generated: true`
+- MR 描述已改为更适合阅读的结构化格式（文件表格、摘要去重、验证结果）
 
-```
-backend/app/
-├── scheduler.py         # 任务调度器
-├── core/
-│   └── scheduler.py     # 调度逻辑
-```
-
-### 修改文件
-
-```
-backend/app/
-├── config.py            # 添加调度配置
-├── models.py            # 添加新字段
-├── core/
-│   ├── parser.py       # 扩展命令解析
-│   └── worker.py       # 添加超时处理
-├── api/
-│   └── webhook.py      # 修改任务创建逻辑
-├── alembic/
-│   └── versions/
-│       └── 002_queue_scheduling.py  # 新迁移
-```
+**状态判断：** ✅ 可用，且是当前项目最成熟的主执行链路之一
 
 ---
 
-## 验证方式
+### 3.4 手动任务、调度参数与用户操作能力
 
-- [x] 多个任务同时触发，验证并发控制生效
-- [x] 同一 Issue 多次 @bot，验证互斥调度
-- [x] 使用 delay 参数，验证延迟执行
-- [x] 使用 priority 参数，验证优先级调度
-- [x] 停止正在运行的任务，验证超时处理
-- [x] 重启服务，验证崩溃恢复
+**已实现：**
+
+- 手动创建任务页 `CreateTask.vue`
+- 选择项目 / 基线分支 / 新分支 / 目标分支
+- delay 调度
+- 绝对时间调度
+- 任务详情页执行、取消、重试操作
+- 任务列表筛选与实时刷新
+
+**本阶段修复/增强：**
+
+- 修复前端调度参数未正确传递导致“看似延迟、实际立即执行”的问题
+- 修复时区 aware datetime 写库异常
+- 统一前后端对 naive UTC 的处理，页面统一显示为 **UTC+8**
+- 手动任务没有 issue 时，列表/详情统一显示 `-`
+
+**状态判断：** ✅ 已完成
 
 ---
 
-## 环境变量新增
+### 3.5 Web 管理后台（P2）
 
-```bash
-# 调度配置
-MAX_CONCURRENCY=3              # 最大并发任务数
-TASK_TIMEOUT=1800              # 任务超时时间(秒)
-SCHEDULER_INTERVAL=5           # 调度器轮询间隔(秒)
-DEFAULT_TARGET_BRANCH=main     # 默认目标分支
-```
+**已实现：**
+
+- Dashboard：任务列表、状态筛选、自动刷新
+- TaskView：任务详情、日志查看、操作按钮
+- Monitor：任务统计、运行中容器
+- Config：运行时配置读写（已支持持久化保存与重置）
+- 容器日志 SSE 实时流
+
+**本阶段增强：**
+
+- Dashboard / TaskView / Monitor 的移动端适配
+- 手动任务入口与创建表单
+- 任务关联的 Project / Issue / Branch 变为可点击跳转
+- 链接样式统一优化，去掉默认蓝色原生链接风格
+- 任务列表/详情显示项目路径名，而不是只显示 project id
+- MR 统计（+/-/total）在任务列表与详情页可见
+
+**状态判断：** ✅ P2 核心功能已完成
+
+---
+
+### 3.6 日志、可观测性与用户反馈
+
+**按设计已实现或部分实现：**
+
+- 任务开始反馈
+- 任务完成/失败反馈
+- Dashboard 轮询刷新
+- 容器日志流（SSE）
+- 任务详情页实时日志展示
+- MR 执行中 / 执行后描述更新
+
+**与设计的差异：**
+
+- `DESIGN.md` 的 P0.1 设想是“规划完成 → 分步骤执行 → 实时勾选步骤”
+- 当前实现改为“执行中状态 + 最终结构化报告”
+- 也就是说：**保留了 MR 作为任务结果承载体，但放弃了分步规划清单这一交互模型**
+
+**状态判断：** ✅ 可观测性较设计更务实，但少了“规划过程可追踪”的展示层
+
+---
+
+### 3.7 测试覆盖
+
+**代码仓库中已补齐较多测试：**
+
+- unit tests
+- mock e2e tests
+- gitlab e2e tests
+- manual task 测试
+- scheduled_at 测试
+- MR comment / MR stats / notifications / parser / priority / scheduler / timeout 测试
+
+**现实情况：**
+
+- 测试代码本身已显著扩充
+- 前端构建验证稳定可跑
+- 后端运行时容器镜像目前**不内置 pytest**，因此部署后在容器内直接跑测试并不方便
+- 当前线上排障仍较依赖：日志、数据库状态、真实任务回放、镜像重建后的实测验证
+
+**状态判断：** 🟡 仓库测试覆盖已明显增强，但“部署环境中可直接回归”的运维体验仍一般
+
+---
+
+## 四、与 DESIGN.md 不一致但当前更合理的实现方式
+
+### 4.1 P0.1 分步规划模式已退出主路径
+
+**设计原意：** 先规划、后逐步执行，并在 MR 中持续展示步骤完成情况。  
+**当前实现：** 直接执行，MR 只展示运行中状态与最终总结。
+
+**原因：**
+
+- 分步规划使执行链路更长，日志与状态更复杂
+- 实际使用中，用户更关注“是否开始执行、现在日志到哪一步、最终 MR 结果如何”
+- 当前任务详情页 + SSE 日志已经承担了大部分“过程可见性”的需求
+
+**结论：** 这是一次**有意识的产品取舍**，不是缺失实现。
+
+---
+
+### 4.2 Git 认证不再使用 token 直接嵌入 repo URL
+
+**旧文档/旧实现：** clone / push 时把 token 直接嵌入 URL。  
+**当前实现：** 使用**普通 HTTP 仓库地址 + `.git-credentials`** 提供认证。
+
+**原因：**
+
+- 旧做法在私有仓库、URL 重写、GitLab 跳转场景下更容易出错
+- 当前方式更稳定，也更容易控制日志中的脱敏输出
+
+**结论：** 当前实现优于文档中的旧方案。
+
+---
+
+### 4.3 Task 页面中的 GitLab 导航链接不落库，只在 API 响应中拼接
+
+**设计未明确约束此点。**
+
+**当前实现：**
+
+- 数据库继续只保存任务原始核心字段
+- `project_url` / `issue_url` / `branch_url` / `target_branch_url` 在 API 层根据现有字段动态拼装
+
+**优点：**
+
+- 不需要新增数据库字段
+- 避免 URL 持久化冗余
+- 更适合适配 GitLab 基础地址变更
+
+---
+
+### 4.4 MR 统计不再依赖 Worker 回调后端 PATCH
+
+设计上没有固定要求，但在实现过程中曾尝试让 Worker 直接回写 `/api/tasks/{id}/stats`。  
+由于 Worker 容器网络与 compose 服务名解析的限制，这种方式较脆弱。
+
+**当前更稳的思路：**
+
+- 优先依赖后端已有的 GitLab MR 查询能力获取统计
+- Worker 只负责把 commit / MR 推上去，不承担对后端接口的强耦合回调
+
+---
+
+## 五、尚未完成或仍有缺口的设计项
+
+### 5.1 P3：认证与权限
+
+**未开始。** 当前 Dashboard 没有：
+
+- GitLab OIDC 登录
+- 用户自动注册
+- 角色（user/admin）
+- 任务可见性隔离
+- 项目级权限控制
+
+这是当前与 `DESIGN.md` 最大的结构性差距之一。
+
+---
+
+### 5.2 P4：资源隔离与缓存优化
+
+`DESIGN.md` 中提到的这些能力当前还未完整落地：
+
+- Worker 容器 CPU / 内存 cgroup 限制
+- bare repo 只读挂载
+- 共享 Maven 缓存只读挂载
+- 更系统的容器级资源治理
+
+**当前实现：** 仍然是**每任务 fresh clone**，容器创建参数里也没有资源限制配置。
+
+---
+
+### 5.3 配置持久化
+
+`DESIGN.md` 规划的是 Dashboard 可热更新部分配置，并存入持久化配置表。  
+**当前实现**已经落地为**数据库持久化 override**，并由 backend / scheduler 在启动和调度循环中刷新加载。
+
+当前剩余差距主要在：
+
+- 还没有配置变更审计
+- 还没有扩展到更多系统级配置项
+- 还没有和权限体系结合，限制谁可以修改配置
+
+---
+
+### 5.4 更深入的监控能力
+
+当前 Monitor 页已有任务/容器层面的监控，但以下设计项未完成：
+
+- vLLM 指标接入
+- GPU / 请求队列可视化
+- 更完整的统计分析页
+- 更细颗粒度的系统健康看板
+
+---
+
+### 5.5 前端自动化测试
+
+仓库中尚未看到成体系的前端 UI / E2E 测试。当前前端主要依赖：
+
+- `npm run build`
+- 真实页面验证
+- 联调后目测确认
+
+这是后续质量保障上值得补齐的一块。
+
+---
+
+### 5.6 nginx 对后端容器重建的韧性
+
+本轮排障中已经观察到：**backend 容器重建后，nginx 有时会因缓存旧 upstream IP 而出现 `/api/*` 502**，需要重启 nginx 才恢复。
+
+这属于明显的运维韧性问题，建议后续专门修正。
+
+---
+
+## 六、当前项目的真实状态判断
+
+如果把项目看成“设计文档里的理想形态”与“当前可工作的生产原型”两条线，那么当前更准确的判断是：
+
+> **它已经不是“只有 MVP 的实验项目”，而是一个具备真实可用性、但仍未完成认证/权限/资源治理/高级监控的生产前中期系统。**
+
+换句话说：
+
+- **能用**：是的，而且已经能持续处理真实任务
+- **好用**：相比早期版本，已经明显提升
+- **可维护**：正在进入可维护区间，但仍有几处运维脆点
+- **可规模化**：还没到，尤其是权限、资源隔离、配置中心化能力还不够
+
+---
+
+## 七、建议的下一阶段优先级
+
+### 优先级 A：稳定性与运维韧性
+
+1. 修复 nginx upstream 依赖容器 IP 的问题
+2. 补齐 Worker 容器资源限制（CPU / memory）
+3. 明确 backend / scheduler / worker 的部署与回归检查脚本
+4. 让测试在更接近部署环境的地方更容易执行
+
+### 优先级 B：配置与平台能力
+
+1. 补充更完整的配置项与变更审计
+2. 支持更细粒度的单项配置管理和来源展示
+3. 完善 Monitor 页与系统监控指标
+
+### 优先级 C：产品化能力
+
+1. 实现 GitLab OIDC 登录
+2. 引入用户/角色/权限模型
+3. 区分“我的任务 / 全部任务 / 项目范围任务”
+4. 视需要恢复“分步执行”的轻量版，而非完整规划模式
+
+### 优先级 D：工程质量
+
+1. 补充前端自动化测试
+2. 持续清理部署与测试文档的历史偏差
+3. 继续把 `DESIGN.md` 中已经不再采用的方案明确标注为“历史方案/已弃用”
+
+---
+
+## 八、关键实现变化清单（本阶段）
+
+### 后端
+
+- `backend/app/api/tasks.py`
+  - 手动任务接口增强
+  - 调度字段处理增强
+  - 任务 API 返回项目元数据与导航链接
+- `backend/app/api/webhook.py`
+  - 调度时间统一规范化
+- `backend/app/core/worker.py`
+  - MR 创建/复用逻辑增强
+  - MR 元数据与统计处理增强
+- `backend/app/core/gitlab_client.py`
+  - GitLab URL 规范化
+- `backend/app/core/scheduling.py`
+  - 调度时间规范化逻辑
+- `backend/app/migrations.py`
+  - 启动时迁移支持
+- `backend/app/models.py`
+  - `is_manual` 等字段支持
+
+### Worker / 部署
+
+- `deploy/Dockerfile.worker`
+  - Claude Code CLI + Java + Maven + Node + npm + rg
+- `deploy/entrypoint.sh`
+  - 直接执行模式
+  - 非 root Claude CLI 执行
+  - clone 认证修复
+  - 实时日志输出
+  - MR 标题/描述/commit message 自动生成
+  - MR 报告结构优化
+
+### 前端
+
+- `frontend/src/views/CreateTask.vue`
+  - 手动任务创建与调度 UI
+- `frontend/src/views/Dashboard.vue`
+  - 项目名展示、任务导航链接、统计展示
+- `frontend/src/views/TaskView.vue`
+  - 实时日志、详情导航、MR/branch/issue 链接
+- `frontend/src/views/Monitor.vue`
+  - 监控页适配优化
+- `frontend/src/utils/datetime.ts`
+  - UTC+8 统一显示与 naive UTC 解析修正
+- `frontend/src/App.vue`
+  - 链接样式统一美化
+
+---
+
+## 九、总结
+
+本项目当前最值得肯定的地方，不是“按设计把每个阶段都完整做完了”，而是：
+
+- 核心链路已经在真实环境中跑通并经过多轮排障
+- 围绕 manual task、调度、MR 元数据、实时日志、时间展示、导航体验等关键使用场景做了大量补强
+- 对设计进行了**有意识的修正**，而不是机械照搬
+
+当前最应该继续投入的方向也很明确：
+
+- **先补运维韧性和平台能力**
+- 再补 **认证与多用户能力**
+- 最后再考虑更理想化的“完整规划式 AI 工作流”
+
+如果把当前版本定义为一个阶段性里程碑，比较准确的命名应该是：
+
+> **“具备真实可用性的单组织内部版 GIMR”**
+
+而不是早期文档里所暗示的“刚做完 MVP”。

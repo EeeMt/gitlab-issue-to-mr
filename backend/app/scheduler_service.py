@@ -7,6 +7,7 @@ import signal
 from app.config import get_settings
 from app.database import close_db, init_db
 from app.migrations import run_migrations
+from app.runtime_config import load_runtime_config_from_db
 from app.scheduler import start_scheduler, stop_scheduler
 
 settings = get_settings()
@@ -28,6 +29,7 @@ async def run_scheduler_service() -> None:
     run_migrations()
 
     await init_db()
+    await load_runtime_config_from_db()
     stop_event = asyncio.Event()
 
     loop = asyncio.get_running_loop()

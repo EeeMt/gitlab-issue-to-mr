@@ -3,10 +3,18 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_effective_settings, get_runtime_config, update_runtime_config
+from app.config import get_effective_settings, get_runtime_config_types
+from app.database import get_db
+from app.runtime_config import (
+    load_runtime_config_from_db,
+    reset_all_runtime_config_overrides,
+    reset_runtime_config_override,
+    save_runtime_config_override,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -21,78 +29,87 @@ class ConfigUpdate(BaseModel):
     default_target_branch: Optional[str] = None
 
 
-@router.get("/config")
-async def get_config():
-    """Get current configuration.
-
-    Returns:
-        Configuration object
-    """
+def _serialize_effective_config() -> dict:
     settings = get_effective_settings()
-    runtime = get_runtime_config()
-
     return {
-        "max_concurrency": runtime.get("max_concurrency", settings.max_concurrency),
-        "task_timeout": runtime.get("task_timeout", settings.task_timeout),
-        "scheduler_interval": runtime.get("scheduler_interval", settings.scheduler_interval),
-        "default_target_branch": runtime.get("default_target_branch", settings.default_target_branch),
+        "max_concurrency": settings.max_concurrency,
+        "task_timeout": settings.task_timeout,
+        "scheduler_interval": settings.scheduler_interval,
+        "default_target_branch": settings.default_target_branch,
     }
+
+
+def _validate_config_value(key: str, value: object) -> None:
+    if key == "max_concurrency" and (not isinstance(value, int) or value < 1 or value > 20):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="max_concurrency must be between 1 and 20",
+        )
+
+    if key == "task_timeout" and (not isinstance(value, int) or value < 60 or value > 7200):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="task_timeout must be between 60 and 7200 seconds",
+        )
+
+    if key == "scheduler_interval" and (not isinstance(value, int) or value < 1 or value > 60):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="scheduler_interval must be between 1 and 60 seconds",
+        )
+
+    if key == "default_target_branch" and (not isinstance(value, str) or not value.strip()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="default_target_branch cannot be empty",
+        )
+
+
+@router.get("/config")
+async def get_config(db: AsyncSession = Depends(get_db)):
+    """Get current configuration."""
+    await load_runtime_config_from_db(db)
+    return _serialize_effective_config()
 
 
 @router.patch("/config")
-async def update_config(config_update: ConfigUpdate):
-    """Update runtime configuration.
+async def update_config(
+    config_update: ConfigUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update persisted runtime configuration overrides."""
+    updates = config_update.model_dump(exclude_unset=True)
 
-    Args:
-        config_update: Configuration updates
+    for key, value in updates.items():
+        _validate_config_value(key, value)
+        if key == "default_target_branch":
+            value = value.strip()
+        await save_runtime_config_override(db, key, value)
+        logger.info("Updated runtime config %s to %s", key, value)
 
-    Returns:
-        Updated configuration
-    """
-    runtime = get_runtime_config()
+    await load_runtime_config_from_db(db)
+    return _serialize_effective_config()
 
-    if config_update.max_concurrency is not None:
-        if config_update.max_concurrency < 1 or config_update.max_concurrency > 20:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="max_concurrency must be between 1 and 20",
-            )
-        update_runtime_config("max_concurrency", config_update.max_concurrency)
-        logger.info(f"Updated max_concurrency to {config_update.max_concurrency}")
 
-    if config_update.task_timeout is not None:
-        if config_update.task_timeout < 60 or config_update.task_timeout > 7200:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="task_timeout must be between 60 and 7200 seconds",
-            )
-        update_runtime_config("task_timeout", config_update.task_timeout)
-        logger.info(f"Updated task_timeout to {config_update.task_timeout}")
+@router.post("/config/reset")
+async def reset_config(db: AsyncSession = Depends(get_db)):
+    """Reset all runtime configuration overrides back to env/default values."""
+    await reset_all_runtime_config_overrides(db)
+    await load_runtime_config_from_db(db)
+    logger.info("Reset all runtime configuration overrides")
+    return _serialize_effective_config()
 
-    if config_update.scheduler_interval is not None:
-        if config_update.scheduler_interval < 1 or config_update.scheduler_interval > 60:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="scheduler_interval must be between 1 and 60 seconds",
-            )
-        update_runtime_config("scheduler_interval", config_update.scheduler_interval)
-        logger.info(f"Updated scheduler_interval to {config_update.scheduler_interval}")
 
-    if config_update.default_target_branch is not None:
-        if not config_update.default_target_branch:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="default_target_branch cannot be empty",
-            )
-        update_runtime_config("default_target_branch", config_update.default_target_branch)
-        logger.info(f"Updated default_target_branch to {config_update.default_target_branch}")
+@router.delete("/config/{key}")
+async def reset_config_key(key: str, db: AsyncSession = Depends(get_db)):
+    """Reset one runtime configuration override back to env/default value."""
+    if key not in get_runtime_config_types():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown config key: {key}",
+        )
 
-    # Return current config
-    settings = get_effective_settings()
-    runtime = get_runtime_config()
-    return {
-        "max_concurrency": runtime.get("max_concurrency", settings.max_concurrency),
-        "task_timeout": runtime.get("task_timeout", settings.task_timeout),
-        "scheduler_interval": runtime.get("scheduler_interval", settings.scheduler_interval),
-        "default_target_branch": runtime.get("default_target_branch", settings.default_target_branch),
-    }
+    await reset_runtime_config_override(db, key)
+    await load_runtime_config_from_db(db)
+    logger.info("Reset runtime configuration override for %s", key)
+    return _serialize_effective_config()

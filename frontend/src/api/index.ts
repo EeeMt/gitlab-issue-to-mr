@@ -170,6 +170,11 @@ export async function updateConfig(config: Partial<Config>): Promise<Config> {
   return response.data
 }
 
+export async function resetConfig(): Promise<Config> {
+  const response = await api.post('/config/reset')
+  return response.data
+}
+
 // Manual task creation APIs
 export async function getProjects(): Promise<Project[]> {
   const response = await api.get('/projects')
