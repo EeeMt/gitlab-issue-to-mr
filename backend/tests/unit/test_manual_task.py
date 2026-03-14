@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch, AsyncMock
+from pydantic import ValidationError
 
 from app.api.tasks import CreateTaskRequest
 from app.core.scheduling import normalize_scheduled_datetime, resolve_scheduled_at
@@ -68,6 +69,16 @@ class TestCreateTaskRequest:
         )
         assert request.target_branch == "main"
         assert request.priority == 0
+
+    def test_same_source_and_target_branch_is_rejected(self):
+        """Test manual tasks cannot use the same source and target branch."""
+        with pytest.raises(ValidationError, match="Source branch and target branch must be different"):
+            CreateTaskRequest(
+                project_id=1,
+                branch_name="main",
+                target_branch="main",
+                user_prompt="Test prompt",
+            )
 
     def test_task_priority_p0(self):
         """Test P0 priority."""

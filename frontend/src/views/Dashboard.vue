@@ -43,7 +43,7 @@
           :row-props="getRowProps"
           :pagination="pagination"
           :bordered="false"
-          :scroll-x="isMobile ? undefined : 900"
+          :scroll-x="isMobile ? undefined : undefined"
         />
       </n-card>
     </n-space>
@@ -108,6 +108,26 @@ function getProjectSecondaryLabel(task: Task): string {
   return `${getProjectLabel(task)} · ${issueLabel}`
 }
 
+function formatPriority(priority?: string | number | null): string {
+  if (priority === null || priority === undefined || priority === '') {
+    return '-'
+  }
+
+  const normalized = String(priority).toLowerCase().trim()
+  if (normalized === '0' || normalized === 'p0') return 'P0'
+  if (normalized === '1' || normalized === 'p1') return 'P1'
+  if (normalized === '2' || normalized === 'p2') return 'P2'
+  return String(priority)
+}
+
+function formatCompactDateTime(value?: string | null): string {
+  if (!value) {
+    return '-'
+  }
+
+  return formatDateTimeUtc8(value).slice(0, 16)
+}
+
 function goToTask(task: Task) {
   router.push({ name: 'TaskView', params: { id: task.id } })
 }
@@ -165,68 +185,72 @@ const desktopColumns: DataTableColumns<Task> = [
   {
     title: 'Project',
     key: 'project',
-    width: 220,
+    width: 180,
     ellipsis: { tooltip: true },
     render: (row) => h('div', { style: 'line-height: 1.4' }, [
       h('div', renderExternalLink(getProjectLabel(row), row.project_url)),
-      h('div', { style: 'font-size: 12px; color: #888' }, `ID: ${row.project_id}`)
+      h('div', { style: 'font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;' }, `#${row.project_id}`)
     ])
   },
   {
     title: 'Issue',
     key: 'issue_iid',
-    width: 70,
+    width: 60,
     render: (row) => row.issue_iid ? renderExternalLink(`!${row.issue_iid}`, row.issue_url) : '-'
   },
   {
     title: 'Status',
     key: 'status',
-    width: 100,
+    width: 90,
     render: (row) => h(NTag, { type: statusColors[row.status], size: 'small' }, () => row.status)
   },
   {
     title: 'Priority',
     key: 'priority',
-    width: 80
+    width: 68,
+    render: (row) => formatPriority(row.priority)
   },
   {
     title: 'Branch',
     key: 'branch_name',
-    width: 180,
+    width: 140,
     ellipsis: { tooltip: true },
     render: (row) => row.branch_name ? renderExternalLink(row.branch_name, row.branch_url) : '-'
   },
   {
     title: 'MR',
     key: 'merge_request_url',
-    width: 200,
-    ellipsis: { tooltip: true },
-    render: (row) => row.merge_request_url ? h('a', { href: row.merge_request_url, target: '_blank', rel: 'noopener noreferrer', class: 'app-link' }, row.merge_request_url.split('/').pop()) : '-'
+    width: 76,
+    render: (row) => {
+      if (!row.merge_request_url) return '-'
+      const label = row.merge_request_iid ? `!${row.merge_request_iid}` : 'Open'
+      return h('a', { href: row.merge_request_url, target: '_blank', rel: 'noopener noreferrer', class: 'app-link' }, label)
+    }
   },
   {
     title: 'Changes',
     key: 'changes',
-    width: 120,
+    width: 92,
     render: (row) => {
       if (row.additions === undefined && row.deletions === undefined) return '-'
       if (!row.additions && !row.deletions) return '-'
-      return h('span', { style: 'display: flex; align-items: center; gap: 4px;' }, [
+      return h('span', { style: 'display: flex; align-items: center; gap: 4px; font-size: 12px;' }, [
         h('span', { style: 'color: #18a053' }, '+' + (row.additions || 0)),
-        h('span', { style: 'color: #db3b21; margin-left: 8px' }, '-' + (row.deletions || 0))
+        h('span', { style: 'color: #db3b21; margin-left: 4px' }, '-' + (row.deletions || 0))
       ])
     }
   },
   {
     title: 'Created',
     key: 'created_at',
-    width: 160,
-    render: (row) => formatDateTimeUtc8(row.created_at)
+    width: 132,
+    render: (row) => formatCompactDateTime(row.created_at)
   },
   {
     title: 'Scheduled',
     key: 'scheduled_at',
-    width: 160,
-    render: (row) => row.scheduled_at ? formatDateTimeUtc8(row.scheduled_at) : '-'
+    width: 132,
+    render: (row) => formatCompactDateTime(row.scheduled_at)
   }
 ]
 

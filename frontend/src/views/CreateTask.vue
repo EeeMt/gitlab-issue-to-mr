@@ -79,6 +79,9 @@
                       Branch to merge changes into.
                     </template>
                   </n-form-item>
+                  <div v-if="sameBranchConflict" class="create-task-form__warning">
+                    Manual tasks must use a different source branch and target branch to produce a merge request.
+                  </div>
                 </n-gi>
               </n-grid>
             </div>
@@ -266,6 +269,18 @@ const targetBranchOptions = computed(() => {
   return options
 })
 
+const resolvedSourceBranch = computed(() => {
+  return (formValue.value.new_branch_name || formValue.value.base_branch || '').trim()
+})
+
+const sameBranchConflict = computed(() => {
+  return (
+    !!resolvedSourceBranch.value &&
+    !!formValue.value.target_branch &&
+    resolvedSourceBranch.value === formValue.value.target_branch
+  )
+})
+
 const scheduleSummary = computed(() => {
   if (scheduleType.value === 'now') {
     return 'This task will execute immediately after creation.'
@@ -298,10 +313,20 @@ const rules: FormRules = {
     message: 'Please select a base branch',
     trigger: 'change'
   },
+  new_branch_name: {
+    validator: () =>
+      !sameBranchConflict.value || new Error('Source branch and target branch must be different'),
+    trigger: ['blur', 'input', 'change']
+  },
   target_branch: {
     required: true,
-    message: 'Please select target branch',
-    trigger: 'change'
+    validator: () => {
+      if (!formValue.value.target_branch) {
+        return new Error('Please select target branch')
+      }
+      return !sameBranchConflict.value || new Error('Source branch and target branch must be different')
+    },
+    trigger: ['blur', 'change', 'input']
   },
   user_prompt: {
     required: true,
@@ -416,6 +441,11 @@ async function handleSubmit() {
     // Determine branch_name: use new_branch_name if provided, otherwise use base_branch
     const branchName = formValue.value.new_branch_name || formValue.value.base_branch || ''
 
+    if (branchName === formValue.value.target_branch) {
+      message.error('Source branch and target branch must be different for manual tasks')
+      return
+    }
+
     // Prepare request
     const request: CreateTaskRequest = {
       project_id: formValue.value.project_id,
@@ -516,6 +546,12 @@ onMounted(() => {
 .create-task-form__hint {
   font-size: 12px;
   color: rgba(15, 23, 42, 0.64);
+}
+
+.create-task-form__warning {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #d03050;
 }
 
 @media (max-width: 768px) {

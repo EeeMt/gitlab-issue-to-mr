@@ -7,7 +7,7 @@ from typing import Any, Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sqlalchemy import select, func, false
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -475,6 +475,13 @@ class CreateTaskRequest(BaseModel):
     priority: int = 0
     delay_seconds: Optional[int] = None
     scheduled_datetime: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def validate_distinct_branches(self) -> "CreateTaskRequest":
+        """Manual tasks must use distinct source and target branches."""
+        if self.branch_name == self.target_branch:
+            raise ValueError("Source branch and target branch must be different for manual tasks")
+        return self
 
 
 @router.get("/projects")
