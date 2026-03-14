@@ -1,9 +1,14 @@
 <template>
   <div class="dashboard">
     <n-space vertical :size="16">
-      <div class="header-row">
-        <h2>Task Dashboard</h2>
-        <n-space align="center">
+      <div class="dashboard__hero">
+        <div>
+          <h2 class="dashboard__title">Task Dashboard</h2>
+          <p class="dashboard__subtitle">
+            Track queued work, running jobs, and completed merge request tasks from a single view.
+          </p>
+        </div>
+        <n-space align="center" wrap>
           <n-button type="primary" @click="router.push('/create-task')" size="small">
             Create Task
           </n-button>
@@ -20,12 +25,22 @@
         </n-space>
       </div>
 
-      <n-card>
+      <n-grid :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
+        <n-gi v-for="item in summaryItems" :key="item.label">
+          <n-card size="small" class="dashboard-summary-card" :bordered="false">
+            <div class="dashboard-summary-card__label">{{ item.label }}</div>
+            <div class="dashboard-summary-card__value">{{ item.value }}</div>
+          </n-card>
+        </n-gi>
+      </n-grid>
+
+      <n-card class="dashboard-table-card" :bordered="false">
         <n-data-table
           :columns="columns"
           :data="tasks"
           :loading="loading"
           :row-key="(row: Task) => row.id"
+          :row-props="getRowProps"
           :pagination="pagination"
           :bordered="false"
           :scroll-x="isMobile ? undefined : 900"
@@ -37,7 +52,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, h, watch, computed } from 'vue'
-import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, useMessage, DataTableColumns } from 'naive-ui'
+import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, NGrid, NGi, useMessage, DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useWindowSize } from '@vueuse/core'
 import { getTasks, type Task } from '../api'
@@ -93,6 +108,32 @@ function getProjectSecondaryLabel(task: Task): string {
   return `${getProjectLabel(task)} · ${issueLabel}`
 }
 
+function goToTask(task: Task) {
+  router.push({ name: 'TaskView', params: { id: task.id } })
+}
+
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) {
+    return false
+  }
+
+  return Boolean(
+    target.closest('a, button, input, textarea, select, summary, [role="button"], .n-button, .n-base-selection')
+  )
+}
+
+function getRowProps(row: Task) {
+  return {
+    style: 'cursor: pointer;',
+    onClick: (event: MouseEvent) => {
+      if (isInteractiveTarget(event.target)) {
+        return
+      }
+      goToTask(row)
+    }
+  }
+}
+
 const mobileColumns: DataTableColumns<Task> = [
   {
     title: 'ID',
@@ -117,7 +158,7 @@ const mobileColumns: DataTableColumns<Task> = [
     title: '',
     key: 'actions',
     width: 52,
-    render: (row) => h(NButton, { size: 'tiny', onClick: () => router.push({ name: 'TaskView', params: { id: row.id } }) }, () => 'View')
+    render: (row) => h(NButton, { size: 'tiny', onClick: () => goToTask(row) }, () => 'View')
   }
 ]
 
@@ -197,11 +238,32 @@ const desktopColumns: DataTableColumns<Task> = [
     title: 'Actions',
     key: 'actions',
     width: 100,
-    render: (row) => h(NButton, { size: 'small', onClick: () => router.push({ name: 'TaskView', params: { id: row.id } }) }, () => 'View')
+    render: (row) => h(NButton, { size: 'small', onClick: () => goToTask(row) }, () => 'View')
   }
 ]
 
 const columns = computed(() => isMobile.value ? mobileColumns : desktopColumns)
+
+const summaryItems = computed(() => {
+  const summary = tasks.value.reduce(
+    (acc, task) => {
+      acc.total += 1
+      if (task.status === 'running') acc.running += 1
+      if (task.status === 'completed') acc.completed += 1
+      if (task.status === 'pending' || task.status === 'queued') acc.pending += 1
+      if (task.status === 'failed') acc.failed += 1
+      return acc
+    },
+    { total: 0, running: 0, completed: 0, pending: 0, failed: 0 }
+  )
+
+  return [
+    { label: 'Visible Tasks', value: String(summary.total) },
+    { label: 'Running', value: String(summary.running) },
+    { label: 'Pending / Queued', value: String(summary.pending) },
+    { label: 'Completed', value: String(summary.completed) }
+  ]
+})
 
 async function fetchTasks() {
   if (loading.value) return
@@ -246,26 +308,58 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .dashboard {
-  max-width: 100%;
+  max-width: 1240px;
 }
-.header-row {
+
+.dashboard__hero {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 16px;
 }
-.header-row h2 {
+
+.dashboard__title {
   margin: 0;
-  font-size: 18px;
+  font-size: 28px;
+  line-height: 1.2;
 }
+
+.dashboard__subtitle {
+  margin: 8px 0 0;
+  color: rgba(15, 23, 42, 0.68);
+  max-width: 760px;
+}
+
+.dashboard-summary-card {
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
+}
+
+.dashboard-summary-card__label {
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.6);
+}
+
+.dashboard-summary-card__value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--n-text-color-1);
+}
+
+.dashboard-table-card {
+  border-radius: 18px;
+}
+
 @media (max-width: 768px) {
-  .header-row {
+  .dashboard__hero {
     flex-direction: column;
     align-items: flex-start;
   }
-  .header-row h2 {
-    font-size: 16px;
+
+  .dashboard__title {
+    font-size: 24px;
   }
 }
 </style>

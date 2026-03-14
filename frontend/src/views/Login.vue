@@ -6,7 +6,7 @@
           <n-icon size="26" :component="RocketOutline" />
         </div>
         <div>
-          <h1 class="login-card__title">GitMR Admin</h1>
+          <h1 class="login-card__title">GIMR Admin</h1>
           <p class="login-card__subtitle">Sign in with GitLab to access the dashboard.</p>
         </div>
       </div>
@@ -54,15 +54,20 @@ function handleLogin() {
 
 <style scoped>
 .login-page {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 100%;
+  box-sizing: border-box;
   padding: 24px;
+  padding-top: max(24px, env(safe-area-inset-top));
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
 }
 
 .login-card {
   width: min(460px, 100%);
+  margin: 0 auto;
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.86);
   backdrop-filter: blur(14px);
@@ -106,5 +111,12 @@ function handleLogin() {
 .login-card__hint {
   display: block;
   line-height: 1.5;
+}
+
+@media (max-width: 767px) {
+  .login-page {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
 }
 </style>

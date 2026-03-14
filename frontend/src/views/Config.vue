@@ -10,6 +10,8 @@
           </p>
         </div>
         <n-space :size="8" wrap>
+          <n-tag v-if="isDirty" size="small" round type="warning">Unsaved changes</n-tag>
+          <n-tag v-else size="small" round type="success">In sync</n-tag>
           <n-tag size="small" round type="info">DB override</n-tag>
           <n-tag size="small" round>env fallback</n-tag>
           <n-tag size="small" round>default fallback</n-tag>
@@ -30,234 +32,277 @@
         </n-gi>
       </n-grid>
 
-      <n-card class="config-form-card" :bordered="false">
-        <template #header>
-          <div class="config-card-header">
-            <div>
-              <div class="config-card-header__title">Settings</div>
-              <div class="config-card-header__subtitle">Runtime and authentication configuration</div>
-            </div>
-            <n-space :size="8" align="center">
-              <n-tag v-if="isDirty" size="small" type="warning" round>Unsaved changes</n-tag>
-              <n-tag v-else size="small" type="success" round>In sync</n-tag>
-            </n-space>
+      <n-spin :show="loading">
+        <n-form ref="formRef" :model="formValue" :rules="rules" label-placement="top" class="config-form">
+          <div class="config-layout__main">
+            <n-card id="runtime-settings" class="config-form-card" :bordered="false">
+                <template #header>
+                  <div class="config-card-header">
+                    <div>
+                      <div class="config-card-header__title">Runtime Settings</div>
+                      <div class="config-card-header__subtitle">Scheduler and task execution behavior</div>
+                    </div>
+                  </div>
+                </template>
+
+                <div class="config-form__section">
+                  <div class="config-form__section-title">Scheduler</div>
+                  <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                    <n-gi>
+                      <n-form-item label="Max Concurrency" path="max_concurrency">
+                        <n-input-number
+                          v-model:value="formValue.max_concurrency"
+                          :min="1"
+                          :max="20"
+                          class="config-form__input"
+                        />
+                        <template #feedback>
+                          Maximum number of tasks that can run at the same time.
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item label="Scheduler Interval (seconds)" path="scheduler_interval">
+                        <n-input-number
+                          v-model:value="formValue.scheduler_interval"
+                          :min="1"
+                          :max="60"
+                          class="config-form__input"
+                        />
+                        <template #feedback>
+                          How often the scheduler checks for work.
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item label="Task Timeout (seconds)" path="task_timeout">
+                        <n-input-number
+                          v-model:value="formValue.task_timeout"
+                          :min="60"
+                          :max="7200"
+                          class="config-form__input"
+                        />
+                        <template #feedback>
+                          Maximum execution time before a task is marked failed.
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item label="Default Target Branch" path="default_target_branch">
+                        <n-input
+                          v-model:value="formValue.default_target_branch"
+                          placeholder="main"
+                          class="config-form__input"
+                        />
+                        <template #feedback>
+                          Default branch used when a task does not specify one.
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                  </n-grid>
+                </div>
+            </n-card>
+
+            <n-card id="oidc-settings" class="config-form-card" :bordered="false">
+                <template #header>
+                  <div class="config-card-header">
+                    <div>
+                      <div class="config-card-header__title">GitLab OIDC</div>
+                      <div class="config-card-header__subtitle">Identity provider and callback configuration</div>
+                    </div>
+                  </div>
+                </template>
+
+                <div class="config-form__section">
+                  <div class="config-form__section-title">Provider basics</div>
+                  <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                    <n-gi>
+                      <n-form-item label="Enable OIDC Login" path="oidc_enabled">
+                        <n-switch v-model:value="formValue.oidc_enabled" />
+                        <template #feedback>
+                          When enabled, dashboard APIs require GitLab sign-in.
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item label="Client Secret Status">
+                        <n-tag :type="formValue.oidc_client_secret_configured ? 'success' : 'warning'" round>
+                          {{ formValue.oidc_client_secret_configured ? 'Configured' : 'Missing' }}
+                        </n-tag>
+                        <template #feedback>
+                          The actual secret is never returned to the browser.
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item label="Issuer URL" path="oidc_issuer_url">
+                        <n-input
+                          v-model:value="formValue.oidc_issuer_url"
+                          placeholder="https://gitlab.example.com"
+                          class="config-form__input"
+                        />
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item label="Client ID" path="oidc_client_id">
+                        <n-input v-model:value="formValue.oidc_client_id" class="config-form__input" />
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi :span="isMobile ? 1 : 2">
+                      <n-form-item label="Client Secret">
+                        <n-input
+                          v-model:value="formValue.oidc_client_secret_input"
+                          type="password"
+                          show-password-on="click"
+                          :placeholder="
+                            formValue.oidc_client_secret_configured
+                              ? 'Configured. Enter a new value to rotate it.'
+                              : 'Enter client secret'
+                          "
+                          class="config-form__input"
+                        />
+                        <template #feedback>
+                          Leave blank to keep the stored secret unchanged.
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi :span="isMobile ? 1 : 2">
+                      <n-form-item label="Redirect URI" path="oidc_redirect_uri">
+                        <n-input
+                          v-model:value="formValue.oidc_redirect_uri"
+                          placeholder="https://your-domain.example.com/api/auth/callback"
+                          class="config-form__input"
+                        />
+                      </n-form-item>
+                    </n-gi>
+                  </n-grid>
+                </div>
+            </n-card>
+
+            <n-card id="session-settings" class="config-form-card" :bordered="false">
+                <template #header>
+                  <div class="config-card-header">
+                    <div>
+                      <div class="config-card-header__title">Session & Access</div>
+                      <div class="config-card-header__subtitle">Cookie policy and admin bootstrap settings</div>
+                    </div>
+                  </div>
+                </template>
+
+                <div class="config-form__section">
+                  <div class="config-form__section-title">Session policy</div>
+                  <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                    <n-gi>
+                      <n-form-item label="Session Cookie Name" path="session_cookie_name">
+                        <n-input v-model:value="formValue.session_cookie_name" class="config-form__input" />
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item label="Session TTL (seconds)" path="session_ttl_seconds">
+                        <n-input-number
+                          v-model:value="formValue.session_ttl_seconds"
+                          :min="300"
+                          :max="604800"
+                          class="config-form__input"
+                        />
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item label="Cookie Secure" path="cookie_secure">
+                        <n-switch v-model:value="formValue.cookie_secure" />
+                        <template #feedback>
+                          Keep this enabled for HTTPS deployments.
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item label="Cookie SameSite" path="cookie_samesite">
+                        <n-select
+                          v-model:value="formValue.cookie_samesite"
+                          :options="sameSiteOptions"
+                          class="config-form__input"
+                        />
+                      </n-form-item>
+                    </n-gi>
+                  </n-grid>
+                </div>
+
+                <div class="config-form__section">
+                  <div class="config-form__section-title">Admin bootstrap</div>
+                  <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                    <n-gi>
+                      <n-form-item label="Admin Usernames">
+                        <n-input
+                          v-model:value="formValue.auth_admin_usernames"
+                          placeholder="alice,bob"
+                          class="config-form__input"
+                        />
+                        <template #feedback>
+                          Comma-separated GitLab usernames bootstrapped as platform admins.
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item label="Admin GitLab Groups">
+                        <n-input
+                          v-model:value="formValue.auth_admin_gitlab_groups"
+                          placeholder="platform-team"
+                          class="config-form__input"
+                        />
+                        <template #feedback>
+                          Optional group names checked during login.
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                  </n-grid>
+                </div>
+            </n-card>
+
+            <n-card id="config-actions" class="config-form-card" :bordered="false">
+                <template #header>
+                  <div class="config-card-header">
+                    <div>
+                      <div class="config-card-header__title">Actions</div>
+                      <div class="config-card-header__subtitle">Validate, save, reload, or reset configuration</div>
+                    </div>
+                  </div>
+                </template>
+
+                <div class="config-form__section">
+                  <n-space :size="12" wrap>
+                    <n-button
+                      type="primary"
+                      @click="handleSave"
+                      :loading="saving"
+                      :disabled="loading || saving || !isDirty"
+                    >
+                      Save changes
+                    </n-button>
+                    <n-button @click="handleTestOidc" :loading="testing" :disabled="loading || saving || testing">
+                      Test OIDC connection
+                    </n-button>
+                    <n-button
+                      @click="handleClearSecret"
+                      :disabled="loading || saving || testing || !formValue.oidc_client_secret_configured"
+                    >
+                      Clear stored secret
+                    </n-button>
+                    <n-button @click="handleReload" :disabled="loading || saving || testing">
+                      Reload
+                    </n-button>
+                    <n-button @click="handleReset" :disabled="loading || saving || testing" secondary>
+                      Reset to env/defaults
+                    </n-button>
+                  </n-space>
+                </div>
+
+                <n-alert v-if="oidcTestState" :type="oidcTestState.type" :show-icon="false">
+                  {{ oidcTestState.message }}
+                </n-alert>
+            </n-card>
           </div>
-        </template>
-
-        <n-spin :show="loading">
-          <n-form ref="formRef" :model="formValue" :rules="rules" label-placement="top" class="config-form">
-            <div class="config-form__section">
-              <div class="config-form__section-title">Scheduler</div>
-              <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-                <n-gi>
-                  <n-form-item label="Max Concurrency" path="max_concurrency">
-                    <n-input-number
-                      v-model:value="formValue.max_concurrency"
-                      :min="1"
-                      :max="20"
-                      class="config-form__input"
-                    />
-                    <template #feedback>
-                      Maximum number of tasks that can run at the same time.
-                    </template>
-                  </n-form-item>
-                </n-gi>
-                <n-gi>
-                  <n-form-item label="Scheduler Interval (seconds)" path="scheduler_interval">
-                    <n-input-number
-                      v-model:value="formValue.scheduler_interval"
-                      :min="1"
-                      :max="60"
-                      class="config-form__input"
-                    />
-                    <template #feedback>
-                      How often the scheduler checks for work.
-                    </template>
-                  </n-form-item>
-                </n-gi>
-                <n-gi>
-                  <n-form-item label="Task Timeout (seconds)" path="task_timeout">
-                    <n-input-number
-                      v-model:value="formValue.task_timeout"
-                      :min="60"
-                      :max="7200"
-                      class="config-form__input"
-                    />
-                    <template #feedback>
-                      Maximum execution time before a task is marked failed.
-                    </template>
-                  </n-form-item>
-                </n-gi>
-                <n-gi>
-                  <n-form-item label="Default Target Branch" path="default_target_branch">
-                    <n-input
-                      v-model:value="formValue.default_target_branch"
-                      placeholder="main"
-                      class="config-form__input"
-                    />
-                    <template #feedback>
-                      Default branch used when a task does not specify one.
-                    </template>
-                  </n-form-item>
-                </n-gi>
-              </n-grid>
-            </div>
-
-            <div class="config-form__section">
-              <div class="config-form__section-title">GitLab OIDC</div>
-              <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-                <n-gi>
-                  <n-form-item label="Enable OIDC Login" path="oidc_enabled">
-                    <n-switch v-model:value="formValue.oidc_enabled" />
-                    <template #feedback>
-                      When enabled, dashboard APIs require GitLab sign-in.
-                    </template>
-                  </n-form-item>
-                </n-gi>
-                <n-gi>
-                  <n-form-item label="Client Secret Status">
-                    <n-tag :type="formValue.oidc_client_secret_configured ? 'success' : 'warning'" round>
-                      {{ formValue.oidc_client_secret_configured ? 'Configured' : 'Missing' }}
-                    </n-tag>
-                    <template #feedback>
-                      The actual secret is never returned to the browser.
-                    </template>
-                  </n-form-item>
-                </n-gi>
-                <n-gi>
-                  <n-form-item label="Issuer URL" path="oidc_issuer_url">
-                    <n-input
-                      v-model:value="formValue.oidc_issuer_url"
-                      placeholder="https://gitlab.example.com"
-                      class="config-form__input"
-                    />
-                  </n-form-item>
-                </n-gi>
-                <n-gi>
-                  <n-form-item label="Client ID" path="oidc_client_id">
-                    <n-input v-model:value="formValue.oidc_client_id" class="config-form__input" />
-                  </n-form-item>
-                </n-gi>
-                <n-gi :span="isMobile ? 1 : 2">
-                  <n-form-item label="Client Secret">
-                    <n-input
-                      v-model:value="formValue.oidc_client_secret_input"
-                      type="password"
-                      show-password-on="click"
-                      :placeholder="
-                        formValue.oidc_client_secret_configured
-                          ? 'Configured. Enter a new value to rotate it.'
-                          : 'Enter client secret'
-                      "
-                      class="config-form__input"
-                    />
-                    <template #feedback>
-                      Leave blank to keep the stored secret unchanged.
-                    </template>
-                  </n-form-item>
-                </n-gi>
-                <n-gi :span="isMobile ? 1 : 2">
-                  <n-form-item label="Redirect URI" path="oidc_redirect_uri">
-                    <n-input
-                      v-model:value="formValue.oidc_redirect_uri"
-                      placeholder="https://your-domain.example.com/api/auth/callback"
-                      class="config-form__input"
-                    />
-                  </n-form-item>
-                </n-gi>
-                <n-gi>
-                  <n-form-item label="Session Cookie Name" path="session_cookie_name">
-                    <n-input v-model:value="formValue.session_cookie_name" class="config-form__input" />
-                  </n-form-item>
-                </n-gi>
-                <n-gi>
-                  <n-form-item label="Session TTL (seconds)" path="session_ttl_seconds">
-                    <n-input-number
-                      v-model:value="formValue.session_ttl_seconds"
-                      :min="300"
-                      :max="604800"
-                      class="config-form__input"
-                    />
-                  </n-form-item>
-                </n-gi>
-                <n-gi>
-                  <n-form-item label="Cookie Secure" path="cookie_secure">
-                    <n-switch v-model:value="formValue.cookie_secure" />
-                    <template #feedback>
-                      Keep this enabled for HTTPS deployments.
-                    </template>
-                  </n-form-item>
-                </n-gi>
-                <n-gi>
-                  <n-form-item label="Cookie SameSite" path="cookie_samesite">
-                    <n-select
-                      v-model:value="formValue.cookie_samesite"
-                      :options="sameSiteOptions"
-                      class="config-form__input"
-                    />
-                  </n-form-item>
-                </n-gi>
-                <n-gi>
-                  <n-form-item label="Admin Usernames">
-                    <n-input
-                      v-model:value="formValue.auth_admin_usernames"
-                      placeholder="alice,bob"
-                      class="config-form__input"
-                    />
-                    <template #feedback>
-                      Comma-separated GitLab usernames bootstrapped as platform admins.
-                    </template>
-                  </n-form-item>
-                </n-gi>
-                <n-gi>
-                  <n-form-item label="Admin GitLab Groups">
-                    <n-input
-                      v-model:value="formValue.auth_admin_gitlab_groups"
-                      placeholder="platform-team"
-                      class="config-form__input"
-                    />
-                    <template #feedback>
-                      Optional group names checked during login.
-                    </template>
-                  </n-form-item>
-                </n-gi>
-              </n-grid>
-
-              <n-alert v-if="oidcTestState" :type="oidcTestState.type" :show-icon="false">
-                {{ oidcTestState.message }}
-              </n-alert>
-            </div>
-
-            <div class="config-form__actions">
-              <n-space :size="12" wrap>
-                <n-button
-                  type="primary"
-                  @click="handleSave"
-                  :loading="saving"
-                  :disabled="loading || saving || !isDirty"
-                >
-                  Save changes
-                </n-button>
-                <n-button @click="handleTestOidc" :loading="testing" :disabled="loading || saving || testing">
-                  Test OIDC connection
-                </n-button>
-                <n-button
-                  @click="handleClearSecret"
-                  :disabled="loading || saving || testing || !formValue.oidc_client_secret_configured"
-                >
-                  Clear stored secret
-                </n-button>
-                <n-button @click="handleReload" :disabled="loading || saving || testing">
-                  Reload
-                </n-button>
-                <n-button @click="handleReset" :disabled="loading || saving || testing" secondary>
-                  Reset to env/defaults
-                </n-button>
-              </n-space>
-            </div>
-          </n-form>
-        </n-spin>
-      </n-card>
+        </n-form>
+      </n-spin>
     </n-space>
   </div>
 </template>
@@ -558,7 +603,7 @@ onMounted(() => {
 
 <style scoped>
 .config-page {
-  max-width: 1120px;
+  max-width: 1240px;
 }
 
 .config-page__hero {
@@ -602,6 +647,11 @@ onMounted(() => {
   border-radius: 18px;
 }
 
+.config-layout__main {
+  display: grid;
+  gap: 16px;
+}
+
 .config-card-header {
   display: flex;
   align-items: center;
@@ -639,12 +689,6 @@ onMounted(() => {
 
 .config-form__input {
   width: 100%;
-}
-
-.config-form__actions {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 @media (max-width: 767px) {

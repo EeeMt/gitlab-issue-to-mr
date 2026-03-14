@@ -17,7 +17,7 @@
           :collapsed="collapsed"
           show-trigger
           :native-scrollbar="false"
-          content-style="padding: 18px 14px;"
+          :content-style="collapsed ? 'padding: 18px 8px;' : 'padding: 18px 14px;'"
           class="app-shell__sider"
           @collapse="collapsed = true"
           @expand="collapsed = false"
@@ -27,7 +27,7 @@
               <n-icon size="22" :component="RocketOutline" />
             </div>
             <div v-if="!collapsed" class="logo__copy">
-              <n-text strong class="logo__title">GitMR Admin</n-text>
+              <n-text strong class="logo__title">GIMR Admin</n-text>
               <n-text depth="3" class="logo__subtitle">Task operations console</n-text>
             </div>
           </div>
@@ -51,7 +51,7 @@
                     <n-icon size="20" :component="RocketOutline" />
                   </div>
                   <div class="logo__copy">
-                    <n-text strong class="logo__title">GitMR Admin</n-text>
+                    <n-text strong class="logo__title">GIMR Admin</n-text>
                     <n-text depth="3" class="logo__subtitle">Navigation</n-text>
                   </div>
                 </div>
@@ -96,7 +96,7 @@
                 </template>
               </n-button>
               <div class="mobile-header__copy">
-                <n-text depth="3" class="mobile-header__eyebrow">GitMR Admin</n-text>
+                <n-text depth="3" class="mobile-header__eyebrow">GIMR Admin</n-text>
                 <n-text strong class="mobile-header__title">{{ currentPageLabel }}</n-text>
               </div>
             </div>
@@ -237,12 +237,17 @@ body {
 }
 
 .app-shell {
+  height: 100vh;
+  overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(32, 128, 240, 0.08), transparent 30%),
     linear-gradient(180deg, #f8fafc 0%, #f3f6fb 100%);
 }
 
 .app-shell__sider {
+  position: sticky !important;
+  top: 0;
+  height: 100vh;
   background: rgba(255, 255, 255, 0.78);
   backdrop-filter: blur(12px);
   border-right: 1px solid rgba(15, 23, 42, 0.08);
@@ -252,6 +257,11 @@ body {
 .app-shell__main,
 .app-shell__content {
   background: transparent;
+}
+
+.app-shell__main {
+  height: 100vh;
+  overflow-y: auto;
 }
 
 .app-shell__content-inner {
@@ -343,6 +353,19 @@ body {
 .nav-menu .n-menu-item-content {
   border-radius: 14px;
   margin: 4px 0;
+}
+
+.nav-menu.n-menu--collapsed .n-menu-item-content {
+  width: 56px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.nav-menu.n-menu--collapsed .n-menu-item-content-header,
+.nav-menu.n-menu--collapsed .n-menu-item-content__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .nav-menu .n-menu-item-content::before {

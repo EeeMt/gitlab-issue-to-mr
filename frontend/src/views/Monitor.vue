@@ -1,57 +1,33 @@
 <template>
-  <div>
+  <div class="monitor-page">
     <n-space vertical :size="16">
-      <h2>System Monitor</h2>
+      <div class="monitor-page__hero">
+        <div>
+          <h2 class="monitor-page__title">System Monitor</h2>
+          <p class="monitor-page__subtitle">
+            Watch global task health and currently running worker containers.
+          </p>
+        </div>
+        <n-button @click="refresh" :loading="loading">Refresh</n-button>
+      </div>
 
-      <!-- Merge both stat rows; isMobile → 2-per-row, desktop → 4-per-row -->
-      <n-row :gutter="[16, 16]">
-        <n-col :span="isMobile ? 12 : 6">
-          <n-card>
-            <n-statistic label="Total Tasks" :value="stats.total" />
+      <n-grid :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
+        <n-gi v-for="item in summaryItems" :key="item.label">
+          <n-card size="small" class="monitor-summary-card" :bordered="false">
+            <div class="monitor-summary-card__label">{{ item.label }}</div>
+            <div class="monitor-summary-card__value">{{ item.value }}</div>
           </n-card>
-        </n-col>
-        <n-col :span="isMobile ? 12 : 6">
-          <n-card>
-            <n-statistic label="Running" :value="stats.running">
-              <template #prefix>
-                <span style="color: #f0a020">●</span>
-              </template>
-            </n-statistic>
-          </n-card>
-        </n-col>
-        <n-col :span="isMobile ? 12 : 6">
-          <n-card>
-            <n-statistic label="Pending/Queued" :value="stats.pending + stats.queued" />
-          </n-card>
-        </n-col>
-        <n-col :span="isMobile ? 12 : 6">
-          <n-card>
-            <n-statistic label="Completed" :value="stats.completed">
-              <template #prefix>
-                <span style="color: #18a058">●</span>
-              </template>
-            </n-statistic>
-          </n-card>
-        </n-col>
-        <n-col :span="isMobile ? 12 : 6">
-          <n-card>
-            <n-statistic label="Failed" :value="stats.failed">
-              <template #prefix>
-                <span style="color: #d03050">●</span>
-              </template>
-            </n-statistic>
-          </n-card>
-        </n-col>
-        <n-col :span="isMobile ? 12 : 6">
-          <n-card>
-            <n-statistic label="Cancelled" :value="stats.cancelled" />
-          </n-card>
-        </n-col>
-      </n-row>
+        </n-gi>
+      </n-grid>
 
-      <n-card title="Running Containers">
-        <template #header-extra>
-          <n-button @click="refresh" :loading="loading">Refresh</n-button>
+      <n-card class="monitor-table-card" :bordered="false">
+        <template #header>
+          <div class="monitor-card__header">
+            <div>
+              <div class="monitor-card__title">Running Containers</div>
+              <div class="monitor-card__subtitle">Live worker containers currently visible to the backend</div>
+            </div>
+          </div>
         </template>
         <n-data-table
           :columns="isMobile ? mobileColumns : columns"
@@ -67,7 +43,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, h } from 'vue'
-import { NCard, NStatistic, NRow, NCol, NButton, NDataTable, NTag, useMessage, DataTableColumns } from 'naive-ui'
+import { NCard, NButton, NDataTable, NTag, NGrid, NGi, useMessage, DataTableColumns } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
 import { getStats, getContainers, type Container, type Stats } from '../api'
 
@@ -88,6 +64,15 @@ const stats = ref<Stats>({
 const containers = ref<Container[]>([])
 const loading = ref(false)
 let pollTimer: number | null = null
+
+const summaryItems = computed(() => [
+  { label: 'Total Tasks', value: String(stats.value.total) },
+  { label: 'Running', value: String(stats.value.running) },
+  { label: 'Pending / Queued', value: String(stats.value.pending + stats.value.queued) },
+  { label: 'Completed', value: String(stats.value.completed) },
+  { label: 'Failed', value: String(stats.value.failed) },
+  { label: 'Cancelled', value: String(stats.value.cancelled) }
+])
 
 const columns: DataTableColumns<Container> = [
   {
@@ -180,3 +165,80 @@ onBeforeUnmount(() => {
   }
 })
 </script>
+
+<style scoped>
+.monitor-page {
+  max-width: 1240px;
+}
+
+.monitor-page__hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.monitor-page__title {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.monitor-page__subtitle {
+  margin: 8px 0 0;
+  color: rgba(15, 23, 42, 0.68);
+  max-width: 760px;
+}
+
+.monitor-summary-card {
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
+}
+
+.monitor-summary-card__label {
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.6);
+}
+
+.monitor-summary-card__value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--n-text-color-1);
+}
+
+.monitor-table-card {
+  border-radius: 18px;
+}
+
+.monitor-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.monitor-card__title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.monitor-card__subtitle {
+  margin-top: 4px;
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.58);
+}
+
+@media (max-width: 768px) {
+  .monitor-page__hero,
+  .monitor-card__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .monitor-page__title {
+    font-size: 24px;
+  }
+}
+</style>
