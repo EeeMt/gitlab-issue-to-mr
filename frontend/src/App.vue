@@ -180,78 +180,75 @@ const userDisplayName = computed(() => authState.user?.display_name || authState
 const userInitial = computed(() => userDisplayName.value.slice(0, 1).toUpperCase())
 
 const renderIcon = (icon: any) => () => h(NIcon, null, { default: () => h(icon) })
+const shouldGroupMenu = computed(() => !collapsed.value || isMobile.value)
+
+function buildMenuItem(label: string, key: string, icon: any): MenuOption {
+  return {
+    label,
+    key,
+    icon: renderIcon(icon)
+  }
+}
+
+function buildMenuSection(label: string, children: MenuOption[]): MenuOption[] {
+  if (!children.length) {
+    return []
+  }
+
+  if (!shouldGroupMenu.value) {
+    return children
+  }
+
+  return [
+    {
+      type: 'group',
+      key: `group-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+      label,
+      children
+    }
+  ]
+}
 
 const menuOptions = computed<MenuOption[]>(() => {
-  const items: MenuOption[] = [
-    {
-      label: 'Dashboard',
-      key: 'Dashboard',
-      icon: renderIcon(GridOutline)
-    },
-    {
-      label: 'Create Task',
-      key: 'CreateTask',
-      icon: renderIcon(AddCircleOutline)
-    }
+  const workspaceItems: MenuOption[] = [
+    buildMenuItem('Dashboard', 'Dashboard', GridOutline),
+    buildMenuItem('Create Task', 'CreateTask', AddCircleOutline)
   ]
 
   if (authState.oidcEnabled) {
-    items.push({
-      label: 'Sessions',
-      key: 'Sessions',
-      icon: renderIcon(FingerPrintOutline)
-    })
+    workspaceItems.push(buildMenuItem('Sessions', 'Sessions', FingerPrintOutline))
   }
 
-  if (canAccessSharedPage('monitor')) {
-    items.push({
-      label: 'Monitor',
-      key: 'Monitor',
-      icon: renderIcon(SpeedometerOutline)
-    })
+  const insightsItems: MenuOption[] = []
+
+  if (canAccessSharedPage('analytics')) {
+    insightsItems.push(buildMenuItem('Analytics', 'Analytics', BarChartOutline))
   }
 
   if (canAccessSharedPage('schedule_overview')) {
-    items.push({
-      label: 'Schedule Overview',
-      key: 'ScheduleOverview',
-      icon: renderIcon(CalendarOutline)
-    })
+    insightsItems.push(buildMenuItem('Schedule Overview', 'ScheduleOverview', CalendarOutline))
   }
 
-  if (canAccessSharedPage('analytics')) {
-    items.push({
-      label: 'Analytics',
-      key: 'Analytics',
-      icon: renderIcon(BarChartOutline)
-    })
+  if (canAccessSharedPage('monitor')) {
+    insightsItems.push(buildMenuItem('Monitor', 'Monitor', SpeedometerOutline))
   }
 
-  if (!authState.oidcEnabled || isAdmin.value) {
-    items.push({
-      label: 'Access Management',
-      key: 'AccessManagement',
-      icon: renderIcon(PeopleOutline)
-    })
-  }
+  const adminItems: MenuOption[] = []
 
   if (canAccessSharedPage('oidc_diagnostics')) {
-    items.push({
-      label: 'OIDC Diagnostics',
-      key: 'OidcDiagnostics',
-      icon: renderIcon(PulseOutline)
-    })
+    adminItems.push(buildMenuItem('OIDC Diagnostics', 'OidcDiagnostics', PulseOutline))
   }
 
   if (!authState.oidcEnabled || isAdmin.value) {
-    items.push({
-      label: 'Configuration',
-      key: 'Config',
-      icon: renderIcon(SettingsOutline)
-    })
+    adminItems.push(buildMenuItem('Access Management', 'AccessManagement', PeopleOutline))
+    adminItems.push(buildMenuItem('Configuration', 'Config', SettingsOutline))
   }
 
-  return items
+  return [
+    ...buildMenuSection('Workspace', workspaceItems),
+    ...buildMenuSection('Insights & Operations', insightsItems),
+    ...buildMenuSection('Administration', adminItems)
+  ]
 })
 
 function handleMenuUpdate(key: string) {
@@ -403,8 +400,19 @@ body {
 }
 
 .nav-menu .n-menu-item-content,
-.nav-menu .n-menu-item-content-header {
+.nav-menu .n-menu-item-content-header,
+.nav-menu .n-menu-item-group-title {
   transition: all 0.2s ease;
+}
+
+.nav-menu .n-menu-item-group-title {
+  margin-top: 14px;
+  padding: 0 12px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(15, 23, 42, 0.42);
 }
 
 .nav-menu .n-menu-item-content {
