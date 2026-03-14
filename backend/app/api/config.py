@@ -16,6 +16,8 @@ from app.core.config_crypto import ConfigEncryptionError
 from app.core.oidc import (
     OIDCConfigurationError,
     build_authorization_url_for_settings,
+    get_required_oidc_scope_string,
+    get_required_oidc_scopes,
     get_oidc_discovery_document_for_settings,
 )
 from app.database import get_db
@@ -93,6 +95,37 @@ class OIDCConfigTestResponse(BaseModel):
     token_endpoint: str
     userinfo_endpoint: str
     authorization_url_preview: str
+    required_scopes: list[str]
+    warnings: list[str]
+
+
+class OIDCDiagnosticsCheck(BaseModel):
+    key: str
+    label: str
+    status: str
+    detail: str
+
+
+class OIDCDiagnosticsResponse(BaseModel):
+    oidc_enabled: bool
+    break_glass_enabled: bool
+    issuer_url: str
+    redirect_uri: str
+    client_id_configured: bool
+    client_secret_configured: bool
+    session_cookie_name: str
+    session_ttl_seconds: int
+    cookie_secure: bool
+    cookie_samesite: str
+    required_scopes: list[str]
+    required_scope_string: str
+    authorization_url_preview: Optional[str]
+    discovery_issuer: Optional[str]
+    authorization_endpoint: Optional[str]
+    token_endpoint: Optional[str]
+    userinfo_endpoint: Optional[str]
+    checks: list[OIDCDiagnosticsCheck]
+    warnings: list[str]
 
 
 def _serialize_effective_config() -> ConfigResponse:
@@ -271,6 +304,53 @@ def _validate_oidc_ready(settings: Settings) -> None:
         )
 
 
+def _build_oidc_diagnostics_warnings(settings: Settings) -> list[str]:
+    warnings: list[str] = []
+
+    if settings.oidc_redirect_uri:
+        parsed = urlparse(settings.oidc_redirect_uri)
+        if parsed.path != "/api/auth/callback":
+            warnings.append("Redirect URI path should usually be /api/auth/callback.")
+        if parsed.scheme == "http" and settings.cookie_secure:
+            warnings.append(
+                "COOKIE_SECURE=true with an http redirect URI may prevent session cookies during local testing."
+            )
+        if parsed.scheme == "https" and not settings.cookie_secure:
+            warnings.append(
+                "COOKIE_SECURE=false with an https redirect URI weakens cookie protection in production."
+            )
+
+    if settings.session_ttl_seconds > 86400:
+        warnings.append("Session TTL is longer than 24 hours. Consider shortening it for tighter session control.")
+
+    if settings.cookie_samesite == "none" and not settings.cookie_secure:
+        warnings.append("SameSite=None without secure cookies is rejected by many browsers.")
+
+    if not settings.break_glass_enabled:
+        warnings.append("Break-glass recovery is currently disabled.")
+
+    return warnings
+
+
+def _build_endpoint_checks(discovery: dict[str, Any]) -> list[OIDCDiagnosticsCheck]:
+    checks: list[OIDCDiagnosticsCheck] = []
+    for key, label in (
+        ("authorization_endpoint", "Authorization endpoint"),
+        ("token_endpoint", "Token endpoint"),
+        ("userinfo_endpoint", "Userinfo endpoint"),
+    ):
+        endpoint = str(discovery.get(key, "")).strip()
+        checks.append(
+            OIDCDiagnosticsCheck(
+                key=key,
+                label=label,
+                status="ok" if _is_valid_http_url(endpoint) else "error",
+                detail=endpoint or f"{label} is missing from discovery metadata.",
+            )
+        )
+    return checks
+
+
 @router.get("/config")
 async def get_config(db: AsyncSession = Depends(get_db)):
     """Get current configuration."""
@@ -375,4 +455,125 @@ async def test_oidc_config(
         token_endpoint=str(discovery.get("token_endpoint", "")),
         userinfo_endpoint=str(discovery.get("userinfo_endpoint", "")),
         authorization_url_preview=authorization_url,
+        required_scopes=list(get_required_oidc_scopes()),
+        warnings=_build_oidc_diagnostics_warnings(preview_settings),
+    )
+
+
+@router.get("/config/oidc/diagnostics", response_model=OIDCDiagnosticsResponse)
+async def get_oidc_diagnostics(db: AsyncSession = Depends(get_db)):
+    """Return a richer OIDC diagnostics snapshot for operators."""
+    await load_runtime_config_from_db(db)
+    settings = get_effective_settings()
+    warnings = _build_oidc_diagnostics_warnings(settings)
+    checks: list[OIDCDiagnosticsCheck] = []
+    authorization_url_preview: Optional[str] = None
+    discovery_issuer: Optional[str] = None
+    authorization_endpoint: Optional[str] = None
+    token_endpoint: Optional[str] = None
+    userinfo_endpoint: Optional[str] = None
+
+    try:
+        discovery = await get_oidc_discovery_document_for_settings(settings)
+        discovery_issuer = str(discovery.get("issuer", "")) or None
+        authorization_endpoint = str(discovery.get("authorization_endpoint", "")) or None
+        token_endpoint = str(discovery.get("token_endpoint", "")) or None
+        userinfo_endpoint = str(discovery.get("userinfo_endpoint", "")) or None
+        checks.append(
+            OIDCDiagnosticsCheck(
+                key="discovery",
+                label="OIDC discovery",
+                status="ok",
+                detail=f"Fetched discovery document from issuer {discovery_issuer or settings.oidc_issuer_url}.",
+            )
+        )
+        checks.extend(_build_endpoint_checks(discovery))
+    except OIDCConfigurationError as exc:
+        checks.append(
+            OIDCDiagnosticsCheck(
+                key="discovery",
+                label="OIDC discovery",
+                status="error",
+                detail=str(exc),
+            )
+        )
+    except httpx.HTTPError as exc:
+        checks.append(
+            OIDCDiagnosticsCheck(
+                key="discovery",
+                label="OIDC discovery",
+                status="error",
+                detail=f"Failed to fetch discovery document: {exc}",
+            )
+        )
+
+    if _is_valid_http_url(settings.oidc_redirect_uri):
+        checks.append(
+            OIDCDiagnosticsCheck(
+                key="redirect_uri",
+                label="Redirect URI",
+                status="ok" if settings.oidc_redirect_uri.endswith("/api/auth/callback") else "warning",
+                detail=settings.oidc_redirect_uri,
+            )
+        )
+    else:
+        checks.append(
+            OIDCDiagnosticsCheck(
+                key="redirect_uri",
+                label="Redirect URI",
+                status="error",
+                detail="Redirect URI is missing or invalid.",
+            )
+        )
+
+    checks.append(
+        OIDCDiagnosticsCheck(
+            key="scope",
+            label="Required scopes",
+            status="ok",
+            detail=get_required_oidc_scope_string(),
+        )
+    )
+    checks.append(
+        OIDCDiagnosticsCheck(
+            key="cookie_policy",
+            label="Cookie policy",
+            status="warning" if warnings else "ok",
+            detail=(
+                "; ".join(warnings)
+                if warnings
+                else f"Cookie policy looks consistent: secure={settings.cookie_secure}, samesite={settings.cookie_samesite}."
+            ),
+        )
+    )
+
+    try:
+        authorization_url_preview = await build_authorization_url_for_settings(
+            settings,
+            state="diagnostics-state",
+            nonce="diagnostics-nonce",
+        )
+    except (OIDCConfigurationError, httpx.HTTPError):
+        authorization_url_preview = None
+
+    return OIDCDiagnosticsResponse(
+        oidc_enabled=settings.oidc_enabled,
+        break_glass_enabled=settings.break_glass_enabled,
+        issuer_url=settings.oidc_issuer_url,
+        redirect_uri=settings.oidc_redirect_uri,
+        client_id_configured=bool(settings.oidc_client_id),
+        client_secret_configured=bool(settings.oidc_client_secret),
+        session_cookie_name=settings.session_cookie_name,
+        session_ttl_seconds=settings.session_ttl_seconds,
+        cookie_secure=settings.cookie_secure,
+        cookie_samesite=settings.cookie_samesite,
+        required_scopes=list(get_required_oidc_scopes()),
+        required_scope_string=get_required_oidc_scope_string(),
+        authorization_url_preview=authorization_url_preview,
+        discovery_issuer=discovery_issuer,
+        authorization_endpoint=authorization_endpoint,
+        token_endpoint=token_endpoint,
+        userinfo_endpoint=userinfo_endpoint,
+        checks=checks,
+        warnings=warnings,
     )

@@ -158,6 +158,37 @@ export interface OidcConfigTestResult {
   token_endpoint: string
   userinfo_endpoint: string
   authorization_url_preview: string
+  required_scopes: string[]
+  warnings: string[]
+}
+
+export interface OidcDiagnosticsCheck {
+  key: string
+  label: string
+  status: string
+  detail: string
+}
+
+export interface OidcDiagnosticsResult {
+  oidc_enabled: boolean
+  break_glass_enabled: boolean
+  issuer_url: string
+  redirect_uri: string
+  client_id_configured: boolean
+  client_secret_configured: boolean
+  session_cookie_name: string
+  session_ttl_seconds: number
+  cookie_secure: boolean
+  cookie_samesite: string
+  required_scopes: string[]
+  required_scope_string: string
+  authorization_url_preview: string | null
+  discovery_issuer: string | null
+  authorization_endpoint: string | null
+  token_endpoint: string | null
+  userinfo_endpoint: string | null
+  checks: OidcDiagnosticsCheck[]
+  warnings: string[]
 }
 
 export interface AuthUser {
@@ -316,6 +347,11 @@ export async function resetConfigKey(key: string): Promise<Config> {
 
 export async function testOidcConfig(auth: AuthConfigUpdate): Promise<OidcConfigTestResult> {
   const response = await api.post('/config/oidc/test', { auth })
+  return response.data
+}
+
+export async function getOidcDiagnostics(): Promise<OidcDiagnosticsResult> {
+  const response = await api.get('/config/oidc/diagnostics')
   return response.data
 }
 

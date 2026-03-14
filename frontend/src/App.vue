@@ -140,6 +140,7 @@ import {
   GridOutline,
   LogOutOutline,
   MenuOutline,
+  PulseOutline,
   PeopleOutline,
   RocketOutline,
   SettingsOutline,
@@ -166,7 +167,8 @@ const menuLabels: Record<string, string> = {
   Sessions: 'Sessions',
   Monitor: 'Monitor',
   Config: 'Configuration',
-  AccessManagement: 'Access Management'
+  AccessManagement: 'Access Management',
+  OidcDiagnostics: 'OIDC Diagnostics'
 }
 
 const currentPageLabel = computed(() => menuLabels[activeKey.value] || 'Navigation')
@@ -210,7 +212,12 @@ const menuOptions = computed<MenuOption[]>(() => {
         icon: renderIcon(PeopleOutline)
       },
       {
-        label: 'Config',
+        label: 'OIDC Diagnostics',
+        key: 'OidcDiagnostics',
+        icon: renderIcon(PulseOutline)
+      },
+      {
+        label: 'Configuration',
         key: 'Config',
         icon: renderIcon(SettingsOutline)
       }

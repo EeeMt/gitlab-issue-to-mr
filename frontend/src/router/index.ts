@@ -5,6 +5,7 @@ import TaskView from '../views/TaskView.vue'
 import Monitor from '../views/Monitor.vue'
 import Config from '../views/Config.vue'
 import AccessManagement from '../views/AccessManagement.vue'
+import OidcDiagnostics from '../views/OidcDiagnostics.vue'
 import Sessions from '../views/Sessions.vue'
 import CreateTask from '../views/CreateTask.vue'
 import Login from '../views/Login.vue'
@@ -62,6 +63,12 @@ const router = createRouter({
       path: '/access-management',
       name: 'AccessManagement',
       component: AccessManagement,
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/oidc-diagnostics',
+      name: 'OidcDiagnostics',
+      component: OidcDiagnostics,
       meta: { requiresAuth: true, requiresAdmin: true }
     }
   ]

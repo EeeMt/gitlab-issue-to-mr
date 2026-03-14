@@ -244,6 +244,22 @@ You should be able to:
 - see whether a refresh token is available for each session
 - revoke old or suspicious sessions
 
+### Run OIDC diagnostics
+
+Visit:
+
+```text
+https://your-domain.example.com/oidc-diagnostics
+```
+
+The diagnostics page shows:
+
+- OIDC discovery reachability
+- authorization/token/userinfo endpoint presence from discovery
+- redirect URI and cookie policy warnings
+- the required GitLab OAuth scopes
+- an authorization URL preview built from the current effective settings
+
 ### Emergency login
 
 If break-glass recovery is enabled, the login page also shows an emergency admin form.
@@ -442,7 +458,24 @@ The `/sessions` page shows:
 - whether encrypted GitLab access and refresh tokens exist
 - IP and user agent when available
 
-## 9. Troubleshooting
+## 9. Diagnostics and operator UX
+
+Current diagnostics behavior includes:
+
+- an admin-only `/oidc-diagnostics` page
+- a backend diagnostics snapshot endpoint at `/api/config/oidc/diagnostics`
+- richer `Test OIDC connection` output with required scopes and warnings
+- warnings for callback path mismatches, cookie security mismatches, long session TTLs, and disabled break-glass recovery
+
+Recommended use:
+
+1. open `/oidc-diagnostics`
+2. confirm **OIDC discovery** is healthy
+3. confirm the discovered authorization/token/userinfo endpoints are present
+4. verify the required scope string includes `openid profile email read_api offline_access`
+5. review warnings before enabling or changing OIDC settings
+
+## 10. Troubleshooting
 
 ### `/api/auth/login` returns 503
 
@@ -507,7 +540,7 @@ Check:
 - whether your GitLab OIDC response actually contains group info
 - local user record in the `users` table
 
-## 10. Safe rollout suggestion
+## 11. Safe rollout suggestion
 
 Recommended order:
 

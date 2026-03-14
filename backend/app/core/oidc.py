@@ -14,6 +14,17 @@ from jwt import PyJWKClient
 from app.config import Settings, get_effective_settings
 
 _discovery_cache: dict[str, Any] = {"issuer": "", "expires_at": 0.0, "document": None}
+REQUIRED_OIDC_SCOPES = ("openid", "profile", "email", "read_api", "offline_access")
+
+
+def get_required_oidc_scopes() -> tuple[str, ...]:
+    """Return the OAuth scopes required by the dashboard."""
+    return REQUIRED_OIDC_SCOPES
+
+
+def get_required_oidc_scope_string() -> str:
+    """Return the OAuth scope string used in authorization URLs."""
+    return " ".join(REQUIRED_OIDC_SCOPES)
 
 
 class OIDCConfigurationError(RuntimeError):
@@ -72,7 +83,7 @@ async def build_authorization_url_for_settings(settings: Settings, state: str, n
         "client_id": settings.oidc_client_id,
         "redirect_uri": settings.oidc_redirect_uri,
         "response_type": "code",
-        "scope": "openid profile email read_api offline_access",
+        "scope": get_required_oidc_scope_string(),
         "state": state,
         "nonce": nonce,
     }

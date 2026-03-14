@@ -281,6 +281,9 @@
                     <n-button @click="handleTestOidc" :loading="testing" :disabled="loading || saving || testing">
                       Test OIDC connection
                     </n-button>
+                    <n-button @click="router.push('/oidc-diagnostics')" :disabled="loading || saving || testing">
+                      Open OIDC diagnostics
+                    </n-button>
                     <n-button
                       @click="handleClearSecret"
                       :disabled="loading || saving || testing || !formValue.oidc_client_secret_configured"
@@ -296,7 +299,7 @@
                   </n-space>
                 </div>
 
-                <n-alert v-if="oidcTestState" :type="oidcTestState.type" :show-icon="false">
+                <n-alert v-if="oidcTestState" :type="oidcTestState.type" :show-icon="false" class="config-actions__alert">
                   {{ oidcTestState.message }}
                 </n-alert>
             </n-card>
@@ -309,6 +312,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   NAlert,
   NButton,
@@ -364,6 +368,7 @@ type OidcTestState = {
 }
 
 const message = useMessage()
+const router = useRouter()
 const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
@@ -555,7 +560,7 @@ async function handleTestOidc() {
     const result = await testOidcConfig(buildPayload().auth || {})
     oidcTestState.value = {
       type: 'success',
-      message: `OIDC discovery succeeded for issuer ${result.issuer || formValue.value.oidc_issuer_url}.`
+      message: `OIDC discovery succeeded for issuer ${result.issuer || formValue.value.oidc_issuer_url}. Required scopes: ${result.required_scopes.join(', ')}.`
     }
     message.success('OIDC connection test passed')
   } catch (error: any) {
@@ -604,6 +609,7 @@ onMounted(() => {
 <style scoped>
 .config-page {
   max-width: 1240px;
+  padding: 8px 0;
 }
 
 .config-page__hero {
@@ -689,6 +695,10 @@ onMounted(() => {
 
 .config-form__input {
   width: 100%;
+}
+
+.config-actions__alert {
+  margin-top: 16px;
 }
 
 @media (max-width: 767px) {
