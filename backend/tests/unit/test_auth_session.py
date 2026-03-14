@@ -6,6 +6,7 @@ import sys
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -32,6 +33,30 @@ class AuthSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(added_session.user_id, 1)
         self.assertEqual(added_session.session_token_hash, hash_session_token(token))
         self.assertIsNotNone(added_session.expires_at)
+
+    async def test_create_user_session_encrypts_gitlab_access_token(self) -> None:
+        user = User(id=1, oidc_sub="1", gitlab_user_id=1, username="alice")
+        mock_db = MagicMock()
+        mock_db.add = MagicMock()
+        mock_db.flush = AsyncMock()
+
+        with patch("app.core.session.encrypt_config_secret", return_value="encrypted-token"):
+            await create_user_session(mock_db, user, gitlab_access_token="raw-token")
+
+        added_session = mock_db.add.call_args.args[0]
+        self.assertEqual(added_session.gitlab_access_token_encrypted, "encrypted-token")
+
+    async def test_create_user_session_caps_expiry_when_max_expires_at_is_shorter(self) -> None:
+        user = User(id=1, oidc_sub="1", gitlab_user_id=1, username="alice")
+        mock_db = MagicMock()
+        mock_db.add = MagicMock()
+        mock_db.flush = AsyncMock()
+        max_expires_at = datetime.utcnow() + timedelta(minutes=10)
+
+        await create_user_session(mock_db, user, max_expires_at=max_expires_at)
+
+        added_session = mock_db.add.call_args.args[0]
+        self.assertLessEqual(added_session.expires_at, max_expires_at)
 
     async def test_get_user_from_session_token_returns_user_for_valid_session(self) -> None:
         user = User(id=1, oidc_sub="1", gitlab_user_id=1, username="alice", state="active")

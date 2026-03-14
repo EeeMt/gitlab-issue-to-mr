@@ -171,6 +171,7 @@ class UserSession(Base):
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     session_token_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    gitlab_access_token_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     ip_address: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)

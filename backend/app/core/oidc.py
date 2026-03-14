@@ -72,7 +72,7 @@ async def build_authorization_url_for_settings(settings: Settings, state: str, n
         "client_id": settings.oidc_client_id,
         "redirect_uri": settings.oidc_redirect_uri,
         "response_type": "code",
-        "scope": "openid profile email",
+        "scope": "openid profile email read_api",
         "state": state,
         "nonce": nonce,
     }

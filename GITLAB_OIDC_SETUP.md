@@ -18,6 +18,7 @@ Current implementation notes:
 - admin-only pages and APIs are controlled by platform admin role
 - OIDC settings can now be managed in the dashboard **Configuration** page
 - secrets edited in the page are encrypted before being stored in the database
+- normal users only see GitLab projects and tasks for projects they can access in GitLab, including public and internal projects
 
 ## 1. Create a GitLab OAuth application
 
@@ -29,9 +30,10 @@ Open your GitLab instance and create an OAuth application:
    - **Name**: `GIMR Dashboard`
    - **Redirect URI**: `https://your-domain.example.com/api/auth/callback`
    - **Scopes**:
-     - `openid`
-     - `profile`
-     - `email`
+      - `openid`
+      - `profile`
+      - `email`
+      - `read_api`
 4. Save the application
 5. Copy:
    - **Application ID**
@@ -206,8 +208,9 @@ After GitLab sign-in and callback:
 
 Current phase behavior:
 
-- all logged-in users can access normal dashboard pages and APIs
+- logged-in users can access dashboard data only for GitLab projects they can access
 - only platform admins can access admin-only pages such as configuration and monitor-related APIs
+- project visibility is resolved from the GitLab OAuth access token and includes GitLab membership projects plus public/internal projects visible to the signed-in user
 
 Platform admin is assigned when one of these is true:
 

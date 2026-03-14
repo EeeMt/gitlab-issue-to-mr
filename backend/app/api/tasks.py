@@ -8,12 +8,17 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import select, func, false
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.scheduling import resolve_scheduled_at
 from app.database import get_db
+from app.dependencies.project_access import (
+    ProjectAccessScope,
+    require_project_access,
+    require_project_access_scope,
+)
 from app.models import Task, TaskLog, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -118,6 +123,7 @@ async def list_tasks(
     status: Optional[str] = None,
     project_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """List tasks with optional filtering.
 
@@ -139,7 +145,14 @@ async def list_tasks(
             pass
 
     if project_id:
+        require_project_access(project_id, access_scope)
         query = query.where(Task.project_id == project_id)
+    elif not access_scope.is_unrestricted:
+        allowed_project_ids = access_scope.accessible_project_ids
+        if not allowed_project_ids:
+            query = query.where(false())
+        else:
+            query = query.where(Task.project_id.in_(allowed_project_ids))
 
     result = await db.execute(query.limit(100))
     tasks = result.scalars().all()
@@ -152,7 +165,11 @@ async def list_tasks(
 
 
 @router.get("/tasks/{task_id}")
-async def get_task(task_id: int, db: AsyncSession = Depends(get_db)):
+async def get_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
     """Get task by ID.
 
     Args:
@@ -170,12 +187,17 @@ async def get_task(task_id: int, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task {task_id} not found",
         )
+    require_project_access(task.project_id, access_scope)
 
     return _serialize_task(task, await _get_project_metadata(task.project_id))
 
 
 @router.get("/tasks/{task_id}/logs")
-async def get_task_logs(task_id: int, db: AsyncSession = Depends(get_db)):
+async def get_task_logs(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
     """Get task logs.
 
     Args:
@@ -194,6 +216,7 @@ async def get_task_logs(task_id: int, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task {task_id} not found",
         )
+    require_project_access(task.project_id, access_scope)
 
     # Get logs
     result = await db.execute(
@@ -216,7 +239,11 @@ async def get_task_logs(task_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/tasks/{task_id}/stats")
-async def get_task_stats(task_id: int, db: AsyncSession = Depends(get_db)):
+async def get_task_stats(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
     """Get MR statistics for a task.
 
     Args:
@@ -234,6 +261,7 @@ async def get_task_stats(task_id: int, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task {task_id} not found",
         )
+    require_project_access(task.project_id, access_scope)
 
     # Return database stats if available (non-zero)
     if task.additions > 0 or task.deletions > 0 or task.total_changes > 0:
@@ -269,6 +297,7 @@ async def update_task_stats(
     deletions: int,
     total: int,
     db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Update MR statistics for a task.
 
@@ -290,6 +319,7 @@ async def update_task_stats(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task {task_id} not found",
         )
+    require_project_access(task.project_id, access_scope)
 
     task.additions = additions
     task.deletions = deletions
@@ -308,7 +338,11 @@ async def update_task_stats(
 
 
 @router.post("/tasks/{task_id}/cancel")
-async def cancel_task(task_id: int, db: AsyncSession = Depends(get_db)):
+async def cancel_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
     """Cancel a task.
 
     Args:
@@ -326,6 +360,7 @@ async def cancel_task(task_id: int, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task {task_id} not found",
         )
+    require_project_access(task.project_id, access_scope)
 
     if task.status not in [TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING]:
         raise HTTPException(
@@ -344,7 +379,11 @@ async def cancel_task(task_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/tasks/{task_id}/retry")
-async def retry_task(task_id: int, db: AsyncSession = Depends(get_db)):
+async def retry_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
     """Retry a failed or cancelled task.
 
     Args:
@@ -362,6 +401,7 @@ async def retry_task(task_id: int, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task {task_id} not found",
         )
+    require_project_access(task.project_id, access_scope)
 
     if task.status not in [TaskStatus.FAILED, TaskStatus.CANCELLED]:
         raise HTTPException(
@@ -386,7 +426,11 @@ async def retry_task(task_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/tasks/{task_id}/execute")
-async def execute_task(task_id: int, db: AsyncSession = Depends(get_db)):
+async def execute_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
     """Trigger immediate execution of a pending task.
 
     Args:
@@ -404,6 +448,7 @@ async def execute_task(task_id: int, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task {task_id} not found",
         )
+    require_project_access(task.project_id, access_scope)
 
     if task.status != TaskStatus.PENDING:
         raise HTTPException(
@@ -433,20 +478,27 @@ class CreateTaskRequest(BaseModel):
 
 
 @router.get("/projects")
-async def list_projects():
+async def list_projects(
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
     """List accessible GitLab projects.
 
     Returns:
         List of projects with id, name, and path
     """
     from app.core.gitlab_client import get_gitlab_client
+    if not access_scope.is_unrestricted:
+        return access_scope.accessible_projects
     gitlab = get_gitlab_client()
     projects = await asyncio.to_thread(gitlab.get_projects)
     return projects
 
 
 @router.get("/projects/{project_id}/branches")
-async def list_branches(project_id: int):
+async def list_branches(
+    project_id: int,
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
     """List branches for a GitLab project.
 
     Args:
@@ -456,13 +508,18 @@ async def list_branches(project_id: int):
         List of branch names
     """
     from app.core.gitlab_client import get_gitlab_client
+    require_project_access(project_id, access_scope)
     gitlab = get_gitlab_client()
     branches = await asyncio.to_thread(gitlab.get_branches, project_id)
     return branches
 
 
 @router.post("/tasks")
-async def create_task(request: CreateTaskRequest, db: AsyncSession = Depends(get_db)):
+async def create_task(
+    request: CreateTaskRequest,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
     """Create a new manual task.
 
     Args:
@@ -476,6 +533,7 @@ async def create_task(request: CreateTaskRequest, db: AsyncSession = Depends(get
         request.scheduled_datetime,
         request.delay_seconds,
     )
+    require_project_access(request.project_id, access_scope)
 
     # Create task
     task = Task(

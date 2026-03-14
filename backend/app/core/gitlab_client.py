@@ -5,6 +5,7 @@ from typing import Optional
 from urllib.parse import urlsplit, urlunsplit
 
 import gitlab
+import httpx
 from gitlab import Gitlab
 from gitlab.exceptions import GitlabGetError
 from gitlab.v4.objects import MergeRequest, Project
@@ -387,3 +388,55 @@ def get_gitlab_client() -> GitLabClient:
     if _gitlab_client is None:
         _gitlab_client = GitLabClient()
     return _gitlab_client
+
+
+async def get_accessible_projects_for_oauth_token(
+    access_token: str,
+    *,
+    per_page: int = 100,
+) -> list[dict]:
+    """List GitLab projects accessible to the current OAuth user.
+
+    This includes projects where the user is a member plus public/internal
+    projects visible to the signed-in user.
+    """
+    if not access_token:
+        return []
+
+    base_url = settings.gitlab_url.rstrip("/")
+    projects_by_id: dict[int, dict] = {}
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        async def collect_projects(query: dict[str, str]) -> None:
+            page = 1
+            while True:
+                response = await client.get(
+                    f"{base_url}/api/v4/projects",
+                    params={
+                        **query,
+                        "simple": "true",
+                        "per_page": per_page,
+                        "page": page,
+                        "order_by": "id",
+                        "sort": "asc",
+                    },
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                response.raise_for_status()
+                payload = response.json()
+                for project in payload:
+                    projects_by_id[int(project["id"])] = {
+                        "id": project["id"],
+                        "name": project["name"],
+                        "path_with_namespace": project["path_with_namespace"],
+                    }
+                next_page = response.headers.get("X-Next-Page")
+                if not next_page:
+                    break
+                page = int(next_page)
+
+        await collect_projects({"membership": "true"})
+        await collect_projects({"visibility": "public"})
+        await collect_projects({"visibility": "internal"})
+
+    return list(projects_by_id.values())

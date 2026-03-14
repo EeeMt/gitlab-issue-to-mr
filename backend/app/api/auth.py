@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 import httpx
@@ -193,6 +193,12 @@ async def callback(
         user,
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
+        gitlab_access_token=tokens.get("access_token"),
+        max_expires_at=(
+            datetime.utcnow() + timedelta(seconds=int(tokens["expires_in"]))
+            if tokens.get("expires_in")
+            else None
+        ),
     )
 
     response = RedirectResponse(next_path, status_code=status.HTTP_302_FOUND)
