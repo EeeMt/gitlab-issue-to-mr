@@ -1304,11 +1304,13 @@ onBeforeUnmount(() => {
   gap: 10px;
   align-items: stretch;
   justify-content: center;
-  width: min(100%, calc(19ch + 9.5rem));
+  width: fit-content;
+  max-width: 100%;
 }
 
 .slot-task-card__date-picker {
-  width: 100%;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .slot-task-card__save-button {

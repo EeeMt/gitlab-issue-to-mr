@@ -615,7 +615,8 @@ onMounted(() => {
 }
 
 .content-width-datetime-picker {
-  width: min(100%, calc(19ch + 9.5rem));
+  width: fit-content;
+  max-width: 100%;
 }
 
 .create-task-form__warning {
