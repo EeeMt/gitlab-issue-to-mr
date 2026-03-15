@@ -169,7 +169,6 @@
                         class="task-actions__date-picker"
                         :placeholder="t('taskView.selectRescheduleTime')"
                         :is-date-disabled="isScheduledDateDisabled"
-                        :is-time-disabled="isScheduledTimeDisabled"
                         :disabled="!canManageTask"
                       />
                       <n-button
@@ -203,7 +202,6 @@
                         class="task-actions__date-picker"
                         :placeholder="t('taskView.selectRescheduleTime')"
                         :is-date-disabled="isScheduledDateDisabled"
-                        :is-time-disabled="isScheduledTimeDisabled"
                         :disabled="!canManageTask"
                       />
                       <n-button
@@ -417,14 +415,6 @@ function syncRescheduleDatetime() {
   rescheduleDatetime.value = task.value?.scheduled_at ? new Date(task.value.scheduled_at).getTime() : null
 }
 
-function isSameLocalDay(left: Date, right: Date): boolean {
-  return (
-    left.getFullYear() === right.getFullYear()
-    && left.getMonth() === right.getMonth()
-    && left.getDate() === right.getDate()
-  )
-}
-
 function isScheduledDateDisabled(timestamp: number): boolean {
   const candidate = new Date(timestamp)
   const today = new Date()
@@ -433,33 +423,6 @@ function isScheduledDateDisabled(timestamp: number): boolean {
   today.setHours(0, 0, 0, 0)
 
   return candidate.getTime() < today.getTime()
-}
-
-function isScheduledTimeDisabled(timestamp: number) {
-  const selectedDate = new Date(timestamp)
-  const now = new Date()
-
-  if (!isSameLocalDay(selectedDate, now)) {
-    return {}
-  }
-
-  const currentHour = now.getHours()
-  const currentMinute = now.getMinutes()
-  const currentSecond = now.getSeconds()
-
-  return {
-    isHourDisabled: (hour: number) => hour < currentHour,
-    isMinuteDisabled: (minute: number, hour: number | null) => (
-      hour !== null && hour === currentHour && minute < currentMinute
-    ),
-    isSecondDisabled: (second: number, minute: number | null, hour: number | null) => (
-      hour !== null
-      && minute !== null
-      && hour === currentHour
-      && minute === currentMinute
-      && second < currentSecond
-    )
-  }
 }
 
 function isActiveTaskStatus(status?: string | null): boolean {
