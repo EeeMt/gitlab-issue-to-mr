@@ -24,7 +24,7 @@
         </n-alert>
 
         <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 2 : 3" :x-gap="16" :y-gap="16">
-          <n-gi v-for="item in summaryItems" :key="item.label">
+          <n-gi v-for="item in summaryItems" :key="item.label" class="analytics-grid-cell">
             <n-card size="small" class="analytics-summary-card" :bordered="false">
               <div class="analytics-summary-card__label">{{ item.label }}</div>
               <div class="analytics-summary-card__value">{{ item.value }}</div>
@@ -105,8 +105,8 @@
         </n-space>
 
         <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
-          <n-gi>
-            <n-card class="analytics-card" :bordered="false">
+          <n-gi class="analytics-grid-cell">
+            <n-card class="analytics-card analytics-card--stretch" :bordered="false">
               <template #header>
                 <div class="analytics-card__header">
                   <div>
@@ -126,8 +126,8 @@
             </n-card>
           </n-gi>
 
-          <n-gi>
-            <n-card class="analytics-card" :bordered="false">
+          <n-gi class="analytics-grid-cell">
+            <n-card class="analytics-card analytics-card--stretch" :bordered="false">
               <template #header>
                 <div class="analytics-card__header">
                   <div>
@@ -149,8 +149,8 @@
         </n-grid>
 
         <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
-          <n-gi>
-            <n-card class="analytics-card" :bordered="false">
+          <n-gi class="analytics-grid-cell">
+            <n-card class="analytics-card analytics-card--stretch" :bordered="false">
               <template #header>
                 <div class="analytics-card__header">
                   <div>
@@ -169,8 +169,8 @@
             </n-card>
           </n-gi>
 
-          <n-gi>
-            <n-card class="analytics-card" :bordered="false">
+          <n-gi class="analytics-grid-cell">
+            <n-card class="analytics-card analytics-card--stretch" :bordered="false">
               <template #header>
                 <div class="analytics-card__header">
                   <div>
@@ -573,8 +573,27 @@ onMounted(() => {
   border-radius: 18px;
 }
 
+.analytics-grid-cell {
+  display: flex;
+}
+
+.analytics-grid-cell > * {
+  flex: 1;
+}
+
+.analytics-summary-card,
+.analytics-card--stretch {
+  height: 100%;
+}
+
 .analytics-summary-card {
   background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
+}
+
+.analytics-summary-card :deep(.n-card__content) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .analytics-summary-card__label {
@@ -590,7 +609,8 @@ onMounted(() => {
 }
 
 .analytics-summary-card__note {
-  margin-top: 6px;
+  margin-top: auto;
+  padding-top: 6px;
   font-size: 12px;
   color: rgba(15, 23, 42, 0.56);
 }

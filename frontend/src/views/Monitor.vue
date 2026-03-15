@@ -20,7 +20,7 @@
         </n-alert>
 
         <n-grid :x-gap="16" :y-gap="16" cols="1 s:2 l:4" responsive="screen">
-          <n-gi v-for="item in overviewCards" :key="item.key">
+          <n-gi v-for="item in overviewCards" :key="item.key" class="monitor-grid-cell">
             <n-card size="small" class="monitor-summary-card">
               <div class="summary-label">{{ item.label }}</div>
               <div class="summary-value-row">
@@ -36,7 +36,7 @@
           <n-tab-pane name="runtime" :tab="t('monitor.runtimeTab')">
             <n-space vertical :size="16">
               <n-grid :x-gap="16" :y-gap="16" cols="1 s:2 l:4" responsive="screen">
-                <n-gi v-for="item in runtimeCards" :key="item.key">
+                <n-gi v-for="item in runtimeCards" :key="item.key" class="monitor-grid-cell">
                   <n-card size="small" class="monitor-summary-card">
                     <div class="summary-label">{{ item.label }}</div>
                     <div class="summary-value">{{ item.value }}</div>
@@ -86,7 +86,7 @@
           <n-tab-pane name="debug" :tab="t('monitor.debugTab')">
             <n-space vertical :size="16">
               <n-grid :x-gap="16" :y-gap="16" cols="1 s:2 l:4" responsive="screen">
-                <n-gi v-for="item in debugCards" :key="item.key">
+                <n-gi v-for="item in debugCards" :key="item.key" class="monitor-grid-cell">
                   <n-card size="small" class="monitor-summary-card">
                     <div class="summary-label">{{ item.label }}</div>
                     <div class="summary-value">{{ item.value }}</div>
@@ -96,8 +96,8 @@
               </n-grid>
 
               <n-grid :x-gap="16" :y-gap="16" cols="1 l:2" responsive="screen">
-                <n-gi>
-                  <n-card class="monitor-card" :title="t('monitor.runningTasksWithoutContainerTitle')">
+                <n-gi class="monitor-grid-cell">
+                  <n-card class="monitor-card monitor-card--stretch" :title="t('monitor.runningTasksWithoutContainerTitle')">
                     <div v-if="runningTasksWithoutContainer.length > 0" class="issue-list">
                       <button
                         v-for="task in runningTasksWithoutContainer"
@@ -116,8 +116,8 @@
                   </n-card>
                 </n-gi>
 
-                <n-gi>
-                  <n-card class="monitor-card" :title="t('monitor.orphanContainersTitle')">
+                <n-gi class="monitor-grid-cell">
+                  <n-card class="monitor-card monitor-card--stretch" :title="t('monitor.orphanContainersTitle')">
                     <div v-if="orphanContainers.length > 0" class="issue-list">
                       <div v-for="container in orphanContainers" :key="container.id" class="issue-item">
                         <div class="issue-title">{{ container.name }}</div>
@@ -154,8 +154,8 @@
           <n-tab-pane name="health" :tab="t('monitor.healthTab')">
             <n-space vertical :size="16">
               <n-grid :x-gap="16" :y-gap="16" cols="1 l:2" responsive="screen">
-                <n-gi>
-                  <n-card class="monitor-card" :title="t('monitor.healthChecksTitle')">
+                <n-gi class="monitor-grid-cell">
+                  <n-card class="monitor-card monitor-card--stretch" :title="t('monitor.healthChecksTitle')">
                     <div class="health-checks">
                       <div v-for="check in healthChecks" :key="check.key" class="health-check">
                         <div>
@@ -168,8 +168,8 @@
                   </n-card>
                 </n-gi>
 
-                <n-gi>
-                  <n-card class="monitor-card" :title="t('monitor.statusBreakdownTitle')">
+                <n-gi class="monitor-grid-cell">
+                  <n-card class="monitor-card monitor-card--stretch" :title="t('monitor.statusBreakdownTitle')">
                     <div class="status-breakdown">
                       <div v-for="item in statusBreakdown" :key="item.key" class="status-breakdown__row">
                         <div class="status-breakdown__label">
@@ -996,6 +996,25 @@ onBeforeUnmount(() => {
   padding-bottom: 16px;
 }
 
+.monitor-grid-cell {
+  display: flex;
+}
+
+.monitor-grid-cell > * {
+  flex: 1;
+}
+
+.monitor-summary-card,
+.monitor-card--stretch {
+  height: 100%;
+}
+
+.monitor-summary-card :deep(.n-card__content) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
 .summary-label {
   font-size: 12px;
   font-weight: 600;
@@ -1021,7 +1040,8 @@ onBeforeUnmount(() => {
 }
 
 .summary-help {
-  margin: 10px 0 0;
+  margin: auto 0 0;
+  padding-top: 10px;
   color: rgba(15, 23, 42, 0.68);
   line-height: 1.5;
   min-height: 42px;
