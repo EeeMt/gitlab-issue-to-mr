@@ -35,6 +35,14 @@
                     <div class="schedule-card__title">{{ t('scheduleOverview.next24Hours') }}</div>
                     <div class="schedule-card__subtitle">{{ t('scheduleOverview.next24HoursSubtitle') }}</div>
                   </div>
+                  <div class="schedule-card__hint">
+                    <span class="schedule-chip schedule-chip--interactive">
+                      {{ t('scheduleOverview.clickableHint') }}
+                    </span>
+                    <span v-if="selectedWindow" class="schedule-chip schedule-chip--active">
+                      {{ t('scheduleOverview.selectedHint') }}
+                    </span>
+                  </div>
                 </div>
               </template>
 
@@ -49,6 +57,9 @@
                   }"
                   @click="handleHourlyBucketSelect(bucket)"
                 >
+                  <div v-if="bucket.count > 0" class="hourly-chart__tap-indicator">
+                    {{ t('scheduleOverview.tapToInspectShort') }}
+                  </div>
                   <div class="hourly-chart__count">{{ bucket.count }}</div>
                   <div class="hourly-chart__bar-wrap">
                     <div
@@ -58,6 +69,9 @@
                   </div>
                   <div class="hourly-chart__label">{{ bucket.shortLabel }}</div>
                 </div>
+              </div>
+              <div class="schedule-section-tip">
+                {{ t('scheduleOverview.chartTip') }}
               </div>
             </n-card>
           </n-gi>
@@ -123,6 +137,9 @@
                   <span class="heatmap-legend__swatch heatmap-legend__swatch--4"></span>
                 </div>
                 <span class="heatmap-legend__label">{{ t('scheduleOverview.busy') }}</span>
+                <span class="schedule-chip schedule-chip--interactive">
+                  {{ t('scheduleOverview.clickableHint') }}
+                </span>
               </div>
             </div>
           </template>
@@ -155,6 +172,9 @@
                 </div>
             </template>
           </div>
+          <div class="schedule-section-tip">
+            {{ t('scheduleOverview.heatmapTip') }}
+          </div>
         </n-card>
 
         <n-card v-if="selectedWindow" class="schedule-card" :bordered="false">
@@ -166,9 +186,14 @@
                   {{ t('scheduleOverview.selectedWindowSubtitle') }}
                 </div>
               </div>
-              <n-button quaternary @click="clearSelectedWindow">
-                {{ t('scheduleOverview.clearSelectedWindow') }}
-              </n-button>
+              <div class="schedule-card__hint">
+                <span class="schedule-chip schedule-chip--active">
+                  {{ t('scheduleOverview.selectedHint') }}
+                </span>
+                <n-button quaternary @click="clearSelectedWindow">
+                  {{ t('scheduleOverview.clearSelectedWindow') }}
+                </n-button>
+              </div>
             </div>
           </template>
 
@@ -933,6 +958,38 @@ onBeforeUnmount(() => {
   color: rgba(15, 23, 42, 0.58);
 }
 
+.schedule-card__hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.schedule-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.schedule-chip--interactive {
+  background: rgba(32, 128, 240, 0.1);
+  color: rgba(32, 128, 240, 0.95);
+}
+
+.schedule-chip--active {
+  background: rgba(24, 160, 88, 0.12);
+  color: rgba(24, 160, 88, 0.95);
+}
+
+.schedule-section-tip {
+  margin-top: 12px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.58);
+}
+
 .schedule-table__ellipsis {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -959,9 +1016,21 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
+.hourly-chart__item--clickable:hover .hourly-chart__bar-wrap {
+  background: rgba(32, 128, 240, 0.14);
+}
+
 .hourly-chart__item--active .hourly-chart__bar-wrap {
   outline: 2px solid rgba(32, 128, 240, 0.45);
   outline-offset: 2px;
+  background: rgba(32, 128, 240, 0.16);
+}
+
+.hourly-chart__tap-indicator {
+  min-height: 14px;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(32, 128, 240, 0.85);
 }
 
 .hourly-chart__count {
@@ -1106,8 +1175,13 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
+.heatmap__cell--clickable:hover {
+  transform: translateY(-1px);
+  box-shadow: inset 0 0 0 1px rgba(32, 128, 240, 0.22);
+}
+
 .heatmap__cell--active {
-  box-shadow: inset 0 0 0 2px rgba(15, 23, 42, 0.32);
+  box-shadow: inset 0 0 0 2px rgba(15, 23, 42, 0.32), 0 0 0 2px rgba(24, 160, 88, 0.16);
 }
 
 .slot-detail {
