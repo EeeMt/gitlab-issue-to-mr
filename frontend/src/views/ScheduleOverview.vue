@@ -241,7 +241,7 @@
                     <n-date-picker
                       v-model:value="scheduleDrafts[task.id]"
                       type="datetime"
-                      style="width: min(100%, 280px)"
+                      class="slot-task-card__date-picker"
                       :placeholder="t('scheduleOverview.selectNewTime')"
                       :is-date-disabled="isScheduledDateDisabled"
                       :is-time-disabled="isScheduledTimeDisabled"
@@ -1303,6 +1303,10 @@ onBeforeUnmount(() => {
   gap: 10px;
   align-items: stretch;
   justify-content: center;
+}
+
+.slot-task-card__date-picker {
+  width: min(100%, calc(19ch + 9.5rem));
 }
 
 @media (max-width: 768px) {

@@ -141,14 +141,14 @@
                         />
                       </n-space>
 
-                       <n-date-picker
-                         v-if="scheduleType === 'scheduled'"
-                         v-model:value="scheduledDatetime"
-                         type="datetime"
-                         style="width: min(100%, 320px)"
-                         :placeholder="t('createTask.selectDateTime')"
-                         :is-date-disabled="isScheduledDateDisabled"
-                         :is-time-disabled="isScheduledTimeDisabled"
+                        <n-date-picker
+                          v-if="scheduleType === 'scheduled'"
+                          v-model:value="scheduledDatetime"
+                          type="datetime"
+                          class="content-width-datetime-picker"
+                          :placeholder="t('createTask.selectDateTime')"
+                          :is-date-disabled="isScheduledDateDisabled"
+                          :is-time-disabled="isScheduledTimeDisabled"
                        />
 
                       <div class="create-task-form__hint">
@@ -612,6 +612,10 @@ onMounted(() => {
 .create-task-form__hint {
   font-size: 12px;
   color: rgba(15, 23, 42, 0.64);
+}
+
+.content-width-datetime-picker {
+  width: min(100%, calc(19ch + 9.5rem));
 }
 
 .create-task-form__warning {
