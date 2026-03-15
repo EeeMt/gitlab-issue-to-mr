@@ -216,15 +216,17 @@
                 class="slot-task-card"
               >
                 <div class="slot-task-card__main" @click="goToTask(task)">
-                    <div class="slot-task-card__header">
-                      <div class="slot-task-card__title">
-                        #{{ task.id }} · {{ getProjectLabel(task) }}
-                      </div>
-                      <div class="slot-task-card__badges">
-                        <span class="slot-task-card__badge">{{ t(`status.${task.status}`) }}</span>
-                        <span class="slot-task-card__badge">{{ formatPriority(task.priority) }}</span>
-                      </div>
+                  <div class="slot-task-card__header">
+                    <div class="slot-task-card__title">
+                      #{{ task.id }} · {{ getProjectLabel(task) }}
                     </div>
+                  </div>
+                  <div class="slot-task-card__meta-row">
+                    <div class="slot-task-card__badges">
+                      <span class="slot-task-card__badge">{{ t(`status.${task.status}`) }}</span>
+                      <span class="slot-task-card__badge">{{ formatPriority(task.priority) }}</span>
+                    </div>
+                  </div>
                   <div class="slot-task-card__time">
                     {{ t('scheduleOverview.currentSchedule') }}: {{ formatShortDateTime(task.scheduled_at) }}
                   </div>
@@ -1257,6 +1259,10 @@ onBeforeUnmount(() => {
 .slot-task-card__title {
   font-size: 14px;
   font-weight: 600;
+}
+
+.slot-task-card__meta-row {
+  margin-top: 8px;
 }
 
 .slot-task-card__badges {

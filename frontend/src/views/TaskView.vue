@@ -794,7 +794,7 @@ onBeforeUnmount(() => {
 .task-actions__controls {
   display: grid;
   gap: 10px;
-  width: min(100%, 440px);
+  width: min(100%, 390px);
   justify-items: stretch;
 }
 
