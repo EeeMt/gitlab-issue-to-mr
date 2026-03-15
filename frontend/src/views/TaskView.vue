@@ -800,7 +800,7 @@ onBeforeUnmount(() => {
 }
 
 .task-actions__date-picker {
-  width: 100%;
+  width: fit-content;
 }
 
 .task-actions__controls :deep(.n-button) {
