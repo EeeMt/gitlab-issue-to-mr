@@ -13,7 +13,7 @@ from sqlalchemy import select, func, false
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings, get_settings
-from app.core.scheduling import resolve_scheduled_at
+from app.core.scheduling import normalize_scheduled_datetime, resolve_scheduled_at
 from app.database import get_db
 from app.dependencies.auth import get_optional_current_user, require_page_access
 from app.dependencies.project_access import (
@@ -556,6 +556,21 @@ class CreateTaskRequest(BaseModel):
         """Manual tasks must use distinct source and target branches."""
         if self.branch_name == self.target_branch:
             raise ValueError("Source branch and target branch must be different for manual tasks")
+        return self
+
+    @model_validator(mode="after")
+    def validate_schedule_is_future(self) -> "CreateTaskRequest":
+        """Manual tasks can only be scheduled in the future."""
+        if self.delay_seconds is not None and self.delay_seconds <= 0:
+            raise ValueError("Delay seconds must be greater than 0 for manual tasks")
+
+        if self.scheduled_datetime is None:
+            return self
+
+        normalized_scheduled = normalize_scheduled_datetime(self.scheduled_datetime)
+        if normalized_scheduled is not None and normalized_scheduled <= datetime.utcnow():
+            raise ValueError("Scheduled datetime must be in the future for manual tasks")
+
         return self
 
 

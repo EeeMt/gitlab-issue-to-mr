@@ -141,13 +141,15 @@
                         />
                       </n-space>
 
-                      <n-date-picker
-                        v-if="scheduleType === 'scheduled'"
-                        v-model:value="scheduledDatetime"
-                        type="datetime"
-                        style="width: min(100%, 320px)"
-                        :placeholder="t('createTask.selectDateTime')"
-                      />
+                       <n-date-picker
+                         v-if="scheduleType === 'scheduled'"
+                         v-model:value="scheduledDatetime"
+                         type="datetime"
+                         style="width: min(100%, 320px)"
+                         :placeholder="t('createTask.selectDateTime')"
+                         :is-date-disabled="isScheduledDateDisabled"
+                         :is-time-disabled="isScheduledTimeDisabled"
+                       />
 
                       <div class="create-task-form__hint">
                         {{ scheduleSummary }}
@@ -306,6 +308,53 @@ const scheduleSummary = computed(() => {
 
   return t('createTask.taskWillRunAt', { time: formatDateTimeUtc8(scheduledDatetime.value) })
 })
+
+function isSameLocalDay(left: Date, right: Date): boolean {
+  return (
+    left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate()
+  )
+}
+
+function isScheduledDateDisabled(timestamp: number): boolean {
+  const candidate = new Date(timestamp)
+  const today = new Date()
+
+  candidate.setHours(0, 0, 0, 0)
+  today.setHours(0, 0, 0, 0)
+
+  return candidate.getTime() < today.getTime()
+}
+
+function isScheduledTimeDisabled(timestamp: number) {
+  const selectedDate = new Date(timestamp)
+  const now = new Date()
+
+  if (!isSameLocalDay(selectedDate, now)) {
+    return {}
+  }
+
+  const currentHour = now.getHours()
+  const currentMinute = now.getMinutes()
+  const currentSecond = now.getSeconds()
+
+  return {
+    isHourDisabled: (hour: number) => hour < currentHour,
+    isMinuteDisabled: (minute: number, hour: number | null) => (
+      hour !== null
+      && hour === currentHour
+      && minute < currentMinute
+    ),
+    isSecondDisabled: (second: number, minute: number | null, hour: number | null) => (
+      hour !== null
+      && minute !== null
+      && hour === currentHour
+      && minute === currentMinute
+      && second < currentSecond
+    )
+  }
+}
 
 // Validation rules
 const rules: FormRules = {
