@@ -792,10 +792,10 @@ onBeforeUnmount(() => {
 }
 
 .task-actions__controls {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   width: min(100%, calc(19ch + 9.5rem));
-  justify-items: stretch;
 }
 
 .task-actions__date-picker {
@@ -803,7 +803,7 @@ onBeforeUnmount(() => {
 }
 
 .task-actions__controls :deep(.n-button) {
-  justify-self: end;
+  width: 100%;
 }
 
 .task-actions__label {

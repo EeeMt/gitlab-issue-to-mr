@@ -251,6 +251,7 @@
                       secondary
                       strong
                       round
+                      class="slot-task-card__save-button"
                       @click.stop="handleTaskReschedule(task)"
                       :loading="savingTaskId === task.id"
                       :disabled="scheduleDrafts[task.id] === null || (savingTaskId !== null && savingTaskId !== task.id)"
@@ -1303,10 +1304,15 @@ onBeforeUnmount(() => {
   gap: 10px;
   align-items: stretch;
   justify-content: center;
+  width: min(100%, calc(19ch + 9.5rem));
 }
 
 .slot-task-card__date-picker {
-  width: min(100%, calc(19ch + 9.5rem));
+  width: 100%;
+}
+
+.slot-task-card__save-button {
+  width: 100%;
 }
 
 @media (max-width: 768px) {
