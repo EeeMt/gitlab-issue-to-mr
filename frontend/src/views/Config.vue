@@ -656,7 +656,7 @@
                   </div>
                 </template>
 
-                <div class="config-form__section">
+                <div class="config-form__section config-page-actions">
                   <n-space :size="12" wrap>
                     <n-button @click="handleReload" :disabled="isBusy">
                       {{ t('common.reload') }}
@@ -1403,6 +1403,11 @@ onMounted(() => {
   margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.config-card-actions :deep(.n-button),
+.config-page-actions :deep(.n-button) {
+  border-radius: 999px;
 }
 
 @media (max-width: 767px) {

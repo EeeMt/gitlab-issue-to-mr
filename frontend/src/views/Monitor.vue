@@ -1,7 +1,7 @@
 <template>
   <div class="monitor-page">
     <n-spin :show="initialLoading" :description="t('monitor.loading')">
-      <n-space vertical :size="20">
+      <n-space vertical :size="16">
         <div class="monitor-page__hero">
           <div>
             <h2 class="monitor-page__title">{{ t('monitor.title') }}</h2>
@@ -224,7 +224,6 @@ onBeforeUnmount(() => {
 
 .monitor-table-card {
   border-radius: 18px;
-  margin-top: 8px;
 }
 
 .monitor-table-card :deep(.n-card__content) {
