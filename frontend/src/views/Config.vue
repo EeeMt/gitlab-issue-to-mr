@@ -728,33 +728,21 @@ const isDirty = computed(() => {
   )
 })
 
+const sharedPagesEnabledCount = computed(
+  () =>
+    [
+      formValue.value.allow_monitor_for_users,
+      formValue.value.allow_schedule_overview_for_users,
+      formValue.value.allow_analytics_for_users,
+      formValue.value.allow_oidc_diagnostics_for_users
+    ].filter(Boolean).length
+)
+
 const summaryItems = computed(() => [
   { label: t('config.maxConcurrency'), value: String(formValue.value.max_concurrency) },
   { label: t('config.taskTimeout'), value: `${formValue.value.task_timeout}s` },
-  { label: t('config.maxRetries'), value: String(formValue.value.max_retries) },
-  { label: t('config.gitlabUrl'), value: formValue.value.gitlab_url || t('common.notAvailable') },
-  { label: t('config.anthropicModel'), value: formValue.value.anthropic_model },
-  {
-    label: t('config.sharedPages'),
-    value:
-      [
-        formValue.value.allow_monitor_for_users ? t('nav.monitor') : null,
-        formValue.value.allow_schedule_overview_for_users ? t('nav.scheduleOverview') : null,
-        formValue.value.allow_analytics_for_users ? t('nav.analytics') : null,
-        formValue.value.allow_oidc_diagnostics_for_users ? t('nav.oidcDiagnostics') : null
-      ]
-        .filter(Boolean)
-        .join(', ') || t('config.adminOnly')
-  },
   { label: t('config.oidcLogin'), value: formValue.value.oidc_enabled ? t('common.enabled') : t('common.disabled') },
-  {
-    label: t('config.clientSecret'),
-    value: formValue.value.oidc_client_secret_configured ? t('config.configured') : t('config.missing')
-  },
-  {
-    label: t('config.anthropicApiKey'),
-    value: formValue.value.anthropic_api_key_configured ? t('config.configured') : t('config.missing')
-  }
+  { label: t('config.sharedPages'), value: String(sharedPagesEnabledCount.value) }
 ])
 
 const rules: FormRules = {
