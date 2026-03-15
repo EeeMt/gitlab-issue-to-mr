@@ -26,26 +26,51 @@ from app.models import Task, TaskLog, TaskStatus, User
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-_PROJECT_LIST_CACHE_TTL_SECONDS = 60
+_PROJECT_LIST_CACHE_TTL_SECONDS = 300  # 5-minute freshness window
 _project_list_cache_expires_at = 0.0
 _project_list_cache: list[dict[str, Any]] = []
+_project_list_refresh_task: Optional[asyncio.Task] = None
+
+
+async def _refresh_project_cache() -> list[dict[str, Any]]:
+    """Fetch fresh project list from GitLab and update the cache."""
+    global _project_list_cache, _project_list_cache_expires_at, _project_list_refresh_task
+
+    from app.core.gitlab_client import get_gitlab_client
+    try:
+        gitlab = get_gitlab_client()
+        projects = await asyncio.to_thread(gitlab.get_projects)
+        _project_list_cache = projects
+        _project_list_cache_expires_at = time.time() + _PROJECT_LIST_CACHE_TTL_SECONDS
+    except Exception as exc:
+        logger.warning(f"Failed to refresh project cache: {exc}")
+    finally:
+        _project_list_refresh_task = None
+    return _project_list_cache
 
 
 async def _get_cached_projects() -> list[dict[str, Any]]:
-    """Return cached GitLab project metadata for unrestricted views."""
-    global _project_list_cache, _project_list_cache_expires_at
+    """Return cached GitLab project metadata using stale-while-revalidate.
+
+    Returns stale data immediately when the cache has expired, and kicks off
+    a background refresh so the next caller gets fresh data without blocking.
+    Only blocks on the very first call (cold cache with no data at all).
+    """
+    global _project_list_refresh_task
 
     now = time.time()
     if _project_list_cache and _project_list_cache_expires_at > now:
+        # Fresh — return without waiting.
         return _project_list_cache
 
-    from app.core.gitlab_client import get_gitlab_client
+    if _project_list_cache:
+        # Stale but not empty — return immediately and refresh in background.
+        if _project_list_refresh_task is None or _project_list_refresh_task.done():
+            _project_list_refresh_task = asyncio.create_task(_refresh_project_cache())
+        return _project_list_cache
 
-    gitlab = get_gitlab_client()
-    projects = await asyncio.to_thread(gitlab.get_projects)
-    _project_list_cache = projects
-    _project_list_cache_expires_at = now + _PROJECT_LIST_CACHE_TTL_SECONDS
-    return projects
+    # Cold cache: must wait for the first fetch.
+    return await _refresh_project_cache()
 
 
 def _projects_to_lookup(projects: list[dict[str, Any]]) -> dict[int, dict[str, Optional[str]]]:
