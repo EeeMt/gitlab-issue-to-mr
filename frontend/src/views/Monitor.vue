@@ -185,10 +185,6 @@ onBeforeUnmount(() => {
   max-width: 1240px;
 }
 
-.monitor-table-card {
-  margin-top: 4px;
-}
-
 .monitor-page__hero {
   display: flex;
   justify-content: space-between;
