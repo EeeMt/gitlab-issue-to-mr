@@ -481,8 +481,13 @@ async function fetchTask() {
   loading.value = true
   try {
     const previousStatus = task.value?.status
+    const previousScheduledAt = task.value?.scheduled_at
     task.value = await getTask(taskId.value)
-    syncRescheduleDatetime()
+    // Only sync the date picker when loading for the first time or when scheduled_at
+    // changed externally (not during user editing).
+    if (!hasLoadedOnce.value || task.value?.scheduled_at !== previousScheduledAt) {
+      syncRescheduleDatetime()
+    }
     connectLogStream()
 
     if (isActiveTaskStatus(previousStatus) && !isActiveTaskStatus(task.value.status)) {
