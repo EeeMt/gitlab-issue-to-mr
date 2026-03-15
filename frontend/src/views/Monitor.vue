@@ -10,7 +10,7 @@
             <p>{{ t('monitor.subtitle') }}</p>
           </div>
 
-          <n-button secondary @click="fetchData">
+          <n-button secondary :loading="loading && hasLoadedOnce" @click="fetchData()">
             {{ t('common.refresh') }}
           </n-button>
         </section>
@@ -263,6 +263,7 @@ const { t } = useI18n()
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
 const activeTab = ref('runtime')
+const refreshRequestInFlight = ref(false)
 const stats = ref<Stats>({
   total: 0,
   pending: 0,
@@ -274,6 +275,8 @@ const stats = ref<Stats>({
 })
 const containers = ref<Container[]>([])
 const tasks = ref<Task[]>([])
+let pendingSilentRefresh = false
+let pendingVisibleRefresh = false
 let refreshTimer: number | null = null
 
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
@@ -896,8 +899,22 @@ function goToTask(taskId: number) {
   router.push(`/tasks/${taskId}`)
 }
 
-async function fetchData() {
-  loading.value = true
+async function fetchData(options: { silent?: boolean } = {}) {
+  const silent = options.silent ?? false
+
+  if (refreshRequestInFlight.value) {
+    if (silent) {
+      pendingSilentRefresh = true
+    } else {
+      pendingVisibleRefresh = true
+    }
+    return
+  }
+
+  refreshRequestInFlight.value = true
+  if (!silent) {
+    loading.value = true
+  }
 
   try {
     const [statsData, containersData, tasksData] = await Promise.all([
@@ -914,14 +931,24 @@ async function fetchData() {
     console.error(error)
     message.error(t('monitor.failedToFetchData'))
   } finally {
-    loading.value = false
+    if (!silent) {
+      loading.value = false
+    }
+    refreshRequestInFlight.value = false
+
+    if (pendingVisibleRefresh || pendingSilentRefresh) {
+      const nextSilent = !pendingVisibleRefresh
+      pendingVisibleRefresh = false
+      pendingSilentRefresh = false
+      await fetchData({ silent: nextSilent })
+    }
   }
 }
 
 function startAutoRefresh() {
   stopAutoRefresh()
   refreshTimer = window.setInterval(() => {
-    void fetchData()
+    void fetchData({ silent: true })
   }, 15000)
 }
 
