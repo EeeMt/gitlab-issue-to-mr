@@ -852,7 +852,7 @@ async function handleTaskReschedule(task: Task) {
       scheduled_datetime: new Date(draft).toISOString()
     })
     tasks.value = tasks.value.map((item) => (item.id === updatedTask.id ? updatedTask : item))
-    syncScheduleDrafts()
+    clearSelectedWindow()
     message.success(t('scheduleOverview.taskRescheduled'))
   } catch (error) {
     message.error(t('scheduleOverview.failedToRescheduleTask'))
@@ -1185,12 +1185,17 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.heatmap__cell--clickable:hover {
+.heatmap__cell--clickable:not(.heatmap__cell--active):hover {
   transform: translateY(-1px);
   box-shadow: inset 0 0 0 1px rgba(32, 128, 240, 0.22);
 }
 
 .heatmap__cell--active {
+  box-shadow: inset 0 0 0 2px rgba(15, 23, 42, 0.32), 0 0 0 2px rgba(24, 160, 88, 0.16);
+}
+
+.heatmap__cell--active:hover {
+  transform: none;
   box-shadow: inset 0 0 0 2px rgba(15, 23, 42, 0.32), 0 0 0 2px rgba(24, 160, 88, 0.16);
 }
 
