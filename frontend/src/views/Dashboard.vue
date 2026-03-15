@@ -13,9 +13,25 @@
             <n-select
               v-model:value="statusFilter"
               :options="statusOptions"
-              :placeholder="t('common.filter')"
+              :placeholder="t('dashboard.status')"
               clearable
               style="width: 140px"
+            />
+            <n-select
+              v-model:value="projectFilter"
+              :options="projectOptions"
+              :placeholder="t('dashboard.project')"
+              clearable
+              filterable
+              style="width: min(280px, 70vw)"
+            />
+            <n-select
+              v-model:value="initiatorFilter"
+              :options="initiatorOptions"
+              :placeholder="t('dashboard.initiator')"
+              clearable
+              filterable
+              style="width: 180px"
             />
             <n-button @click="refreshTasks" :loading="loading" size="small">
               {{ t('common.refresh') }}
@@ -55,7 +71,7 @@ import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, NGrid, NGi, NSpin, u
 import { useRouter } from 'vue-router'
 import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { getTasks, type Task } from '../api'
+import { getProjects, getTasks, type Project, type Task } from '../api'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
 
 const router = useRouter()
@@ -66,9 +82,12 @@ const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
 const tasks = ref<Task[]>([])
+const projects = ref<Project[]>([])
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
 const statusFilter = ref<string | null>(null)
+const projectFilter = ref<number | null>(null)
+const initiatorFilter = ref<string | null>(null)
 let pollTimer: number | null = null
 
 const pagination = {
@@ -84,6 +103,22 @@ const statusOptions = computed(() => [
   { label: t('status.failed'), value: 'failed' },
   { label: t('status.cancelled'), value: 'cancelled' }
 ])
+const projectOptions = computed(() =>
+  projects.value.map((project) => ({
+    label: project.path_with_namespace,
+    value: project.id
+  }))
+)
+const initiatorOptions = computed(() => {
+  const values = Array.from(
+    new Set(tasks.value.map((task) => task.initiator_username?.trim()).filter(Boolean) as string[])
+  ).sort((left, right) => left.localeCompare(right))
+
+  return values.map((username) => ({
+    label: username,
+    value: username
+  }))
+})
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
   pending: 'default',
@@ -108,6 +143,10 @@ function renderExternalLink(label: string, href?: string | null) {
 function getProjectSecondaryLabel(task: Task): string {
   const issueLabel = task.issue_iid ? `!${task.issue_iid}` : '-'
   return `${getProjectLabel(task)} · ${issueLabel}`
+}
+
+function getInitiatorLabel(task: Task): string {
+  return task.initiator_username?.trim() || '-'
 }
 
 function formatPriority(priority?: string | number | null): string {
@@ -201,12 +240,12 @@ const columns = computed<DataTableColumns<Task>>(() => {
     {
       title: t('dashboard.id'),
       key: 'id',
-      width: 60
+      width: 52
     },
     {
       title: t('dashboard.project'),
       key: 'project',
-      width: 180,
+      width: 156,
       ellipsis: { tooltip: true },
       render: (row) =>
         h('div', { style: 'line-height: 1.4' }, [
@@ -219,34 +258,41 @@ const columns = computed<DataTableColumns<Task>>(() => {
         ])
     },
     {
+      title: t('dashboard.initiator'),
+      key: 'initiator_username',
+      width: 112,
+      ellipsis: { tooltip: true },
+      render: (row) => getInitiatorLabel(row)
+    },
+    {
       title: t('dashboard.issue'),
       key: 'issue_iid',
-      width: 60,
+      width: 52,
       render: (row) => (row.issue_iid ? renderExternalLink(`!${row.issue_iid}`, row.issue_url) : '-')
     },
     {
       title: t('dashboard.status'),
       key: 'status',
-      width: 90,
+      width: 84,
       render: renderStatus
     },
     {
       title: t('dashboard.priority'),
       key: 'priority',
-      width: 68,
+      width: 58,
       render: (row) => formatPriority(row.priority)
     },
     {
       title: t('dashboard.branch'),
       key: 'branch_name',
-      width: 140,
+      width: 120,
       ellipsis: { tooltip: true },
       render: (row) => (row.branch_name ? renderExternalLink(row.branch_name, row.branch_url) : '-')
     },
     {
       title: t('dashboard.mergeRequest'),
       key: 'merge_request_url',
-      width: 76,
+      width: 72,
       render: (row) => {
         if (!row.merge_request_url) return '-'
         const label = row.merge_request_iid ? `!${row.merge_request_iid}` : t('dashboard.open')
@@ -260,7 +306,7 @@ const columns = computed<DataTableColumns<Task>>(() => {
     {
       title: t('dashboard.changes'),
       key: 'changes',
-      width: 92,
+      width: 84,
       render: (row) => {
         if (row.additions === undefined && row.deletions === undefined) return '-'
         if (!row.additions && !row.deletions) return '-'
@@ -273,13 +319,13 @@ const columns = computed<DataTableColumns<Task>>(() => {
     {
       title: t('common.created'),
       key: 'created_at',
-      width: 132,
+      width: 118,
       render: (row) => formatCompactDateTime(row.created_at)
     },
     {
       title: t('dashboard.scheduled'),
       key: 'scheduled_at',
-      width: 132,
+      width: 118,
       render: (row) => formatCompactDateTime(row.scheduled_at)
     }
   ]
@@ -313,9 +359,15 @@ async function fetchTasks() {
   if (loading.value) return
   loading.value = true
   try {
-    const params: { status?: string } = {}
+    const params: { status?: string; project_id?: number; initiator_username?: string } = {}
     if (statusFilter.value) {
       params.status = statusFilter.value
+    }
+    if (projectFilter.value !== null) {
+      params.project_id = projectFilter.value
+    }
+    if (initiatorFilter.value) {
+      params.initiator_username = initiatorFilter.value
     }
     tasks.value = await getTasks(params)
   } catch (error) {
@@ -326,15 +378,24 @@ async function fetchTasks() {
   }
 }
 
+async function fetchProjects() {
+  try {
+    projects.value = await getProjects()
+  } catch (error) {
+    // Keep the task list usable even if the optional filter options fail to load.
+  }
+}
+
 function refreshTasks() {
   fetchTasks()
 }
 
-watch(statusFilter, () => {
+watch([statusFilter, projectFilter, initiatorFilter], () => {
   fetchTasks()
 })
 
 onMounted(() => {
+  fetchProjects()
   fetchTasks()
   // Auto-refresh every 15 seconds and skip when tab is not visible
   pollTimer = window.setInterval(() => {

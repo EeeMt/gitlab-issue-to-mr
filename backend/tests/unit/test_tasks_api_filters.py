@@ -1,0 +1,143 @@
+import os
+import sys
+from datetime import datetime
+from types import SimpleNamespace
+from typing import Optional
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import app.api.tasks as tasks_api
+from app.api.tasks import _build_project_lookup, list_projects, list_tasks
+from app.dependencies.project_access import ProjectAccessScope
+from app.models import Task, TaskStatus
+
+
+def _make_task(
+    task_id: int,
+    project_id: int,
+    status: TaskStatus,
+    initiator_username: Optional[str] = None,
+) -> Task:
+    now = datetime.utcnow()
+    return Task(
+        id=task_id,
+        project_id=project_id,
+        issue_iid=task_id,
+        issue_id=task_id,
+        note_id=None,
+        user_prompt=f"Prompt {task_id}",
+        branch_name=f"feature/{task_id}",
+        target_branch="main",
+        priority=task_id % 3,
+        status=status,
+        is_manual=True,
+        initiator_username=initiator_username,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_serializes_initiator_fields():
+    task = _make_task(1, 101, TaskStatus.PENDING, initiator_username="alice")
+    task.initiator_user_id = 7
+    task.initiator_gitlab_user_id = 77
+    db = AsyncMock()
+    db.execute.return_value = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [task]))
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+    with patch(
+        "app.api.tasks._build_project_lookup",
+        new=AsyncMock(
+            return_value={
+                101: {
+                    "project_name": "Project Alpha",
+                    "project_path_with_namespace": "group/project-alpha",
+                }
+            }
+        ),
+    ):
+        result = await list_tasks(db=db, access_scope=access_scope)
+
+    assert len(result) == 1
+    assert result[0]["initiator_user_id"] == 7
+    assert result[0]["initiator_gitlab_user_id"] == 77
+    assert result[0]["initiator_username"] == "alice"
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_applies_project_and_initiator_filters():
+    task = _make_task(2, 202, TaskStatus.RUNNING, initiator_username="alice")
+    db = AsyncMock()
+    db.execute.return_value = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [task]))
+    access_scope = ProjectAccessScope(
+        is_unrestricted=False,
+        accessible_projects=[{"id": 202, "name": "Project Beta"}],
+    )
+
+    with patch("app.api.tasks._build_project_lookup", new=AsyncMock(return_value={})):
+        result = await list_tasks(
+            project_id=202,
+            initiator_username="alice",
+            db=db,
+            access_scope=access_scope,
+        )
+
+    executed_query = db.execute.await_args.args[0]
+
+    assert len(result) == 1
+    assert "tasks.project_id =" in str(executed_query)
+    assert "tasks.initiator_username =" in str(executed_query)
+
+
+@pytest.mark.asyncio
+async def test_build_project_lookup_reuses_access_scope_projects_without_gitlab_fetch():
+    access_scope = ProjectAccessScope(
+        is_unrestricted=False,
+        accessible_projects=[
+            {
+                "id": 202,
+                "name": "Project Beta",
+                "path_with_namespace": "team/project-beta",
+            }
+        ],
+    )
+
+    with patch("app.api.tasks.asyncio.to_thread", new=AsyncMock()) as to_thread:
+        lookup = await _build_project_lookup(access_scope)
+
+    assert lookup == {
+        202: {
+            "project_name": "Project Beta",
+            "project_path_with_namespace": "team/project-beta",
+        }
+    }
+    to_thread.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_projects_uses_ttl_cache_for_unrestricted_scope():
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+    fake_projects = [
+        {
+            "id": 101,
+            "name": "Project Alpha",
+            "path_with_namespace": "team/project-alpha",
+        }
+    ]
+    tasks_api._project_list_cache = []
+    tasks_api._project_list_cache_expires_at = 0.0
+
+    with patch("app.core.gitlab_client.get_gitlab_client", return_value=SimpleNamespace(get_projects=object())), patch(
+        "app.api.tasks.asyncio.to_thread",
+        new=AsyncMock(return_value=fake_projects),
+    ) as to_thread, patch("app.api.tasks.time.time", side_effect=[100.0, 101.0]):
+        first = await list_projects(access_scope=access_scope)
+        second = await list_projects(access_scope=access_scope)
+
+    assert first == fake_projects
+    assert second == fake_projects
+    assert to_thread.await_count == 1

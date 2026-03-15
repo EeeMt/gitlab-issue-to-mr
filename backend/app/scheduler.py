@@ -325,10 +325,8 @@ def _run_worker_task(task_id: int) -> bool:
     try:
         return loop.run_until_complete(run_task())
     finally:
-        loop.close()
-        # Dispose the engine to close connections
-        import asyncio
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(engine.dispose())
-        loop.close()
+        try:
+            loop.run_until_complete(engine.dispose())
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()

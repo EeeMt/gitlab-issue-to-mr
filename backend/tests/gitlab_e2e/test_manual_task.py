@@ -86,7 +86,7 @@ class TestGitLabProjects:
 
         # Get branches
         response = requests.get(
-            f"{GITLAB_URL}/api/v4/projects/{project_id}/branches",
+            f"{GITLAB_URL}/api/v4/projects/{project_id}/repository/branches",
             headers={"PRIVATE-TOKEN": GITLAB_TOKEN},
             timeout=10
         )

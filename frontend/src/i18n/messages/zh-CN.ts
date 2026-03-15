@@ -44,6 +44,7 @@ const zhCN = {
   },
   common: {
     filter: '筛选',
+    all: '全部',
     refresh: '刷新',
     reload: '重新加载',
     reset: '重置',
@@ -64,6 +65,7 @@ const zhCN = {
     issue: '议题',
     mergeRequest: '合并请求',
     priority: '优先级',
+    initiator: '发起人',
     branch: '分支',
     targetBranch: '目标分支',
     changes: '变更',
@@ -101,6 +103,7 @@ const zhCN = {
     status: '状态',
     priority: '优先级',
     branch: '分支',
+    initiator: '发起人',
     mergeRequest: 'MR',
     changes: '变更',
     scheduled: '调度时间',

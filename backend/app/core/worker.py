@@ -87,6 +87,25 @@ class WorkerExecutor:
 
         return f"AI: Task {task.id}"
 
+    def _remove_mr_draft_status(self, task: Task) -> None:
+        """Remove draft status from an MR by normalizing its title."""
+        project = self.gitlab.gl.projects.get(task.project_id)
+        mr = project.mergerequests.get(task.merge_request_iid)
+
+        title = getattr(mr, "title", "")
+        if not isinstance(title, str):
+            logger.info(f"[Task {task.id}] Skipping draft removal because MR title is unavailable")
+            return
+
+        updated_title = re.sub(r"^(?:\[Draft\]\s*|Draft:\s*|WIP:\s*)", "", title, count=1, flags=re.IGNORECASE).strip()
+        if not updated_title or updated_title == title:
+            logger.info(f"[Task {task.id}] MR !{task.merge_request_iid} is already non-draft")
+            return
+
+        mr.title = updated_title
+        mr.save()
+        logger.info(f"[Task {task.id}] Removed draft status from MR !{task.merge_request_iid}")
+
     async def execute_task(self, db: AsyncSession, task_id: int) -> bool:
         """Execute a task.
 
@@ -295,13 +314,7 @@ class WorkerExecutor:
                 # Remove draft status from MR if it was created
                 if task.merge_request_iid:
                     try:
-                        self.gitlab.gl.projects.get(task.project_id).mergerequests.get(task.merge_request_iid)
-                        # Update MR to remove draft status
-                        self.gitlab.gl.projects.get(task.project_id).mergerequests.update(
-                            task.merge_request_iid,
-                            {"draft": False}
-                        )
-                        logger.info(f"[Task {task_id}] Removed draft status from MR !{task.merge_request_iid}")
+                        self._remove_mr_draft_status(task)
                     except Exception as e:
                         logger.warning(f"[Task {task_id}] Failed to update MR draft status: {e}")
 

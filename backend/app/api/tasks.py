@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from datetime import datetime
 from typing import Any, Optional
 from urllib.parse import quote
@@ -25,21 +26,45 @@ from app.models import Task, TaskLog, TaskStatus, User
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+_PROJECT_LIST_CACHE_TTL_SECONDS = 60
+_project_list_cache_expires_at = 0.0
+_project_list_cache: list[dict[str, Any]] = []
 
-async def _build_project_lookup() -> dict[int, dict[str, str]]:
-    """Build a project metadata lookup keyed by GitLab project ID."""
+
+async def _get_cached_projects() -> list[dict[str, Any]]:
+    """Return cached GitLab project metadata for unrestricted views."""
+    global _project_list_cache, _project_list_cache_expires_at
+
+    now = time.time()
+    if _project_list_cache and _project_list_cache_expires_at > now:
+        return _project_list_cache
+
     from app.core.gitlab_client import get_gitlab_client
 
-    try:
-        gitlab = get_gitlab_client()
-        projects = await asyncio.to_thread(gitlab.get_projects)
-        return {
-            project["id"]: {
-                "project_name": project["name"],
-                "project_path_with_namespace": project["path_with_namespace"],
-            }
-            for project in projects
+    gitlab = get_gitlab_client()
+    projects = await asyncio.to_thread(gitlab.get_projects)
+    _project_list_cache = projects
+    _project_list_cache_expires_at = now + _PROJECT_LIST_CACHE_TTL_SECONDS
+    return projects
+
+
+def _projects_to_lookup(projects: list[dict[str, Any]]) -> dict[int, dict[str, Optional[str]]]:
+    return {
+        int(project["id"]): {
+            "project_name": project.get("name"),
+            "project_path_with_namespace": project.get("path_with_namespace"),
         }
+        for project in projects
+    }
+
+
+async def _build_project_lookup(access_scope: ProjectAccessScope) -> dict[int, dict[str, Optional[str]]]:
+    """Build a project metadata lookup keyed by GitLab project ID."""
+    if not access_scope.is_unrestricted:
+        return _projects_to_lookup(access_scope.accessible_projects)
+
+    try:
+        return _projects_to_lookup(await _get_cached_projects())
     except Exception as exc:
         logger.warning(f"Failed to load project metadata: {exc}")
         return {}
@@ -96,6 +121,9 @@ def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = Non
         "issue_id": task.issue_id,
         "note_id": task.note_id,
         "user_prompt": task.user_prompt,
+        "initiator_user_id": task.initiator_user_id,
+        "initiator_gitlab_user_id": task.initiator_gitlab_user_id,
+        "initiator_username": task.initiator_username,
         "branch_name": task.branch_name,
         "branch_url": branch_url,
         "merge_request_iid": task.merge_request_iid,
@@ -123,6 +151,7 @@ def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = Non
 async def list_tasks(
     status: Optional[str] = None,
     project_id: Optional[int] = None,
+    initiator_username: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
@@ -131,6 +160,7 @@ async def list_tasks(
     Args:
         status: Filter by task status
         project_id: Filter by project ID
+        initiator_username: Filter by initiator username
         db: Database session
 
     Returns:
@@ -155,9 +185,12 @@ async def list_tasks(
         else:
             query = query.where(Task.project_id.in_(allowed_project_ids))
 
+    if initiator_username:
+        query = query.where(Task.initiator_username == initiator_username)
+
     result = await db.execute(query.limit(100))
     tasks = result.scalars().all()
-    project_lookup = await _build_project_lookup()
+    project_lookup = await _build_project_lookup(access_scope)
 
     return [
         _serialize_task(task, project_lookup.get(task.project_id))
@@ -198,7 +231,7 @@ async def list_scheduled_tasks(
 
     result = await db.execute(query)
     tasks = result.scalars().all()
-    project_lookup = await _build_project_lookup()
+    project_lookup = await _build_project_lookup(access_scope)
 
     return [
         _serialize_task(task, project_lookup.get(task.project_id))
@@ -538,9 +571,12 @@ async def list_projects(
     from app.core.gitlab_client import get_gitlab_client
     if not access_scope.is_unrestricted:
         return access_scope.accessible_projects
-    gitlab = get_gitlab_client()
-    projects = await asyncio.to_thread(gitlab.get_projects)
-    return projects
+    try:
+        return await _get_cached_projects()
+    except Exception as exc:
+        logger.warning("Failed to load accessible projects: %s", exc)
+        gitlab = get_gitlab_client()
+        return await asyncio.to_thread(gitlab.get_projects)
 
 
 @router.get("/projects/{project_id}/branches")

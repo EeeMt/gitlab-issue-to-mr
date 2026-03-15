@@ -36,6 +36,9 @@ export interface Task {
   issue_id: number | null
   note_id: number | null
   user_prompt: string
+  initiator_user_id?: number | null
+  initiator_gitlab_user_id?: number | null
+  initiator_username?: string | null
   branch_name: string | null
   branch_url?: string | null
   merge_request_iid: number | null
@@ -369,7 +372,11 @@ export interface RevokeSessionResponse {
 }
 
 // API functions
-export async function getTasks(params?: { status?: string; project_id?: number }): Promise<Task[]> {
+export async function getTasks(params?: {
+  status?: string
+  project_id?: number
+  initiator_username?: string
+}): Promise<Task[]> {
   const response = await api.get('/tasks', { params })
   return response.data
 }

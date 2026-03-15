@@ -721,8 +721,8 @@ def main():
             # cleanup_test_project(project["id"])
             pass
 
-        # Stop services (unless --keep-running is set)
-        if not args.keep_running:
+        # Only stop services that this script started itself.
+        if not args.keep_running and not args.skip_startup:
             stop_docker_compose()
         else:
             logger.info("\n[Info] Keeping services running (--keep-running)")

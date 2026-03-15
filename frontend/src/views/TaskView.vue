@@ -16,7 +16,7 @@
         </n-button>
       </div>
 
-      <n-spin :show="loading">
+      <n-spin :show="initialLoading">
         <div class="task-view__content">
           <n-grid :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16" class="task-view__summary" v-if="task">
             <n-gi v-for="item in summaryItems" :key="item.label">
@@ -253,6 +253,7 @@ const task = ref<Task | null>(null)
 const logs = ref('')
 const containerLogs = ref('')
 const loading = ref(false)
+const hasLoadedOnce = ref(false)
 const logsLoading = ref(false)
 const containerLogsLoading = ref(false)
 const actionLoading = ref(false)
@@ -261,6 +262,7 @@ const containerRequestInFlight = ref(false)
 let pollTimer: number | null = null
 let logEventSource: EventSource | null = null
 let logStreamContainerId: string | null = null
+const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
   pending: 'default',
@@ -382,6 +384,7 @@ async function fetchTask() {
   } catch (error) {
     message.error(t('taskView.failedToFetchTask'))
   } finally {
+    hasLoadedOnce.value = true
     loading.value = false
     taskRequestInFlight.value = false
   }

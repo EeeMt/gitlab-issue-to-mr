@@ -17,23 +17,37 @@ cd backend && pip install -r requirements.txt
 # Run backend locally (requires PostgreSQL running)
 cd backend && uvicorn app.main:app --reload
 
-# Run database migrations
+# Run database migrations (auto-run on startup if auto_migrate=true)
 cd backend && alembic upgrade head
 
-# Run tests (uses pytest with asyncio_mode = auto)
+# Run all tests
 cd backend && pytest
 
+# Run unit tests only
+cd backend && pytest tests/unit/ -v
+
+# Run Mock E2E tests
+cd backend && pytest tests/mock_e2e/ -v
+
+# Run GitLab E2E tests (requires real GitLab)
+cd backend && pytest tests/gitlab_e2e/ -v
+
+# Run tests for manual task feature
+cd backend && pytest tests/unit/test_manual_task.py -v
+cd backend && pytest tests/mock_e2e/test_manual_task.py -v
+cd backend && pytest tests/gitlab_e2e/test_manual_task.py -v
+
 # Run standalone test script
-cd backend && python test_timeout_recovery.py
+cd backend && python tests/unit/test_timeout.py
 
 # Run E2E integration test (requires real GitLab)
-cd backend && python test_integration_e2e.py --skip-startup
+cd backend && python tests/gitlab_e2e/test_integration.py --skip-startup
 
 # Run E2E mock test (no GitLab required)
-cd backend && python test_integration_e2e_mock.py --skip-startup
+cd backend && python tests/mock_e2e/test_integration.py --skip-startup
 
 # Run P0.1 tests (initial MR creation, MR_IID passing)
-cd backend && python test_p01.py
+cd backend && python tests/unit/test_priority.py
 
 # Run frontend dev server
 cd frontend && npm run dev
@@ -97,11 +111,13 @@ curl -s -H "PRIVATE-TOKEN: glpat-xxx" "http://192.168.50.129:8080/api/v4/project
 | Component | File | Description |
 |-----------|------|-------------|
 | Webhook Handler | `backend/app/api/webhook.py` | Receives GitLab webhook events |
+| Task API | `backend/app/api/tasks.py` | Task CRUD + manual task creation |
 | Task Model | `backend/app/models.py` | SQLAlchemy models (Task, TaskLog) |
 | Scheduler | `backend/app/scheduler.py` | Priority queue with P0/P1/P2 support, crash recovery |
 | Worker | `backend/app/core/worker.py` | Executes tasks in Docker containers |
 | Docker Client | `backend/app/core/docker_client.py` | Container lifecycle management |
 | GitLab Client | `backend/app/core/gitlab_client.py` | GitLab API interactions |
+| Migration Runner | `backend/app/migrations.py` | Auto-run migrations on startup |
 
 ### Database Schema
 
@@ -114,6 +130,7 @@ curl -s -H "PRIVATE-TOKEN: glpat-xxx" "http://192.168.50.129:8080/api/v4/project
 - `TaskView.vue` - Individual task details and logs
 - `Config.vue` - Runtime configuration management
 - `Monitor.vue` - System monitoring
+- `CreateTask.vue` - Manual task creation page (`/create-task`)
 
 ### Configuration
 
@@ -127,6 +144,25 @@ Environment variables in `backend/.env`:
 - `MAX_CONCURRENCY` - Max parallel tasks (default: 3)
 - `TASK_TIMEOUT` - Task timeout in seconds (default: 1800 = 30 min)
 - `DEFAULT_TARGET_BRANCH` - Default branch for MRs (default: main)
+- `AUTO_MIGRATE` - Auto-run migrations on startup (default: true)
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/webhook/gitlab` | POST | GitLab webhook receiver |
+| `/api/tasks` | GET | List tasks |
+| `/api/tasks` | POST | Create manual task |
+| `/api/tasks/{id}` | GET | Get task details |
+| `/api/tasks/{id}/logs` | GET | Get task logs |
+| `/api/tasks/{id}/cancel` | POST | Cancel task |
+| `/api/tasks/{id}/retry` | POST | Retry failed task |
+| `/api/tasks/{id}/execute` | POST | Execute pending task immediately |
+| `/api/projects` | GET | List GitLab projects |
+| `/api/projects/{id}/branches` | GET | List project branches |
+| `/api/containers` | GET | List running containers |
+| `/api/stats` | GET | System statistics |
+| `/api/config` | GET/PATCH | Runtime configuration |
 
 ## Key Patterns
 
@@ -136,3 +172,5 @@ Environment variables in `backend/.env`:
 - **Crash Recovery**: On startup, scheduler cleans up stale containers and marks stuck tasks as failed
 - **Issue Mutex**: Prevents multiple tasks for the same issue from running concurrently
 - **Runtime Config**: Scheduler settings can be overridden via `/api/config` endpoints without restart
+- **Manual Tasks**: Tasks created via UI don't require issue association and skip GitLab notifications
+- **Auto Migration**: Database migrations run automatically on application startup (configurable via `AUTO_MIGRATE`)

@@ -22,7 +22,7 @@
         </n-gi>
       </n-grid>
 
-      <n-spin :show="loading">
+      <n-spin :show="initialLoading">
         <n-space v-if="diagnostics" vertical :size="16">
           <n-alert v-if="diagnostics.warnings.length" type="warning" :show-icon="false">
             <div class="diagnostics-alert__title">{{ t('oidcDiagnostics.operatorWarnings') }}</div>
@@ -195,6 +195,8 @@ const isMobile = computed(() => width.value < 768)
 
 const loading = ref(false)
 const diagnostics = ref<OidcDiagnosticsResult | null>(null)
+const hasLoadedOnce = ref(false)
+const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
 const summaryItems = computed(() => {
   if (!diagnostics.value) {
@@ -231,6 +233,7 @@ async function fetchDiagnostics() {
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('oidcDiagnostics.failedToFetch'))
   } finally {
+    hasLoadedOnce.value = true
     loading.value = false
   }
 }

@@ -54,6 +54,7 @@ def test_create_initial_mr():
 
     # Create mock GitLab client
     mock_gitlab = MagicMock()
+    mock_gitlab.normalize_web_url.side_effect = lambda url: url
     mock_docker = MagicMock()
 
     # Mock the create_container to return a mock container
@@ -66,6 +67,7 @@ def test_create_initial_mr():
     mock_mr = MagicMock()
     mock_mr.iid = 42
     mock_mr.web_url = "http://gitlab.example.com/project/-/merge_requests/42"
+    mock_project.mergerequests.list.return_value = []
     mock_project.mergerequests.create.return_value = mock_mr
 
     mock_gitlab.gl.projects.get.return_value = mock_project
@@ -129,6 +131,7 @@ def test_mr_iid_passed_to_container():
     print("=" * 60)
 
     mock_gitlab = MagicMock()
+    mock_gitlab.normalize_web_url.side_effect = lambda url: url
     mock_docker = MagicMock()
 
     mock_container = MockContainer()
@@ -139,6 +142,7 @@ def test_mr_iid_passed_to_container():
     mock_mr = MagicMock()
     mock_mr.iid = 42
     mock_mr.web_url = "http://gitlab.example.com/project/-/merge_requests/42"
+    mock_project.mergerequests.list.return_value = []
     mock_project.mergerequests.create.return_value = mock_mr
 
     mock_gitlab.gl.projects.get.return_value = mock_project
@@ -184,6 +188,7 @@ def test_mr_creation_failure_handled():
     print("=" * 60)
 
     mock_gitlab = MagicMock()
+    mock_gitlab.normalize_web_url.side_effect = lambda url: url
     mock_docker = MagicMock()
 
     mock_container = MockContainer()
@@ -192,6 +197,7 @@ def test_mr_creation_failure_handled():
 
     # Make MR creation fail
     mock_project = MagicMock()
+    mock_project.mergerequests.list.return_value = []
     mock_project.mergerequests.create.side_effect = Exception("Network error")
     mock_gitlab.gl.projects.get.return_value = mock_project
 
@@ -236,6 +242,7 @@ def test_draft_removed_on_completion():
     print("=" * 60)
 
     mock_gitlab = MagicMock()
+    mock_gitlab.normalize_web_url.side_effect = lambda url: url
     mock_docker = MagicMock()
 
     mock_container = MockContainer()
@@ -246,10 +253,13 @@ def test_draft_removed_on_completion():
     mock_mr = MagicMock()
     mock_mr.iid = 42
     mock_mr.web_url = "http://gitlab.example.com/project/-/merge_requests/42"
+    mock_project.mergerequests.list.return_value = []
     mock_project.mergerequests.create.return_value = mock_mr
 
-    # Mock the MR update call
-    mock_project.mergerequests.update = MagicMock()
+    # Mock the MR reload/save flow used to remove draft status
+    mock_existing_mr = MagicMock()
+    mock_existing_mr.title = "Draft: AI: Complete feature"
+    mock_project.mergerequests.get.return_value = mock_existing_mr
 
     mock_gitlab.gl.projects.get.return_value = mock_project
 
@@ -274,19 +284,12 @@ def test_draft_removed_on_completion():
 
     asyncio.run(run_test())
 
-    # Verify update was called to remove draft status
-    mock_project.mergerequests.update.assert_called()
+    mock_project.mergerequests.get.assert_called_with(42)
+    assert mock_existing_mr.title == "AI: Complete feature"
+    mock_existing_mr.save.assert_called_once()
 
-    # Check if called with draft=False
-    call_args = mock_project.mergerequests.update.call_args
-    if call_args[1]:  # kwargs
-        call_kwargs = call_args[1]
-        assert call_kwargs.get("draft") == False, "Draft should be set to False"
-        print("✓ Draft status removed on completion")
-        print(f"  - draft set to: {call_kwargs.get('draft')}")
-    else:
-        # Just verify it was called
-        print("✓ Draft status removal called (mock kwargs not captured)")
+    print("✓ Draft status removed on completion")
+    print(f"  - updated title: {mock_existing_mr.title}")
 
 
 def test_mr_iid_in_issue_comment():

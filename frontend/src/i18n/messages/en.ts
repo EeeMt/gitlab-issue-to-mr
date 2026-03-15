@@ -44,6 +44,7 @@ const en = {
   },
   common: {
     filter: 'Filter',
+    all: 'All',
     refresh: 'Refresh',
     reload: 'Reload',
     reset: 'Reset',
@@ -64,6 +65,7 @@ const en = {
     issue: 'Issue',
     mergeRequest: 'Merge Request',
     priority: 'Priority',
+    initiator: 'Initiator',
     branch: 'Branch',
     targetBranch: 'Target Branch',
     changes: 'Changes',
@@ -104,6 +106,7 @@ const en = {
     status: 'Status',
     priority: 'Priority',
     branch: 'Branch',
+    initiator: 'Initiator',
     mergeRequest: 'MR',
     changes: 'Changes',
     scheduled: 'Scheduled',
