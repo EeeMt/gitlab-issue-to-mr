@@ -792,9 +792,10 @@ onBeforeUnmount(() => {
 }
 
 .task-actions__controls {
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
   gap: 10px;
+  width: max-content;
   max-width: 100%;
 }
 

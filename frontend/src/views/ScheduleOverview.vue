@@ -1304,9 +1304,11 @@ onBeforeUnmount(() => {
 }
 
 .slot-task-card__actions {
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
   gap: 10px;
+  justify-self: start;
+  width: max-content;
   max-width: 100%;
 }
 
