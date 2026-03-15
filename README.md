@@ -254,6 +254,7 @@ You can also create tasks from the dashboard without a GitLab issue. Manual task
 - [docs/GITLAB_OIDC_SETUP.md](docs/GITLAB_OIDC_SETUP.md)
 - [docs/e2e-debugging.md](docs/e2e-debugging.md)
 - [docs/DESIGN.md](docs/DESIGN.md)
+- [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md) - Dashboard screenshots and visual overview
 
 ## License
 
