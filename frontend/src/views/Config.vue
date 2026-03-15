@@ -31,7 +31,7 @@
       </n-grid>
 
       <n-spin :show="loading">
-        <n-form ref="formRef" :model="formValue" :rules="rules" label-placement="top" class="config-form">
+        <div class="config-form">
           <div class="config-layout__main">
             <n-card id="runtime-settings" class="config-form-card" :bordered="false">
                 <template #header>
@@ -43,6 +43,7 @@
                   </div>
                 </template>
 
+                <n-form ref="runtimeFormRef" :model="formValue" :rules="runtimeRules" label-placement="top" class="config-section-form">
                 <div class="config-form__section">
                   <div class="config-form__section-title">{{ t('config.scheduler') }}</div>
                   <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
@@ -225,6 +226,38 @@
                     </n-gi>
                   </n-grid>
                 </div>
+                <div class="config-card-actions">
+                  <n-space :size="12" wrap>
+                    <n-button
+                      type="primary"
+                      @click="handleSaveSection('runtime')"
+                      :loading="sectionSaving.runtime"
+                      :disabled="isSectionBusy('runtime') || !isSectionDirty('runtime')"
+                    >
+                      {{ t('config.saveChanges') }}
+                    </n-button>
+                    <n-button
+                      secondary
+                      @click="resetSection('runtime')"
+                      :disabled="isSectionBusy('runtime') || !isSectionDirty('runtime')"
+                    >
+                      {{ t('config.revertChanges') }}
+                    </n-button>
+                    <n-button
+                      @click="handleClearSecret('anthropic_api_key')"
+                      :disabled="isSectionBusy('runtime') || !formValue.anthropic_api_key_configured"
+                    >
+                      {{ t('config.clearAnthropicApiKey') }}
+                    </n-button>
+                    <n-button
+                      @click="handleClearSecret('alert_webhook_url')"
+                      :disabled="isSectionBusy('runtime') || !formValue.alert_webhook_url_configured"
+                    >
+                      {{ t('config.clearAlertWebhook') }}
+                    </n-button>
+                  </n-space>
+                </div>
+                </n-form>
             </n-card>
 
             <n-card id="shared-page-settings" class="config-form-card" :bordered="false">
@@ -237,6 +270,7 @@
                   </div>
                 </template>
 
+                <n-form :model="formValue" label-placement="top" class="config-section-form">
                 <div class="config-form__section">
                    <div class="config-form__section-title">{{ t('config.pagePermissions') }}</div>
                   <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
@@ -274,6 +308,26 @@
                     </n-gi>
                   </n-grid>
                 </div>
+                <div class="config-card-actions">
+                  <n-space :size="12" wrap>
+                    <n-button
+                      type="primary"
+                      @click="handleSaveSection('sharedPages')"
+                      :loading="sectionSaving.sharedPages"
+                      :disabled="isSectionBusy('sharedPages') || !isSectionDirty('sharedPages')"
+                    >
+                      {{ t('config.saveChanges') }}
+                    </n-button>
+                    <n-button
+                      secondary
+                      @click="resetSection('sharedPages')"
+                      :disabled="isSectionBusy('sharedPages') || !isSectionDirty('sharedPages')"
+                    >
+                      {{ t('config.revertChanges') }}
+                    </n-button>
+                  </n-space>
+                </div>
+                </n-form>
             </n-card>
 
             <n-card id="gitlab-settings" class="config-form-card" :bordered="false">
@@ -286,6 +340,7 @@
                   </div>
                 </template>
 
+                <n-form ref="gitlabFormRef" :model="formValue" :rules="gitlabRules" label-placement="top" class="config-section-form">
                 <div class="config-form__section">
                    <div class="config-form__section-title">{{ t('config.gitlabConnection') }}</div>
                   <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
@@ -340,6 +395,39 @@
                 >
                   {{ gitlabTestState.message }}
                 </n-alert>
+                <div class="config-card-actions">
+                  <n-space :size="12" wrap>
+                    <n-button
+                      type="primary"
+                      @click="handleSaveSection('gitlab')"
+                      :loading="sectionSaving.gitlab"
+                      :disabled="isSectionBusy('gitlab') || !isSectionDirty('gitlab')"
+                    >
+                      {{ t('config.saveChanges') }}
+                    </n-button>
+                    <n-button
+                      secondary
+                      @click="resetSection('gitlab')"
+                      :disabled="isSectionBusy('gitlab') || !isSectionDirty('gitlab')"
+                    >
+                      {{ t('config.revertChanges') }}
+                    </n-button>
+                    <n-button
+                      @click="handleTestGitLab"
+                      :loading="gitlabTesting"
+                      :disabled="isSectionBusy('gitlab')"
+                    >
+                      {{ t('config.testGitlabConnection') }}
+                    </n-button>
+                    <n-button
+                      @click="handleClearSecret('gitlab_bot_token')"
+                      :disabled="isSectionBusy('gitlab') || !formValue.gitlab_bot_token_configured"
+                    >
+                      {{ t('config.clearGitlabBotToken') }}
+                    </n-button>
+                  </n-space>
+                </div>
+                </n-form>
             </n-card>
 
             <n-card id="oidc-settings" class="config-form-card" :bordered="false">
@@ -352,6 +440,7 @@
                   </div>
                 </template>
 
+                <n-form ref="oidcFormRef" :model="formValue" :rules="oidcRules" label-placement="top" class="config-section-form">
                 <div class="config-form__section">
                    <div class="config-form__section-title">{{ t('config.providerBasics') }}</div>
                   <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
@@ -416,6 +505,45 @@
                     </n-gi>
                   </n-grid>
                 </div>
+                <n-alert v-if="oidcTestState" :type="oidcTestState.type" :show-icon="false" class="config-actions__alert">
+                  {{ oidcTestState.message }}
+                </n-alert>
+                <div class="config-card-actions">
+                  <n-space :size="12" wrap>
+                    <n-button
+                      type="primary"
+                      @click="handleSaveSection('oidc')"
+                      :loading="sectionSaving.oidc"
+                      :disabled="isSectionBusy('oidc') || !isSectionDirty('oidc')"
+                    >
+                      {{ t('config.saveChanges') }}
+                    </n-button>
+                    <n-button
+                      secondary
+                      @click="resetSection('oidc')"
+                      :disabled="isSectionBusy('oidc') || !isSectionDirty('oidc')"
+                    >
+                      {{ t('config.revertChanges') }}
+                    </n-button>
+                    <n-button
+                      @click="handleTestOidc"
+                      :loading="oidcTesting"
+                      :disabled="isSectionBusy('oidc')"
+                    >
+                      {{ t('config.testOidcConnection') }}
+                    </n-button>
+                    <n-button @click="router.push('/oidc-diagnostics')" :disabled="isSectionBusy('oidc')">
+                      {{ t('config.openOidcDiagnostics') }}
+                    </n-button>
+                    <n-button
+                      @click="handleClearSecret('oidc_client_secret')"
+                      :disabled="isSectionBusy('oidc') || !formValue.oidc_client_secret_configured"
+                    >
+                      {{ t('config.clearOidcSecret') }}
+                    </n-button>
+                  </n-space>
+                </div>
+                </n-form>
             </n-card>
 
             <n-card id="session-settings" class="config-form-card" :bordered="false">
@@ -428,6 +556,7 @@
                   </div>
                 </template>
 
+                <n-form ref="sessionFormRef" :model="formValue" :rules="sessionRules" label-placement="top" class="config-section-form">
                 <div class="config-form__section">
                    <div class="config-form__section-title">{{ t('config.sessionPolicy') }}</div>
                   <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
@@ -495,6 +624,26 @@
                     </n-gi>
                   </n-grid>
                 </div>
+                <div class="config-card-actions">
+                  <n-space :size="12" wrap>
+                    <n-button
+                      type="primary"
+                      @click="handleSaveSection('session')"
+                      :loading="sectionSaving.session"
+                      :disabled="isSectionBusy('session') || !isSectionDirty('session')"
+                    >
+                      {{ t('config.saveChanges') }}
+                    </n-button>
+                    <n-button
+                      secondary
+                      @click="resetSection('session')"
+                      :disabled="isSectionBusy('session') || !isSectionDirty('session')"
+                    >
+                      {{ t('config.revertChanges') }}
+                    </n-button>
+                  </n-space>
+                </div>
+                </n-form>
             </n-card>
 
             <n-card id="config-actions" class="config-form-card" :bordered="false">
@@ -509,69 +658,24 @@
 
                 <div class="config-form__section">
                   <n-space :size="12" wrap>
-                    <n-button
-                      type="primary"
-                      @click="handleSave"
-                      :loading="saving"
-                      :disabled="loading || saving || !isDirty"
-                    >
-                       {{ t('config.saveChanges') }}
+                    <n-button @click="handleReload" :disabled="isBusy">
+                      {{ t('common.reload') }}
                     </n-button>
-                     <n-button @click="handleTestOidc" :loading="testing" :disabled="loading || saving || testing">
-                       {{ t('config.testOidcConnection') }}
-                     </n-button>
-                     <n-button @click="handleTestGitLab" :loading="testing" :disabled="loading || saving || testing">
-                       {{ t('config.testGitlabConnection') }}
-                     </n-button>
-                     <n-button @click="router.push('/oidc-diagnostics')" :disabled="loading || saving || testing">
-                       {{ t('config.openOidcDiagnostics') }}
-                     </n-button>
-                     <n-button
-                       @click="handleClearSecret('gitlab_bot_token')"
-                       :disabled="loading || saving || testing || !formValue.gitlab_bot_token_configured"
-                     >
-                        {{ t('config.clearGitlabBotToken') }}
-                      </n-button>
-                     <n-button
-                       @click="handleClearSecret('oidc_client_secret')"
-                       :disabled="loading || saving || testing || !formValue.oidc_client_secret_configured"
-                     >
-                        {{ t('config.clearOidcSecret') }}
-                      </n-button>
-                     <n-button
-                       @click="handleClearSecret('anthropic_api_key')"
-                       :disabled="loading || saving || testing || !formValue.anthropic_api_key_configured"
-                     >
-                        {{ t('config.clearAnthropicApiKey') }}
-                      </n-button>
-                     <n-button
-                       @click="handleClearSecret('alert_webhook_url')"
-                       :disabled="loading || saving || testing || !formValue.alert_webhook_url_configured"
-                     >
-                        {{ t('config.clearAlertWebhook') }}
-                      </n-button>
-                     <n-button @click="handleReload" :disabled="loading || saving || testing">
-                       {{ t('common.reload') }}
-                     </n-button>
-                     <n-button @click="handleReset" :disabled="loading || saving || testing" secondary>
-                       {{ t('config.resetEnvDefaults') }}
-                     </n-button>
+                    <n-button @click="handleReset" :loading="pageActionLoading" :disabled="isBusy" secondary>
+                      {{ t('config.resetEnvDefaults') }}
+                    </n-button>
                   </n-space>
                 </div>
-
-                <n-alert v-if="oidcTestState" :type="oidcTestState.type" :show-icon="false" class="config-actions__alert">
-                  {{ oidcTestState.message }}
-                </n-alert>
             </n-card>
           </div>
-        </n-form>
+        </div>
       </n-spin>
     </n-space>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NAlert,
@@ -601,8 +705,11 @@ import {
   testGitLabConfig,
   testOidcConfig,
   updateConfig,
+  type AuthConfigUpdate,
   type Config,
-  type ConfigUpdate
+  type ConfigUpdate,
+  type IntegrationConfigUpdate,
+  type RuntimeConfigUpdate
 } from '../api'
 
 type ConfigForm = {
@@ -645,6 +752,8 @@ type TestState = {
   message: string
 }
 
+type ConfigSectionKey = 'runtime' | 'sharedPages' | 'gitlab' | 'oidc' | 'session'
+
 const message = useMessage()
 const router = useRouter()
 const { t } = useI18n()
@@ -652,11 +761,75 @@ const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
 const loading = ref(false)
-const saving = ref(false)
-const testing = ref(false)
-const formRef = ref<FormInst | null>(null)
+const pageActionLoading = ref(false)
+const runtimeFormRef = ref<FormInst | null>(null)
+const gitlabFormRef = ref<FormInst | null>(null)
+const oidcFormRef = ref<FormInst | null>(null)
+const sessionFormRef = ref<FormInst | null>(null)
+const sectionSaving = reactive<Record<ConfigSectionKey, boolean>>({
+  runtime: false,
+  sharedPages: false,
+  gitlab: false,
+  oidc: false,
+  session: false
+})
+const gitlabTesting = ref(false)
+const oidcTesting = ref(false)
 const oidcTestState = ref<TestState | null>(null)
 const gitlabTestState = ref<TestState | null>(null)
+
+const sectionKeys: ConfigSectionKey[] = ['runtime', 'sharedPages', 'gitlab', 'oidc', 'session']
+
+const runtimeSectionFields: readonly (keyof ConfigForm)[] = [
+  'max_concurrency',
+  'task_timeout',
+  'scheduler_interval',
+  'default_target_branch',
+  'max_retries',
+  'retry_delay',
+  'alert_on_failure',
+  'alert_webhook_url_input',
+  'anthropic_base_url',
+  'anthropic_api_key_input',
+  'anthropic_model'
+]
+
+const sharedPagesSectionFields: readonly (keyof ConfigForm)[] = [
+  'allow_monitor_for_users',
+  'allow_schedule_overview_for_users',
+  'allow_analytics_for_users',
+  'allow_oidc_diagnostics_for_users'
+]
+
+const gitlabSectionFields: readonly (keyof ConfigForm)[] = [
+  'gitlab_url',
+  'gitlab_bot_token_input'
+]
+
+const oidcSectionFields: readonly (keyof ConfigForm)[] = [
+  'oidc_enabled',
+  'oidc_issuer_url',
+  'oidc_client_id',
+  'oidc_redirect_uri',
+  'oidc_client_secret_input'
+]
+
+const sessionSectionFields: readonly (keyof ConfigForm)[] = [
+  'session_cookie_name',
+  'session_ttl_seconds',
+  'cookie_secure',
+  'cookie_samesite',
+  'auth_admin_usernames',
+  'auth_admin_gitlab_groups'
+]
+
+const sectionFieldKeys: Record<ConfigSectionKey, readonly (keyof ConfigForm)[]> = {
+  runtime: runtimeSectionFields,
+  sharedPages: sharedPagesSectionFields,
+  gitlab: gitlabSectionFields,
+  oidc: oidcSectionFields,
+  session: sessionSectionFields
+}
 
 const sameSiteOptions = computed(() => [
   { label: 'Lax', value: 'lax' },
@@ -701,32 +874,30 @@ const formValue = ref<ConfigForm>({
 
 const lastLoadedValue = ref<ConfigForm>({ ...formValue.value })
 
-function comparableValue(value: ConfigForm) {
-  const {
-    oidc_client_secret_input,
-    alert_webhook_url_input,
-    anthropic_api_key_input,
-    gitlab_bot_token_input,
-    ...rest
-  } = value
-  return rest
+const anySectionSaving = computed(() =>
+  sectionKeys.some((section) => sectionSaving[section])
+)
+
+const isBusy = computed(() =>
+  loading.value || pageActionLoading.value || anySectionSaving.value || gitlabTesting.value || oidcTesting.value
+)
+
+function snapshotSection(section: ConfigSectionKey, value: ConfigForm) {
+  const snapshot: Record<string, string | number | boolean> = {}
+  for (const key of sectionFieldKeys[section]) {
+    snapshot[key] = value[key]
+  }
+  return snapshot
 }
 
-const isDirty = computed(() => {
-  if (
-    formValue.value.oidc_client_secret_input.trim() ||
-    formValue.value.alert_webhook_url_input.trim() ||
-    formValue.value.anthropic_api_key_input.trim() ||
-    formValue.value.gitlab_bot_token_input.trim()
-  ) {
-    return true
-  }
-
+function isSectionDirty(section: ConfigSectionKey) {
   return (
-    JSON.stringify(comparableValue(formValue.value)) !==
-    JSON.stringify(comparableValue(lastLoadedValue.value))
+    JSON.stringify(snapshotSection(section, formValue.value)) !==
+    JSON.stringify(snapshotSection(section, lastLoadedValue.value))
   )
-})
+}
+
+const isDirty = computed(() => sectionKeys.some((section) => isSectionDirty(section)))
 
 const sharedPagesEnabledCount = computed(
   () =>
@@ -745,7 +916,7 @@ const summaryItems = computed(() => [
   { label: t('config.sharedPages'), value: String(sharedPagesEnabledCount.value) }
 ])
 
-const rules: FormRules = {
+const runtimeRules: FormRules = {
   max_concurrency: { required: true, type: 'number', message: t('config.enterMaxConcurrency'), trigger: 'blur' },
   task_timeout: { required: true, type: 'number', message: t('config.enterTaskTimeout'), trigger: 'blur' },
   scheduler_interval: {
@@ -780,12 +951,18 @@ const rules: FormRules = {
     required: true,
     message: t('config.enterAnthropicModel'),
     trigger: 'blur'
-  },
+  }
+}
+
+const gitlabRules: FormRules = {
   gitlab_url: {
     required: true,
     message: t('config.enterGitlabUrl'),
     trigger: 'blur'
-  },
+  }
+}
+
+const oidcRules: FormRules = {
   oidc_issuer_url: {
     validator: () =>
       !formValue.value.oidc_enabled || !!formValue.value.oidc_issuer_url.trim() || new Error(t('config.issuerRequired')),
@@ -800,7 +977,10 @@ const rules: FormRules = {
     validator: () =>
       !formValue.value.oidc_enabled || !!formValue.value.oidc_redirect_uri.trim() || new Error(t('config.redirectUriRequired')),
     trigger: ['blur', 'input']
-  },
+  }
+}
+
+const sessionRules: FormRules = {
   session_cookie_name: {
     required: true,
     message: t('config.enterSessionCookieName'),
@@ -811,6 +991,12 @@ const rules: FormRules = {
     type: 'number',
     message: t('config.enterSessionTtl'),
     trigger: 'blur'
+  }
+}
+
+function copyFields<K extends keyof ConfigForm>(keys: readonly K[], source: ConfigForm, target: ConfigForm) {
+  for (const key of keys) {
+    target[key] = source[key]
   }
 }
 
@@ -852,57 +1038,136 @@ function syncForm(config: Config) {
   lastLoadedValue.value = { ...formValue.value }
 }
 
-function buildPayload(): ConfigUpdate {
-  const payload: ConfigUpdate = {
-    runtime: {
-      max_concurrency: formValue.value.max_concurrency,
-      task_timeout: formValue.value.task_timeout,
-      scheduler_interval: formValue.value.scheduler_interval,
-      default_target_branch: formValue.value.default_target_branch.trim(),
-      max_retries: formValue.value.max_retries,
-      retry_delay: formValue.value.retry_delay,
-      alert_on_failure: formValue.value.alert_on_failure,
-      anthropic_base_url: formValue.value.anthropic_base_url.trim(),
-      anthropic_model: formValue.value.anthropic_model.trim(),
-      allow_monitor_for_users: formValue.value.allow_monitor_for_users,
-      allow_schedule_overview_for_users: formValue.value.allow_schedule_overview_for_users,
-      allow_analytics_for_users: formValue.value.allow_analytics_for_users,
-      allow_oidc_diagnostics_for_users: formValue.value.allow_oidc_diagnostics_for_users
-    },
-    integration: {
-      gitlab_url: formValue.value.gitlab_url.trim()
-    },
-    auth: {
-      oidc_enabled: formValue.value.oidc_enabled,
-      oidc_issuer_url: formValue.value.oidc_issuer_url.trim(),
-      oidc_client_id: formValue.value.oidc_client_id.trim(),
-      oidc_redirect_uri: formValue.value.oidc_redirect_uri.trim(),
-      session_cookie_name: formValue.value.session_cookie_name.trim(),
-      session_ttl_seconds: formValue.value.session_ttl_seconds,
-      cookie_secure: formValue.value.cookie_secure,
-      cookie_samesite: formValue.value.cookie_samesite,
-      auth_admin_usernames: formValue.value.auth_admin_usernames,
-      auth_admin_gitlab_groups: formValue.value.auth_admin_gitlab_groups
-    }
+function getSectionForm(section: ConfigSectionKey): FormInst | null {
+  switch (section) {
+    case 'runtime':
+      return runtimeFormRef.value
+    case 'gitlab':
+      return gitlabFormRef.value
+    case 'oidc':
+      return oidcFormRef.value
+    case 'session':
+      return sessionFormRef.value
+    default:
+      return null
+  }
+}
+
+function isSectionBusy(section: ConfigSectionKey) {
+  return (
+    loading.value ||
+    pageActionLoading.value ||
+    anySectionSaving.value ||
+    (section === 'gitlab' && gitlabTesting.value) ||
+    (section === 'oidc' && oidcTesting.value)
+  )
+}
+
+async function validateSection(section: ConfigSectionKey) {
+  const form = getSectionForm(section)
+  if (!form) {
+    return true
   }
 
-  if (formValue.value.oidc_client_secret_input.trim()) {
-    payload.auth!.oidc_client_secret = formValue.value.oidc_client_secret_input.trim()
+  return await form.validate().then(() => true).catch(() => false)
+}
+
+function buildRuntimeSectionUpdate(): RuntimeConfigUpdate {
+  const update: RuntimeConfigUpdate = {
+    max_concurrency: formValue.value.max_concurrency,
+    task_timeout: formValue.value.task_timeout,
+    scheduler_interval: formValue.value.scheduler_interval,
+    default_target_branch: formValue.value.default_target_branch.trim(),
+    max_retries: formValue.value.max_retries,
+    retry_delay: formValue.value.retry_delay,
+    alert_on_failure: formValue.value.alert_on_failure,
+    anthropic_base_url: formValue.value.anthropic_base_url.trim(),
+    anthropic_model: formValue.value.anthropic_model.trim()
   }
 
   if (formValue.value.alert_webhook_url_input.trim()) {
-    payload.runtime!.alert_webhook_url = formValue.value.alert_webhook_url_input.trim()
+    update.alert_webhook_url = formValue.value.alert_webhook_url_input.trim()
   }
 
   if (formValue.value.anthropic_api_key_input.trim()) {
-    payload.runtime!.anthropic_api_key = formValue.value.anthropic_api_key_input.trim()
+    update.anthropic_api_key = formValue.value.anthropic_api_key_input.trim()
+  }
+
+  return update
+}
+
+function buildSharedPagesSectionUpdate(): RuntimeConfigUpdate {
+  return {
+    allow_monitor_for_users: formValue.value.allow_monitor_for_users,
+    allow_schedule_overview_for_users: formValue.value.allow_schedule_overview_for_users,
+    allow_analytics_for_users: formValue.value.allow_analytics_for_users,
+    allow_oidc_diagnostics_for_users: formValue.value.allow_oidc_diagnostics_for_users
+  }
+}
+
+function buildGitlabSectionUpdate(): IntegrationConfigUpdate {
+  const update: IntegrationConfigUpdate = {
+    gitlab_url: formValue.value.gitlab_url.trim()
   }
 
   if (formValue.value.gitlab_bot_token_input.trim()) {
-    payload.integration!.gitlab_bot_token = formValue.value.gitlab_bot_token_input.trim()
+    update.gitlab_bot_token = formValue.value.gitlab_bot_token_input.trim()
   }
 
-  return payload
+  return update
+}
+
+function buildOidcSectionUpdate(): AuthConfigUpdate {
+  const update: AuthConfigUpdate = {
+    oidc_enabled: formValue.value.oidc_enabled,
+    oidc_issuer_url: formValue.value.oidc_issuer_url.trim(),
+    oidc_client_id: formValue.value.oidc_client_id.trim(),
+    oidc_redirect_uri: formValue.value.oidc_redirect_uri.trim()
+  }
+
+  if (formValue.value.oidc_client_secret_input.trim()) {
+    update.oidc_client_secret = formValue.value.oidc_client_secret_input.trim()
+  }
+
+  return update
+}
+
+function buildSessionSectionUpdate(): AuthConfigUpdate {
+  return {
+    session_cookie_name: formValue.value.session_cookie_name.trim(),
+    session_ttl_seconds: formValue.value.session_ttl_seconds,
+    cookie_secure: formValue.value.cookie_secure,
+    cookie_samesite: formValue.value.cookie_samesite,
+    auth_admin_usernames: formValue.value.auth_admin_usernames,
+    auth_admin_gitlab_groups: formValue.value.auth_admin_gitlab_groups
+  }
+}
+
+function buildSectionPayload(section: ConfigSectionKey): ConfigUpdate {
+  switch (section) {
+    case 'runtime':
+      return { runtime: buildRuntimeSectionUpdate() }
+    case 'sharedPages':
+      return { runtime: buildSharedPagesSectionUpdate() }
+    case 'gitlab':
+      return { integration: buildGitlabSectionUpdate() }
+    case 'oidc':
+      return { auth: buildOidcSectionUpdate() }
+    case 'session':
+      return { auth: buildSessionSectionUpdate() }
+  }
+}
+
+function resetSection(section: ConfigSectionKey) {
+  copyFields(sectionFieldKeys[section], lastLoadedValue.value, formValue.value)
+
+  if (section === 'gitlab') {
+    gitlabTestState.value = null
+  }
+
+  if (section === 'oidc') {
+    oidcTestState.value = null
+  }
 }
 
 async function fetchConfig() {
@@ -918,29 +1183,33 @@ async function fetchConfig() {
   }
 }
 
-async function handleSave() {
-  const valid = await formRef.value?.validate().then(() => true).catch(() => false)
+async function handleSaveSection(section: ConfigSectionKey) {
+  const valid = await validateSection(section)
   if (!valid) {
     return
   }
 
-  saving.value = true
+  sectionSaving[section] = true
   try {
-    syncForm(await updateConfig(buildPayload()))
-    oidcTestState.value = null
-    gitlabTestState.value = null
+    syncForm(await updateConfig(buildSectionPayload(section)))
+    if (section === 'gitlab') {
+      gitlabTestState.value = null
+    }
+    if (section === 'oidc') {
+      oidcTestState.value = null
+    }
     message.success(t('config.configurationSaved'))
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('config.failedToSaveConfig'))
   } finally {
-    saving.value = false
+    sectionSaving[section] = false
   }
 }
 
 async function handleTestGitLab() {
-  testing.value = true
+  gitlabTesting.value = true
   try {
-    const result = await testGitLabConfig(buildPayload().integration || {})
+    const result = await testGitLabConfig(buildGitlabSectionUpdate())
     gitlabTestState.value = {
       type: 'success',
       message: t('config.gitlabConnectionSucceeded', {
@@ -955,15 +1224,15 @@ async function handleTestGitLab() {
     gitlabTestState.value = { type: 'error', message: detail }
     message.error(detail)
   } finally {
-    testing.value = false
+    gitlabTesting.value = false
   }
 }
 
 async function handleTestOidc() {
-  testing.value = true
+  oidcTesting.value = true
   try {
-    const result = await testOidcConfig(buildPayload().auth || {})
-      oidcTestState.value = {
+    const result = await testOidcConfig(buildOidcSectionUpdate())
+    oidcTestState.value = {
       type: 'success',
       message: t('config.oidcDiscoverySucceeded', {
         issuer: result.issuer || formValue.value.oidc_issuer_url,
@@ -976,14 +1245,17 @@ async function handleTestOidc() {
     oidcTestState.value = { type: 'error', message: detail }
     message.error(detail)
   } finally {
-    testing.value = false
+    oidcTesting.value = false
   }
 }
 
 async function handleClearSecret(
   key: 'oidc_client_secret' | 'anthropic_api_key' | 'alert_webhook_url' | 'gitlab_bot_token',
 ) {
-  saving.value = true
+  const section: ConfigSectionKey =
+    key === 'gitlab_bot_token' ? 'gitlab' : key === 'oidc_client_secret' ? 'oidc' : 'runtime'
+
+  sectionSaving[section] = true
   try {
     if (key === 'gitlab_bot_token') {
       syncForm(await updateConfig({ integration: { clear_gitlab_bot_token: true } }))
@@ -1002,12 +1274,12 @@ async function handleClearSecret(
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('config.failedToClearSecret'))
   } finally {
-    saving.value = false
+    sectionSaving[section] = false
   }
 }
 
 async function handleReset() {
-  saving.value = true
+  pageActionLoading.value = true
   try {
     syncForm(await resetConfig())
     oidcTestState.value = null
@@ -1016,7 +1288,7 @@ async function handleReset() {
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('config.failedToResetConfig'))
   } finally {
-    saving.value = false
+    pageActionLoading.value = false
   }
 }
 
@@ -1102,6 +1374,10 @@ onMounted(() => {
   margin-top: 8px;
 }
 
+.config-section-form {
+  display: grid;
+}
+
 .config-form__section + .config-form__section {
   margin-top: 20px;
 }
@@ -1121,6 +1397,12 @@ onMounted(() => {
 
 .config-actions__alert {
   margin-top: 16px;
+}
+
+.config-card-actions {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 @media (max-width: 767px) {
