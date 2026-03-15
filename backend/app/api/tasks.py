@@ -500,6 +500,19 @@ async def retry_task(
     return {"status": "success", "message": f"Task {task_id} reset for retry"}
 
 
+class RescheduleTaskRequest(BaseModel):
+    """Request model for updating an existing task's scheduled time."""
+
+    scheduled_datetime: datetime
+
+    @model_validator(mode="after")
+    def validate_schedule_is_future(self) -> "RescheduleTaskRequest":
+        normalized_scheduled = normalize_scheduled_datetime(self.scheduled_datetime)
+        if normalized_scheduled is None or normalized_scheduled <= datetime.utcnow():
+            raise ValueError("Scheduled datetime must be in the future for manual tasks")
+        return self
+
+
 @router.post("/tasks/{task_id}/execute")
 async def execute_task(
     task_id: int,
@@ -540,6 +553,52 @@ async def execute_task(
     return {"status": "success", "message": f"Task {task_id} scheduled for immediate execution"}
 
 
+@router.patch("/tasks/{task_id}/schedule")
+async def reschedule_task(
+    task_id: int,
+    request: RescheduleTaskRequest,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Update the scheduled execution time for an existing pending scheduled task."""
+    result = await db.execute(select(Task).where(Task.id == task_id))
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task {task_id} not found",
+        )
+    require_project_access(task.project_id, access_scope)
+
+    if task.status != TaskStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Task must be in PENDING status to reschedule, current: {task.status.value}",
+        )
+
+    if task.scheduled_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only scheduled tasks can update their scheduled time",
+        )
+
+    normalized_scheduled = normalize_scheduled_datetime(request.scheduled_datetime)
+    if normalized_scheduled is None or normalized_scheduled <= datetime.utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Scheduled datetime must be in the future for manual tasks",
+        )
+
+    task.scheduled_at = normalized_scheduled
+    await db.commit()
+    await db.refresh(task)
+
+    logger.info("Task %s rescheduled to %s via API", task_id, normalized_scheduled.isoformat())
+
+    return _serialize_task(task, await _get_project_metadata(task.project_id))
+
+
 # Pydantic models for manual task creation
 class CreateTaskRequest(BaseModel):
     """Request model for creating a manual task."""
@@ -572,8 +631,6 @@ class CreateTaskRequest(BaseModel):
             raise ValueError("Scheduled datetime must be in the future for manual tasks")
 
         return self
-
-
 @router.get("/projects")
 async def list_projects(
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),

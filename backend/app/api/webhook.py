@@ -444,6 +444,7 @@ async def _handle_generate_command(
     )
 
     # Determine target branch
+    settings = get_effective_settings()
     target_branch = command.target_branch or settings.default_target_branch
 
     # Create new task

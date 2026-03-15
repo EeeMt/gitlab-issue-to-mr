@@ -10,9 +10,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch, AsyncMock
+from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app.api.tasks import CreateTaskRequest
+from app.api.tasks import CreateTaskRequest, RescheduleTaskRequest, reschedule_task
+from app.dependencies.project_access import ProjectAccessScope
 from app.core.scheduling import normalize_scheduled_datetime, resolve_scheduled_at
 from app.models import Task, TaskStatus
 
@@ -314,6 +316,81 @@ class TestScheduledAtCalculation:
 
         assert scheduled_at == datetime(2026, 3, 31, 14, 32, 34)
         assert scheduled_at.tzinfo is None
+
+
+class TestRescheduleTask:
+    @pytest.mark.asyncio
+    async def test_reschedule_task_updates_pending_scheduled_task(self):
+        now = datetime.utcnow()
+        task = Task(
+            id=1,
+            project_id=1,
+            user_prompt="Test prompt",
+            branch_name="feature/test",
+            target_branch="main",
+            status=TaskStatus.PENDING,
+            scheduled_at=now + timedelta(hours=1),
+            is_manual=True,
+            created_at=now,
+            updated_at=now,
+        )
+        request = RescheduleTaskRequest(scheduled_datetime=now + timedelta(hours=2))
+        db = AsyncMock()
+        db.execute.return_value = MagicMock(scalar_one_or_none=lambda: task)
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks._get_project_metadata", new=AsyncMock(return_value={})):
+            result = await reschedule_task(task_id=1, request=request, db=db, access_scope=access_scope)
+
+        assert task.scheduled_at is not None
+        assert abs((task.scheduled_at - (now + timedelta(hours=2))).total_seconds()) < 1
+        db.commit.assert_awaited_once()
+        db.refresh.assert_awaited_once_with(task)
+        assert result["scheduled_at"] == task.scheduled_at.isoformat()
+
+    @pytest.mark.asyncio
+    async def test_reschedule_task_rejects_non_pending_task(self):
+        task = Task(
+            id=1,
+            project_id=1,
+            user_prompt="Test prompt",
+            branch_name="feature/test",
+            target_branch="main",
+            status=TaskStatus.RUNNING,
+            scheduled_at=datetime.utcnow() + timedelta(hours=1),
+            is_manual=True,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        request = RescheduleTaskRequest(scheduled_datetime=datetime.utcnow() + timedelta(hours=2))
+        db = AsyncMock()
+        db.execute.return_value = MagicMock(scalar_one_or_none=lambda: task)
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with pytest.raises(HTTPException, match="Task must be in PENDING status to reschedule"):
+            await reschedule_task(task_id=1, request=request, db=db, access_scope=access_scope)
+
+    @pytest.mark.asyncio
+    async def test_reschedule_task_rejects_immediate_task(self):
+        task = Task(
+            id=1,
+            project_id=1,
+            user_prompt="Test prompt",
+            branch_name="feature/test",
+            target_branch="main",
+            status=TaskStatus.PENDING,
+            scheduled_at=None,
+            is_manual=True,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        request = RescheduleTaskRequest(scheduled_datetime=datetime.utcnow() + timedelta(hours=2))
+        db = AsyncMock()
+        db.execute.return_value = MagicMock(scalar_one_or_none=lambda: task)
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with pytest.raises(HTTPException, match="Only scheduled tasks can update their scheduled time"):
+            await reschedule_task(task_id=1, request=request, db=db, access_scope=access_scope)
 
 
 if __name__ == "__main__":

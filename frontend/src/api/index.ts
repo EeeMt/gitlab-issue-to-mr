@@ -83,6 +83,10 @@ export interface CreateTaskRequest {
   scheduled_datetime?: string
 }
 
+export interface RescheduleTaskRequest {
+  scheduled_datetime: string
+}
+
 export interface TaskLog {
   id: number
   task_id: number
@@ -623,6 +627,11 @@ export async function getBranches(projectId: number): Promise<Branch[]> {
 
 export async function createTask(request: CreateTaskRequest): Promise<Task> {
   const response = await api.post('/tasks', request)
+  return response.data
+}
+
+export async function rescheduleTask(taskId: number, request: RescheduleTaskRequest): Promise<Task> {
+  const response = await api.patch(`/tasks/${taskId}/schedule`, request)
   return response.data
 }
 

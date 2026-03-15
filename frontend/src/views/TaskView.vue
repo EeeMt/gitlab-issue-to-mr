@@ -147,6 +147,39 @@
                   </div>
 
                   <div
+                    v-if="task && canReschedule"
+                    class="task-actions__item task-actions__item--info"
+                  >
+                    <div class="task-actions__meta">
+                      <div class="task-actions__label">{{ t('taskView.rescheduleTask') }}</div>
+                      <div class="task-actions__description">
+                        {{ t('taskView.rescheduleTaskDescription') }}
+                      </div>
+                    </div>
+                    <div class="task-actions__controls">
+                      <n-date-picker
+                        v-model:value="rescheduleDatetime"
+                        type="datetime"
+                        :placeholder="t('taskView.selectRescheduleTime')"
+                        :is-date-disabled="isScheduledDateDisabled"
+                        :is-time-disabled="isScheduledTimeDisabled"
+                        style="width: min(100%, 280px)"
+                      />
+                      <n-button
+                        type="info"
+                        secondary
+                        strong
+                        round
+                        @click="handleReschedule"
+                        :loading="actionLoading"
+                        :disabled="rescheduleDatetime === null"
+                      >
+                        {{ t('taskView.saveScheduledTime') }}
+                      </n-button>
+                    </div>
+                  </div>
+
+                  <div
                     v-if="task && task.status === 'pending'"
                     class="task-actions__item task-actions__item--info"
                   >
@@ -235,10 +268,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { NButton, NSpace, NCard, NDescriptions, NDescriptionsItem, NTag, NGrid, NGi, NSpin, NAlert, NText, useMessage } from 'naive-ui'
+import { NButton, NSpace, NCard, NDescriptions, NDescriptionsItem, NTag, NGrid, NGi, NSpin, NAlert, NText, NDatePicker, useMessage } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, type Task } from '../api'
+import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, type Task } from '../api'
 import { formatDateTimeUtc8 } from '../utils/datetime'
 
 const route = useRoute()
@@ -259,6 +292,7 @@ const containerLogsLoading = ref(false)
 const actionLoading = ref(false)
 const taskRequestInFlight = ref(false)
 const containerRequestInFlight = ref(false)
+const rescheduleDatetime = ref<number | null>(null)
 let pollTimer: number | null = null
 let logEventSource: EventSource | null = null
 let logStreamContainerId: string | null = null
@@ -301,6 +335,8 @@ const hasActions = computed(() => {
   return ['pending', 'queued', 'running', 'failed', 'cancelled'].includes(task.value.status)
 })
 
+const canReschedule = computed(() => task.value?.status === 'pending' && !!task.value?.scheduled_at)
+
 function formatDate(dateStr: string): string {
   return formatDateTimeUtc8(dateStr)
 }
@@ -317,6 +353,55 @@ function formatPriority(priority?: string | number | null): string {
   if (normalized === '2' || normalized === 'p2') return 'P2'
 
   return String(priority)
+}
+
+function syncRescheduleDatetime() {
+  rescheduleDatetime.value = task.value?.scheduled_at ? new Date(task.value.scheduled_at).getTime() : null
+}
+
+function isSameLocalDay(left: Date, right: Date): boolean {
+  return (
+    left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate()
+  )
+}
+
+function isScheduledDateDisabled(timestamp: number): boolean {
+  const candidate = new Date(timestamp)
+  const today = new Date()
+
+  candidate.setHours(0, 0, 0, 0)
+  today.setHours(0, 0, 0, 0)
+
+  return candidate.getTime() < today.getTime()
+}
+
+function isScheduledTimeDisabled(timestamp: number) {
+  const selectedDate = new Date(timestamp)
+  const now = new Date()
+
+  if (!isSameLocalDay(selectedDate, now)) {
+    return {}
+  }
+
+  const currentHour = now.getHours()
+  const currentMinute = now.getMinutes()
+  const currentSecond = now.getSeconds()
+
+  return {
+    isHourDisabled: (hour: number) => hour < currentHour,
+    isMinuteDisabled: (minute: number, hour: number | null) => (
+      hour !== null && hour === currentHour && minute < currentMinute
+    ),
+    isSecondDisabled: (second: number, minute: number | null, hour: number | null) => (
+      hour !== null
+      && minute !== null
+      && hour === currentHour
+      && minute === currentMinute
+      && second < currentSecond
+    )
+  }
 }
 
 function isActiveTaskStatus(status?: string | null): boolean {
@@ -376,6 +461,7 @@ async function fetchTask() {
   try {
     const previousStatus = task.value?.status
     task.value = await getTask(taskId.value)
+    syncRescheduleDatetime()
     connectLogStream()
 
     if (isActiveTaskStatus(previousStatus) && !isActiveTaskStatus(task.value.status)) {
@@ -476,6 +562,31 @@ async function handleExecute() {
     refreshTask()
   } catch (error) {
     message.error(t('taskView.failedToExecuteTask'))
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+async function handleReschedule() {
+  if (!rescheduleDatetime.value) {
+    message.error(t('taskView.selectRescheduleTime'))
+    return
+  }
+
+  if (rescheduleDatetime.value <= Date.now()) {
+    message.error(t('taskView.rescheduleTimeFuture'))
+    return
+  }
+
+  actionLoading.value = true
+  try {
+    task.value = await rescheduleTask(taskId.value, {
+      scheduled_datetime: new Date(rescheduleDatetime.value).toISOString()
+    })
+    syncRescheduleDatetime()
+    message.success(t('taskView.taskRescheduled'))
+  } catch (error) {
+    message.error(t('taskView.failedToRescheduleTask'))
   } finally {
     actionLoading.value = false
   }
@@ -648,6 +759,12 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
+.task-actions__controls {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
 .task-actions__label {
   font-size: 15px;
   font-weight: 600;
@@ -682,6 +799,10 @@ onBeforeUnmount(() => {
   .task-actions__item {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .task-actions__controls {
+    justify-items: stretch;
   }
 }
 </style>
