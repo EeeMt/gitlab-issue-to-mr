@@ -236,10 +236,23 @@ class WorkerExecutor:
             container_name = f"gimr-{task.id}-p{task.project_id}-{issue_suffix}"
 
             # Create and run container
+            volumes: dict = {}
+            if settings.maven_cache_host_path:
+                volumes[settings.maven_cache_host_path] = {
+                    "bind": "/home/gimr/.m2/repository",
+                    "mode": "rw",
+                }
+            if settings.maven_settings_host_path:
+                volumes[settings.maven_settings_host_path] = {
+                    "bind": "/home/gimr/.m2/settings.xml",
+                    "mode": "ro",
+                }
+
             container = self.docker.create_container(
                 image=settings.worker_image,
                 command="",
                 environment=environment,
+                volumes=volumes if volumes else None,
                 network="bridge",
                 name=container_name,
             )

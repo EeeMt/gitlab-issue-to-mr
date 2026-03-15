@@ -108,6 +108,8 @@ class Settings(BaseSettings):
 
     # Worker Configuration
     worker_image: str = Field(default="gitlab-issues-to-mr-worker:latest")
+    maven_cache_host_path: str = Field(default="")  # Host path to .m2/repository dir; empty = disabled
+    maven_settings_host_path: str = Field(default="")  # Host path to settings.xml; empty = disabled
 
     # Scheduler Configuration
     max_concurrency: int = Field(default=3)
