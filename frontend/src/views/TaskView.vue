@@ -796,13 +796,12 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 10px;
   flex: 0 0 auto;
-  width: fit-content;
+  width: min(100%, calc(19ch + 3.5rem));
   max-width: 100%;
 }
 
 .task-actions__date-picker {
-  width: fit-content;
-  max-width: 100%;
+  width: 100%;
 }
 
 .task-actions__controls :deep(.n-button) {
