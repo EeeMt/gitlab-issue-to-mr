@@ -795,6 +795,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex: 0 0 auto;
   width: fit-content;
   max-width: 100%;
 }
