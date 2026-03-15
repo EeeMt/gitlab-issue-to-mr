@@ -71,22 +71,21 @@ async def _build_project_lookup(access_scope: ProjectAccessScope) -> dict[int, d
 
 
 async def _get_project_metadata(project_id: int) -> dict[str, Optional[str]]:
-    """Get project metadata for a single task response."""
-    from app.core.gitlab_client import get_gitlab_client
-
+    """Get project metadata for a single task response, using the shared cache."""
     try:
-        gitlab = get_gitlab_client()
-        project = await asyncio.to_thread(gitlab.get_project, project_id)
-        return {
-            "project_name": getattr(project, "name", None),
-            "project_path_with_namespace": getattr(project, "path_with_namespace", None),
-        }
+        projects = await _get_cached_projects()
+        project = next((p for p in projects if int(p["id"]) == project_id), None)
+        if project:
+            return {
+                "project_name": project.get("name"),
+                "project_path_with_namespace": project.get("path_with_namespace"),
+            }
     except Exception as exc:
         logger.warning(f"Failed to load project {project_id} metadata: {exc}")
-        return {
-            "project_name": None,
-            "project_path_with_namespace": None,
-        }
+    return {
+        "project_name": None,
+        "project_path_with_namespace": None,
+    }
 
 
 def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = None) -> dict[str, Any]:
