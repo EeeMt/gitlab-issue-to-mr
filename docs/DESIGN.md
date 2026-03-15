@@ -1710,7 +1710,9 @@ gitlab_issues_to_mr/
 │       ├── ca.pem
 │       ├── client-cert.pem
 │       └── client-key.pem
-├── DESIGN.md                       # 本设计文档
+├── docs/
+│   ├── DESIGN.md                   # 本设计文档
+│   └── ...                         # 其他说明文档
 └── CLAUDE.md                       # Claude CLI 项目上下文
 ```
 

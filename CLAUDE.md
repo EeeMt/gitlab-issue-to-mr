@@ -79,7 +79,7 @@ cd deploy && docker-compose logs -f
 
 ### Testing & Debugging
 
-See [backend/docs/e2e-debugging.md](backend/docs/e2e-debugging.md) for detailed debugging guide.
+See [docs/e2e-debugging.md](docs/e2e-debugging.md) for detailed debugging guide.
 
 Quick debug commands:
 ```bash

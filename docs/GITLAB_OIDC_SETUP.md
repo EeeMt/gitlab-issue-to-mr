@@ -187,7 +187,7 @@ After deployment, validate in this order.
 Visit:
 
 ```text
-https://your-domain.example.com/config
+https://your-domain.example.com/configuration
 ```
 
 Fill in the GitLab OIDC fields, save them, and run **Test OIDC connection**.

@@ -1,0 +1,328 @@
+# 开发环境搭建指南
+
+本文档面向本地开发者，介绍如何搭建 GIMR 的后端、前端和测试环境，并说明推荐的开发流程。
+
+## 1. 你会开发到哪些部分
+
+当前仓库主要由三部分组成：
+
+- `backend/`：FastAPI + SQLAlchemy + 调度与任务执行逻辑
+- `frontend/`：Vue 3 + Vite + Naive UI 的管理后台
+- `deploy/`：Docker Compose 与生产/集成部署相关文件
+
+日常开发通常分两类：
+
+- 本地开发后端 / 前端，快速迭代
+- 通过 Docker 或远程 Docker 环境验证完整链路
+
+## 2. 前置条件
+
+建议本地具备以下工具：
+
+- Python 3.11 或兼容版本
+- Node.js 18+ 与 npm
+- Docker 与 Docker Compose
+- PostgreSQL（本地安装，或通过 Docker 提供）
+- 可访问的 GitLab 测试环境
+- 可访问的 Claude CLI 兼容模型服务
+
+如果你要跑真实 GitLab E2E，还需要：
+
+- 独立测试项目
+- 独立测试 Token
+- 不会影响正式环境的数据隔离
+
+## 3. 获取代码
+
+```bash
+git clone <your-repo-url>
+cd gitlab-issue-to-mr
+```
+
+## 4. 后端开发环境
+
+### 4.1 安装 Python 依赖
+
+```bash
+cd backend
+pip install -r requirements.txt
+```
+
+如果你使用虚拟环境，建议先创建并激活虚拟环境再安装。
+
+### 4.2 准备环境变量
+
+从模板复制：
+
+```bash
+cp .env.example .env
+```
+
+然后按本地环境修改关键项：
+
+#### GitLab
+
+- `GITLAB_URL`
+- `GITLAB_BOT_TOKEN`
+- `GITLAB_WEBHOOK_SECRET`
+
+#### 模型服务
+
+- `ANTHROPIC_BASE_URL`
+- `ANTHROPIC_API_KEY`
+- `ANTHROPIC_MODEL`
+
+#### 数据库
+
+- `DATABASE_URL`
+
+注意：
+
+- `.env.example` 中的数据库地址默认面向 Docker 网络里的 `postgres`
+- 如果你是在宿主机直接运行后端，需要把 `DATABASE_URL` 改成你本机可访问的 PostgreSQL 地址
+
+#### 应用配置
+
+- `SECRET_KEY`
+- `WORKER_IMAGE`
+- `MAX_CONCURRENCY`
+- `TASK_TIMEOUT`
+- `DEFAULT_TARGET_BRANCH`
+
+### 4.3 准备 PostgreSQL
+
+你可以任选一种方式：
+
+#### 方式 A：本机已有 PostgreSQL
+
+手动创建数据库并把 `DATABASE_URL` 指向本机数据库。
+
+#### 方式 B：用 Docker 起一个 PostgreSQL
+
+最简单的方式是直接使用项目里的 compose，把 `postgres` 起起来：
+
+```bash
+cd ../deploy
+docker-compose up -d postgres
+```
+
+然后在 `backend/.env` 中把 `DATABASE_URL` 指向与当前运行方式匹配的地址。
+
+如果后端也跑在宿主机上，通常不能直接使用 `postgres:5432` 这个容器内主机名，需改成宿主机可访问地址。
+
+### 4.4 执行数据库迁移
+
+```bash
+cd ../backend
+alembic upgrade head
+```
+
+### 4.5 本地启动后端
+
+```bash
+uvicorn app.main:app --reload
+```
+
+默认后端地址通常是：
+
+- `http://localhost:8000`
+
+## 5. 前端开发环境
+
+### 5.1 安装依赖
+
+```bash
+cd frontend
+npm install
+```
+
+### 5.2 启动开发服务器
+
+```bash
+npm run dev
+```
+
+前端开发服务器启动后，通常会提供一个本地端口，例如 `http://localhost:5173`。
+
+### 5.3 前端构建校验
+
+前端改动完成后，推荐执行：
+
+```bash
+npm run build
+```
+
+这也是当前仓库里最直接的前端类型/构建校验方式。
+
+## 6. 推荐本地开发组合
+
+### 方案 A：前后端都本地运行
+
+适合前端页面与后端 API 联调。
+
+推荐组合：
+
+- PostgreSQL：本地或 Docker
+- backend：宿主机 `uvicorn --reload`
+- frontend：宿主机 `npm run dev`
+
+优点：
+
+- 改动反馈最快
+- 日志查看最直接
+- 调试工具最方便
+
+### 方案 B：前端本地，后端使用远端或 Docker 环境
+
+适合你只改前端、希望直接对接现有测试后端。
+
+注意确认前端 API 指向和跨域设置是否匹配当前环境。
+
+### 方案 C：用 compose 验证接近生产的运行方式
+
+适合验证部署问题、容器行为和调度问题：
+
+```bash
+cd deploy
+docker-compose up -d --build
+```
+
+这个方案更接近生产，但迭代速度比本地直接跑慢。
+
+## 7. 常用开发命令
+
+### 7.1 后端
+
+```bash
+# 安装依赖
+cd backend && pip install -r requirements.txt
+
+# 本地运行
+cd backend && uvicorn app.main:app --reload
+
+# 手动迁移
+cd backend && alembic upgrade head
+```
+
+### 7.2 前端
+
+```bash
+cd frontend && npm install
+cd frontend && npm run dev
+cd frontend && npm run build
+```
+
+### 7.3 Docker / 部署验证
+
+```bash
+cd deploy && docker-compose up -d --build
+cd deploy && docker-compose logs -f
+```
+
+## 8. 测试命令
+
+### 8.1 后端测试
+
+```bash
+# 全量 backend 测试
+cd backend && pytest
+
+# 单元测试
+cd backend && pytest tests/unit/ -v
+
+# Mock E2E
+cd backend && pytest tests/mock_e2e/ -v
+
+# 真实 GitLab E2E
+cd backend && pytest tests/gitlab_e2e/ -v
+```
+
+### 8.2 特定功能测试
+
+```bash
+# 手动任务
+cd backend && pytest tests/unit/test_manual_task.py -v
+cd backend && pytest tests/mock_e2e/test_manual_task.py -v
+cd backend && pytest tests/gitlab_e2e/test_manual_task.py -v
+
+# 调度/优先级
+cd backend && python tests/unit/test_priority.py
+
+# 超时脚本
+cd backend && python tests/unit/test_timeout.py
+```
+
+### 8.3 前端验证
+
+```bash
+cd frontend && npm run build
+```
+
+## 9. 真实 GitLab 测试的安全注意事项
+
+真实 GitLab E2E 只应该跑在隔离测试环境。
+
+原因：
+
+- 真实测试可能创建任务、分支、MR、Issue 评论
+- 测试环境中保存着运行时配置、OIDC 配置、用户和会话
+- 错误的清理动作可能影响正在使用的共享环境
+
+尤其要避免把带清理逻辑的测试脚本对着正式环境运行。
+
+如需深入排查，请阅读 [e2e-debugging.md](e2e-debugging.md)。
+
+## 10. 本地开发常见问题
+
+### 10.1 后端启动时报数据库连接失败
+
+先确认：
+
+- PostgreSQL 是否真的已启动
+- `DATABASE_URL` 是否指向当前运行方式下可访问的地址
+- 你是否误用了 Docker 内部主机名 `postgres`
+
+### 10.2 前端页面打开了，但接口全 401 或无数据
+
+先确认：
+
+- 当前环境是否启用了 OIDC
+- 你是否已经登录
+- 后端 `/api/auth/me` 返回的 `oidc_enabled` 和 `authenticated` 是否符合预期
+
+### 10.3 任务能创建，但 Worker 起不来
+
+先确认：
+
+- `DOCKER_HOST` 是否可用
+- `WORKER_IMAGE` 是否存在
+- 当前运行方式能否访问 Docker Engine
+
+### 10.4 OIDC UI 元素突然消失
+
+先确认：
+
+- 数据库里的 `system_config` 是否还在
+- OIDC 配置是否因数据库重置而丢失
+- `/api/config` 与 `/api/auth/me` 返回值是否正常
+
+## 11. 推荐开发流程
+
+比较稳妥的日常流程如下：
+
+1. 拉取最新代码
+2. 本地修改后端或前端
+3. 先跑与你改动最相关的测试
+4. 前端改动至少执行一次 `cd frontend && npm run build`
+5. 后端行为改动至少跑对应单元测试 / E2E
+6. 需要接近生产验证时，再用 compose 或远程 Docker 环境复测
+
+## 12. 相关文档
+
+- [文档索引](README.md)
+- [项目总览 README](../README.md)
+- [README.zh-CN.md](README.zh-CN.md)
+- [DEPLOYMENT.md](DEPLOYMENT.md)
+- [GITLAB_WEBHOOK_SETUP.md](GITLAB_WEBHOOK_SETUP.md)
+- [GITLAB_OIDC_SETUP.md](GITLAB_OIDC_SETUP.md)
+- [e2e-debugging.md](e2e-debugging.md)
