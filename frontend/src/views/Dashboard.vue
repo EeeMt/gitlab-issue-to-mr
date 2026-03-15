@@ -267,7 +267,7 @@ const columns = computed<DataTableColumns<Task>>(() => {
     {
       title: t('dashboard.issue'),
       key: 'issue_iid',
-      width: 52,
+      width: 68,
       render: (row) => (row.issue_iid ? renderExternalLink(`!${row.issue_iid}`, row.issue_url) : '-')
     },
     {
@@ -279,7 +279,7 @@ const columns = computed<DataTableColumns<Task>>(() => {
     {
       title: t('dashboard.priority'),
       key: 'priority',
-      width: 58,
+      width: 84,
       render: (row) => formatPriority(row.priority)
     },
     {
