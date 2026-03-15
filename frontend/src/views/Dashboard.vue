@@ -52,7 +52,7 @@
           <n-data-table
             :columns="columns"
             :data="tasks"
-            :loading="loading"
+            :loading="tableLoading"
             :row-key="(row: Task) => row.id"
             :row-props="getRowProps"
             :pagination="pagination"
@@ -333,6 +333,7 @@ const columns = computed<DataTableColumns<Task>>(() => {
   return isMobile.value ? mobileColumns : desktopColumns
 })
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
+const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 
 const summaryItems = computed(() => {
   const summary = tasks.value.reduce(

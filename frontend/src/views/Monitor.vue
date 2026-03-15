@@ -33,7 +33,7 @@
           <n-data-table
             :columns="isMobile ? mobileColumns : columns"
             :data="containers"
-            :loading="loading"
+            :loading="tableLoading"
             :bordered="false"
             :scroll-x="isMobile ? undefined : 660"
           />
@@ -79,6 +79,7 @@ const summaryItems = computed(() => [
   { label: t('monitor.cancelled'), value: String(stats.value.cancelled) }
 ])
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
+const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 
 function containerStatusLabel(status: string) {
   return status === 'running' ? t('status.running') : status

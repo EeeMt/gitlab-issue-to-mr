@@ -166,7 +166,7 @@
           <n-data-table
             :columns="columns"
             :data="filteredTasks"
-            :loading="loading"
+            :loading="tableLoading"
             :bordered="false"
             :row-key="(row: Task) => row.id"
             :row-props="getRowProps"
@@ -361,6 +361,7 @@ const filteredTasks = computed(() => {
 })
 
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
+const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 
 const summaryItems = computed(() => {
   const now = Date.now()
