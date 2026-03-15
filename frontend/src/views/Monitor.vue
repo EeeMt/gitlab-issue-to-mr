@@ -226,6 +226,11 @@ onBeforeUnmount(() => {
   border-radius: 18px;
 }
 
+.monitor-table-card :deep(.n-card__content) {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
 .monitor-card__header {
   display: flex;
   align-items: flex-start;
