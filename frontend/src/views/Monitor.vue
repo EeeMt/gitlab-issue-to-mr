@@ -224,6 +224,7 @@ onBeforeUnmount(() => {
 
 .monitor-table-card {
   border-radius: 18px;
+  margin-top: 8px;
 }
 
 .monitor-table-card :deep(.n-card__content) {
