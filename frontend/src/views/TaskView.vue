@@ -166,10 +166,10 @@
                       <n-date-picker
                         v-model:value="rescheduleDatetime"
                         type="datetime"
+                        class="task-actions__date-picker"
                         :placeholder="t('taskView.selectRescheduleTime')"
                         :is-date-disabled="isScheduledDateDisabled"
                         :is-time-disabled="isScheduledTimeDisabled"
-                        style="width: min(100%, 360px)"
                         :disabled="!canManageTask"
                       />
                       <n-button
@@ -794,7 +794,16 @@ onBeforeUnmount(() => {
 .task-actions__controls {
   display: grid;
   gap: 10px;
-  justify-items: end;
+  width: min(100%, 440px);
+  justify-items: stretch;
+}
+
+.task-actions__date-picker {
+  width: 100%;
+}
+
+.task-actions__controls :deep(.n-button) {
+  justify-self: end;
 }
 
 .task-actions__label {

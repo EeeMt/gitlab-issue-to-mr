@@ -53,13 +53,10 @@
                   class="hourly-chart__item"
                   :class="{
                     'hourly-chart__item--clickable': bucket.count > 0,
-                    'hourly-chart__item--active': isSelectedWindow(getHourlyWindowKey(bucket.startMs))
+                    'hourly-chart__item--active': isSelectedWindow(bucket.startMs, bucket.startMs + 60 * 60 * 1000)
                   }"
                   @click="handleHourlyBucketSelect(bucket)"
                 >
-                  <div v-if="bucket.count > 0" class="hourly-chart__tap-indicator">
-                    {{ t('scheduleOverview.tapToInspectShort') }}
-                  </div>
                   <div class="hourly-chart__count">{{ bucket.count }}</div>
                   <div class="hourly-chart__bar-wrap">
                     <div
@@ -96,7 +93,7 @@
                       :key="bucket.key"
                       type="button"
                       class="window-insights__item window-insights__item--button"
-                      :class="{ 'window-insights__item--active': isSelectedWindow(getHourlyWindowKey(bucket.startMs)) }"
+                      :class="{ 'window-insights__item--active': isSelectedWindow(bucket.startMs, bucket.startMs + 60 * 60 * 1000) }"
                       @click="handleHourlyBucketSelect(bucket)"
                     >
                       <span>{{ bucket.label }}</span>
@@ -162,7 +159,7 @@
                   class="heatmap__cell"
                   :class="{
                     'heatmap__cell--clickable': cell.count > 0,
-                    'heatmap__cell--active': isSelectedWindow(cell.key)
+                    'heatmap__cell--active': isSelectedWindow(cell.startMs, cell.endMs)
                   }"
                   :style="heatmapCellStyle(cell.count, heatmapMax)"
                   :title="t('scheduleOverview.taskCountTitle', { label: cell.label, count: cell.count })"
@@ -219,17 +216,15 @@
                 class="slot-task-card"
               >
                 <div class="slot-task-card__main" @click="goToTask(task)">
-                  <div class="slot-task-card__header">
-                    <div class="slot-task-card__title">
-                      #{{ task.id }} · {{ getProjectLabel(task) }}
+                    <div class="slot-task-card__header">
+                      <div class="slot-task-card__title">
+                        #{{ task.id }} · {{ getProjectLabel(task) }}
+                      </div>
+                      <div class="slot-task-card__badges">
+                        <span class="slot-task-card__badge">{{ t(`status.${task.status}`) }}</span>
+                        <span class="slot-task-card__badge">{{ formatPriority(task.priority) }}</span>
+                      </div>
                     </div>
-                    <n-space :size="8" align="center">
-                      <n-tag size="small" :type="getStatusTagType(task.status)">
-                        {{ t(`status.${task.status}`) }}
-                      </n-tag>
-                      <n-tag size="small">{{ formatPriority(task.priority) }}</n-tag>
-                    </n-space>
-                  </div>
                   <div class="slot-task-card__time">
                     {{ t('scheduleOverview.currentSchedule') }}: {{ formatShortDateTime(task.scheduled_at) }}
                   </div>
@@ -655,10 +650,6 @@ function isScheduledTimeDisabled(timestamp: number) {
   }
 }
 
-function getHourlyWindowKey(startMs: number): string {
-  return `hour-${startMs}`
-}
-
 function setSelectedWindow(nextWindow: SelectedWindow) {
   selectedWindow.value = nextWindow
   syncScheduleDrafts()
@@ -669,14 +660,17 @@ function clearSelectedWindow() {
   scheduleDrafts.value = {}
 }
 
-function isSelectedWindow(key: string): boolean {
-  return selectedWindow.value?.key === key
+function isSelectedWindow(startMs: number, endMs: number): boolean {
+  return (
+    selectedWindow.value?.startMs === startMs
+    && selectedWindow.value?.endMs === endMs
+  )
 }
 
 function handleHourlyBucketSelect(bucket: HourBucket) {
   if (bucket.count === 0) return
   setSelectedWindow({
-    key: getHourlyWindowKey(bucket.startMs),
+    key: `hour-${bucket.startMs}`,
     label: bucket.label,
     startMs: bucket.startMs,
     endMs: bucket.startMs + 60 * 60 * 1000,
@@ -1028,7 +1022,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -1044,13 +1038,6 @@ onBeforeUnmount(() => {
   outline: 2px solid rgba(32, 128, 240, 0.45);
   outline-offset: 2px;
   background: rgba(32, 128, 240, 0.16);
-}
-
-.hourly-chart__tap-indicator {
-  min-height: 14px;
-  font-size: 10px;
-  font-weight: 600;
-  color: rgba(32, 128, 240, 0.85);
 }
 
 .hourly-chart__count {
@@ -1270,6 +1257,23 @@ onBeforeUnmount(() => {
 .slot-task-card__title {
   font-size: 14px;
   font-weight: 600;
+}
+
+.slot-task-card__badges {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.slot-task-card__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(15, 23, 42, 0.72);
+  background: rgba(148, 163, 184, 0.14);
 }
 
 .slot-task-card__time,
