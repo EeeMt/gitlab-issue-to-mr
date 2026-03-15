@@ -473,16 +473,24 @@
                  >
                    {{ gitlabTestState.message }}
                  </n-alert>
-                 <n-alert
-                   v-if="webhookSetupState"
-                   :type="webhookSetupState.type"
-                   :show-icon="false"
-                   class="config-actions__alert"
-                 >
-                   {{ webhookSetupState.message }}
-                 </n-alert>
-                 <div class="config-card-actions">
-                   <n-space :size="12" wrap>
+                  <n-alert
+                    v-if="webhookSetupState"
+                    :type="webhookSetupState.type"
+                    :show-icon="false"
+                    class="config-actions__alert"
+                  >
+                    {{ webhookSetupState.message }}
+                  </n-alert>
+                  <n-alert
+                    v-if="webhookStatusState"
+                    :type="webhookStatusState.type"
+                    :show-icon="false"
+                    class="config-actions__alert"
+                  >
+                    {{ webhookStatusState.message }}
+                  </n-alert>
+                  <div class="config-card-actions">
+                    <n-space :size="12" wrap>
                     <n-button
                       type="primary"
                       @click="handleSaveSection('gitlab')"
@@ -523,10 +531,17 @@
                      >
                        {{ t('config.clearGitlabWebhookSecret') }}
                      </n-button>
-                     <n-button
-                       type="primary"
-                       secondary
-                       @click="handleSetupProjectWebhook"
+                      <n-button
+                        @click="handleViewProjectWebhookStatus"
+                        :loading="webhookStatusLoading"
+                        :disabled="isSectionBusy('gitlab') || selectedWebhookProjectId === null"
+                      >
+                        {{ t('config.viewProjectWebhookStatus') }}
+                      </n-button>
+                      <n-button
+                        type="primary"
+                        secondary
+                        @click="handleSetupProjectWebhook"
                        :loading="webhookSetupLoading"
                        :disabled="isSectionBusy('gitlab') || selectedWebhookProjectId === null"
                      >
@@ -807,6 +822,7 @@ import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import {
   getConfig,
+  getGitLabProjectWebhookStatus,
   getProjects,
   resetConfig,
   resetConfigKey,
@@ -818,6 +834,7 @@ import {
   type Config,
   type ConfigUpdate,
   type GitLabProjectWebhookSetupResult,
+  type GitLabProjectWebhookStatusResult,
   type IntegrationConfigUpdate,
   type Project,
   type RuntimeConfigUpdate
@@ -890,11 +907,13 @@ const sectionSaving = reactive<Record<ConfigSectionKey, boolean>>({
 })
 const gitlabTesting = ref(false)
 const webhookSetupLoading = ref(false)
+const webhookStatusLoading = ref(false)
 const projectsLoading = ref(false)
 const oidcTesting = ref(false)
 const oidcTestState = ref<TestState | null>(null)
 const gitlabTestState = ref<TestState | null>(null)
 const webhookSetupState = ref<TestState | null>(null)
+const webhookStatusState = ref<TestState | null>(null)
 const availableProjects = ref<Project[]>([])
 const selectedWebhookProjectId = ref<number | null>(null)
 
@@ -1012,7 +1031,13 @@ const anySectionSaving = computed(() =>
 )
 
 const isBusy = computed(() =>
-  loading.value || pageActionLoading.value || anySectionSaving.value || gitlabTesting.value || oidcTesting.value
+  loading.value ||
+  pageActionLoading.value ||
+  anySectionSaving.value ||
+  gitlabTesting.value ||
+  webhookSetupLoading.value ||
+  webhookStatusLoading.value ||
+  oidcTesting.value
 )
 
 function snapshotSection(section: ConfigSectionKey, value: ConfigForm) {
@@ -1197,6 +1222,7 @@ function isSectionBusy(section: ConfigSectionKey) {
     anySectionSaving.value ||
     (section === 'gitlab' && gitlabTesting.value) ||
     (section === 'gitlab' && webhookSetupLoading.value) ||
+    (section === 'gitlab' && webhookStatusLoading.value) ||
     (section === 'oidc' && oidcTesting.value)
   )
 }
@@ -1310,6 +1336,7 @@ function resetSection(section: ConfigSectionKey) {
   if (section === 'gitlab') {
     gitlabTestState.value = null
     webhookSetupState.value = null
+    webhookStatusState.value = null
   }
 
   if (section === 'oidc') {
@@ -1353,6 +1380,7 @@ async function handleSaveSection(section: ConfigSectionKey) {
     if (section === 'gitlab') {
       gitlabTestState.value = null
       webhookSetupState.value = null
+      webhookStatusState.value = null
       await fetchProjects()
     }
     if (section === 'oidc') {
@@ -1417,6 +1445,33 @@ function buildWebhookSetupMessage(result: GitLabProjectWebhookSetupResult): stri
   return t('config.projectWebhookUpdated', { project: projectLabel, hookId: result.hook_id })
 }
 
+function buildWebhookStatusMessage(result: GitLabProjectWebhookStatusResult): string {
+  const projectLabel = result.project_path_with_namespace || result.project_name || `#${result.project_id}`
+  const secretLabel =
+    result.secret_mode === 'project'
+      ? t('config.webhookSecretModeProject')
+      : result.secret_mode === 'global_fallback'
+        ? t('config.webhookSecretModeGlobalFallback')
+        : t('config.webhookSecretModeNone')
+
+  if (!result.hook_found) {
+    return t('config.projectWebhookMissing', {
+      project: projectLabel,
+      url: result.target_webhook_url,
+      secretMode: secretLabel
+    })
+  }
+
+  return t('config.projectWebhookStatusSummary', {
+    project: projectLabel,
+    hookId: result.hook_id ?? '-',
+    url: result.hook_url || result.target_webhook_url,
+    noteEvents: result.note_events ? t('common.enabled') : t('common.disabled'),
+    ssl: result.enable_ssl_verification ? t('common.enabled') : t('common.disabled'),
+    secretMode: secretLabel
+  })
+}
+
 async function handleSetupProjectWebhook() {
   if (selectedWebhookProjectId.value === null) {
     message.error(t('config.selectGitlabProject'))
@@ -1428,6 +1483,7 @@ async function handleSetupProjectWebhook() {
     const result = await setupGitLabProjectWebhook(selectedWebhookProjectId.value)
     const successMessage = buildWebhookSetupMessage(result)
     webhookSetupState.value = { type: 'success', message: successMessage }
+    webhookStatusState.value = null
     message.success(successMessage)
   } catch (error: any) {
     const detail = error?.response?.data?.detail || t('config.projectWebhookSetupFailed')
@@ -1435,6 +1491,29 @@ async function handleSetupProjectWebhook() {
     message.error(detail)
   } finally {
     webhookSetupLoading.value = false
+  }
+}
+
+async function handleViewProjectWebhookStatus() {
+  if (selectedWebhookProjectId.value === null) {
+    message.error(t('config.selectGitlabProject'))
+    return
+  }
+
+  webhookStatusLoading.value = true
+  try {
+    const result = await getGitLabProjectWebhookStatus(selectedWebhookProjectId.value)
+    const summary = buildWebhookStatusMessage(result)
+    webhookStatusState.value = {
+      type: result.hook_found ? 'success' : 'error',
+      message: summary
+    }
+  } catch (error: any) {
+    const detail = error?.response?.data?.detail || t('config.projectWebhookStatusFailed')
+    webhookStatusState.value = { type: 'error', message: detail }
+    message.error(detail)
+  } finally {
+    webhookStatusLoading.value = false
   }
 }
 
@@ -1463,10 +1542,12 @@ async function handleClearSecret(
     } else if (key === 'gitlab_admin_token') {
       syncForm(await updateConfig({ integration: { clear_gitlab_admin_token: true } }))
       webhookSetupState.value = null
+      webhookStatusState.value = null
       message.success(t('config.gitlabAdminTokenCleared'))
     } else if (key === 'gitlab_webhook_secret') {
       syncForm(await updateConfig({ integration: { clear_gitlab_webhook_secret: true } }))
       webhookSetupState.value = null
+      webhookStatusState.value = null
       message.success(t('config.gitlabWebhookSecretCleared'))
     } else if (key === 'oidc_client_secret') {
       syncForm(await resetConfigKey(key))
@@ -1491,6 +1572,8 @@ async function handleReset() {
     syncForm(await resetConfig())
     oidcTestState.value = null
     gitlabTestState.value = null
+    webhookSetupState.value = null
+    webhookStatusState.value = null
     message.success(t('config.resetToDefaults'))
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('config.failedToResetConfig'))

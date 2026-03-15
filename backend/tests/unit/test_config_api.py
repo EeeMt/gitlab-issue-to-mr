@@ -133,13 +133,11 @@ class ConfigApiHelperTests(unittest.TestCase):
         set_runtime_config({
             "gitlab_url": "https://gitlab.example.com",
             "gitlab_admin_token": "glpat-admin",
-            "gitlab_webhook_secret": "secret-123",
         })
         settings = get_settings().model_copy(update={
             "backend_url": "https://bot.example.com/",
             "gitlab_url": "https://gitlab.example.com",
             "gitlab_admin_token": "glpat-admin",
-            "gitlab_webhook_secret": "secret-123",
         })
 
         self.assertEqual(
@@ -156,7 +154,6 @@ class ConfigApiHelperTests(unittest.TestCase):
             "backend_url": "https://bot.example.com",
             "gitlab_url": "https://gitlab.example.com",
             "gitlab_admin_token": "",
-            "gitlab_webhook_secret": "",
         })
 
         with self.assertRaises(HTTPException):

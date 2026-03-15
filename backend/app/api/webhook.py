@@ -10,12 +10,13 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
+from app.config import get_effective_settings
 from app.core.gitlab_client import get_gitlab_client
 from app.core.parser import BotCommand, parse_ai_bot_command
 from app.core.scheduling import resolve_scheduled_at
 from app.database import get_db
 from app.models import Task, TaskStatus
+from app.project_webhook_config import get_project_webhook_secret
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +105,6 @@ def build_prompt_with_issue_context(prompt: str, issue_title: str, issue_descrip
 
     return f"{issue_context}\n\n用户补充要求: {trimmed_prompt}"
 router = APIRouter()
-settings = get_settings()
 
 
 def _coerce_int(value: object) -> Optional[int]:
@@ -125,6 +125,7 @@ def _coerce_str(value: object) -> Optional[str]:
 
 async def verify_gitlab_webhook(
     request: Request,
+    db: AsyncSession,
     x_gitlab_token: Optional[str] = Header(None, alias="X-Gitlab-Token"),
 ) -> dict:
     """Verify GitLab webhook request.
@@ -139,20 +140,6 @@ async def verify_gitlab_webhook(
     Raises:
         HTTPException: If verification fails
     """
-    # Verify webhook secret
-    if settings.gitlab_webhook_secret:
-        if not x_gitlab_token:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing X-Gitlab-Token header",
-            )
-        if not secrets.compare_digest(x_gitlab_token, settings.gitlab_webhook_secret):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid X-Gitlab-Token",
-            )
-
-    # Parse JSON body
     try:
         payload = await request.json()
     except Exception as e:
@@ -160,6 +147,27 @@ async def verify_gitlab_webhook(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid JSON payload: {e}",
         )
+
+    effective_settings = get_effective_settings()
+    project_id = _coerce_int((payload.get("project") or {}).get("id"))
+    expected_secret: Optional[str] = None
+    if project_id is not None:
+        expected_secret = await get_project_webhook_secret(db, project_id)
+    if not expected_secret:
+        expected_secret = effective_settings.gitlab_webhook_secret or None
+
+    # Verify webhook secret
+    if expected_secret:
+        if not x_gitlab_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing X-Gitlab-Token header",
+            )
+        if not secrets.compare_digest(x_gitlab_token, expected_secret):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid X-Gitlab-Token",
+            )
 
     logger.info(f"Webhook received: object_kind={payload.get('object_kind')}, event_type={payload.get('event_type')}")
     # Debug: log full payload structure
@@ -189,7 +197,7 @@ async def gitlab_webhook(
         Response dict
     """
     # Verify webhook
-    payload = await verify_gitlab_webhook(request, x_gitlab_token)
+    payload = await verify_gitlab_webhook(request, db, x_gitlab_token)
 
     # Only handle note (comment) events
     event_type = payload.get("object_kind")

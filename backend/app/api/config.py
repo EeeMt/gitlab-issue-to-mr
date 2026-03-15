@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -25,6 +26,7 @@ from app.core.oidc import (
 )
 from app.database import get_db
 from app.dependencies.auth import require_admin_user, require_page_access
+from app.project_webhook_config import get_project_webhook_secret, has_project_webhook_secret, save_project_webhook_secret
 from app.runtime_config import (
     load_runtime_config_from_db,
     reset_all_runtime_config_overrides,
@@ -163,6 +165,21 @@ class GitLabProjectWebhookSetupResponse(BaseModel):
     project_path_with_namespace: str
     webhook_url: str
     hook_id: int
+
+
+class GitLabProjectWebhookStatusResponse(BaseModel):
+    project_id: int
+    project_name: str
+    project_path_with_namespace: str
+    target_webhook_url: str
+    hook_found: bool
+    hook_id: Optional[int] = None
+    hook_url: Optional[str] = None
+    note_events: Optional[bool] = None
+    enable_ssl_verification: Optional[bool] = None
+    managed_secret_configured: bool
+    global_secret_fallback_configured: bool
+    secret_mode: str
 
 
 class OIDCDiagnosticsCheck(BaseModel):
@@ -522,8 +539,6 @@ def _validate_gitlab_webhook_ready(settings: Settings) -> str:
         missing.append("gitlab_url")
     if not settings.gitlab_admin_token.strip():
         missing.append("gitlab_admin_token")
-    if not settings.gitlab_webhook_secret.strip():
-        missing.append("gitlab_webhook_secret")
     if missing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -725,6 +740,10 @@ async def setup_gitlab_project_webhook(
     await load_runtime_config_from_db(db)
     settings = get_effective_settings()
     webhook_url = _validate_gitlab_webhook_ready(settings)
+    managed_secret = await get_project_webhook_secret(db, project_id)
+    if not managed_secret:
+        managed_secret = secrets.token_urlsafe(32)
+        await save_project_webhook_secret(db, project_id, managed_secret)
 
     client = GitLabClient(settings=settings, private_token=settings.gitlab_admin_token)
     try:
@@ -733,7 +752,7 @@ async def setup_gitlab_project_webhook(
             client.ensure_project_webhook,
             project_id,
             webhook_url,
-            settings.gitlab_webhook_secret,
+            managed_secret,
         )
     except (GitlabError, httpx.HTTPError) as exc:
         raise HTTPException(
@@ -751,6 +770,58 @@ async def setup_gitlab_project_webhook(
         project_path_with_namespace=str(getattr(project, "path_with_namespace", "") or ""),
         webhook_url=str(hook_payload.get("url", webhook_url)),
         hook_id=int(hook_payload["id"]),
+    )
+
+
+@router.get("/config/gitlab/projects/{project_id}/webhook", response_model=GitLabProjectWebhookStatusResponse)
+async def get_gitlab_project_webhook_status(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_admin_user),
+):
+    """Inspect the GitLab webhook status for one project."""
+    await load_runtime_config_from_db(db)
+    settings = get_effective_settings()
+    target_webhook_url = _validate_gitlab_webhook_ready(settings)
+
+    client = GitLabClient(settings=settings, private_token=settings.gitlab_admin_token)
+    try:
+        project = await asyncio.to_thread(client.get_project, project_id)
+        hooks = await asyncio.to_thread(client.get_project_hooks, project_id)
+    except (GitlabError, httpx.HTTPError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"GitLab webhook status lookup failed: {exc}",
+        ) from exc
+    finally:
+        client.close()
+
+    normalized_target = GitLabClient._normalize_hook_url(target_webhook_url)
+    matched_hook = next(
+        (
+            hook for hook in hooks
+            if GitLabClient._normalize_hook_url(str(hook.get("url", ""))) == normalized_target
+        ),
+        None,
+    )
+
+    managed_secret_configured = await has_project_webhook_secret(db, project_id)
+    global_secret_fallback_configured = bool(settings.gitlab_webhook_secret.strip())
+    secret_mode = "project" if managed_secret_configured else "global_fallback" if global_secret_fallback_configured else "none"
+
+    return GitLabProjectWebhookStatusResponse(
+        project_id=project_id,
+        project_name=str(getattr(project, "name", "") or ""),
+        project_path_with_namespace=str(getattr(project, "path_with_namespace", "") or ""),
+        target_webhook_url=target_webhook_url,
+        hook_found=matched_hook is not None,
+        hook_id=int(matched_hook["id"]) if matched_hook is not None else None,
+        hook_url=str(matched_hook.get("url", "")) if matched_hook is not None else None,
+        note_events=bool(matched_hook.get("note_events")) if matched_hook is not None else None,
+        enable_ssl_verification=bool(matched_hook.get("enable_ssl_verification")) if matched_hook is not None else None,
+        managed_secret_configured=managed_secret_configured,
+        global_secret_fallback_configured=global_secret_fallback_configured,
+        secret_mode=secret_mode,
     )
 
 

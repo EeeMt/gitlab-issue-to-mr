@@ -143,6 +143,21 @@ class SystemConfig(Base):
     )
 
 
+class ProjectWebhookConfig(Base):
+    """Per-project webhook configuration managed by this system."""
+
+    __tablename__ = "project_webhook_config"
+
+    project_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    secret_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
 class User(Base):
     """Dashboard user created from GitLab OIDC login."""
 

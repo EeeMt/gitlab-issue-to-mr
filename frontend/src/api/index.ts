@@ -317,6 +317,21 @@ export interface GitLabProjectWebhookSetupResult {
   hook_id: number
 }
 
+export interface GitLabProjectWebhookStatusResult {
+  project_id: number
+  project_name: string
+  project_path_with_namespace: string
+  target_webhook_url: string
+  hook_found: boolean
+  hook_id: number | null
+  hook_url: string | null
+  note_events: boolean | null
+  enable_ssl_verification: boolean | null
+  managed_secret_configured: boolean
+  global_secret_fallback_configured: boolean
+  secret_mode: 'project' | 'global_fallback' | 'none' | string
+}
+
 export interface OidcDiagnosticsCheck {
   key: string
   label: string
@@ -531,6 +546,13 @@ export async function setupGitLabProjectWebhook(
   projectId: number,
 ): Promise<GitLabProjectWebhookSetupResult> {
   const response = await api.post(`/config/gitlab/projects/${projectId}/webhook`)
+  return response.data
+}
+
+export async function getGitLabProjectWebhookStatus(
+  projectId: number,
+): Promise<GitLabProjectWebhookStatusResult> {
+  const response = await api.get(`/config/gitlab/projects/${projectId}/webhook`)
   return response.data
 }
 
