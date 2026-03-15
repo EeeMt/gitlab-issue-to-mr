@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Optional
 from urllib.parse import urlparse
 
 import httpx
+from gitlab.exceptions import GitlabError
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_effective_settings, get_runtime_config_types, get_settings
 from app.core.config_crypto import ConfigEncryptionError
+from app.core.gitlab_client import GitLabClient
 from app.core.oidc import (
     OIDCConfigurationError,
     build_authorization_url_for_settings,
@@ -38,6 +41,13 @@ class RuntimeConfigSection(BaseModel):
     task_timeout: int
     scheduler_interval: int
     default_target_branch: str
+    max_retries: int
+    retry_delay: int
+    alert_on_failure: bool
+    alert_webhook_url_configured: bool
+    anthropic_base_url: str
+    anthropic_api_key_configured: bool
+    anthropic_model: str
     allow_monitor_for_users: bool
     allow_schedule_overview_for_users: bool
     allow_analytics_for_users: bool
@@ -58,9 +68,15 @@ class AuthConfigSection(BaseModel):
     oidc_client_secret_configured: bool
 
 
+class IntegrationConfigSection(BaseModel):
+    gitlab_url: str
+    gitlab_bot_token_configured: bool
+
+
 class ConfigResponse(BaseModel):
     runtime: RuntimeConfigSection
     auth: AuthConfigSection
+    integration: IntegrationConfigSection
 
 
 class RuntimeConfigUpdate(BaseModel):
@@ -68,6 +84,15 @@ class RuntimeConfigUpdate(BaseModel):
     task_timeout: Optional[int] = None
     scheduler_interval: Optional[int] = None
     default_target_branch: Optional[str] = None
+    max_retries: Optional[int] = None
+    retry_delay: Optional[int] = None
+    alert_on_failure: Optional[bool] = None
+    alert_webhook_url: Optional[str] = None
+    clear_alert_webhook_url: bool = False
+    anthropic_base_url: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    clear_anthropic_api_key: bool = False
+    anthropic_model: Optional[str] = None
     allow_monitor_for_users: Optional[bool] = None
     allow_schedule_overview_for_users: Optional[bool] = None
     allow_analytics_for_users: Optional[bool] = None
@@ -89,9 +114,16 @@ class AuthConfigUpdate(BaseModel):
     auth_admin_gitlab_groups: Optional[str] = None
 
 
+class IntegrationConfigUpdate(BaseModel):
+    gitlab_url: Optional[str] = None
+    gitlab_bot_token: Optional[str] = None
+    clear_gitlab_bot_token: bool = False
+
+
 class ConfigUpdate(BaseModel):
     runtime: Optional[RuntimeConfigUpdate] = None
     auth: Optional[AuthConfigUpdate] = None
+    integration: Optional[IntegrationConfigUpdate] = None
 
 
 class OIDCConfigTestRequest(BaseModel):
@@ -106,6 +138,16 @@ class OIDCConfigTestResponse(BaseModel):
     authorization_url_preview: str
     required_scopes: list[str]
     warnings: list[str]
+
+
+class GitLabConfigTestRequest(BaseModel):
+    integration: IntegrationConfigUpdate
+
+
+class GitLabConfigTestResponse(BaseModel):
+    server_version: str
+    username: str
+    gitlab_url: str
 
 
 class OIDCDiagnosticsCheck(BaseModel):
@@ -145,6 +187,13 @@ def _serialize_effective_config() -> ConfigResponse:
             task_timeout=settings.task_timeout,
             scheduler_interval=settings.scheduler_interval,
             default_target_branch=settings.default_target_branch,
+            max_retries=settings.max_retries,
+            retry_delay=settings.retry_delay,
+            alert_on_failure=settings.alert_on_failure,
+            alert_webhook_url_configured=bool(settings.alert_webhook_url),
+            anthropic_base_url=settings.anthropic_base_url,
+            anthropic_api_key_configured=bool(settings.anthropic_api_key),
+            anthropic_model=settings.anthropic_model,
             allow_monitor_for_users=settings.allow_monitor_for_users,
             allow_schedule_overview_for_users=settings.allow_schedule_overview_for_users,
             allow_analytics_for_users=settings.allow_analytics_for_users,
@@ -162,6 +211,10 @@ def _serialize_effective_config() -> ConfigResponse:
             auth_admin_usernames=settings.auth_admin_usernames,
             auth_admin_gitlab_groups=settings.auth_admin_gitlab_groups,
             oidc_client_secret_configured=bool(settings.oidc_client_secret),
+        ),
+        integration=IntegrationConfigSection(
+            gitlab_url=settings.gitlab_url,
+            gitlab_bot_token_configured=bool(settings.gitlab_bot_token),
         ),
     )
 
@@ -214,6 +267,62 @@ def _validate_config_value(key: str, value: object) -> object:
             )
         return value.strip()
 
+    if key == "gitlab_url":
+        if not isinstance(value, str) or not value.strip() or not _is_valid_http_url(value.strip()):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="gitlab_url must be a valid http/https URL",
+            )
+        return value.strip()
+
+    if key == "gitlab_bot_token":
+        if not isinstance(value, str) or not value.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="gitlab_bot_token cannot be empty",
+            )
+        return value.strip()
+
+    if key == "max_retries":
+        if not isinstance(value, int) or value < 0 or value > 10:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="max_retries must be between 0 and 10",
+            )
+        return value
+
+    if key == "retry_delay":
+        if not isinstance(value, int) or value < 1 or value > 3600:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="retry_delay must be between 1 and 3600 seconds",
+            )
+        return value
+
+    if key in {"anthropic_base_url", "alert_webhook_url"}:
+        if not isinstance(value, str) or not value.strip() or not _is_valid_http_url(value.strip()):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{key} must be a valid http/https URL",
+            )
+        return value.strip()
+
+    if key == "anthropic_model":
+        if not isinstance(value, str) or not value.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="anthropic_model cannot be empty",
+            )
+        return value.strip()
+
+    if key == "anthropic_api_key":
+        if not isinstance(value, str) or not value.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="anthropic_api_key cannot be empty",
+            )
+        return value.strip()
+
     if key in {"oidc_issuer_url", "oidc_redirect_uri"}:
         if not isinstance(value, str) or not value.strip() or not _is_valid_http_url(value.strip()):
             raise HTTPException(
@@ -240,6 +349,7 @@ def _validate_config_value(key: str, value: object) -> object:
 
     if key in {
         "oidc_enabled",
+        "alert_on_failure",
         "allow_monitor_for_users",
         "allow_schedule_overview_for_users",
         "allow_analytics_for_users",
@@ -298,7 +408,12 @@ def _validate_config_value(key: str, value: object) -> object:
 def _normalize_updates(raw_updates: dict[str, Any]) -> dict[str, Any]:
     normalized: dict[str, Any] = {}
     for key, value in raw_updates.items():
-        if key == "clear_oidc_client_secret":
+        if key in {
+            "clear_oidc_client_secret",
+            "clear_alert_webhook_url",
+            "clear_anthropic_api_key",
+            "clear_gitlab_bot_token",
+        }:
             normalized[key] = bool(value)
             continue
         normalized[key] = _validate_config_value(key, value)
@@ -400,11 +515,23 @@ async def update_config(
     auth_updates = _normalize_updates(
         config_update.auth.model_dump(exclude_unset=True) if config_update.auth else {}
     )
+    integration_updates = _normalize_updates(
+        config_update.integration.model_dump(exclude_unset=True) if config_update.integration else {}
+    )
 
     clear_secret = bool(auth_updates.pop("clear_oidc_client_secret", False))
-    preview_updates = {**runtime_updates, **auth_updates}
+    clear_alert_webhook = bool(runtime_updates.pop("clear_alert_webhook_url", False))
+    clear_anthropic_api_key = bool(runtime_updates.pop("clear_anthropic_api_key", False))
+    clear_gitlab_bot_token = bool(integration_updates.pop("clear_gitlab_bot_token", False))
+    preview_updates = {**runtime_updates, **auth_updates, **integration_updates}
     if clear_secret and "oidc_client_secret" not in auth_updates:
         preview_updates["oidc_client_secret"] = get_settings().oidc_client_secret
+    if clear_alert_webhook and "alert_webhook_url" not in runtime_updates:
+        preview_updates["alert_webhook_url"] = get_settings().alert_webhook_url
+    if clear_anthropic_api_key and "anthropic_api_key" not in runtime_updates:
+        preview_updates["anthropic_api_key"] = get_settings().anthropic_api_key
+    if clear_gitlab_bot_token and "gitlab_bot_token" not in integration_updates:
+        preview_updates["gitlab_bot_token"] = get_settings().gitlab_bot_token
 
     preview_settings = _build_preview_settings(preview_updates)
     if preview_settings.oidc_enabled:
@@ -419,9 +546,25 @@ async def update_config(
             await save_runtime_config_override(db, key, value)
             logger.info("Updated auth config %s", key)
 
+        for key, value in integration_updates.items():
+            await save_runtime_config_override(db, key, value)
+            logger.info("Updated integration config %s", key)
+
         if clear_secret and "oidc_client_secret" not in auth_updates:
             await reset_runtime_config_override(db, "oidc_client_secret")
             logger.info("Cleared stored OIDC client secret")
+
+        if clear_alert_webhook and "alert_webhook_url" not in runtime_updates:
+            await reset_runtime_config_override(db, "alert_webhook_url")
+            logger.info("Cleared stored alert webhook URL")
+
+        if clear_anthropic_api_key and "anthropic_api_key" not in runtime_updates:
+            await reset_runtime_config_override(db, "anthropic_api_key")
+            logger.info("Cleared stored Anthropic API key")
+
+        if clear_gitlab_bot_token and "gitlab_bot_token" not in integration_updates:
+            await reset_runtime_config_override(db, "gitlab_bot_token")
+            logger.info("Cleared stored GitLab bot token")
 
         await load_runtime_config_from_db(db)
     except ConfigEncryptionError as exc:
@@ -458,6 +601,43 @@ async def reset_config_key(
     await load_runtime_config_from_db(db)
     logger.info("Reset persisted configuration override for %s", key)
     return _serialize_effective_config()
+
+
+@router.post("/config/gitlab/test", response_model=GitLabConfigTestResponse)
+async def test_gitlab_config(
+    request: GitLabConfigTestRequest,
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_admin_user),
+):
+    """Validate GitLab connectivity with current or unsaved integration values."""
+    await load_runtime_config_from_db(db)
+    integration_updates = _normalize_updates(request.integration.model_dump(exclude_unset=True))
+    integration_updates.pop("clear_gitlab_bot_token", None)
+    preview_settings = _build_preview_settings(integration_updates)
+
+    if not preview_settings.gitlab_url.strip() or not preview_settings.gitlab_bot_token.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitLab URL and bot token must be configured before testing the connection.",
+        )
+
+    client = GitLabClient(settings=preview_settings)
+    try:
+        version_payload = await asyncio.to_thread(client.gl.http_get, "/version")
+        user_payload = await asyncio.to_thread(client.gl.http_get, "/user")
+    except (GitlabError, httpx.HTTPError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"GitLab config test failed: {exc}",
+        ) from exc
+    finally:
+        client.close()
+
+    return GitLabConfigTestResponse(
+        server_version=str(version_payload.get("version", "")),
+        username=str(user_payload.get("username", "")),
+        gitlab_url=preview_settings.gitlab_url,
+    )
 
 
 @router.post("/config/oidc/test")

@@ -10,22 +10,24 @@ from gitlab import Gitlab
 from gitlab.exceptions import GitlabGetError
 from gitlab.v4.objects import MergeRequest, Project
 
-from app.config import get_settings
+from app.config import Settings, get_effective_settings
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 class GitLabClient:
     """Wrapper around python-gitlab for GitLab API operations."""
 
-    def __init__(self) -> None:
+    def __init__(self, settings: Optional[Settings] = None) -> None:
         """Initialize GitLab client."""
+        self.settings = settings or get_effective_settings()
+        self.base_url = self.settings.gitlab_url.rstrip("/")
+        self.private_token = self.settings.gitlab_bot_token
         self.gl: Gitlab = gitlab.Gitlab(
-            settings.gitlab_url,
-            private_token=settings.gitlab_bot_token,
+            self.base_url,
+            private_token=self.private_token,
         )
-        logger.info(f"GitLab client initialized: {settings.gitlab_url}")
+        logger.info(f"GitLab client initialized: {self.base_url}")
 
     def get_project(self, project_id: int) -> Project:
         """Get a project by ID.
@@ -118,7 +120,7 @@ class GitLabClient:
         if not url:
             return url
 
-        configured = urlsplit(settings.gitlab_url.rstrip("/"))
+        configured = urlsplit(self.base_url)
         parsed = urlsplit(url)
 
         if not configured.scheme or not configured.netloc or not parsed.path:
@@ -194,10 +196,10 @@ class GitLabClient:
 
             # Use GitLab API directly via HTTP request
             import requests
-            url = f"{settings.gitlab_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/changes"
+            url = f"{self.base_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/changes"
             response = requests.get(
                 url,
-                headers={"PRIVATE-TOKEN": settings.gitlab_bot_token},
+                headers={"PRIVATE-TOKEN": self.private_token},
                 timeout=30
             )
             response.raise_for_status()
@@ -380,13 +382,36 @@ class GitLabClient:
 
 # Singleton instance
 _gitlab_client: Optional[GitLabClient] = None
+_gitlab_client_config: Optional[tuple[str, str]] = None
+
+
+def _build_gitlab_client_config_snapshot(settings: Optional[Settings] = None) -> tuple[str, str]:
+    active_settings = settings or get_effective_settings()
+    return (
+        active_settings.gitlab_url.strip(),
+        active_settings.gitlab_bot_token,
+    )
+
+
+def reset_gitlab_client() -> None:
+    """Drop any cached GitLab client so it will be recreated on next use."""
+    global _gitlab_client, _gitlab_client_config
+    if _gitlab_client is not None:
+        _gitlab_client.close()
+    _gitlab_client = None
+    _gitlab_client_config = None
 
 
 def get_gitlab_client() -> GitLabClient:
-    """Get singleton GitLab client instance."""
-    global _gitlab_client
-    if _gitlab_client is None:
-        _gitlab_client = GitLabClient()
+    """Get singleton GitLab client instance for the current effective config."""
+    global _gitlab_client, _gitlab_client_config
+    settings = get_effective_settings()
+    current_config = _build_gitlab_client_config_snapshot(settings)
+    if _gitlab_client is None or _gitlab_client_config != current_config:
+        if _gitlab_client is not None:
+            _gitlab_client.close()
+        _gitlab_client = GitLabClient(settings=settings)
+        _gitlab_client_config = current_config
     return _gitlab_client
 
 
@@ -403,7 +428,7 @@ async def get_accessible_projects_for_oauth_token(
     if not access_token:
         return []
 
-    base_url = settings.gitlab_url.rstrip("/")
+    base_url = get_effective_settings().gitlab_url.rstrip("/")
     projects_by_id: dict[int, dict] = {}
 
     async with httpx.AsyncClient(timeout=15.0) as client:

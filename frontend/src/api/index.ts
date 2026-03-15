@@ -218,6 +218,13 @@ export interface RuntimeConfig {
   task_timeout: number
   scheduler_interval: number
   default_target_branch: string
+  max_retries: number
+  retry_delay: number
+  alert_on_failure: boolean
+  alert_webhook_url_configured: boolean
+  anthropic_base_url: string
+  anthropic_api_key_configured: boolean
+  anthropic_model: string
   allow_monitor_for_users: boolean
   allow_schedule_overview_for_users: boolean
   allow_analytics_for_users: boolean
@@ -238,21 +245,40 @@ export interface AuthConfig {
   oidc_client_secret_configured: boolean
 }
 
+export interface IntegrationConfig {
+  gitlab_url: string
+  gitlab_bot_token_configured: boolean
+}
+
 export interface Config {
   runtime: RuntimeConfig
   auth: AuthConfig
+  integration: IntegrationConfig
 }
 
-export interface RuntimeConfigUpdate extends Partial<RuntimeConfig> {}
+export interface RuntimeConfigUpdate
+  extends Partial<Omit<RuntimeConfig, 'alert_webhook_url_configured' | 'anthropic_api_key_configured'>> {
+  alert_webhook_url?: string
+  clear_alert_webhook_url?: boolean
+  anthropic_api_key?: string
+  clear_anthropic_api_key?: boolean
+}
 
 export interface AuthConfigUpdate extends Partial<Omit<AuthConfig, 'oidc_client_secret_configured'>> {
   oidc_client_secret?: string
   clear_oidc_client_secret?: boolean
 }
 
+export interface IntegrationConfigUpdate
+  extends Partial<Omit<IntegrationConfig, 'gitlab_bot_token_configured'>> {
+  gitlab_bot_token?: string
+  clear_gitlab_bot_token?: boolean
+}
+
 export interface ConfigUpdate {
   runtime?: RuntimeConfigUpdate
   auth?: AuthConfigUpdate
+  integration?: IntegrationConfigUpdate
 }
 
 export interface OidcConfigTestResult {
@@ -263,6 +289,12 @@ export interface OidcConfigTestResult {
   authorization_url_preview: string
   required_scopes: string[]
   warnings: string[]
+}
+
+export interface GitLabConfigTestResult {
+  server_version: string
+  username: string
+  gitlab_url: string
 }
 
 export interface OidcDiagnosticsCheck {
@@ -465,6 +497,13 @@ export async function resetConfigKey(key: string): Promise<Config> {
 
 export async function testOidcConfig(auth: AuthConfigUpdate): Promise<OidcConfigTestResult> {
   const response = await api.post('/config/oidc/test', { auth })
+  return response.data
+}
+
+export async function testGitLabConfig(
+  integration: IntegrationConfigUpdate,
+): Promise<GitLabConfigTestResult> {
+  const response = await api.post('/config/gitlab/test', { integration })
   return response.data
 }
 

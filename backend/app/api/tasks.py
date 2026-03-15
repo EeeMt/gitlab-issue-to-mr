@@ -12,7 +12,7 @@ from pydantic import BaseModel, model_validator
 from sqlalchemy import select, func, false
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
+from app.config import get_effective_settings, get_settings
 from app.core.scheduling import resolve_scheduled_at
 from app.database import get_db
 from app.dependencies.auth import get_optional_current_user, require_page_access
@@ -92,7 +92,7 @@ async def _get_project_metadata(project_id: int) -> dict[str, Optional[str]]:
 def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """Serialize a task row for API responses."""
     metadata = project_metadata or {}
-    settings = get_settings()
+    settings = get_effective_settings()
     project_path = metadata.get("project_path_with_namespace")
     project_url = f"{settings.gitlab_url.rstrip('/')}/{project_path}" if project_path else None
     issue_url = (

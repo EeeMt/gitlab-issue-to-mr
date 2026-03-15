@@ -99,6 +99,132 @@
                     </n-gi>
                   </n-grid>
                 </div>
+
+                <div class="config-form__section">
+                  <div class="config-form__section-title">{{ t('config.retryAndAlerts') }}</div>
+                  <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                    <n-gi>
+                      <n-form-item :label="t('config.maxRetries')" path="max_retries">
+                        <n-input-number
+                          v-model:value="formValue.max_retries"
+                          :min="0"
+                          :max="10"
+                          class="config-form__input"
+                        />
+                        <template #feedback>
+                          {{ t('config.maxRetriesHint') }}
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item :label="t('config.retryDelay')" path="retry_delay">
+                        <n-input-number
+                          v-model:value="formValue.retry_delay"
+                          :min="1"
+                          :max="3600"
+                          class="config-form__input"
+                        />
+                        <template #feedback>
+                          {{ t('config.retryDelayHint') }}
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item :label="t('config.alertOnFailure')" path="alert_on_failure">
+                        <n-switch v-model:value="formValue.alert_on_failure" />
+                        <template #feedback>
+                          {{ t('config.alertOnFailureHint') }}
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item :label="t('config.alertWebhookStatus')">
+                        <n-tag :type="formValue.alert_webhook_url_configured ? 'success' : 'warning'" round>
+                          {{ formValue.alert_webhook_url_configured ? t('config.configured') : t('config.missing') }}
+                        </n-tag>
+                        <template #feedback>
+                          {{ t('config.alertWebhookStatusHint') }}
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi :span="isMobile ? 1 : 2">
+                      <n-form-item :label="t('config.alertWebhookUrl')">
+                        <n-input
+                          v-model:value="formValue.alert_webhook_url_input"
+                          type="password"
+                          show-password-on="click"
+                          :placeholder="
+                            formValue.alert_webhook_url_configured
+                              ? t('config.configuredEnterNew')
+                              : t('config.enterAlertWebhookUrl')
+                          "
+                          class="config-form__input"
+                        />
+                        <template #feedback>
+                          {{ t('config.alertWebhookHint') }}
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                  </n-grid>
+                </div>
+
+                <div class="config-form__section">
+                  <div class="config-form__section-title">{{ t('config.aiProvider') }}</div>
+                  <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                    <n-gi>
+                      <n-form-item :label="t('config.anthropicBaseUrl')" path="anthropic_base_url">
+                        <n-input
+                          v-model:value="formValue.anthropic_base_url"
+                          placeholder="http://host.docker.internal:11434/v1"
+                          class="config-form__input"
+                        />
+                        <template #feedback>
+                          {{ t('config.anthropicBaseUrlHint') }}
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item :label="t('config.anthropicModel')" path="anthropic_model">
+                        <n-input
+                          v-model:value="formValue.anthropic_model"
+                          placeholder="claude-sonnet-4-20250514"
+                          class="config-form__input"
+                        />
+                        <template #feedback>
+                          {{ t('config.anthropicModelHint') }}
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                      <n-form-item :label="t('config.anthropicApiKeyStatus')">
+                        <n-tag :type="formValue.anthropic_api_key_configured ? 'success' : 'warning'" round>
+                          {{ formValue.anthropic_api_key_configured ? t('config.configured') : t('config.missing') }}
+                        </n-tag>
+                        <template #feedback>
+                          {{ t('config.anthropicApiKeyStatusHint') }}
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi :span="isMobile ? 1 : 2">
+                      <n-form-item :label="t('config.anthropicApiKey')">
+                        <n-input
+                          v-model:value="formValue.anthropic_api_key_input"
+                          type="password"
+                          show-password-on="click"
+                          :placeholder="
+                            formValue.anthropic_api_key_configured
+                              ? t('config.configuredEnterNew')
+                              : t('config.enterAnthropicApiKey')
+                          "
+                          class="config-form__input"
+                        />
+                        <template #feedback>
+                          {{ t('config.anthropicApiKeyHint') }}
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                  </n-grid>
+                </div>
             </n-card>
 
             <n-card id="shared-page-settings" class="config-form-card" :bordered="false">
@@ -148,6 +274,72 @@
                     </n-gi>
                   </n-grid>
                 </div>
+            </n-card>
+
+            <n-card id="gitlab-settings" class="config-form-card" :bordered="false">
+                <template #header>
+                  <div class="config-card-header">
+                    <div>
+                       <div class="config-card-header__title">{{ t('config.gitlabIntegration') }}</div>
+                       <div class="config-card-header__subtitle">{{ t('config.gitlabIntegrationSubtitle') }}</div>
+                    </div>
+                  </div>
+                </template>
+
+                <div class="config-form__section">
+                   <div class="config-form__section-title">{{ t('config.gitlabConnection') }}</div>
+                  <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                    <n-gi>
+                       <n-form-item :label="t('config.gitlabUrl')" path="gitlab_url">
+                        <n-input
+                          v-model:value="formValue.gitlab_url"
+                          placeholder="https://gitlab.example.com"
+                          class="config-form__input"
+                        />
+                        <template #feedback>
+                           {{ t('config.gitlabUrlHint') }}
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
+                       <n-form-item :label="t('config.gitlabBotTokenStatus')">
+                        <n-tag :type="formValue.gitlab_bot_token_configured ? 'success' : 'warning'" round>
+                           {{ formValue.gitlab_bot_token_configured ? t('config.configured') : t('config.missing') }}
+                        </n-tag>
+                        <template #feedback>
+                           {{ t('config.gitlabBotTokenStatusHint') }}
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi :span="isMobile ? 1 : 2">
+                       <n-form-item :label="t('config.gitlabBotToken')">
+                        <n-input
+                          v-model:value="formValue.gitlab_bot_token_input"
+                          type="password"
+                          show-password-on="click"
+                          :placeholder="
+                            formValue.gitlab_bot_token_configured
+                              ? t('config.configuredEnterNew')
+                              : t('config.enterGitlabBotToken')
+                          "
+                          class="config-form__input"
+                        />
+                        <template #feedback>
+                           {{ t('config.gitlabBotTokenHint') }}
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                  </n-grid>
+                </div>
+
+                <n-alert
+                  v-if="gitlabTestState"
+                  :type="gitlabTestState.type"
+                  :show-icon="false"
+                  class="config-actions__alert"
+                >
+                  {{ gitlabTestState.message }}
+                </n-alert>
             </n-card>
 
             <n-card id="oidc-settings" class="config-form-card" :bordered="false">
@@ -328,15 +520,36 @@
                      <n-button @click="handleTestOidc" :loading="testing" :disabled="loading || saving || testing">
                        {{ t('config.testOidcConnection') }}
                      </n-button>
+                     <n-button @click="handleTestGitLab" :loading="testing" :disabled="loading || saving || testing">
+                       {{ t('config.testGitlabConnection') }}
+                     </n-button>
                      <n-button @click="router.push('/oidc-diagnostics')" :disabled="loading || saving || testing">
                        {{ t('config.openOidcDiagnostics') }}
                      </n-button>
-                    <n-button
-                      @click="handleClearSecret"
-                      :disabled="loading || saving || testing || !formValue.oidc_client_secret_configured"
-                    >
-                       {{ t('config.clearStoredSecret') }}
-                     </n-button>
+                     <n-button
+                       @click="handleClearSecret('gitlab_bot_token')"
+                       :disabled="loading || saving || testing || !formValue.gitlab_bot_token_configured"
+                     >
+                        {{ t('config.clearGitlabBotToken') }}
+                      </n-button>
+                     <n-button
+                       @click="handleClearSecret('oidc_client_secret')"
+                       :disabled="loading || saving || testing || !formValue.oidc_client_secret_configured"
+                     >
+                        {{ t('config.clearOidcSecret') }}
+                      </n-button>
+                     <n-button
+                       @click="handleClearSecret('anthropic_api_key')"
+                       :disabled="loading || saving || testing || !formValue.anthropic_api_key_configured"
+                     >
+                        {{ t('config.clearAnthropicApiKey') }}
+                      </n-button>
+                     <n-button
+                       @click="handleClearSecret('alert_webhook_url')"
+                       :disabled="loading || saving || testing || !formValue.alert_webhook_url_configured"
+                     >
+                        {{ t('config.clearAlertWebhook') }}
+                      </n-button>
                      <n-button @click="handleReload" :disabled="loading || saving || testing">
                        {{ t('common.reload') }}
                      </n-button>
@@ -385,6 +598,7 @@ import {
   getConfig,
   resetConfig,
   resetConfigKey,
+  testGitLabConfig,
   testOidcConfig,
   updateConfig,
   type Config,
@@ -396,10 +610,22 @@ type ConfigForm = {
   task_timeout: number
   scheduler_interval: number
   default_target_branch: string
+  max_retries: number
+  retry_delay: number
+  alert_on_failure: boolean
+  alert_webhook_url_configured: boolean
+  alert_webhook_url_input: string
+  anthropic_base_url: string
+  anthropic_api_key_configured: boolean
+  anthropic_api_key_input: string
+  anthropic_model: string
   allow_monitor_for_users: boolean
   allow_schedule_overview_for_users: boolean
   allow_analytics_for_users: boolean
   allow_oidc_diagnostics_for_users: boolean
+  gitlab_url: string
+  gitlab_bot_token_configured: boolean
+  gitlab_bot_token_input: string
   oidc_enabled: boolean
   oidc_issuer_url: string
   oidc_client_id: string
@@ -414,7 +640,7 @@ type ConfigForm = {
   oidc_client_secret_input: string
 }
 
-type OidcTestState = {
+type TestState = {
   type: 'success' | 'error'
   message: string
 }
@@ -429,7 +655,8 @@ const loading = ref(false)
 const saving = ref(false)
 const testing = ref(false)
 const formRef = ref<FormInst | null>(null)
-const oidcTestState = ref<OidcTestState | null>(null)
+const oidcTestState = ref<TestState | null>(null)
+const gitlabTestState = ref<TestState | null>(null)
 
 const sameSiteOptions = computed(() => [
   { label: 'Lax', value: 'lax' },
@@ -442,10 +669,22 @@ const formValue = ref<ConfigForm>({
   task_timeout: 1800,
   scheduler_interval: 5,
   default_target_branch: 'main',
+  max_retries: 0,
+  retry_delay: 60,
+  alert_on_failure: false,
+  alert_webhook_url_configured: false,
+  alert_webhook_url_input: '',
+  anthropic_base_url: 'http://localhost:11434/v1',
+  anthropic_api_key_configured: false,
+  anthropic_api_key_input: '',
+  anthropic_model: 'claude-sonnet-4-20250514',
   allow_monitor_for_users: false,
   allow_schedule_overview_for_users: false,
   allow_analytics_for_users: false,
   allow_oidc_diagnostics_for_users: false,
+  gitlab_url: '',
+  gitlab_bot_token_configured: false,
+  gitlab_bot_token_input: '',
   oidc_enabled: false,
   oidc_issuer_url: '',
   oidc_client_id: '',
@@ -463,12 +702,23 @@ const formValue = ref<ConfigForm>({
 const lastLoadedValue = ref<ConfigForm>({ ...formValue.value })
 
 function comparableValue(value: ConfigForm) {
-  const { oidc_client_secret_input, ...rest } = value
+  const {
+    oidc_client_secret_input,
+    alert_webhook_url_input,
+    anthropic_api_key_input,
+    gitlab_bot_token_input,
+    ...rest
+  } = value
   return rest
 }
 
 const isDirty = computed(() => {
-  if (formValue.value.oidc_client_secret_input.trim()) {
+  if (
+    formValue.value.oidc_client_secret_input.trim() ||
+    formValue.value.alert_webhook_url_input.trim() ||
+    formValue.value.anthropic_api_key_input.trim() ||
+    formValue.value.gitlab_bot_token_input.trim()
+  ) {
     return true
   }
 
@@ -481,6 +731,9 @@ const isDirty = computed(() => {
 const summaryItems = computed(() => [
   { label: t('config.maxConcurrency'), value: String(formValue.value.max_concurrency) },
   { label: t('config.taskTimeout'), value: `${formValue.value.task_timeout}s` },
+  { label: t('config.maxRetries'), value: String(formValue.value.max_retries) },
+  { label: t('config.gitlabUrl'), value: formValue.value.gitlab_url || t('common.notAvailable') },
+  { label: t('config.anthropicModel'), value: formValue.value.anthropic_model },
   {
     label: t('config.sharedPages'),
     value:
@@ -497,6 +750,10 @@ const summaryItems = computed(() => [
   {
     label: t('config.clientSecret'),
     value: formValue.value.oidc_client_secret_configured ? t('config.configured') : t('config.missing')
+  },
+  {
+    label: t('config.anthropicApiKey'),
+    value: formValue.value.anthropic_api_key_configured ? t('config.configured') : t('config.missing')
   }
 ])
 
@@ -512,6 +769,33 @@ const rules: FormRules = {
   default_target_branch: {
     required: true,
     message: t('config.enterDefaultTargetBranch'),
+    trigger: 'blur'
+  },
+  max_retries: {
+    required: true,
+    type: 'number',
+    message: t('config.enterMaxRetries'),
+    trigger: 'blur'
+  },
+  retry_delay: {
+    required: true,
+    type: 'number',
+    message: t('config.enterRetryDelay'),
+    trigger: 'blur'
+  },
+  anthropic_base_url: {
+    required: true,
+    message: t('config.enterAnthropicBaseUrl'),
+    trigger: 'blur'
+  },
+  anthropic_model: {
+    required: true,
+    message: t('config.enterAnthropicModel'),
+    trigger: 'blur'
+  },
+  gitlab_url: {
+    required: true,
+    message: t('config.enterGitlabUrl'),
     trigger: 'blur'
   },
   oidc_issuer_url: {
@@ -548,10 +832,22 @@ function syncForm(config: Config) {
     task_timeout: config.runtime.task_timeout,
     scheduler_interval: config.runtime.scheduler_interval,
     default_target_branch: config.runtime.default_target_branch,
+    max_retries: config.runtime.max_retries,
+    retry_delay: config.runtime.retry_delay,
+    alert_on_failure: config.runtime.alert_on_failure,
+    alert_webhook_url_configured: config.runtime.alert_webhook_url_configured,
+    alert_webhook_url_input: '',
+    anthropic_base_url: config.runtime.anthropic_base_url,
+    anthropic_api_key_configured: config.runtime.anthropic_api_key_configured,
+    anthropic_api_key_input: '',
+    anthropic_model: config.runtime.anthropic_model,
     allow_monitor_for_users: config.runtime.allow_monitor_for_users,
     allow_schedule_overview_for_users: config.runtime.allow_schedule_overview_for_users,
     allow_analytics_for_users: config.runtime.allow_analytics_for_users,
     allow_oidc_diagnostics_for_users: config.runtime.allow_oidc_diagnostics_for_users,
+    gitlab_url: config.integration.gitlab_url,
+    gitlab_bot_token_configured: config.integration.gitlab_bot_token_configured,
+    gitlab_bot_token_input: '',
     oidc_enabled: config.auth.oidc_enabled,
     oidc_issuer_url: config.auth.oidc_issuer_url,
     oidc_client_id: config.auth.oidc_client_id,
@@ -575,10 +871,18 @@ function buildPayload(): ConfigUpdate {
       task_timeout: formValue.value.task_timeout,
       scheduler_interval: formValue.value.scheduler_interval,
       default_target_branch: formValue.value.default_target_branch.trim(),
+      max_retries: formValue.value.max_retries,
+      retry_delay: formValue.value.retry_delay,
+      alert_on_failure: formValue.value.alert_on_failure,
+      anthropic_base_url: formValue.value.anthropic_base_url.trim(),
+      anthropic_model: formValue.value.anthropic_model.trim(),
       allow_monitor_for_users: formValue.value.allow_monitor_for_users,
       allow_schedule_overview_for_users: formValue.value.allow_schedule_overview_for_users,
       allow_analytics_for_users: formValue.value.allow_analytics_for_users,
       allow_oidc_diagnostics_for_users: formValue.value.allow_oidc_diagnostics_for_users
+    },
+    integration: {
+      gitlab_url: formValue.value.gitlab_url.trim()
     },
     auth: {
       oidc_enabled: formValue.value.oidc_enabled,
@@ -598,12 +902,25 @@ function buildPayload(): ConfigUpdate {
     payload.auth!.oidc_client_secret = formValue.value.oidc_client_secret_input.trim()
   }
 
+  if (formValue.value.alert_webhook_url_input.trim()) {
+    payload.runtime!.alert_webhook_url = formValue.value.alert_webhook_url_input.trim()
+  }
+
+  if (formValue.value.anthropic_api_key_input.trim()) {
+    payload.runtime!.anthropic_api_key = formValue.value.anthropic_api_key_input.trim()
+  }
+
+  if (formValue.value.gitlab_bot_token_input.trim()) {
+    payload.integration!.gitlab_bot_token = formValue.value.gitlab_bot_token_input.trim()
+  }
+
   return payload
 }
 
 async function fetchConfig() {
   loading.value = true
   oidcTestState.value = null
+  gitlabTestState.value = null
   try {
     syncForm(await getConfig())
   } catch (error) {
@@ -623,11 +940,34 @@ async function handleSave() {
   try {
     syncForm(await updateConfig(buildPayload()))
     oidcTestState.value = null
+    gitlabTestState.value = null
     message.success(t('config.configurationSaved'))
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('config.failedToSaveConfig'))
   } finally {
     saving.value = false
+  }
+}
+
+async function handleTestGitLab() {
+  testing.value = true
+  try {
+    const result = await testGitLabConfig(buildPayload().integration || {})
+    gitlabTestState.value = {
+      type: 'success',
+      message: t('config.gitlabConnectionSucceeded', {
+        url: result.gitlab_url,
+        username: result.username,
+        version: result.server_version || t('common.notAvailable')
+      })
+    }
+    message.success(t('config.gitlabConnectionPassed'))
+  } catch (error: any) {
+    const detail = error?.response?.data?.detail || t('config.gitlabConnectionFailed')
+    gitlabTestState.value = { type: 'error', message: detail }
+    message.error(detail)
+  } finally {
+    testing.value = false
   }
 }
 
@@ -652,11 +992,25 @@ async function handleTestOidc() {
   }
 }
 
-async function handleClearSecret() {
+async function handleClearSecret(
+  key: 'oidc_client_secret' | 'anthropic_api_key' | 'alert_webhook_url' | 'gitlab_bot_token',
+) {
   saving.value = true
   try {
-    syncForm(await resetConfigKey('oidc_client_secret'))
-    message.success(t('config.storedSecretCleared'))
+    if (key === 'gitlab_bot_token') {
+      syncForm(await updateConfig({ integration: { clear_gitlab_bot_token: true } }))
+      gitlabTestState.value = null
+      message.success(t('config.gitlabBotTokenCleared'))
+    } else if (key === 'oidc_client_secret') {
+      syncForm(await resetConfigKey(key))
+      message.success(t('config.oidcSecretCleared'))
+    } else if (key === 'anthropic_api_key') {
+      syncForm(await updateConfig({ runtime: { clear_anthropic_api_key: true } }))
+      message.success(t('config.anthropicApiKeyCleared'))
+    } else {
+      syncForm(await updateConfig({ runtime: { clear_alert_webhook_url: true } }))
+      message.success(t('config.alertWebhookCleared'))
+    }
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('config.failedToClearSecret'))
   } finally {
@@ -669,6 +1023,7 @@ async function handleReset() {
   try {
     syncForm(await resetConfig())
     oidcTestState.value = null
+    gitlabTestState.value = null
     message.success(t('config.resetToDefaults'))
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('config.failedToResetConfig'))
@@ -689,7 +1044,6 @@ onMounted(() => {
 <style scoped>
 .config-page {
   max-width: 1240px;
-  padding: 8px 0;
 }
 
 .config-page__hero {

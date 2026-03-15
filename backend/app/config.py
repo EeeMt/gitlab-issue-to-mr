@@ -10,10 +10,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 RuntimeConfigValue = Union[int, str, bool]
 
 PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
+    "gitlab_url": str,
+    "gitlab_bot_token": str,
     "max_concurrency": int,
     "task_timeout": int,
     "scheduler_interval": int,
     "default_target_branch": str,
+    "max_retries": int,
+    "retry_delay": int,
+    "alert_on_failure": bool,
+    "alert_webhook_url": str,
+    "anthropic_base_url": str,
+    "anthropic_api_key": str,
+    "anthropic_model": str,
     "allow_monitor_for_users": bool,
     "allow_schedule_overview_for_users": bool,
     "allow_analytics_for_users": bool,
@@ -31,7 +40,12 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "auth_admin_gitlab_groups": str,
 }
 
-SECRET_CONFIG_KEYS = {"oidc_client_secret"}
+SECRET_CONFIG_KEYS = {
+    "oidc_client_secret",
+    "gitlab_bot_token",
+    "alert_webhook_url",
+    "anthropic_api_key",
+}
 
 
 class Settings(BaseSettings):

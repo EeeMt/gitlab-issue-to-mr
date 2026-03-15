@@ -4,16 +4,29 @@
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from app.core.gitlab_client import get_accessible_projects_for_oauth_token
+from app.config import reset_runtime_config, set_runtime_config
+from app.core.gitlab_client import (
+    get_accessible_projects_for_oauth_token,
+    get_gitlab_client,
+    reset_gitlab_client,
+)
 
 
 class GitLabClientAccessTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        reset_runtime_config()
+        reset_gitlab_client()
+
+    def tearDown(self) -> None:
+        reset_gitlab_client()
+        reset_runtime_config()
+
     async def test_accessible_projects_include_membership_public_and_internal(self) -> None:
         original_async_client = httpx.AsyncClient
         responses = {
@@ -59,7 +72,9 @@ class GitLabClientAccessTests(unittest.IsolatedAsyncioTestCase):
 
         transport = httpx.MockTransport(handler)
 
-        with patch("app.core.gitlab_client.settings.gitlab_url", "https://gitlab.example.com"), patch(
+        set_runtime_config({"gitlab_url": "https://gitlab.example.com"})
+
+        with patch(
             "app.core.gitlab_client.httpx.AsyncClient",
             side_effect=lambda *args, **kwargs: original_async_client(
                 transport=transport,
@@ -77,6 +92,37 @@ class GitLabClientAccessTests(unittest.IsolatedAsyncioTestCase):
                 {"id": 4, "name": "internal-proj", "path_with_namespace": "corp/internal-proj"},
             ],
         )
+
+    def test_get_gitlab_client_recreates_singleton_when_runtime_config_changes(self) -> None:
+        created_clients: list[MagicMock] = []
+
+        def build_gitlab(base_url: str, private_token: str):
+            client = MagicMock()
+            client.base_url = base_url
+            client.private_token = private_token
+            created_clients.append(client)
+            return client
+
+        set_runtime_config({
+            "gitlab_url": "https://gitlab-one.example.com",
+            "gitlab_bot_token": "token-one",
+        })
+
+        with patch("app.core.gitlab_client.gitlab.Gitlab", side_effect=build_gitlab):
+            first = get_gitlab_client()
+            second = get_gitlab_client()
+            self.assertIs(first, second)
+
+            set_runtime_config({
+                "gitlab_url": "https://gitlab-two.example.com",
+                "gitlab_bot_token": "token-two",
+            })
+            third = get_gitlab_client()
+
+        self.assertIsNot(first, third)
+        self.assertEqual(len(created_clients), 2)
+        self.assertEqual(created_clients[0].base_url, "https://gitlab-one.example.com")
+        self.assertEqual(created_clients[1].base_url, "https://gitlab-two.example.com")
 
 
 if __name__ == "__main__":
