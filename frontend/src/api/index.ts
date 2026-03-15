@@ -248,6 +248,8 @@ export interface AuthConfig {
 export interface IntegrationConfig {
   gitlab_url: string
   gitlab_bot_token_configured: boolean
+  gitlab_admin_token_configured: boolean
+  gitlab_webhook_secret_configured: boolean
 }
 
 export interface Config {
@@ -270,9 +272,18 @@ export interface AuthConfigUpdate extends Partial<Omit<AuthConfig, 'oidc_client_
 }
 
 export interface IntegrationConfigUpdate
-  extends Partial<Omit<IntegrationConfig, 'gitlab_bot_token_configured'>> {
+  extends Partial<
+    Omit<
+      IntegrationConfig,
+      'gitlab_bot_token_configured' | 'gitlab_admin_token_configured' | 'gitlab_webhook_secret_configured'
+    >
+  > {
   gitlab_bot_token?: string
   clear_gitlab_bot_token?: boolean
+  gitlab_admin_token?: string
+  clear_gitlab_admin_token?: boolean
+  gitlab_webhook_secret?: string
+  clear_gitlab_webhook_secret?: boolean
 }
 
 export interface ConfigUpdate {
@@ -295,6 +306,15 @@ export interface GitLabConfigTestResult {
   server_version: string
   username: string
   gitlab_url: string
+}
+
+export interface GitLabProjectWebhookSetupResult {
+  action: 'created' | 'updated' | string
+  project_id: number
+  project_name: string
+  project_path_with_namespace: string
+  webhook_url: string
+  hook_id: number
 }
 
 export interface OidcDiagnosticsCheck {
@@ -504,6 +524,13 @@ export async function testGitLabConfig(
   integration: IntegrationConfigUpdate,
 ): Promise<GitLabConfigTestResult> {
   const response = await api.post('/config/gitlab/test', { integration })
+  return response.data
+}
+
+export async function setupGitLabProjectWebhook(
+  projectId: number,
+): Promise<GitLabProjectWebhookSetupResult> {
+  const response = await api.post(`/config/gitlab/projects/${projectId}/webhook`)
   return response.data
 }
 

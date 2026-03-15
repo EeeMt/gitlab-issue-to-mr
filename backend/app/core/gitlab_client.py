@@ -1,7 +1,7 @@
 """GitLab API client wrapper."""
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 import gitlab
@@ -18,16 +18,25 @@ logger = logging.getLogger(__name__)
 class GitLabClient:
     """Wrapper around python-gitlab for GitLab API operations."""
 
-    def __init__(self, settings: Optional[Settings] = None) -> None:
+    def __init__(
+        self,
+        settings: Optional[Settings] = None,
+        *,
+        private_token: Optional[str] = None,
+    ) -> None:
         """Initialize GitLab client."""
         self.settings = settings or get_effective_settings()
         self.base_url = self.settings.gitlab_url.rstrip("/")
-        self.private_token = self.settings.gitlab_bot_token
+        self.private_token = private_token if private_token is not None else self.settings.gitlab_bot_token
         self.gl: Gitlab = gitlab.Gitlab(
             self.base_url,
             private_token=self.private_token,
         )
         logger.info(f"GitLab client initialized: {self.base_url}")
+
+    @staticmethod
+    def _normalize_hook_url(url: str) -> str:
+        return url.strip().rstrip("/")
 
     def get_project(self, project_id: int) -> Project:
         """Get a project by ID.
@@ -373,6 +382,63 @@ class GitLabClient:
             per_page=100
         ))
         return [{"name": b["name"]} for b in all_branches]
+
+    def get_project_hooks(self, project_id: int) -> list[dict[str, Any]]:
+        """Get all project hooks via the GitLab API."""
+        logger.info("Fetching hooks for project: %s", project_id)
+        return list(self.gl.http_list(f"/projects/{project_id}/hooks", per_page=100))
+
+    def ensure_project_webhook(
+        self,
+        project_id: int,
+        webhook_url: str,
+        secret_token: str,
+    ) -> dict[str, Any]:
+        """Create or update the GitLab project webhook for this system."""
+        normalized_target = self._normalize_hook_url(webhook_url)
+        hook_payload = {
+            "url": webhook_url,
+            "token": secret_token,
+            "enable_ssl_verification": True,
+            "note_events": True,
+            "issues_events": False,
+            "merge_requests_events": False,
+            "push_events": False,
+            "tag_push_events": False,
+            "job_events": False,
+            "pipeline_events": False,
+            "wiki_page_events": False,
+        }
+
+        existing_hook = next(
+            (
+                hook for hook in self.get_project_hooks(project_id)
+                if self._normalize_hook_url(str(hook.get("url", ""))) == normalized_target
+            ),
+            None,
+        )
+
+        if existing_hook:
+            hook_id = int(existing_hook["id"])
+            logger.info("Updating existing webhook %s for project %s", hook_id, project_id)
+            updated_hook = self.gl.http_put(
+                f"/projects/{project_id}/hooks/{hook_id}",
+                post_data=hook_payload,
+            )
+            return {
+                "action": "updated",
+                "hook": updated_hook,
+            }
+
+        logger.info("Creating webhook for project %s", project_id)
+        created_hook = self.gl.http_post(
+            f"/projects/{project_id}/hooks",
+            post_data=hook_payload,
+        )
+        return {
+            "action": "created",
+            "hook": created_hook,
+        }
 
     def close(self) -> None:
         """Close GitLab client."""

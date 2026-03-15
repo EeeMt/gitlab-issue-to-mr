@@ -9,7 +9,13 @@ from fastapi import HTTPException
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from app.api.config import _normalize_updates, _serialize_effective_config, _validate_config_value
+from app.api.config import (
+    _build_gitlab_webhook_target_url,
+    _normalize_updates,
+    _serialize_effective_config,
+    _validate_config_value,
+    _validate_gitlab_webhook_ready,
+)
 from app.config import get_settings, reset_runtime_config, set_runtime_config
 
 
@@ -38,6 +44,8 @@ class ConfigApiHelperTests(unittest.TestCase):
             "anthropic_model": "claude-sonnet-4.5",
             "gitlab_url": "https://gitlab-configured.example.com",
             "gitlab_bot_token": "stored-gitlab-token",
+            "gitlab_admin_token": "stored-admin-token",
+            "gitlab_webhook_secret": "stored-webhook-secret",
         })
 
         response = _serialize_effective_config()
@@ -51,6 +59,8 @@ class ConfigApiHelperTests(unittest.TestCase):
         self.assertEqual(response.runtime.anthropic_model, "claude-sonnet-4.5")
         self.assertEqual(response.integration.gitlab_url, "https://gitlab-configured.example.com")
         self.assertTrue(response.integration.gitlab_bot_token_configured)
+        self.assertTrue(response.integration.gitlab_admin_token_configured)
+        self.assertTrue(response.integration.gitlab_webhook_secret_configured)
 
     def test_validate_config_value_accepts_new_runtime_fields(self) -> None:
         self.assertEqual(_validate_config_value("max_retries", 2), 2)
@@ -71,6 +81,8 @@ class ConfigApiHelperTests(unittest.TestCase):
             "https://gitlab.example.com",
         )
         self.assertEqual(_validate_config_value("gitlab_bot_token", "glpat-test"), "glpat-test")
+        self.assertEqual(_validate_config_value("gitlab_admin_token", "glpat-admin"), "glpat-admin")
+        self.assertEqual(_validate_config_value("gitlab_webhook_secret", "secret-123"), "secret-123")
 
     def test_validate_config_value_rejects_invalid_retry_and_url_values(self) -> None:
         with self.assertRaises(HTTPException):
@@ -91,11 +103,19 @@ class ConfigApiHelperTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             _validate_config_value("gitlab_bot_token", " ")
 
+        with self.assertRaises(HTTPException):
+            _validate_config_value("gitlab_admin_token", " ")
+
+        with self.assertRaises(HTTPException):
+            _validate_config_value("gitlab_webhook_secret", " ")
+
     def test_normalize_updates_handles_runtime_clear_flags(self) -> None:
         normalized = _normalize_updates({
             "clear_alert_webhook_url": 1,
             "clear_anthropic_api_key": 0,
             "clear_gitlab_bot_token": 1,
+            "clear_gitlab_admin_token": 1,
+            "clear_gitlab_webhook_secret": 0,
         })
 
         self.assertEqual(
@@ -104,8 +124,43 @@ class ConfigApiHelperTests(unittest.TestCase):
                 "clear_alert_webhook_url": True,
                 "clear_anthropic_api_key": False,
                 "clear_gitlab_bot_token": True,
+                "clear_gitlab_admin_token": True,
+                "clear_gitlab_webhook_secret": False,
             },
         )
+
+    def test_validate_gitlab_webhook_ready_builds_target_url(self) -> None:
+        set_runtime_config({
+            "gitlab_url": "https://gitlab.example.com",
+            "gitlab_admin_token": "glpat-admin",
+            "gitlab_webhook_secret": "secret-123",
+        })
+        settings = get_settings().model_copy(update={
+            "backend_url": "https://bot.example.com/",
+            "gitlab_url": "https://gitlab.example.com",
+            "gitlab_admin_token": "glpat-admin",
+            "gitlab_webhook_secret": "secret-123",
+        })
+
+        self.assertEqual(
+            _validate_gitlab_webhook_ready(settings),
+            "https://bot.example.com/api/webhook/gitlab",
+        )
+        self.assertEqual(
+            _build_gitlab_webhook_target_url(settings),
+            "https://bot.example.com/api/webhook/gitlab",
+        )
+
+    def test_validate_gitlab_webhook_ready_rejects_missing_fields(self) -> None:
+        settings = get_settings().model_copy(update={
+            "backend_url": "https://bot.example.com",
+            "gitlab_url": "https://gitlab.example.com",
+            "gitlab_admin_token": "",
+            "gitlab_webhook_secret": "",
+        })
+
+        with self.assertRaises(HTTPException):
+            _validate_gitlab_webhook_ready(settings)
 
 
 if __name__ == "__main__":

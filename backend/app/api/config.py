@@ -71,6 +71,8 @@ class AuthConfigSection(BaseModel):
 class IntegrationConfigSection(BaseModel):
     gitlab_url: str
     gitlab_bot_token_configured: bool
+    gitlab_admin_token_configured: bool
+    gitlab_webhook_secret_configured: bool
 
 
 class ConfigResponse(BaseModel):
@@ -118,6 +120,10 @@ class IntegrationConfigUpdate(BaseModel):
     gitlab_url: Optional[str] = None
     gitlab_bot_token: Optional[str] = None
     clear_gitlab_bot_token: bool = False
+    gitlab_admin_token: Optional[str] = None
+    clear_gitlab_admin_token: bool = False
+    gitlab_webhook_secret: Optional[str] = None
+    clear_gitlab_webhook_secret: bool = False
 
 
 class ConfigUpdate(BaseModel):
@@ -148,6 +154,15 @@ class GitLabConfigTestResponse(BaseModel):
     server_version: str
     username: str
     gitlab_url: str
+
+
+class GitLabProjectWebhookSetupResponse(BaseModel):
+    action: str
+    project_id: int
+    project_name: str
+    project_path_with_namespace: str
+    webhook_url: str
+    hook_id: int
 
 
 class OIDCDiagnosticsCheck(BaseModel):
@@ -215,6 +230,8 @@ def _serialize_effective_config() -> ConfigResponse:
         integration=IntegrationConfigSection(
             gitlab_url=settings.gitlab_url,
             gitlab_bot_token_configured=bool(settings.gitlab_bot_token),
+            gitlab_admin_token_configured=bool(settings.gitlab_admin_token),
+            gitlab_webhook_secret_configured=bool(settings.gitlab_webhook_secret),
         ),
     )
 
@@ -280,6 +297,22 @@ def _validate_config_value(key: str, value: object) -> object:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="gitlab_bot_token cannot be empty",
+            )
+        return value.strip()
+
+    if key == "gitlab_admin_token":
+        if not isinstance(value, str) or not value.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="gitlab_admin_token cannot be empty",
+            )
+        return value.strip()
+
+    if key == "gitlab_webhook_secret":
+        if not isinstance(value, str) or not value.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="gitlab_webhook_secret cannot be empty",
             )
         return value.strip()
 
@@ -413,6 +446,8 @@ def _normalize_updates(raw_updates: dict[str, Any]) -> dict[str, Any]:
             "clear_alert_webhook_url",
             "clear_anthropic_api_key",
             "clear_gitlab_bot_token",
+            "clear_gitlab_admin_token",
+            "clear_gitlab_webhook_secret",
         }:
             normalized[key] = bool(value)
             continue
@@ -471,6 +506,32 @@ def _build_oidc_diagnostics_warnings(settings: Settings) -> list[str]:
     return warnings
 
 
+def _build_gitlab_webhook_target_url(settings: Settings) -> str:
+    backend_url = settings.backend_url.strip()
+    if not backend_url or not _is_valid_http_url(backend_url):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="backend_url must be configured as a valid http/https URL before setting up GitLab webhooks.",
+        )
+    return f"{backend_url.rstrip('/')}/api/webhook/gitlab"
+
+
+def _validate_gitlab_webhook_ready(settings: Settings) -> str:
+    missing: list[str] = []
+    if not settings.gitlab_url.strip():
+        missing.append("gitlab_url")
+    if not settings.gitlab_admin_token.strip():
+        missing.append("gitlab_admin_token")
+    if not settings.gitlab_webhook_secret.strip():
+        missing.append("gitlab_webhook_secret")
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"GitLab webhook setup requires these configured fields: {', '.join(missing)}",
+        )
+    return _build_gitlab_webhook_target_url(settings)
+
+
 def _build_endpoint_checks(discovery: dict[str, Any]) -> list[OIDCDiagnosticsCheck]:
     checks: list[OIDCDiagnosticsCheck] = []
     for key, label in (
@@ -523,6 +584,8 @@ async def update_config(
     clear_alert_webhook = bool(runtime_updates.pop("clear_alert_webhook_url", False))
     clear_anthropic_api_key = bool(runtime_updates.pop("clear_anthropic_api_key", False))
     clear_gitlab_bot_token = bool(integration_updates.pop("clear_gitlab_bot_token", False))
+    clear_gitlab_admin_token = bool(integration_updates.pop("clear_gitlab_admin_token", False))
+    clear_gitlab_webhook_secret = bool(integration_updates.pop("clear_gitlab_webhook_secret", False))
     preview_updates = {**runtime_updates, **auth_updates, **integration_updates}
     if clear_secret and "oidc_client_secret" not in auth_updates:
         preview_updates["oidc_client_secret"] = get_settings().oidc_client_secret
@@ -532,6 +595,10 @@ async def update_config(
         preview_updates["anthropic_api_key"] = get_settings().anthropic_api_key
     if clear_gitlab_bot_token and "gitlab_bot_token" not in integration_updates:
         preview_updates["gitlab_bot_token"] = get_settings().gitlab_bot_token
+    if clear_gitlab_admin_token and "gitlab_admin_token" not in integration_updates:
+        preview_updates["gitlab_admin_token"] = get_settings().gitlab_admin_token
+    if clear_gitlab_webhook_secret and "gitlab_webhook_secret" not in integration_updates:
+        preview_updates["gitlab_webhook_secret"] = get_settings().gitlab_webhook_secret
 
     preview_settings = _build_preview_settings(preview_updates)
     if preview_settings.oidc_enabled:
@@ -565,6 +632,14 @@ async def update_config(
         if clear_gitlab_bot_token and "gitlab_bot_token" not in integration_updates:
             await reset_runtime_config_override(db, "gitlab_bot_token")
             logger.info("Cleared stored GitLab bot token")
+
+        if clear_gitlab_admin_token and "gitlab_admin_token" not in integration_updates:
+            await reset_runtime_config_override(db, "gitlab_admin_token")
+            logger.info("Cleared stored GitLab admin token")
+
+        if clear_gitlab_webhook_secret and "gitlab_webhook_secret" not in integration_updates:
+            await reset_runtime_config_override(db, "gitlab_webhook_secret")
+            logger.info("Cleared stored GitLab webhook secret")
 
         await load_runtime_config_from_db(db)
     except ConfigEncryptionError as exc:
@@ -637,6 +712,45 @@ async def test_gitlab_config(
         server_version=str(version_payload.get("version", "")),
         username=str(user_payload.get("username", "")),
         gitlab_url=preview_settings.gitlab_url,
+    )
+
+
+@router.post("/config/gitlab/projects/{project_id}/webhook", response_model=GitLabProjectWebhookSetupResponse)
+async def setup_gitlab_project_webhook(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_admin_user),
+):
+    """Create or update the GitLab webhook for one project."""
+    await load_runtime_config_from_db(db)
+    settings = get_effective_settings()
+    webhook_url = _validate_gitlab_webhook_ready(settings)
+
+    client = GitLabClient(settings=settings, private_token=settings.gitlab_admin_token)
+    try:
+        project = await asyncio.to_thread(client.get_project, project_id)
+        result = await asyncio.to_thread(
+            client.ensure_project_webhook,
+            project_id,
+            webhook_url,
+            settings.gitlab_webhook_secret,
+        )
+    except (GitlabError, httpx.HTTPError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"GitLab webhook setup failed: {exc}",
+        ) from exc
+    finally:
+        client.close()
+
+    hook_payload = result["hook"]
+    return GitLabProjectWebhookSetupResponse(
+        action=str(result["action"]),
+        project_id=project_id,
+        project_name=str(getattr(project, "name", "") or ""),
+        project_path_with_namespace=str(getattr(project, "path_with_namespace", "") or ""),
+        webhook_url=str(hook_payload.get("url", webhook_url)),
+        hook_id=int(hook_payload["id"]),
     )
 
 

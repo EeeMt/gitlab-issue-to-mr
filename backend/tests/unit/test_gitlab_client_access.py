@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from app.config import reset_runtime_config, set_runtime_config
 from app.core.gitlab_client import (
+    GitLabClient,
     get_accessible_projects_for_oauth_token,
     get_gitlab_client,
     reset_gitlab_client,
@@ -123,6 +124,43 @@ class GitLabClientAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(created_clients), 2)
         self.assertEqual(created_clients[0].base_url, "https://gitlab-one.example.com")
         self.assertEqual(created_clients[1].base_url, "https://gitlab-two.example.com")
+
+    def test_ensure_project_webhook_creates_new_hook_when_missing(self) -> None:
+        with patch("app.core.gitlab_client.gitlab.Gitlab", return_value=MagicMock()) as mock_gitlab:
+            client = GitLabClient(private_token="glpat-admin")
+
+        client.gl.http_list.return_value = []
+        client.gl.http_post.return_value = {"id": 99, "url": "https://bot.example.com/api/webhook/gitlab"}
+
+        result = client.ensure_project_webhook(
+            7,
+            "https://bot.example.com/api/webhook/gitlab",
+            "secret-123",
+        )
+
+        self.assertEqual(result["action"], "created")
+        client.gl.http_post.assert_called_once()
+        self.assertEqual(mock_gitlab.call_args.kwargs["private_token"], "glpat-admin")
+
+    def test_ensure_project_webhook_updates_matching_hook(self) -> None:
+        with patch("app.core.gitlab_client.gitlab.Gitlab", return_value=MagicMock()):
+            client = GitLabClient(private_token="glpat-admin")
+
+        client.gl.http_list.return_value = [
+            {"id": 12, "url": "https://bot.example.com/api/webhook/gitlab/"},
+            {"id": 13, "url": "https://other.example.com/api/webhook/gitlab"},
+        ]
+        client.gl.http_put.return_value = {"id": 12, "url": "https://bot.example.com/api/webhook/gitlab"}
+
+        result = client.ensure_project_webhook(
+            7,
+            "https://bot.example.com/api/webhook/gitlab",
+            "secret-123",
+        )
+
+        self.assertEqual(result["action"], "updated")
+        client.gl.http_put.assert_called_once()
+        client.gl.http_post.assert_not_called()
 
 
 if __name__ == "__main__":

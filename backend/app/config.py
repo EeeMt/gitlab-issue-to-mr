@@ -12,6 +12,8 @@ RuntimeConfigValue = Union[int, str, bool]
 PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "gitlab_url": str,
     "gitlab_bot_token": str,
+    "gitlab_admin_token": str,
+    "gitlab_webhook_secret": str,
     "max_concurrency": int,
     "task_timeout": int,
     "scheduler_interval": int,
@@ -43,6 +45,8 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
 SECRET_CONFIG_KEYS = {
     "oidc_client_secret",
     "gitlab_bot_token",
+    "gitlab_admin_token",
+    "gitlab_webhook_secret",
     "alert_webhook_url",
     "anthropic_api_key",
 }
@@ -61,6 +65,7 @@ class Settings(BaseSettings):
     # GitLab Configuration
     gitlab_url: str = Field(default="https://gitlab.example.com")
     gitlab_bot_token: str = Field(default="")
+    gitlab_admin_token: str = Field(default="")
     gitlab_webhook_secret: str = Field(default="")
 
     # Claude CLI Configuration (passed to Worker)

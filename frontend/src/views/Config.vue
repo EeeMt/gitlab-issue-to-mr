@@ -341,8 +341,8 @@
                 </template>
 
                 <n-form ref="gitlabFormRef" :model="formValue" :rules="gitlabRules" label-placement="top" class="config-section-form">
-                <div class="config-form__section">
-                   <div class="config-form__section-title">{{ t('config.gitlabConnection') }}</div>
+                 <div class="config-form__section">
+                    <div class="config-form__section-title">{{ t('config.gitlabConnection') }}</div>
                   <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                     <n-gi>
                        <n-form-item :label="t('config.gitlabUrl')" path="gitlab_url">
@@ -382,21 +382,107 @@
                         <template #feedback>
                            {{ t('config.gitlabBotTokenHint') }}
                         </template>
-                      </n-form-item>
-                    </n-gi>
-                  </n-grid>
-                </div>
+                       </n-form-item>
+                     </n-gi>
+                   </n-grid>
+                 </div>
 
-                <n-alert
-                  v-if="gitlabTestState"
+                 <div class="config-form__section">
+                    <div class="config-form__section-title">{{ t('config.webhookAutomation') }}</div>
+                   <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                     <n-gi>
+                        <n-form-item :label="t('config.gitlabAdminTokenStatus')">
+                         <n-tag :type="formValue.gitlab_admin_token_configured ? 'success' : 'warning'" round>
+                            {{ formValue.gitlab_admin_token_configured ? t('config.configured') : t('config.missing') }}
+                         </n-tag>
+                         <template #feedback>
+                            {{ t('config.gitlabAdminTokenStatusHint') }}
+                         </template>
+                       </n-form-item>
+                     </n-gi>
+                     <n-gi>
+                        <n-form-item :label="t('config.gitlabWebhookSecretStatus')">
+                         <n-tag :type="formValue.gitlab_webhook_secret_configured ? 'success' : 'warning'" round>
+                            {{ formValue.gitlab_webhook_secret_configured ? t('config.configured') : t('config.missing') }}
+                         </n-tag>
+                         <template #feedback>
+                            {{ t('config.gitlabWebhookSecretStatusHint') }}
+                         </template>
+                       </n-form-item>
+                     </n-gi>
+                     <n-gi :span="isMobile ? 1 : 2">
+                        <n-form-item :label="t('config.gitlabAdminToken')">
+                         <n-input
+                           v-model:value="formValue.gitlab_admin_token_input"
+                           type="password"
+                           show-password-on="click"
+                           :placeholder="
+                             formValue.gitlab_admin_token_configured
+                               ? t('config.configuredEnterNew')
+                               : t('config.enterGitlabAdminToken')
+                           "
+                           class="config-form__input"
+                         />
+                         <template #feedback>
+                            {{ t('config.gitlabAdminTokenHint') }}
+                         </template>
+                       </n-form-item>
+                     </n-gi>
+                     <n-gi :span="isMobile ? 1 : 2">
+                        <n-form-item :label="t('config.gitlabWebhookSecret')">
+                         <n-input
+                           v-model:value="formValue.gitlab_webhook_secret_input"
+                           type="password"
+                           show-password-on="click"
+                           :placeholder="
+                             formValue.gitlab_webhook_secret_configured
+                               ? t('config.configuredEnterNew')
+                               : t('config.enterGitlabWebhookSecret')
+                           "
+                           class="config-form__input"
+                         />
+                         <template #feedback>
+                            {{ t('config.gitlabWebhookSecretHint') }}
+                         </template>
+                       </n-form-item>
+                     </n-gi>
+                     <n-gi :span="isMobile ? 1 : 2">
+                        <n-form-item :label="t('config.webhookProject')">
+                         <n-select
+                           v-model:value="selectedWebhookProjectId"
+                           :options="projectOptions"
+                           :loading="projectsLoading"
+                           :disabled="projectsLoading || !projectOptions.length"
+                           filterable
+                           clearable
+                           :placeholder="t('config.selectGitlabProject')"
+                         />
+                         <template #feedback>
+                            {{ t('config.webhookProjectHint') }}
+                         </template>
+                       </n-form-item>
+                     </n-gi>
+                   </n-grid>
+                 </div>
+
+                 <n-alert
+                   v-if="gitlabTestState"
                   :type="gitlabTestState.type"
                   :show-icon="false"
                   class="config-actions__alert"
-                >
-                  {{ gitlabTestState.message }}
-                </n-alert>
-                <div class="config-card-actions">
-                  <n-space :size="12" wrap>
+                 >
+                   {{ gitlabTestState.message }}
+                 </n-alert>
+                 <n-alert
+                   v-if="webhookSetupState"
+                   :type="webhookSetupState.type"
+                   :show-icon="false"
+                   class="config-actions__alert"
+                 >
+                   {{ webhookSetupState.message }}
+                 </n-alert>
+                 <div class="config-card-actions">
+                   <n-space :size="12" wrap>
                     <n-button
                       type="primary"
                       @click="handleSaveSection('gitlab')"
@@ -419,14 +505,35 @@
                     >
                       {{ t('config.testGitlabConnection') }}
                     </n-button>
-                    <n-button
-                      @click="handleClearSecret('gitlab_bot_token')"
-                      :disabled="isSectionBusy('gitlab') || !formValue.gitlab_bot_token_configured"
-                    >
-                      {{ t('config.clearGitlabBotToken') }}
-                    </n-button>
-                  </n-space>
-                </div>
+                     <n-button
+                       @click="handleClearSecret('gitlab_bot_token')"
+                       :disabled="isSectionBusy('gitlab') || !formValue.gitlab_bot_token_configured"
+                     >
+                       {{ t('config.clearGitlabBotToken') }}
+                     </n-button>
+                     <n-button
+                       @click="handleClearSecret('gitlab_admin_token')"
+                       :disabled="isSectionBusy('gitlab') || !formValue.gitlab_admin_token_configured"
+                     >
+                       {{ t('config.clearGitlabAdminToken') }}
+                     </n-button>
+                     <n-button
+                       @click="handleClearSecret('gitlab_webhook_secret')"
+                       :disabled="isSectionBusy('gitlab') || !formValue.gitlab_webhook_secret_configured"
+                     >
+                       {{ t('config.clearGitlabWebhookSecret') }}
+                     </n-button>
+                     <n-button
+                       type="primary"
+                       secondary
+                       @click="handleSetupProjectWebhook"
+                       :loading="webhookSetupLoading"
+                       :disabled="isSectionBusy('gitlab') || selectedWebhookProjectId === null"
+                     >
+                       {{ t('config.setupProjectWebhook') }}
+                     </n-button>
+                   </n-space>
+                 </div>
                 </n-form>
             </n-card>
 
@@ -700,15 +807,19 @@ import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import {
   getConfig,
+  getProjects,
   resetConfig,
   resetConfigKey,
+  setupGitLabProjectWebhook,
   testGitLabConfig,
   testOidcConfig,
   updateConfig,
   type AuthConfigUpdate,
   type Config,
   type ConfigUpdate,
+  type GitLabProjectWebhookSetupResult,
   type IntegrationConfigUpdate,
+  type Project,
   type RuntimeConfigUpdate
 } from '../api'
 
@@ -733,6 +844,10 @@ type ConfigForm = {
   gitlab_url: string
   gitlab_bot_token_configured: boolean
   gitlab_bot_token_input: string
+  gitlab_admin_token_configured: boolean
+  gitlab_admin_token_input: string
+  gitlab_webhook_secret_configured: boolean
+  gitlab_webhook_secret_input: string
   oidc_enabled: boolean
   oidc_issuer_url: string
   oidc_client_id: string
@@ -774,9 +889,14 @@ const sectionSaving = reactive<Record<ConfigSectionKey, boolean>>({
   session: false
 })
 const gitlabTesting = ref(false)
+const webhookSetupLoading = ref(false)
+const projectsLoading = ref(false)
 const oidcTesting = ref(false)
 const oidcTestState = ref<TestState | null>(null)
 const gitlabTestState = ref<TestState | null>(null)
+const webhookSetupState = ref<TestState | null>(null)
+const availableProjects = ref<Project[]>([])
+const selectedWebhookProjectId = ref<number | null>(null)
 
 const sectionKeys: ConfigSectionKey[] = ['runtime', 'sharedPages', 'gitlab', 'oidc', 'session']
 
@@ -803,7 +923,9 @@ const sharedPagesSectionFields: readonly (keyof ConfigForm)[] = [
 
 const gitlabSectionFields: readonly (keyof ConfigForm)[] = [
   'gitlab_url',
-  'gitlab_bot_token_input'
+  'gitlab_bot_token_input',
+  'gitlab_admin_token_input',
+  'gitlab_webhook_secret_input'
 ]
 
 const oidcSectionFields: readonly (keyof ConfigForm)[] = [
@@ -837,6 +959,13 @@ const sameSiteOptions = computed(() => [
   { label: 'None', value: 'none' }
 ])
 
+const projectOptions = computed(() =>
+  availableProjects.value.map((project) => ({
+    label: project.path_with_namespace,
+    value: project.id
+  }))
+)
+
 const formValue = ref<ConfigForm>({
   max_concurrency: 3,
   task_timeout: 1800,
@@ -858,6 +987,10 @@ const formValue = ref<ConfigForm>({
   gitlab_url: '',
   gitlab_bot_token_configured: false,
   gitlab_bot_token_input: '',
+  gitlab_admin_token_configured: false,
+  gitlab_admin_token_input: '',
+  gitlab_webhook_secret_configured: false,
+  gitlab_webhook_secret_input: '',
   oidc_enabled: false,
   oidc_issuer_url: '',
   oidc_client_id: '',
@@ -1022,6 +1155,10 @@ function syncForm(config: Config) {
     gitlab_url: config.integration.gitlab_url,
     gitlab_bot_token_configured: config.integration.gitlab_bot_token_configured,
     gitlab_bot_token_input: '',
+    gitlab_admin_token_configured: config.integration.gitlab_admin_token_configured,
+    gitlab_admin_token_input: '',
+    gitlab_webhook_secret_configured: config.integration.gitlab_webhook_secret_configured,
+    gitlab_webhook_secret_input: '',
     oidc_enabled: config.auth.oidc_enabled,
     oidc_issuer_url: config.auth.oidc_issuer_url,
     oidc_client_id: config.auth.oidc_client_id,
@@ -1059,6 +1196,7 @@ function isSectionBusy(section: ConfigSectionKey) {
     pageActionLoading.value ||
     anySectionSaving.value ||
     (section === 'gitlab' && gitlabTesting.value) ||
+    (section === 'gitlab' && webhookSetupLoading.value) ||
     (section === 'oidc' && oidcTesting.value)
   )
 }
@@ -1114,6 +1252,14 @@ function buildGitlabSectionUpdate(): IntegrationConfigUpdate {
     update.gitlab_bot_token = formValue.value.gitlab_bot_token_input.trim()
   }
 
+  if (formValue.value.gitlab_admin_token_input.trim()) {
+    update.gitlab_admin_token = formValue.value.gitlab_admin_token_input.trim()
+  }
+
+  if (formValue.value.gitlab_webhook_secret_input.trim()) {
+    update.gitlab_webhook_secret = formValue.value.gitlab_webhook_secret_input.trim()
+  }
+
   return update
 }
 
@@ -1163,6 +1309,7 @@ function resetSection(section: ConfigSectionKey) {
 
   if (section === 'gitlab') {
     gitlabTestState.value = null
+    webhookSetupState.value = null
   }
 
   if (section === 'oidc') {
@@ -1183,6 +1330,17 @@ async function fetchConfig() {
   }
 }
 
+async function fetchProjects() {
+  projectsLoading.value = true
+  try {
+    availableProjects.value = await getProjects()
+  } catch (error) {
+    availableProjects.value = []
+  } finally {
+    projectsLoading.value = false
+  }
+}
+
 async function handleSaveSection(section: ConfigSectionKey) {
   const valid = await validateSection(section)
   if (!valid) {
@@ -1194,6 +1352,8 @@ async function handleSaveSection(section: ConfigSectionKey) {
     syncForm(await updateConfig(buildSectionPayload(section)))
     if (section === 'gitlab') {
       gitlabTestState.value = null
+      webhookSetupState.value = null
+      await fetchProjects()
     }
     if (section === 'oidc') {
       oidcTestState.value = null
@@ -1249,11 +1409,50 @@ async function handleTestOidc() {
   }
 }
 
+function buildWebhookSetupMessage(result: GitLabProjectWebhookSetupResult): string {
+  const projectLabel = result.project_path_with_namespace || result.project_name || `#${result.project_id}`
+  if (result.action === 'created') {
+    return t('config.projectWebhookCreated', { project: projectLabel, hookId: result.hook_id })
+  }
+  return t('config.projectWebhookUpdated', { project: projectLabel, hookId: result.hook_id })
+}
+
+async function handleSetupProjectWebhook() {
+  if (selectedWebhookProjectId.value === null) {
+    message.error(t('config.selectGitlabProject'))
+    return
+  }
+
+  webhookSetupLoading.value = true
+  try {
+    const result = await setupGitLabProjectWebhook(selectedWebhookProjectId.value)
+    const successMessage = buildWebhookSetupMessage(result)
+    webhookSetupState.value = { type: 'success', message: successMessage }
+    message.success(successMessage)
+  } catch (error: any) {
+    const detail = error?.response?.data?.detail || t('config.projectWebhookSetupFailed')
+    webhookSetupState.value = { type: 'error', message: detail }
+    message.error(detail)
+  } finally {
+    webhookSetupLoading.value = false
+  }
+}
+
 async function handleClearSecret(
-  key: 'oidc_client_secret' | 'anthropic_api_key' | 'alert_webhook_url' | 'gitlab_bot_token',
+  key:
+    | 'oidc_client_secret'
+    | 'anthropic_api_key'
+    | 'alert_webhook_url'
+    | 'gitlab_bot_token'
+    | 'gitlab_admin_token'
+    | 'gitlab_webhook_secret',
 ) {
   const section: ConfigSectionKey =
-    key === 'gitlab_bot_token' ? 'gitlab' : key === 'oidc_client_secret' ? 'oidc' : 'runtime'
+    key === 'gitlab_bot_token' || key === 'gitlab_admin_token' || key === 'gitlab_webhook_secret'
+      ? 'gitlab'
+      : key === 'oidc_client_secret'
+        ? 'oidc'
+        : 'runtime'
 
   sectionSaving[section] = true
   try {
@@ -1261,6 +1460,14 @@ async function handleClearSecret(
       syncForm(await updateConfig({ integration: { clear_gitlab_bot_token: true } }))
       gitlabTestState.value = null
       message.success(t('config.gitlabBotTokenCleared'))
+    } else if (key === 'gitlab_admin_token') {
+      syncForm(await updateConfig({ integration: { clear_gitlab_admin_token: true } }))
+      webhookSetupState.value = null
+      message.success(t('config.gitlabAdminTokenCleared'))
+    } else if (key === 'gitlab_webhook_secret') {
+      syncForm(await updateConfig({ integration: { clear_gitlab_webhook_secret: true } }))
+      webhookSetupState.value = null
+      message.success(t('config.gitlabWebhookSecretCleared'))
     } else if (key === 'oidc_client_secret') {
       syncForm(await resetConfigKey(key))
       message.success(t('config.oidcSecretCleared'))
@@ -1298,6 +1505,7 @@ function handleReload() {
 
 onMounted(() => {
   fetchConfig()
+  fetchProjects()
 })
 </script>
 
