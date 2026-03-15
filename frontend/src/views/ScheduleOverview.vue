@@ -190,6 +190,9 @@
                 <span class="schedule-chip schedule-chip--active">
                   {{ t('scheduleOverview.selectedHint') }}
                 </span>
+                <span v-if="!canEditScheduleOverview" class="schedule-chip schedule-chip--readonly">
+                  {{ t('scheduleOverview.adminOnlyEditing') }}
+                </span>
                 <n-button quaternary @click="clearSelectedWindow">
                   {{ t('scheduleOverview.clearSelectedWindow') }}
                 </n-button>
@@ -203,6 +206,10 @@
               <div class="slot-detail__meta">
                 {{ t('scheduleOverview.slotTaskCount', { count: selectedWindowTasks.length }) }}
               </div>
+            </div>
+
+            <div v-if="!canEditScheduleOverview" class="slot-detail__notice">
+              {{ t('scheduleOverview.adminOnlyEditingDescription') }}
             </div>
 
             <div v-if="selectedWindowTasks.length" class="slot-detail__list">
@@ -233,7 +240,7 @@
                 </div>
 
                 <div class="slot-task-card__actions">
-                  <template v-if="canRescheduleTask(task)">
+                  <template v-if="canRescheduleTask(task) && canEditScheduleOverview">
                     <n-date-picker
                       v-model:value="scheduleDrafts[task.id]"
                       type="datetime"
@@ -255,7 +262,11 @@
                     </n-button>
                   </template>
                   <div v-else class="slot-task-card__readonly">
-                    {{ t('scheduleOverview.onlyPendingTasksEditable') }}
+                    {{
+                      !canEditScheduleOverview
+                        ? t('scheduleOverview.adminOnlyEditingDescription')
+                        : t('scheduleOverview.onlyPendingTasksEditable')
+                    }}
                   </div>
                 </div>
               </div>
@@ -311,6 +322,7 @@ import {
 import { useWindowSize } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { authState, isAdmin, initializeAuth } from '../auth'
 import { getScheduledTasks, rescheduleTask, type Task } from '../api'
 import { formatDateTimeUtc8Compact, formatMonthDayTimeUtc8, formatMonthDayWeekdayUtc8, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
 
@@ -367,6 +379,8 @@ const pagination = {
   pageSize: 20,
   responsive: true,
 }
+
+const canEditScheduleOverview = computed(() => !authState.oidcEnabled || isAdmin.value)
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
   pending: 'default',
@@ -851,6 +865,7 @@ async function handleTaskReschedule(task: Task) {
 }
 
 onMounted(() => {
+  void initializeAuth()
   fetchData()
   pollTimer = window.setInterval(() => {
     if (document.visibilityState !== 'visible') return
@@ -982,6 +997,11 @@ onBeforeUnmount(() => {
 .schedule-chip--active {
   background: rgba(24, 160, 88, 0.12);
   color: rgba(24, 160, 88, 0.95);
+}
+
+.schedule-chip--readonly {
+  background: rgba(240, 160, 32, 0.12);
+  color: rgba(163, 94, 12, 0.92);
 }
 
 .schedule-section-tip {
@@ -1204,11 +1224,19 @@ onBeforeUnmount(() => {
 
 .slot-detail__meta,
 .slot-detail__empty,
+.slot-detail__notice,
 .slot-task-card__time,
 .slot-task-card__branch,
 .slot-task-card__readonly {
   font-size: 13px;
   color: rgba(15, 23, 42, 0.6);
+}
+
+.slot-detail__notice {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(240, 160, 32, 0.08);
+  color: rgba(163, 94, 12, 0.92);
 }
 
 .slot-detail__list {

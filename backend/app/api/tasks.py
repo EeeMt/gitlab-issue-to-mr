@@ -147,6 +147,41 @@ def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = Non
     }
 
 
+def _can_manage_task(task: Task, current_user: Optional[User]) -> bool:
+    """Return whether the current user may operate on a task."""
+    settings = get_effective_settings()
+    if not settings.oidc_enabled:
+        return True
+
+    if current_user is None:
+        return False
+
+    if current_user.platform_role == "platform_admin":
+        return True
+
+    if task.initiator_user_id is not None and task.initiator_user_id == current_user.id:
+        return True
+
+    if (
+        task.initiator_gitlab_user_id is not None
+        and task.initiator_gitlab_user_id == current_user.gitlab_user_id
+    ):
+        return True
+
+    return False
+
+
+def _require_task_operator(task: Task, current_user: Optional[User]) -> None:
+    """Ensure the current user may operate on a task."""
+    if _can_manage_task(task, current_user):
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You may only operate on your own tasks unless you are an admin",
+    )
+
+
 @router.get("/tasks")
 async def list_tasks(
     status: Optional[str] = None,
@@ -416,6 +451,7 @@ async def update_task_stats(
 async def cancel_task(
     task_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Cancel a task.
@@ -436,6 +472,7 @@ async def cancel_task(
             detail=f"Task {task_id} not found",
         )
     require_project_access(task.project_id, access_scope)
+    _require_task_operator(task, current_user)
 
     if task.status not in [TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING]:
         raise HTTPException(
@@ -457,6 +494,7 @@ async def cancel_task(
 async def retry_task(
     task_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Retry a failed or cancelled task.
@@ -477,6 +515,7 @@ async def retry_task(
             detail=f"Task {task_id} not found",
         )
     require_project_access(task.project_id, access_scope)
+    _require_task_operator(task, current_user)
 
     if task.status not in [TaskStatus.FAILED, TaskStatus.CANCELLED]:
         raise HTTPException(
@@ -517,6 +556,7 @@ class RescheduleTaskRequest(BaseModel):
 async def execute_task(
     task_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Trigger immediate execution of a pending task.
@@ -537,6 +577,7 @@ async def execute_task(
             detail=f"Task {task_id} not found",
         )
     require_project_access(task.project_id, access_scope)
+    _require_task_operator(task, current_user)
 
     if task.status != TaskStatus.PENDING:
         raise HTTPException(
@@ -558,6 +599,7 @@ async def reschedule_task(
     task_id: int,
     request: RescheduleTaskRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Update the scheduled execution time for an existing pending scheduled task."""
@@ -570,6 +612,7 @@ async def reschedule_task(
             detail=f"Task {task_id} not found",
         )
     require_project_access(task.project_id, access_scope)
+    _require_task_operator(task, current_user)
 
     if task.status != TaskStatus.PENDING:
         raise HTTPException(

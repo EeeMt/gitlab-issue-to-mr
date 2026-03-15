@@ -133,6 +133,8 @@ const en = {
     rescheduleTask: 'Reschedule Task',
     rescheduleTaskDescription:
       'Update the reserved execution time for a pending scheduled task without recreating it.',
+    actionPermissionHint:
+      'Only admins or the task owner can run actions for this task. Other users may review the details but cannot operate it.',
     selectRescheduleTime: 'Select a new scheduled date and time',
     saveScheduledTime: 'Save scheduled time',
     executeNow: 'Execute Now',
@@ -416,6 +418,9 @@ const en = {
     tapToInspectShort: 'Inspect',
     chartTip: 'Click any non-empty hour column to inspect that time slot.',
     heatmapTip: 'Click any colored heatmap cell to inspect and adjust the tasks in that hour.',
+    adminOnlyEditing: 'Admin-only editing',
+    adminOnlyEditingDescription:
+      'Only admins can adjust task schedules from Schedule Overview. You can still inspect the tasks in this time window.',
     slotTaskCount: '{count} task(s) in this window',
     currentSchedule: 'Current schedule',
     selectNewTime: 'Select a new scheduled date and time',

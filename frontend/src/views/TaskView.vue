@@ -102,6 +102,10 @@
                     {{ t('taskView.actionsIntro') }}
                   </div>
 
+                  <div v-if="hasActions && !canManageTask" class="task-actions__permission-note">
+                    {{ t('taskView.actionPermissionHint') }}
+                  </div>
+
                   <div
                     v-if="task && ['pending', 'queued', 'running'].includes(task.status)"
                     class="task-actions__item task-actions__item--error"
@@ -119,6 +123,7 @@
                       round
                       @click="handleCancel"
                       :loading="actionLoading"
+                      :disabled="!canManageTask"
                     >
                       {{ t('common.cancel') }}
                     </n-button>
@@ -141,6 +146,7 @@
                       round
                       @click="handleRetry"
                       :loading="actionLoading"
+                      :disabled="!canManageTask"
                     >
                       {{ t('common.retry') }}
                     </n-button>
@@ -163,7 +169,8 @@
                         :placeholder="t('taskView.selectRescheduleTime')"
                         :is-date-disabled="isScheduledDateDisabled"
                         :is-time-disabled="isScheduledTimeDisabled"
-                        style="width: min(100%, 280px)"
+                        style="width: min(100%, 360px)"
+                        :disabled="!canManageTask"
                       />
                       <n-button
                         type="info"
@@ -172,7 +179,7 @@
                         round
                         @click="handleReschedule"
                         :loading="actionLoading"
-                        :disabled="rescheduleDatetime === null"
+                        :disabled="!canManageTask || rescheduleDatetime === null"
                       >
                         {{ t('taskView.saveScheduledTime') }}
                       </n-button>
@@ -196,6 +203,7 @@
                       round
                       @click="handleExecute"
                       :loading="actionLoading"
+                      :disabled="!canManageTask"
                     >
                       {{ t('common.execute') }}
                     </n-button>
@@ -272,6 +280,7 @@ import { NButton, NSpace, NCard, NDescriptions, NDescriptionsItem, NTag, NGrid, 
 import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, type Task } from '../api'
+import { authState, isAdmin, initializeAuth } from '../auth'
 import { formatDateTimeUtc8 } from '../utils/datetime'
 
 const route = useRoute()
@@ -336,6 +345,20 @@ const hasActions = computed(() => {
 })
 
 const canReschedule = computed(() => task.value?.status === 'pending' && !!task.value?.scheduled_at)
+const canManageTask = computed(() => {
+  if (!task.value) return false
+  if (!authState.oidcEnabled) return true
+  if (!authState.user) return false
+  if (isAdmin.value) return true
+
+  return (
+    (task.value.initiator_user_id !== null && task.value.initiator_user_id === authState.user.id)
+    || (
+      task.value.initiator_gitlab_user_id !== null
+      && task.value.initiator_gitlab_user_id === authState.user.gitlab_user_id
+    )
+  )
+})
 
 function formatDate(dateStr: string): string {
   return formatDateTimeUtc8(dateStr)
@@ -593,6 +616,7 @@ async function handleReschedule() {
 }
 
 onMounted(async () => {
+  await initializeAuth()
   await fetchTask()
   if (isActiveTaskStatus(task.value?.status)) {
     await fetchContainerLogs()
@@ -726,6 +750,14 @@ onBeforeUnmount(() => {
   border-radius: 14px;
   background: rgba(15, 23, 42, 0.035);
   color: rgba(15, 23, 42, 0.66);
+  line-height: 1.5;
+}
+
+.task-actions__permission-note {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(240, 160, 32, 0.08);
+  color: rgba(163, 94, 12, 0.92);
   line-height: 1.5;
 }
 

@@ -13,10 +13,15 @@ from unittest.mock import MagicMock, patch, AsyncMock
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app.api.tasks import CreateTaskRequest, RescheduleTaskRequest, reschedule_task
+from app.api.tasks import (
+    CreateTaskRequest,
+    RescheduleTaskRequest,
+    _can_manage_task,
+    reschedule_task,
+)
 from app.dependencies.project_access import ProjectAccessScope
 from app.core.scheduling import normalize_scheduled_datetime, resolve_scheduled_at
-from app.models import Task, TaskStatus
+from app.models import Task, TaskStatus, User
 
 
 class TestCreateTaskRequest:
@@ -340,7 +345,13 @@ class TestRescheduleTask:
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
         with patch("app.api.tasks._get_project_metadata", new=AsyncMock(return_value={})):
-            result = await reschedule_task(task_id=1, request=request, db=db, access_scope=access_scope)
+            result = await reschedule_task(
+                task_id=1,
+                request=request,
+                db=db,
+                current_user=None,
+                access_scope=access_scope,
+            )
 
         assert task.scheduled_at is not None
         assert abs((task.scheduled_at - (now + timedelta(hours=2))).total_seconds()) < 1
@@ -368,7 +379,13 @@ class TestRescheduleTask:
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
         with pytest.raises(HTTPException, match="Task must be in PENDING status to reschedule"):
-            await reschedule_task(task_id=1, request=request, db=db, access_scope=access_scope)
+            await reschedule_task(
+                task_id=1,
+                request=request,
+                db=db,
+                current_user=None,
+                access_scope=access_scope,
+            )
 
     @pytest.mark.asyncio
     async def test_reschedule_task_rejects_immediate_task(self):
@@ -390,7 +407,76 @@ class TestRescheduleTask:
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
         with pytest.raises(HTTPException, match="Only scheduled tasks can update their scheduled time"):
-            await reschedule_task(task_id=1, request=request, db=db, access_scope=access_scope)
+            await reschedule_task(
+                task_id=1,
+                request=request,
+                db=db,
+                current_user=None,
+                access_scope=access_scope,
+            )
+
+    @pytest.mark.asyncio
+    async def test_reschedule_task_rejects_other_users(self):
+        now = datetime.utcnow()
+        task = Task(
+            id=1,
+            project_id=1,
+            user_prompt="Test prompt",
+            branch_name="feature/test",
+            target_branch="main",
+            status=TaskStatus.PENDING,
+            scheduled_at=now + timedelta(hours=1),
+            initiator_user_id=10,
+            initiator_gitlab_user_id=100,
+            is_manual=True,
+            created_at=now,
+            updated_at=now,
+        )
+        request = RescheduleTaskRequest(scheduled_datetime=now + timedelta(hours=2))
+        db = AsyncMock()
+        db.execute.return_value = MagicMock(scalar_one_or_none=lambda: task)
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+        current_user = User(id=11, gitlab_user_id=101, username="other", platform_role="platform_user")
+
+        with patch("app.api.tasks.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
+            with pytest.raises(HTTPException, match="You may only operate on your own tasks"):
+                await reschedule_task(
+                    task_id=1,
+                    request=request,
+                    db=db,
+                    current_user=current_user,
+                    access_scope=access_scope,
+                )
+
+
+class TestTaskOperatorPermissions:
+    def test_can_manage_task_allows_admin(self):
+        task = Task(project_id=1, user_prompt="Test", branch_name="feature", initiator_user_id=10)
+        current_user = User(id=99, gitlab_user_id=999, username="admin", platform_role="platform_admin")
+
+        with patch("app.api.tasks.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
+            assert _can_manage_task(task, current_user) is True
+
+    def test_can_manage_task_allows_owner_by_dashboard_user_id(self):
+        task = Task(project_id=1, user_prompt="Test", branch_name="feature", initiator_user_id=10)
+        current_user = User(id=10, gitlab_user_id=999, username="owner", platform_role="platform_user")
+
+        with patch("app.api.tasks.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
+            assert _can_manage_task(task, current_user) is True
+
+    def test_can_manage_task_allows_owner_by_gitlab_user_id(self):
+        task = Task(project_id=1, user_prompt="Test", branch_name="feature", initiator_gitlab_user_id=123)
+        current_user = User(id=10, gitlab_user_id=123, username="owner", platform_role="platform_user")
+
+        with patch("app.api.tasks.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
+            assert _can_manage_task(task, current_user) is True
+
+    def test_can_manage_task_rejects_other_user(self):
+        task = Task(project_id=1, user_prompt="Test", branch_name="feature", initiator_user_id=10, initiator_gitlab_user_id=123)
+        current_user = User(id=11, gitlab_user_id=456, username="other", platform_role="platform_user")
+
+        with patch("app.api.tasks.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
+            assert _can_manage_task(task, current_user) is False
 
 
 if __name__ == "__main__":
