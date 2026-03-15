@@ -11,7 +11,7 @@
         <n-button @click="fetchSessions" :loading="loading" :disabled="loading">{{ t('sessions.reloadSessions') }}</n-button>
       </div>
 
-      <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 1 : 4" :x-gap="16" :y-gap="16">
+      <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
         <n-gi v-for="item in summaryItems" :key="item.label">
           <n-card size="small" class="sessions-summary-card" :bordered="false">
             <div class="sessions-summary-card__label">{{ item.label }}</div>

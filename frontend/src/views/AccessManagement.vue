@@ -17,7 +17,7 @@
         {{ t('accessManagement.intro') }}
       </n-alert>
 
-      <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 1 : 4" :x-gap="16" :y-gap="16">
+      <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
         <n-gi v-for="item in summaryItems" :key="item.label">
           <n-card size="small" class="access-summary-card" :bordered="false">
             <div class="access-summary-card__label">{{ item.label }}</div>

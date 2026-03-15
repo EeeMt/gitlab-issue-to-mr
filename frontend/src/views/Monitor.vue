@@ -19,7 +19,7 @@
           {{ t('monitor.dataSourceInfo') }}
         </n-alert>
 
-        <n-grid :x-gap="16" :y-gap="16" cols="1 s:2 l:4" responsive="screen">
+        <n-grid :x-gap="16" :y-gap="16" cols="2 s:2 l:4" responsive="screen">
           <n-gi v-for="item in overviewCards" :key="item.key" class="monitor-grid-cell">
             <n-card size="small" class="monitor-summary-card">
               <div class="summary-label">{{ item.label }}</div>
@@ -35,7 +35,7 @@
         <n-tabs v-model:value="activeTab" type="line" animated class="monitor-tabs">
           <n-tab-pane name="runtime" :tab="t('monitor.runtimeTab')">
             <n-space vertical :size="16">
-              <n-grid :x-gap="16" :y-gap="16" cols="1 s:2 l:4" responsive="screen">
+              <n-grid :x-gap="16" :y-gap="16" cols="2 s:2 l:4" responsive="screen">
                 <n-gi v-for="item in runtimeCards" :key="item.key" class="monitor-grid-cell">
                   <n-card size="small" class="monitor-summary-card">
                     <div class="summary-label">{{ item.label }}</div>
@@ -45,9 +45,14 @@
                 </n-gi>
               </n-grid>
 
-              <n-card class="monitor-card" :title="t('monitor.activeTasksTitle')">
-                <template #header-extra>
-                  <span class="card-caption">{{ t('monitor.activeTasksSubtitle') }}</span>
+              <n-card class="monitor-card">
+                <template #header>
+                  <div class="monitor-card__header">
+                    <div>
+                      <div class="monitor-card__title">{{ t('monitor.activeTasksTitle') }}</div>
+                      <div class="monitor-card__subtitle">{{ t('monitor.activeTasksSubtitle') }}</div>
+                    </div>
+                  </div>
                 </template>
 
                 <n-empty v-if="!tableLoading && activeTasks.length === 0" :description="t('monitor.noActiveTasks')" />
@@ -63,9 +68,14 @@
                 />
               </n-card>
 
-              <n-card class="monitor-card" :title="t('monitor.recentActivityTitle')">
-                <template #header-extra>
-                  <span class="card-caption">{{ t('monitor.recentActivitySubtitle') }}</span>
+              <n-card class="monitor-card">
+                <template #header>
+                  <div class="monitor-card__header">
+                    <div>
+                      <div class="monitor-card__title">{{ t('monitor.recentActivityTitle') }}</div>
+                      <div class="monitor-card__subtitle">{{ t('monitor.recentActivitySubtitle') }}</div>
+                    </div>
+                  </div>
                 </template>
 
                 <n-empty v-if="!tableLoading && recentFinishedTasks.length === 0" :description="t('monitor.noRecentActivity')" />
@@ -85,7 +95,7 @@
 
           <n-tab-pane name="debug" :tab="t('monitor.debugTab')">
             <n-space vertical :size="16">
-              <n-grid :x-gap="16" :y-gap="16" cols="1 s:2 l:4" responsive="screen">
+              <n-grid :x-gap="16" :y-gap="16" cols="2 s:2 l:4" responsive="screen">
                 <n-gi v-for="item in debugCards" :key="item.key" class="monitor-grid-cell">
                   <n-card size="small" class="monitor-summary-card">
                     <div class="summary-label">{{ item.label }}</div>
@@ -131,9 +141,14 @@
                 </n-gi>
               </n-grid>
 
-              <n-card class="monitor-card" :title="t('monitor.containersTitle')">
-                <template #header-extra>
-                  <span class="card-caption">{{ t('monitor.containersSubtitle') }}</span>
+              <n-card class="monitor-card">
+                <template #header>
+                  <div class="monitor-card__header">
+                    <div>
+                      <div class="monitor-card__title">{{ t('monitor.containersTitle') }}</div>
+                      <div class="monitor-card__subtitle">{{ t('monitor.containersSubtitle') }}</div>
+                    </div>
+                  </div>
                 </template>
 
                 <n-empty v-if="!tableLoading && sortedContainers.length === 0" :description="t('monitor.noContainers')" />
@@ -185,9 +200,14 @@
                 </n-gi>
               </n-grid>
 
-              <n-card class="monitor-card" :title="t('monitor.recentFailuresTitle')">
-                <template #header-extra>
-                  <span class="card-caption">{{ t('monitor.recentFailuresSubtitle') }}</span>
+              <n-card class="monitor-card">
+                <template #header>
+                  <div class="monitor-card__header">
+                    <div>
+                      <div class="monitor-card__title">{{ t('monitor.recentFailuresTitle') }}</div>
+                      <div class="monitor-card__subtitle">{{ t('monitor.recentFailuresSubtitle') }}</div>
+                    </div>
+                  </div>
                 </template>
 
                 <n-empty v-if="!tableLoading && recentFailures.length === 0" :description="t('monitor.noRecentFailures')" />
@@ -1047,9 +1067,23 @@ onBeforeUnmount(() => {
   min-height: 42px;
 }
 
-.card-caption {
-  color: rgba(15, 23, 42, 0.56);
+.monitor-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.monitor-card__title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.monitor-card__subtitle {
+  margin-top: 4px;
   font-size: 13px;
+  color: rgba(15, 23, 42, 0.56);
 }
 
 .issue-list {
@@ -1155,6 +1189,11 @@ onBeforeUnmount(() => {
   .monitor-page__hero {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .monitor-card__header {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .summary-value-row {

@@ -13,7 +13,7 @@
         </n-button>
       </div>
 
-      <n-grid v-if="diagnostics" :cols="isMobile ? 1 : 4" :x-gap="16" :y-gap="16">
+      <n-grid v-if="diagnostics" :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
         <n-gi v-for="item in summaryItems" :key="item.label">
           <n-card size="small" class="diagnostics-summary-card" :bordered="false">
             <div class="diagnostics-summary-card__label">{{ item.label }}</div>

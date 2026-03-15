@@ -9,7 +9,7 @@
               {{ t('dashboard.subtitle') }}
             </p>
           </div>
-          <n-space align="center" wrap>
+          <n-space align="center" wrap class="dashboard__filters">
             <n-select
               v-model:value="statusFilter"
               :options="statusOptions"
@@ -432,6 +432,10 @@ onBeforeUnmount(() => {
   line-height: 1.2;
 }
 
+.dashboard__filters {
+  justify-content: flex-end;
+}
+
 .dashboard__subtitle {
   margin: 8px 0 0;
   color: rgba(15, 23, 42, 0.68);
@@ -463,6 +467,20 @@ onBeforeUnmount(() => {
   .dashboard__hero {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .dashboard__filters {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .dashboard__filters :deep(.n-space-item) {
+    width: 100%;
+  }
+
+  .dashboard__filters :deep(.n-base-selection),
+  .dashboard__filters :deep(.n-button) {
+    width: 100%;
   }
 
   .dashboard__title {
