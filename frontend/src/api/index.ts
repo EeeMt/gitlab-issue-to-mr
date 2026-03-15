@@ -488,8 +488,9 @@ export async function cancelTask(id: number): Promise<void> {
   await api.post(`/tasks/${id}/cancel`)
 }
 
-export async function retryTask(id: number): Promise<void> {
-  await api.post(`/tasks/${id}/retry`)
+export async function retryTask(id: number, scheduledDatetime?: string): Promise<void> {
+  const body = scheduledDatetime ? { scheduled_datetime: scheduledDatetime } : undefined
+  await api.post(`/tasks/${id}/retry`, body)
 }
 
 export async function executeTask(id: number): Promise<void> {

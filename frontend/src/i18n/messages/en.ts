@@ -130,6 +130,10 @@ const en = {
     retryTask: 'Retry Task',
     retryTaskDescription:
       'Re-queue the task with the same prompt and branch configuration to run it again.',
+    retryWithSchedule: 'Schedule Retry',
+    retryWithScheduleDescription:
+      'Pick a future time for the retry instead of queuing it immediately.',
+    scheduleRetry: 'Schedule retry',
     rescheduleTask: 'Reschedule Task',
     rescheduleTaskDescription:
       'Update the reserved execution time for a pending scheduled task without recreating it.',
@@ -161,6 +165,7 @@ const en = {
     taskCancelled: 'Task cancelled',
     failedToCancelTask: 'Failed to cancel task',
     taskRetryScheduled: 'Task retry scheduled',
+    taskRetryRescheduled: 'Task scheduled for retry',
     failedToRetryTask: 'Failed to retry task',
     taskRescheduled: 'Task scheduled time updated',
     failedToRescheduleTask: 'Failed to update scheduled time',

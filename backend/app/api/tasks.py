@@ -490,17 +490,33 @@ async def cancel_task(
     return {"status": "success", "message": f"Task {task_id} cancelled"}
 
 
+class RetryTaskRequest(BaseModel):
+    """Optional request body for retrying a task.
+
+    If scheduled_datetime is provided, the task will be retried at that time
+    instead of being queued immediately.
+    """
+
+    scheduled_datetime: Optional[datetime] = None
+
+
 @router.post("/tasks/{task_id}/retry")
 async def retry_task(
     task_id: int,
+    request: Optional[RetryTaskRequest] = None,
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Retry a failed or cancelled task.
 
+    If a scheduled_datetime is supplied in the request body the task will be
+    reset to PENDING and held until that time; otherwise it is queued
+    immediately (existing behaviour).
+
     Args:
         task_id: Task ID
+        request: Optional body with scheduled_datetime
         db: Database session
 
     Returns:
@@ -523,6 +539,16 @@ async def retry_task(
             detail=f"Cannot retry task with status {task.status.value}",
         )
 
+    scheduled_at: Optional[datetime] = None
+    if request and request.scheduled_datetime is not None:
+        normalized = normalize_scheduled_datetime(request.scheduled_datetime)
+        if normalized is None or normalized <= datetime.utcnow():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Scheduled datetime must be in the future",
+            )
+        scheduled_at = normalized
+
     task.status = TaskStatus.PENDING
     task.error_message = None
     task.completed_at = None
@@ -532,12 +558,13 @@ async def retry_task(
     task.additions = 0
     task.deletions = 0
     task.total_changes = 0
+    task.scheduled_at = scheduled_at
     await db.commit()
 
-    logger.info(f"Task {task_id} reset for retry")
+    action = f"scheduled for retry at {scheduled_at}" if scheduled_at else "reset for retry"
+    logger.info(f"Task {task_id} {action}")
 
-    return {"status": "success", "message": f"Task {task_id} reset for retry"}
-
+    return {"status": "success", "message": f"Task {task_id} {action}"}
 
 class RescheduleTaskRequest(BaseModel):
     """Request model for updating an existing task's scheduled time."""

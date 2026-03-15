@@ -153,6 +153,40 @@
                   </div>
 
                   <div
+                    v-if="task && ['failed', 'cancelled'].includes(task.status)"
+                    class="task-actions__item task-actions__item--info"
+                  >
+                    <div class="task-actions__meta">
+                      <div class="task-actions__label">{{ t('taskView.retryWithSchedule') }}</div>
+                      <div class="task-actions__description">
+                        {{ t('taskView.retryWithScheduleDescription') }}
+                      </div>
+                    </div>
+                    <div class="task-actions__controls">
+                      <n-date-picker
+                        v-model:value="retryScheduleDatetime"
+                        type="datetime"
+                        class="task-actions__date-picker"
+                        :placeholder="t('taskView.selectRescheduleTime')"
+                        :is-date-disabled="isScheduledDateDisabled"
+                        :is-time-disabled="isScheduledTimeDisabled"
+                        :disabled="!canManageTask"
+                      />
+                      <n-button
+                        type="info"
+                        secondary
+                        strong
+                        round
+                        @click="handleRetryWithSchedule"
+                        :loading="actionLoading"
+                        :disabled="!canManageTask || retryScheduleDatetime === null"
+                      >
+                        {{ t('taskView.scheduleRetry') }}
+                      </n-button>
+                    </div>
+                  </div>
+
+                  <div
                     v-if="task && canReschedule"
                     class="task-actions__item task-actions__item--info"
                   >
@@ -302,6 +336,7 @@ const actionLoading = ref(false)
 const taskRequestInFlight = ref(false)
 const containerRequestInFlight = ref(false)
 const rescheduleDatetime = ref<number | null>(null)
+const retryScheduleDatetime = ref<number | null>(null)
 let pollTimer: number | null = null
 let logEventSource: EventSource | null = null
 let logStreamContainerId: string | null = null
@@ -569,6 +604,28 @@ async function handleRetry() {
   try {
     await retryTask(taskId.value)
     message.success(t('taskView.taskRetryScheduled'))
+    refreshTask()
+  } catch (error) {
+    message.error(t('taskView.failedToRetryTask'))
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+async function handleRetryWithSchedule() {
+  if (!retryScheduleDatetime.value) {
+    message.error(t('taskView.selectRescheduleTime'))
+    return
+  }
+  if (retryScheduleDatetime.value <= Date.now()) {
+    message.error(t('taskView.rescheduleTimeFuture'))
+    return
+  }
+  actionLoading.value = true
+  try {
+    await retryTask(taskId.value, new Date(retryScheduleDatetime.value).toISOString())
+    retryScheduleDatetime.value = null
+    message.success(t('taskView.taskRetryRescheduled'))
     refreshTask()
   } catch (error) {
     message.error(t('taskView.failedToRetryTask'))
