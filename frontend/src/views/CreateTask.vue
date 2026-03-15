@@ -25,7 +25,7 @@
           </div>
         </template>
         <n-spin :show="loading">
-          <n-form ref="formRef" :model="formValue" :rules="rules" label-placement="top" class="create-task-form">
+          <n-form :key="formResetKey" ref="formRef" :model="formValue" :rules="rules" label-placement="top" class="create-task-form">
             <div class="create-task-form__section">
               <div class="create-task-form__section-title">{{ t('createTask.repositoryBranches') }}</div>
               <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
@@ -219,17 +219,23 @@ const branches = ref<Branch[]>([])
 
 // Form state
 const formRef = ref<FormInst | null>(null)
-const formValue = ref<CreateTaskRequest & { base_branch?: string; new_branch_name?: string; branch_name?: string }>({
-  project_id: undefined,
-  base_branch: undefined,
-  new_branch_name: '',
-  branch_name: '',
-  target_branch: 'main',
-  user_prompt: '',
-  priority: 0,
-  delay_seconds: undefined,
-  scheduled_datetime: undefined
-})
+const formResetKey = ref(0)
+
+function createInitialFormValue(): CreateTaskRequest & { base_branch?: string; new_branch_name?: string; branch_name?: string } {
+  return {
+    project_id: undefined,
+    base_branch: undefined,
+    new_branch_name: '',
+    branch_name: '',
+    target_branch: 'main',
+    user_prompt: '',
+    priority: 0,
+    delay_seconds: undefined,
+    scheduled_datetime: undefined
+  }
+}
+
+const formValue = ref<CreateTaskRequest & { base_branch?: string; new_branch_name?: string; branch_name?: string }>(createInitialFormValue())
 
 // UI state
 const scheduleType = ref<'now' | 'delay' | 'scheduled'>('now')
@@ -433,22 +439,13 @@ function handleBaseBranchChange(_branch: string) {
 
 async function handleReset() {
   branches.value = []
-  formValue.value = {
-    project_id: undefined,
-    base_branch: undefined,
-    new_branch_name: '',
-    branch_name: '',
-    target_branch: 'main',
-    user_prompt: '',
-    priority: 0,
-    delay_seconds: undefined,
-    scheduled_datetime: undefined
-  }
+  Object.assign(formValue.value, createInitialFormValue())
   scheduleType.value = 'now'
   delayValue.value = 5
   delayUnit.value = 'minutes'
   scheduledDatetime.value = null
   createdTaskId.value = 0
+  formResetKey.value += 1
 
   await nextTick()
   formRef.value?.restoreValidation()
