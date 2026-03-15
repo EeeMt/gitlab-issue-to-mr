@@ -9,20 +9,7 @@
               {{ t('scheduleOverview.subtitle') }}
             </p>
           </div>
-          <n-space align="center" wrap>
-            <n-select
-              v-model:value="statusFilter"
-              :options="statusOptions"
-              :placeholder="t('scheduleOverview.statusPlaceholder')"
-              clearable
-              style="width: 140px"
-            />
-            <n-input
-              v-model:value="searchTerm"
-              :placeholder="t('scheduleOverview.searchPlaceholder')"
-              clearable
-              style="width: min(280px, 60vw)"
-            />
+          <n-space align="center" wrap class="schedule-overview__actions">
             <n-button @click="refresh" :loading="loading">
               {{ t('common.refresh') }}
             </n-button>
@@ -39,9 +26,9 @@
           </n-gi>
         </n-grid>
 
-        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
+        <n-grid class="schedule-overview__insights-grid" :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
           <n-gi>
-            <n-card class="schedule-card" :bordered="false">
+            <n-card class="schedule-card schedule-card--stretch" :bordered="false">
               <template #header>
                 <div class="schedule-card__header">
                   <div>
@@ -71,7 +58,7 @@
           </n-gi>
 
           <n-gi>
-            <n-card class="schedule-card" :bordered="false">
+            <n-card class="schedule-card schedule-card--stretch" :bordered="false">
               <template #header>
                 <div class="schedule-card__header">
                   <div>
@@ -165,7 +152,7 @@
 
           <n-data-table
             :columns="columns"
-            :data="filteredTasks"
+            :data="tasks"
             :loading="tableLoading"
             :bordered="false"
             :row-key="(row: Task) => row.id"
@@ -187,8 +174,6 @@ import {
   NDataTable,
   NGrid,
   NGi,
-  NInput,
-  NSelect,
   NSpace,
   NSpin,
   NTag,
@@ -236,20 +221,12 @@ const isMobile = computed(() => width.value < 768)
 const tasks = ref<Task[]>([])
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
-const statusFilter = ref<string | null>(null)
-const searchTerm = ref('')
 let pollTimer: number | null = null
 
 const pagination = {
   pageSize: 20,
   responsive: true,
 }
-
-const statusOptions = computed(() => [
-  { label: t('status.pending'), value: 'pending' },
-  { label: t('status.queued'), value: 'queued' },
-  { label: t('status.running'), value: 'running' },
-])
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
   pending: 'default',
@@ -299,19 +276,6 @@ function getScheduledTimestamp(value?: string | null): number | null {
   return parseUtcDate(value).getTime()
 }
 
-function getSearchHaystack(task: Task): string {
-  return [
-    task.id,
-    task.status,
-    getProjectLabel(task),
-    task.branch_name,
-    task.user_prompt,
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase()
-}
-
 function getShanghaiParts(date: Date): Record<string, string> {
   return shanghaiPartsFormatter.formatToParts(date).reduce<Record<string, string>>((acc, part) => {
     if (part.type !== 'literal') {
@@ -344,49 +308,33 @@ function buildHeatmapDays(days: number): HeatmapDay[] {
     })
 }
 
-const filteredTasks = computed(() => {
-  const query = searchTerm.value.trim().toLowerCase()
-
-  return tasks.value.filter((task) => {
-    if (statusFilter.value && task.status !== statusFilter.value) {
-      return false
-    }
-
-    if (!query) {
-      return true
-    }
-
-    return getSearchHaystack(task).includes(query)
-  })
-})
-
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 
 const summaryItems = computed(() => {
   const now = Date.now()
   const next24Hours = now + 24 * 60 * 60 * 1000
-  const readyNow = filteredTasks.value.filter((task) => {
+  const readyNow = tasks.value.filter((task) => {
     const scheduledMs = getScheduledTimestamp(task.scheduled_at)
     if (scheduledMs === null) return false
     return scheduledMs <= now
   }).length
-  const next24HoursCount = filteredTasks.value.filter((task) => {
+  const next24HoursCount = tasks.value.filter((task) => {
     const scheduledMs = getScheduledTimestamp(task.scheduled_at)
     if (scheduledMs === null) return false
     return scheduledMs > now && scheduledMs <= next24Hours
   }).length
-  const laterCount = filteredTasks.value.filter((task) => {
+  const laterCount = tasks.value.filter((task) => {
     const scheduledMs = getScheduledTimestamp(task.scheduled_at)
     if (scheduledMs === null) return false
     return scheduledMs > next24Hours
   }).length
-  const queuedCount = filteredTasks.value.filter((task) => task.status === 'queued').length
-  const runningCount = filteredTasks.value.filter((task) => task.status === 'running').length
+  const queuedCount = tasks.value.filter((task) => task.status === 'queued').length
+  const runningCount = tasks.value.filter((task) => task.status === 'running').length
   const busiest = [...hourlyBuckets.value].sort((left, right) => right.count - left.count)[0]
 
   return [
-    { label: t('scheduleOverview.scheduledQueue'), value: String(filteredTasks.value.length), note: t('scheduleOverview.activeScheduledTasks') },
+    { label: t('scheduleOverview.scheduledQueue'), value: String(tasks.value.length), note: t('scheduleOverview.activeScheduledTasks') },
     { label: t('scheduleOverview.readyNow'), value: String(readyNow), note: t('scheduleOverview.alreadyDue') },
     { label: t('scheduleOverview.upcoming24h'), value: String(next24HoursCount), note: t('scheduleOverview.upcomingScheduledWork') },
     { label: t('scheduleOverview.after24h'), value: String(laterCount), note: t('scheduleOverview.laterBacklog') },
@@ -416,7 +364,7 @@ const hourlyBuckets = computed<HourBucket[]>(() => {
     }
   })
 
-  filteredTasks.value.forEach((task) => {
+  tasks.value.forEach((task) => {
     const scheduledMs = getScheduledTimestamp(task.scheduled_at)
     if (scheduledMs === null) return
     if (scheduledMs < startMs || scheduledMs >= startMs + 24 * 60 * 60 * 1000) {
@@ -455,7 +403,7 @@ const heatmapRows = computed<HeatmapRow[]>(() => {
   const dayKeys = heatmapDays.value.map((day) => day.dateKey)
   const counts = new Map<string, number>()
 
-  filteredTasks.value.forEach((task) => {
+  tasks.value.forEach((task) => {
     if (!task.scheduled_at) return
     const scheduledDate = parseUtcDate(task.scheduled_at)
     const dateKey = getShanghaiDateKey(scheduledDate)
@@ -650,6 +598,10 @@ onBeforeUnmount(() => {
   max-width: 780px;
 }
 
+.schedule-overview__actions {
+  justify-content: flex-end;
+}
+
 .schedule-summary-card {
   border-radius: 12px;
   background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
@@ -675,6 +627,23 @@ onBeforeUnmount(() => {
 
 .schedule-card {
   border-radius: 18px;
+}
+
+.schedule-overview__insights-grid {
+  align-items: stretch;
+}
+
+.schedule-overview__insights-grid :deep(.n-grid-item) {
+  display: flex;
+}
+
+.schedule-card--stretch {
+  width: 100%;
+  height: 100%;
+}
+
+.schedule-card--stretch :deep(.n-card__content) {
+  height: 100%;
 }
 
 .schedule-card__header {
@@ -849,6 +818,11 @@ onBeforeUnmount(() => {
   .schedule-card__header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .schedule-overview__actions {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .schedule-overview__title {
