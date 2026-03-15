@@ -189,7 +189,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NCard, NForm, NFormItem, NSelect, NInput, NInputNumber,
@@ -406,6 +406,7 @@ async function fetchProjects() {
 // Fetch branches when project changes
 async function fetchBranches(projectId: number) {
   branchesLoading.value = true
+  branches.value = []
   try {
     branches.value = await getBranches(projectId)
     // Reset branch selection
@@ -430,7 +431,8 @@ function handleBaseBranchChange(_branch: string) {
   formValue.value.new_branch_name = ''
 }
 
-function handleReset() {
+async function handleReset() {
+  branches.value = []
   formValue.value = {
     project_id: undefined,
     base_branch: undefined,
@@ -446,6 +448,10 @@ function handleReset() {
   delayValue.value = 5
   delayUnit.value = 'minutes'
   scheduledDatetime.value = null
+  createdTaskId.value = 0
+
+  await nextTick()
+  formRef.value?.restoreValidation()
 }
 
 function buildScheduleRequest(): Pick<CreateTaskRequest, 'delay_seconds' | 'scheduled_datetime'> {
@@ -531,7 +537,7 @@ function viewTask() {
 
 function createAnother() {
   showSuccessModal.value = false
-  handleReset()
+  void handleReset()
 }
 
 onMounted(() => {
