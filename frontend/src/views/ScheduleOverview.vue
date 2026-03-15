@@ -1304,18 +1304,14 @@ onBeforeUnmount(() => {
 }
 
 .slot-task-card__actions {
-  display: flex;
+  display: inline-flex;
   flex-direction: column;
   gap: 10px;
-  align-items: stretch;
-  justify-content: center;
-  width: fit-content;
   max-width: 100%;
 }
 
 .slot-task-card__date-picker {
-  width: fit-content;
-  max-width: 100%;
+  width: 100%;
 }
 
 .slot-task-card__save-button {
