@@ -68,7 +68,7 @@
         </n-drawer>
 
         <n-layout :native-scrollbar="false" class="app-shell__main">
-          <div v-if="authState.oidcEnabled && authState.authenticated && !isMobile" class="app-shell__topbar">
+          <div v-if="showUserToolbar && !isMobile" class="app-shell__topbar">
             <div class="app-shell__topbar-user">
               <n-avatar round size="small" :src="authState.user?.avatar_url || undefined">
                 {{ userInitial }}
@@ -81,12 +81,7 @@
               </div>
             </div>
             <div class="app-shell__topbar-actions">
-              <n-select
-                v-model:value="localeValue"
-                :options="languageOptions"
-                size="small"
-                class="app-shell__language-select"
-              />
+              <LanguageToggle size="small" class="app-shell__language-toggle" />
               <n-button tertiary class="app-shell__logout-button" @click="handleLogout">
                 <template #icon>
                   <n-icon :component="LogOutOutline" />
@@ -108,12 +103,27 @@
                 <n-text strong class="mobile-header__title">{{ currentPageLabel }}</n-text>
               </div>
             </div>
-            <n-select
-              v-model:value="localeValue"
-              :options="languageOptions"
-              size="small"
-              class="mobile-header__language-select"
-            />
+            <div class="mobile-header__actions">
+              <div v-if="showUserToolbar" class="mobile-header__user-chip">
+                <n-avatar round size="small" :src="authState.user?.avatar_url || undefined">
+                  {{ userInitial }}
+                </n-avatar>
+                <span class="mobile-header__user-name">{{ userDisplayName }}</span>
+              </div>
+              <LanguageToggle size="small" class="mobile-header__language-toggle" />
+              <n-button
+                v-if="showUserToolbar"
+                quaternary
+                circle
+                class="mobile-header__logout-button"
+                :title="t('shell.logout')"
+                @click="handleLogout"
+              >
+                <template #icon>
+                  <n-icon :component="LogOutOutline" />
+                </template>
+              </n-button>
+            </div>
           </div>
 
           <n-layout content-style="padding: 20px;" :native-scrollbar="false" class="app-shell__content">
@@ -140,7 +150,6 @@ import {
   NLayoutSider,
   NMenu,
   NMessageProvider,
-  NSelect,
   NSpin,
   NText
 } from 'naive-ui'
@@ -163,12 +172,10 @@ import {
 } from '@vicons/ionicons5'
 import { useWindowSize } from '@vueuse/core'
 import { authState, canAccessSharedPage, initializeAuth, isAdmin, logoutAndClearAuth } from './auth'
+import LanguageToggle from './components/LanguageToggle.vue'
 import {
-  currentLocale,
   naiveUiDateLocale,
   naiveUiLocale,
-  setAppLocale,
-  type AppLocale
 } from './i18n'
 
 const router = useRouter()
@@ -197,19 +204,11 @@ const menuLabels: Record<string, string> = {
 }
 
 const currentPageLabel = computed(() => t(menuLabels[activeKey.value] || 'app.navigation'))
+const showUserToolbar = computed(() => authState.oidcEnabled && authState.authenticated)
 const userDisplayName = computed(
   () => authState.user?.display_name || authState.user?.username || t('shell.gitlabUser')
 )
 const userInitial = computed(() => userDisplayName.value.slice(0, 1).toUpperCase())
-const localeValue = computed({
-  get: () => currentLocale.value,
-  set: (value) => setAppLocale(value as AppLocale)
-})
-const languageOptions = computed(() => [
-  { label: t('locale.en'), value: 'en' },
-  { label: t('locale.zhCN'), value: 'zh-CN' }
-])
-
 const renderIcon = (icon: any) => () => h(NIcon, null, { default: () => h(icon) })
 const shouldGroupMenu = computed(() => !collapsed.value || isMobile.value)
 
@@ -377,8 +376,8 @@ body {
   gap: 10px;
 }
 
-.app-shell__language-select {
-  width: 116px;
+.app-shell__language-toggle {
+  flex-shrink: 0;
 }
 
 .logo {
@@ -512,6 +511,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   margin: 10px 12px 0;
   padding: 10px 12px;
   border-radius: 16px;
@@ -526,6 +526,7 @@ body {
   align-items: center;
   gap: 12px;
   min-width: 0;
+  flex: 1;
 }
 
 .mobile-header__menu-button {
@@ -560,9 +561,39 @@ body {
   letter-spacing: 0.04em;
 }
 
-.mobile-header__language-select {
-  width: 116px;
+.mobile-header__language-toggle {
   flex-shrink: 0;
+}
+
+.mobile-header__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.mobile-header__user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 132px;
+  padding: 4px 8px 4px 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.mobile-header__user-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.mobile-header__logout-button {
+  color: #334155;
 }
 
 .mobile-drawer-header {
@@ -608,6 +639,28 @@ a.app-link:visited:hover {
   .nav-menu .n-menu-item-content {
     margin: 2px 0;
     border-radius: 12px;
+  }
+
+  .mobile-header__user-chip {
+    max-width: 112px;
+  }
+}
+
+@media (max-width: 480px) {
+  .mobile-header {
+    align-items: flex-start;
+  }
+
+  .mobile-header__actions {
+    gap: 6px;
+  }
+
+  .mobile-header__user-name {
+    display: none;
+  }
+
+  .mobile-header__user-chip {
+    padding-right: 4px;
   }
 }
 </style>

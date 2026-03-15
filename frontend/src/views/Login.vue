@@ -1,17 +1,17 @@
 <template>
   <div class="login-page">
-    <div class="login-page__language-switcher">
-      <n-select v-model:value="localeValue" :options="languageOptions" size="small" />
-    </div>
     <n-card class="login-card" :bordered="false">
-      <div class="login-card__brand">
-        <div class="login-card__mark">
-          <n-icon size="26" :component="RocketOutline" />
+      <div class="login-card__header">
+        <div class="login-card__brand">
+          <div class="login-card__mark">
+            <n-icon size="26" :component="RocketOutline" />
+          </div>
+          <div>
+            <h1 class="login-card__title">{{ t('app.brandTitle') }}</h1>
+            <p class="login-card__subtitle">{{ t('login.subtitle') }}</p>
+          </div>
         </div>
-        <div>
-          <h1 class="login-card__title">{{ t('app.brandTitle') }}</h1>
-          <p class="login-card__subtitle">{{ t('login.subtitle') }}</p>
-        </div>
+        <LanguageToggle size="small" class="login-card__language-switcher" />
       </div>
 
       <n-alert v-if="!authState.oidcEnabled && authState.initialized" type="warning" :show-icon="false">
@@ -81,12 +81,12 @@
 import axios from 'axios'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton, NCard, NDivider, NIcon, NInput, NSpace, NSelect, NText, useMessage } from 'naive-ui'
+import { NAlert, NButton, NCard, NDivider, NIcon, NInput, NSpace, NText, useMessage } from 'naive-ui'
 import { RocketOutline } from '@vicons/ionicons5'
 import { useRoute } from 'vue-router'
 import { authState, startLogin } from '../auth'
 import { breakGlassLogin } from '../api'
-import { currentLocale, setAppLocale, type AppLocale } from '../i18n'
+import LanguageToggle from '../components/LanguageToggle.vue'
 
 const route = useRoute()
 const message = useMessage()
@@ -103,14 +103,6 @@ const loginReason = computed(() => {
 const breakGlassUsername = ref(authState.breakGlassUsername || '')
 const breakGlassPassword = ref('')
 const breakGlassLoading = ref(false)
-const localeValue = computed({
-  get: () => currentLocale.value,
-  set: (value) => setAppLocale(value as AppLocale)
-})
-const languageOptions = computed(() => [
-  { label: t('locale.en'), value: 'en' },
-  { label: t('locale.zhCN'), value: 'zh-CN' }
-])
 
 watch(
   () => authState.breakGlassUsername,
@@ -166,13 +158,6 @@ async function handleBreakGlassLogin() {
   padding-bottom: max(24px, env(safe-area-inset-bottom));
 }
 
-.login-page__language-switcher {
-  width: min(460px, 100%);
-  margin: 0 auto 16px;
-  display: flex;
-  justify-content: flex-end;
-}
-
 .login-card {
   width: min(460px, 100%);
   margin: 0 auto;
@@ -182,10 +167,24 @@ async function handleBreakGlassLogin() {
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
 }
 
+.login-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .login-card__brand {
   display: flex;
   align-items: center;
   gap: 16px;
+  min-width: 0;
+  flex: 1;
+}
+
+.login-card__language-switcher {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
 .login-card__mark {
@@ -229,6 +228,26 @@ async function handleBreakGlassLogin() {
   .login-page {
     padding-left: 16px;
     padding-right: 16px;
+  }
+
+  .login-card__header {
+    gap: 12px;
+  }
+
+  .login-card__brand {
+    gap: 14px;
+  }
+}
+
+@media (max-width: 480px) {
+  .login-card__header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .login-card__language-switcher {
+    align-self: flex-end;
+    margin-top: 0;
   }
 }
 </style>

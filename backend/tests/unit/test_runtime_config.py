@@ -39,6 +39,11 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
             "task_timeout": 900,
             "scheduler_interval": 9,
             "default_target_branch": "develop",
+            "max_retries": 2,
+            "retry_delay": 120,
+            "alert_on_failure": True,
+            "anthropic_base_url": "https://llm.example.com/v1",
+            "anthropic_model": "claude-override",
         })
 
         settings = get_effective_settings()
@@ -47,15 +52,24 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(settings.task_timeout, 900)
         self.assertEqual(settings.scheduler_interval, 9)
         self.assertEqual(settings.default_target_branch, "develop")
+        self.assertEqual(settings.max_retries, 2)
+        self.assertEqual(settings.retry_delay, 120)
+        self.assertTrue(settings.alert_on_failure)
+        self.assertEqual(settings.anthropic_base_url, "https://llm.example.com/v1")
+        self.assertEqual(settings.anthropic_model, "claude-override")
 
     def test_runtime_values_round_trip_by_type(self) -> None:
         serialized_int = _serialize_runtime_value("max_concurrency", 5)
         serialized_str = _serialize_runtime_value("default_target_branch", "release")
         serialized_secret = _serialize_runtime_value("oidc_client_secret", "super-secret")
+        serialized_api_key = _serialize_runtime_value("anthropic_api_key", "api-key")
+        serialized_webhook = _serialize_runtime_value("alert_webhook_url", "https://hooks.example.com/a")
 
         self.assertEqual(serialized_int, ("5", "int"))
         self.assertEqual(serialized_str, ("release", "str"))
         self.assertEqual(serialized_secret[1], "secret_str")
+        self.assertEqual(serialized_api_key[1], "secret_str")
+        self.assertEqual(serialized_webhook[1], "secret_str")
         self.assertEqual(_deserialize_runtime_value("max_concurrency", "5", "int"), 5)
         self.assertEqual(
             _deserialize_runtime_value("default_target_branch", "release", "str"),
@@ -65,6 +79,14 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
             _deserialize_runtime_value("oidc_client_secret", serialized_secret[0], serialized_secret[1]),
             "super-secret",
         )
+        self.assertEqual(
+            _deserialize_runtime_value("anthropic_api_key", serialized_api_key[0], serialized_api_key[1]),
+            "api-key",
+        )
+        self.assertEqual(
+            _deserialize_runtime_value("alert_webhook_url", serialized_webhook[0], serialized_webhook[1]),
+            "https://hooks.example.com/a",
+        )
 
     async def test_load_runtime_config_from_db_refreshes_cache(self) -> None:
         serialized_secret, secret_type = _serialize_runtime_value("oidc_client_secret", "stored-secret")
@@ -72,6 +94,7 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
         mock_result.scalars.return_value.all.return_value = [
             SystemConfig(key="max_concurrency", value="4", value_type="int"),
             SystemConfig(key="default_target_branch", value="release", value_type="str"),
+            SystemConfig(key="max_retries", value="3", value_type="int"),
             SystemConfig(key="oidc_client_secret", value=serialized_secret, value_type=secret_type),
         ]
         mock_db = MagicMock()
@@ -82,6 +105,7 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(overrides["max_concurrency"], 4)
         self.assertEqual(overrides["default_target_branch"], "release")
+        self.assertEqual(overrides["max_retries"], 3)
         self.assertEqual(overrides["oidc_client_secret"], "stored-secret")
         self.assertEqual(get_effective_settings().max_concurrency, 4)
 

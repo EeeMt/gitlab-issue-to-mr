@@ -69,10 +69,14 @@ const router = createRouter({
       meta: { requiresAuth: true, pagePermission: 'analytics' }
     },
     {
-      path: '/config',
+      path: '/configuration',
       name: 'Config',
       component: Config,
       meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/config',
+      redirect: '/configuration'
     },
     {
       path: '/access-management',

@@ -246,7 +246,6 @@ onMounted(() => {
 <style scoped>
 .diagnostics-page {
   max-width: 1240px;
-  padding: 8px 0;
 }
 
 .diagnostics-page__hero {
