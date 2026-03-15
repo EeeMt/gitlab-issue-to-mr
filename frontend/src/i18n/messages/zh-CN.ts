@@ -394,7 +394,19 @@ const zhCN = {
     prompt: '提示词',
     failedToFetch: '获取定时任务失败',
     activeScheduledTaskCount: '{count} 个活跃定时任务',
-    taskCountTitle: '{label}：{count} 个任务'
+    taskCountTitle: '{label}：{count} 个任务',
+    selectedWindow: '已选时间窗口',
+    selectedWindowSubtitle: '查看该时段内的任务，并逐个调整预约时间。',
+    clearSelectedWindow: '清除选择',
+    slotTaskCount: '该时段内有 {count} 个任务',
+    currentSchedule: '当前预约时间',
+    selectNewTime: '选择新的预约时间',
+    saveTime: '保存时间',
+    onlyPendingTasksEditable: '这里只能修改仍处于待执行状态的预约任务。',
+    noTasksInSelectedWindow: '该选中时段内已经没有任务了。',
+    rescheduleTimeFuture: '预约时间必须晚于当前时间。',
+    taskRescheduled: '任务预约时间已更新',
+    failedToRescheduleTask: '更新预约时间失败'
   },
   analytics: {
     title: '任务统计分析',

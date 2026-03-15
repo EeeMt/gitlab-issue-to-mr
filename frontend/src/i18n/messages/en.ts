@@ -407,7 +407,19 @@ const en = {
     prompt: 'Prompt',
     failedToFetch: 'Failed to fetch scheduled tasks',
     activeScheduledTaskCount: '{count} active scheduled tasks',
-    taskCountTitle: '{label}: {count} task(s)'
+    taskCountTitle: '{label}: {count} task(s)',
+    selectedWindow: 'Selected Time Window',
+    selectedWindowSubtitle: 'Review the tasks in this slot and adjust individual schedules.',
+    clearSelectedWindow: 'Clear selection',
+    slotTaskCount: '{count} task(s) in this window',
+    currentSchedule: 'Current schedule',
+    selectNewTime: 'Select a new scheduled date and time',
+    saveTime: 'Save time',
+    onlyPendingTasksEditable: 'Only pending scheduled tasks can be edited here.',
+    noTasksInSelectedWindow: 'No tasks remain in the selected window.',
+    rescheduleTimeFuture: 'Scheduled time must be in the future.',
+    taskRescheduled: 'Task schedule updated',
+    failedToRescheduleTask: 'Failed to update scheduled time'
   },
   analytics: {
     title: 'Task Analytics',

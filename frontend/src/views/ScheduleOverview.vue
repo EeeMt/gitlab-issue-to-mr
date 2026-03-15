@@ -43,6 +43,11 @@
                   v-for="bucket in hourlyBuckets"
                   :key="bucket.key"
                   class="hourly-chart__item"
+                  :class="{
+                    'hourly-chart__item--clickable': bucket.count > 0,
+                    'hourly-chart__item--active': isSelectedWindow(getHourlyWindowKey(bucket.startMs))
+                  }"
+                  @click="handleHourlyBucketSelect(bucket)"
                 >
                   <div class="hourly-chart__count">{{ bucket.count }}</div>
                   <div class="hourly-chart__bar-wrap">
@@ -72,10 +77,17 @@
                 <div class="window-insights__group">
                   <div class="window-insights__heading">{{ t('scheduleOverview.busiestSlots') }}</div>
                   <div v-if="busyWindows.length" class="window-insights__list">
-                    <div v-for="bucket in busyWindows" :key="bucket.key" class="window-insights__item">
+                    <button
+                      v-for="bucket in busyWindows"
+                      :key="bucket.key"
+                      type="button"
+                      class="window-insights__item window-insights__item--button"
+                      :class="{ 'window-insights__item--active': isSelectedWindow(getHourlyWindowKey(bucket.startMs)) }"
+                      @click="handleHourlyBucketSelect(bucket)"
+                    >
                       <span>{{ bucket.label }}</span>
                       <n-tag size="small" type="warning">{{ bucket.count }}</n-tag>
-                    </div>
+                    </button>
                   </div>
                   <div v-else class="window-insights__empty">{{ t('scheduleOverview.noScheduledWork24h') }}</div>
                 </div>
@@ -127,16 +139,106 @@
 
             <template v-for="row in heatmapRows" :key="row.hour">
               <div class="heatmap__hour">{{ row.label }}</div>
-              <div
-                v-for="cell in row.cells"
-                :key="cell.key"
-                class="heatmap__cell"
-                :style="heatmapCellStyle(cell.count, heatmapMax)"
+                <div
+                  v-for="cell in row.cells"
+                  :key="cell.key"
+                  class="heatmap__cell"
+                  :class="{
+                    'heatmap__cell--clickable': cell.count > 0,
+                    'heatmap__cell--active': isSelectedWindow(cell.key)
+                  }"
+                  :style="heatmapCellStyle(cell.count, heatmapMax)"
                   :title="t('scheduleOverview.taskCountTitle', { label: cell.label, count: cell.count })"
-              >
-                {{ cell.count > 0 ? cell.count : '' }}
-              </div>
+                  @click="handleHeatmapCellSelect(cell)"
+                >
+                  {{ cell.count > 0 ? cell.count : '' }}
+                </div>
             </template>
+          </div>
+        </n-card>
+
+        <n-card v-if="selectedWindow" class="schedule-card" :bordered="false">
+          <template #header>
+            <div class="schedule-card__header">
+              <div>
+                <div class="schedule-card__title">{{ t('scheduleOverview.selectedWindow') }}</div>
+                <div class="schedule-card__subtitle">
+                  {{ t('scheduleOverview.selectedWindowSubtitle') }}
+                </div>
+              </div>
+              <n-button quaternary @click="clearSelectedWindow">
+                {{ t('scheduleOverview.clearSelectedWindow') }}
+              </n-button>
+            </div>
+          </template>
+
+          <div class="slot-detail">
+            <div class="slot-detail__summary">
+              <div class="slot-detail__window">{{ selectedWindow.label }}</div>
+              <div class="slot-detail__meta">
+                {{ t('scheduleOverview.slotTaskCount', { count: selectedWindowTasks.length }) }}
+              </div>
+            </div>
+
+            <div v-if="selectedWindowTasks.length" class="slot-detail__list">
+              <div
+                v-for="task in selectedWindowTasks"
+                :key="task.id"
+                class="slot-task-card"
+              >
+                <div class="slot-task-card__main" @click="goToTask(task)">
+                  <div class="slot-task-card__header">
+                    <div class="slot-task-card__title">
+                      #{{ task.id }} · {{ getProjectLabel(task) }}
+                    </div>
+                    <n-space :size="8" align="center">
+                      <n-tag size="small" :type="getStatusTagType(task.status)">
+                        {{ t(`status.${task.status}`) }}
+                      </n-tag>
+                      <n-tag size="small">{{ formatPriority(task.priority) }}</n-tag>
+                    </n-space>
+                  </div>
+                  <div class="slot-task-card__time">
+                    {{ t('scheduleOverview.currentSchedule') }}: {{ formatShortDateTime(task.scheduled_at) }}
+                  </div>
+                  <div class="slot-task-card__branch">
+                    {{ t('common.branch') }}: {{ task.branch_name || '-' }}
+                  </div>
+                  <div class="slot-task-card__prompt">{{ task.user_prompt }}</div>
+                </div>
+
+                <div class="slot-task-card__actions">
+                  <template v-if="canRescheduleTask(task)">
+                    <n-date-picker
+                      v-model:value="scheduleDrafts[task.id]"
+                      type="datetime"
+                      style="width: min(100%, 280px)"
+                      :placeholder="t('scheduleOverview.selectNewTime')"
+                      :is-date-disabled="isScheduledDateDisabled"
+                      :is-time-disabled="isScheduledTimeDisabled"
+                    />
+                    <n-button
+                      type="info"
+                      secondary
+                      strong
+                      round
+                      @click.stop="handleTaskReschedule(task)"
+                      :loading="savingTaskId === task.id"
+                      :disabled="scheduleDrafts[task.id] === null || (savingTaskId !== null && savingTaskId !== task.id)"
+                    >
+                      {{ t('scheduleOverview.saveTime') }}
+                    </n-button>
+                  </template>
+                  <div v-else class="slot-task-card__readonly">
+                    {{ t('scheduleOverview.onlyPendingTasksEditable') }}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div v-else class="slot-detail__empty">
+              {{ t('scheduleOverview.noTasksInSelectedWindow') }}
+            </div>
           </div>
         </n-card>
 
@@ -172,6 +274,7 @@ import {
   NButton,
   NCard,
   NDataTable,
+  NDatePicker,
   NGrid,
   NGi,
   NSpace,
@@ -183,7 +286,7 @@ import {
 import { useWindowSize } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getScheduledTasks, type Task } from '../api'
+import { getScheduledTasks, rescheduleTask, type Task } from '../api'
 import { formatDateTimeUtc8Compact, formatMonthDayTimeUtc8, formatMonthDayWeekdayUtc8, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
 
 type HourBucket = {
@@ -204,6 +307,15 @@ type HeatmapCell = {
   key: string
   label: string
   count: number
+  startMs: number
+  endMs: number
+}
+
+type SelectedWindow = {
+  key: string
+  label: string
+  startMs: number
+  endMs: number
 }
 
 type HeatmapRow = {
@@ -221,6 +333,9 @@ const isMobile = computed(() => width.value < 768)
 const tasks = ref<Task[]>([])
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
+const selectedWindow = ref<SelectedWindow | null>(null)
+const scheduleDrafts = ref<Record<number, number | null>>({})
+const savingTaskId = ref<number | null>(null)
 let pollTimer: number | null = null
 
 const pagination = {
@@ -420,10 +535,13 @@ const heatmapRows = computed<HeatmapRow[]>(() => {
     label: `${String(hour).padStart(2, '0')}:00`,
     cells: heatmapDays.value.map((day) => {
       const key = `${day.dateKey}-${hour}`
+      const startMs = new Date(`${day.dateKey}T${String(hour).padStart(2, '0')}:00:00+08:00`).getTime()
       return {
         key,
         label: `${day.label} ${String(hour).padStart(2, '0')}:00`,
         count: counts.get(key) || 0,
+        startMs,
+        endMs: startMs + 60 * 60 * 1000,
       }
     }),
   }))
@@ -449,6 +567,127 @@ function heatmapCellStyle(count: number, maxCount: number) {
     background: `rgba(32, 128, 240, ${alpha.toFixed(3)})`,
     color: intensity > 0.58 ? '#fff' : '#0f172a',
   }
+}
+
+function isSameLocalDay(left: Date, right: Date): boolean {
+  return (
+    left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate()
+  )
+}
+
+function isScheduledDateDisabled(timestamp: number): boolean {
+  const candidate = new Date(timestamp)
+  const today = new Date()
+
+  candidate.setHours(0, 0, 0, 0)
+  today.setHours(0, 0, 0, 0)
+
+  return candidate.getTime() < today.getTime()
+}
+
+function isScheduledTimeDisabled(timestamp: number) {
+  const selectedDate = new Date(timestamp)
+  const now = new Date()
+
+  if (!isSameLocalDay(selectedDate, now)) {
+    return {}
+  }
+
+  const currentHour = now.getHours()
+  const currentMinute = now.getMinutes()
+  const currentSecond = now.getSeconds()
+
+  return {
+    isHourDisabled: (hour: number) => hour < currentHour,
+    isMinuteDisabled: (minute: number, hour: number | null) => (
+      hour !== null
+      && hour === currentHour
+      && minute < currentMinute
+    ),
+    isSecondDisabled: (second: number, minute: number | null, hour: number | null) => (
+      hour !== null
+      && minute !== null
+      && hour === currentHour
+      && minute === currentMinute
+      && second < currentSecond
+    )
+  }
+}
+
+function getHourlyWindowKey(startMs: number): string {
+  return `hour-${startMs}`
+}
+
+function setSelectedWindow(nextWindow: SelectedWindow) {
+  selectedWindow.value = nextWindow
+  syncScheduleDrafts()
+}
+
+function clearSelectedWindow() {
+  selectedWindow.value = null
+  scheduleDrafts.value = {}
+}
+
+function isSelectedWindow(key: string): boolean {
+  return selectedWindow.value?.key === key
+}
+
+function handleHourlyBucketSelect(bucket: HourBucket) {
+  if (bucket.count === 0) return
+  setSelectedWindow({
+    key: getHourlyWindowKey(bucket.startMs),
+    label: bucket.label,
+    startMs: bucket.startMs,
+    endMs: bucket.startMs + 60 * 60 * 1000,
+  })
+}
+
+function handleHeatmapCellSelect(cell: HeatmapCell) {
+  if (cell.count === 0) return
+  setSelectedWindow({
+    key: cell.key,
+    label: cell.label,
+    startMs: cell.startMs,
+    endMs: cell.endMs,
+  })
+}
+
+function canRescheduleTask(task: Task): boolean {
+  return task.status === 'pending' && !!task.scheduled_at
+}
+
+function isTaskInSelectedWindow(task: Task, window: SelectedWindow): boolean {
+  const scheduledMs = getScheduledTimestamp(task.scheduled_at)
+  if (scheduledMs === null) return false
+  return scheduledMs >= window.startMs && scheduledMs < window.endMs
+}
+
+const selectedWindowTasks = computed(() => {
+  if (!selectedWindow.value) return []
+
+  return tasks.value
+    .filter((task) => isTaskInSelectedWindow(task, selectedWindow.value!))
+    .sort((left, right) => {
+      const leftMs = getScheduledTimestamp(left.scheduled_at) ?? 0
+      const rightMs = getScheduledTimestamp(right.scheduled_at) ?? 0
+      return leftMs - rightMs || right.priority - left.priority || left.id - right.id
+    })
+})
+
+function syncScheduleDrafts() {
+  if (!selectedWindow.value) {
+    scheduleDrafts.value = {}
+    return
+  }
+
+  scheduleDrafts.value = Object.fromEntries(
+    selectedWindowTasks.value.map((task) => [
+      task.id,
+      task.scheduled_at ? new Date(task.scheduled_at).getTime() : null,
+    ])
+  )
 }
 
 function goToTask(task: Task) {
@@ -544,6 +783,7 @@ async function fetchData() {
   loading.value = true
   try {
     tasks.value = await getScheduledTasks()
+    syncScheduleDrafts()
     hasLoadedOnce.value = true
   } catch (error) {
     message.error(t('scheduleOverview.failedToFetch'))
@@ -555,6 +795,34 @@ async function fetchData() {
 
 function refresh() {
   fetchData()
+}
+
+async function handleTaskReschedule(task: Task) {
+  const draft = scheduleDrafts.value[task.id]
+
+  if (!draft) {
+    message.error(t('scheduleOverview.selectNewTime'))
+    return
+  }
+
+  if (draft <= Date.now()) {
+    message.error(t('scheduleOverview.rescheduleTimeFuture'))
+    return
+  }
+
+  savingTaskId.value = task.id
+  try {
+    const updatedTask = await rescheduleTask(task.id, {
+      scheduled_datetime: new Date(draft).toISOString()
+    })
+    tasks.value = tasks.value.map((item) => (item.id === updatedTask.id ? updatedTask : item))
+    syncScheduleDrafts()
+    message.success(t('scheduleOverview.taskRescheduled'))
+  } catch (error) {
+    message.error(t('scheduleOverview.failedToRescheduleTask'))
+  } finally {
+    savingTaskId.value = null
+  }
 }
 
 onMounted(() => {
@@ -687,6 +955,15 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
+.hourly-chart__item--clickable {
+  cursor: pointer;
+}
+
+.hourly-chart__item--active .hourly-chart__bar-wrap {
+  outline: 2px solid rgba(32, 128, 240, 0.45);
+  outline-offset: 2px;
+}
+
 .hourly-chart__count {
   min-height: 20px;
   font-size: 12px;
@@ -752,6 +1029,18 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
+.window-insights__item--button {
+  width: 100%;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.window-insights__item--active {
+  background: rgba(32, 128, 240, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(32, 128, 240, 0.22);
+}
+
 .window-insights__empty {
   font-size: 13px;
   color: rgba(15, 23, 42, 0.58);
@@ -813,6 +1102,97 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
+.heatmap__cell--clickable {
+  cursor: pointer;
+}
+
+.heatmap__cell--active {
+  box-shadow: inset 0 0 0 2px rgba(15, 23, 42, 0.32);
+}
+
+.slot-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.slot-detail__summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.slot-detail__window {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.slot-detail__meta,
+.slot-detail__empty,
+.slot-task-card__time,
+.slot-task-card__branch,
+.slot-task-card__readonly {
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.6);
+}
+
+.slot-detail__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.slot-task-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+  gap: 16px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.slot-task-card__main {
+  min-width: 0;
+  cursor: pointer;
+}
+
+.slot-task-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.slot-task-card__title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.slot-task-card__time,
+.slot-task-card__branch {
+  margin-top: 6px;
+}
+
+.slot-task-card__prompt {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--n-text-color-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.slot-task-card__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+  justify-content: center;
+}
+
 @media (max-width: 768px) {
   .schedule-overview__hero,
   .schedule-card__header {
@@ -848,6 +1228,10 @@ onBeforeUnmount(() => {
   .heatmap__cell {
     min-height: 28px;
     font-size: 11px;
+  }
+
+  .slot-task-card {
+    grid-template-columns: 1fr;
   }
 }
 </style>
