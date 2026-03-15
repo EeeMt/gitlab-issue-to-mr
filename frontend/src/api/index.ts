@@ -66,6 +66,7 @@ export interface Project {
   id: number
   name: string
   path_with_namespace: string
+  default_branch?: string
 }
 
 export interface Branch {
@@ -76,6 +77,7 @@ export interface Branch {
 export interface CreateTaskRequest {
   project_id?: number | null
   branch_name: string
+  base_branch?: string
   target_branch: string
   user_prompt: string
   priority?: number

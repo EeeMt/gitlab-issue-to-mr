@@ -58,6 +58,7 @@ class Task(Base):
 
     # Branch and MR info
     branch_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    base_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     merge_request_iid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     merge_request_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 

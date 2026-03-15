@@ -179,7 +179,7 @@ const zhCN = {
     baseBranchHint: '作为变更起点的分支。',
     newBranchName: '新分支名',
     newBranchPlaceholder: '可选：feature/my-task',
-    newBranchHint: '留空则直接在基础分支上工作。',
+    newBranchHint: '留空则自动生成分支名称。',
     targetBranch: '目标分支',
     selectTargetBranch: '选择目标分支',
     targetBranchHint: '用于合并变更的目标分支。',

@@ -219,13 +219,9 @@ class WorkerExecutor:
             if task.issue_iid:
                 environment["ISSUE_IID"] = str(task.issue_iid)
 
-            # Add BASE_BRANCH if different from TARGET_BRANCH (for manual tasks)
-            # Base branch is the branch to create new branch from
-            # If user specifies a base branch, pass it to the worker
-            if task.branch_name and target_branch:
-                # Check if base branch should be passed - this is handled in the entrypoint
-                # For now, we let the entrypoint use TARGET_BRANCH as default
-                pass
+            # Add BASE_BRANCH if task specifies a source branch to fork from
+            if task.base_branch:
+                environment["BASE_BRANCH"] = task.base_branch
 
             # Pass MR_IID to worker so execution can update the MR description
             if mr_iid:

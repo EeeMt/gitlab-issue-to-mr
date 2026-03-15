@@ -190,7 +190,7 @@ const en = {
     baseBranchHint: 'Branch to base changes on.',
     newBranchName: 'New Branch Name',
     newBranchPlaceholder: 'Optional: feature/my-task',
-    newBranchHint: 'Leave empty to work on the base branch.',
+    newBranchHint: 'Leave empty to auto-generate a branch name.',
     targetBranch: 'Target Branch',
     selectTargetBranch: 'Select target branch',
     targetBranchHint: 'Branch to merge changes into.',

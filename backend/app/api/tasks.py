@@ -674,6 +674,7 @@ class CreateTaskRequest(BaseModel):
     """Request model for creating a manual task."""
     project_id: int
     branch_name: str
+    base_branch: Optional[str] = None
     target_branch: str = "main"
     user_prompt: str
     priority: int = 0
@@ -771,6 +772,7 @@ async def create_task(
         initiator_gitlab_user_id=current_user.gitlab_user_id if current_user is not None else None,
         initiator_username=current_user.username if current_user is not None else None,
         branch_name=request.branch_name,
+        base_branch=request.base_branch,
         target_branch=request.target_branch,
         priority=request.priority,
         scheduled_at=scheduled_at,

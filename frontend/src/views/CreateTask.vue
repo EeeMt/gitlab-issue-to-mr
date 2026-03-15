@@ -280,7 +280,7 @@ const targetBranchOptions = computed(() => {
 })
 
 const resolvedSourceBranch = computed(() => {
-  return (formValue.value.new_branch_name || formValue.value.base_branch || '').trim()
+  return (formValue.value.new_branch_name || '').trim()
 })
 
 const sameBranchConflict = computed(() => {
@@ -429,6 +429,9 @@ function handleProjectChange(projectId: number) {
     fetchBranches(projectId)
     formValue.value.base_branch = undefined
     formValue.value.new_branch_name = ''
+    // Set target_branch to the project's default branch
+    const project = projects.value.find(p => p.id === projectId)
+    formValue.value.target_branch = project?.default_branch || 'main'
   }
 }
 
@@ -497,18 +500,14 @@ async function handleSubmit() {
   submitting.value = true
 
   try {
-    // Determine branch_name: use new_branch_name if provided, otherwise use base_branch
-    const branchName = formValue.value.new_branch_name || formValue.value.base_branch || ''
+    // Determine branch_name: use new_branch_name if provided, otherwise auto-generate
+    const branchName = formValue.value.new_branch_name?.trim() || `ai-task-${Date.now()}`
 
-    if (branchName === formValue.value.target_branch) {
-      message.error(t('createTask.manualTaskBranchConflict'))
-      return
-    }
-
-    // Prepare request
+    // Prepare request; base_branch is the branch to fork from (sent separately)
     const request: CreateTaskRequest = {
       project_id: formValue.value.project_id,
       branch_name: branchName,
+      base_branch: formValue.value.base_branch || undefined,
       target_branch: formValue.value.target_branch,
       user_prompt: formValue.value.user_prompt,
       priority: formValue.value.priority

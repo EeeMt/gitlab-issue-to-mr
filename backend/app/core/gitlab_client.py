@@ -361,6 +361,7 @@ class GitLabClient:
                 "id": p.id,
                 "name": p.name,
                 "path_with_namespace": p.path_with_namespace,
+                "default_branch": getattr(p, "default_branch", None),
             }
             for p in projects
         ]
