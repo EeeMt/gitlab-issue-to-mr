@@ -253,6 +253,7 @@ cd frontend && npm run build
 - [GITLAB_OIDC_SETUP.md](GITLAB_OIDC_SETUP.md)
 - [e2e-debugging.md](e2e-debugging.md)
 - [DESIGN.md](DESIGN.md)
+- [SCREENSHOTS.md](SCREENSHOTS.md) - 界面预览截图
 
 ## License
 
