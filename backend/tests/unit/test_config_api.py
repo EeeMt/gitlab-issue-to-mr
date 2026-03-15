@@ -10,6 +10,7 @@ from fastapi import HTTPException
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app.api.config import (
+    _build_gitlab_project_webhook_status_response,
     _build_gitlab_webhook_target_url,
     _normalize_updates,
     _serialize_effective_config,
@@ -158,6 +159,71 @@ class ConfigApiHelperTests(unittest.TestCase):
 
         with self.assertRaises(HTTPException):
             _validate_gitlab_webhook_ready(settings)
+
+    def test_build_gitlab_project_webhook_status_response_marks_configured(self) -> None:
+        response = _build_gitlab_project_webhook_status_response(
+            project_id=1,
+            project_name="Demo",
+            project_path_with_namespace="group/demo",
+            target_webhook_url="https://bot.example.com/api/webhook/gitlab",
+            managed_secret_configured=True,
+            global_secret_fallback_configured=False,
+            matched_hook={
+                "id": 12,
+                "url": "https://bot.example.com/api/webhook/gitlab",
+                "note_events": True,
+                "enable_ssl_verification": True,
+            },
+        )
+
+        self.assertEqual(response.status, "configured")
+        self.assertIsNone(response.status_detail)
+        self.assertEqual(response.secret_mode, "project")
+        self.assertTrue(response.hook_found)
+
+    def test_build_gitlab_project_webhook_status_response_marks_attention_needed(self) -> None:
+        response = _build_gitlab_project_webhook_status_response(
+            project_id=1,
+            project_name="Demo",
+            project_path_with_namespace="group/demo",
+            target_webhook_url="https://bot.example.com/api/webhook/gitlab",
+            managed_secret_configured=False,
+            global_secret_fallback_configured=True,
+            matched_hook={
+                "id": 12,
+                "url": "https://bot.example.com/api/webhook/gitlab",
+                "note_events": False,
+                "enable_ssl_verification": True,
+            },
+        )
+
+        self.assertEqual(response.status, "needs_attention")
+        self.assertEqual(response.status_detail, "note events disabled")
+        self.assertEqual(response.secret_mode, "global_fallback")
+
+    def test_build_gitlab_project_webhook_status_response_marks_missing_and_error(self) -> None:
+        missing_response = _build_gitlab_project_webhook_status_response(
+            project_id=1,
+            project_name="Demo",
+            project_path_with_namespace="group/demo",
+            target_webhook_url="https://bot.example.com/api/webhook/gitlab",
+            managed_secret_configured=False,
+            global_secret_fallback_configured=False,
+        )
+        error_response = _build_gitlab_project_webhook_status_response(
+            project_id=1,
+            project_name="Demo",
+            project_path_with_namespace="group/demo",
+            target_webhook_url="https://bot.example.com/api/webhook/gitlab",
+            managed_secret_configured=False,
+            global_secret_fallback_configured=False,
+            inspection_error="forbidden",
+        )
+
+        self.assertEqual(missing_response.status, "missing")
+        self.assertEqual(missing_response.secret_mode, "none")
+        self.assertEqual(error_response.status, "error")
+        self.assertEqual(error_response.status_detail, "forbidden")
 
 
 if __name__ == "__main__":

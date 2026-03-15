@@ -385,9 +385,9 @@
                    </n-grid>
                  </div>
 
-                 <div class="config-form__section">
-                    <div class="config-form__section-title">{{ t('config.webhookAutomation') }}</div>
-                   <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                  <div class="config-form__section">
+                     <div class="config-form__section-title">{{ t('config.webhookAutomation') }}</div>
+                    <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                      <n-gi>
                         <n-form-item :label="t('config.gitlabAdminTokenStatus')">
                          <n-tag :type="formValue.gitlab_admin_token_configured ? 'success' : 'warning'" round>
@@ -444,24 +444,21 @@
                          </template>
                        </n-form-item>
                      </n-gi>
-                     <n-gi :span="isMobile ? 1 : 2">
-                        <n-form-item :label="t('config.webhookProject')">
-                         <n-select
-                           v-model:value="selectedWebhookProjectId"
-                           :options="projectOptions"
-                           :loading="projectsLoading"
-                           :disabled="projectsLoading || !projectOptions.length"
-                           filterable
-                           clearable
-                           :placeholder="t('config.selectGitlabProject')"
-                         />
-                         <template #feedback>
-                            {{ t('config.webhookProjectHint') }}
-                         </template>
-                       </n-form-item>
-                     </n-gi>
-                   </n-grid>
-                 </div>
+                      <n-gi :span="isMobile ? 1 : 2">
+                         <n-form-item :label="t('config.webhookOverviewSearch')">
+                          <n-input
+                            v-model:value="webhookSearch"
+                            clearable
+                            :placeholder="t('config.webhookOverviewSearchPlaceholder')"
+                            class="config-form__input"
+                          />
+                          <template #feedback>
+                             {{ t('config.webhookOverviewHint') }}
+                          </template>
+                        </n-form-item>
+                      </n-gi>
+                    </n-grid>
+                  </div>
 
                  <n-alert
                    v-if="gitlabTestState"
@@ -484,11 +481,45 @@
                     :type="webhookStatusState.type"
                     :show-icon="false"
                     class="config-actions__alert"
-                  >
-                    {{ webhookStatusState.message }}
-                  </n-alert>
-                  <div class="config-card-actions">
-                    <n-space :size="12" wrap>
+                   >
+                     {{ webhookStatusState.message }}
+                   </n-alert>
+                  <div class="config-form__section">
+                    <div class="config-card-header config-card-header--stacked">
+                      <div>
+                        <div class="config-card-header__title">{{ t('config.webhookOverview') }}</div>
+                        <div class="config-card-header__subtitle">{{ t('config.webhookOverviewSubtitle') }}</div>
+                      </div>
+                      <n-button
+                        @click="fetchWebhookStatuses"
+                        :loading="webhookStatusLoading"
+                        :disabled="isSectionBusy('gitlab')"
+                      >
+                        {{ t('config.refreshWebhookStatuses') }}
+                      </n-button>
+                    </div>
+
+                    <n-grid v-if="webhookSummaryItems.length" :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16" class="config-webhook-summary">
+                      <n-gi v-for="item in webhookSummaryItems" :key="item.label">
+                        <n-card size="small" class="config-summary-card" :bordered="false">
+                          <div class="config-summary-card__label">{{ item.label }}</div>
+                          <div class="config-summary-card__value">{{ item.value }}</div>
+                        </n-card>
+                      </n-gi>
+                    </n-grid>
+
+                    <n-data-table
+                      :columns="webhookColumns"
+                      :data="filteredWebhookStatuses"
+                      :loading="webhookStatusLoading"
+                      :bordered="false"
+                      :pagination="{ pageSize: 10 }"
+                      :scroll-x="isMobile ? 760 : 1100"
+                      :row-key="(row: GitLabProjectWebhookStatusResult) => row.project_id"
+                    />
+                  </div>
+                   <div class="config-card-actions">
+                     <n-space :size="12" wrap>
                     <n-button
                       type="primary"
                       @click="handleSaveSection('gitlab')"
@@ -523,30 +554,14 @@
                      >
                        {{ t('config.clearGitlabAdminToken') }}
                      </n-button>
-                     <n-button
-                       @click="handleClearSecret('gitlab_webhook_secret')"
-                       :disabled="isSectionBusy('gitlab') || !formValue.gitlab_webhook_secret_configured"
-                     >
-                       {{ t('config.clearGitlabWebhookSecret') }}
-                     </n-button>
                       <n-button
-                        @click="handleViewProjectWebhookStatus"
-                        :loading="webhookStatusLoading"
-                        :disabled="isSectionBusy('gitlab') || selectedWebhookProjectId === null"
+                        @click="handleClearSecret('gitlab_webhook_secret')"
+                        :disabled="isSectionBusy('gitlab') || !formValue.gitlab_webhook_secret_configured"
                       >
-                        {{ t('config.viewProjectWebhookStatus') }}
+                        {{ t('config.clearGitlabWebhookSecret') }}
                       </n-button>
-                      <n-button
-                        type="primary"
-                        secondary
-                        @click="handleSetupProjectWebhook"
-                       :loading="webhookSetupLoading"
-                       :disabled="isSectionBusy('gitlab') || selectedWebhookProjectId === null"
-                     >
-                       {{ t('config.setupProjectWebhook') }}
-                     </n-button>
-                   </n-space>
-                 </div>
+                    </n-space>
+                  </div>
                  </n-form>
                 </n-card>
               </div>
@@ -804,12 +819,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, h, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   NAlert,
   NButton,
   NCard,
+  NDataTable,
   NForm,
   NFormItem,
   NGi,
@@ -824,6 +840,7 @@ import {
   NTag,
   NTabs,
   useMessage,
+  type DataTableColumns,
   type FormInst,
   type FormRules
 } from 'naive-ui'
@@ -831,8 +848,7 @@ import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import {
   getConfig,
-  getGitLabProjectWebhookStatus,
-  getProjects,
+  listGitLabProjectWebhookStatuses,
   resetConfig,
   resetConfigKey,
   setupGitLabProjectWebhook,
@@ -845,7 +861,6 @@ import {
   type GitLabProjectWebhookSetupResult,
   type GitLabProjectWebhookStatusResult,
   type IntegrationConfigUpdate,
-  type Project,
   type RuntimeConfigUpdate
 } from '../api'
 import OidcDiagnosticsPanel from '../components/config/OidcDiagnosticsPanel.vue'
@@ -917,16 +932,15 @@ const sectionSaving = reactive<Record<ConfigSectionKey, boolean>>({
   session: false
 })
 const gitlabTesting = ref(false)
-const webhookSetupLoading = ref(false)
 const webhookStatusLoading = ref(false)
-const projectsLoading = ref(false)
+const webhookActionProjectId = ref<number | null>(null)
+const webhookStatuses = ref<GitLabProjectWebhookStatusResult[]>([])
+const webhookSearch = ref('')
 const oidcTesting = ref(false)
 const oidcTestState = ref<TestState | null>(null)
 const gitlabTestState = ref<TestState | null>(null)
 const webhookSetupState = ref<TestState | null>(null)
 const webhookStatusState = ref<TestState | null>(null)
-const availableProjects = ref<Project[]>([])
-const selectedWebhookProjectId = ref<number | null>(null)
 const activeConfigTab = ref<ConfigTabKey>('runtime')
 const configTabs: ConfigTabKey[] = ['runtime', 'gitlab', 'auth', 'maintenance']
 
@@ -991,13 +1005,6 @@ const sameSiteOptions = computed(() => [
   { label: 'None', value: 'none' }
 ])
 
-const projectOptions = computed(() =>
-  availableProjects.value.map((project) => ({
-    label: project.path_with_namespace,
-    value: project.id
-  }))
-)
-
 const formValue = ref<ConfigForm>({
   max_concurrency: 3,
   task_timeout: 1800,
@@ -1048,10 +1055,44 @@ const isBusy = computed(() =>
   pageActionLoading.value ||
   anySectionSaving.value ||
   gitlabTesting.value ||
-  webhookSetupLoading.value ||
   webhookStatusLoading.value ||
+  webhookActionProjectId.value !== null ||
   oidcTesting.value
 )
+
+const filteredWebhookStatuses = computed(() => {
+  const keyword = webhookSearch.value.trim().toLowerCase()
+  if (!keyword) {
+    return webhookStatuses.value
+  }
+
+  return webhookStatuses.value.filter((row) => {
+    const text = [
+      row.project_name,
+      row.project_path_with_namespace,
+      row.status,
+      row.secret_mode,
+      row.status_detail || ''
+    ]
+      .join(' ')
+      .toLowerCase()
+    return text.includes(keyword)
+  })
+})
+
+const webhookSummaryItems = computed(() => {
+  const rows = webhookStatuses.value
+  const configured = rows.filter((row) => row.status === 'configured').length
+  const attention = rows.filter((row) => row.status === 'needs_attention').length
+  const missingOrError = rows.filter((row) => row.status === 'missing' || row.status === 'error').length
+
+  return [
+    { label: t('config.webhookProjectsTotal'), value: String(rows.length) },
+    { label: t('config.webhookProjectsConfigured'), value: String(configured) },
+    { label: t('config.webhookProjectsAttention'), value: String(attention) },
+    { label: t('config.webhookProjectsMissing'), value: String(missingOrError) }
+  ]
+})
 
 function snapshotSection(section: ConfigSectionKey, value: ConfigForm) {
   const snapshot: Record<string, string | number | boolean> = {}
@@ -1233,8 +1274,7 @@ function isSectionBusy(section: ConfigSectionKey) {
     pageActionLoading.value ||
     anySectionSaving.value ||
     (section === 'gitlab' && gitlabTesting.value) ||
-    (section === 'gitlab' && webhookSetupLoading.value) ||
-    (section === 'gitlab' && webhookStatusLoading.value) ||
+    (section === 'gitlab' && (webhookStatusLoading.value || webhookActionProjectId.value !== null)) ||
     (section === 'oidc' && oidcTesting.value)
   )
 }
@@ -1362,6 +1402,7 @@ async function fetchConfig() {
   gitlabTestState.value = null
   try {
     syncForm(await getConfig())
+    await fetchWebhookStatuses()
   } catch (error) {
     message.error(t('config.failedToFetchConfig'))
   } finally {
@@ -1369,14 +1410,120 @@ async function fetchConfig() {
   }
 }
 
-async function fetchProjects() {
-  projectsLoading.value = true
+function getWebhookSecretLabel(secretMode: GitLabProjectWebhookStatusResult['secret_mode']) {
+  if (secretMode === 'project') {
+    return t('config.webhookSecretModeProject')
+  }
+  if (secretMode === 'global_fallback') {
+    return t('config.webhookSecretModeGlobalFallback')
+  }
+  return t('config.webhookSecretModeNone')
+}
+
+function getWebhookStatusLabel(status: GitLabProjectWebhookStatusResult['status']) {
+  if (status === 'configured') {
+    return t('config.webhookStatusConfigured')
+  }
+  if (status === 'needs_attention') {
+    return t('config.webhookStatusNeedsAttention')
+  }
+  if (status === 'missing') {
+    return t('config.webhookStatusMissing')
+  }
+  return t('config.webhookStatusError')
+}
+
+function getWebhookStatusTagType(status: GitLabProjectWebhookStatusResult['status']): 'success' | 'warning' | 'error' | 'default' {
+  if (status === 'configured') {
+    return 'success'
+  }
+  if (status === 'needs_attention') {
+    return 'warning'
+  }
+  if (status === 'missing' || status === 'error') {
+    return 'error'
+  }
+  return 'default'
+}
+
+const webhookColumns = computed<DataTableColumns<GitLabProjectWebhookStatusResult>>(() => [
+  {
+    title: t('config.webhookProjectColumn'),
+    key: 'project',
+    minWidth: 240,
+    render: (row) =>
+      h('div', { class: 'config-webhook-project' }, [
+        h('div', { class: 'config-webhook-project__name' }, row.project_path_with_namespace || row.project_name || `#${row.project_id}`),
+        h('div', { class: 'config-webhook-project__meta' }, `#${row.project_id}`)
+      ])
+  },
+  {
+    title: t('config.webhookStatusColumn'),
+    key: 'status',
+    width: 150,
+    render: (row) =>
+      h(NTag, { type: getWebhookStatusTagType(row.status), round: true }, { default: () => getWebhookStatusLabel(row.status) })
+  },
+  {
+    title: t('config.webhookSecretModeColumn'),
+    key: 'secret_mode',
+    width: 170,
+    render: (row) => h(NTag, { round: true }, { default: () => getWebhookSecretLabel(row.secret_mode) })
+  },
+  {
+    title: t('config.webhookChecksColumn'),
+    key: 'checks',
+    minWidth: 220,
+    render: (row) =>
+      h('div', { class: 'config-webhook-checks' }, [
+        h('span', `${t('config.webhookHookIdShort')}: ${row.hook_id ?? '-'}`),
+        h('span', `${t('config.webhookNoteEventsShort')}: ${row.note_events === null ? '-' : row.note_events ? t('common.enabled') : t('common.disabled')}`),
+        h('span', `${t('config.webhookSslShort')}: ${row.enable_ssl_verification === null ? '-' : row.enable_ssl_verification ? t('common.enabled') : t('common.disabled')}`)
+      ])
+  },
+  {
+    title: t('config.webhookStatusDetailColumn'),
+    key: 'status_detail',
+    minWidth: 220,
+    render: (row) => row.status_detail || row.hook_url || row.target_webhook_url
+  },
+  {
+    title: t('config.actions'),
+    key: 'actions',
+    width: 140,
+    fixed: isMobile.value ? undefined : 'right',
+    render: (row) =>
+      h(
+        NButton,
+        {
+          size: 'small',
+          type: row.status === 'configured' ? 'default' : 'primary',
+          secondary: row.status !== 'configured',
+          loading: webhookActionProjectId.value === row.project_id,
+          disabled: isSectionBusy('gitlab') && webhookActionProjectId.value !== row.project_id,
+          onClick: () => handleSetupProjectWebhook(row.project_id)
+        },
+        { default: () => t('config.setupProjectWebhook') }
+      )
+  }
+])
+
+async function fetchWebhookStatuses() {
   try {
-    availableProjects.value = await getProjects()
-  } catch (error) {
-    availableProjects.value = []
+    if (!formValue.value.gitlab_url.trim() || !formValue.value.gitlab_admin_token_configured) {
+      webhookStatuses.value = []
+      return
+    }
+
+    webhookStatusLoading.value = true
+    webhookStatusState.value = null
+    webhookStatuses.value = await listGitLabProjectWebhookStatuses()
+  } catch (error: any) {
+    webhookStatuses.value = []
+    const detail = error?.response?.data?.detail || t('config.projectWebhookStatusFailed')
+    webhookStatusState.value = { type: 'error', message: detail }
   } finally {
-    projectsLoading.value = false
+    webhookStatusLoading.value = false
   }
 }
 
@@ -1393,7 +1540,7 @@ async function handleSaveSection(section: ConfigSectionKey) {
       gitlabTestState.value = null
       webhookSetupState.value = null
       webhookStatusState.value = null
-      await fetchProjects()
+      await fetchWebhookStatuses()
     }
     if (section === 'oidc') {
       oidcTestState.value = null
@@ -1457,75 +1604,20 @@ function buildWebhookSetupMessage(result: GitLabProjectWebhookSetupResult): stri
   return t('config.projectWebhookUpdated', { project: projectLabel, hookId: result.hook_id })
 }
 
-function buildWebhookStatusMessage(result: GitLabProjectWebhookStatusResult): string {
-  const projectLabel = result.project_path_with_namespace || result.project_name || `#${result.project_id}`
-  const secretLabel =
-    result.secret_mode === 'project'
-      ? t('config.webhookSecretModeProject')
-      : result.secret_mode === 'global_fallback'
-        ? t('config.webhookSecretModeGlobalFallback')
-        : t('config.webhookSecretModeNone')
-
-  if (!result.hook_found) {
-    return t('config.projectWebhookMissing', {
-      project: projectLabel,
-      url: result.target_webhook_url,
-      secretMode: secretLabel
-    })
-  }
-
-  return t('config.projectWebhookStatusSummary', {
-    project: projectLabel,
-    hookId: result.hook_id ?? '-',
-    url: result.hook_url || result.target_webhook_url,
-    noteEvents: result.note_events ? t('common.enabled') : t('common.disabled'),
-    ssl: result.enable_ssl_verification ? t('common.enabled') : t('common.disabled'),
-    secretMode: secretLabel
-  })
-}
-
-async function handleSetupProjectWebhook() {
-  if (selectedWebhookProjectId.value === null) {
-    message.error(t('config.selectGitlabProject'))
-    return
-  }
-
-  webhookSetupLoading.value = true
+async function handleSetupProjectWebhook(projectId: number) {
+  webhookActionProjectId.value = projectId
   try {
-    const result = await setupGitLabProjectWebhook(selectedWebhookProjectId.value)
+    const result = await setupGitLabProjectWebhook(projectId)
     const successMessage = buildWebhookSetupMessage(result)
     webhookSetupState.value = { type: 'success', message: successMessage }
-    webhookStatusState.value = null
+    await fetchWebhookStatuses()
     message.success(successMessage)
   } catch (error: any) {
     const detail = error?.response?.data?.detail || t('config.projectWebhookSetupFailed')
     webhookSetupState.value = { type: 'error', message: detail }
     message.error(detail)
   } finally {
-    webhookSetupLoading.value = false
-  }
-}
-
-async function handleViewProjectWebhookStatus() {
-  if (selectedWebhookProjectId.value === null) {
-    message.error(t('config.selectGitlabProject'))
-    return
-  }
-
-  webhookStatusLoading.value = true
-  try {
-    const result = await getGitLabProjectWebhookStatus(selectedWebhookProjectId.value)
-    const summary = buildWebhookStatusMessage(result)
-    webhookStatusState.value = {
-      type: result.hook_found ? 'success' : 'error',
-      message: summary
-    }
-  } catch (error: any) {
-    const detail = error?.response?.data?.detail || t('config.projectWebhookStatusFailed')
-    webhookStatusState.value = { type: 'error', message: detail }
-    message.error(detail)
-  } finally {
-    webhookStatusLoading.value = false
+    webhookActionProjectId.value = null
   }
 }
 
@@ -1600,7 +1692,6 @@ function handleReload() {
 
 onMounted(() => {
   fetchConfig()
-  fetchProjects()
 })
 
 watch(
@@ -1680,6 +1771,10 @@ watch(
   gap: 12px;
 }
 
+.config-card-header--stacked {
+  margin-bottom: 16px;
+}
+
 .config-card-header__title {
   font-size: 18px;
   font-weight: 600;
@@ -1718,6 +1813,29 @@ watch(
 
 .config-actions__alert {
   margin-top: 16px;
+}
+
+.config-webhook-summary {
+  margin-bottom: 16px;
+}
+
+.config-webhook-project {
+  display: grid;
+  gap: 4px;
+}
+
+.config-webhook-project__name {
+  font-weight: 600;
+}
+
+.config-webhook-project__meta {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.56);
+}
+
+.config-webhook-checks {
+  display: grid;
+  gap: 4px;
 }
 
 .config-card-actions {

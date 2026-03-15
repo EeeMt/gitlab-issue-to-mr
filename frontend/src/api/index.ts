@@ -322,6 +322,8 @@ export interface GitLabProjectWebhookStatusResult {
   project_name: string
   project_path_with_namespace: string
   target_webhook_url: string
+  status: 'configured' | 'missing' | 'needs_attention' | 'error' | string
+  status_detail: string | null
   hook_found: boolean
   hook_id: number | null
   hook_url: string | null
@@ -553,6 +555,11 @@ export async function getGitLabProjectWebhookStatus(
   projectId: number,
 ): Promise<GitLabProjectWebhookStatusResult> {
   const response = await api.get(`/config/gitlab/projects/${projectId}/webhook`)
+  return response.data
+}
+
+export async function listGitLabProjectWebhookStatuses(): Promise<GitLabProjectWebhookStatusResult[]> {
+  const response = await api.get('/config/gitlab/webhooks')
   return response.data
 }
 
