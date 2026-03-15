@@ -721,7 +721,7 @@ function syncScheduleDrafts() {
   scheduleDrafts.value = Object.fromEntries(
     selectedWindowTasks.value.map((task) => [
       task.id,
-      task.scheduled_at ? new Date(task.scheduled_at).getTime() : null,
+      task.scheduled_at ? parseUtcDate(task.scheduled_at).getTime() : null,
     ])
   )
 }

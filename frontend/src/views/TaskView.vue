@@ -313,7 +313,7 @@ import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, type Task } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
-import { formatDateTimeUtc8 } from '../utils/datetime'
+import { formatDateTimeUtc8, parseUtcDate } from '../utils/datetime'
 
 const route = useRoute()
 const message = useMessage()
@@ -412,7 +412,7 @@ function formatPriority(priority?: string | number | null): string {
 }
 
 function syncRescheduleDatetime() {
-  rescheduleDatetime.value = task.value?.scheduled_at ? new Date(task.value.scheduled_at).getTime() : null
+  rescheduleDatetime.value = task.value?.scheduled_at ? parseUtcDate(task.value.scheduled_at).getTime() : null
 }
 
 function isScheduledDateDisabled(timestamp: number): boolean {
