@@ -464,7 +464,11 @@ const en = {
     envFallback: 'env fallback',
     defaultFallback: 'default fallback',
      secretInfo:
-      'Secrets are stored server-side and never returned to the browser. Leave secret fields blank to keep their current stored values.',
+       'Secrets are stored server-side and never returned to the browser. Leave secret fields blank to keep their current stored values.',
+     runtimeTab: 'Runtime',
+     gitlabTab: 'GitLab',
+     authenticationTab: 'Authentication',
+     maintenanceTab: 'Maintenance',
      runtimeSettings: 'Runtime Settings',
      runtimeSettingsSubtitle: 'Scheduler and task execution behavior',
      scheduler: 'Scheduler',

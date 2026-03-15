@@ -164,7 +164,6 @@ import {
   LogOutOutline,
   MenuOutline,
   CalendarOutline,
-  PulseOutline,
   PeopleOutline,
   RocketOutline,
   SettingsOutline,
@@ -199,8 +198,7 @@ const menuLabels: Record<string, string> = {
   ScheduleOverview: 'nav.scheduleOverview',
   Analytics: 'nav.analytics',
   Config: 'nav.config',
-  AccessManagement: 'nav.accessManagement',
-  OidcDiagnostics: 'nav.oidcDiagnostics'
+  AccessManagement: 'nav.accessManagement'
 }
 
 const currentPageLabel = computed(() => t(menuLabels[activeKey.value] || 'app.navigation'))
@@ -264,10 +262,6 @@ const menuOptions = computed<MenuOption[]>(() => {
   }
 
   const adminItems: MenuOption[] = []
-
-  if (canAccessSharedPage('oidc_diagnostics')) {
-    adminItems.push(buildMenuItem('nav.oidcDiagnostics', 'OidcDiagnostics', PulseOutline))
-  }
 
   if (!authState.oidcEnabled || isAdmin.value) {
     adminItems.push(buildMenuItem('nav.accessManagement', 'AccessManagement', PeopleOutline))

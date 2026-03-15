@@ -8,7 +8,6 @@ import ScheduleOverview from '../views/ScheduleOverview.vue'
 import Analytics from '../views/Analytics.vue'
 import Config from '../views/Config.vue'
 import AccessManagement from '../views/AccessManagement.vue'
-import OidcDiagnostics from '../views/OidcDiagnostics.vue'
 import Sessions from '../views/Sessions.vue'
 import CreateTask from '../views/CreateTask.vue'
 import Login from '../views/Login.vue'
@@ -87,8 +86,7 @@ const router = createRouter({
     {
       path: '/oidc-diagnostics',
       name: 'OidcDiagnostics',
-      component: OidcDiagnostics,
-      meta: { requiresAuth: true, pagePermission: 'oidc_diagnostics' }
+      redirect: '/configuration?tab=auth'
     }
   ]
 })

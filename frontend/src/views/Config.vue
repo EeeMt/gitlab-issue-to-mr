@@ -32,8 +32,10 @@
 
       <n-spin :show="loading">
         <div class="config-form">
-          <div class="config-layout__main">
-            <n-card id="runtime-settings" class="config-form-card" :bordered="false">
+          <n-tabs v-model:value="activeConfigTab" type="line" animated class="config-tabs">
+            <n-tab-pane name="runtime" :tab="t('config.runtimeTab')">
+              <div class="config-layout__main">
+                <n-card id="runtime-settings" class="config-form-card" :bordered="false">
                 <template #header>
                   <div class="config-card-header">
                     <div>
@@ -258,9 +260,9 @@
                   </n-space>
                 </div>
                 </n-form>
-            </n-card>
+                </n-card>
 
-            <n-card id="shared-page-settings" class="config-form-card" :bordered="false">
+                <n-card id="shared-page-settings" class="config-form-card" :bordered="false">
                 <template #header>
                   <div class="config-card-header">
                     <div>
@@ -273,7 +275,7 @@
                 <n-form :model="formValue" label-placement="top" class="config-section-form">
                 <div class="config-form__section">
                    <div class="config-form__section-title">{{ t('config.pagePermissions') }}</div>
-                  <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                    <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                     <n-gi>
                        <n-form-item :label="t('config.allowMonitor')">
                         <n-switch v-model:value="formValue.allow_monitor_for_users" />
@@ -298,16 +300,8 @@
                         </template>
                       </n-form-item>
                     </n-gi>
-                    <n-gi>
-                       <n-form-item :label="t('config.allowOidcDiagnostics')">
-                        <n-switch v-model:value="formValue.allow_oidc_diagnostics_for_users" />
-                        <template #feedback>
-                           {{ t('config.allowOidcDiagnosticsHint') }}
-                        </template>
-                      </n-form-item>
-                    </n-gi>
-                  </n-grid>
-                </div>
+                   </n-grid>
+                 </div>
                 <div class="config-card-actions">
                   <n-space :size="12" wrap>
                     <n-button
@@ -328,9 +322,13 @@
                   </n-space>
                 </div>
                 </n-form>
-            </n-card>
+                </n-card>
+              </div>
+            </n-tab-pane>
 
-            <n-card id="gitlab-settings" class="config-form-card" :bordered="false">
+            <n-tab-pane name="gitlab" :tab="t('config.gitlabTab')">
+              <div class="config-layout__main">
+                <n-card id="gitlab-settings" class="config-form-card" :bordered="false">
                 <template #header>
                   <div class="config-card-header">
                     <div>
@@ -549,10 +547,14 @@
                      </n-button>
                    </n-space>
                  </div>
-                </n-form>
-            </n-card>
+                 </n-form>
+                </n-card>
+              </div>
+            </n-tab-pane>
 
-            <n-card id="oidc-settings" class="config-form-card" :bordered="false">
+            <n-tab-pane name="auth" :tab="t('config.authenticationTab')">
+              <div class="config-layout__main">
+                <n-card id="oidc-settings" class="config-form-card" :bordered="false">
                 <template #header>
                   <div class="config-card-header">
                     <div>
@@ -654,21 +656,18 @@
                     >
                       {{ t('config.testOidcConnection') }}
                     </n-button>
-                    <n-button @click="router.push('/oidc-diagnostics')" :disabled="isSectionBusy('oidc')">
-                      {{ t('config.openOidcDiagnostics') }}
-                    </n-button>
-                    <n-button
-                      @click="handleClearSecret('oidc_client_secret')"
-                      :disabled="isSectionBusy('oidc') || !formValue.oidc_client_secret_configured"
+                     <n-button
+                       @click="handleClearSecret('oidc_client_secret')"
+                       :disabled="isSectionBusy('oidc') || !formValue.oidc_client_secret_configured"
                     >
                       {{ t('config.clearOidcSecret') }}
                     </n-button>
                   </n-space>
                 </div>
                 </n-form>
-            </n-card>
+                </n-card>
 
-            <n-card id="session-settings" class="config-form-card" :bordered="false">
+                <n-card id="session-settings" class="config-form-card" :bordered="false">
                 <template #header>
                   <div class="config-card-header">
                     <div>
@@ -766,9 +765,15 @@
                   </n-space>
                 </div>
                 </n-form>
-            </n-card>
+                </n-card>
 
-            <n-card id="config-actions" class="config-form-card" :bordered="false">
+                <OidcDiagnosticsPanel />
+              </div>
+            </n-tab-pane>
+
+            <n-tab-pane name="maintenance" :tab="t('config.maintenanceTab')">
+              <div class="config-layout__main">
+                <n-card id="config-actions" class="config-form-card" :bordered="false">
                 <template #header>
                   <div class="config-card-header">
                     <div>
@@ -778,7 +783,7 @@
                   </div>
                 </template>
 
-                <div class="config-form__section config-page-actions">
+                  <div class="config-form__section config-page-actions">
                   <n-space :size="12" wrap>
                     <n-button @click="handleReload" :disabled="isBusy">
                       {{ t('common.reload') }}
@@ -787,9 +792,11 @@
                       {{ t('config.resetEnvDefaults') }}
                     </n-button>
                   </n-space>
-                </div>
-            </n-card>
-          </div>
+                  </div>
+                </n-card>
+              </div>
+            </n-tab-pane>
+          </n-tabs>
         </div>
       </n-spin>
     </n-space>
@@ -797,8 +804,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   NAlert,
   NButton,
@@ -813,7 +820,9 @@ import {
   NSpace,
   NSpin,
   NSwitch,
+  NTabPane,
   NTag,
+  NTabs,
   useMessage,
   type FormInst,
   type FormRules
@@ -839,6 +848,7 @@ import {
   type Project,
   type RuntimeConfigUpdate
 } from '../api'
+import OidcDiagnosticsPanel from '../components/config/OidcDiagnosticsPanel.vue'
 
 type ConfigForm = {
   max_concurrency: number
@@ -885,9 +895,10 @@ type TestState = {
 }
 
 type ConfigSectionKey = 'runtime' | 'sharedPages' | 'gitlab' | 'oidc' | 'session'
+type ConfigTabKey = 'runtime' | 'gitlab' | 'auth' | 'maintenance'
 
 const message = useMessage()
-const router = useRouter()
+const route = useRoute()
 const { t } = useI18n()
 const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
@@ -916,6 +927,8 @@ const webhookSetupState = ref<TestState | null>(null)
 const webhookStatusState = ref<TestState | null>(null)
 const availableProjects = ref<Project[]>([])
 const selectedWebhookProjectId = ref<number | null>(null)
+const activeConfigTab = ref<ConfigTabKey>('runtime')
+const configTabs: ConfigTabKey[] = ['runtime', 'gitlab', 'auth', 'maintenance']
 
 const sectionKeys: ConfigSectionKey[] = ['runtime', 'sharedPages', 'gitlab', 'oidc', 'session']
 
@@ -1062,8 +1075,7 @@ const sharedPagesEnabledCount = computed(
     [
       formValue.value.allow_monitor_for_users,
       formValue.value.allow_schedule_overview_for_users,
-      formValue.value.allow_analytics_for_users,
-      formValue.value.allow_oidc_diagnostics_for_users
+      formValue.value.allow_analytics_for_users
     ].filter(Boolean).length
 )
 
@@ -1590,6 +1602,16 @@ onMounted(() => {
   fetchConfig()
   fetchProjects()
 })
+
+watch(
+  () => route.query.tab,
+  (tab) => {
+    if (typeof tab === 'string' && configTabs.includes(tab as ConfigTabKey)) {
+      activeConfigTab.value = tab as ConfigTabKey
+    }
+  },
+  { immediate: true }
+)
 </script>
 
 <style scoped>
@@ -1641,6 +1663,14 @@ onMounted(() => {
 .config-layout__main {
   display: grid;
   gap: 16px;
+}
+
+.config-tabs :deep(.n-tabs-nav) {
+  margin-bottom: 20px;
+}
+
+.config-tabs :deep(.n-tabs-tab) {
+  border-radius: 999px;
 }
 
 .config-card-header {

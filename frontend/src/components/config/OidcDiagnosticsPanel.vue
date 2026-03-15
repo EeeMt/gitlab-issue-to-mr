@@ -1,0 +1,362 @@
+<template>
+  <n-card class="diagnostics-card" :bordered="false">
+    <template #header>
+      <div class="diagnostics-card__header">
+        <div>
+          <div class="diagnostics-card__title">{{ t('oidcDiagnostics.title') }}</div>
+          <div class="diagnostics-card__subtitle">{{ t('oidcDiagnostics.subtitle') }}</div>
+        </div>
+        <n-button @click="fetchDiagnostics" :loading="loading" :disabled="loading">
+          {{ t('oidcDiagnostics.refreshDiagnostics') }}
+        </n-button>
+      </div>
+    </template>
+
+    <n-spin :show="initialLoading">
+      <n-space v-if="diagnostics" vertical :size="16">
+        <n-grid :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
+          <n-gi v-for="item in summaryItems" :key="item.label">
+            <n-card size="small" class="diagnostics-summary-card" :bordered="false">
+              <div class="diagnostics-summary-card__label">{{ item.label }}</div>
+              <div class="diagnostics-summary-card__value">{{ item.value }}</div>
+            </n-card>
+          </n-gi>
+        </n-grid>
+
+        <n-alert v-if="diagnostics.warnings.length" type="warning" :show-icon="false">
+          <div class="diagnostics-alert__title">{{ t('oidcDiagnostics.operatorWarnings') }}</div>
+          <ul class="diagnostics-alert__list">
+            <li v-for="warning in diagnostics.warnings" :key="warning">{{ warning }}</li>
+          </ul>
+        </n-alert>
+
+        <div class="diagnostics-checks">
+          <div
+            v-for="check in diagnostics.checks"
+            :key="check.key"
+            class="diagnostics-check"
+            :class="`diagnostics-check--${check.status}`"
+          >
+            <div class="diagnostics-check__top">
+              <span class="diagnostics-check__label">{{ check.label }}</span>
+              <n-tag size="small" round :type="tagType(check.status)">
+                {{
+                  check.status === 'ok'
+                    ? t('status.ok')
+                    : check.status === 'warning'
+                      ? t('oidcDiagnostics.warning')
+                      : t('oidcDiagnostics.error')
+                }}
+              </n-tag>
+            </div>
+            <div class="diagnostics-check__detail">{{ check.detail }}</div>
+          </div>
+        </div>
+
+        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
+          <n-gi>
+            <n-card class="diagnostics-detail-card" :bordered="false">
+              <template #header>
+                <div class="diagnostics-card__header">
+                  <div>
+                    <div class="diagnostics-card__title">{{ t('oidcDiagnostics.authModeSummary') }}</div>
+                    <div class="diagnostics-card__subtitle">{{ t('oidcDiagnostics.authModeSummarySubtitle') }}</div>
+                  </div>
+                </div>
+              </template>
+
+              <div class="diagnostics-detail-list">
+                <div class="diagnostics-detail-list__item">
+                  <span>{{ t('oidcDiagnostics.oidcLogin') }}</span>
+                  <strong>{{ diagnostics.oidc_enabled ? t('common.enabled') : t('common.disabled') }}</strong>
+                </div>
+                <div class="diagnostics-detail-list__item">
+                  <span>{{ t('oidcDiagnostics.breakGlass') }}</span>
+                  <strong>{{ diagnostics.break_glass_enabled ? t('common.enabled') : t('common.disabled') }}</strong>
+                </div>
+                <div class="diagnostics-detail-list__item">
+                  <span>{{ t('oidcDiagnostics.clientId') }}</span>
+                  <strong>{{ diagnostics.client_id_configured ? t('config.configured') : t('config.missing') }}</strong>
+                </div>
+                <div class="diagnostics-detail-list__item">
+                  <span>{{ t('oidcDiagnostics.clientSecret') }}</span>
+                  <strong>{{ diagnostics.client_secret_configured ? t('config.configured') : t('config.missing') }}</strong>
+                </div>
+                <div class="diagnostics-detail-list__item">
+                  <span>{{ t('oidcDiagnostics.cookiePolicy') }}</span>
+                  <strong>
+                    {{ diagnostics.cookie_secure ? t('oidcDiagnostics.secure') : t('oidcDiagnostics.insecure') }} /
+                    {{ diagnostics.cookie_samesite }}
+                  </strong>
+                </div>
+                <div class="diagnostics-detail-list__item">
+                  <span>{{ t('oidcDiagnostics.sessionTtl') }}</span>
+                  <strong>{{ diagnostics.session_ttl_seconds }}s</strong>
+                </div>
+              </div>
+            </n-card>
+          </n-gi>
+
+          <n-gi>
+            <n-card class="diagnostics-detail-card" :bordered="false">
+              <template #header>
+                <div class="diagnostics-card__header">
+                  <div>
+                    <div class="diagnostics-card__title">{{ t('oidcDiagnostics.providerMetadata') }}</div>
+                    <div class="diagnostics-card__subtitle">{{ t('oidcDiagnostics.providerMetadataSubtitle') }}</div>
+                  </div>
+                </div>
+              </template>
+
+              <div class="diagnostics-detail-list">
+                <div class="diagnostics-detail-list__item">
+                  <span>{{ t('oidcDiagnostics.issuerUrl') }}</span>
+                  <code>{{ diagnostics.issuer_url || '—' }}</code>
+                </div>
+                <div class="diagnostics-detail-list__item">
+                  <span>{{ t('oidcDiagnostics.discoveryIssuer') }}</span>
+                  <code>{{ diagnostics.discovery_issuer || '—' }}</code>
+                </div>
+                <div class="diagnostics-detail-list__item">
+                  <span>{{ t('oidcDiagnostics.redirectUri') }}</span>
+                  <code>{{ diagnostics.redirect_uri || '—' }}</code>
+                </div>
+                <div class="diagnostics-detail-list__item">
+                  <span>{{ t('oidcDiagnostics.authorizationEndpoint') }}</span>
+                  <code>{{ diagnostics.authorization_endpoint || '—' }}</code>
+                </div>
+                <div class="diagnostics-detail-list__item">
+                  <span>{{ t('oidcDiagnostics.tokenEndpoint') }}</span>
+                  <code>{{ diagnostics.token_endpoint || '—' }}</code>
+                </div>
+                <div class="diagnostics-detail-list__item">
+                  <span>{{ t('oidcDiagnostics.userinfoEndpoint') }}</span>
+                  <code>{{ diagnostics.userinfo_endpoint || '—' }}</code>
+                </div>
+              </div>
+            </n-card>
+          </n-gi>
+        </n-grid>
+
+        <n-card class="diagnostics-detail-card" :bordered="false">
+          <template #header>
+            <div class="diagnostics-card__header">
+              <div>
+                <div class="diagnostics-card__title">{{ t('oidcDiagnostics.requiredScopes') }}</div>
+                <div class="diagnostics-card__subtitle">{{ t('oidcDiagnostics.requiredScopesSubtitle') }}</div>
+              </div>
+            </div>
+          </template>
+
+          <n-space :size="8" wrap>
+            <n-tag v-for="scope in diagnostics.required_scopes" :key="scope" round>{{ scope }}</n-tag>
+          </n-space>
+
+          <div class="diagnostics-scope-string">
+            <span class="diagnostics-scope-string__label">{{ t('oidcDiagnostics.authorizationScopeString') }}</span>
+            <code>{{ diagnostics.required_scope_string }}</code>
+          </div>
+
+          <div v-if="diagnostics.authorization_url_preview" class="diagnostics-scope-string">
+            <span class="diagnostics-scope-string__label">{{ t('oidcDiagnostics.authorizationUrlPreview') }}</span>
+            <code>{{ diagnostics.authorization_url_preview }}</code>
+          </div>
+        </n-card>
+      </n-space>
+    </n-spin>
+  </n-card>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { useWindowSize } from '@vueuse/core'
+import { NAlert, NButton, NCard, NGi, NGrid, NSpace, NSpin, NTag, useMessage } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
+import { getOidcDiagnostics, type OidcDiagnosticsResult } from '../../api'
+
+const message = useMessage()
+const { t } = useI18n()
+const { width } = useWindowSize()
+const isMobile = computed(() => width.value < 768)
+
+const loading = ref(false)
+const diagnostics = ref<OidcDiagnosticsResult | null>(null)
+const hasLoadedOnce = ref(false)
+const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
+
+const summaryItems = computed(() => {
+  if (!diagnostics.value) {
+    return []
+  }
+
+  const okCount = diagnostics.value.checks.filter((check) => check.status === 'ok').length
+  const warningCount = diagnostics.value.checks.filter((check) => check.status === 'warning').length
+  const errorCount = diagnostics.value.checks.filter((check) => check.status === 'error').length
+
+  return [
+    { label: t('oidcDiagnostics.oidcLoginSummary'), value: diagnostics.value.oidc_enabled ? t('common.enabled') : t('common.disabled') },
+    { label: t('oidcDiagnostics.healthyChecks'), value: String(okCount) },
+    { label: t('oidcDiagnostics.warnings'), value: String(warningCount) },
+    { label: t('oidcDiagnostics.errors'), value: String(errorCount) }
+  ]
+})
+
+function tagType(status: string): 'success' | 'warning' | 'error' | 'default' {
+  if (status === 'ok') {
+    return 'success'
+  }
+  if (status === 'warning') {
+    return 'warning'
+  }
+  if (status === 'error') {
+    return 'error'
+  }
+  return 'default'
+}
+
+async function fetchDiagnostics() {
+  loading.value = true
+  try {
+    diagnostics.value = await getOidcDiagnostics()
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || t('oidcDiagnostics.failedToFetch'))
+  } finally {
+    hasLoadedOnce.value = true
+    loading.value = false
+  }
+}
+
+onMounted(() => {
+  fetchDiagnostics()
+})
+</script>
+
+<style scoped>
+.diagnostics-card,
+.diagnostics-detail-card {
+  border-radius: 18px;
+}
+
+.diagnostics-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.diagnostics-card__title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.diagnostics-card__subtitle {
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.58);
+  margin-top: 4px;
+}
+
+.diagnostics-summary-card {
+  background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
+  border-radius: 12px;
+}
+
+.diagnostics-summary-card__label {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.6);
+  margin-bottom: 8px;
+}
+
+.diagnostics-summary-card__value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--n-text-color-1);
+}
+
+.diagnostics-alert__title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.diagnostics-alert__list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.diagnostics-checks {
+  display: grid;
+  gap: 12px;
+}
+
+.diagnostics-check {
+  border-radius: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.diagnostics-check--ok {
+  background: rgba(24, 160, 88, 0.06);
+}
+
+.diagnostics-check--warning {
+  background: rgba(240, 160, 32, 0.08);
+}
+
+.diagnostics-check--error {
+  background: rgba(208, 48, 80, 0.08);
+}
+
+.diagnostics-check__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.diagnostics-check__label {
+  font-weight: 600;
+}
+
+.diagnostics-check__detail,
+.diagnostics-detail-list__item,
+.diagnostics-scope-string {
+  color: rgba(15, 23, 42, 0.72);
+  line-height: 1.6;
+}
+
+.diagnostics-detail-list {
+  display: grid;
+  gap: 12px;
+}
+
+.diagnostics-detail-list__item {
+  display: grid;
+  gap: 4px;
+}
+
+.diagnostics-detail-list__item code,
+.diagnostics-scope-string code {
+  word-break: break-all;
+}
+
+.diagnostics-scope-string {
+  margin-top: 16px;
+  display: grid;
+  gap: 6px;
+}
+
+.diagnostics-scope-string__label {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.56);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+@media (max-width: 767px) {
+  .diagnostics-card__header,
+  .diagnostics-check__top {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+</style>
