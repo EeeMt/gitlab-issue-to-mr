@@ -611,6 +611,8 @@ class WorkerExecutor:
         is_continuation = mr_iid is not None
         settings = get_settings()
         task_url = f"{settings.dashboard_url}/tasks/{task.id}"
+
+        if success:
             if task.merge_request_url:
                 # Extract MR IID from URL if not already set
                 if not mr_iid and "/merge_requests/" in task.merge_request_url:
