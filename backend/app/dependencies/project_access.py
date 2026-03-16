@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import datetime, timedelta
@@ -19,8 +20,11 @@ from app.core.session import update_session_gitlab_tokens
 from app.database import get_db
 from app.dependencies.auth import AuthContext, require_authenticated_context
 
-_ACCESS_CACHE_TTL_SECONDS = 60
+_ACCESS_CACHE_TTL_SECONDS = 300
+# Cache stores (expires_at, projects_list); None means no data yet (cold).
 _project_access_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+# Tracks in-flight background refresh tasks per session to avoid duplicate fetches.
+_project_access_refresh_tasks: dict[str, asyncio.Task] = {}
 logger = logging.getLogger(__name__)
 
 
@@ -39,11 +43,31 @@ class ProjectAccessScope:
         return self.is_unrestricted or project_id in self.accessible_project_ids
 
 
+async def _fetch_and_cache_projects(
+    session_id: str,
+    access_token: str,
+    session_expires_at: float,
+) -> list[dict[str, Any]]:
+    """Fetch accessible projects from GitLab and update the cache."""
+    projects = await get_accessible_projects_for_oauth_token(access_token)
+    now = time.time()
+    cache_expires_at = min(now + _ACCESS_CACHE_TTL_SECONDS, session_expires_at)
+    _project_access_cache[session_id] = (cache_expires_at, projects)
+    _project_access_refresh_tasks.pop(session_id, None)
+    return projects
+
+
 async def require_project_access_scope(
     auth_context: Optional[AuthContext] = Depends(require_authenticated_context),
     db: AsyncSession = Depends(get_db),
 ) -> ProjectAccessScope:
-    """Resolve the set of GitLab projects the current user may access."""
+    """Resolve the set of GitLab projects the current user may access.
+
+    Uses stale-while-revalidate: returns cached data immediately on cache
+    expiry and refreshes in the background, so polling endpoints never block
+    on a GitLab API round-trip.
+    """
+    t_start = time.time()
     settings = get_effective_settings()
     if not settings.oidc_enabled or auth_context is None:
         return ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -59,21 +83,47 @@ async def require_project_access_scope(
                 detail="Session is missing GitLab API access. Please sign in again.",
             )
 
-    cache_entry = _project_access_cache.get(auth_context.session.id)
+    session_id = auth_context.session.id
+    cache_entry = _project_access_cache.get(session_id)
     now = time.time()
+    session_expires_at = (
+        auth_context.session.expires_at.timestamp()
+        if auth_context.session.expires_at is not None
+        else now + _ACCESS_CACHE_TTL_SECONDS
+    )
+
     if cache_entry and cache_entry[0] > now:
+        # Fresh cache — return immediately.
         projects = cache_entry[1]
+    elif cache_entry:
+        # Stale cache — return immediately and refresh in background.
+        projects = cache_entry[1]
+        existing_task = _project_access_refresh_tasks.get(session_id)
+        if existing_task is None or existing_task.done():
+            _project_access_refresh_tasks[session_id] = asyncio.create_task(
+                _fetch_and_cache_projects(
+                    session_id,
+                    auth_context.gitlab_access_token,
+                    session_expires_at,
+                )
+            )
     else:
+        # Cold cache — must block on the first fetch.
         try:
-            projects = await get_accessible_projects_for_oauth_token(auth_context.gitlab_access_token)
+            projects = await _fetch_and_cache_projects(
+                session_id,
+                auth_context.gitlab_access_token,
+                session_expires_at,
+            )
         except httpx.HTTPStatusError as exc:
-            status_code = exc.response.status_code
-            if status_code in {401, 403}:
+            if exc.response.status_code in {401, 403}:
                 refreshed = await _refresh_auth_context_tokens(auth_context, db)
                 if refreshed:
                     try:
-                        projects = await get_accessible_projects_for_oauth_token(
-                            auth_context.gitlab_access_token
+                        projects = await _fetch_and_cache_projects(
+                            session_id,
+                            auth_context.gitlab_access_token,
+                            session_expires_at,
                         )
                     except httpx.HTTPStatusError as retry_exc:
                         if retry_exc.response.status_code in {401, 403}:
@@ -104,13 +154,14 @@ async def require_project_access_scope(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Failed to reach GitLab while resolving project access.",
             ) from exc
-        session_expires_at = (
-            auth_context.session.expires_at.timestamp()
-            if auth_context.session.expires_at is not None
-            else now + _ACCESS_CACHE_TTL_SECONDS
+
+    elapsed = time.time() - t_start
+    if elapsed > 1.0:
+        logger.warning(
+            f"[SLOW require_project_access_scope] {elapsed:.3f}s "
+            f"user={auth_context.user.username if auth_context else None} "
+            f"cache_hit={bool(cache_entry and cache_entry[0] > time.time())}"
         )
-        cache_expires_at = min(now + _ACCESS_CACHE_TTL_SECONDS, session_expires_at)
-        _project_access_cache[auth_context.session.id] = (cache_expires_at, projects)
 
     return ProjectAccessScope(is_unrestricted=False, accessible_projects=projects)
 

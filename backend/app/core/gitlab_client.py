@@ -1,5 +1,6 @@
 """GitLab API client wrapper."""
 
+import asyncio
 import logging
 from typing import Any, Optional
 from urllib.parse import urlsplit, urlunsplit
@@ -527,8 +528,9 @@ async def get_accessible_projects_for_oauth_token(
                     break
                 page = int(next_page)
 
-        await collect_projects({"membership": "true"})
-        await collect_projects({"visibility": "public"})
-        await collect_projects({"visibility": "internal"})
-
+        await asyncio.gather(
+            collect_projects({"membership": "true"}),
+            collect_projects({"visibility": "public"}),
+            collect_projects({"visibility": "internal"}),
+        )
     return list(projects_by_id.values())
