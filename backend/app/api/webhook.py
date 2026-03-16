@@ -205,11 +205,16 @@ async def gitlab_webhook(
         logger.debug(f"Ignoring event type: {event_type}")
         return {"status": "ignored", "reason": f"event_type {event_type} not supported"}
 
-    # Get note (comment) data - GitLab webhook uses 'note' field directly (not object_attributes)
-    note_attrs = payload.get("note", {})
+    # Get note (comment) data from object_attributes (standard GitLab note webhook format)
+    note_attrs = payload.get("object_attributes", {})
     note_id = note_attrs.get("id")
     note_type = note_attrs.get("noteable_type")
-    comment_body = note_attrs.get("body", "")
+    comment_body = note_attrs.get("note", "")
+
+    # Skip system-generated notes (e.g. "closed", "merged" status updates)
+    if note_attrs.get("system"):
+        logger.debug("Ignoring system-generated note")
+        return {"status": "ignored", "reason": "system note"}
 
     # Get issue and project info from root level
     issue = payload.get("issue", {})
