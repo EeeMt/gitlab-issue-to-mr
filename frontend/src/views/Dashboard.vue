@@ -253,7 +253,7 @@ const columns = computed<DataTableColumns<Task>>(() => {
           h(
             'div',
             { style: 'font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;' },
-            `#${row.project_id}`
+            `ID: ${row.project_id}`
           )
         ])
     },
