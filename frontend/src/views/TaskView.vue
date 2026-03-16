@@ -289,15 +289,9 @@
               </div>
             </template>
             <n-spin :show="logsLoading">
-              <div v-if="task?.status === 'running' || task?.status === 'pending' || task?.status === 'queued'">
-                <n-spin :show="containerLogsLoading && !containerLogs && !logs">
-                  <!-- Live stream for admins; fall back to periodic DB logs for others -->
-                  <pre class="log-content">{{ containerLogs || logs || t('taskView.waitingForLogs') }}</pre>
-                </n-spin>
-              </div>
-              <div v-else>
-                <pre class="log-content">{{ logs || t('taskView.noLogsAvailable') }}</pre>
-              </div>
+              <!-- DB log entries are streamed every ~10s during execution,
+                   so the same <pre> works for both running and completed tasks. -->
+              <pre class="log-content">{{ logs || (isActiveTaskStatus(task?.status) ? t('taskView.waitingForLogs') : t('taskView.noLogsAvailable')) }}</pre>
             </n-spin>
           </n-card>
         </div>
