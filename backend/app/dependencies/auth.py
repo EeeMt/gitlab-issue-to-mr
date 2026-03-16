@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -19,6 +21,8 @@ from app.models import User, UserSession
 from app.page_permissions import can_access_page
 from app.runtime_config import load_runtime_config_from_db
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class AuthContext:
@@ -35,13 +39,22 @@ async def get_optional_auth_context(
     db: AsyncSession = Depends(get_db),
 ) -> Optional[AuthContext]:
     """Resolve the current auth context from the session cookie if auth is enabled."""
+    t0 = time.time()
     await load_runtime_config_from_db(db)
+    t1 = time.time()
     settings = get_effective_settings()
     if not settings.oidc_enabled:
         return None
 
     token = request.cookies.get(settings.session_cookie_name)
     result = await resolve_session_authentication(db, token)
+    t2 = time.time()
+
+    if t1 - t0 > 1.0:
+        logger.warning(f"[SLOW auth] load_runtime_config={t1-t0:.3f}s path={request.url.path}")
+    if t2 - t1 > 1.0:
+        logger.warning(f"[SLOW auth] resolve_session={t2-t1:.3f}s path={request.url.path}")
+
     request.state.auth_failure_detail = result.failure_detail
     if result.user is None or result.session is None:
         return None

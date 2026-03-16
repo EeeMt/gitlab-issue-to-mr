@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -112,6 +113,7 @@ async def get_container_logs(
             docker = get_docker_client()
 
             # Try to find container by ID or name
+            t_get = time.time()
             try:
                 container = await asyncio.to_thread(docker.client.containers.get, container_id)
             except Exception:
@@ -127,7 +129,12 @@ async def get_container_logs(
                     yield f"data: {('Container not found: ' + container_id)}\n\n"
                     return
 
+            t_got = time.time()
+            if t_got - t_get > 2.0:
+                logger.warning(f"[SLOW SSE] docker.containers.get took {t_got-t_get:.3f}s for {container_id}")
+
             # Stream logs
+            t_stream = time.time()
             logs = await asyncio.to_thread(
                 container.logs,
                 stdout=True,
@@ -136,10 +143,17 @@ async def get_container_logs(
                 tail=100,
                 stream=True,
             )
+            t_streamed = time.time()
+            if t_streamed - t_stream > 2.0:
+                logger.warning(f"[SLOW SSE] container.logs() setup took {t_streamed-t_stream:.3f}s for {container_id}")
 
             try:
                 while True:
+                    t_next = time.time()
                     line = await asyncio.to_thread(next, logs, None)
+                    wait = time.time() - t_next
+                    if wait > 5.0:
+                        logger.info(f"[SSE] log line wait={wait:.1f}s (container idle) for {container_id}")
                     if line is None:
                         break
                     yield f"data: {line.decode('utf-8', errors='replace')}\n\n"
