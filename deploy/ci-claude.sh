@@ -93,9 +93,17 @@ else
   info "Tools  : $ALLOWED_TOOLS"
 fi
 [[ -n "$CLAUDE_MODEL" ]]             && info "Model  : $CLAUDE_MODEL"
+[[ -n "$MAX_TURNS" ]]                && info "MaxTurns: $MAX_TURNS"
 [[ -n "$RESUME" ]]               && info "Session: resuming $RESUME"
 [[ "$CONTINUE_SESSION" == "1" ]] && info "Session: continuing last conversation"
-_e "\n"
+
+# Print full CLI args (excluding the prompt at index 1)
+_e "${DIM}[ci-claude] CLI args:"
+for arg in "${CLAUDE_ARGS[@]}"; do
+  [[ "$arg" == "$PROMPT" ]] && continue
+  _e " %s" "$arg"
+done
+_e "${RESET}\n\n"
 
 # ── Temp files for accumulating structured data ───────────────────────────────
 # Needed because process_stream runs in a pipe subshell and can't set outer vars.
