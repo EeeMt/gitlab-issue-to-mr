@@ -567,6 +567,7 @@ const zhCN = {
     webhookProjectHint: '选择单个项目后，可一键创建或更新指向本系统的 Webhook。',
     viewProjectWebhookStatus: '查看项目 Webhook 状态',
     setupProjectWebhook: '配置项目 Webhook',
+    noWebhookData: '未找到项目，请确认已配置 GitLab Admin Token。',
     sharedPageAccess: '共享页面访问',
     sharedPageAccessSubtitle: '选择哪些只读页面也可以向平台普通用户开放',
     pagePermissions: '页面权限',

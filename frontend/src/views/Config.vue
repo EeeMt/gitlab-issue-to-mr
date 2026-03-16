@@ -497,17 +497,51 @@
                       </n-gi>
                     </n-grid>
 
-                    <div class="config-table-wrapper">
+                    <div v-if="!isMobile" class="config-table-wrapper">
                       <n-data-table
                         :columns="webhookColumns"
                         :data="filteredWebhookStatuses"
                         :loading="webhookStatusLoading"
                         :bordered="false"
                         :pagination="{ pageSize: 10 }"
-                        :scroll-x="isMobile ? 760 : 1100"
+                        :scroll-x="1100"
                         :row-key="(row: GitLabProjectWebhookStatusResult) => row.project_id"
                       />
                     </div>
+                    <n-spin v-else :show="webhookStatusLoading">
+                      <div v-if="!webhookStatusLoading && filteredWebhookStatuses.length === 0" class="config-webhook-mobile__empty">
+                        {{ t('config.noWebhookData') }}
+                      </div>
+                      <div
+                        v-for="row in filteredWebhookStatuses"
+                        :key="row.project_id"
+                        class="config-webhook-mobile__item"
+                      >
+                        <div class="config-webhook-mobile__item-top">
+                          <div class="config-webhook-project">
+                            <div class="config-webhook-project__name">{{ row.project_path_with_namespace || row.project_name || `#${row.project_id}` }}</div>
+                            <div class="config-webhook-project__meta">#{{ row.project_id }}</div>
+                          </div>
+                          <n-button
+                            size="small"
+                            :type="row.status === 'configured' ? 'default' : 'primary'"
+                            :secondary="row.status !== 'configured'"
+                            :loading="webhookActionProjectId === row.project_id"
+                            :disabled="isSectionBusy('gitlab') && webhookActionProjectId !== row.project_id"
+                            @click="handleSetupProjectWebhook(row.project_id)"
+                          >
+                            {{ t('config.setupProjectWebhook') }}
+                          </n-button>
+                        </div>
+                        <div class="config-webhook-mobile__item-tags">
+                          <n-tag :type="getWebhookStatusTagType(row.status)" size="small" round>{{ getWebhookStatusLabel(row.status) }}</n-tag>
+                          <n-tag size="small" round>{{ getWebhookSecretLabel(row.secret_mode) }}</n-tag>
+                        </div>
+                        <div v-if="row.status_detail || row.hook_url || row.target_webhook_url" class="config-webhook-mobile__item-detail">
+                          {{ row.status_detail || row.hook_url || row.target_webhook_url }}
+                        </div>
+                      </div>
+                    </n-spin>
                   </div>
                    <div class="config-card-actions">
                      <n-space :size="12" wrap>
@@ -1899,9 +1933,47 @@ watch(
     padding-left: 16px;
     padding-right: 16px;
   }
+}
 
-  .config-table-wrapper {
-    overflow-x: auto;
-  }
+.config-webhook-mobile__empty {
+  padding: 24px 0;
+  text-align: center;
+  color: rgba(15, 23, 42, 0.45);
+  font-size: 14px;
+}
+
+.config-webhook-mobile__item {
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.config-webhook-mobile__item:last-child {
+  border-bottom: none;
+}
+
+.config-webhook-mobile__item-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.config-webhook-mobile__item-top :deep(.n-button) {
+  flex-shrink: 0;
+  border-radius: 999px;
+}
+
+.config-webhook-mobile__item-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.config-webhook-mobile__item-detail {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.56);
+  word-break: break-all;
 }
 </style>

@@ -589,6 +589,7 @@ const en = {
       webhookProjectHint: 'Choose one project, then create or update the webhook that points back to this system.',
       viewProjectWebhookStatus: 'View project webhook status',
       setupProjectWebhook: 'Set up project webhook',
+      noWebhookData: 'No projects found. Ensure the GitLab admin token is configured.',
       sharedPageAccess: 'Shared Page Access',
     sharedPageAccessSubtitle: 'Choose which read-only pages can also be opened by platform users',
     pagePermissions: 'Page permissions',
