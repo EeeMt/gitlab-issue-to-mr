@@ -577,8 +577,7 @@ class WorkerExecutor:
 
         settings = get_settings()
         task_url = f"{settings.dashboard_url}/tasks/{task.id}"
-
-        # If this is a continuation task (has merge_request_iid), notify MR
+        message = f"🔄 开始处理请求... [任务 {task.id}]({task_url})"
         if task.merge_request_iid:
             self.gitlab.create_mr_note(
                 task.project_id,
