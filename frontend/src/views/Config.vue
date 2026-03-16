@@ -199,6 +199,19 @@
                       </n-form-item>
                     </n-gi>
                     <n-gi>
+                      <n-form-item :label="t('config.claudeMaxTurns')" path="claude_max_turns">
+                        <n-input-number
+                          v-model:value="formValue.claude_max_turns"
+                          :min="1"
+                          :max="200"
+                          class="config-form__input"
+                        />
+                        <template #feedback>
+                          {{ t('config.claudeMaxTurnsHint') }}
+                        </template>
+                      </n-form-item>
+                    </n-gi>
+                    <n-gi>
                       <n-form-item :label="t('config.anthropicApiKeyStatus')">
                         <n-tag :type="formValue.anthropic_api_key_configured ? 'success' : 'warning'" round>
                           {{ formValue.anthropic_api_key_configured ? t('config.configured') : t('config.missing') }}
@@ -879,6 +892,7 @@ type ConfigForm = {
   anthropic_api_key_configured: boolean
   anthropic_api_key_input: string
   anthropic_model: string
+  claude_max_turns: number
   allow_monitor_for_users: boolean
   allow_schedule_overview_for_users: boolean
   allow_analytics_for_users: boolean
@@ -957,7 +971,8 @@ const runtimeSectionFields: readonly (keyof ConfigForm)[] = [
   'alert_webhook_url_input',
   'anthropic_base_url',
   'anthropic_api_key_input',
-  'anthropic_model'
+  'anthropic_model',
+  'claude_max_turns'
 ]
 
 const sharedPagesSectionFields: readonly (keyof ConfigForm)[] = [
@@ -1019,6 +1034,7 @@ const formValue = ref<ConfigForm>({
   anthropic_api_key_configured: false,
   anthropic_api_key_input: '',
   anthropic_model: 'claude-sonnet-4-20250514',
+  claude_max_turns: 20,
   allow_monitor_for_users: false,
   allow_schedule_overview_for_users: false,
   allow_analytics_for_users: false,
@@ -1162,6 +1178,12 @@ const runtimeRules: FormRules = {
     required: true,
     message: t('config.enterAnthropicModel'),
     trigger: 'blur'
+  },
+  claude_max_turns: {
+    required: true,
+    type: 'number',
+    message: t('config.enterClaudeMaxTurns'),
+    trigger: 'blur'
   }
 }
 
@@ -1226,6 +1248,7 @@ function syncForm(config: Config) {
     anthropic_api_key_configured: config.runtime.anthropic_api_key_configured,
     anthropic_api_key_input: '',
     anthropic_model: config.runtime.anthropic_model,
+    claude_max_turns: config.runtime.claude_max_turns,
     allow_monitor_for_users: config.runtime.allow_monitor_for_users,
     allow_schedule_overview_for_users: config.runtime.allow_schedule_overview_for_users,
     allow_analytics_for_users: config.runtime.allow_analytics_for_users,
@@ -1298,7 +1321,8 @@ function buildRuntimeSectionUpdate(): RuntimeConfigUpdate {
     retry_delay: formValue.value.retry_delay,
     alert_on_failure: formValue.value.alert_on_failure,
     anthropic_base_url: formValue.value.anthropic_base_url.trim(),
-    anthropic_model: formValue.value.anthropic_model.trim()
+    anthropic_model: formValue.value.anthropic_model.trim(),
+    claude_max_turns: formValue.value.claude_max_turns
   }
 
   if (formValue.value.alert_webhook_url_input.trim()) {

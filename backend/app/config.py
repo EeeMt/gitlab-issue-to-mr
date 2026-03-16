@@ -25,6 +25,7 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "anthropic_base_url": str,
     "anthropic_api_key": str,
     "anthropic_model": str,
+    "claude_max_turns": int,
     "allow_monitor_for_users": bool,
     "allow_schedule_overview_for_users": bool,
     "allow_analytics_for_users": bool,
@@ -72,6 +73,7 @@ class Settings(BaseSettings):
     anthropic_base_url: str = Field(default="http://localhost:11434/v1")
     anthropic_api_key: str = Field(default="")
     anthropic_model: str = Field(default="claude-sonnet-4-20250514")
+    claude_max_turns: int = Field(default=20)
 
     # Database Configuration - require via env var
     database_url: str = Field(default="postgresql+asyncpg://gimr:gimr_password@localhost:5432/gimr")

@@ -231,6 +231,7 @@ export interface RuntimeConfig {
   anthropic_base_url: string
   anthropic_api_key_configured: boolean
   anthropic_model: string
+  claude_max_turns: number
   allow_monitor_for_users: boolean
   allow_schedule_overview_for_users: boolean
   allow_analytics_for_users: boolean

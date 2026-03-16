@@ -50,6 +50,7 @@ class RuntimeConfigSection(BaseModel):
     anthropic_base_url: str
     anthropic_api_key_configured: bool
     anthropic_model: str
+    claude_max_turns: int
     allow_monitor_for_users: bool
     allow_schedule_overview_for_users: bool
     allow_analytics_for_users: bool
@@ -97,6 +98,7 @@ class RuntimeConfigUpdate(BaseModel):
     anthropic_api_key: Optional[str] = None
     clear_anthropic_api_key: bool = False
     anthropic_model: Optional[str] = None
+    claude_max_turns: Optional[int] = None
     allow_monitor_for_users: Optional[bool] = None
     allow_schedule_overview_for_users: Optional[bool] = None
     allow_analytics_for_users: Optional[bool] = None
@@ -228,6 +230,7 @@ def _serialize_effective_config() -> ConfigResponse:
             anthropic_base_url=settings.anthropic_base_url,
             anthropic_api_key_configured=bool(settings.anthropic_api_key),
             anthropic_model=settings.anthropic_model,
+            claude_max_turns=settings.claude_max_turns,
             allow_monitor_for_users=settings.allow_monitor_for_users,
             allow_schedule_overview_for_users=settings.allow_schedule_overview_for_users,
             allow_analytics_for_users=settings.allow_analytics_for_users,
@@ -426,6 +429,14 @@ def _validate_config_value(key: str, value: object) -> object:
                 detail="anthropic_api_key cannot be empty",
             )
         return value.strip()
+
+    if key == "claude_max_turns":
+        if not isinstance(value, int) or value < 1 or value > 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="claude_max_turns must be between 1 and 200",
+            )
+        return value
 
     if key in {"oidc_issuer_url", "oidc_redirect_uri"}:
         if not isinstance(value, str) or not value.strip() or not _is_valid_http_url(value.strip()):
