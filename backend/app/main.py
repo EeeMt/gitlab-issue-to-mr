@@ -1,10 +1,12 @@
 """FastAPI application entry point."""
 
+import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
@@ -22,6 +24,20 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+
+async def _event_loop_lag_monitor():
+    """Background task that measures event loop lag.
+
+    Wakes up every 0.1s. If actual elapsed time is much longer, the
+    event loop was blocked by synchronous code.
+    """
+    while True:
+        t = time.time()
+        await asyncio.sleep(0.1)
+        lag = time.time() - t - 0.1
+        if lag > 1.0:
+            logger.warning(f"[EVENT LOOP LAG] {lag:.3f}s — event loop was blocked")
 
 
 @asynccontextmanager
@@ -49,11 +65,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error(f"Failed to initialize database: {e}")
         raise
 
+    # Start event loop lag monitor
+    lag_monitor = asyncio.create_task(_event_loop_lag_monitor())
+
     yield
 
     # Shutdown
     logger.info("Shutting down...")
 
+    lag_monitor.cancel()
     await close_db()
     logger.info("Database connection closed")
 
@@ -80,6 +100,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def log_slow_requests(request: Request, call_next):
+    """Log requests that take more than 2 seconds."""
+    t0 = time.time()
+    path = request.url.path
+    # Log when the request arrives for task detail endpoints
+    if path.startswith("/tasks/") and "logs" not in path and request.method == "GET":
+        logger.info(f"[REQUEST ARRIVED] {request.method} {path} t={t0:.3f}")
+    response = await call_next(request)
+    elapsed = time.time() - t0
+    if elapsed > 2.0 and "logs" not in path:
+        logger.warning(
+            f"[SLOW REQUEST] {request.method} {path} "
+            f"total={elapsed:.3f}s status={response.status_code}"
+        )
+    return response
 
 
 @app.get("/")

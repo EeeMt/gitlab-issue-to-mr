@@ -313,7 +313,10 @@ async def get_task(
     Returns:
         Task details
     """
+    t0 = time.time()
+    logger.info(f"[HANDLER START] get_task/{task_id} t={t0:.3f}")
     result = await db.execute(select(Task).where(Task.id == task_id))
+    t1 = time.time()
     task = result.scalar_one_or_none()
 
     if not task:
@@ -323,7 +326,21 @@ async def get_task(
         )
     require_project_access(task.project_id, access_scope)
 
-    return _serialize_task(task, await _get_project_metadata(task.project_id))
+    t2 = time.time()
+    metadata = await _get_project_metadata(task.project_id)
+    t3 = time.time()
+    result_data = _serialize_task(task, metadata)
+    t4 = time.time()
+
+    total = t4 - t0
+    if total > 1.0:
+        logger.warning(
+            f"[SLOW get_task/{task_id}] total={total:.3f}s "
+            f"db={t1-t0:.3f}s project_meta={t3-t2:.3f}s serialize={t4-t3:.3f}s "
+            f"access_scope_resolved_before_handler status={task.status}"
+        )
+
+    return result_data
 
 
 @router.get("/tasks/{task_id}/logs")
