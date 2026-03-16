@@ -553,7 +553,7 @@ const en = {
      anthropicModel: 'Anthropic Model',
      anthropicModelHint: 'Model identifier passed to new worker tasks.',
      claudeMaxTurns: 'Claude Max Turns',
-     claudeMaxTurnsHint: 'Maximum number of agentic turns per task (1–200). Higher values allow more complex tasks.',
+     claudeMaxTurnsHint: 'Maximum number of agentic turns per task (1–1000). Higher values allow more complex tasks.',
      gitlabIntegration: 'GitLab Integration',
      gitlabIntegrationSubtitle: 'GitLab API host and bot credentials used by task execution',
      gitlabConnection: 'GitLab connection',

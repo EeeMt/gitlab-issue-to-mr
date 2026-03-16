@@ -203,7 +203,7 @@
                         <n-input-number
                           v-model:value="formValue.claude_max_turns"
                           :min="1"
-                          :max="200"
+                          :max="1000"
                           class="config-form__input"
                         />
                         <template #feedback>

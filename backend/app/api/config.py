@@ -431,10 +431,10 @@ def _validate_config_value(key: str, value: object) -> object:
         return value.strip()
 
     if key == "claude_max_turns":
-        if not isinstance(value, int) or value < 1 or value > 200:
+        if not isinstance(value, int) or value < 1 or value > 1000:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="claude_max_turns must be between 1 and 200",
+                detail="claude_max_turns must be between 1 and 1000",
             )
         return value
 

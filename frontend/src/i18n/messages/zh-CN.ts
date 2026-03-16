@@ -533,7 +533,7 @@ const zhCN = {
     anthropicModel: 'Anthropic Model',
     anthropicModelHint: '传给新 Worker 任务的模型标识。',
     claudeMaxTurns: 'Claude 最大轮次',
-    claudeMaxTurnsHint: '每个任务最多允许的 Agent 轮次（1–200），值越大可处理越复杂的任务。',
+    claudeMaxTurnsHint: '每个任务最多允许的 Agent 轮次（1–1000），值越大可处理越复杂的任务。',
     gitlabIntegration: 'GitLab 集成',
     gitlabIntegrationSubtitle: '任务执行使用的 GitLab API 地址与机器人凭据',
     gitlabConnection: 'GitLab 连接',

@@ -385,7 +385,7 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 
 **Q: 如何调整 Claude 的工作深度（Max Turns）？**
 
-进入 **Configuration → 运行时配置**，修改 **Claude Max Turns** 字段（范围 1–200）。
+进入 **Configuration → 运行时配置**，修改 **Claude Max Turns** 字段（范围 1–1000）。
 
 - 增大 Max Turns：Claude 可以执行更多工具调用，适合复杂任务
 - 减小 Max Turns：更快返回结果，适合简单任务，节省 token
