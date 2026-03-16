@@ -1,8 +1,20 @@
+# Stage 1: Download Claude Code CLI (217 MB self-contained binary).
+# Isolated so that updating system deps or scripts does not re-trigger the download.
+FROM debian:bookworm-slim AS claude-installer
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fL --retry 5 --retry-delay 2 --retry-all-errors https://claude.ai/install.sh | bash -s stable \
+    && install -m 755 "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude
+
+# Stage 2: Runtime image with project toolchain.
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies (Java 21, Maven, Node.js) in single layer
+# Install system dependencies (Java 21, Maven, Node.js)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
@@ -18,18 +30,16 @@ RUN useradd --create-home --shell /bin/bash --uid 1000 gimr \
     && mkdir -p /home/gimr/.m2/repository \
     && chown -R gimr:gimr /home/gimr/.m2
 
-# Set Java environment
 ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 ENV PATH="${JAVA_HOME}/bin:/usr/local/bin:${PATH}"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Install official Claude Code CLI via native installer
-RUN curl -fL --retry 5 --retry-delay 2 --retry-all-errors https://claude.ai/install.sh | bash -s stable \
-    && install -m 755 "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude \
-    && claude --version
+# Copy Claude CLI binary from installer stage and verify
+COPY --from=claude-installer /usr/local/bin/claude /usr/local/bin/claude
+RUN claude --version
 
-# Copy and set entrypoint
+# Copy entrypoint scripts
 COPY deploy/entrypoint.sh /entrypoint.sh
 COPY deploy/ci-claude.sh /usr/local/bin/ci-claude.sh
 RUN chmod +x /entrypoint.sh /usr/local/bin/ci-claude.sh
