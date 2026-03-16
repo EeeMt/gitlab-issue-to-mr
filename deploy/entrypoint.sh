@@ -363,28 +363,15 @@ ${USER_PROMPT}
 EOF
 
 chmod 644 /tmp/claude_prompt.txt
-cat > /tmp/run_claude.sh <<'EOF'
-#!/bin/bash
-set -e
-export HOME=/home/gimr
-export PATH="/usr/local/bin:/usr/bin:/bin:${JAVA_HOME}/bin"
-cd /workspace
-/usr/local/bin/claude -p \
-    --dangerously-skip-permissions \
-    --no-session-persistence \
-    --output-format text \
-    --verbose \
-    --max-turns 20 \
-    --model "${ANTHROPIC_MODEL}" \
-    "$(cat /tmp/claude_prompt.txt)"
-EOF
-chmod +x /tmp/run_claude.sh
-chown -R gimr:gimr /workspace /tmp/claude_prompt.txt /tmp/run_claude.sh
+chown -R gimr:gimr /workspace /tmp/claude_prompt.txt
 
 export ANTHROPIC_BASE_URL
 export ANTHROPIC_API_KEY
 export ANTHROPIC_AUTH_TOKEN="${ANTHROPIC_AUTH_TOKEN:-${ANTHROPIC_API_KEY}}"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-1}"
+export SANDBOX_MODE=1
+export CLAUDE_MAX_TURNS=20
+export CLAUDE_MODEL="${ANTHROPIC_MODEL}"
 FINAL_SUMMARY_CONTENT=""
 FINAL_CHANGED_FILES_TEXT=""
 FINAL_MR_TITLE=""
@@ -394,17 +381,14 @@ echo "Claude CLI version: $(/usr/local/bin/claude --version)"
 echo "Updating MR with execution status..."
 update_mr_description "$(build_running_mr_description)" || true
 
-echo "Starting Claude CLI..."
-set -x
+echo "Starting Claude CLI (streaming mode)..."
 set +e
-set -o pipefail
-env HOME=/home/gimr timeout 300 su -m -s /bin/bash gimr -c '/tmp/run_claude.sh' 2>&1 | tee /workspace/result.md
-SCRIPT_RESULT=${PIPESTATUS[0]}
-set +o pipefail
+env HOME=/home/gimr timeout 300 su -m -s /bin/bash gimr -c \
+    'cd /workspace && export PATH="/usr/local/bin:/usr/bin:/bin:${JAVA_HOME}/bin" && /usr/local/bin/ci-claude.sh "$(cat /tmp/claude_prompt.txt)"' \
+    > /tmp/claude_result.json
+SCRIPT_RESULT=$?
 set -e
-set +x
 echo "Claude CLI exited with code: ${SCRIPT_RESULT}"
-echo "Execution output saved to /workspace/result.md"
 
 RESULT=${SCRIPT_RESULT}
 
@@ -413,8 +397,8 @@ if [ $RESULT -ne 0 ]; then
     exit $RESULT
 fi
 
-if [ -f /workspace/result.md ]; then
-    SUMMARY_CONTENT=$(cat /workspace/result.md)
+if [ -f /tmp/claude_result.json ] && [ -s /tmp/claude_result.json ]; then
+    SUMMARY_CONTENT=$(jq -r '.result // ""' /tmp/claude_result.json 2>/dev/null || true)
     if [ ${#SUMMARY_CONTENT} -gt 45000 ]; then
         SUMMARY_CONTENT="${SUMMARY_CONTENT:0:45000}
 
@@ -425,7 +409,7 @@ fi
 
 # Now commit and push the changes
 # Check if any changes were made (excluding result.md)
-CHANGES=$(git status --porcelain | grep -v "result.md" || true)
+CHANGES=$(git status --porcelain || true)
 if [ -n "$CHANGES" ]; then
     echo "Changes detected:"
     while IFS= read -r line; do
@@ -443,13 +427,12 @@ if [ -n "$CHANGES" ]; then
     done <<< "$CHANGES"
     echo "Changes detected, committing..."
 
-    # Remove result.md if it exists (it's the output log, not actual code)
+    # Remove result.md if it exists from prior runs
     rm -f /workspace/result.md
     git rm -f result.md 2>/dev/null || true
 
-    # Add all files except result.md (it's the output log, not actual code)
-    # Use git add with exclusion pattern
-    git add -A -- ':!result.md'
+    # Add all changed files
+    git add -A
 
     # Calculate change statistics from staged changes before committing.
     echo "Calculating change statistics..."
@@ -484,7 +467,6 @@ if [ -n "$CHANGES" ]; then
         [ -z "$line" ] && continue
         status=$(printf '%s' "$line" | awk '{print $1}')
         filepath=$(printf '%s' "$line" | cut -f2-)
-        [ "$filepath" = "result.md" ] && continue
         case "$status" in
             A) NEW_FILES="${NEW_FILES}${filepath}," ;;
             M) MODIFIED_FILES="${MODIFIED_FILES}${filepath}," ;;

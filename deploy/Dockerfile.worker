@@ -6,6 +6,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
+    jq \
     openjdk-21-jdk \
     maven \
     nodejs \
@@ -30,6 +31,7 @@ RUN curl -fL --retry 5 --retry-delay 2 --retry-all-errors https://claude.ai/inst
 
 # Copy and set entrypoint
 COPY deploy/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY deploy/ci-claude.sh /usr/local/bin/ci-claude.sh
+RUN chmod +x /entrypoint.sh /usr/local/bin/ci-claude.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
