@@ -207,6 +207,17 @@ async def get_analytics(
         ),
         else_=None,
     )
+    token_total_expr = case(
+        (
+            Task.input_tokens.is_not(None) | Task.output_tokens.is_not(None),
+            func.coalesce(Task.input_tokens, 0) + func.coalesce(Task.output_tokens, 0),
+        ),
+        else_=None,
+    )
+    token_tracked_expr = case(
+        (Task.input_tokens.is_not(None) | Task.output_tokens.is_not(None), 1),
+        else_=0,
+    )
 
     summary_query = _apply_project_scope(
         select(
@@ -214,16 +225,21 @@ async def get_analytics(
             func.coalesce(func.sum(Task.additions), 0),
             func.coalesce(func.sum(Task.deletions), 0),
             func.coalesce(func.sum(Task.total_changes), 0),
+            func.coalesce(func.sum(Task.input_tokens), 0),
+            func.coalesce(func.sum(Task.output_tokens), 0),
             func.coalesce(func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0)), 0),
             func.coalesce(func.sum(case((Task.status == TaskStatus.FAILED, 1), else_=0)), 0),
             func.coalesce(func.sum(case((Task.status == TaskStatus.CANCELLED, 1), else_=0)), 0),
             func.coalesce(func.sum(finished_task_expr), 0),
             func.coalesce(func.sum(case((Task.initiator_username.is_not(None), 1), else_=0)), 0),
+            func.coalesce(func.sum(token_tracked_expr), 0),
             func.min(case((Task.initiator_username.is_not(None), Task.created_at), else_=None)),
             func.avg(execution_seconds_expr),
             func.max(execution_seconds_expr),
             func.avg(queue_wait_seconds_expr),
             func.max(queue_wait_seconds_expr),
+            func.avg(token_total_expr),
+            func.max(token_total_expr),
         ).where(Task.created_at >= since),
         access_scope,
     )
@@ -233,16 +249,21 @@ async def get_analytics(
         total_additions,
         total_deletions,
         total_changes,
+        total_input_tokens,
+        total_output_tokens,
         completed_tasks,
         failed_tasks,
         cancelled_tasks,
         finished_tasks,
         tracked_initiator_tasks,
+        token_tracked_tasks,
         initiator_tracking_started_at,
         avg_execution_seconds,
         max_execution_seconds,
         avg_queue_wait_seconds,
         max_queue_wait_seconds,
+        avg_total_tokens_per_tracked_task,
+        max_total_tokens_per_tracked_task,
     ) = summary_result.one()
 
     project_query = (
@@ -261,6 +282,11 @@ async def get_analytics(
             func.coalesce(func.sum(Task.additions), 0).label("additions"),
             func.coalesce(func.sum(Task.deletions), 0).label("deletions"),
             func.coalesce(func.sum(Task.total_changes), 0).label("total_changes"),
+            func.coalesce(func.sum(Task.input_tokens), 0).label("input_tokens"),
+            func.coalesce(func.sum(Task.output_tokens), 0).label("output_tokens"),
+            func.coalesce(func.sum(func.coalesce(Task.input_tokens, 0) + func.coalesce(Task.output_tokens, 0)), 0).label(
+                "total_tokens"
+            ),
             func.avg(execution_seconds_expr).label("avg_execution_seconds"),
             func.avg(queue_wait_seconds_expr).label("avg_queue_wait_seconds"),
             func.max(Task.created_at).label("last_task_at"),
@@ -294,6 +320,11 @@ async def get_analytics(
             func.coalesce(func.sum(Task.additions), 0).label("additions"),
             func.coalesce(func.sum(Task.deletions), 0).label("deletions"),
             func.coalesce(func.sum(Task.total_changes), 0).label("total_changes"),
+            func.coalesce(func.sum(Task.input_tokens), 0).label("input_tokens"),
+            func.coalesce(func.sum(Task.output_tokens), 0).label("output_tokens"),
+            func.coalesce(func.sum(func.coalesce(Task.input_tokens, 0) + func.coalesce(Task.output_tokens, 0)), 0).label(
+                "total_tokens"
+            ),
             func.avg(execution_seconds_expr).label("avg_execution_seconds"),
             func.avg(queue_wait_seconds_expr).label("avg_queue_wait_seconds"),
             func.max(Task.created_at).label("last_task_at"),
@@ -321,6 +352,11 @@ async def get_analytics(
             func.coalesce(func.sum(Task.additions), 0).label("additions"),
             func.coalesce(func.sum(Task.deletions), 0).label("deletions"),
             func.coalesce(func.sum(Task.total_changes), 0).label("total_changes"),
+            func.coalesce(func.sum(Task.input_tokens), 0).label("input_tokens"),
+            func.coalesce(func.sum(Task.output_tokens), 0).label("output_tokens"),
+            func.coalesce(func.sum(func.coalesce(Task.input_tokens, 0) + func.coalesce(Task.output_tokens, 0)), 0).label(
+                "total_tokens"
+            ),
             func.avg(execution_seconds_expr).label("avg_execution_seconds"),
         )
         .where(Task.created_at >= since)
@@ -377,6 +413,9 @@ async def get_analytics(
                 "additions": int(row.additions) if row else 0,
                 "deletions": int(row.deletions) if row else 0,
                 "total_changes": int(row.total_changes) if row else 0,
+                "input_tokens": int(row.input_tokens) if row else 0,
+                "output_tokens": int(row.output_tokens) if row else 0,
+                "total_tokens": int(row.total_tokens) if row else 0,
                 "avg_execution_seconds": float(row.avg_execution_seconds) if row and row.avg_execution_seconds is not None else None,
             }
         )
@@ -392,6 +431,9 @@ async def get_analytics(
             "total_additions": int(total_additions or 0),
             "total_deletions": int(total_deletions or 0),
             "total_changes": int(total_changes or 0),
+            "total_input_tokens": int(total_input_tokens or 0),
+            "total_output_tokens": int(total_output_tokens or 0),
+            "total_tokens": int(total_input_tokens or 0) + int(total_output_tokens or 0),
             "completed_tasks": int(completed_tasks or 0),
             "failed_tasks": int(failed_tasks or 0),
             "cancelled_tasks": int(cancelled_tasks or 0),
@@ -399,6 +441,7 @@ async def get_analytics(
             "success_rate": success_rate,
             "failure_rate": failure_rate,
             "tracked_initiator_tasks": int(tracked_initiator_tasks or 0),
+            "token_tracked_tasks": int(token_tracked_tasks or 0),
             "initiator_tracking_started_at": (
                 initiator_tracking_started_at.isoformat() if initiator_tracking_started_at else None
             ),
@@ -406,6 +449,16 @@ async def get_analytics(
             "max_execution_seconds": float(max_execution_seconds) if max_execution_seconds is not None else None,
             "avg_queue_wait_seconds": float(avg_queue_wait_seconds) if avg_queue_wait_seconds is not None else None,
             "max_queue_wait_seconds": float(max_queue_wait_seconds) if max_queue_wait_seconds is not None else None,
+            "avg_total_tokens_per_tracked_task": (
+                float(avg_total_tokens_per_tracked_task)
+                if avg_total_tokens_per_tracked_task is not None
+                else None
+            ),
+            "max_total_tokens_per_tracked_task": (
+                float(max_total_tokens_per_tracked_task)
+                if max_total_tokens_per_tracked_task is not None
+                else None
+            ),
         },
         "projects": [
             {
@@ -428,6 +481,9 @@ async def get_analytics(
                 "additions": int(row.additions or 0),
                 "deletions": int(row.deletions or 0),
                 "total_changes": int(row.total_changes or 0),
+                "input_tokens": int(row.input_tokens or 0),
+                "output_tokens": int(row.output_tokens or 0),
+                "total_tokens": int(row.total_tokens or 0),
                 "avg_execution_seconds": (
                     float(row.avg_execution_seconds) if row.avg_execution_seconds is not None else None
                 ),
@@ -457,6 +513,9 @@ async def get_analytics(
                 "additions": int(row.additions or 0),
                 "deletions": int(row.deletions or 0),
                 "total_changes": int(row.total_changes or 0),
+                "input_tokens": int(row.input_tokens or 0),
+                "output_tokens": int(row.output_tokens or 0),
+                "total_tokens": int(row.total_tokens or 0),
                 "avg_execution_seconds": (
                     float(row.avg_execution_seconds) if row.avg_execution_seconds is not None else None
                 ),

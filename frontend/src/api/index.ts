@@ -130,6 +130,9 @@ export interface AnalyticsSummary {
   total_additions: number
   total_deletions: number
   total_changes: number
+  total_input_tokens: number
+  total_output_tokens: number
+  total_tokens: number
   completed_tasks: number
   failed_tasks: number
   cancelled_tasks: number
@@ -137,11 +140,14 @@ export interface AnalyticsSummary {
   success_rate: number | null
   failure_rate: number | null
   tracked_initiator_tasks: number
+  token_tracked_tasks: number
   initiator_tracking_started_at: string | null
   avg_execution_seconds: number | null
   max_execution_seconds: number | null
   avg_queue_wait_seconds: number | null
   max_queue_wait_seconds: number | null
+  avg_total_tokens_per_tracked_task: number | null
+  max_total_tokens_per_tracked_task: number | null
 }
 
 export interface AnalyticsProjectRow {
@@ -156,6 +162,9 @@ export interface AnalyticsProjectRow {
   additions: number
   deletions: number
   total_changes: number
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
   avg_execution_seconds: number | null
   avg_queue_wait_seconds: number | null
   last_task_at: string | null
@@ -172,6 +181,9 @@ export interface AnalyticsInitiatorRow {
   additions: number
   deletions: number
   total_changes: number
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
   avg_execution_seconds: number | null
   avg_queue_wait_seconds: number | null
   last_task_at: string | null
@@ -186,6 +198,9 @@ export interface AnalyticsTrendPoint {
   additions: number
   deletions: number
   total_changes: number
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
   avg_execution_seconds: number | null
 }
 

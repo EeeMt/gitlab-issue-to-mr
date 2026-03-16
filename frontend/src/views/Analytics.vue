@@ -102,6 +102,29 @@
               </div>
             </div>
           </n-card>
+
+          <n-card class="analytics-card" :bordered="false">
+            <template #header>
+              <div class="analytics-card__header">
+                <div>
+                    <div class="analytics-card__title">{{ t('analytics.tokenTrend') }}</div>
+                    <div class="analytics-card__subtitle">{{ t('analytics.tokenTrendSubtitle') }}</div>
+                </div>
+              </div>
+            </template>
+
+            <div v-if="tokenTrendBars.length" class="trend-chart-scroll">
+              <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
+                <div v-for="bar in tokenTrendBars" :key="bar.key" class="trend-chart__item">
+                  <div class="trend-chart__count">{{ bar.displayValue }}</div>
+                  <div class="trend-chart__bar-wrap">
+                    <div class="trend-chart__bar trend-chart__bar--token" :style="{ height: `${bar.heightPercent}%` }" />
+                  </div>
+                  <div class="trend-chart__label">{{ bar.label }}</div>
+                </div>
+              </div>
+            </div>
+          </n-card>
         </n-space>
 
         <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
@@ -121,7 +144,7 @@
                 :data="analytics?.projects || []"
                 :bordered="false"
                 :pagination="{ pageSize: 8 }"
-                :scroll-x="isMobile ? undefined : 980"
+                :scroll-x="isMobile ? undefined : 1130"
               />
             </n-card>
           </n-gi>
@@ -142,7 +165,7 @@
                 :data="analytics?.initiators || []"
                 :bordered="false"
                 :pagination="{ pageSize: 8 }"
-                :scroll-x="isMobile ? undefined : 900"
+                :scroll-x="isMobile ? undefined : 1050"
               />
             </n-card>
           </n-gi>
@@ -286,11 +309,35 @@ function formatDuration(value: number | null | undefined) {
   return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`
 }
 
+function formatNumber(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return '—'
+  }
+  return Math.round(value).toLocaleString()
+}
+
+function formatCompactNumber(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return '—'
+  }
+  return new Intl.NumberFormat(undefined, {
+    notation: 'compact',
+    maximumFractionDigits: value >= 1000 ? 1 : 0
+  }).format(value)
+}
+
 function formatPercentage(value: number | null | undefined) {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return '—'
   }
     return `${(value * 100).toFixed(1)}%`
+}
+
+function formatTokenBreakdown(inputTokens: number, outputTokens: number) {
+  return t('analytics.tokenBreakdown', {
+    input: formatNumber(inputTokens),
+    output: formatNumber(outputTokens)
+  })
 }
 
 function buildTrendBars(values: { key: string; label: string; value: number; displayValue?: string }[]) {
@@ -340,6 +387,22 @@ const summaryItems = computed(() => {
       note: t('analytics.changeBreakdown', { additions: summary.total_additions, deletions: summary.total_deletions })
     },
     {
+      label: t('analytics.totalTokens'),
+      value: formatNumber(summary.total_tokens),
+      note:
+        summary.token_tracked_tasks > 0
+          ? `${formatTokenBreakdown(summary.total_input_tokens, summary.total_output_tokens)} · ${t('analytics.trackedTokenTasks', { count: summary.token_tracked_tasks })}`
+          : t('analytics.noTokenData')
+    },
+    {
+      label: t('analytics.avgTokensPerTask'),
+      value: formatNumber(summary.avg_total_tokens_per_tracked_task),
+      note:
+        summary.max_total_tokens_per_tracked_task !== null
+          ? t('analytics.maxTokens', { value: formatNumber(summary.max_total_tokens_per_tracked_task) })
+          : t('analytics.noTokenData')
+    },
+    {
       label: t('analytics.trackedInitiators'),
       value: String(summary.tracked_initiator_tasks),
       note: summary.initiator_tracking_started_at
@@ -378,6 +441,17 @@ const durationTrendBars = computed(() =>
       label: formatShortDate(point.date),
       value: point.avg_execution_seconds ?? 0,
       displayValue: formatDuration(point.avg_execution_seconds)
+    }))
+  )
+)
+
+const tokenTrendBars = computed(() =>
+  buildTrendBars(
+    (analytics.value?.trends || []).map((point) => ({
+      key: `${point.date}-tokens`,
+      label: formatShortDate(point.date),
+      value: point.total_tokens,
+      displayValue: formatCompactNumber(point.total_tokens)
     }))
   )
 )
@@ -422,6 +496,16 @@ const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
       h('div', { class: 'analytics-table__primary' }, [
         h('div', String(row.total_changes)),
         h('div', { class: 'analytics-table__secondary' }, t('analytics.changeBreakdown', { additions: row.additions, deletions: row.deletions }))
+      ])
+  },
+  {
+    title: t('analytics.tokens'),
+    key: 'total_tokens',
+    width: 150,
+    render: (row) =>
+      h('div', { class: 'analytics-table__primary' }, [
+        h('div', formatNumber(row.total_tokens)),
+        h('div', { class: 'analytics-table__secondary' }, formatTokenBreakdown(row.input_tokens, row.output_tokens))
       ])
   },
   {
@@ -472,6 +556,16 @@ const initiatorColumns = computed<DataTableColumns<AnalyticsInitiatorRow>>(() =>
       h('div', { class: 'analytics-table__primary' }, [
         h('div', String(row.total_changes)),
         h('div', { class: 'analytics-table__secondary' }, t('analytics.changeBreakdown', { additions: row.additions, deletions: row.deletions }))
+      ])
+  },
+  {
+    title: t('analytics.tokens'),
+    key: 'total_tokens',
+    width: 150,
+    render: (row) =>
+      h('div', { class: 'analytics-table__primary' }, [
+        h('div', formatNumber(row.total_tokens)),
+        h('div', { class: 'analytics-table__secondary' }, formatTokenBreakdown(row.input_tokens, row.output_tokens))
       ])
   },
   {
@@ -682,6 +776,10 @@ onMounted(() => {
 
 .trend-chart__bar--accent {
   background: linear-gradient(180deg, rgba(245, 158, 11, 0.92), rgba(245, 158, 11, 0.52));
+}
+
+.trend-chart__bar--token {
+  background: linear-gradient(180deg, rgba(168, 85, 247, 0.92), rgba(168, 85, 247, 0.52));
 }
 
 .trend-chart__label {
