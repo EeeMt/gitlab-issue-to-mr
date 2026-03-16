@@ -101,6 +101,20 @@ git config --global --add safe.directory /workspace
 # Checkout/create branch
 echo "Checking out branch: ${BRANCH_NAME}"
 git fetch origin
+
+# Verify BASE_BRANCH exists on remote; if not, fall back to the remote's actual default branch
+if ! git rev-parse --verify "origin/${BASE_BRANCH}" > /dev/null 2>&1; then
+    echo "Warning: origin/${BASE_BRANCH} not found. Detecting remote default branch..."
+    DETECTED=$(git ls-remote --symref origin HEAD 2>/dev/null | grep '^ref:' | sed 's|ref: refs/heads/||;s|	HEAD||')
+    if [ -n "${DETECTED}" ]; then
+        echo "Detected remote default branch: ${DETECTED} (was: ${BASE_BRANCH})"
+        BASE_BRANCH="${DETECTED}"
+    else
+        echo "ERROR: Cannot resolve base branch 'origin/${BASE_BRANCH}' and could not detect default branch"
+        exit 1
+    fi
+fi
+
 if git checkout "${BRANCH_NAME}" 2>/dev/null; then
     echo "Branch already exists, pulling latest..."
     git pull origin "${BRANCH_NAME}"

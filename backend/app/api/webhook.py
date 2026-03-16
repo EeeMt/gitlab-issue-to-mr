@@ -450,7 +450,21 @@ async def _handle_generate_command(
 
     # Determine target branch
     settings = get_effective_settings()
-    target_branch = command.target_branch or settings.default_target_branch
+    if command.target_branch:
+        target_branch = command.target_branch
+    else:
+        # Use the project's actual default branch from GitLab, falling back to the system default
+        try:
+            _gl = get_gitlab_client()
+            project_info = _gl.get_project(project_id)
+            target_branch = project_info.default_branch or settings.default_target_branch
+            logger.info(f"Using project default branch '{target_branch}' for project {project_id}")
+        except Exception as e:
+            logger.warning(
+                f"Failed to get project default branch: {e}, "
+                f"falling back to '{settings.default_target_branch}'"
+            )
+            target_branch = settings.default_target_branch
 
     # Create new task
     task = Task(
