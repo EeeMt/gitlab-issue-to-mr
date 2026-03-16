@@ -121,6 +121,20 @@ def _apply_project_scope(query, access_scope: ProjectAccessScope):
     return query.where(Task.project_id.in_(allowed_project_ids))
 
 
+def _apply_analytics_filters(
+    query,
+    access_scope: ProjectAccessScope,
+    project_id: int | None = None,
+    initiator_username: str | None = None,
+):
+    query = _apply_project_scope(query, access_scope)
+    if project_id is not None:
+        query = query.where(Task.project_id == project_id)
+    if initiator_username:
+        query = query.where(Task.initiator_username == initiator_username)
+    return query
+
+
 def _build_error_breakdown(error_rows: list[tuple[str, int]], failed_tasks: int) -> list[dict]:
     grouped: dict[str, dict[str, object]] = defaultdict(
         lambda: {
@@ -178,6 +192,8 @@ def _summarize_error_message(error_message: str | None) -> str | None:
 @router.get("/stats/analytics")
 async def get_analytics(
     days: int = Query(default=30, ge=7, le=90),
+    project_id: int | None = Query(default=None),
+    initiator_username: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     _current_user=Depends(require_page_access("analytics")),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
@@ -188,6 +204,18 @@ async def get_analytics(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="days must be one of: 7, 30, 90",
         )
+
+    selected_initiator_username = initiator_username.strip() if initiator_username else None
+    if selected_initiator_username == "":
+        selected_initiator_username = None
+
+    if project_id is not None and not access_scope.is_unrestricted:
+        allowed_project_ids = set(access_scope.accessible_project_ids)
+        if project_id not in allowed_project_ids:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project {project_id} is not available for analytics.",
+            )
 
     now = datetime.utcnow()
     since = now - timedelta(days=days - 1)
@@ -219,7 +247,7 @@ async def get_analytics(
         else_=0,
     )
 
-    summary_query = _apply_project_scope(
+    summary_query = _apply_analytics_filters(
         select(
             func.count(Task.id),
             func.coalesce(func.sum(Task.additions), 0),
@@ -242,6 +270,8 @@ async def get_analytics(
             func.max(token_total_expr),
         ).where(Task.created_at >= since),
         access_scope,
+        project_id=project_id,
+        initiator_username=selected_initiator_username,
     )
     summary_result = await db.execute(summary_query)
     (
@@ -299,9 +329,31 @@ async def get_analytics(
             Task.project_id.asc(),
         )
     )
-    project_query = _apply_project_scope(project_query, access_scope)
+    project_query = _apply_analytics_filters(
+        project_query,
+        access_scope,
+        project_id=project_id,
+        initiator_username=selected_initiator_username,
+    )
     project_rows = (await db.execute(project_query)).all()
     project_lookup = await _build_project_lookup(access_scope)
+
+    available_initiators_query = (
+        select(
+            Task.initiator_username,
+            Task.initiator_gitlab_user_id,
+            func.count(Task.id).label("task_count"),
+        )
+        .where(Task.created_at >= since, Task.initiator_username.is_not(None))
+        .group_by(Task.initiator_username, Task.initiator_gitlab_user_id)
+        .order_by(func.count(Task.id).desc(), Task.initiator_username.asc())
+    )
+    available_initiators_query = _apply_analytics_filters(
+        available_initiators_query,
+        access_scope,
+        project_id=project_id,
+    )
+    available_initiator_rows = (await db.execute(available_initiators_query)).all()
 
     initiator_query = (
         select(
@@ -333,7 +385,12 @@ async def get_analytics(
         .group_by(Task.initiator_username, Task.initiator_gitlab_user_id)
         .order_by(func.count(Task.id).desc(), func.coalesce(func.sum(Task.total_changes), 0).desc(), Task.initiator_username.asc())
     )
-    initiator_query = _apply_project_scope(initiator_query, access_scope)
+    initiator_query = _apply_analytics_filters(
+        initiator_query,
+        access_scope,
+        project_id=project_id,
+        initiator_username=selected_initiator_username,
+    )
     initiator_rows = (await db.execute(initiator_query)).all()
 
     trend_query = (
@@ -363,7 +420,12 @@ async def get_analytics(
         .group_by(func.date(Task.created_at))
         .order_by(func.date(Task.created_at).asc())
     )
-    trend_query = _apply_project_scope(trend_query, access_scope)
+    trend_query = _apply_analytics_filters(
+        trend_query,
+        access_scope,
+        project_id=project_id,
+        initiator_username=selected_initiator_username,
+    )
     trend_rows = (await db.execute(trend_query)).all()
     trend_map = {str(row.day): row for row in trend_rows}
 
@@ -378,7 +440,12 @@ async def get_analytics(
         .group_by(Task.priority)
         .order_by(Task.priority.asc())
     )
-    priority_wait_query = _apply_project_scope(priority_wait_query, access_scope)
+    priority_wait_query = _apply_analytics_filters(
+        priority_wait_query,
+        access_scope,
+        project_id=project_id,
+        initiator_username=selected_initiator_username,
+    )
     priority_wait_rows = (await db.execute(priority_wait_query)).all()
 
     error_query = (
@@ -391,7 +458,12 @@ async def get_analytics(
         .group_by(Task.error_message)
         .order_by(func.count(Task.id).desc(), Task.error_message.asc())
     )
-    error_query = _apply_project_scope(error_query, access_scope)
+    error_query = _apply_analytics_filters(
+        error_query,
+        access_scope,
+        project_id=project_id,
+        initiator_username=selected_initiator_username,
+    )
     error_rows = [
         (str(row.error_message), int(row.count or 0))
         for row in (await db.execute(error_query)).all()
@@ -460,6 +532,16 @@ async def get_analytics(
                 else None
             ),
         },
+        "available_initiators": [
+            {
+                "initiator_username": row.initiator_username,
+                "initiator_gitlab_user_id": int(row.initiator_gitlab_user_id)
+                if row.initiator_gitlab_user_id is not None
+                else None,
+                "task_count": int(row.task_count or 0),
+            }
+            for row in available_initiator_rows
+        ],
         "projects": [
             {
                 "project_id": int(row.project_id),

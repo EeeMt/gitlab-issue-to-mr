@@ -485,6 +485,8 @@ const en = {
     noTokenData: 'No token data yet',
     tokenTrend: 'Token Trend',
     tokenTrendSubtitle: 'Daily total token usage (input + output)',
+    projectFilterPlaceholder: 'Filter by project',
+    initiatorFilterPlaceholder: 'Filter by initiator',
     trackedInitiators: 'Tracked Initiators',
     since: 'Since {time}',
     noTrackedInitiators: 'No tracked initiators yet',
@@ -499,7 +501,8 @@ const en = {
     share: 'Share',
     example: 'Example',
     gitlabId: 'GitLab ID: {id}',
-    failedToLoad: 'Failed to load analytics'
+    failedToLoad: 'Failed to load analytics',
+    failedToLoadProjects: 'Failed to load project options'
   },
   config: {
     title: 'Configuration',

@@ -189,6 +189,12 @@ export interface AnalyticsInitiatorRow {
   last_task_at: string | null
 }
 
+export interface AnalyticsInitiatorOption {
+  initiator_username: string
+  initiator_gitlab_user_id: number | null
+  task_count: number
+}
+
 export interface AnalyticsTrendPoint {
   date: string
   task_count: number
@@ -222,6 +228,7 @@ export interface AnalyticsResponse {
   window_days: number
   generated_at: string
   summary: AnalyticsSummary
+  available_initiators: AnalyticsInitiatorOption[]
   projects: AnalyticsProjectRow[]
   initiators: AnalyticsInitiatorRow[]
   trends: AnalyticsTrendPoint[]
@@ -532,8 +539,18 @@ export async function getStats(): Promise<Stats> {
   return response.data
 }
 
-export async function getAnalytics(days: number): Promise<AnalyticsResponse> {
-  const response = await api.get('/stats/analytics', { params: { days } })
+export async function getAnalytics(
+  days: number,
+  projectId?: number | null,
+  initiatorUsername?: string | null
+): Promise<AnalyticsResponse> {
+  const response = await api.get('/stats/analytics', {
+    params: {
+      days,
+      project_id: projectId ?? undefined,
+      initiator_username: initiatorUsername || undefined
+    }
+  })
   return response.data
 }
 

@@ -9,13 +9,32 @@
               {{ t('analytics.subtitle') }}
             </p>
           </div>
-          <n-space align="center" wrap>
+          <n-space align="center" wrap class="analytics-page__controls">
             <n-select
               v-model:value="windowDays"
               :options="windowOptions"
-              style="width: 140px"
+              :style="{ width: isMobile ? '100%' : '140px' }"
             />
-            <n-button @click="refresh" :loading="loading">{{ t('common.refresh') }}</n-button>
+            <n-select
+              v-model:value="selectedProjectId"
+              :options="projectOptions"
+              :loading="projectsLoading"
+              :placeholder="t('analytics.projectFilterPlaceholder')"
+              clearable
+              filterable
+              :style="{ width: isMobile ? '100%' : '220px' }"
+            />
+            <n-select
+              v-model:value="selectedInitiatorUsername"
+              :options="initiatorOptions"
+              :placeholder="t('analytics.initiatorFilterPlaceholder')"
+              clearable
+              filterable
+              :style="{ width: isMobile ? '100%' : '220px' }"
+            />
+            <n-button @click="refresh" :loading="loading" :style="{ width: isMobile ? '100%' : undefined }">
+              {{ t('common.refresh') }}
+            </n-button>
           </n-space>
         </div>
 
@@ -237,11 +256,14 @@ import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import {
   getAnalytics,
+  getProjects,
   type AnalyticsErrorRow,
+  type AnalyticsInitiatorOption,
   type AnalyticsInitiatorRow,
   type AnalyticsPriorityWaitRow,
   type AnalyticsProjectRow,
-  type AnalyticsResponse
+  type AnalyticsResponse,
+  type Project
 } from '../api'
 import { formatDateTimeLocal, formatMonthDayLocal } from '../utils/datetime'
 
@@ -259,15 +281,31 @@ const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
 const analytics = ref<AnalyticsResponse | null>(null)
+const availableProjects = ref<Project[]>([])
 const loading = ref(false)
+const projectsLoading = ref(false)
 const hasLoadedOnce = ref(false)
 const windowDays = ref<number>(30)
+const selectedProjectId = ref<number | null>(null)
+const selectedInitiatorUsername = ref<string | null>(null)
 
 const windowOptions = computed(() => [
   { label: t('analytics.last7Days'), value: 7 },
   { label: t('analytics.last30Days'), value: 30 },
   { label: t('analytics.last90Days'), value: 90 }
 ])
+const projectOptions = computed(() =>
+  availableProjects.value.map((project) => ({
+    label: project.path_with_namespace || project.name,
+    value: project.id
+  }))
+)
+const initiatorOptions = computed(() =>
+  (analytics.value?.available_initiators || []).map((initiator: AnalyticsInitiatorOption) => ({
+    label: `${initiator.initiator_username} (${initiator.task_count})`,
+    value: initiator.initiator_username
+  }))
+)
 
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 const trendChartMinWidth = computed(() => {
@@ -613,12 +651,27 @@ const errorColumns = computed<DataTableColumns<AnalyticsErrorRow>>(() => [
 async function fetchAnalytics() {
   loading.value = true
   try {
-    analytics.value = await getAnalytics(windowDays.value)
+    analytics.value = await getAnalytics(
+      windowDays.value,
+      selectedProjectId.value,
+      selectedInitiatorUsername.value
+    )
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('analytics.failedToLoad'))
   } finally {
     hasLoadedOnce.value = true
     loading.value = false
+  }
+}
+
+async function fetchProjects() {
+  projectsLoading.value = true
+  try {
+    availableProjects.value = await getProjects()
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || t('analytics.failedToLoadProjects'))
+  } finally {
+    projectsLoading.value = false
   }
 }
 
@@ -632,7 +685,29 @@ watch(windowDays, () => {
   }
 })
 
+watch(selectedProjectId, (value, previousValue) => {
+  if (value === previousValue) {
+    return
+  }
+
+  if (selectedInitiatorUsername.value) {
+    selectedInitiatorUsername.value = null
+    return
+  }
+
+  if (hasLoadedOnce.value) {
+    fetchAnalytics()
+  }
+})
+
+watch(selectedInitiatorUsername, () => {
+  if (hasLoadedOnce.value) {
+    fetchAnalytics()
+  }
+})
+
 onMounted(() => {
+  fetchProjects()
   fetchAnalytics()
 })
 </script>
@@ -648,6 +723,11 @@ onMounted(() => {
   align-items: flex-start;
   gap: 16px;
   flex-wrap: wrap;
+}
+
+.analytics-page__controls {
+  flex: 1;
+  justify-content: flex-end;
 }
 
 .analytics-page__title {
@@ -803,6 +883,10 @@ onMounted(() => {
 @media (max-width: 768px) {
   .analytics-page__title {
     font-size: 24px;
+  }
+
+  .analytics-page__controls {
+    width: 100%;
   }
 
   .trend-chart__label {

@@ -467,6 +467,8 @@ const zhCN = {
     noTokenData: '暂无 Token 数据',
     tokenTrend: 'Token 趋势',
     tokenTrendSubtitle: '每日总 Token 用量（输入 + 输出）',
+    projectFilterPlaceholder: '按项目筛选',
+    initiatorFilterPlaceholder: '按发起人筛选',
     trackedInitiators: '已追踪发起人',
     since: '自 {time} 起',
     noTrackedInitiators: '暂无已追踪发起人数据',
@@ -481,7 +483,8 @@ const zhCN = {
     share: '占比',
     example: '示例',
     gitlabId: 'GitLab ID：{id}',
-    failedToLoad: '加载统计失败'
+    failedToLoad: '加载统计失败',
+    failedToLoadProjects: '加载项目筛选项失败'
   },
   config: {
     title: '系统配置',
