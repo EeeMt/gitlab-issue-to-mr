@@ -7,8 +7,8 @@ Create Date: 2025-01-01 00:00:00.000000
 from alembic import op
 import sqlalchemy as sa
 
-revision = '015'
-down_revision = '014'
+revision = '015_add_task_token_stats'
+down_revision = '014_add_task_base_branch'
 branch_labels = None
 depends_on = None
 
