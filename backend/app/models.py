@@ -88,6 +88,10 @@ class Task(Base):
     deletions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_changes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # Token usage (populated from Claude CLI output)
+    input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
     # Retry tracking
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 

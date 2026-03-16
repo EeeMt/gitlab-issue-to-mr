@@ -163,6 +163,8 @@ def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = Non
         "additions": task.additions,
         "deletions": task.deletions,
         "total_changes": task.total_changes,
+        "input_tokens": task.input_tokens,
+        "output_tokens": task.output_tokens,
         "is_manual": task.is_manual,
         "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat(),

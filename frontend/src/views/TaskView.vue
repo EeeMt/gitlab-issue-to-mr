@@ -78,6 +78,15 @@
                     </span>
                     <span v-else>-</span>
                   </n-descriptions-item>
+                  <n-descriptions-item :label="t('taskView.tokenUsage')">
+                    <span v-if="task.input_tokens != null || task.output_tokens != null">
+                      <span style="color: #888">{{ t('taskView.inputTokens') }}:</span>
+                      <span style="margin-left: 4px">{{ (task.input_tokens ?? 0).toLocaleString() }}</span>
+                      <span style="color: #888; margin-left: 12px">{{ t('taskView.outputTokens') }}:</span>
+                      <span style="margin-left: 4px">{{ (task.output_tokens ?? 0).toLocaleString() }}</span>
+                    </span>
+                    <span v-else>-</span>
+                  </n-descriptions-item>
                   <n-descriptions-item :label="t('common.created')">{{ formatDate(task.created_at) }}</n-descriptions-item>
                   <n-descriptions-item :label="t('common.scheduled')">{{ task.scheduled_at ? formatDate(task.scheduled_at) : '-' }}</n-descriptions-item>
                   <n-descriptions-item :label="t('common.started')">{{ task.started_at ? formatDate(task.started_at) : '-' }}</n-descriptions-item>

@@ -411,6 +411,10 @@ if [ -f /tmp/claude_result.json ] && [ -s /tmp/claude_result.json ]; then
 ...(内容已截断)"
     fi
     FINAL_SUMMARY_CONTENT="$(sanitize_summary_content "${SUMMARY_CONTENT}")"
+
+    # Emit machine-parseable usage stats for backend collection
+    USAGE_JSON=$(jq -c '.usage // {}' /tmp/claude_result.json 2>/dev/null || echo '{}')
+    echo "GIMR_STATS:${USAGE_JSON}"
 fi
 
 # Now commit and push the changes

@@ -54,6 +54,8 @@ export interface Task {
   additions: number
   deletions: number
   total_changes: number
+  input_tokens: number | null
+  output_tokens: number | null
   is_manual: boolean
   created_at: string
   updated_at: string

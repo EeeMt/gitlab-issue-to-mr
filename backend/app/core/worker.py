@@ -1,6 +1,7 @@
 """Worker executor for running tasks in Docker containers."""
 
 import asyncio
+import json as _json
 import logging
 import re
 import threading
@@ -27,6 +28,8 @@ _ANSI_ESCAPE = re.compile(
     re.DOTALL,
 )
 
+# Emitted by entrypoint.sh after Claude finishes; contains token usage JSON.
+_GIMR_STATS_RE = re.compile(r'^GIMR_STATS:(.+)$', re.MULTILINE)
 
 def scrub_sensitive_data(text: str) -> str:
     """Redact credentials (tokens, API keys) from text, preserving ANSI codes and Unicode.
@@ -402,6 +405,20 @@ class WorkerExecutor:
             exit_code, logs, log_chunks_saved = await self._stream_logs_to_db(
                 container, task.id, db, settings.task_timeout
             )
+
+            # Extract token usage from GIMR_STATS marker line
+            stats_match = _GIMR_STATS_RE.search(logs)
+            if stats_match:
+                try:
+                    usage = _json.loads(stats_match.group(1).strip())
+                    task.input_tokens = usage.get('input_tokens')
+                    task.output_tokens = usage.get('output_tokens')
+                    logger.info(
+                        f"[Task {task_id}] Token usage: "
+                        f"in={task.input_tokens} out={task.output_tokens}"
+                    )
+                except Exception:
+                    logger.debug(f"[Task {task_id}] Failed to parse GIMR_STATS")
 
             # Process results
             if exit_code == 0:
