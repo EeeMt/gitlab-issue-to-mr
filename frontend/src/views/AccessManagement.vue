@@ -491,6 +491,10 @@ onMounted(() => {
   align-items: flex-start;
 }
 
+.user-management__identity :deep(.n-avatar) {
+  flex-shrink: 0;
+}
+
 .user-management__name-row {
   display: flex;
   align-items: center;

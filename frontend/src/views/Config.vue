@@ -473,30 +473,6 @@
                     </n-grid>
                   </div>
 
-                 <n-alert
-                   v-if="gitlabTestState"
-                  :type="gitlabTestState.type"
-                  :show-icon="false"
-                  class="config-actions__alert"
-                 >
-                   {{ gitlabTestState.message }}
-                 </n-alert>
-                  <n-alert
-                    v-if="webhookSetupState"
-                    :type="webhookSetupState.type"
-                    :show-icon="false"
-                    class="config-actions__alert"
-                  >
-                    {{ webhookSetupState.message }}
-                  </n-alert>
-                  <n-alert
-                    v-if="webhookStatusState"
-                    :type="webhookStatusState.type"
-                    :show-icon="false"
-                    class="config-actions__alert"
-                   >
-                     {{ webhookStatusState.message }}
-                   </n-alert>
                   <div class="config-form__section">
                     <div class="config-card-header config-card-header--stacked">
                       <div>
@@ -521,15 +497,17 @@
                       </n-gi>
                     </n-grid>
 
-                    <n-data-table
-                      :columns="webhookColumns"
-                      :data="filteredWebhookStatuses"
-                      :loading="webhookStatusLoading"
-                      :bordered="false"
-                      :pagination="{ pageSize: 10 }"
-                      :scroll-x="isMobile ? 760 : 1100"
-                      :row-key="(row: GitLabProjectWebhookStatusResult) => row.project_id"
-                    />
+                    <div class="config-table-wrapper">
+                      <n-data-table
+                        :columns="webhookColumns"
+                        :data="filteredWebhookStatuses"
+                        :loading="webhookStatusLoading"
+                        :bordered="false"
+                        :pagination="{ pageSize: 10 }"
+                        :scroll-x="isMobile ? 760 : 1100"
+                        :row-key="(row: GitLabProjectWebhookStatusResult) => row.project_id"
+                      />
+                    </div>
                   </div>
                    <div class="config-card-actions">
                      <n-space :size="12" wrap>
@@ -574,6 +552,30 @@
                         {{ t('config.clearGitlabWebhookSecret') }}
                       </n-button>
                     </n-space>
+                    <n-alert
+                      v-if="gitlabTestState"
+                      :type="gitlabTestState.type"
+                      :show-icon="false"
+                      class="config-actions__alert"
+                    >
+                      {{ gitlabTestState.message }}
+                    </n-alert>
+                    <n-alert
+                      v-if="webhookSetupState"
+                      :type="webhookSetupState.type"
+                      :show-icon="false"
+                      class="config-actions__alert"
+                    >
+                      {{ webhookSetupState.message }}
+                    </n-alert>
+                    <n-alert
+                      v-if="webhookStatusState"
+                      :type="webhookStatusState.type"
+                      :show-icon="false"
+                      class="config-actions__alert"
+                    >
+                      {{ webhookStatusState.message }}
+                    </n-alert>
                   </div>
                  </n-form>
                 </n-card>
@@ -1878,6 +1880,7 @@ watch(
   .config-card-header {
     flex-direction: column;
     align-items: flex-start;
+    width: 100%;
   }
 
   .config-page__title {
@@ -1886,6 +1889,19 @@ watch(
 
   .config-page__subtitle {
     max-width: none;
+  }
+
+  .config-card-header--stacked :deep(.n-button) {
+    width: 100%;
+  }
+
+  .config-form-card :deep(.n-card-content) {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .config-table-wrapper {
+    overflow-x: auto;
   }
 }
 </style>
