@@ -28,20 +28,13 @@ _ANSI_ESCAPE = re.compile(
 )
 
 
-def sanitize_sensitive_data(text: str) -> str:
-    """Remove sensitive data (tokens, passwords) and ANSI codes from text.
+def scrub_sensitive_data(text: str) -> str:
+    """Redact credentials (tokens, API keys) from text, preserving ANSI codes and Unicode.
 
-    Args:
-        text: Text to sanitize
-
-    Returns:
-        Sanitized text
+    Use this for log content that will be stored in the DB and rendered in the UI.
     """
     if not text:
         return text
-
-    # Strip ANSI escape codes (colors, cursor movement) so logs render cleanly
-    text = _ANSI_ESCAPE.sub('', text)
 
     # Remove GitLab personal access tokens (glpat-*)
     text = re.sub(r'glpat-[a-zA-Z0-9\-]{10,}', '[GITLAB_TOKEN]', text)
@@ -52,11 +45,29 @@ def sanitize_sensitive_data(text: str) -> str:
     # Remove Authorization headers
     text = re.sub(r'(PRIVATE-TOKEN:\s*)[^\s]+', r'\1[REDACTED]', text)
 
-    # Remove null bytes and other invalid UTF-8 sequences
+    # Remove null bytes
     text = text.replace('\x00', '')
 
-    # Replace other non-printable characters that might cause issues
-    text = ''.join(char if ord(char) < 0xFFFD else '?' for char in text)
+    return text
+
+
+def sanitize_sensitive_data(text: str) -> str:
+    """Redact credentials and strip ANSI codes from text.
+
+    Use this for error messages and other plain-text fields.
+    For log storage use scrub_sensitive_data() to preserve ANSI and emoji.
+    """
+    if not text:
+        return text
+
+    text = scrub_sensitive_data(text)
+
+    # Strip ANSI escape codes (colors, cursor movement)
+    text = _ANSI_ESCAPE.sub('', text)
+
+    # Remove Unicode non-characters (surrogates, BOM variants).
+    # NOTE: do NOT filter by codepoint >= 0xFFFD — that would drop emoji.
+    text = re.sub(r'[\ud800-\udfff\ufffe\uffff]', '', text)
 
     return text
 
@@ -129,7 +140,7 @@ class WorkerExecutor:
         db: AsyncSession,
     ) -> None:
         """Save a batch of log lines as a TaskLog entry."""
-        content = sanitize_sensitive_data("".join(lines)).strip()
+        content = scrub_sensitive_data("".join(lines)).strip()
         if not content:
             return
         if len(content) > 8000:
@@ -465,9 +476,6 @@ class WorkerExecutor:
             else:
                 task.status = TaskStatus.FAILED
                 task.completed_at = datetime.utcnow()
-                # Sanitize logs before storing (remove tokens/passwords)
-                sanitized_logs = sanitize_sensitive_data(logs)
-                task.error_message = sanitized_logs[-1000:]  # Store last 1000 chars
                 logger.error(f"[Task {task_id}] Failed with exit code {exit_code}")
 
                 # Check if we should retry
@@ -487,12 +495,13 @@ class WorkerExecutor:
 
             # Save a final log entry for failures, or for very fast tasks with no
             # streaming chunks (e.g., container exited immediately).
-            sanitized_logs = sanitize_sensitive_data(logs)
+            scrubbed_logs = scrub_sensitive_data(logs)
             if exit_code != 0:
+                task.error_message = sanitize_sensitive_data(logs)[-1000:]
                 log_entry = TaskLog(
                     task_id=task.id,
                     log_level="ERROR",
-                    message=f"[Exit code: {exit_code}]\n{sanitized_logs[-2000:]}",
+                    message=f"[Exit code: {exit_code}]\n{scrubbed_logs[-2000:]}",
                 )
                 db.add(log_entry)
             elif log_chunks_saved == 0:
@@ -500,7 +509,7 @@ class WorkerExecutor:
                 log_entry = TaskLog(
                     task_id=task.id,
                     log_level="INFO",
-                    message=sanitized_logs[-4000:] or "[No output]",
+                    message=scrubbed_logs[-4000:] or "[No output]",
                 )
                 db.add(log_entry)
 

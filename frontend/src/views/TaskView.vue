@@ -291,7 +291,12 @@
             <n-spin :show="logsLoading">
               <!-- DB log entries are streamed every ~10s during execution,
                    so the same <pre> works for both running and completed tasks. -->
-              <pre class="log-content">{{ logs || (isActiveTaskStatus(task?.status) ? t('taskView.waitingForLogs') : t('taskView.noLogsAvailable')) }}</pre>
+              <pre
+                class="log-content"
+                v-if="renderedLogs"
+                v-html="renderedLogs"
+              ></pre>
+              <pre class="log-content" v-else>{{ isActiveTaskStatus(task?.status) ? t('taskView.waitingForLogs') : t('taskView.noLogsAvailable') }}</pre>
             </n-spin>
           </n-card>
         </div>
@@ -309,6 +314,9 @@ import { useI18n } from 'vue-i18n'
 import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, type Task } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
 import { formatDateTimeUtc8, parseUtcDate } from '../utils/datetime'
+import AnsiToHtml from 'ansi-to-html'
+
+const ansiConverter = new AnsiToHtml({ escapeXML: true })
 
 const route = useRoute()
 const message = useMessage()
@@ -334,6 +342,12 @@ let pollTimer: number | null = null
 let logEventSource: EventSource | null = null
 let logStreamContainerId: string | null = null
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
+
+const renderedLogs = computed(() => {
+  const text = logs.value
+  if (!text) return ''
+  return ansiConverter.toHtml(text)
+})
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
   pending: 'default',
@@ -680,7 +694,7 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   max-height: 400px;
   overflow: auto;
-  font-family: 'Consolas', 'Monaco', monospace;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji';
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-all;
