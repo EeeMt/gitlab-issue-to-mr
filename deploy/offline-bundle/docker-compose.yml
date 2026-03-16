@@ -1,0 +1,70 @@
+services:
+  nginx:
+    image: deploy-nginx:latest
+    container_name: gimr-nginx
+    ports:
+      - "8880:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - gimr-network
+
+  backend:
+    image: deploy-backend:latest
+    container_name: gimr-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./config/.env.offline
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DOCKER_TLS_CA=
+      - DOCKER_TLS_CERT=
+      - DOCKER_TLS_KEY=
+      - AUTO_MIGRATE=false
+    depends_on:
+      - postgres
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    networks:
+      - gimr-network
+
+  scheduler:
+    image: deploy-backend:latest
+    container_name: gimr-scheduler
+    command: ["python3", "-m", "app.scheduler_service"]
+    env_file:
+      - ./config/.env.offline
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DOCKER_TLS_CA=
+      - DOCKER_TLS_CERT=
+      - DOCKER_TLS_KEY=
+      - AUTO_MIGRATE=true
+    depends_on:
+      - postgres
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    networks:
+      - gimr-network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: gimr-postgres
+    env_file:
+      - ./config/.env.offline
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - gimr-network
+
+volumes:
+  postgres_data:
+
+networks:
+  gimr-network:
+    driver: bridge
