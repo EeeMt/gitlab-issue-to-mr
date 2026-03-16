@@ -655,7 +655,7 @@ async def _handle_mr_comment(
     # Send notification to MR comment
     try:
         gitlab = get_gitlab_client()
-        task_url = f"{settings.backend_url}/tasks/{task.id}"
+        task_url = f"{settings.dashboard_url}/tasks/{task.id}"
         notify_msg = f"🔄 开始处理请求... [任务 {task.id}]({task_url})"
         gitlab.create_mr_note(project_id, mr_iid, notify_msg)
         logger.info(f"Sent start notification to MR !{mr_iid}")

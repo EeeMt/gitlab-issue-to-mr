@@ -89,7 +89,13 @@ class Settings(BaseSettings):
     session_secret: str = Field(default="change-me-in-production")
     config_encryption_key: str = Field(default="")
     log_level: str = Field(default="INFO")
-    backend_url: str = Field(default="http://localhost:8000")  # Frontend/Backend URL for links
+    backend_url: str = Field(default="http://localhost:8000")  # Backend API URL (used for webhook endpoint)
+    frontend_url: str = Field(default="")  # Dashboard URL for task links; falls back to backend_url if empty
+
+    @property
+    def dashboard_url(self) -> str:
+        """URL used for task links in GitLab comments. Uses frontend_url when set."""
+        return self.frontend_url.strip() or self.backend_url
     auto_migrate: bool = Field(default=True)  # Auto-run migrations on startup
 
     # OIDC Authentication

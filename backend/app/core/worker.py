@@ -576,8 +576,7 @@ class WorkerExecutor:
             return
 
         settings = get_settings()
-        task_url = f"{settings.backend_url}/tasks/{task.id}"
-        message = f"🔄 开始处理请求... [任务 {task.id}]({task_url})"
+        task_url = f"{settings.dashboard_url}/tasks/{task.id}"
 
         # If this is a continuation task (has merge_request_iid), notify MR
         if task.merge_request_iid:
@@ -611,9 +610,7 @@ class WorkerExecutor:
         mr_iid = task.merge_request_iid
         is_continuation = mr_iid is not None
         settings = get_settings()
-        task_url = f"{settings.backend_url}/tasks/{task.id}"
-
-        if success:
+        task_url = f"{settings.dashboard_url}/tasks/{task.id}"
             if task.merge_request_url:
                 # Extract MR IID from URL if not already set
                 if not mr_iid and "/merge_requests/" in task.merge_request_url:
