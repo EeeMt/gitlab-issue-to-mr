@@ -1,16 +1,35 @@
-FROM ubuntu:22.04
+# Stage 1: Build Python virtual environment.
+# Heavy build tools (gcc, libpq-dev) stay here; only the venv is carried forward.
+# Re-runs only when requirements.txt changes.
+FROM ubuntu:22.04 AS python-builder
 
-WORKDIR /app
+WORKDIR /build
 
-# Install system dependencies, Python 3.11, Java 21, and debugging tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Python 3.11
     python3.11 \
     python3.11-venv \
     python3-pip \
-    # Build tools
     libpq-dev \
     gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3.11 -m venv /venv
+
+COPY backend/requirements.txt .
+RUN /venv/bin/pip install --no-cache-dir -r requirements.txt
+
+# Stage 2: Runtime image.
+# System tools and Java are stable layers; only the app source is frequently changing.
+FROM ubuntu:22.04 AS runtime
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Python 3.11 runtime
+    python3.11 \
+    python3.11-venv \
+    # PostgreSQL client runtime lib
+    libpq5 \
     # Base tools
     curl \
     wget \
@@ -39,30 +58,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     maven \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Python 3.11 as default
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
-RUN update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
 
-# Set Java environment
 ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
-ENV PATH="${JAVA_HOME}/bin:${PATH}"
+ENV PATH="${JAVA_HOME}/bin:/venv/bin:${PATH}"
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
 
-# Copy requirements first for better caching
-COPY backend/requirements.txt .
-RUN python3 -m pip install --no-cache-dir -r requirements.txt
+# Copy pre-built venv from builder stage (cached until requirements.txt changes)
+COPY --from=python-builder /venv /venv
 
-# Copy application code
+# Variable part: application source code (invalidates only these final layers)
 COPY backend/app/ ./app/
 COPY backend/alembic/ ./alembic/
 COPY backend/alembic.ini .
 COPY backend/pyproject.toml .
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-
-# Expose port
 EXPOSE 8000
 
-# Run the application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
