@@ -1,9 +1,12 @@
 """Worker executor for running tasks in Docker containers."""
 
+import asyncio
 import logging
 import re
+import threading
+import time
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,9 +18,18 @@ from app.models import Task, TaskLog, TaskStatus
 
 logger = logging.getLogger(__name__)
 
+# Matches common ANSI/VT100 escape sequences (colors, cursor movement, etc.)
+_ANSI_ESCAPE = re.compile(
+    r'\x1b\[[0-9;]*[mABCDEFGHJKLMPSTfnsu]'   # CSI sequences (colors, cursor)
+    r'|\x1b\][^\x07]*\x07'                     # OSC sequences (title, etc.)
+    r'|\x1b[()][A-Z0-9]'                       # Character set selection
+    r'|\x1b[@-_]',                             # Two-character ESC sequences
+    re.DOTALL,
+)
+
 
 def sanitize_sensitive_data(text: str) -> str:
-    """Remove sensitive data (tokens, passwords) from text.
+    """Remove sensitive data (tokens, passwords) and ANSI codes from text.
 
     Args:
         text: Text to sanitize
@@ -27,6 +39,9 @@ def sanitize_sensitive_data(text: str) -> str:
     """
     if not text:
         return text
+
+    # Strip ANSI escape codes (colors, cursor movement) so logs render cleanly
+    text = _ANSI_ESCAPE.sub('', text)
 
     # Remove GitLab personal access tokens (glpat-*)
     text = re.sub(r'glpat-[a-zA-Z0-9\-]{10,}', '[GITLAB_TOKEN]', text)
@@ -105,6 +120,120 @@ class WorkerExecutor:
         mr.title = updated_title
         mr.save()
         logger.info(f"[Task {task.id}] Removed draft status from MR !{task.merge_request_iid}")
+
+    async def _flush_log_chunk(
+        self,
+        task_id: int,
+        lines: list[str],
+        chunk_index: int,
+        db: AsyncSession,
+    ) -> None:
+        """Save a batch of log lines as a TaskLog entry."""
+        content = sanitize_sensitive_data("".join(lines)).strip()
+        if not content:
+            return
+        if len(content) > 8000:
+            content = content[:8000]
+        db.add(TaskLog(task_id=task_id, log_level="INFO", message=content))
+        await db.commit()
+        logger.debug(f"[Task {task_id}] Saved log chunk {chunk_index} ({len(lines)} lines)")
+
+    async def _stream_logs_to_db(
+        self,
+        container: Any,
+        task_id: int,
+        db: AsyncSession,
+        timeout: int,
+    ) -> tuple[int, str, int]:
+        """Stream container logs to TaskLog entries while waiting for completion.
+
+        Saves log chunks to the DB every FLUSH_INTERVAL seconds so users can
+        monitor execution progress in real-time without waiting for the container
+        to finish. Returns (exit_code, full_log_string, chunks_saved).
+        """
+        FLUSH_INTERVAL = 10.0   # seconds between DB flushes
+        MAX_BUFFER_LINES = 200  # also flush when buffer hits this many lines
+
+        loop = asyncio.get_running_loop()
+        log_queue: asyncio.Queue = asyncio.Queue()
+
+        def _stream_thread() -> None:
+            """Background thread: reads Docker log stream and enqueues chunks."""
+            try:
+                for chunk in container.logs(
+                    stdout=True, stderr=True, follow=True, stream=True
+                ):
+                    loop.call_soon_threadsafe(log_queue.put_nowait, chunk)
+            except Exception as exc:
+                logger.debug(f"[Task {task_id}] Log stream thread error: {exc}")
+            finally:
+                loop.call_soon_threadsafe(log_queue.put_nowait, None)  # sentinel
+
+        stream_thread = threading.Thread(target=_stream_thread, daemon=True)
+        stream_thread.start()
+
+        buffer: list[str] = []
+        all_lines: list[str] = []
+        last_flush = time.monotonic()
+        chunk_index = 0
+        deadline = time.monotonic() + timeout
+
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                logger.warning(f"[Task {task_id}] Log stream timed out after {timeout}s")
+                if buffer:
+                    await self._flush_log_chunk(task_id, buffer, chunk_index, db)
+                    chunk_index += 1
+                stream_thread.join(timeout=2)
+                return -1, "".join(all_lines), chunk_index
+
+            try:
+                item = await asyncio.wait_for(log_queue.get(), timeout=min(remaining, 2.0))
+            except asyncio.TimeoutError:
+                # No new data; flush buffer if interval elapsed
+                now = time.monotonic()
+                if buffer and (now - last_flush) >= FLUSH_INTERVAL:
+                    await self._flush_log_chunk(task_id, buffer, chunk_index, db)
+                    chunk_index += 1
+                    buffer = []
+                    last_flush = now
+                continue
+
+            if item is None:
+                # Sentinel: stream ended because container stopped
+                break
+
+            line = item.decode("utf-8", errors="replace")
+            buffer.append(line)
+            all_lines.append(line)
+
+            now = time.monotonic()
+            if len(buffer) >= MAX_BUFFER_LINES or (now - last_flush) >= FLUSH_INTERVAL:
+                await self._flush_log_chunk(task_id, buffer, chunk_index, db)
+                chunk_index += 1
+                buffer = []
+                last_flush = now
+
+        # Flush any remaining lines
+        if buffer:
+            await self._flush_log_chunk(task_id, buffer, chunk_index, db)
+            chunk_index += 1
+
+        stream_thread.join(timeout=5)
+
+        # Container stopped (stream ended); get exit code
+        try:
+            result = await asyncio.to_thread(container.wait, timeout=30)
+            exit_code = result.get("StatusCode", 1)
+        except Exception as exc:
+            logger.warning(f"[Task {task_id}] container.wait() error: {exc}")
+            exit_code = -1
+
+        logger.info(
+            f"[Task {task_id}] Log streaming complete: {chunk_index} chunks, exit_code={exit_code}"
+        )
+        return exit_code, "".join(all_lines), chunk_index
 
     async def execute_task(self, db: AsyncSession, task_id: int) -> bool:
         """Execute a task.
@@ -257,9 +386,9 @@ class WorkerExecutor:
             task.container_id = container.id
             await db.commit()
 
-            # Wait for completion
-            exit_code, logs = self.docker.wait_for_container(
-                container, timeout=settings.task_timeout
+            # Stream logs to DB while waiting for container to finish
+            exit_code, logs, log_chunks_saved = await self._stream_logs_to_db(
+                container, task.id, db, settings.task_timeout
             )
 
             # Process results
@@ -355,14 +484,24 @@ class WorkerExecutor:
                 except Exception as e:
                     logger.warning(f"Failed to send failure notification: {e}")
 
-            # Add log entry (sanitized)
+            # Save a final log entry for failures, or for very fast tasks with no
+            # streaming chunks (e.g., container exited immediately).
             sanitized_logs = sanitize_sensitive_data(logs)
-            log_entry = TaskLog(
-                task_id=task.id,
-                log_level="ERROR" if exit_code != 0 else "INFO",
-                message=sanitized_logs[-4000:],  # Store last 4000 chars
-            )
-            db.add(log_entry)
+            if exit_code != 0:
+                log_entry = TaskLog(
+                    task_id=task.id,
+                    log_level="ERROR",
+                    message=f"[Exit code: {exit_code}]\n{sanitized_logs[-2000:]}",
+                )
+                db.add(log_entry)
+            elif log_chunks_saved == 0:
+                # No streaming chunks were flushed (very fast / empty output)
+                log_entry = TaskLog(
+                    task_id=task.id,
+                    log_level="INFO",
+                    message=sanitized_logs[-4000:] or "[No output]",
+                )
+                db.add(log_entry)
 
             await db.commit()
 

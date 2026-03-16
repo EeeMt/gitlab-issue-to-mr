@@ -290,8 +290,9 @@
             </template>
             <n-spin :show="logsLoading">
               <div v-if="task?.status === 'running' || task?.status === 'pending' || task?.status === 'queued'">
-                <n-spin :show="containerLogsLoading">
-                  <pre class="log-content">{{ containerLogs || t('taskView.waitingForLogs') }}</pre>
+                <n-spin :show="containerLogsLoading && !containerLogs && !logs">
+                  <!-- Live stream for admins; fall back to periodic DB logs for others -->
+                  <pre class="log-content">{{ containerLogs || logs || t('taskView.waitingForLogs') }}</pre>
                 </n-spin>
               </div>
               <div v-else>
@@ -459,9 +460,11 @@ function connectLogStream() {
   containerLogs.value = ''
   containerLogsLoading.value = true
   logStreamContainerId = containerId
+  let receivedFirstMessage = false
   logEventSource = new EventSource(`/api/containers/${containerId}/logs`)
 
   logEventSource.onmessage = (event) => {
+    receivedFirstMessage = true
     containerLogsLoading.value = false
     const chunk = event.data.endsWith('\n') ? event.data : `${event.data}\n`
     containerLogs.value = trimLogBuffer(containerLogs.value + chunk)
@@ -469,7 +472,10 @@ function connectLogStream() {
 
   logEventSource.onerror = () => {
     containerLogsLoading.value = false
-    if (!isActiveTaskStatus(task.value?.status) || task.value?.container_id !== logStreamContainerId) {
+    // If we never received data, this is likely an auth failure (403) — close
+    // the stream to avoid infinite reconnect loops for non-admin users.
+    const likelyAuthFailure = !receivedFirstMessage
+    if (likelyAuthFailure || !isActiveTaskStatus(task.value?.status) || task.value?.container_id !== logStreamContainerId) {
       closeLogStream()
     }
   }
@@ -645,9 +651,8 @@ onMounted(async () => {
   await fetchTask()
   if (isActiveTaskStatus(task.value?.status)) {
     await fetchContainerLogs()
-  } else {
-    await fetchLogs()
   }
+  await fetchLogs()
   // Auto-refresh for active tasks; skip when tab is not visible.
   pollTimer = window.setInterval(() => {
     if (document.visibilityState !== 'visible') return
@@ -657,6 +662,7 @@ onMounted(async () => {
       if (!logEventSource) {
         fetchContainerLogs()
       }
+      fetchLogs()  // Poll DB logs so non-admin users see streaming chunks
     } else {
       closeLogStream()
     }
