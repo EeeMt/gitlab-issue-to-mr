@@ -30,6 +30,8 @@ _ANSI_ESCAPE = re.compile(
 
 # Emitted by entrypoint.sh after Claude finishes; contains token usage JSON.
 _GIMR_STATS_RE = re.compile(r'^GIMR_STATS:(.+)$', re.MULTILINE)
+# Emitted by entrypoint.sh; git-computed change stats (e.g. GIMR_DIFF:+18-21).
+_GIMR_DIFF_RE = re.compile(r'^GIMR_DIFF:\+(\d+)-(\d+)$', re.MULTILINE)
 
 def scrub_sensitive_data(text: str) -> str:
     """Redact credentials (tokens, API keys) from text, preserving ANSI codes and Unicode.
@@ -458,8 +460,17 @@ class WorkerExecutor:
 
                 logger.info(f"Task {task_id} completed successfully")
 
-                # Get MR change stats after MR is created
-                if task.merge_request_iid:
+                # Get MR change stats — prefer log-parsed git diff (accurate), fall back to GitLab API.
+                diff_match = _GIMR_DIFF_RE.search(logs)
+                if diff_match:
+                    task.additions = int(diff_match.group(1))
+                    task.deletions = int(diff_match.group(2))
+                    task.total_changes = task.additions + task.deletions
+                    logger.info(
+                        f"[Task {task_id}] Diff stats (from log): "
+                        f"+{task.additions} -{task.deletions} ({task.total_changes} total)"
+                    )
+                elif task.merge_request_iid:
                     try:
                         logger.info(f"[Task {task_id}] Getting MR stats for MR !{task.merge_request_iid}")
                         stats = self.gitlab.get_merge_request_stats(
@@ -471,7 +482,8 @@ class WorkerExecutor:
                             task.deletions = stats.get("deletions", 0)
                             task.total_changes = stats.get("total", 0)
                             logger.info(
-                                f"[Task {task_id}] MR stats: +{task.additions} -{task.deletions} ({task.total_changes} total)"
+                                f"[Task {task_id}] MR stats (from API): "
+                                f"+{task.additions} -{task.deletions} ({task.total_changes} total)"
                             )
                         else:
                             logger.warning(f"[Task {task_id}] MR stats returned None")

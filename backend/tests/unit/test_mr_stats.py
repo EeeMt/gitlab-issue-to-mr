@@ -106,9 +106,9 @@ def test_gitlab_get_mr_stats_from_diff():
 
 
 def test_worker_saves_mr_stats_after_completion():
-    """Test that worker fetches and saves MR stats after task completion."""
+    """Test that worker uses GIMR_DIFF log line (primary) for MR change stats."""
     print("\n" + "=" * 60)
-    print("Testing: Worker saves MR stats after task completion")
+    print("Testing: Worker saves MR stats from GIMR_DIFF log line (primary path)")
     print("=" * 60)
 
     mock_settings = MagicMock()
@@ -129,32 +129,13 @@ def test_worker_saves_mr_stats_after_completion():
 
         mock_gitlab = MagicMock()
         mock_docker = MagicMock()
-
         mock_container = MockContainer()
         mock_docker.create_container.return_value = mock_container
-        mock_docker.wait_for_container.return_value = (0, "MR created: !42\nhttp://gitlab.example.com/project/-/merge_requests/42")
 
-        # Mock project and MR
-        mock_project = MagicMock()
-        mock_mr = MagicMock()
-        mock_mr.iid = 42
-        mock_mr.web_url = "http://gitlab.example.com/project/-/merge_requests/42"
-        mock_project.mergerequests.create.return_value = mock_mr
-        mock_project.mergerequests.get.return_value = mock_mr
-
-        # Mock get_merge_request_stats to return stats
-        mock_stats = {
-            "additions": 100,
-            "deletions": 50,
-            "total": 150
-        }
-
-        mock_gitlab.gl.projects.get.return_value = mock_project
-        mock_gitlab.get_merge_request_stats = MagicMock(return_value=mock_stats)
+        mock_gitlab.get_merge_request_stats = MagicMock(return_value={"additions": 99, "deletions": 1, "total": 100})
 
         worker = WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
 
-        # Create task
         task = Task(
             id=3,
             project_id=123,
@@ -170,36 +151,40 @@ def test_worker_saves_mr_stats_after_completion():
             total_changes=0,
         )
 
-        # Verify initial stats are 0
-        assert task.additions == 0
-        assert task.deletions == 0
-        assert task.total_changes == 0
-
         mock_db = create_mock_db(task)
 
+        # Simulate logs that contain GIMR_DIFF and an MR URL
+        fake_logs = (
+            "Cloning repo...\n"
+            "Running claude...\n"
+            "http://gitlab.example.com/project/-/merge_requests/42\n"
+            "GIMR_DIFF:+100-50\n"
+            "GIMR_STATS:{\"input_tokens\":1000,\"output_tokens\":200}\n"
+        )
+
         async def run_test():
-            await worker.execute_task(mock_db, task.id)
+            with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
+                await worker.execute_task(mock_db, task.id)
 
         asyncio.run(run_test())
 
-        # Verify get_merge_request_stats was called
-        mock_gitlab.get_merge_request_stats.assert_called_once_with(123, 42)
+        # GIMR_DIFF is present → no API call needed
+        mock_gitlab.get_merge_request_stats.assert_not_called()
 
-        # Verify task stats were saved
         assert task.additions == 100, f"Expected additions=100, got {task.additions}"
         assert task.deletions == 50, f"Expected deletions=50, got {task.deletions}"
         assert task.total_changes == 150, f"Expected total_changes=150, got {task.total_changes}"
 
-        print("✓ Worker saves MR stats after task completion")
+        print("✓ Worker saves MR stats from GIMR_DIFF log line")
         print(f"  - Additions: +{task.additions}")
         print(f"  - Deletions: -{task.deletions}")
         print(f"  - Total: {task.total_changes}")
 
 
 def test_worker_handles_missing_mr_stats():
-    """Test that worker handles case when MR stats cannot be fetched."""
+    """Test fallback to GitLab API when GIMR_DIFF is absent; None API result leaves stats at 0."""
     print("\n" + "=" * 60)
-    print("Testing: Worker handles missing MR stats gracefully")
+    print("Testing: Worker falls back to GitLab API when GIMR_DIFF absent")
     print("=" * 60)
 
     mock_settings = MagicMock()
@@ -220,26 +205,14 @@ def test_worker_handles_missing_mr_stats():
 
         mock_gitlab = MagicMock()
         mock_docker = MagicMock()
-
         mock_container = MockContainer()
         mock_docker.create_container.return_value = mock_container
-        mock_docker.wait_for_container.return_value = (0, "MR created: !42\nhttp://gitlab.example.com/project/-/merge_requests/42")
 
-        # Mock project and MR
-        mock_project = MagicMock()
-        mock_mr = MagicMock()
-        mock_mr.iid = 42
-        mock_mr.web_url = "http://gitlab.example.com/project/-/merge_requests/42"
-        mock_project.mergerequests.create.return_value = mock_mr
-        mock_project.mergerequests.get.return_value = mock_mr
-
-        # Mock get_merge_request_stats to return None (failed to get stats)
-        mock_gitlab.gl.projects.get.return_value = mock_project
+        # API returns None (unavailable)
         mock_gitlab.get_merge_request_stats = MagicMock(return_value=None)
 
         worker = WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
 
-        # Create task
         task = Task(
             id=4,
             project_id=123,
@@ -257,21 +230,28 @@ def test_worker_handles_missing_mr_stats():
 
         mock_db = create_mock_db(task)
 
-        async def run_test():
-            await worker.execute_task(mock_db, task.id)
+        # Logs without GIMR_DIFF → fallback to GitLab API
+        fake_logs = (
+            "Cloning repo...\n"
+            "http://gitlab.example.com/project/-/merge_requests/42\n"
+            "GIMR_STATS:{\"input_tokens\":500,\"output_tokens\":100}\n"
+        )
 
-        # Should not raise exception
+        async def run_test():
+            with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
+                await worker.execute_task(mock_db, task.id)
+
         asyncio.run(run_test())
 
-        # Verify get_merge_request_stats was called
+        # Fallback API was called
         mock_gitlab.get_merge_request_stats.assert_called_once_with(123, 42)
 
-        # Verify stats remain 0 when unable to fetch
+        # API returned None → stats remain 0
         assert task.additions == 0
         assert task.deletions == 0
         assert task.total_changes == 0
 
-        print("✓ Worker handles missing MR stats gracefully")
+        print("✓ Worker falls back to API and leaves stats at 0 when API returns None")
 
 
 if __name__ == "__main__":

@@ -481,6 +481,7 @@ if [ -n "$CHANGES" ]; then
     TOTAL_CHANGES=$((ADDITIONS + DELETIONS))
 
     echo "Changes: +${ADDITIONS} -${DELETIONS} (${TOTAL_CHANGES} total)"
+    echo "GIMR_DIFF:+${ADDITIONS}-${DELETIONS}"
 
     # Collect changed file lists from the staged diff before committing.
     NEW_FILES=""
