@@ -2,74 +2,48 @@
 
 [中文说明](docs/README.zh-CN.md)
 
-GIMR is an AI-assisted service that turns GitLab Issue comments into code changes, branches, commits, and Merge Requests. It also includes a Vue-based operations dashboard for task management, scheduling, monitoring, analytics, configuration, and OIDC-based access control.
+GIMR is an AI-assisted service that turns GitLab issue comments into code changes, branches, commits, and Merge Requests. It also ships with a Vue-based dashboard for task operations, scheduling, monitoring, analytics, configuration, and access control.
 
 ## What it does
 
-- Listens to GitLab issue comment webhooks such as `@ai-bot <prompt>`
-- Creates and schedules tasks with priority and delayed execution support
-- Runs each task in an isolated Docker container
-- Uses Claude CLI-compatible backends to generate and apply code changes
-- Creates or updates Merge Requests and posts task progress back to GitLab
-- Provides a web dashboard for task operations, monitoring, analytics, configuration, and diagnostics
-- Supports GitLab OIDC dashboard login with server-side sessions and project-scoped access
-- Supports bilingual frontend UI (`English` / `简体中文`)
+- Watches GitLab issue comments such as `@ai-bot <prompt>`
+- Creates tasks with priority, scheduling, retry, and manual execution support
+- Runs each task in an isolated Docker worker container
+- Uses a Claude CLI-compatible backend to generate and apply changes
+- Pushes commits, creates or updates Merge Requests, and posts progress back to GitLab
+- Provides a dashboard for tasks, logs, monitoring, analytics, sessions, config, and auth
 
-## High-level architecture
+## Request flow
 
-1. GitLab sends an issue comment webhook to `/api/webhook/gitlab`
+1. GitLab sends a webhook to `/api/webhook/gitlab`
 2. Backend parses the command and stores a `Task`
-3. Scheduler picks runnable tasks by status, priority, schedule, and concurrency limits
-4. Worker executor starts a dedicated Docker container for the task
-5. The worker clones the repository, runs Claude CLI, commits, pushes, and updates the MR
-6. Dashboard users track tasks, logs, containers, analytics, configuration, and auth state from the frontend
+3. Scheduler selects runnable tasks by status, priority, schedule, and concurrency
+4. Worker executor launches a dedicated Docker container
+5. The worker clones the repo, runs Claude CLI, commits, pushes, and updates the MR
+6. Dashboard users track status, logs, containers, analytics, and configuration
 
-Key backend components:
+## Key components
 
 - `backend/app/api/webhook.py` — GitLab webhook receiver
-- `backend/app/api/tasks.py` — task APIs, filtering, scheduled queue, project list
+- `backend/app/api/tasks.py` — task APIs and queue views
 - `backend/app/core/worker.py` — task execution and MR updates
-- `backend/app/scheduler.py` — priority scheduler and crash recovery
-- `backend/app/api/auth.py` — OIDC auth/session bootstrap endpoints
-- `backend/app/api/config.py` — runtime and auth configuration APIs
+- `backend/app/scheduler.py` — priority scheduling and crash recovery
+- `backend/app/api/config.py` — runtime and auth configuration
+- `frontend/src/views/` — dashboard pages
+- `deploy/` — Dockerfiles, compose deployment, worker entrypoint
 
-## Current dashboard capabilities
+## Dashboard pages
 
-- Task list with project / initiator filters
-- Manual task creation
+- Task dashboard
 - Task detail and logs
+- Manual task creation
 - Schedule overview
-- Analytics page
-- Monitor page
-- Session management
-- Configuration page at `/configuration`
+- Analytics
+- Monitor
+- Sessions
+- Configuration
 - Access management
 - OIDC diagnostics
-
-## Repository layout
-
-```text
-docs/
-  README.md
-  README.zh-CN.md
-  DEPLOYMENT.md
-  DEVELOPMENT.md
-  GITLAB_WEBHOOK_SETUP.md
-  GITLAB_OIDC_SETUP.md
-  DESIGN.md
-  PROGRESS.md
-  e2e-debugging.md
-backend/
-  app/
-  alembic/
-  tests/
-deploy/
-  docker-compose.yml
-  Dockerfile.backend
-  Dockerfile.frontend
-  Dockerfile.worker
-frontend/
-```
 
 ## Quick start
 
@@ -78,17 +52,12 @@ frontend/
 - Docker and Docker Compose
 - A reachable GitLab instance
 - A Claude CLI-compatible model endpoint
-- PostgreSQL is provided by `deploy/docker-compose.yml`
 
-### 1. Prepare configuration
+### 1. Prepare config
 
-For local backend development, start from:
+For the bundled Docker deployment, `deploy/docker-compose.yml` loads `deploy/.env.test` for `backend` and `scheduler`.
 
-```bash
-cp backend/.env.example backend/.env
-```
-
-For the bundled Docker deployment, `deploy/docker-compose.yml` currently loads `deploy/.env.test` for `backend` and `scheduler`. Make sure the deployment environment provides at least:
+Important values include:
 
 - `GITLAB_URL`
 - `GITLAB_BOT_TOKEN`
@@ -97,13 +66,14 @@ For the bundled Docker deployment, `deploy/docker-compose.yml` currently loads `
 - `ANTHROPIC_API_KEY`
 - `ANTHROPIC_MODEL`
 - `CONFIG_ENCRYPTION_KEY`
-- `SECRET_KEY` / session secret values used by your deployment
+- `SECRET_KEY`
+- `SESSION_SECRET`
 
-Important:
+Notes:
 
-- OIDC and other runtime/auth settings are persisted in PostgreSQL `system_config`
-- Secrets entered in the dashboard configuration UI are stored encrypted at rest
-- If the PostgreSQL volume is removed, persisted runtime config, OIDC config, users, sessions, and audit data are lost
+- Runtime overrides are persisted in PostgreSQL `system_config`
+- Secrets entered in the dashboard are stored encrypted at rest
+- If the PostgreSQL volume is removed, runtime config, users, sessions, and auth state are lost
 
 ### 2. Start the stack
 
@@ -112,14 +82,7 @@ cd deploy
 docker-compose up -d --build
 ```
 
-This starts:
-
-- `postgres`
-- `backend`
-- `scheduler`
-- `nginx`
-
-Default exposed ports:
+Default ports:
 
 - Frontend: `http://localhost:8880`
 - Backend API: `http://localhost:8000`
@@ -128,32 +91,27 @@ Default exposed ports:
 
 See [docs/GITLAB_WEBHOOK_SETUP.md](docs/GITLAB_WEBHOOK_SETUP.md).
 
-### 4. Configure dashboard login (optional but recommended)
+### 4. Configure dashboard auth (optional but recommended)
 
 See [docs/GITLAB_OIDC_SETUP.md](docs/GITLAB_OIDC_SETUP.md).
 
 Recommended rollout:
 
-1. Keep OIDC disabled initially
-2. Deploy the stack with a valid `CONFIG_ENCRYPTION_KEY`
-3. Open the dashboard **Configuration** page
-4. Fill in OIDC settings
-5. Use the built-in diagnostics / test flow
-6. Enable OIDC after validation succeeds
+1. Deploy with OIDC disabled
+2. Ensure `CONFIG_ENCRYPTION_KEY` is set
+3. Open the dashboard Configuration page
+4. Enter OIDC settings and validate them
+5. Enable OIDC after the checks succeed
 
-## Development commands
+## Common commands
 
 ### Backend
 
 ```bash
-# Install dependencies
 cd backend && pip install -r requirements.txt
-
-# Run backend locally
 cd backend && uvicorn app.main:app --reload
-
-# Apply migrations manually
 cd backend && alembic upgrade head
+cd backend && pytest
 ```
 
 ### Frontend
@@ -164,97 +122,55 @@ cd frontend && npm run dev
 cd frontend && npm run build
 ```
 
-### Deployment rebuilds
-
-After changing source code, rebuild the affected image:
+### Rebuild deployment images
 
 ```bash
-# Backend / scheduler image
+# backend / scheduler
 docker build -f deploy/Dockerfile.backend -t deploy-backend .
 cd deploy && docker-compose up -d backend scheduler
 
-# Frontend nginx image
-cd frontend && npm run build
-cd ../deploy && docker-compose build nginx && docker-compose up -d nginx
+# frontend / nginx
+docker build -f deploy/Dockerfile.frontend -t deploy-nginx:latest .
+cd deploy && docker-compose up -d --build nginx
 
-# Worker image (if worker image contents changed)
+# worker
 docker build -f deploy/Dockerfile.worker -t gitlab-issues-to-mr-worker:latest .
 ```
-
-## Testing
-
-### Main test commands
-
-```bash
-# All backend tests
-cd backend && pytest
-
-# Unit tests
-cd backend && pytest tests/unit/ -v
-
-# Mock E2E tests
-cd backend && pytest tests/mock_e2e/ -v
-
-# Real GitLab E2E tests
-cd backend && pytest tests/gitlab_e2e/ -v
-
-# Frontend build validation
-cd frontend && npm run build
-```
-
-### Important testing safety note
-
-Run real integration tests only against an isolated test environment.
-
-Why:
-
-- The stack persists runtime config, auth config, users, and sessions in PostgreSQL
-- Removing the PostgreSQL Docker volume resets the database completely
-- Shared environments should not be used for destructive cleanup flows
-
-If you are debugging E2E, also read [docs/e2e-debugging.md](docs/e2e-debugging.md).
 
 ## Usage
 
 ### GitLab issue flow
 
-1. Create a GitLab issue
-2. Add a comment such as:
+Comment on an issue with:
 
 ```text
 @ai-bot create a hello world function
 ```
 
-3. GIMR will:
-   - create or queue a task
-   - create a branch
-   - run Claude CLI inside a worker container
-   - commit and push changes
-   - create or update a Merge Request
-   - post progress back to GitLab
+GIMR will queue a task, run the worker, push changes, create or update an MR, and report progress back to GitLab.
 
 ### Manual task flow
 
-You can also create tasks from the dashboard without a GitLab issue. Manual tasks skip GitLab issue notifications and are useful for operator-driven code generation or maintenance work.
+You can also create tasks directly from the dashboard. Manual tasks skip GitLab issue notifications.
 
 ## Operational notes
 
-- Backend and scheduler share the same backend image in `deploy/docker-compose.yml`
-- In the bundled compose file, backend runs with `AUTO_MIGRATE=false` and scheduler runs with `AUTO_MIGRATE=true`
-- The dashboard route for configuration is `/configuration`
-- Shared-page permissions can expose selected read-oriented pages to non-admin users
-- Project/task visibility for authenticated users is filtered by GitLab access rules
+- `backend` and `scheduler` share the same image in `deploy/docker-compose.yml`
+- `backend` runs with `AUTO_MIGRATE=false`; `scheduler` runs with `AUTO_MIGRATE=true`
+- Dashboard configuration route: `/configuration`
+- Project/task visibility is filtered by GitLab access rules for authenticated users
 
-## Related documents
+## Related docs
 
 - [docs/README.md](docs/README.md)
+- [docs/README.zh-CN.md](docs/README.zh-CN.md)
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 - [docs/GITLAB_WEBHOOK_SETUP.md](docs/GITLAB_WEBHOOK_SETUP.md)
 - [docs/GITLAB_OIDC_SETUP.md](docs/GITLAB_OIDC_SETUP.md)
 - [docs/e2e-debugging.md](docs/e2e-debugging.md)
-- [docs/DESIGN.md](docs/DESIGN.md)
-- [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md) - Dashboard screenshots and visual overview
+- [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md)
+- [deploy/offline-bundle/README.md](deploy/offline-bundle/README.md)
 
 ## License
 
