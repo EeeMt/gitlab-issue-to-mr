@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import secrets
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -17,6 +18,12 @@ from app.core.config_crypto import decrypt_config_secret, encrypt_config_secret
 from app.models import User, UserSession
 
 SESSION_RETENTION_DAYS = 30
+
+# Throttle last_seen_at writes: only update in DB once per this many seconds per session.
+# This prevents the SSE log stream (which keeps a DB session open for its lifetime)
+# from holding a row-level lock on user_sessions indefinitely.
+_LAST_SEEN_WRITE_INTERVAL_SECONDS = 60
+_last_seen_written_at: dict[str, float] = {}
 
 
 def _utcnow() -> datetime:
@@ -122,7 +129,15 @@ async def resolve_session_authentication(
         )
 
     session.last_seen_at = now
-    await db.flush()
+    now_ts = time.time()
+    last_write = _last_seen_written_at.get(session.id, 0.0)
+    if now_ts - last_write >= _LAST_SEEN_WRITE_INTERVAL_SECONDS:
+        # Commit immediately so the row lock is released before the request
+        # handler runs. Without this, a long-lived SSE streaming response would
+        # hold the lock for its entire lifetime, blocking all polling requests
+        # from the same user.
+        await db.commit()
+        _last_seen_written_at[session.id] = now_ts
     return SessionAuthResult(user=user, session=session)
 
 
