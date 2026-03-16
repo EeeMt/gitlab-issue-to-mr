@@ -247,6 +247,7 @@ cd frontend && npm run build
 
 ## 相关文档
 
+- [USER_GUIDE.zh-CN.md](USER_GUIDE.zh-CN.md) — **详细使用说明（中文）**
 - [DEPLOYMENT.md](DEPLOYMENT.md)
 - [DEVELOPMENT.md](DEVELOPMENT.md)
 - [GITLAB_WEBHOOK_SETUP.md](GITLAB_WEBHOOK_SETUP.md)
