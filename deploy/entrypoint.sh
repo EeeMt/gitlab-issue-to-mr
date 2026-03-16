@@ -30,6 +30,8 @@ echo "Issue: ${ISSUE_IID:-N/A (manual task)}"
 echo "Branch: ${BRANCH_NAME}"
 echo "Base Branch: ${BASE_BRANCH:-${TARGET_BRANCH}}"
 echo "Target: ${TARGET_BRANCH}"
+echo "Model: ${ANTHROPIC_MODEL}"
+echo "Max Turns: ${CLAUDE_MAX_TURNS:-20}"
 echo "========================================"
 
 # Set BASE_BRANCH to TARGET_BRANCH if not explicitly set
@@ -105,6 +107,7 @@ echo "Running Claude Code CLI in direct execution mode..."
 echo "Prompt: ${USER_PROMPT}"
 echo "ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL}"
 echo "ANTHROPIC_MODEL: ${ANTHROPIC_MODEL}"
+echo "CLAUDE_MAX_TURNS: ${CLAUDE_MAX_TURNS:-20}"
 echo "ANTHROPIC_API_KEY set: $([ -n "$ANTHROPIC_API_KEY" ] && echo 'yes' || echo 'no')"
 echo ""
 
