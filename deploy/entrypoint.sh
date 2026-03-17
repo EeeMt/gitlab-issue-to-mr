@@ -87,6 +87,15 @@ if [ -n "${CUSTOM_CA_BUNDLE}" ] && [ -f "${CUSTOM_CA_BUNDLE}" ]; then
     # Python requests / httpx pick this up automatically
     export REQUESTS_CA_BUNDLE="${CUSTOM_CA_BUNDLE}"
     export SSL_CERT_FILE="${CUSTOM_CA_BUNDLE}"
+    # Import into JDK truststore so Java tools (Maven, Gradle, etc.) verify the CA
+    if [ -n "${JAVA_HOME}" ] && [ -x "${JAVA_HOME}/bin/keytool" ]; then
+        "${JAVA_HOME}/bin/keytool" -importcert -noprompt -trustcacerts \
+            -alias custom-ca \
+            -file "${CUSTOM_CA_BUNDLE}" \
+            -keystore "${JAVA_HOME}/lib/security/cacerts" \
+            -storepass changeit 2>/dev/null || true
+        echo "Custom CA imported into JDK truststore"
+    fi
     echo "Custom CA installed; SSL verification enabled"
 else
     # No custom CA — disable git SSL verification to allow self-signed GitLab certs
