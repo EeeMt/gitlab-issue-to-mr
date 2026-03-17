@@ -124,6 +124,36 @@ def test_create_initial_mr():
     print(f"  - MR URL: {task.merge_request_url}")
 
 
+def test_initial_mr_description_links_issue():
+    """Test initial MR description keeps the GitLab issue linkage."""
+    print("\n" + "=" * 60)
+    print("Testing: Initial MR description includes issue closure reference")
+    print("=" * 60)
+
+    mock_gitlab = MagicMock()
+    mock_docker = MagicMock()
+    worker = WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
+
+    task = Task(
+        id=11,
+        project_id=123,
+        issue_iid=456,
+        note_id=999,
+        user_prompt="Add user authentication feature",
+        branch_name="gimr-11-p123-i456",
+        target_branch="main",
+        priority=2,
+        status=TaskStatus.PENDING,
+    )
+
+    description = worker._build_initial_mr_description(task)
+
+    assert "Add user authentication feature" in description
+    assert "Closes #456" in description
+
+    print("✓ Initial MR description retains issue linkage")
+
+
 def test_mr_iid_passed_to_container():
     """Test that MR_IID is passed to container environment."""
     print("\n" + "=" * 60)
@@ -280,7 +310,12 @@ def test_draft_removed_on_completion():
     mock_db = create_mock_db(task)
 
     async def run_test():
-        await worker.execute_task(mock_db, task.id)
+        with patch.object(
+            worker,
+            "_stream_logs_to_db",
+            AsyncMock(return_value=(0, "MR created: http://gitlab.example.com/project/-/merge_requests/42", 1)),
+        ):
+            await worker.execute_task(mock_db, task.id)
 
     asyncio.run(run_test())
 
@@ -293,7 +328,7 @@ def test_draft_removed_on_completion():
 
 
 def test_mr_iid_in_issue_comment():
-    """Test that issue comment uses GitLab shorthand (!iid) format."""
+    """Test that issue completion comments keep the MR shorthand in the issue reply."""
     print("\n" + "=" * 60)
     print("Testing: Issue comment uses GitLab shorthand (!iid)")
     print("=" * 60)
@@ -336,16 +371,16 @@ def test_mr_iid_in_issue_comment():
     task.merge_request_url = "http://gitlab.example.com/project/-/merge_requests/42"
     task.merge_request_iid = 42
 
-    worker._notify_task_completed(task, success=True)
+    worker._notify_task_completed(task, success=True, notify_target="issue")
 
-    # Check the comment format - with merge_request_iid, uses create_mr_note
-    mock_gitlab.create_mr_note.assert_called()
-    call_args = mock_gitlab.create_mr_note.call_args[0]
+    mock_gitlab.create_note.assert_called()
+    call_args = mock_gitlab.create_note.call_args[0]
 
     # The comment should contain !42 (GitLab shorthand) instead of full URL
     comment_body = call_args[2]
     assert "!42" in comment_body or "✅" in comment_body, \
         "Comment should use GitLab shorthand format"
+    mock_gitlab.create_mr_note.assert_not_called()
 
     print("✓ Issue comment uses GitLab shorthand format")
     print(f"  - Comment: {comment_body[:60]}...")
@@ -353,6 +388,7 @@ def test_mr_iid_in_issue_comment():
 
 if __name__ == "__main__":
     test_create_initial_mr()
+    test_initial_mr_description_links_issue()
     test_mr_iid_passed_to_container()
     test_mr_creation_failure_handled()
     test_draft_removed_on_completion()

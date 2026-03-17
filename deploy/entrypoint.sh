@@ -183,7 +183,14 @@ ${USER_PROMPT}
 ---
 
 *Claude Code CLI 正在直接实施变更...*
+$(build_issue_reference_block)
 EOF
+}
+
+build_issue_reference_block() {
+    if [ -n "${ISSUE_IID}" ]; then
+        printf '\n\nCloses #%s' "${ISSUE_IID}"
+    fi
 }
 
 sanitize_summary_content() {
@@ -307,6 +314,7 @@ ${changed_files_text}
 
 ### 执行摘要
 ${summary_text}
+$(build_issue_reference_block)
 EOF
 }
 
@@ -609,17 +617,6 @@ AI-Generated: true"
         else
             update_mr "${FINAL_MR_TITLE}" "" || true
         fi
-    fi
-
-    # Comment on issue with MR link
-    echo "Commenting on issue..."
-    if [ -n "${ISSUE_IID}" ]; then
-        curl -s -X POST "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/issues/${ISSUE_IID}/notes" \
-            -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d "{
-                \"body\": \"I've created a merge request: ${MR_WEB_URL}\\n\\nPlease review the changes.\"
-            }"
     fi
 
     echo "========================================"

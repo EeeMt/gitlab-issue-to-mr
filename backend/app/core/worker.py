@@ -118,6 +118,21 @@ class WorkerExecutor:
 
         return f"AI: Task {task.id}"
 
+    def _build_initial_mr_description(self, task: Task) -> str:
+        """Build the initial MR description shown while the worker is running."""
+        description = f"""## 🚀 AI 正在执行
+
+### 需求
+{task.user_prompt}
+
+---
+*AI 正在直接实施变更...*"""
+
+        if task.issue_iid:
+            description += f"\n\nCloses #{task.issue_iid}"
+
+        return description
+
     def _remove_mr_draft_status(self, task: Task) -> None:
         """Remove draft status from an MR by normalizing its title."""
         project = self.gitlab.gl.projects.get(task.project_id)
@@ -273,6 +288,7 @@ class WorkerExecutor:
             return False
 
         logger.info(f"[Task {task_id}] Executing for project={task.project_id} issue_iid={task.issue_iid} priority={task.priority}")
+        had_existing_mr = task.merge_request_iid is not None
 
         # Update task status to running
         task.status = TaskStatus.RUNNING
@@ -323,13 +339,7 @@ class WorkerExecutor:
             if not mr_iid:
                 # No existing MR - create a new one
                 try:
-                    initial_mr_desc = f"""## 🚀 AI 正在执行
-
-### 需求
-{task.user_prompt}
-
----
-*AI 正在直接实施变更...*"""
+                    initial_mr_desc = self._build_initial_mr_description(task)
 
                     mr_response = self.gitlab.gl.projects.get(task.project_id).mergerequests.create({
                         "source_branch": task.branch_name,
@@ -499,7 +509,7 @@ class WorkerExecutor:
 
                 # Send "completed" notification with MR URL
                 try:
-                    self._notify_task_completed(task, success=True)
+                    self._notify_task_completed(task, success=True, notify_target="mr" if had_existing_mr else "issue")
                 except Exception as e:
                     logger.warning(f"Failed to send completion notification: {e}")
             else:
@@ -518,7 +528,7 @@ class WorkerExecutor:
 
                 # Send "failed" notification
                 try:
-                    self._notify_task_completed(task, success=False)
+                    self._notify_task_completed(task, success=False, notify_target="mr" if had_existing_mr else "issue")
                 except Exception as e:
                     logger.warning(f"Failed to send failure notification: {e}")
 
@@ -570,7 +580,7 @@ class WorkerExecutor:
 
             # Send failure notification for exceptions
             try:
-                self._notify_task_completed(task, success=False)
+                self._notify_task_completed(task, success=False, notify_target="mr" if had_existing_mr else "issue")
             except Exception as notify_error:
                 logger.warning(f"Failed to send failure notification: {notify_error}")
 
@@ -605,21 +615,20 @@ class WorkerExecutor:
             )
             logger.info(f"Sent start notification for task {task.id}")
 
-    def _notify_task_completed(self, task: Task, success: bool) -> None:
+    def _notify_task_completed(self, task: Task, success: bool, notify_target: str = "issue") -> None:
         """Send notification when task completes.
 
         Args:
             task: Task object
             success: Whether the task succeeded
+            notify_target: Target discussion, either "issue" or "mr"
         """
         # Skip notifications for manual tasks (no issue to notify)
         if task.is_manual:
             logger.info(f"Skipping completion notification for manual task {task.id}")
             return
 
-        # Determine target: MR or Issue
         mr_iid = task.merge_request_iid
-        is_continuation = mr_iid is not None
         settings = get_settings()
         task_url = f"{settings.dashboard_url}/tasks/{task.id}"
 
@@ -644,8 +653,8 @@ class WorkerExecutor:
             error_msg = sanitize_sensitive_data(error_msg)
             message = f"❌ 任务失败 [任务 {task.id}]({task_url}): {error_msg}"
 
-        # Send notification to MR for continuation tasks, otherwise to issue
-        if is_continuation and mr_iid:
+        # Send notification to the original trigger discussion.
+        if notify_target == "mr" and mr_iid:
             self.gitlab.create_mr_note(task.project_id, mr_iid, message)
             logger.info(f"Sent completion notification to MR !{mr_iid} for task {task.id}, success={success}")
 
