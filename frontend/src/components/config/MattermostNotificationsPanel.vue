@@ -188,142 +188,122 @@
     </div>
   </n-spin>
 
-  <n-modal v-model:show="profileModalVisible" :mask-closable="false">
-    <n-card
-      role="dialog"
-      aria-modal="true"
-      :title="editingProfileId === null ? t('config.createNotificationProfile') : t('config.editNotificationProfile')"
-      :style="{ width: isMobile ? '96vw' : '760px' }"
-      closable
-      @close="profileModalVisible = false"
-    >
-      <n-form ref="profileFormRef" :model="profileForm" :rules="profileRules" label-placement="top">
-        <div class="config-form__section">
-          <div class="config-form__section-title">{{ t('config.notificationProfileBasics') }}</div>
-          <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-            <n-gi>
-              <n-form-item :label="t('config.profileName')" path="name">
-                <n-input v-model:value="profileForm.name" :placeholder="t('config.enterProfileName')" />
-              </n-form-item>
-            </n-gi>
-            <n-gi>
-              <n-form-item :label="t('config.notificationTarget')" path="target_type">
-                <n-radio-group v-model:value="profileForm.target_type" name="notification-target">
-                  <n-space vertical>
-                    <n-radio
-                      v-for="option in targetOptions"
-                      :key="option.value"
-                      :value="option.value"
-                    >
-                      {{ option.label }}
-                    </n-radio>
-                  </n-space>
-                </n-radio-group>
-              </n-form-item>
-            </n-gi>
-            <n-gi>
-              <n-form-item :label="t('config.profileEnabled')">
-                <n-switch v-model:value="profileForm.enabled" />
-              </n-form-item>
-            </n-gi>
-            <n-gi>
-              <n-form-item :label="t('config.notifyManualTasks')">
-                <n-switch v-model:value="profileForm.send_for_manual_tasks" />
-              </n-form-item>
-            </n-gi>
-          </n-grid>
-          <n-alert
-            v-if="profileForm.target_type === 'channel'"
-            type="info"
-            :show-icon="false"
-            class="config-profile-help"
-          >
-            {{ t('config.mentionInitiatorVisibilityHint') }}
-          </n-alert>
-          <n-form-item
-            v-if="profileForm.target_type === 'channel'"
-            :label="t('config.mentionInitiatorInChannel')"
-            class="config-profile-toggle"
-          >
-            <n-switch v-model:value="profileForm.mention_in_channel" />
-            <template #feedback>
-              {{ t('config.mentionInitiatorInChannelHint') }}
-            </template>
-          </n-form-item>
-        </div>
+  <n-modal
+    v-model:show="profileModalVisible"
+    preset="card"
+    :title="editingProfileId === null ? t('config.createNotificationProfile') : t('config.editNotificationProfile')"
+    :style="{ width: isMobile ? '96vw' : '760px' }"
+  >
+    <n-form ref="profileFormRef" :model="profileForm" :rules="profileRules" label-placement="top">
+      <div class="config-form__section">
+        <div class="config-form__section-title">{{ t('config.notificationProfileBasics') }}</div>
+        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+          <n-gi>
+            <n-form-item :label="t('config.profileName')" path="name">
+              <n-input v-model:value="profileForm.name" :placeholder="t('config.enterProfileName')" />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item :label="t('config.notificationTarget')" path="target_type">
+              <n-select
+                v-model:value="profileForm.target_type"
+                :options="targetOptions"
+              />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item :label="t('config.profileEnabled')">
+              <n-switch v-model:value="profileForm.enabled" />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item :label="t('config.notifyManualTasks')">
+              <n-switch v-model:value="profileForm.send_for_manual_tasks" />
+            </n-form-item>
+          </n-gi>
+        </n-grid>
+        <n-alert
+          v-if="profileForm.target_type === 'channel'"
+          type="info"
+          :show-icon="false"
+          class="config-profile-help"
+        >
+          {{ t('config.mentionInitiatorVisibilityHint') }}
+        </n-alert>
+        <n-form-item
+          v-if="profileForm.target_type === 'channel'"
+          :label="t('config.mentionInitiatorInChannel')"
+          class="config-profile-toggle"
+        >
+          <n-switch v-model:value="profileForm.mention_in_channel" />
+          <template #feedback>
+            {{ t('config.mentionInitiatorInChannelHint') }}
+          </template>
+        </n-form-item>
+      </div>
 
-        <div v-if="profileForm.target_type === 'channel'" class="config-form__section">
-          <div class="config-form__section-title">{{ t('config.notificationChannelTarget') }}</div>
-          <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-            <n-gi>
-              <n-form-item :label="t('config.mattermostTeamName')" path="team_name">
-                <n-input v-model:value="profileForm.team_name" :placeholder="t('config.enterMattermostTeamName')" />
-              </n-form-item>
-            </n-gi>
-            <n-gi>
-              <n-form-item :label="t('config.mattermostChannelName')" path="channel_name">
-                <n-input
-                  v-model:value="profileForm.channel_name"
-                  :placeholder="t('config.enterMattermostChannelName')"
-                />
-              </n-form-item>
-            </n-gi>
-          </n-grid>
-        </div>
+      <div v-if="profileForm.target_type === 'channel'" class="config-form__section">
+        <div class="config-form__section-title">{{ t('config.notificationChannelTarget') }}</div>
+        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+          <n-gi>
+            <n-form-item :label="t('config.mattermostTeamName')" path="team_name">
+              <n-input v-model:value="profileForm.team_name" :placeholder="t('config.enterMattermostTeamName')" />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item :label="t('config.mattermostChannelName')" path="channel_name">
+              <n-input
+                v-model:value="profileForm.channel_name"
+                :placeholder="t('config.enterMattermostChannelName')"
+              />
+            </n-form-item>
+          </n-gi>
+        </n-grid>
+      </div>
 
-        <div class="config-form__section">
-          <div class="config-form__section-title">{{ t('config.notificationEvents') }}</div>
-          <n-form-item path="event_types">
-            <n-checkbox-group v-model:value="profileForm.event_types">
-              <n-space vertical>
-                <n-checkbox
-                  v-for="option in eventOptions"
-                  :key="option.value"
-                  :value="option.value"
-                  :label="option.label"
-                />
-              </n-space>
-            </n-checkbox-group>
-          </n-form-item>
-        </div>
+      <div class="config-form__section">
+        <div class="config-form__section-title">{{ t('config.notificationEvents') }}</div>
+        <n-form-item path="event_types">
+          <n-checkbox-group v-model:value="profileForm.event_types">
+            <n-space vertical>
+              <n-checkbox
+                v-for="option in eventOptions"
+                :key="option.value"
+                :value="option.value"
+                :label="option.label"
+              />
+            </n-space>
+          </n-checkbox-group>
+        </n-form-item>
+      </div>
 
-        <div class="config-form__section">
-          <div class="config-form__section-title">{{ t('config.notificationFields') }}</div>
-          <n-alert type="info" :show-icon="false" class="config-profile-help">
-            {{ t('config.initiatorFieldDisplayHint') }}
-          </n-alert>
-          <n-form-item path="field_keys">
-            <n-checkbox-group v-model:value="profileForm.field_keys">
-              <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-                <n-gi v-for="option in fieldOptions" :key="option.value">
-                  <n-checkbox :value="option.value" :label="option.label" />
-                </n-gi>
-              </n-grid>
-            </n-checkbox-group>
-          </n-form-item>
-        </div>
-      </n-form>
+      <div class="config-form__section">
+        <div class="config-form__section-title">{{ t('config.notificationFields') }}</div>
+        <n-alert type="info" :show-icon="false" class="config-profile-help">
+          {{ t('config.initiatorFieldDisplayHint') }}
+        </n-alert>
+        <n-form-item path="field_keys">
+          <n-checkbox-group v-model:value="profileForm.field_keys">
+            <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+              <n-gi v-for="option in fieldOptions" :key="option.value">
+                <n-checkbox :value="option.value" :label="option.label" />
+              </n-gi>
+            </n-grid>
+          </n-checkbox-group>
+        </n-form-item>
+      </div>
+    </n-form>
 
-      <n-alert
-        v-if="profileErrorMessage"
-        type="error"
-        :show-icon="false"
-        class="config-actions__alert"
-      >
-        {{ profileErrorMessage }}
-      </n-alert>
-
-      <template #footer>
-        <n-space justify="end" :size="12">
-          <n-button secondary :disabled="profileSaving" @click="profileModalVisible = false">
-            {{ t('common.cancel') }}
-          </n-button>
-          <n-button type="primary" :loading="profileSaving" @click="handleSaveProfile">
-            {{ t('config.saveChanges') }}
-          </n-button>
-        </n-space>
-      </template>
-    </n-card>
+    <template #footer>
+      <n-space justify="end" :size="12">
+        <n-button secondary :disabled="profileSaving" @click="profileModalVisible = false">
+          {{ t('common.cancel') }}
+        </n-button>
+        <n-button type="primary" :loading="profileSaving" @click="handleSaveProfile">
+          {{ t('config.saveChanges') }}
+        </n-button>
+      </n-space>
+    </template>
   </n-modal>
 </template>
 
@@ -341,8 +321,7 @@ import {
   NGrid,
   NInput,
   NModal,
-  NRadio,
-  NRadioGroup,
+  NSelect,
   NSpace,
   NSpin,
   NSwitch,
@@ -406,7 +385,6 @@ const deletingProfileId = ref<number | null>(null)
 const profileModalVisible = ref(false)
 const editingProfileId = ref<number | null>(null)
 const integrationTestState = ref<TestState | null>(null)
-const profileErrorMessage = ref<string | null>(null)
 const integrationFormRef = ref<FormInst | null>(null)
 const profileFormRef = ref<FormInst | null>(null)
 
@@ -632,14 +610,12 @@ function buildProfilePayload(): MattermostNotificationProfilePayload {
 
 function openCreateProfileModal() {
   editingProfileId.value = null
-  profileErrorMessage.value = null
   Object.assign(profileForm, createEmptyProfileForm())
   profileModalVisible.value = true
 }
 
 function openEditProfileModal(profile: MattermostNotificationProfile) {
   editingProfileId.value = profile.id
-  profileErrorMessage.value = null
   Object.assign(profileForm, {
     name: profile.name,
     enabled: profile.enabled,
@@ -654,60 +630,7 @@ function openEditProfileModal(profile: MattermostNotificationProfile) {
   profileModalVisible.value = true
 }
 
-function getErrorMessage(error: any, fallback: string): string {
-  const detail = error?.response?.data?.detail
-  if (typeof detail === 'string' && detail.trim()) {
-    return detail
-  }
-  if (Array.isArray(detail) && detail.length > 0) {
-    const parts = detail
-      .map((item) => {
-        if (typeof item === 'string') {
-          return item
-        }
-        if (typeof item?.msg === 'string') {
-          return item.msg
-        }
-        return ''
-      })
-      .filter(Boolean)
-    if (parts.length > 0) {
-      return parts.join('; ')
-    }
-  }
-  return fallback
-}
-
-function validateProfileBeforeSave(): string | null {
-  if (!profileForm.name.trim()) {
-    return t('config.enterProfileName')
-  }
-  if (profileForm.target_type === 'channel') {
-    if (!profileForm.team_name.trim()) {
-      return t('config.enterMattermostTeamName')
-    }
-    if (!profileForm.channel_name.trim()) {
-      return t('config.enterMattermostChannelName')
-    }
-  }
-  if (profileForm.event_types.length === 0) {
-    return t('config.selectNotificationEvents')
-  }
-  if (profileForm.field_keys.length === 0) {
-    return t('config.selectNotificationFields')
-  }
-  return null
-}
-
 async function handleSaveProfile() {
-  profileErrorMessage.value = null
-  const preflightError = validateProfileBeforeSave()
-  if (preflightError) {
-    profileErrorMessage.value = preflightError
-    message.error(preflightError)
-    return
-  }
-
   const valid = await profileFormRef.value?.validate().then(() => true).catch(() => false)
   if (!valid) {
     return
@@ -721,16 +644,14 @@ async function handleSaveProfile() {
     } else {
       await updateMattermostNotificationProfile(editingProfileId.value, buildProfilePayload())
       message.success(t('config.notificationProfileUpdated'))
-      }
-      profileModalVisible.value = false
-      await fetchNotifications(false)
-    } catch (error: any) {
-      const detail = getErrorMessage(error, t('config.failedToSaveNotifications'))
-      profileErrorMessage.value = detail
-      message.error(detail)
-    } finally {
-      profileSaving.value = false
     }
+    profileModalVisible.value = false
+    await fetchNotifications(false)
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || t('config.failedToSaveNotifications'))
+  } finally {
+    profileSaving.value = false
+  }
 }
 
 async function handleDeleteProfile(profile: MattermostNotificationProfile) {
@@ -781,12 +702,6 @@ watch(
   },
   { immediate: true }
 )
-
-watch(profileModalVisible, (visible) => {
-  if (!visible) {
-    profileErrorMessage.value = null
-  }
-})
 </script>
 
 <style scoped>
