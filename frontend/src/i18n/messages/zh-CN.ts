@@ -557,6 +557,7 @@ const zhCN = {
     enterMattermostChannelName: '输入 Mattermost 频道名称',
     mentionInitiatorInChannel: '在群组里 @ 发起人',
     mentionInitiatorInChannelHint: '开启后，会在群组通知前缀中加上 @任务发起人用户名。',
+    mentionInitiatorInChannelDisabledHint: '只有通知目标为 Mattermost 群组频道时，才可以开启这个选项。',
     notifyManualTasks: '通知手工任务',
     skipManualTasks: '跳过手工任务',
     createNotificationProfile: '创建通知配置',

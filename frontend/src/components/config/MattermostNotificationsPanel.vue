@@ -228,20 +228,27 @@
               <n-switch v-model:value="profileForm.send_for_manual_tasks" />
             </n-form-item>
           </n-gi>
+          <n-gi :span="isMobile ? 1 : 2">
+            <n-form-item :label="t('config.mentionInitiatorInChannel')">
+              <n-switch
+                v-model:value="profileForm.mention_in_channel"
+                :disabled="profileForm.target_type !== 'channel'"
+              />
+              <template #feedback>
+                {{
+                  profileForm.target_type === 'channel'
+                    ? t('config.mentionInitiatorInChannelHint')
+                    : t('config.mentionInitiatorInChannelDisabledHint')
+                }}
+              </template>
+            </n-form-item>
+          </n-gi>
         </n-grid>
       </div>
 
       <div v-if="profileForm.target_type === 'channel'" class="config-form__section">
         <div class="config-form__section-title">{{ t('config.notificationChannelTarget') }}</div>
         <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-          <n-gi :span="isMobile ? 1 : 2">
-            <n-form-item :label="t('config.mentionInitiatorInChannel')">
-              <n-switch v-model:value="profileForm.mention_in_channel" />
-              <template #feedback>
-                {{ t('config.mentionInitiatorInChannelHint') }}
-              </template>
-            </n-form-item>
-          </n-gi>
           <n-gi>
             <n-form-item :label="t('config.mattermostTeamName')" path="team_name">
               <n-input v-model:value="profileForm.team_name" :placeholder="t('config.enterMattermostTeamName')" />
