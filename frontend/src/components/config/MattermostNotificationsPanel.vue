@@ -208,10 +208,17 @@
             </n-gi>
             <n-gi>
               <n-form-item :label="t('config.notificationTarget')" path="target_type">
-                <n-select
-                  v-model:value="profileForm.target_type"
-                  :options="targetOptions"
-                />
+                <n-radio-group v-model:value="profileForm.target_type" name="notification-target">
+                  <n-space vertical>
+                    <n-radio
+                      v-for="option in targetOptions"
+                      :key="option.value"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </n-radio>
+                  </n-space>
+                </n-radio-group>
               </n-form-item>
             </n-gi>
             <n-gi>
@@ -334,7 +341,8 @@ import {
   NGrid,
   NInput,
   NModal,
-  NSelect,
+  NRadio,
+  NRadioGroup,
   NSpace,
   NSpin,
   NSwitch,
