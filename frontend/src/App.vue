@@ -331,6 +331,11 @@ body {
   background: transparent;
 }
 
+.app-shell__content-inner {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
 .app-shell__main {
   height: 100vh;
   overflow-y: auto;
@@ -362,6 +367,20 @@ body {
 
 .app-shell__logout-button {
   flex-shrink: 0;
+}
+
+/* Global button styling - unified rounded corners */
+.n-button {
+  border-radius: 10px !important;
+  transition: all 0.2s ease;
+}
+
+.n-button.n-button--round {
+  border-radius: 999px !important;
+}
+
+.n-button.n-button--circle {
+  border-radius: 50% !important;
 }
 
 .app-shell__topbar-actions {
