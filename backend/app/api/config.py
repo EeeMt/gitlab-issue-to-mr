@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 import httpx
 from gitlab.exceptions import GitlabError
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -47,7 +47,7 @@ from app.runtime_config import (
     reset_runtime_config_override,
     save_runtime_config_override,
 )
-from app.models import MattermostNotificationProfile
+from app.models import MattermostNotificationProfile, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -1231,13 +1231,30 @@ async def list_gitlab_project_webhook_statuses(
 
 @router.post("/config/oidc/test")
 async def test_oidc_config(
-    request: OIDCConfigTestRequest,
+    request: Request,
+    oidc_request: OIDCConfigTestRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_admin_user),
+    current_user: Optional[User] = Depends(require_admin_user),
 ):
     """Validate OIDC connectivity with current or unsaved config values."""
+    # Check if user is authenticated (when OIDC is enabled)
+    settings = get_effective_settings()
+    if settings.oidc_enabled and current_user is None:
+        # Check if skip-redirect header was sent
+        skip_redirect = request.headers.get("X-Skip-Auth-Redirect", "").lower() == "true"
+        if not skip_redirect:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required",
+            )
+        # For skip-redirect requests, return 401 without redirect
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required. Please log in to test OIDC configuration.",
+        )
+    
     await load_runtime_config_from_db(db)
-    auth_updates = _normalize_updates(request.auth.model_dump(exclude_unset=True))
+    auth_updates = _normalize_updates(oidc_request.auth.model_dump(exclude_unset=True))
     auth_updates.pop("clear_oidc_client_secret", None)
     preview_settings = _build_preview_settings(auth_updates)
 
