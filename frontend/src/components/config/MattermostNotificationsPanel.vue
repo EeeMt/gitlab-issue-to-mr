@@ -188,131 +188,135 @@
     </div>
   </n-spin>
 
-  <n-modal
-    v-model:show="profileModalVisible"
-    preset="card"
-    :title="editingProfileId === null ? t('config.createNotificationProfile') : t('config.editNotificationProfile')"
-    :style="{ width: isMobile ? '96vw' : '760px' }"
-  >
-    <n-form ref="profileFormRef" :model="profileForm" :rules="profileRules" label-placement="top">
-      <div class="config-form__section">
-        <div class="config-form__section-title">{{ t('config.notificationProfileBasics') }}</div>
-        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-          <n-gi>
-            <n-form-item :label="t('config.profileName')" path="name">
-              <n-input v-model:value="profileForm.name" :placeholder="t('config.enterProfileName')" />
-            </n-form-item>
-          </n-gi>
-          <n-gi>
-            <n-form-item :label="t('config.notificationTarget')" path="target_type">
-              <n-select
-                v-model:value="profileForm.target_type"
-                :options="targetOptions"
-              />
-            </n-form-item>
-          </n-gi>
-          <n-gi>
-            <n-form-item :label="t('config.profileEnabled')">
-              <n-switch v-model:value="profileForm.enabled" />
-            </n-form-item>
-          </n-gi>
-          <n-gi>
-            <n-form-item :label="t('config.notifyManualTasks')">
-              <n-switch v-model:value="profileForm.send_for_manual_tasks" />
-            </n-form-item>
-          </n-gi>
-        </n-grid>
-        <n-alert
-          v-if="profileForm.target_type === 'channel'"
-          type="info"
-          :show-icon="false"
-          class="config-profile-help"
-        >
-          {{ t('config.mentionInitiatorVisibilityHint') }}
-        </n-alert>
-        <n-form-item
-          v-if="profileForm.target_type === 'channel'"
-          :label="t('config.mentionInitiatorInChannel')"
-          class="config-profile-toggle"
-        >
-          <n-switch v-model:value="profileForm.mention_in_channel" />
-          <template #feedback>
-            {{ t('config.mentionInitiatorInChannelHint') }}
-          </template>
-        </n-form-item>
-      </div>
-
-      <div v-if="profileForm.target_type === 'channel'" class="config-form__section">
-        <div class="config-form__section-title">{{ t('config.notificationChannelTarget') }}</div>
-        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-          <n-gi>
-            <n-form-item :label="t('config.mattermostTeamName')" path="team_name">
-              <n-input v-model:value="profileForm.team_name" :placeholder="t('config.enterMattermostTeamName')" />
-            </n-form-item>
-          </n-gi>
-          <n-gi>
-            <n-form-item :label="t('config.mattermostChannelName')" path="channel_name">
-              <n-input
-                v-model:value="profileForm.channel_name"
-                :placeholder="t('config.enterMattermostChannelName')"
-              />
-            </n-form-item>
-          </n-gi>
-        </n-grid>
-      </div>
-
-      <div class="config-form__section">
-        <div class="config-form__section-title">{{ t('config.notificationEvents') }}</div>
-        <n-form-item path="event_types">
-          <n-checkbox-group v-model:value="profileForm.event_types">
-            <n-space vertical>
-              <n-checkbox
-                v-for="option in eventOptions"
-                :key="option.value"
-                :value="option.value"
-                :label="option.label"
-              />
-            </n-space>
-          </n-checkbox-group>
-        </n-form-item>
-      </div>
-
-      <div class="config-form__section">
-        <div class="config-form__section-title">{{ t('config.notificationFields') }}</div>
-        <n-alert type="info" :show-icon="false" class="config-profile-help">
-          {{ t('config.initiatorFieldDisplayHint') }}
-        </n-alert>
-        <n-form-item path="field_keys">
-          <n-checkbox-group v-model:value="profileForm.field_keys">
-            <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-              <n-gi v-for="option in fieldOptions" :key="option.value">
-                <n-checkbox :value="option.value" :label="option.label" />
-              </n-gi>
-            </n-grid>
-          </n-checkbox-group>
-        </n-form-item>
-      </div>
-    </n-form>
-
-    <n-alert
-      v-if="profileErrorMessage"
-      type="error"
-      :show-icon="false"
-      class="config-actions__alert"
+  <n-modal v-model:show="profileModalVisible" :mask-closable="false">
+    <n-card
+      role="dialog"
+      aria-modal="true"
+      :title="editingProfileId === null ? t('config.createNotificationProfile') : t('config.editNotificationProfile')"
+      :style="{ width: isMobile ? '96vw' : '760px' }"
+      closable
+      @close="profileModalVisible = false"
     >
-      {{ profileErrorMessage }}
-    </n-alert>
+      <n-form ref="profileFormRef" :model="profileForm" :rules="profileRules" label-placement="top">
+        <div class="config-form__section">
+          <div class="config-form__section-title">{{ t('config.notificationProfileBasics') }}</div>
+          <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+            <n-gi>
+              <n-form-item :label="t('config.profileName')" path="name">
+                <n-input v-model:value="profileForm.name" :placeholder="t('config.enterProfileName')" />
+              </n-form-item>
+            </n-gi>
+            <n-gi>
+              <n-form-item :label="t('config.notificationTarget')" path="target_type">
+                <n-select
+                  v-model:value="profileForm.target_type"
+                  :options="targetOptions"
+                />
+              </n-form-item>
+            </n-gi>
+            <n-gi>
+              <n-form-item :label="t('config.profileEnabled')">
+                <n-switch v-model:value="profileForm.enabled" />
+              </n-form-item>
+            </n-gi>
+            <n-gi>
+              <n-form-item :label="t('config.notifyManualTasks')">
+                <n-switch v-model:value="profileForm.send_for_manual_tasks" />
+              </n-form-item>
+            </n-gi>
+          </n-grid>
+          <n-alert
+            v-if="profileForm.target_type === 'channel'"
+            type="info"
+            :show-icon="false"
+            class="config-profile-help"
+          >
+            {{ t('config.mentionInitiatorVisibilityHint') }}
+          </n-alert>
+          <n-form-item
+            v-if="profileForm.target_type === 'channel'"
+            :label="t('config.mentionInitiatorInChannel')"
+            class="config-profile-toggle"
+          >
+            <n-switch v-model:value="profileForm.mention_in_channel" />
+            <template #feedback>
+              {{ t('config.mentionInitiatorInChannelHint') }}
+            </template>
+          </n-form-item>
+        </div>
 
-    <template #footer>
-      <n-space justify="end" :size="12">
-        <n-button secondary :disabled="profileSaving" @click="profileModalVisible = false">
-          {{ t('common.cancel') }}
-        </n-button>
-        <n-button type="primary" :loading="profileSaving" @click="handleSaveProfile">
-          {{ t('config.saveChanges') }}
-        </n-button>
-      </n-space>
-    </template>
+        <div v-if="profileForm.target_type === 'channel'" class="config-form__section">
+          <div class="config-form__section-title">{{ t('config.notificationChannelTarget') }}</div>
+          <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+            <n-gi>
+              <n-form-item :label="t('config.mattermostTeamName')" path="team_name">
+                <n-input v-model:value="profileForm.team_name" :placeholder="t('config.enterMattermostTeamName')" />
+              </n-form-item>
+            </n-gi>
+            <n-gi>
+              <n-form-item :label="t('config.mattermostChannelName')" path="channel_name">
+                <n-input
+                  v-model:value="profileForm.channel_name"
+                  :placeholder="t('config.enterMattermostChannelName')"
+                />
+              </n-form-item>
+            </n-gi>
+          </n-grid>
+        </div>
+
+        <div class="config-form__section">
+          <div class="config-form__section-title">{{ t('config.notificationEvents') }}</div>
+          <n-form-item path="event_types">
+            <n-checkbox-group v-model:value="profileForm.event_types">
+              <n-space vertical>
+                <n-checkbox
+                  v-for="option in eventOptions"
+                  :key="option.value"
+                  :value="option.value"
+                  :label="option.label"
+                />
+              </n-space>
+            </n-checkbox-group>
+          </n-form-item>
+        </div>
+
+        <div class="config-form__section">
+          <div class="config-form__section-title">{{ t('config.notificationFields') }}</div>
+          <n-alert type="info" :show-icon="false" class="config-profile-help">
+            {{ t('config.initiatorFieldDisplayHint') }}
+          </n-alert>
+          <n-form-item path="field_keys">
+            <n-checkbox-group v-model:value="profileForm.field_keys">
+              <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                <n-gi v-for="option in fieldOptions" :key="option.value">
+                  <n-checkbox :value="option.value" :label="option.label" />
+                </n-gi>
+              </n-grid>
+            </n-checkbox-group>
+          </n-form-item>
+        </div>
+      </n-form>
+
+      <n-alert
+        v-if="profileErrorMessage"
+        type="error"
+        :show-icon="false"
+        class="config-actions__alert"
+      >
+        {{ profileErrorMessage }}
+      </n-alert>
+
+      <template #footer>
+        <n-space justify="end" :size="12">
+          <n-button secondary :disabled="profileSaving" @click="profileModalVisible = false">
+            {{ t('common.cancel') }}
+          </n-button>
+          <n-button type="primary" :loading="profileSaving" @click="handleSaveProfile">
+            {{ t('config.saveChanges') }}
+          </n-button>
+        </n-space>
+      </template>
+    </n-card>
   </n-modal>
 </template>
 
