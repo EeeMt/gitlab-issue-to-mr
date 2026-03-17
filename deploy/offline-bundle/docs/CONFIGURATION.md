@@ -86,6 +86,33 @@ These are optional. Configure them if you want Mattermost integration available 
 
 These are optional host paths mounted into worker containers to speed up Maven dependency resolution in Java projects.
 
+### Custom CA certificate
+
+- `CUSTOM_CA_BUNDLE`: path inside the container to a PEM-encoded CA certificate file (e.g. `/certs/ca.crt`)
+
+Use this when GitLab, the LLM gateway, Mattermost, or any other service uses a certificate signed by an internal or self-signed CA.
+
+**Setup steps:**
+
+1. Mount the CA cert file into the backend and scheduler containers:
+   ```yaml
+   volumes:
+     - /host/path/ca.crt:/certs/ca.crt:ro
+   ```
+2. Set `CUSTOM_CA_BUNDLE=/certs/ca.crt` in `config/.env.offline` (or via the `environment:` block in `docker-compose.yml`).
+
+When this variable is set, the following components inside every spawned **worker container** will trust the CA:
+
+| Component | Mechanism |
+|-----------|-----------|
+| System (curl, wget, etc.) | `update-ca-certificates` installs the cert to the system store |
+| git | `http.sslCAInfo` |
+| Python (requests / httpx) | `REQUESTS_CA_BUNDLE` + `SSL_CERT_FILE` env vars |
+| Node.js / Claude CLI | `NODE_EXTRA_CA_CERTS` env var |
+| JDK (Maven, Gradle, Java) | `keytool -importcert` into `$JAVA_HOME/lib/security/cacerts` |
+
+The **backend and scheduler** HTTP clients (GitLab API, Mattermost, OIDC) also use `CUSTOM_CA_BUNDLE` as the `verify=` parameter for all requests.
+
 ### OIDC / auth
 
 Only configure these if the dashboard will use GitLab OIDC in the offline environment:

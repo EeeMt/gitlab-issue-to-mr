@@ -23,10 +23,13 @@ services:
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
       - AUTO_MIGRATE=false
+      - CUSTOM_CA_BUNDLE=
     depends_on:
       - postgres
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Uncomment and adjust to mount a custom CA certificate:
+      # - /path/to/ca.crt:/certs/ca.crt:ro
     restart: unless-stopped
     networks:
       - gimr-network
@@ -43,10 +46,13 @@ services:
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
       - AUTO_MIGRATE=true
+      - CUSTOM_CA_BUNDLE=
     depends_on:
       - postgres
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Uncomment and adjust to mount a custom CA certificate:
+      # - /path/to/ca.crt:/certs/ca.crt:ro
     restart: unless-stopped
     networks:
       - gimr-network
