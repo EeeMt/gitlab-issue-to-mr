@@ -649,14 +649,18 @@ export async function resetConfigKey(key: string): Promise<Config> {
 }
 
 export async function testOidcConfig(auth: AuthConfigUpdate): Promise<OidcConfigTestResult> {
-  const response = await api.post('/config/oidc/test', { auth })
+  const response = await api.post('/config/oidc/test', { auth }, {
+    headers: { 'X-Skip-Auth-Redirect': 'true' }
+  })
   return response.data
 }
 
 export async function testGitLabConfig(
   integration: IntegrationConfigUpdate,
 ): Promise<GitLabConfigTestResult> {
-  const response = await api.post('/config/gitlab/test', { integration })
+  const response = await api.post('/config/gitlab/test', { integration }, {
+    headers: { 'X-Skip-Auth-Redirect': 'true' }
+  })
   return response.data
 }
 

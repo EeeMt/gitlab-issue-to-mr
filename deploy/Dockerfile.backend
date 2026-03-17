@@ -68,6 +68,13 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # Copy pre-built venv from builder stage (cached until requirements.txt changes)
 COPY --from=python-builder /venv /venv
 
+# Copy custom CA certificate into the image
+COPY ca.crt /etc/ssl/certs/custom-ca.crt
+
+# Copy entrypoint script
+COPY deploy/entrypoint.backend.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Variable part: application source code (invalidates only these final layers)
 COPY backend/app/ ./app/
 COPY backend/alembic/ ./alembic/
@@ -76,4 +83,4 @@ COPY backend/pyproject.toml .
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+ENTRYPOINT ["/entrypoint.sh"]

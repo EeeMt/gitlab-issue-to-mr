@@ -39,6 +39,9 @@ ENV PYTHONDONTWRITEBYTECODE=1
 COPY --from=claude-installer /usr/local/bin/claude /usr/local/bin/claude
 RUN claude --version
 
+# Copy custom CA certificate into the image
+COPY ca.crt /etc/ssl/certs/custom-ca.crt
+
 # Copy entrypoint scripts
 COPY deploy/entrypoint.sh /entrypoint.sh
 COPY deploy/ci-claude.sh /usr/local/bin/ci-claude.sh
