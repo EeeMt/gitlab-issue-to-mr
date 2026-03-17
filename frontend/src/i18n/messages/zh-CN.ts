@@ -569,6 +569,7 @@ const zhCN = {
     notificationProfileUpdated: '通知配置已更新',
     notificationProfileDeleted: '通知配置已删除',
     failedToDeleteNotificationProfile: '删除通知配置失败',
+    failedToSaveNotifications: '保存通知配置失败',
     testMattermostConnection: '测试 Mattermost 连接',
     mattermostConnectionSucceeded: 'Mattermost 连接成功：{url}。当前机器人账号为 {username}。',
     mattermostConnectionPassed: 'Mattermost 连接测试通过',

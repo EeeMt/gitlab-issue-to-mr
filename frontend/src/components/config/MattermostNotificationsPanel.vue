@@ -294,6 +294,15 @@
       </div>
     </n-form>
 
+    <n-alert
+      v-if="profileErrorMessage"
+      type="error"
+      :show-icon="false"
+      class="config-actions__alert"
+    >
+      {{ profileErrorMessage }}
+    </n-alert>
+
     <template #footer>
       <n-space justify="end" :size="12">
         <n-button secondary :disabled="profileSaving" @click="profileModalVisible = false">
@@ -385,6 +394,7 @@ const deletingProfileId = ref<number | null>(null)
 const profileModalVisible = ref(false)
 const editingProfileId = ref<number | null>(null)
 const integrationTestState = ref<TestState | null>(null)
+const profileErrorMessage = ref<string | null>(null)
 const integrationFormRef = ref<FormInst | null>(null)
 const profileFormRef = ref<FormInst | null>(null)
 
@@ -610,12 +620,14 @@ function buildProfilePayload(): MattermostNotificationProfilePayload {
 
 function openCreateProfileModal() {
   editingProfileId.value = null
+  profileErrorMessage.value = null
   Object.assign(profileForm, createEmptyProfileForm())
   profileModalVisible.value = true
 }
 
 function openEditProfileModal(profile: MattermostNotificationProfile) {
   editingProfileId.value = profile.id
+  profileErrorMessage.value = null
   Object.assign(profileForm, {
     name: profile.name,
     enabled: profile.enabled,
@@ -630,7 +642,60 @@ function openEditProfileModal(profile: MattermostNotificationProfile) {
   profileModalVisible.value = true
 }
 
+function getErrorMessage(error: any, fallback: string): string {
+  const detail = error?.response?.data?.detail
+  if (typeof detail === 'string' && detail.trim()) {
+    return detail
+  }
+  if (Array.isArray(detail) && detail.length > 0) {
+    const parts = detail
+      .map((item) => {
+        if (typeof item === 'string') {
+          return item
+        }
+        if (typeof item?.msg === 'string') {
+          return item.msg
+        }
+        return ''
+      })
+      .filter(Boolean)
+    if (parts.length > 0) {
+      return parts.join('; ')
+    }
+  }
+  return fallback
+}
+
+function validateProfileBeforeSave(): string | null {
+  if (!profileForm.name.trim()) {
+    return t('config.enterProfileName')
+  }
+  if (profileForm.target_type === 'channel') {
+    if (!profileForm.team_name.trim()) {
+      return t('config.enterMattermostTeamName')
+    }
+    if (!profileForm.channel_name.trim()) {
+      return t('config.enterMattermostChannelName')
+    }
+  }
+  if (profileForm.event_types.length === 0) {
+    return t('config.selectNotificationEvents')
+  }
+  if (profileForm.field_keys.length === 0) {
+    return t('config.selectNotificationFields')
+  }
+  return null
+}
+
 async function handleSaveProfile() {
+  profileErrorMessage.value = null
+  const preflightError = validateProfileBeforeSave()
+  if (preflightError) {
+    profileErrorMessage.value = preflightError
+    message.error(preflightError)
+    return
+  }
+
   const valid = await profileFormRef.value?.validate().then(() => true).catch(() => false)
   if (!valid) {
     return
@@ -644,14 +709,16 @@ async function handleSaveProfile() {
     } else {
       await updateMattermostNotificationProfile(editingProfileId.value, buildProfilePayload())
       message.success(t('config.notificationProfileUpdated'))
+      }
+      profileModalVisible.value = false
+      await fetchNotifications(false)
+    } catch (error: any) {
+      const detail = getErrorMessage(error, t('config.failedToSaveNotifications'))
+      profileErrorMessage.value = detail
+      message.error(detail)
+    } finally {
+      profileSaving.value = false
     }
-    profileModalVisible.value = false
-    await fetchNotifications(false)
-  } catch (error: any) {
-    message.error(error?.response?.data?.detail || t('config.failedToSaveNotifications'))
-  } finally {
-    profileSaving.value = false
-  }
 }
 
 async function handleDeleteProfile(profile: MattermostNotificationProfile) {
@@ -702,6 +769,12 @@ watch(
   },
   { immediate: true }
 )
+
+watch(profileModalVisible, (visible) => {
+  if (!visible) {
+    profileErrorMessage.value = null
+  }
+})
 </script>
 
 <style scoped>

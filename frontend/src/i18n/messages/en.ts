@@ -591,6 +591,7 @@ const en = {
       notificationProfileUpdated: 'Notification profile updated',
       notificationProfileDeleted: 'Notification profile deleted',
       failedToDeleteNotificationProfile: 'Failed to delete notification profile',
+      failedToSaveNotifications: 'Failed to save notification settings',
       testMattermostConnection: 'Test Mattermost connection',
       mattermostConnectionSucceeded:
         'Mattermost connection succeeded for {url}. Authenticated bot account: {username}.',
