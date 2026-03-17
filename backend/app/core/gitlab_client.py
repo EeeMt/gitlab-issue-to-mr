@@ -12,6 +12,7 @@ from gitlab.exceptions import GitlabGetError
 from gitlab.v4.objects import MergeRequest, Project
 
 from app.config import Settings, get_effective_settings
+from app.core.ssl_utils import get_ssl_verify
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class GitLabClient:
         self.gl: Gitlab = gitlab.Gitlab(
             self.base_url,
             private_token=self.private_token,
+            ssl_verify=get_ssl_verify(self.settings),
         )
         logger.info(f"GitLab client initialized: {self.base_url}")
 
@@ -499,7 +501,7 @@ async def get_accessible_projects_for_oauth_token(
     base_url = get_effective_settings().gitlab_url.rstrip("/")
     projects_by_id: dict[int, dict] = {}
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(timeout=15.0, verify=get_ssl_verify()) as client:
         async def collect_projects(query: dict[str, str]) -> None:
             page = 1
             while True:

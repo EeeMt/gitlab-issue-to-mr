@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     docker_tls_cert: Optional[str] = Field(default=None)
     docker_tls_key: Optional[str] = Field(default=None)
 
+    # SSL/TLS Configuration
+    # Path to a PEM-format CA certificate bundle for verifying HTTPS connections
+    # to GitLab, Mattermost, Anthropic API, etc. Leave empty to use the system
+    # CA store. In Docker deployments, mount the cert file and set the path here.
+    custom_ca_bundle: Optional[str] = Field(default=None)
+
     # Application Configuration
     secret_key: str = Field(default="change-me-in-production")
     session_secret: str = Field(default="change-me-in-production")

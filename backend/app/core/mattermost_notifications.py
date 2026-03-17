@@ -11,6 +11,7 @@ import httpx
 from sqlalchemy import or_, select
 
 from app.config import get_effective_settings
+from app.core.ssl_utils import get_ssl_verify
 from app.database import AsyncSessionLocal
 from app.models import (
     MattermostNotificationDelivery,
@@ -191,6 +192,7 @@ class MattermostClient:
                 "Content-Type": "application/json",
             },
             timeout=10,
+            verify=get_ssl_verify(),
         )
         self._me: Optional[dict[str, Any]] = None
 

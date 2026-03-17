@@ -12,6 +12,7 @@ import jwt
 from jwt import PyJWKClient
 
 from app.config import Settings, get_effective_settings
+from app.core.ssl_utils import get_ssl_verify
 
 _discovery_cache: dict[str, Any] = {"issuer": "", "expires_at": 0.0, "document": None}
 REQUIRED_OIDC_SCOPES = ("openid", "profile", "email", "read_api")
@@ -60,7 +61,7 @@ async def get_oidc_discovery_document_for_settings(settings: Settings) -> dict[s
         return _discovery_cache["document"]
 
     discovery_url = f"{issuer}/.well-known/openid-configuration"
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0, verify=get_ssl_verify()) as client:
         response = await client.get(discovery_url)
         response.raise_for_status()
         document = response.json()
@@ -108,7 +109,7 @@ async def exchange_code_for_tokens(code: str) -> dict[str, Any]:
         "client_secret": settings.oidc_client_secret,
     }
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0, verify=get_ssl_verify()) as client:
         response = await client.post(
             discovery["token_endpoint"],
             data=payload,
@@ -130,7 +131,7 @@ async def exchange_refresh_token(refresh_token: str) -> dict[str, Any]:
         "client_secret": settings.oidc_client_secret,
     }
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0, verify=get_ssl_verify()) as client:
         response = await client.post(
             discovery["token_endpoint"],
             data=payload,
@@ -143,7 +144,7 @@ async def exchange_refresh_token(refresh_token: str) -> dict[str, Any]:
 async def fetch_userinfo(access_token: str) -> dict[str, Any]:
     """Fetch userinfo for the authenticated subject."""
     discovery = await get_oidc_discovery_document_for_settings(get_effective_settings())
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0, verify=get_ssl_verify()) as client:
         response = await client.get(
             discovery["userinfo_endpoint"],
             headers={"Authorization": f"Bearer {access_token}"},

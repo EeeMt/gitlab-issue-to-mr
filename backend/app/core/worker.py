@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings, get_effective_settings
 from app.core.docker_client import DockerClientWrapper, get_docker_client
 from app.core.gitlab_client import GitLabClient, get_gitlab_client
+from app.core.ssl_utils import get_ssl_verify
 from app.core.mattermost_notifications import (
     MATTERMOST_EVENT_TASK_COMPLETED,
     MATTERMOST_EVENT_TASK_FAILED,
@@ -388,6 +389,10 @@ class WorkerExecutor:
             # Pass MR_IID to worker so execution can update the MR description
             if mr_iid:
                 environment["MR_IID"] = str(mr_iid)
+
+            # Pass custom CA bundle to worker container for HTTPS verification
+            if settings.custom_ca_bundle:
+                environment["CUSTOM_CA_BUNDLE"] = settings.custom_ca_bundle
 
             # Generate container name with naming convention: gimr-{id}-p{pid}-[i{iid}|manual]
             issue_suffix = f"i{task.issue_iid}" if task.issue_iid else "manual"
@@ -774,14 +779,12 @@ class WorkerExecutor:
 
         # Send webhook request
         try:
-            import httpx
-            # Note: httpx is already used in the project
-            # Using synchronous request for simplicity
             import requests
             response = requests.post(
                 settings.alert_webhook_url,
                 json=alert_data,
-                timeout=10
+                timeout=10,
+                verify=get_ssl_verify(settings),
             )
             if response.status_code < 400:
                 logger.info(f"Sent failure alert for task {task.id}")

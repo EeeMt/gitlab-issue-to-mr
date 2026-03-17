@@ -29,10 +29,15 @@ services:
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
       - AUTO_MIGRATE=false
+      # Custom CA certificate for HTTPS connections (GitLab, Mattermost, etc.)
+      # Uncomment and set path if your services use a self-signed or internal CA.
+      # Also add a volume mount below: - /path/to/ca.crt:/certs/ca.crt:ro
+      - CUSTOM_CA_BUNDLE=
     depends_on:
       - postgres
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # - /path/to/ca.crt:/certs/ca.crt:ro
     restart: unless-stopped
     networks:
       - gimr-network
@@ -50,10 +55,13 @@ services:
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
       - AUTO_MIGRATE=true
+      # Custom CA certificate — must match backend service setting
+      - CUSTOM_CA_BUNDLE=
     depends_on:
       - postgres
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # - /path/to/ca.crt:/certs/ca.crt:ro
     restart: unless-stopped
     networks:
       - gimr-network

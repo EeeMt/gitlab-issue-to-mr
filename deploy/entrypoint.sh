@@ -72,12 +72,26 @@ GIT_REPO_URL="http://${GITLAB_HOST}/${PROJECT_PATH}.git"
 # Log repository URL without exposing token
 echo "Repository URL: http://[TOKEN]@${GITLAB_HOST}/${PROJECT_PATH}.git"
 
-# Configure git to allow insecure GitLab (self-signed cert)
-git config --global http.sslVerify false
-
-# Configure git to use token directly in URL
-# Use git config to disable ssl verify
-git config --global http.sslVerify false
+# Configure git SSL verification
+# When a custom CA bundle is provided, install it into the system trust store,
+# configure git to use it, and enable SSL verification.
+# Without a custom CA, fall back to disabling SSL verification (legacy behaviour).
+if [ -n "${CUSTOM_CA_BUNDLE}" ] && [ -f "${CUSTOM_CA_BUNDLE}" ]; then
+    echo "Installing custom CA certificate from ${CUSTOM_CA_BUNDLE}"
+    cp "${CUSTOM_CA_BUNDLE}" /usr/local/share/ca-certificates/custom-ca.crt
+    update-ca-certificates --fresh 2>/dev/null || true
+    git config --global http.sslVerify true
+    git config --global http.sslCAInfo "${CUSTOM_CA_BUNDLE}"
+    # Claude CLI (Node.js) picks up extra CA certs from this env var
+    export NODE_EXTRA_CA_CERTS="${CUSTOM_CA_BUNDLE}"
+    # Python requests / httpx pick this up automatically
+    export REQUESTS_CA_BUNDLE="${CUSTOM_CA_BUNDLE}"
+    export SSL_CERT_FILE="${CUSTOM_CA_BUNDLE}"
+    echo "Custom CA installed; SSL verification enabled"
+else
+    # No custom CA — disable git SSL verification to allow self-signed GitLab certs
+    git config --global http.sslVerify false
+fi
 
 # Set up credential helper - write credentials file
 rm -rf ~/.git-credentials

@@ -97,7 +97,7 @@ class GitLabClientAccessTests(unittest.IsolatedAsyncioTestCase):
     def test_get_gitlab_client_recreates_singleton_when_runtime_config_changes(self) -> None:
         created_clients: list[MagicMock] = []
 
-        def build_gitlab(base_url: str, private_token: str):
+        def build_gitlab(base_url: str, private_token: str, **kwargs):
             client = MagicMock()
             client.base_url = base_url
             client.private_token = private_token
