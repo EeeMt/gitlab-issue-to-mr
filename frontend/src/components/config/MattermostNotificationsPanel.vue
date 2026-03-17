@@ -228,22 +228,22 @@
               <n-switch v-model:value="profileForm.send_for_manual_tasks" />
             </n-form-item>
           </n-gi>
-          <n-gi :span="isMobile ? 1 : 2">
-            <n-form-item :label="t('config.mentionInitiatorInChannel')">
-              <n-switch
-                v-model:value="profileForm.mention_in_channel"
-                :disabled="profileForm.target_type !== 'channel'"
-              />
-              <template #feedback>
-                {{
-                  profileForm.target_type === 'channel'
-                    ? t('config.mentionInitiatorInChannelHint')
-                    : t('config.mentionInitiatorInChannelDisabledHint')
-                }}
-              </template>
-            </n-form-item>
-          </n-gi>
         </n-grid>
+        <div class="config-form__toggle-card">
+          <n-form-item :label="t('config.mentionInitiatorInChannel')">
+            <n-switch
+              v-model:value="profileForm.mention_in_channel"
+              :disabled="profileForm.target_type !== 'channel'"
+            />
+            <template #feedback>
+              {{
+                profileForm.target_type === 'channel'
+                  ? t('config.mentionInitiatorInChannelHint')
+                  : t('config.mentionInitiatorInChannelDisabledHint')
+              }}
+            </template>
+          </n-form-item>
+        </div>
       </div>
 
       <div v-if="profileForm.target_type === 'channel'" class="config-form__section">
@@ -752,6 +752,14 @@ watch(
 
 .config-form__input {
   width: 100%;
+}
+
+.config-form__toggle-card {
+  margin-top: 8px;
+  padding: 12px 16px 4px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.02);
 }
 
 .config-card-actions {
