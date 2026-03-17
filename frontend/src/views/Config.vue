@@ -616,6 +616,13 @@
               </div>
             </n-tab-pane>
 
+            <n-tab-pane name="notifications" :tab="t('config.notificationsTab')">
+              <MattermostNotificationsPanel
+                :is-mobile="isMobile"
+                :reload-key="notificationReloadKey"
+              />
+            </n-tab-pane>
+
             <n-tab-pane name="auth" :tab="t('config.authenticationTab')">
               <div class="config-layout__main">
                 <n-card id="oidc-settings" class="config-form-card" :bordered="false">
@@ -912,6 +919,7 @@ import {
   type IntegrationConfigUpdate,
   type RuntimeConfigUpdate
 } from '../api'
+import MattermostNotificationsPanel from '../components/config/MattermostNotificationsPanel.vue'
 import OidcDiagnosticsPanel from '../components/config/OidcDiagnosticsPanel.vue'
 
 type ConfigForm = {
@@ -960,7 +968,7 @@ type TestState = {
 }
 
 type ConfigSectionKey = 'runtime' | 'sharedPages' | 'gitlab' | 'oidc' | 'session'
-type ConfigTabKey = 'runtime' | 'gitlab' | 'auth' | 'maintenance'
+type ConfigTabKey = 'runtime' | 'notifications' | 'gitlab' | 'auth' | 'maintenance'
 
 const message = useMessage()
 const route = useRoute()
@@ -992,7 +1000,8 @@ const gitlabTestState = ref<TestState | null>(null)
 const webhookSetupState = ref<TestState | null>(null)
 const webhookStatusState = ref<TestState | null>(null)
 const activeConfigTab = ref<ConfigTabKey>('runtime')
-const configTabs: ConfigTabKey[] = ['runtime', 'gitlab', 'auth', 'maintenance']
+const configTabs: ConfigTabKey[] = ['runtime', 'notifications', 'gitlab', 'auth', 'maintenance']
+const notificationReloadKey = ref(0)
 
 const sectionKeys: ConfigSectionKey[] = ['runtime', 'sharedPages', 'gitlab', 'oidc', 'session']
 
@@ -1463,6 +1472,7 @@ async function fetchConfig() {
   try {
     syncForm(await getConfig())
     await fetchWebhookStatuses()
+    notificationReloadKey.value += 1
   } catch (error) {
     message.error(t('config.failedToFetchConfig'))
   } finally {
@@ -1738,6 +1748,7 @@ async function handleReset() {
     gitlabTestState.value = null
     webhookSetupState.value = null
     webhookStatusState.value = null
+    notificationReloadKey.value += 1
     message.success(t('config.resetToDefaults'))
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('config.failedToResetConfig'))

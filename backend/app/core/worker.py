@@ -15,6 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings, get_effective_settings
 from app.core.docker_client import DockerClientWrapper, get_docker_client
 from app.core.gitlab_client import GitLabClient, get_gitlab_client
+from app.core.mattermost_notifications import (
+    MATTERMOST_EVENT_TASK_COMPLETED,
+    MATTERMOST_EVENT_TASK_FAILED,
+    MATTERMOST_EVENT_TASK_RETRY_SCHEDULED,
+    notify_task_event,
+)
 from app.models import Task, TaskLog, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -512,15 +518,21 @@ class WorkerExecutor:
                     self._notify_task_completed(task, success=True, notify_target="mr" if had_existing_mr else "issue")
                 except Exception as e:
                     logger.warning(f"Failed to send completion notification: {e}")
+                try:
+                    await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
+                except Exception as e:
+                    logger.warning(f"Failed to send Mattermost completion notification: {e}")
             else:
                 task.status = TaskStatus.FAILED
                 task.completed_at = datetime.utcnow()
+                task.error_message = sanitize_sensitive_data(logs)[-1000:]
                 logger.error(f"[Task {task_id}] Failed with exit code {exit_code}")
 
                 # Check if we should retry
                 settings = get_settings()
                 if settings.max_retries > 0 and task.retry_count < settings.max_retries:
                     # Schedule retry
+                    previous_scheduled_at = task.scheduled_at
                     task.retry_count += 1
                     task.status = TaskStatus.PENDING
                     task.scheduled_at = datetime.utcnow()
@@ -531,6 +543,20 @@ class WorkerExecutor:
                     self._notify_task_completed(task, success=False, notify_target="mr" if had_existing_mr else "issue")
                 except Exception as e:
                     logger.warning(f"Failed to send failure notification: {e}")
+                try:
+                    if task.status == TaskStatus.PENDING:
+                        await notify_task_event(
+                            task,
+                            MATTERMOST_EVENT_TASK_RETRY_SCHEDULED,
+                            context={
+                                "previous_scheduled_at": previous_scheduled_at,
+                                "scheduled_at": task.scheduled_at,
+                            },
+                        )
+                    else:
+                        await notify_task_event(task, MATTERMOST_EVENT_TASK_FAILED)
+                except Exception as e:
+                    logger.warning(f"Failed to send Mattermost failure notification: {e}")
 
             # Save a final log entry for failures, or for very fast tasks with no
             # streaming chunks (e.g., container exited immediately).
@@ -583,6 +609,10 @@ class WorkerExecutor:
                 self._notify_task_completed(task, success=False, notify_target="mr" if had_existing_mr else "issue")
             except Exception as notify_error:
                 logger.warning(f"Failed to send failure notification: {notify_error}")
+            try:
+                await notify_task_event(task, MATTERMOST_EVENT_TASK_FAILED)
+            except Exception as notify_error:
+                logger.warning(f"Failed to send Mattermost failure notification: {notify_error}")
 
             return False
 

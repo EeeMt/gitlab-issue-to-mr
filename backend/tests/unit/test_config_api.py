@@ -10,6 +10,7 @@ from fastapi import HTTPException
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app.api.config import (
+    MattermostNotificationProfileInput,
     _build_gitlab_project_webhook_status_response,
     _build_gitlab_webhook_target_url,
     _normalize_updates,
@@ -84,6 +85,11 @@ class ConfigApiHelperTests(unittest.TestCase):
         self.assertEqual(_validate_config_value("gitlab_bot_token", "glpat-test"), "glpat-test")
         self.assertEqual(_validate_config_value("gitlab_admin_token", "glpat-admin"), "glpat-admin")
         self.assertEqual(_validate_config_value("gitlab_webhook_secret", "secret-123"), "secret-123")
+        self.assertEqual(
+            _validate_config_value("mattermost_server_url", "https://mattermost.example.com"),
+            "https://mattermost.example.com",
+        )
+        self.assertEqual(_validate_config_value("mattermost_bot_token", "mm-token"), "mm-token")
 
     def test_validate_config_value_rejects_invalid_retry_and_url_values(self) -> None:
         with self.assertRaises(HTTPException):
@@ -110,6 +116,12 @@ class ConfigApiHelperTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             _validate_config_value("gitlab_webhook_secret", " ")
 
+        with self.assertRaises(HTTPException):
+            _validate_config_value("mattermost_server_url", "not-a-url")
+
+        with self.assertRaises(HTTPException):
+            _validate_config_value("mattermost_bot_token", " ")
+
     def test_normalize_updates_handles_runtime_clear_flags(self) -> None:
         normalized = _normalize_updates({
             "clear_alert_webhook_url": 1,
@@ -117,6 +129,7 @@ class ConfigApiHelperTests(unittest.TestCase):
             "clear_gitlab_bot_token": 1,
             "clear_gitlab_admin_token": 1,
             "clear_gitlab_webhook_secret": 0,
+            "clear_mattermost_bot_token": 0,
         })
 
         self.assertEqual(
@@ -127,8 +140,26 @@ class ConfigApiHelperTests(unittest.TestCase):
                 "clear_gitlab_bot_token": True,
                 "clear_gitlab_admin_token": True,
                 "clear_gitlab_webhook_secret": False,
+                "clear_mattermost_bot_token": False,
             },
         )
+
+    def test_mattermost_profile_validation(self) -> None:
+        payload = MattermostNotificationProfileInput(
+            name=" Team Alerts ",
+            target_type="channel",
+            team_name=" engineering ",
+            channel_name=" ai-bot ",
+            mention_in_channel=True,
+            event_types=["task_completed", "task_completed", "task_failed"],
+            field_keys=["task_id", "status", "status"],
+        )
+
+        self.assertEqual(payload.name, "Team Alerts")
+        self.assertEqual(payload.team_name, "engineering")
+        self.assertEqual(payload.channel_name, "ai-bot")
+        self.assertEqual(payload.event_types, ["task_completed", "task_failed"])
+        self.assertEqual(payload.field_keys, ["task_id", "status"])
 
     def test_validate_gitlab_webhook_ready_builds_target_url(self) -> None:
         set_runtime_config({

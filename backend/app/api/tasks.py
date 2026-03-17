@@ -13,6 +13,13 @@ from sqlalchemy import select, func, false
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings, get_settings
+from app.core.mattermost_notifications import (
+    MATTERMOST_EVENT_TASK_CANCELLED,
+    MATTERMOST_EVENT_TASK_EXECUTE_NOW,
+    MATTERMOST_EVENT_TASK_RESCHEDULED,
+    MATTERMOST_EVENT_TASK_RETRY_SCHEDULED,
+    notify_task_event,
+)
 from app.core.scheduling import normalize_scheduled_datetime, resolve_scheduled_at
 from app.database import get_db
 from app.dependencies.auth import get_optional_current_user, require_page_access
@@ -527,6 +534,12 @@ async def cancel_task(
     task.completed_at = datetime.utcnow()
     task.error_message = "Cancelled by user"
     await db.commit()
+    await db.refresh(task)
+
+    try:
+        await notify_task_event(task, MATTERMOST_EVENT_TASK_CANCELLED)
+    except Exception as exc:
+        logger.warning("Failed to send Mattermost cancel notification for task %s: %s", task_id, exc)
 
     logger.info(f"Task {task_id} cancelled via API")
 
@@ -592,6 +605,7 @@ async def retry_task(
             )
         scheduled_at = normalized
 
+    previous_scheduled_at = task.scheduled_at
     task.status = TaskStatus.PENDING
     task.error_message = None
     task.completed_at = None
@@ -603,6 +617,19 @@ async def retry_task(
     task.total_changes = 0
     task.scheduled_at = scheduled_at
     await db.commit()
+    await db.refresh(task)
+
+    try:
+        await notify_task_event(
+            task,
+            MATTERMOST_EVENT_TASK_RETRY_SCHEDULED,
+            context={
+                "previous_scheduled_at": previous_scheduled_at,
+                "scheduled_at": scheduled_at,
+            },
+        )
+    except Exception as exc:
+        logger.warning("Failed to send Mattermost retry notification for task %s: %s", task_id, exc)
 
     action = f"scheduled for retry at {scheduled_at}" if scheduled_at else "reset for retry"
     logger.info(f"Task {task_id} {action}")
@@ -656,8 +683,22 @@ async def execute_task(
         )
 
     # Remove scheduled_at to execute immediately
+    previous_scheduled_at = task.scheduled_at
     task.scheduled_at = None
     await db.commit()
+    await db.refresh(task)
+
+    try:
+        await notify_task_event(
+            task,
+            MATTERMOST_EVENT_TASK_EXECUTE_NOW,
+            context={
+                "previous_scheduled_at": previous_scheduled_at,
+                "scheduled_at": None,
+            },
+        )
+    except Exception as exc:
+        logger.warning("Failed to send Mattermost execute-now notification for task %s: %s", task_id, exc)
 
     logger.info(f"Task {task_id} scheduled for immediate execution")
 
@@ -703,9 +744,22 @@ async def reschedule_task(
             detail="Scheduled datetime must be in the future for manual tasks",
         )
 
+    previous_scheduled_at = task.scheduled_at
     task.scheduled_at = normalized_scheduled
     await db.commit()
     await db.refresh(task)
+
+    try:
+        await notify_task_event(
+            task,
+            MATTERMOST_EVENT_TASK_RESCHEDULED,
+            context={
+                "previous_scheduled_at": previous_scheduled_at,
+                "scheduled_at": normalized_scheduled,
+            },
+        )
+    except Exception as exc:
+        logger.warning("Failed to send Mattermost reschedule notification for task %s: %s", task_id, exc)
 
     logger.info("Task %s rescheduled to %s via API", task_id, normalized_scheduled.isoformat())
 

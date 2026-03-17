@@ -163,6 +163,76 @@ class ProjectWebhookConfig(Base):
     )
 
 
+class MattermostNotificationProfile(Base):
+    """Notification profile for Mattermost task updates."""
+
+    __tablename__ = "mattermost_notification_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    target_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    team_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    channel_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    mention_in_channel: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    event_types_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    field_keys_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    send_for_manual_tasks: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class MattermostUserMapping(Base):
+    """Cached mapping from GitLab/dashboard users to Mattermost users."""
+
+    __tablename__ = "mattermost_user_mappings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    gitlab_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    gitlab_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    mattermost_user_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    mattermost_username: Mapped[str] = mapped_column(String(255), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="username")
+    last_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class MattermostNotificationDelivery(Base):
+    """Delivery log for task-related Mattermost notifications."""
+
+    __tablename__ = "mattermost_notification_deliveries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    profile_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("mattermost_notification_profiles.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_summary: Mapped[str] = mapped_column(String(255), nullable=False)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+
+
 class User(Base):
     """Dashboard user created from GitLab OIDC login."""
 

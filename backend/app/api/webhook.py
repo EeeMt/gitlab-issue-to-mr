@@ -15,7 +15,7 @@ from app.core.gitlab_client import get_gitlab_client
 from app.core.parser import BotCommand, parse_ai_bot_command
 from app.core.scheduling import resolve_scheduled_at
 from app.database import get_db
-from app.models import Task, TaskStatus
+from app.models import Task, TaskStatus, User
 from app.project_webhook_config import get_project_webhook_secret
 
 logger = logging.getLogger(__name__)
@@ -121,6 +121,19 @@ def _coerce_str(value: object) -> Optional[str]:
         return None
     normalized = str(value).strip()
     return normalized or None
+
+
+async def _resolve_initiator_user_id(
+    db: AsyncSession,
+    initiator: Optional[dict],
+) -> Optional[int]:
+    gitlab_user_id = _coerce_int((initiator or {}).get("id"))
+    if gitlab_user_id is None:
+        return None
+
+    result = await db.execute(select(User).where(User.gitlab_user_id == gitlab_user_id))
+    user = result.scalar_one_or_none()
+    return user.id if user is not None else None
 
 
 async def verify_gitlab_webhook(
@@ -473,6 +486,7 @@ async def _handle_generate_command(
         issue_iid=issue_iid,
         note_id=note_id,
         user_prompt=user_prompt,
+        initiator_user_id=await _resolve_initiator_user_id(db, initiator),
         initiator_gitlab_user_id=_coerce_int(initiator.get("id")) if initiator else None,
         initiator_username=_coerce_str(initiator.get("username")) if initiator else None,
         branch_name=f"gimr/issue-{issue_iid}",
@@ -635,6 +649,7 @@ async def _handle_mr_comment(
         issue_iid=parent_task.issue_iid,
         note_id=note_id,
         user_prompt=user_prompt,
+        initiator_user_id=await _resolve_initiator_user_id(db, initiator),
         initiator_gitlab_user_id=_coerce_int(initiator.get("id")) if initiator else None,
         initiator_username=_coerce_str(initiator.get("username")) if initiator else None,
         branch_name=parent_task.branch_name,  # Continue on existing branch

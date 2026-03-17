@@ -22,6 +22,8 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "retry_delay": int,
     "alert_on_failure": bool,
     "alert_webhook_url": str,
+    "mattermost_server_url": str,
+    "mattermost_bot_token": str,
     "anthropic_base_url": str,
     "anthropic_api_key": str,
     "anthropic_model": str,
@@ -49,6 +51,7 @@ SECRET_CONFIG_KEYS = {
     "gitlab_admin_token",
     "gitlab_webhook_secret",
     "alert_webhook_url",
+    "mattermost_bot_token",
     "anthropic_api_key",
 }
 
@@ -132,6 +135,8 @@ class Settings(BaseSettings):
     # Alert Configuration
     alert_webhook_url: Optional[str] = Field(default=None)  # Slack/Discord webhook URL
     alert_on_failure: bool = Field(default=False)  # Send alert when task fails
+    mattermost_server_url: str = Field(default="")
+    mattermost_bot_token: str = Field(default="")
 
     # Retry Configuration
     max_retries: int = Field(default=0)  # Max retry attempts for failed tasks

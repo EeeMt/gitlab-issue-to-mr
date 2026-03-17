@@ -289,6 +289,76 @@ export interface Config {
   integration: IntegrationConfig
 }
 
+export type MattermostNotificationTargetType = 'channel' | 'initiator_dm'
+export type MattermostNotificationEventType =
+  | 'task_completed'
+  | 'task_failed'
+  | 'task_rescheduled'
+  | 'task_execute_now'
+  | 'task_retry_scheduled'
+  | 'task_cancelled'
+export type MattermostNotificationFieldKey =
+  | 'task_id'
+  | 'project'
+  | 'issue'
+  | 'merge_request'
+  | 'initiator'
+  | 'status'
+  | 'branch'
+  | 'target_branch'
+  | 'scheduled_at'
+  | 'schedule_change'
+  | 'error'
+  | 'task_link'
+
+export interface MattermostIntegrationConfig {
+  mattermost_server_url: string
+  mattermost_bot_token_configured: boolean
+}
+
+export interface MattermostNotificationProfile {
+  id: number
+  name: string
+  enabled: boolean
+  target_type: MattermostNotificationTargetType
+  team_name: string | null
+  channel_name: string | null
+  mention_in_channel: boolean
+  send_for_manual_tasks: boolean
+  event_types: MattermostNotificationEventType[]
+  field_keys: MattermostNotificationFieldKey[]
+  created_at: string
+  updated_at: string
+}
+
+export interface MattermostNotificationConfig {
+  integration: MattermostIntegrationConfig
+  profiles: MattermostNotificationProfile[]
+}
+
+export interface MattermostIntegrationUpdate {
+  mattermost_server_url?: string
+  mattermost_bot_token?: string
+  clear_mattermost_bot_token?: boolean
+}
+
+export interface MattermostConnectionTestResult {
+  server_url: string
+  username: string
+}
+
+export interface MattermostNotificationProfilePayload {
+  name: string
+  enabled: boolean
+  target_type: MattermostNotificationTargetType
+  team_name?: string | null
+  channel_name?: string | null
+  mention_in_channel: boolean
+  send_for_manual_tasks: boolean
+  event_types: MattermostNotificationEventType[]
+  field_keys: MattermostNotificationFieldKey[]
+}
+
 export interface RuntimeConfigUpdate
   extends Partial<Omit<RuntimeConfig, 'alert_webhook_url_configured' | 'anthropic_api_key_configured'>> {
   alert_webhook_url?: string
@@ -608,6 +678,44 @@ export async function listGitLabProjectWebhookStatuses(): Promise<GitLabProjectW
 export async function getOidcDiagnostics(): Promise<OidcDiagnosticsResult> {
   const response = await api.get('/config/oidc/diagnostics')
   return response.data
+}
+
+export async function getMattermostNotificationConfig(): Promise<MattermostNotificationConfig> {
+  const response = await api.get('/config/notifications')
+  return response.data
+}
+
+export async function updateMattermostIntegration(
+  integration: MattermostIntegrationUpdate
+): Promise<MattermostNotificationConfig> {
+  const response = await api.patch('/config/notifications/integration', integration)
+  return response.data
+}
+
+export async function testMattermostIntegration(
+  integration: MattermostIntegrationUpdate
+): Promise<MattermostConnectionTestResult> {
+  const response = await api.post('/config/notifications/test', { integration })
+  return response.data
+}
+
+export async function createMattermostNotificationProfile(
+  payload: MattermostNotificationProfilePayload
+): Promise<MattermostNotificationProfile> {
+  const response = await api.post('/config/notifications/profiles', payload)
+  return response.data
+}
+
+export async function updateMattermostNotificationProfile(
+  profileId: number,
+  payload: MattermostNotificationProfilePayload
+): Promise<MattermostNotificationProfile> {
+  const response = await api.patch(`/config/notifications/profiles/${profileId}`, payload)
+  return response.data
+}
+
+export async function deleteMattermostNotificationProfile(profileId: number): Promise<void> {
+  await api.delete(`/config/notifications/profiles/${profileId}`)
 }
 
 export async function getAuthStatus(): Promise<AuthStatus> {

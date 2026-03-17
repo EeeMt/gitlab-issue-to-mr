@@ -64,6 +64,7 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
         serialized_secret = _serialize_runtime_value("oidc_client_secret", "super-secret")
         serialized_api_key = _serialize_runtime_value("anthropic_api_key", "api-key")
         serialized_webhook = _serialize_runtime_value("alert_webhook_url", "https://hooks.example.com/a")
+        serialized_mattermost_token = _serialize_runtime_value("mattermost_bot_token", "mm-token")
         serialized_gitlab_admin = _serialize_runtime_value("gitlab_admin_token", "glpat-admin")
         serialized_gitlab_webhook_secret = _serialize_runtime_value("gitlab_webhook_secret", "webhook-secret")
 
@@ -72,6 +73,7 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(serialized_secret[1], "secret_str")
         self.assertEqual(serialized_api_key[1], "secret_str")
         self.assertEqual(serialized_webhook[1], "secret_str")
+        self.assertEqual(serialized_mattermost_token[1], "secret_str")
         self.assertEqual(serialized_gitlab_admin[1], "secret_str")
         self.assertEqual(serialized_gitlab_webhook_secret[1], "secret_str")
         self.assertEqual(_deserialize_runtime_value("max_concurrency", "5", "int"), 5)
@@ -90,6 +92,14 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             _deserialize_runtime_value("alert_webhook_url", serialized_webhook[0], serialized_webhook[1]),
             "https://hooks.example.com/a",
+        )
+        self.assertEqual(
+            _deserialize_runtime_value(
+                "mattermost_bot_token",
+                serialized_mattermost_token[0],
+                serialized_mattermost_token[1],
+            ),
+            "mm-token",
         )
         self.assertEqual(
             _deserialize_runtime_value("gitlab_admin_token", serialized_gitlab_admin[0], serialized_gitlab_admin[1]),
