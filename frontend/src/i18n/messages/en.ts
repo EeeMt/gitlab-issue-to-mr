@@ -576,6 +576,10 @@ const en = {
       enterMattermostChannelName: 'Enter Mattermost channel name',
       mentionInitiatorInChannel: 'Mention initiator in channel',
       mentionInitiatorInChannelHint: 'When enabled, channel notifications prefix the card with @initiator_username.',
+      mentionInitiatorVisibilityHint:
+        'This switch only appears for channel targets. Turning it on sends @initiator_username before the card.',
+      initiatorFieldDisplayHint:
+        'Selecting the “Initiator” field only shows the initiator in the card. It does not automatically @ mention them.',
       notifyManualTasks: 'Notify manual tasks',
       skipManualTasks: 'Skip manual tasks',
       createNotificationProfile: 'Create notification profile',
