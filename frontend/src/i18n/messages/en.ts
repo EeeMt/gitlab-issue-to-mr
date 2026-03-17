@@ -567,6 +567,7 @@ const en = {
       notificationTarget: 'Target',
       selectNotificationTarget: 'Select a notification target',
       notificationTargetChannel: 'Mattermost channel',
+      notificationTargetChannelHint: 'For channel targets, you can enable “Mention initiator in channel” in the first row below.',
       notificationTargetInitiatorDm: 'Initiator direct message',
       notificationTargetInitiatorDmHint: 'Send a direct message to the task initiator when the username can be matched in Mattermost.',
       notificationChannelTarget: 'Channel target',

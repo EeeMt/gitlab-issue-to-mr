@@ -547,6 +547,7 @@ const zhCN = {
     notificationTarget: '通知目标',
     selectNotificationTarget: '选择通知目标',
     notificationTargetChannel: 'Mattermost 群组频道',
+    notificationTargetChannelHint: '选择群组频道后，可在下方第一项开启“在群组里 @ 发起人”。',
     notificationTargetInitiatorDm: '任务发起人私聊',
     notificationTargetInitiatorDmHint: '当 GitLab 用户名能在 Mattermost 中匹配到用户名时，发送私聊给任务发起人。',
     notificationChannelTarget: '频道目标',
