@@ -576,10 +576,6 @@ const en = {
       enterMattermostChannelName: 'Enter Mattermost channel name',
       mentionInitiatorInChannel: 'Mention initiator in channel',
       mentionInitiatorInChannelHint: 'When enabled, channel notifications prefix the card with @initiator_username.',
-      mentionInitiatorVisibilityHint:
-        'This switch only appears for channel targets. Turning it on sends @initiator_username before the card.',
-      initiatorFieldDisplayHint:
-        'Selecting the “Initiator” field only shows the initiator in the card. It does not automatically @ mention them.',
       notifyManualTasks: 'Notify manual tasks',
       skipManualTasks: 'Skip manual tasks',
       createNotificationProfile: 'Create notification profile',
@@ -591,7 +587,6 @@ const en = {
       notificationProfileUpdated: 'Notification profile updated',
       notificationProfileDeleted: 'Notification profile deleted',
       failedToDeleteNotificationProfile: 'Failed to delete notification profile',
-      failedToSaveNotifications: 'Failed to save notification settings',
       testMattermostConnection: 'Test Mattermost connection',
       mattermostConnectionSucceeded:
         'Mattermost connection succeeded for {url}. Authenticated bot account: {username}.',

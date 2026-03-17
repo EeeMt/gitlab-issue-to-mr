@@ -222,24 +222,6 @@
             </n-form-item>
           </n-gi>
         </n-grid>
-        <n-alert
-          v-if="profileForm.target_type === 'channel'"
-          type="info"
-          :show-icon="false"
-          class="config-profile-help"
-        >
-          {{ t('config.mentionInitiatorVisibilityHint') }}
-        </n-alert>
-        <n-form-item
-          v-if="profileForm.target_type === 'channel'"
-          :label="t('config.mentionInitiatorInChannel')"
-          class="config-profile-toggle"
-        >
-          <n-switch v-model:value="profileForm.mention_in_channel" />
-          <template #feedback>
-            {{ t('config.mentionInitiatorInChannelHint') }}
-          </template>
-        </n-form-item>
       </div>
 
       <div v-if="profileForm.target_type === 'channel'" class="config-form__section">
@@ -256,6 +238,14 @@
                 v-model:value="profileForm.channel_name"
                 :placeholder="t('config.enterMattermostChannelName')"
               />
+            </n-form-item>
+          </n-gi>
+          <n-gi :span="isMobile ? 1 : 2">
+            <n-form-item :label="t('config.mentionInitiatorInChannel')">
+              <n-switch v-model:value="profileForm.mention_in_channel" />
+              <template #feedback>
+                {{ t('config.mentionInitiatorInChannelHint') }}
+              </template>
             </n-form-item>
           </n-gi>
         </n-grid>
@@ -279,9 +269,6 @@
 
       <div class="config-form__section">
         <div class="config-form__section-title">{{ t('config.notificationFields') }}</div>
-        <n-alert type="info" :show-icon="false" class="config-profile-help">
-          {{ t('config.initiatorFieldDisplayHint') }}
-        </n-alert>
         <n-form-item path="field_keys">
           <n-checkbox-group v-model:value="profileForm.field_keys">
             <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
@@ -738,14 +725,6 @@ watch(
 
 .config-form__section + .config-form__section {
   margin-top: 20px;
-}
-
-.config-profile-help {
-  margin-top: 12px;
-}
-
-.config-profile-toggle {
-  margin-top: 12px;
 }
 
 .config-form__section-title {
