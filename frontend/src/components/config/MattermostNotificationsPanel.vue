@@ -233,13 +233,15 @@
 
       <div v-if="profileForm.target_type === 'channel'" class="config-form__section">
         <div class="config-form__section-title">{{ t('config.notificationChannelTarget') }}</div>
-        <n-form-item :label="t('config.mentionInitiatorInChannel')" style="margin-bottom: 4px">
-          <n-switch v-model:value="profileForm.mention_in_channel" />
-          <template #feedback>
-            {{ t('config.mentionInitiatorInChannelHint') }}
-          </template>
-        </n-form-item>
         <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+          <n-gi :span="isMobile ? 1 : 2">
+            <n-form-item :label="t('config.mentionInitiatorInChannel')">
+              <n-switch v-model:value="profileForm.mention_in_channel" />
+              <template #feedback>
+                {{ t('config.mentionInitiatorInChannelHint') }}
+              </template>
+            </n-form-item>
+          </n-gi>
           <n-gi>
             <n-form-item :label="t('config.mattermostTeamName')" path="team_name">
               <n-input v-model:value="profileForm.team_name" :placeholder="t('config.enterMattermostTeamName')" />
