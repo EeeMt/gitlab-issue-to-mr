@@ -72,6 +72,13 @@ If the environment is fully offline, both endpoints must exist inside the intran
 - `ALERT_ON_FAILURE`
 - `ALERT_WEBHOOK_URL`
 
+### Mattermost notifications
+
+- `MATTERMOST_SERVER_URL`
+- `MATTERMOST_BOT_TOKEN`
+
+These are optional. Configure them if you want Mattermost integration available immediately after the offline deployment starts. Notification profiles themselves are managed in the dashboard and stored in PostgreSQL.
+
 ### Maven optimization
 
 - `MAVEN_CACHE_HOST_PATH`
@@ -98,6 +105,15 @@ Only configure these if the dashboard will use GitLab OIDC in the offline enviro
 - `AUTH_BREAK_GLASS_ENABLED`
 - `AUTH_BREAK_GLASS_USERNAME`
 - `AUTH_BREAK_GLASS_PASSWORD_HASH`
+
+### Optional admin / page access defaults
+
+- `AUTH_ADMIN_USERNAMES`
+- `AUTH_ADMIN_GITLAB_GROUPS`
+- `ALLOW_MONITOR_FOR_USERS`
+- `ALLOW_SCHEDULE_OVERVIEW_FOR_USERS`
+- `ALLOW_ANALYTICS_FOR_USERS`
+- `ALLOW_OIDC_DIAGNOSTICS_FOR_USERS`
 
 ## 5. Deployment steps
 

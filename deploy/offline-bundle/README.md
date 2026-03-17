@@ -37,5 +37,6 @@ The deployment uses these image tags:
 
 - The scheduler runs database migrations automatically on startup.
 - `backend` and `scheduler` need access to the local Docker socket because worker containers are created dynamically.
-- The worker image must already be loaded with the tag configured by `WORKER_IMAGE`.
+- `scripts/load-images.sh` loads all bundled images, including `deploy-backend`, `deploy-nginx`, `gitlab-issues-to-mr-worker`, and `postgres`.
+- If you change `WORKER_IMAGE` in `config/.env.offline`, load an image with the same tag on the offline host.
 - If your intranet environment has no outbound internet access, `ANTHROPIC_BASE_URL` must point to an internal Claude-compatible endpoint.
