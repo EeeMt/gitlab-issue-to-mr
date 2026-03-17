@@ -9,7 +9,11 @@ const api = axios.create({
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Skip redirect if the request included X-Skip-Auth-Redirect header
+    const skipRedirect = error?.config?.headers?.['X-Skip-Auth-Redirect'] === 'true'
+    
     if (
+      !skipRedirect &&
       error?.response?.status === 401 &&
       typeof window !== 'undefined' &&
       !window.location.pathname.startsWith('/login')
@@ -676,7 +680,11 @@ export async function listGitLabProjectWebhookStatuses(): Promise<GitLabProjectW
 }
 
 export async function getOidcDiagnostics(): Promise<OidcDiagnosticsResult> {
-  const response = await api.get('/config/oidc/diagnostics')
+  const response = await api.get('/config/oidc/diagnostics', {
+    // Skip global 401 interceptor redirect for OIDC diagnostics
+    // This allows the component to handle auth errors gracefully
+    headers: { 'X-Skip-Auth-Redirect': 'true' }
+  })
   return response.data
 }
 
