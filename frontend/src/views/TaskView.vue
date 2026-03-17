@@ -54,6 +54,10 @@
                     <span v-else>{{ task.issue_iid ? `!${task.issue_iid}` : '-' }}</span>
                   </n-descriptions-item>
                   <n-descriptions-item :label="t('common.priority')">{{ formatPriority(task.priority) }}</n-descriptions-item>
+                  <n-descriptions-item :label="t('common.initiator')">
+                    <span v-if="task.initiator_username">{{ task.initiator_username }}</span>
+                    <span v-else>-</span>
+                  </n-descriptions-item>
                   <n-descriptions-item :label="t('common.branch')">
                     <a v-if="task.branch_name && task.branch_url" :href="task.branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.branch_name }}</a>
                     <span v-else>{{ task.branch_name || '-' }}</span>
