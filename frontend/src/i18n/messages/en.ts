@@ -1,4 +1,29 @@
 const en = {
+  bootstrap: {
+    subtitle: 'Initialize the system by creating the first administrator account.',
+    intro: 'Welcome! To get started, create the initial administrator account. This account will have full platform administration privileges.',
+    username: 'Username',
+    usernamePlaceholder: 'Enter administrator username',
+    displayName: 'Display Name',
+    displayNamePlaceholder: 'Enter display name (optional)',
+    email: 'Email',
+    emailPlaceholder: 'admin@example.com',
+    password: 'Password',
+    passwordPlaceholder: 'Minimum 8 characters',
+    confirmPassword: 'Confirm Password',
+    confirmPasswordPlaceholder: 'Re-enter password',
+    createAdmin: 'Create Administrator Account',
+    hint: 'This account will be used for local authentication and emergency access.',
+    validation: {
+      usernameRequired: 'Username is required',
+      emailInvalid: 'Please enter a valid email address',
+      passwordMinLength: 'Password must be at least 8 characters',
+      confirmPasswordRequired: 'Please confirm your password',
+      passwordMismatch: 'Passwords do not match'
+    },
+    registrationSuccess: 'Administrator account created successfully!',
+    registrationFailed: 'Failed to create administrator account'
+  },
   app: {
     brandTitle: 'GIMR Admin',
     brandSubtitle: 'Task operations console',
@@ -76,11 +101,19 @@ const en = {
     notAvailable: 'N/A'
   },
   login: {
-    subtitle: 'Sign in with GitLab to access the dashboard.',
+    subtitle: 'Sign in to access the dashboard.',
     oidcDisabled: 'OIDC login is not enabled yet. Dashboard auth is currently bypassed.',
     breakGlassEnabled:
       'Emergency admin access is enabled. Use it only for OIDC recovery or administrator lockout scenarios.',
     continueWithGitlab: 'Continue with GitLab',
+    localAuth: 'Local Authentication',
+    oidcAuth: 'GitLab OIDC',
+    oidcNotConfigured: 'OIDC is not configured yet',
+    username: 'Username',
+    password: 'Password',
+    signIn: 'Sign In',
+    missingCredentials: 'Please enter both username and password',
+    loginFailed: 'Login failed. Please check your credentials.',
     emergencyAccess: 'Emergency access',
     emergencyUsername: 'Emergency username',
     emergencyPassword: 'Emergency password',

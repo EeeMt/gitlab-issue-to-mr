@@ -11,6 +11,7 @@ import AccessManagement from '../views/AccessManagement.vue'
 import Sessions from '../views/Sessions.vue'
 import CreateTask from '../views/CreateTask.vue'
 import Login from '../views/Login.vue'
+import Bootstrap from '../views/Bootstrap.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -24,6 +25,12 @@ const router = createRouter({
       name: 'Login',
       component: Login,
       meta: { requiresAuth: false }
+    },
+    {
+      path: '/bootstrap',
+      name: 'Bootstrap',
+      component: Bootstrap,
+      meta: { requiresAuth: false, requiresBootstrap: true }
     },
     {
       path: '/dashboard',
@@ -93,6 +100,19 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   await initializeAuth()
+
+  // Redirect to bootstrap page if system not initialized
+  if (!authState.systemInitialized && authState.initialized !== undefined) {
+    if (to.name !== 'Bootstrap') {
+      return { name: 'Bootstrap' }
+    }
+    return true
+  }
+
+  // If system is initialized, prevent access to bootstrap page
+  if (authState.systemInitialized && to.name === 'Bootstrap') {
+    return { name: 'Dashboard' }
+  }
 
   if (!authState.oidcEnabled) {
     if (to.name === 'Login') {

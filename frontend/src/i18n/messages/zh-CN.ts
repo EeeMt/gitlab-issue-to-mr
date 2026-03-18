@@ -1,4 +1,29 @@
 const zhCN = {
+  bootstrap: {
+    subtitle: '通过创建首个管理员账户来初始化系统。',
+    intro: '欢迎！首先创建初始管理员账户。此账户将拥有完整的平台管理权限。',
+    username: '用户名',
+    usernamePlaceholder: '输入管理员用户名',
+    displayName: '显示名称',
+    displayNamePlaceholder: '输入显示名称（可选）',
+    email: '邮箱',
+    emailPlaceholder: 'admin@example.com',
+    password: '密码',
+    passwordPlaceholder: '至少 8 个字符',
+    confirmPassword: '确认密码',
+    confirmPasswordPlaceholder: '再次输入密码',
+    createAdmin: '创建管理员账户',
+    hint: '此账户将用于本地认证和紧急访问。',
+    validation: {
+      usernameRequired: '用户名为必填项',
+      emailInvalid: '请输入有效的邮箱地址',
+      passwordMinLength: '密码必须至少 8 个字符',
+      confirmPasswordRequired: '请确认密码',
+      passwordMismatch: '两次输入的密码不一致'
+    },
+    registrationSuccess: '管理员账户创建成功！',
+    registrationFailed: '创建管理员账户失败'
+  },
   app: {
     brandTitle: 'GIMR Admin',
     brandSubtitle: '任务运营控制台',
@@ -76,10 +101,18 @@ const zhCN = {
     notAvailable: '暂无'
   },
   login: {
-    subtitle: '使用 GitLab 登录后访问控制台。',
+    subtitle: '登录以访问控制台。',
     oidcDisabled: 'OIDC 登录尚未启用，当前控制台认证处于绕过状态。',
     breakGlassEnabled: '紧急管理员入口已启用。请仅在 OIDC 恢复或管理员被全部锁定时使用。',
     continueWithGitlab: '使用 GitLab 继续',
+    localAuth: '本地认证',
+    oidcAuth: 'GitLab OIDC',
+    oidcNotConfigured: 'OIDC 尚未配置',
+    username: '用户名',
+    password: '密码',
+    signIn: '登录',
+    missingCredentials: '请输入用户名和密码',
+    loginFailed: '登录失败，请检查您的凭据。',
     emergencyAccess: '紧急访问',
     emergencyUsername: '紧急用户名',
     emergencyPassword: '紧急密码',

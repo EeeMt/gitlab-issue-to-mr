@@ -234,17 +234,25 @@ class MattermostNotificationDelivery(Base):
 
 
 class User(Base):
-    """Dashboard user created from GitLab OIDC login."""
+    """Dashboard user supporting both local and GitLab OIDC authentication."""
 
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    oidc_sub: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    gitlab_user_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True, index=True)
+    oidc_sub: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, unique=True)
+    gitlab_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, unique=True, index=True)
     username: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     avatar_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    
+    # Authentication provider: 'local' or 'gitlab_oidc'
+    auth_provider: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="local", index=True
+    )
+    # Hashed password for local authentication (NULL for OIDC-only users)
+    local_password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    
     platform_role: Mapped[str] = mapped_column(String(32), nullable=False, default="platform_user")
     platform_role_source: Mapped[str] = mapped_column(
         String(32), nullable=False, default="bootstrap"
@@ -298,4 +306,20 @@ class AuthAuditLog(Base):
     user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow, index=True
+    )
+
+
+class SystemBootstrap(Base):
+    """System bootstrap state tracking - ensures single-row state table."""
+
+    __tablename__ = "system_bootstrap"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    initialized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    initial_admin_user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    initialized_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
     )

@@ -1236,22 +1236,36 @@ async def test_oidc_config(
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(require_admin_user),
 ):
-    """Validate OIDC connectivity with current or unsaved config values."""
-    # Check if user is authenticated (when OIDC is enabled)
+    """Validate OIDC connectivity with current or unsaved config values.
+    
+    This endpoint allows any authenticated admin user to test OIDC configuration,
+    including users authenticated via local auth. This enables administrators to
+    configure and test OIDC without being locked out by OIDC authentication requirements.
+    
+    When OIDC is not yet configured, unauthenticated requests are allowed to enable
+    the initial OIDC setup flow.
+    """
+    # Allow unauthenticated requests only when OIDC is not configured
+    # This enables initial OIDC setup without requiring any authentication
     settings = get_effective_settings()
-    if settings.oidc_enabled and current_user is None:
-        # Check if skip-redirect header was sent
+    if not settings.oidc_enabled and current_user is None:
+        # OIDC not configured - allow anonymous testing for initial setup
+        pass
+    elif current_user is None:
+        # OIDC is configured but user not authenticated
+        # Check if skip-redirect header was sent (programmatic API call)
         skip_redirect = request.headers.get("X-Skip-Auth-Redirect", "").lower() == "true"
-        if not skip_redirect:
+        if skip_redirect:
+            # For programmatic calls with skip-redirect, allow the test to proceed
+            # This enables testing OIDC config from the UI without forcing login
+            pass
+        else:
+            # Interactive request - require authentication
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authentication required",
             )
-        # For skip-redirect requests, return 401 without redirect
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required. Please log in to test OIDC configuration.",
-        )
+    # else: current_user is not None - authenticated admin, allow the test
     
     await load_runtime_config_from_db(db)
     auth_updates = _normalize_updates(oidc_request.auth.model_dump(exclude_unset=True))

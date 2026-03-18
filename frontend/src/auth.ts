@@ -10,6 +10,7 @@ const defaultPagePermissions = (): PagePermissions => ({
 
 interface AuthState {
   initialized: boolean
+  systemInitialized: boolean
   loading: boolean
   oidcEnabled: boolean
   breakGlassEnabled: boolean
@@ -21,6 +22,7 @@ interface AuthState {
 
 export const authState = reactive<AuthState>({
   initialized: false,
+  systemInitialized: false,
   loading: true,
   oidcEnabled: false,
   breakGlassEnabled: false,
@@ -57,6 +59,7 @@ export async function initializeAuth(force = false): Promise<AuthStatus> {
       authState.authenticated = status.authenticated
       authState.pagePermissions = status.page_permissions ?? defaultPagePermissions()
       authState.user = status.user
+      authState.systemInitialized = status.system_initialized ?? false
       authState.initialized = true
       return status
     })
@@ -67,7 +70,8 @@ export async function initializeAuth(force = false): Promise<AuthStatus> {
         break_glass_username: null,
         authenticated: false,
         page_permissions: defaultPagePermissions(),
-        user: null
+        user: null,
+        system_initialized: false
       }
       authState.oidcEnabled = fallback.oidc_enabled
       authState.breakGlassEnabled = fallback.break_glass_enabled
@@ -75,6 +79,7 @@ export async function initializeAuth(force = false): Promise<AuthStatus> {
       authState.authenticated = fallback.authenticated
       authState.pagePermissions = fallback.page_permissions
       authState.user = fallback.user
+      authState.systemInitialized = fallback.system_initialized
       authState.initialized = true
       return fallback
     })

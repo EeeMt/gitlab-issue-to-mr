@@ -55,7 +55,12 @@
                   </n-descriptions-item>
                   <n-descriptions-item :label="t('common.priority')">{{ formatPriority(task.priority) }}</n-descriptions-item>
                   <n-descriptions-item :label="t('common.initiator')">
-                    <span v-if="task.initiator_username">{{ task.initiator_username }}</span>
+                    <n-tag v-if="task.initiator_username" :type="task.is_manual ? 'info' : 'success'" size="small" round>
+                      <template #icon>
+                        <n-icon :component="task.is_manual ? PersonOutline : LogoGitlab" />
+                      </template>
+                      {{ task.initiator_username }}
+                    </n-tag>
                     <span v-else>-</span>
                   </n-descriptions-item>
                   <n-descriptions-item :label="t('common.branch')">
@@ -321,7 +326,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { NButton, NSpace, NCard, NDescriptions, NDescriptionsItem, NTag, NGrid, NGi, NSpin, NAlert, NText, NDatePicker, useMessage } from 'naive-ui'
+import { NButton, NSpace, NCard, NDescriptions, NDescriptionsItem, NTag, NGrid, NGi, NSpin, NAlert, NText, NDatePicker, useMessage, NIcon } from 'naive-ui'
+import { PersonOutline, LogoGitlab } from '@vicons/ionicons5'
 import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, type Task } from '../api'

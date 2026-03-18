@@ -16,7 +16,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings
+from app.core.bootstrap import get_bootstrap_state
 from app.core.break_glass import get_break_glass_identity, verify_break_glass_password
+from app.core.local_auth import hash_password, verify_password
 from app.core.oidc import (
     OIDCConfigurationError,
     build_authorization_url,
@@ -47,12 +49,37 @@ NONCE_COOKIE_NAME = "gimr_oidc_nonce"
 NEXT_COOKIE_NAME = "gimr_oidc_next"
 
 
-class BreakGlassLoginRequestBody(BaseModel):
-    """Request body for emergency admin login."""
+class LocalLoginRequestBody(BaseModel):
+    """Request body for local username/password login."""
 
     username: str
     password: str
     next: Optional[str] = None
+
+
+class LocalRegisterRequestBody(BaseModel):
+    """Request body for initial admin registration."""
+
+    username: str
+    password: str
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+
+
+class BootstrapStatusResponse(BaseModel):
+    """Response for bootstrap status endpoint."""
+
+    initialized: bool
+    oidc_configured: bool
+    total_users: int
+
+
+class LocalLoginResponse(BaseModel):
+    """Response for successful local login."""
+
+    status: str
+    next_path: str
+    user: dict[str, Any]
 
 
 class SessionInfoResponse(BaseModel):
@@ -223,6 +250,230 @@ async def _upsert_user(db: AsyncSession, claims: dict[str, Any], userinfo: dict[
 
     await db.flush()
     return user
+
+
+
+@router.get("/auth/bootstrap-status", response_model=BootstrapStatusResponse)
+async def get_bootstrap_status(db: AsyncSession = Depends(get_db)):
+    """Check if the system has been initialized."""
+    state = await get_bootstrap_state(db)
+    
+    result = await db.execute(select(User))
+    users = result.scalars().all()
+    
+    settings = get_effective_settings()
+    
+    return BootstrapStatusResponse(
+        initialized=state.initialized,
+        oidc_configured=settings.oidc_enabled,
+        total_users=len(users),
+    )
+
+
+@router.post("/auth/local/register", response_model=LocalLoginResponse)
+async def local_register(
+    payload: LocalRegisterRequestBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Register the initial admin user (only when system is not initialized)."""
+    state = await get_bootstrap_state(db)
+    if state.initialized:
+        await _record_auth_audit(
+            db,
+            event_type="local_register",
+            username=payload.username,
+            user_id=None,
+            success=False,
+            detail="System already initialized",
+            request=request,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="System already initialized. Cannot register new users via this endpoint.",
+        )
+    
+    username = payload.username.strip()
+    if not username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username is required",
+        )
+    
+    result = await db.execute(select(User).where(User.username == username))
+    if result.scalar_one_or_none():
+        await _record_auth_audit(
+            db,
+            event_type="local_register",
+            username=username,
+            user_id=None,
+            success=False,
+            detail="Username already exists",
+            request=request,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Username already exists",
+        )
+    
+    password_hash = hash_password(payload.password)
+    
+    user = User(
+        username=username,
+        display_name=payload.display_name or username,
+        email=payload.email,
+        local_password_hash=password_hash,
+        auth_provider="local",
+        platform_role="platform_admin",
+        state="active",
+    )
+    db.add(user)
+    
+    from sqlalchemy.dialects.postgresql import insert
+    await db.execute(
+        insert(SystemBootstrap).values(id=1, initialized=True, initialized_at=datetime.utcnow())
+    )
+    
+    session_token = await create_user_session(
+        db,
+        user,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    
+    await _record_auth_audit(
+        db,
+        event_type="local_register",
+        username=user.username,
+        user_id=user.id,
+        success=True,
+        detail="Initial admin registration",
+        request=request,
+    )
+    await db.commit()
+    
+    response = JSONResponse({
+        "status": "success",
+        "next_path": "/dashboard",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "display_name": user.display_name,
+            "email": user.email,
+            "platform_role": user.platform_role,
+        },
+    })
+    cookie_kwargs = _build_cookie_kwargs()
+    response.set_cookie(
+        get_effective_settings().session_cookie_name,
+        session_token,
+        max_age=get_effective_settings().session_ttl_seconds,
+        **cookie_kwargs,
+    )
+    return response
+
+
+@router.post("/auth/local/login", response_model=LocalLoginResponse)
+async def local_login(
+    payload: LocalLoginRequestBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Authenticate with local username/password."""
+    username = payload.username.strip()
+    next_path = _sanitize_next_path(payload.next)
+    
+    result = await db.execute(select(User).where(User.username == username))
+    user = result.scalar_one_or_none()
+    
+    if not user or not user.local_password_hash:
+        await _record_auth_audit(
+            db,
+            event_type="local_login",
+            username=username,
+            user_id=None,
+            success=False,
+            detail="User not found or no local password",
+            request=request,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password",
+        )
+    
+    if not verify_password(payload.password, user.local_password_hash):
+        await _record_auth_audit(
+            db,
+            event_type="local_login",
+            username=username,
+            user_id=user.id,
+            success=False,
+            detail="Invalid password",
+            request=request,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password",
+        )
+    
+    if user.state != "active":
+        await _record_auth_audit(
+            db,
+            event_type="local_login",
+            username=username,
+            user_id=user.id,
+            success=False,
+            detail="User account is disabled",
+            request=request,
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is disabled",
+        )
+    
+    session_token = await create_user_session(
+        db,
+        user,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    
+    await _record_auth_audit(
+        db,
+        event_type="local_login",
+        username=user.username,
+        user_id=user.id,
+        success=True,
+        detail="Local login successful",
+        request=request,
+    )
+    await db.commit()
+    
+    response = JSONResponse({
+        "status": "success",
+        "next_path": next_path,
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "display_name": user.display_name,
+            "email": user.email,
+            "platform_role": user.platform_role,
+        },
+    })
+    cookie_kwargs = _build_cookie_kwargs()
+    response.set_cookie(
+        get_effective_settings().session_cookie_name,
+        session_token,
+        max_age=get_effective_settings().session_ttl_seconds,
+        **cookie_kwargs,
+    )
+    return response
+
 
 
 @router.get("/auth/login")
@@ -491,33 +742,30 @@ async def revoke_session(
 @router.get("/auth/me")
 async def me(
     current_user: Optional[User] = Depends(get_optional_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Return current auth state for frontend bootstrapping."""
     settings = get_effective_settings()
-    if not settings.oidc_enabled:
-        return {
-            "oidc_enabled": False,
-            "break_glass_enabled": settings.break_glass_enabled,
-            "break_glass_username": settings.auth_break_glass_username if settings.break_glass_enabled else None,
-            "authenticated": False,
-            "page_permissions": get_page_permissions(None, settings),
-            "user": None,
-        }
-
+    
+    # Get bootstrap state
+    state = await get_bootstrap_state(db)
+    
     if current_user is None:
         return {
-            "oidc_enabled": True,
+            "oidc_enabled": settings.oidc_enabled,
             "break_glass_enabled": settings.break_glass_enabled,
             "break_glass_username": settings.auth_break_glass_username if settings.break_glass_enabled else None,
+            "system_initialized": state.initialized,
             "authenticated": False,
             "page_permissions": get_page_permissions(None, settings),
             "user": None,
         }
 
     return {
-        "oidc_enabled": True,
+        "oidc_enabled": settings.oidc_enabled,
         "break_glass_enabled": settings.break_glass_enabled,
         "break_glass_username": settings.auth_break_glass_username if settings.break_glass_enabled else None,
+        "system_initialized": state.initialized,
         "authenticated": True,
         "page_permissions": get_page_permissions(current_user, settings),
         "user": {
@@ -528,5 +776,6 @@ async def me(
             "email": current_user.email,
             "avatar_url": current_user.avatar_url,
             "platform_role": current_user.platform_role,
+            "auth_provider": current_user.auth_provider,
         },
     }

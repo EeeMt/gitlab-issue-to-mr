@@ -127,13 +127,55 @@ async def _resolve_initiator_user_id(
     db: AsyncSession,
     initiator: Optional[dict],
 ) -> Optional[int]:
+    """Resolve or create a user record for the GitLab webhook initiator.
+    
+    This function implements unified user creation logic:
+    - If the user exists (by gitlab_user_id), return their ID
+    - If not, create a new GitLab OIDC user record
+    - All tasks will have initiator_user_id pointing to the users table
+    
+    Args:
+        db: Database session
+        initiator: GitLab user object from webhook payload
+        
+    Returns:
+        User ID if initiator is provided, None otherwise
+    """
     gitlab_user_id = _coerce_int((initiator or {}).get("id"))
     if gitlab_user_id is None:
         return None
-
+    
+    username = _coerce_str((initiator or {}).get("username"))
+    email = _coerce_str((initiator or {}).get("email"))
+    display_name = _coerce_str((initiator or {}).get("name"))
+    
+    # Try to find existing user by gitlab_user_id
     result = await db.execute(select(User).where(User.gitlab_user_id == gitlab_user_id))
     user = result.scalar_one_or_none()
-    return user.id if user is not None else None
+    
+    if user is not None:
+        # User exists, return their ID
+        return user.id
+    
+    # User doesn't exist, create a new GitLab OIDC user
+    # Generate a unique username if not provided
+    if not username:
+        username = f"gitlab_user_{gitlab_user_id}"
+    
+    # Create new user with default viewer role
+    # Role can be upgraded later by admin if needed
+    user = User(
+        username=username,
+        display_name=display_name or username,
+        email=email or None,
+        gitlab_user_id=gitlab_user_id,
+        auth_provider="gitlab_oidc",
+        platform_role="viewer",
+    )
+    db.add(user)
+    await db.flush()  # Get the generated ID
+    
+    return user.id
 
 
 async def verify_gitlab_webhook(

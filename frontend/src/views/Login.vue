@@ -26,7 +26,52 @@
         {{ t('login.breakGlassEnabled') }}
       </n-alert>
 
-      <n-space vertical :size="16" class="login-card__body">
+      <n-tabs v-if="!authState.systemInitialized" type="card" animated class="login-card__tabs">
+        <n-tab-pane name="local" :tab="t('login.localAuth')">
+          <n-space vertical :size="16">
+            <n-input
+              v-model:value="localUsername"
+              :placeholder="t('login.username')"
+              autocomplete="username"
+            />
+            <n-input
+              v-model:value="localPassword"
+              type="password"
+              show-password-on="click"
+              :placeholder="t('login.password')"
+              autocomplete="current-password"
+              @keyup.enter="handleLocalLogin"
+            />
+            <n-button
+              type="primary"
+              strong
+              block
+              :loading="localLoading"
+              @click="handleLocalLogin"
+            >
+              {{ t('login.signIn') }}
+            </n-button>
+          </n-space>
+        </n-tab-pane>
+        <n-tab-pane name="oidc" :tab="t('login.oidcAuth')">
+          <n-space vertical :size="16">
+            <n-button
+              v-if="authState.oidcEnabled"
+              type="primary"
+              size="large"
+              block
+              @click="handleLogin"
+            >
+              {{ t('login.continueWithGitlab') }}
+            </n-button>
+            <n-text v-else depth="3" style="text-align: center; display: block;">
+              {{ t('login.oidcNotConfigured') }}
+            </n-text>
+          </n-space>
+        </n-tab-pane>
+      </n-tabs>
+
+      <n-space v-else vertical :size="16" class="login-card__body">
         <n-button
           v-if="authState.oidcEnabled"
           type="primary"
@@ -81,7 +126,7 @@
 import axios from 'axios'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton, NCard, NDivider, NIcon, NInput, NSpace, NText, useMessage } from 'naive-ui'
+import { NAlert, NButton, NCard, NDivider, NIcon, NInput, NSpace, NTabPane, NTabs, NText, useMessage } from 'naive-ui'
 import { RocketOutline } from '@vicons/ionicons5'
 import { useRoute } from 'vue-router'
 import { authState, startLogin } from '../auth'
@@ -100,6 +145,10 @@ const loginReason = computed(() => {
   return typeof reason === 'string' ? reason : ''
 })
 
+const localUsername = ref('')
+const localPassword = ref('')
+const localLoading = ref(false)
+
 const breakGlassUsername = ref(authState.breakGlassUsername || '')
 const breakGlassPassword = ref('')
 const breakGlassLoading = ref(false)
@@ -114,6 +163,33 @@ watch(
 
 function handleLogin() {
   startLogin(nextTarget.value)
+}
+
+async function handleLocalLogin() {
+  if (!localUsername.value.trim() || !localPassword.value) {
+    message.error(t('login.missingCredentials'))
+    return
+  }
+
+  localLoading.value = true
+  try {
+    const result = await axios.post('/api/auth/local/login', {
+      username: localUsername.value.trim(),
+      password: localPassword.value,
+      next: nextTarget.value
+    })
+    window.location.assign(result.data.next_path || nextTarget.value)
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      const detail = error.response?.data?.detail
+      message.error(typeof detail === 'string' ? detail : t('login.loginFailed'))
+    } else {
+      message.error(t('login.loginFailed'))
+    }
+  } finally {
+    localLoading.value = false
+    localPassword.value = ''
+  }
 }
 
 async function handleBreakGlassLogin() {

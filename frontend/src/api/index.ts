@@ -485,6 +485,7 @@ export interface AuthStatus {
   authenticated: boolean
   page_permissions: PagePermissions
   user: AuthUser | null
+  system_initialized?: boolean
 }
 
 export interface AdminUser {
