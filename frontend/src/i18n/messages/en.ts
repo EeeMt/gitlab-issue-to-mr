@@ -7,7 +7,7 @@ const en = {
     displayName: 'Display Name',
     displayNamePlaceholder: 'Enter display name (optional)',
     email: 'Email',
-    emailPlaceholder: 'admin@example.com',
+    emailPlaceholder: 'admin\\@example.com',
     password: 'Password',
     passwordPlaceholder: 'Minimum 8 characters',
     confirmPassword: 'Confirm Password',

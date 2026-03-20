@@ -43,7 +43,7 @@
         <n-form-item :label="t('bootstrap.email')" path="email">
           <n-input
             v-model:value="formData.email"
-            placeholder="admin@example.com"
+            :placeholder="t('bootstrap.emailPlaceholder')"
             autocomplete="email"
           />
         </n-form-item>
