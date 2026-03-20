@@ -43,7 +43,7 @@
         <n-form-item :label="t('bootstrap.email')" path="email">
           <n-input
             v-model:value="formData.email"
-            type="email"
+            type="text"
             :placeholder="t('bootstrap.emailPlaceholder')"
             autocomplete="email"
           />
@@ -141,7 +141,7 @@ const formRules: FormRules = {
   },
   password: {
     required: true,
-    minLength: 8,
+    min: 8,
     message: t('bootstrap.validation.passwordMinLength'),
     trigger: ['blur', 'input']
   },
@@ -149,10 +149,10 @@ const formRules: FormRules = {
     required: true,
     validator: (_rule, value) => {
       if (!value) {
-        return t('bootstrap.validation.confirmPasswordRequired')
+        return new Error(t('bootstrap.validation.confirmPasswordRequired'))
       }
       if (value !== formData.password) {
-        return t('bootstrap.validation.passwordMismatch')
+        return new Error(t('bootstrap.validation.passwordMismatch'))
       }
       return true
     },

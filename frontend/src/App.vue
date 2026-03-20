@@ -188,7 +188,8 @@ const isMobile = computed(() => width.value < 768)
 
 const activeKey = computed(() => route.name as string)
 const isLoginRoute = computed(() => route.name === 'Login')
-const showShell = computed(() => !isLoginRoute.value)
+const isBootstrapRoute = computed(() => route.name === 'Bootstrap')
+const showShell = computed(() => !isLoginRoute.value && !isBootstrapRoute.value)
 
 const menuLabels: Record<string, string> = {
   Dashboard: 'nav.dashboard',

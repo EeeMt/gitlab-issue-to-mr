@@ -76,6 +76,25 @@ services:
     networks:
       - gimr-network
 
+  e2e:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.e2e
+    container_name: gimr-e2e
+    environment:
+      - E2E_BASE_URL=http://nginx:80
+      - E2E_BACKEND_URL=http://backend:8000
+      - E2E_GITLAB_URL=http://gitlab:8080
+      - PYTEST_ARGS=-v
+    depends_on:
+      - nginx
+      - backend
+    networks:
+      - gimr-network
+    # Only run when explicitly started (not auto-started)
+    profiles:
+      - e2e
+
 volumes:
   postgres_data:
 

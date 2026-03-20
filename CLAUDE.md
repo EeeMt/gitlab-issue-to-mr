@@ -46,6 +46,21 @@ cd backend && python tests/gitlab_e2e/test_integration.py --skip-startup
 # Run E2E mock test (no GitLab required)
 cd backend && python tests/mock_e2e/test_integration.py --skip-startup
 
+# Run Playwright E2E tests (requires running services)
+cd backend && pytest tests/e2e/ -v
+
+# Run Playwright E2E tests with visible browser
+cd backend && pytest tests/e2e/ -v --headed
+
+# Run specific E2E test
+cd backend && pytest tests/e2e/ -v -k "bootstrap"
+
+# Build E2E test container
+docker build -f deploy/Dockerfile.e2e -t gimr-e2e:latest .
+
+# Run E2E tests with Docker Compose
+docker-compose --profile e2e run --rm e2e
+
 # Run P0.1 tests (initial MR creation, MR_IID passing)
 cd backend && python tests/unit/test_priority.py
 
