@@ -21,14 +21,14 @@
       <n-form
         ref="formRef"
         :model="formData"
-        :rules="formRules"
+        :rules="formRules()"
         label-placement="top"
         class="bootstrap-form"
       >
         <n-form-item :label="t('bootstrap.username')" path="username">
           <n-input
             v-model:value="formData.username"
-            :placeholder="t('bootstrap.usernamePlaceholder')"
+            placeholder="Enter administrator username"
             autocomplete="username"
           />
         </n-form-item>
@@ -36,11 +36,11 @@
         <n-form-item :label="t('bootstrap.displayName')" path="displayName">
           <n-input
             v-model:value="formData.displayName"
-            :placeholder="t('bootstrap.displayNamePlaceholder')"
+            placeholder="Enter display name (optional)"
           />
         </n-form-item>
 
-        <n-form-item label="Email" path="email">
+        <n-form-item :label="t('bootstrap.email')" path="email">
           <n-input
             v-model:value="formData.email"
             placeholder="admin@example.com"
@@ -48,7 +48,7 @@
           />
         </n-form-item>
 
-        <n-form-item label="Password" path="password">
+        <n-form-item :label="t('bootstrap.password')" path="password">
           <n-input
             v-model:value="formData.password"
             type="password"
@@ -58,7 +58,7 @@
           />
         </n-form-item>
 
-        <n-form-item label="Confirm Password" path="confirmPassword">
+        <n-form-item :label="t('bootstrap.confirmPassword')" path="confirmPassword">
           <n-input
             v-model:value="formData.confirmPassword"
             type="password"
@@ -123,39 +123,42 @@ const formData = reactive({
   confirmPassword: ''
 })
 
-const formRules: FormRules = {
-  username: {
-    required: true,
-    message: t('bootstrap.validation.usernameRequired'),
-    trigger: ['blur', 'input']
-  },
-  displayName: {
-    required: false
-  },
-  email: {
-    required: true,
-    pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-    message: t('bootstrap.validation.emailInvalid'),
-    trigger: ['blur', 'input']
-  },
-  password: {
-    required: true,
-    min: 8,
-    message: t('bootstrap.validation.passwordMinLength'),
-    trigger: ['blur', 'input']
-  },
-  confirmPassword: {
-    required: true,
-    validator: (_rule, value) => {
-      if (!value) {
-        return new Error(t('bootstrap.validation.confirmPasswordRequired'))
-      }
-      if (value !== formData.password) {
-        return new Error(t('bootstrap.validation.passwordMismatch'))
-      }
-      return true
+// Use function to lazy-evaluate i18n strings (avoids t() calls during module init)
+function formRules(): FormRules {
+  return {
+    username: {
+      required: true,
+      message: 'Username is required',
+      trigger: ['blur', 'input']
     },
-    trigger: ['blur', 'input']
+    displayName: {
+      required: false
+    },
+    email: {
+      required: true,
+      pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+      message: 'Please enter a valid email address',
+      trigger: ['blur', 'input']
+    },
+    password: {
+      required: true,
+      min: 8,
+      message: 'Password must be at least 8 characters',
+      trigger: ['blur', 'input']
+    },
+    confirmPassword: {
+      required: true,
+      validator: (_rule, value) => {
+        if (!value) {
+          return new Error('Please confirm your password')
+        }
+        if (value !== formData.password) {
+          return new Error('Passwords do not match')
+        }
+        return true
+      },
+      trigger: ['blur', 'input']
+    }
   }
 }
 
