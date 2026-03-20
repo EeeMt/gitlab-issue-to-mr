@@ -40,31 +40,30 @@
           />
         </n-form-item>
 
-        <n-form-item :label="t('bootstrap.email')" path="email">
+        <n-form-item label="Email" path="email">
           <n-input
             v-model:value="formData.email"
-            type="text"
-            :placeholder="t('bootstrap.emailPlaceholder')"
+            placeholder="admin@example.com"
             autocomplete="email"
           />
         </n-form-item>
 
-        <n-form-item :label="t('bootstrap.password')" path="password">
+        <n-form-item label="Password" path="password">
           <n-input
             v-model:value="formData.password"
             type="password"
             show-password-on="click"
-            :placeholder="t('bootstrap.passwordPlaceholder')"
+            placeholder="Minimum 8 characters"
             autocomplete="new-password"
           />
         </n-form-item>
 
-        <n-form-item :label="t('bootstrap.confirmPassword')" path="confirmPassword">
+        <n-form-item label="Confirm Password" path="confirmPassword">
           <n-input
             v-model:value="formData.confirmPassword"
             type="password"
             show-password-on="click"
-            :placeholder="t('bootstrap.confirmPasswordPlaceholder')"
+            placeholder="Re-enter password"
             autocomplete="new-password"
           />
         </n-form-item>
@@ -135,7 +134,7 @@ const formRules: FormRules = {
   },
   email: {
     required: true,
-    type: 'email',
+    pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
     message: t('bootstrap.validation.emailInvalid'),
     trigger: ['blur', 'input']
   },
@@ -163,42 +162,43 @@ const formRules: FormRules = {
 async function handleSubmit() {
   if (!formRef.value) return
 
-  await formRef.value.validate(async (errors) => {
-    if (errors) {
-      return
+  try {
+    await formRef.value.validate()
+  } catch (errors) {
+    // Validation failed
+    return
+  }
+
+  submitting.value = true
+  try {
+    const response = await axios.post('/api/auth/local/register', {
+      username: formData.username.trim(),
+      display_name: formData.displayName.trim() || formData.username.trim(),
+      email: formData.email.trim(),
+      password: formData.password
+    })
+
+    if (response.data.status === 'success') {
+      message.success(t('bootstrap.registrationSuccess'))
+      // Redirect to dashboard after successful registration
+      setTimeout(() => {
+        window.location.assign(response.data.next_path || '/dashboard')
+      }, 500)
     }
-
-    submitting.value = true
-    try {
-      const response = await axios.post('/api/auth/local/register', {
-        username: formData.username.trim(),
-        display_name: formData.displayName.trim() || formData.username.trim(),
-        email: formData.email.trim(),
-        password: formData.password
-      })
-
-      if (response.data.status === 'success') {
-        message.success(t('bootstrap.registrationSuccess'))
-        // Redirect to dashboard after successful registration
-        setTimeout(() => {
-          window.location.assign(response.data.next_path || '/dashboard')
-        }, 500)
-      }
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        const detail = error.response?.data?.detail
-        if (typeof detail === 'string') {
-          message.error(detail)
-        } else {
-          message.error(t('bootstrap.registrationFailed'))
-        }
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      const detail = error.response?.data?.detail
+      if (typeof detail === 'string') {
+        message.error(detail)
       } else {
         message.error(t('bootstrap.registrationFailed'))
       }
-    } finally {
-      submitting.value = false
+    } else {
+      message.error(t('bootstrap.registrationFailed'))
     }
-  })
+  } finally {
+    submitting.value = false
+  }
 }
 </script>
 
