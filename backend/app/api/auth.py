@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings
-from app.core.bootstrap import get_bootstrap_state
+from app.core.bootstrap import get_bootstrap_state, initialize_system
 from app.core.break_glass import get_break_glass_identity, verify_break_glass_password
 from app.core.local_auth import hash_password, verify_password
 from app.core.oidc import (
@@ -38,7 +38,7 @@ from app.dependencies.auth import (
     get_optional_current_user,
     require_authenticated_context,
 )
-from app.models import AuthAuditLog, User, UserSession
+from app.models import AuthAuditLog, SystemBootstrap, User, UserSession
 from app.page_permissions import get_page_permissions
 
 logger = logging.getLogger(__name__)
@@ -330,12 +330,11 @@ async def local_register(
         state="active",
     )
     db.add(user)
-    
-    from sqlalchemy.dialects.postgresql import insert
-    await db.execute(
-        insert(SystemBootstrap).values(id=1, initialized=True, initialized_at=datetime.utcnow())
-    )
-    
+    await db.flush()
+
+    # Mark system as initialized with this admin user
+    await initialize_system(db, user)
+
     session_token = await create_user_session(
         db,
         user,

@@ -203,7 +203,7 @@ const menuLabels: Record<string, string> = {
 }
 
 const currentPageLabel = computed(() => t(menuLabels[activeKey.value] || 'app.navigation'))
-const showUserToolbar = computed(() => authState.oidcEnabled && authState.authenticated)
+const showUserToolbar = computed(() => authState.authenticated)
 const userDisplayName = computed(
   () => authState.user?.display_name || authState.user?.username || t('shell.gitlabUser')
 )
@@ -244,7 +244,7 @@ const menuOptions = computed<MenuOption[]>(() => {
     buildMenuItem('nav.createTask', 'CreateTask', AddCircleOutline)
   ]
 
-  if (authState.oidcEnabled) {
+  if (authState.authenticated) {
     workspaceItems.push(buildMenuItem('nav.sessions', 'Sessions', FingerPrintOutline))
   }
 

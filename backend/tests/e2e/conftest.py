@@ -77,6 +77,63 @@ def authenticated_page(page):
     return page
 
 
+@pytest.fixture(scope="function")
+def reset_database(postgres_url):
+    """
+    Reset the database to uninitialized state before test.
+
+    This fixture ensures the system is in a clean state for testing
+    bootstrap flow by:
+    1. Clearing all users (except potential system reserved users)
+    2. Resetting system_bootstrap to uninitialized state
+    """
+    import psycopg2
+
+    conn = psycopg2.connect(postgres_url)
+    conn.autocommit = True
+    cursor = conn.cursor()
+
+    try:
+        # Reset system_bootstrap to uninitialized state
+        cursor.execute("""
+            UPDATE system_bootstrap
+            SET initialized = FALSE,
+                initial_admin_user_id = NULL,
+                initialized_at = NULL
+            WHERE id = 1
+        """)
+
+        # Delete all users to allow fresh bootstrap
+        cursor.execute("DELETE FROM users")
+
+        # Reset alembic_version to head of initial migration (017)
+        # to ensure clean state
+        cursor.execute("""
+            UPDATE alembic_version
+            SET version_num = '017_add_local_auth_bootstrap'
+        """)
+
+        yield
+
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@pytest.fixture(scope="session")
+def postgres_url() -> str:
+    """
+    Get the PostgreSQL connection URL for database operations.
+
+    Can be overridden via E2E_POSTGRES_URL environment variable.
+    Default: postgresql://gimr:gimr@postgres:5432/gimr
+    """
+    return os.environ.get(
+        "E2E_POSTGRES_URL",
+        "postgresql://gimr:gimr@postgres:5432/gimr"
+    )
+
+
 def pytest_configure(config):
     """
     Pytest hook called after command line options have been parsed.
