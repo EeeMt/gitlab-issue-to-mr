@@ -53,5 +53,11 @@ if [ "${AUTO_MIGRATE}" = "true" ]; then
     python3 -m alembic upgrade head
 fi
 
-# Start the application with uvicorn
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+# If command arguments are passed, run them; otherwise default to uvicorn
+if [ $# -gt 0 ]; then
+    echo "Running custom command: $@"
+    exec "$@"
+else
+    echo "Starting backend service with uvicorn..."
+    exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+fi
