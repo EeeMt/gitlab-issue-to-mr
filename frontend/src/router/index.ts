@@ -116,7 +116,18 @@ router.beforeEach(async (to) => {
 
   if (!authState.oidcEnabled) {
     if (to.name === 'Login') {
-      return { name: 'Dashboard' }
+      if (authState.authenticated) {
+        return { name: 'Dashboard' }
+      }
+      return true
+    }
+    // OIDC disabled - still require authentication for protected pages
+    const requiresAuth = to.meta.requiresAuth !== false
+    if (requiresAuth && !authState.authenticated) {
+      return {
+        name: 'Login',
+        query: { next: to.fullPath }
+      }
     }
     return true
   }
