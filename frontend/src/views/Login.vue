@@ -14,15 +14,11 @@
         <LanguageToggle size="small" class="login-card__language-switcher" />
       </div>
 
-      <n-alert v-if="!authState.oidcEnabled && authState.initialized" type="warning" :show-icon="false">
-        {{ t('login.oidcDisabled') }}
-      </n-alert>
-
-      <n-alert v-if="loginReason" type="warning" :show-icon="false">
+      <n-alert v-if="loginReason" type="warning" :show-icon="false" class="login-card__alert">
         {{ loginReason }}
       </n-alert>
 
-      <n-alert v-if="authState.breakGlassEnabled" type="warning" :show-icon="false">
+      <n-alert v-if="authState.breakGlassEnabled" type="info" :show-icon="false" class="login-card__alert">
         {{ t('login.breakGlassEnabled') }}
       </n-alert>
 
@@ -316,6 +312,12 @@ async function handleBreakGlassLogin() {
 
 .login-card__body {
   margin-top: 20px;
+}
+
+.login-card__alert {
+  border-radius: 12px;
+  font-size: 13px;
+  padding: 10px 14px;
 }
 
 .login-card__break-glass {

@@ -119,7 +119,7 @@ const zhCN = {
     emergencyPassword: '紧急密码',
     emergencySignIn: '使用紧急访问登录',
     emergencyHint: '该入口受环境变量控制，正常运行时应保持关闭。',
-    sessionHint: '该控制台使用 GitLab OIDC，并通过安全 Cookie 保存服务端会话。',
+    sessionHint: '系统通过安全的 Cookie 保存会话信息。',
     missingEmergencyCredentials: '请输入紧急用户名和密码',
     emergencyLoginFailed: '紧急登录失败'
   },

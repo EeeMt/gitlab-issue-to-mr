@@ -121,7 +121,7 @@ const en = {
     emergencySignIn: 'Sign in with emergency access',
     emergencyHint:
       'This path is environment-controlled and should stay disabled during normal operation.',
-    sessionHint: 'This dashboard uses GitLab OIDC and stores a server-side session in a secure cookie.',
+    sessionHint: 'The system stores session information in a secure cookie.',
     missingEmergencyCredentials: 'Enter the emergency username and password',
     emergencyLoginFailed: 'Emergency login failed'
   },
