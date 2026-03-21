@@ -662,8 +662,7 @@ async def list_sessions(
     db: AsyncSession = Depends(get_db),
 ):
     """List the current user's dashboard sessions."""
-    settings = get_effective_settings()
-    if not settings.oidc_enabled or auth_context is None:
+    if auth_context is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Session management is only available when OIDC is enabled.",
@@ -707,8 +706,7 @@ async def revoke_session(
     db: AsyncSession = Depends(get_db),
 ):
     """Revoke one dashboard session owned by the current user."""
-    settings = get_effective_settings()
-    if not settings.oidc_enabled or auth_context is None:
+    if auth_context is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Session management is only available when OIDC is enabled.",
