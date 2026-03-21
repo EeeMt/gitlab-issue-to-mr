@@ -838,6 +838,8 @@ const en = {
     lastSeen: 'Last seen',
     role: 'Role',
     state: 'State',
+    systemId: 'System ID: {id}',
+    gitlabId: 'GitLab ID: {id}',
     saveAccess: 'Save access',
     revokeSessions: 'Revoke sessions',
     selfReadonly: 'Your own role and state are read-only here to avoid accidental lockout.',

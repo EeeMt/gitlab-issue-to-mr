@@ -85,7 +85,8 @@
                     <div class="user-management__meta">
                       <span>@{{ user.username }}</span>
                       <span v-if="user.email">{{ user.email }}</span>
-                      <span>ID {{ user.gitlab_user_id }}</span>
+                      <span>{{ t('accessManagement.systemId', { id: user.id }) }}</span>
+                      <span v-if="user.gitlab_user_id">{{ t('accessManagement.gitlabId', { id: user.gitlab_user_id }) }}</span>
                     </div>
                   </div>
                 </div>

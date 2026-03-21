@@ -490,7 +490,7 @@ export interface AuthStatus {
 
 export interface AdminUser {
   id: number
-  gitlab_user_id: number
+  gitlab_user_id: number | null
   username: string
   display_name: string | null
   email: string | null

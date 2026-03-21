@@ -808,6 +808,8 @@ const zhCN = {
     lastSeen: '最近访问',
     role: '角色',
     state: '状态',
+    systemId: '系统ID：{id}',
+    gitlabId: 'GitLab ID：{id}',
     saveAccess: '保存访问设置',
     revokeSessions: '撤销会话',
     selfReadonly: '为避免意外锁死，这里不允许修改你自己的角色和状态。',
