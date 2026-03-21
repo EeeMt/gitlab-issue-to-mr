@@ -1,5 +1,6 @@
 services:
   nginx:
+    image: gimr-nginx:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile.frontend
