@@ -55,12 +55,16 @@ services:
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
       - AUTO_MIGRATE=true
-      # Custom CA certificate — must match backend service setting
+      # Custom CA certificate — mounted into scheduler and passed to workers
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
+      # Generic volume mounts for worker containers (JSON array)
+      - "WORKER_VOLUME_MOUNTS=[{\"host_path\": \"/etc/ssl/certs/custom-ca.crt\", \"container_path\": \"/etc/ssl/certs/custom-ca.crt\", \"mode\": \"ro\"}]"
     depends_on:
       - postgres
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Mount CA certificate into scheduler (enable when CA cert file is provided at deployment)
+      # - ./ca.crt:/etc/ssl/certs/custom-ca.crt:ro
     restart: unless-stopped
     networks:
       - gimr-network

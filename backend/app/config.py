@@ -1,5 +1,6 @@
 """Application configuration management."""
 
+import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Union
@@ -26,6 +27,8 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "mattermost_bot_token": str,
     "anthropic_base_url": str,
     "anthropic_api_key": str,
+    "maven_cache_host_path": str,
+    "maven_settings_host_path": str,
     "anthropic_model": str,
     "claude_max_turns": int,
     "allow_monitor_for_users": bool,
@@ -43,6 +46,7 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "cookie_samesite": str,
     "auth_admin_usernames": str,
     "auth_admin_gitlab_groups": str,
+    "worker_volume_mounts": str,  # JSON array of {host_path, container_path, mode}
 }
 
 SECRET_CONFIG_KEYS = {
@@ -127,6 +131,8 @@ class Settings(BaseSettings):
     worker_image: str = Field(default="gimr-worker:latest")
     maven_cache_host_path: str = Field(default="")  # Host path to .m2/repository dir; empty = disabled
     maven_settings_host_path: str = Field(default="")  # Host path to settings.xml; empty = disabled
+    # JSON array of volume mounts: [{"host_path": "/path", "container_path": "/path", "mode": "ro"}]
+    worker_volume_mounts: str = Field(default="")
 
     # Scheduler Configuration
     max_concurrency: int = Field(default=3)
@@ -168,6 +174,19 @@ class Settings(BaseSettings):
             and bool(self.auth_break_glass_username.strip())
             and bool(self.auth_break_glass_password_hash.strip())
         )
+
+    @property
+    def worker_volume_mounts_parsed(self) -> list[dict]:
+        """Parse worker_volume_mounts JSON string into a list of mount dicts."""
+        if not self.worker_volume_mounts:
+            return []
+        try:
+            mounts = json.loads(self.worker_volume_mounts)
+            if isinstance(mounts, list):
+                return mounts
+            return []
+        except json.JSONDecodeError:
+            return []
 
 
 @lru_cache

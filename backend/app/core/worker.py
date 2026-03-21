@@ -411,6 +411,14 @@ class WorkerExecutor:
                     "mode": "ro",
                 }
 
+            # Apply generic volume mounts from configuration
+            for mount in settings.worker_volume_mounts_parsed:
+                host_path = mount.get("host_path")
+                container_path = mount.get("container_path")
+                mode = mount.get("mode", "ro")
+                if host_path and container_path:
+                    volumes[host_path] = {"bind": container_path, "mode": mode}
+
             container = self.docker.create_container(
                 image=settings.worker_image,
                 command="",

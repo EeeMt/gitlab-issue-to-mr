@@ -70,6 +70,9 @@ class RuntimeConfigSection(BaseModel):
     allow_schedule_overview_for_users: bool
     allow_analytics_for_users: bool
     allow_oidc_diagnostics_for_users: bool
+    worker_volume_mounts: str
+    maven_cache_host_path: str
+    maven_settings_host_path: str
 
 
 class AuthConfigSection(BaseModel):
@@ -118,6 +121,9 @@ class RuntimeConfigUpdate(BaseModel):
     allow_schedule_overview_for_users: Optional[bool] = None
     allow_analytics_for_users: Optional[bool] = None
     allow_oidc_diagnostics_for_users: Optional[bool] = None
+    worker_volume_mounts: Optional[str] = None
+    maven_cache_host_path: Optional[str] = None
+    maven_settings_host_path: Optional[str] = None
 
 
 class AuthConfigUpdate(BaseModel):
@@ -336,6 +342,9 @@ def _serialize_effective_config() -> ConfigResponse:
             allow_schedule_overview_for_users=settings.allow_schedule_overview_for_users,
             allow_analytics_for_users=settings.allow_analytics_for_users,
             allow_oidc_diagnostics_for_users=settings.allow_oidc_diagnostics_for_users,
+            worker_volume_mounts=settings.worker_volume_mounts,
+            maven_cache_host_path=settings.maven_cache_host_path,
+            maven_settings_host_path=settings.maven_settings_host_path,
         ),
         auth=AuthConfigSection(
             oidc_enabled=settings.oidc_enabled,

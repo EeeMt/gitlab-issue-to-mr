@@ -264,6 +264,9 @@ export interface RuntimeConfig {
   allow_schedule_overview_for_users: boolean
   allow_analytics_for_users: boolean
   allow_oidc_diagnostics_for_users: boolean
+  worker_volume_mounts: string
+  maven_cache_host_path: string
+  maven_settings_host_path: string
 }
 
 export interface AuthConfig {
@@ -369,6 +372,9 @@ export interface RuntimeConfigUpdate
   clear_alert_webhook_url?: boolean
   anthropic_api_key?: string
   clear_anthropic_api_key?: boolean
+  worker_volume_mounts?: string
+  maven_cache_host_path?: string
+  maven_settings_host_path?: string
 }
 
 export interface AuthConfigUpdate extends Partial<Omit<AuthConfig, 'oidc_client_secret_configured'>> {

@@ -171,76 +171,6 @@
                   </n-grid>
                 </div>
 
-                <div class="config-form__section">
-                  <div class="config-form__section-title">{{ t('config.aiProvider') }}</div>
-                  <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-                    <n-gi>
-                      <n-form-item :label="t('config.anthropicBaseUrl')" path="anthropic_base_url">
-                        <n-input
-                          v-model:value="formValue.anthropic_base_url"
-                          placeholder="http://host.docker.internal:11434/v1"
-                          class="config-form__input"
-                        />
-                        <template #feedback>
-                          {{ t('config.anthropicBaseUrlHint') }}
-                        </template>
-                      </n-form-item>
-                    </n-gi>
-                    <n-gi>
-                      <n-form-item :label="t('config.anthropicModel')" path="anthropic_model">
-                        <n-input
-                          v-model:value="formValue.anthropic_model"
-                          placeholder="claude-sonnet-4-20250514"
-                          class="config-form__input"
-                        />
-                        <template #feedback>
-                          {{ t('config.anthropicModelHint') }}
-                        </template>
-                      </n-form-item>
-                    </n-gi>
-                    <n-gi>
-                      <n-form-item :label="t('config.claudeMaxTurns')" path="claude_max_turns">
-                        <n-input-number
-                          v-model:value="formValue.claude_max_turns"
-                          :min="1"
-                          :max="1000"
-                          class="config-form__input"
-                        />
-                        <template #feedback>
-                          {{ t('config.claudeMaxTurnsHint') }}
-                        </template>
-                      </n-form-item>
-                    </n-gi>
-                    <n-gi>
-                      <n-form-item :label="t('config.anthropicApiKeyStatus')">
-                        <n-tag :type="formValue.anthropic_api_key_configured ? 'success' : 'warning'" round>
-                          {{ formValue.anthropic_api_key_configured ? t('config.configured') : t('config.missing') }}
-                        </n-tag>
-                        <template #feedback>
-                          {{ t('config.anthropicApiKeyStatusHint') }}
-                        </template>
-                      </n-form-item>
-                    </n-gi>
-                    <n-gi :span="isMobile ? 1 : 2">
-                      <n-form-item :label="t('config.anthropicApiKey')">
-                        <n-input
-                          v-model:value="formValue.anthropic_api_key_input"
-                          type="password"
-                          show-password-on="click"
-                          :placeholder="
-                            formValue.anthropic_api_key_configured
-                              ? t('config.configuredEnterNew')
-                              : t('config.enterAnthropicApiKey')
-                          "
-                          class="config-form__input"
-                        />
-                        <template #feedback>
-                          {{ t('config.anthropicApiKeyHint') }}
-                        </template>
-                      </n-form-item>
-                    </n-gi>
-                  </n-grid>
-                </div>
                 <div class="config-card-actions">
                   <n-space :size="12" wrap>
                     <n-button
@@ -257,12 +187,6 @@
                       :disabled="isSectionBusy('runtime') || !isSectionDirty('runtime')"
                     >
                       {{ t('config.revertChanges') }}
-                    </n-button>
-                    <n-button
-                      @click="handleClearSecret('anthropic_api_key')"
-                      :disabled="isSectionBusy('runtime') || !formValue.anthropic_api_key_configured"
-                    >
-                      {{ t('config.clearAnthropicApiKey') }}
                     </n-button>
                     <n-button
                       @click="handleClearSecret('alert_webhook_url')"
@@ -842,6 +766,10 @@
               </div>
             </n-tab-pane>
 
+            <n-tab-pane name="worker" :tab="t('config.workerTab')">
+              <WorkerSettingsPanel :is-mobile="isMobile" />
+            </n-tab-pane>
+
             <n-tab-pane name="maintenance" :tab="t('config.maintenanceTab')">
               <div class="config-layout__main">
                 <n-card id="config-actions" class="config-form-card" :bordered="false">
@@ -921,6 +849,7 @@ import {
 } from '../api'
 import MattermostNotificationsPanel from '../components/config/MattermostNotificationsPanel.vue'
 import OidcDiagnosticsPanel from '../components/config/OidcDiagnosticsPanel.vue'
+import WorkerSettingsPanel from '../components/config/WorkerSettingsPanel.vue'
 
 type ConfigForm = {
   max_concurrency: number
@@ -932,11 +861,6 @@ type ConfigForm = {
   alert_on_failure: boolean
   alert_webhook_url_configured: boolean
   alert_webhook_url_input: string
-  anthropic_base_url: string
-  anthropic_api_key_configured: boolean
-  anthropic_api_key_input: string
-  anthropic_model: string
-  claude_max_turns: number
   allow_monitor_for_users: boolean
   allow_schedule_overview_for_users: boolean
   allow_analytics_for_users: boolean
@@ -968,7 +892,7 @@ type TestState = {
 }
 
 type ConfigSectionKey = 'runtime' | 'sharedPages' | 'gitlab' | 'oidc' | 'session'
-type ConfigTabKey = 'runtime' | 'notifications' | 'gitlab' | 'auth' | 'maintenance'
+type ConfigTabKey = 'runtime' | 'notifications' | 'gitlab' | 'auth' | 'worker' | 'maintenance'
 
 const message = useMessage()
 const route = useRoute()
@@ -1000,7 +924,7 @@ const gitlabTestState = ref<TestState | null>(null)
 const webhookSetupState = ref<TestState | null>(null)
 const webhookStatusState = ref<TestState | null>(null)
 const activeConfigTab = ref<ConfigTabKey>('runtime')
-const configTabs: ConfigTabKey[] = ['runtime', 'notifications', 'gitlab', 'auth', 'maintenance']
+const configTabs: ConfigTabKey[] = ['runtime', 'notifications', 'gitlab', 'auth', 'worker', 'maintenance']
 const notificationReloadKey = ref(0)
 
 const sectionKeys: ConfigSectionKey[] = ['runtime', 'sharedPages', 'gitlab', 'oidc', 'session']
@@ -1013,11 +937,7 @@ const runtimeSectionFields: readonly (keyof ConfigForm)[] = [
   'max_retries',
   'retry_delay',
   'alert_on_failure',
-  'alert_webhook_url_input',
-  'anthropic_base_url',
-  'anthropic_api_key_input',
-  'anthropic_model',
-  'claude_max_turns'
+  'alert_webhook_url_input'
 ]
 
 const sharedPagesSectionFields: readonly (keyof ConfigForm)[] = [
@@ -1075,11 +995,6 @@ const formValue = ref<ConfigForm>({
   alert_on_failure: false,
   alert_webhook_url_configured: false,
   alert_webhook_url_input: '',
-  anthropic_base_url: 'http://localhost:11434/v1',
-  anthropic_api_key_configured: false,
-  anthropic_api_key_input: '',
-  anthropic_model: 'claude-sonnet-4-20250514',
-  claude_max_turns: 20,
   allow_monitor_for_users: false,
   allow_schedule_overview_for_users: false,
   allow_analytics_for_users: false,
@@ -1213,22 +1128,6 @@ const runtimeRules: FormRules = {
     type: 'number',
     message: t('config.enterRetryDelay'),
     trigger: 'blur'
-  },
-  anthropic_base_url: {
-    required: true,
-    message: t('config.enterAnthropicBaseUrl'),
-    trigger: 'blur'
-  },
-  anthropic_model: {
-    required: true,
-    message: t('config.enterAnthropicModel'),
-    trigger: 'blur'
-  },
-  claude_max_turns: {
-    required: true,
-    type: 'number',
-    message: t('config.enterClaudeMaxTurns'),
-    trigger: 'blur'
   }
 }
 
@@ -1289,11 +1188,6 @@ function syncForm(config: Config) {
     alert_on_failure: config.runtime.alert_on_failure,
     alert_webhook_url_configured: config.runtime.alert_webhook_url_configured,
     alert_webhook_url_input: '',
-    anthropic_base_url: config.runtime.anthropic_base_url,
-    anthropic_api_key_configured: config.runtime.anthropic_api_key_configured,
-    anthropic_api_key_input: '',
-    anthropic_model: config.runtime.anthropic_model,
-    claude_max_turns: config.runtime.claude_max_turns,
     allow_monitor_for_users: config.runtime.allow_monitor_for_users,
     allow_schedule_overview_for_users: config.runtime.allow_schedule_overview_for_users,
     allow_analytics_for_users: config.runtime.allow_analytics_for_users,
@@ -1364,18 +1258,11 @@ function buildRuntimeSectionUpdate(): RuntimeConfigUpdate {
     default_target_branch: formValue.value.default_target_branch.trim(),
     max_retries: formValue.value.max_retries,
     retry_delay: formValue.value.retry_delay,
-    alert_on_failure: formValue.value.alert_on_failure,
-    anthropic_base_url: formValue.value.anthropic_base_url.trim(),
-    anthropic_model: formValue.value.anthropic_model.trim(),
-    claude_max_turns: formValue.value.claude_max_turns
+    alert_on_failure: formValue.value.alert_on_failure
   }
 
   if (formValue.value.alert_webhook_url_input.trim()) {
     update.alert_webhook_url = formValue.value.alert_webhook_url_input.trim()
-  }
-
-  if (formValue.value.anthropic_api_key_input.trim()) {
-    update.anthropic_api_key = formValue.value.anthropic_api_key_input.trim()
   }
 
   return update
