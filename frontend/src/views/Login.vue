@@ -82,6 +82,33 @@
           {{ t('login.continueWithGitlab') }}
         </n-button>
 
+        <n-divider v-if="authState.oidcEnabled">{{ t('login.or') }}</n-divider>
+
+        <n-space vertical :size="12">
+          <n-input
+            v-model:value="localUsername"
+            :placeholder="t('login.username')"
+            autocomplete="username"
+          />
+          <n-input
+            v-model:value="localPassword"
+            type="password"
+            show-password-on="click"
+            :placeholder="t('login.password')"
+            autocomplete="current-password"
+            @keyup.enter="handleLocalLogin"
+          />
+          <n-button
+            type="primary"
+            strong
+            block
+            :loading="localLoading"
+            @click="handleLocalLogin"
+          >
+            {{ t('login.signIn') }}
+          </n-button>
+        </n-space>
+
         <div v-if="authState.breakGlassEnabled" class="login-card__break-glass">
           <n-divider>{{ t('login.emergencyAccess') }}</n-divider>
           <n-space vertical :size="12">

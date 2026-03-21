@@ -105,6 +105,7 @@ const zhCN = {
     oidcDisabled: 'OIDC 登录尚未启用，当前控制台认证处于绕过状态。',
     breakGlassEnabled: '紧急管理员入口已启用。请仅在 OIDC 恢复或管理员被全部锁定时使用。',
     continueWithGitlab: '使用 GitLab 继续',
+    or: '或',
     localAuth: '本地认证',
     oidcAuth: 'GitLab OIDC',
     oidcNotConfigured: 'OIDC 尚未配置',

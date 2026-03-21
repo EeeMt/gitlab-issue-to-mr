@@ -106,6 +106,7 @@ const en = {
     breakGlassEnabled:
       'Emergency admin access is enabled. Use it only for OIDC recovery or administrator lockout scenarios.',
     continueWithGitlab: 'Continue with GitLab',
+    or: 'or',
     localAuth: 'Local Authentication',
     oidcAuth: 'GitLab OIDC',
     oidcNotConfigured: 'OIDC is not configured yet',
