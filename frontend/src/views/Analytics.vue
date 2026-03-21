@@ -63,7 +63,7 @@
               </div>
             </template>
 
-            <div v-if="taskTrendBars.length" class="trend-chart-scroll">
+            <div v-if="taskTrendBars.length" ref="taskChartRef" class="trend-chart-scroll">
               <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
                 <div v-for="bar in taskTrendBars" :key="bar.key" class="trend-chart__item">
                   <div class="trend-chart__count">{{ bar.displayValue }}</div>
@@ -86,7 +86,7 @@
               </div>
             </template>
 
-            <div v-if="changeTrendBars.length" class="trend-chart-scroll">
+            <div v-if="changeTrendBars.length" ref="changeChartRef" class="trend-chart-scroll">
               <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
                 <div v-for="bar in changeTrendBars" :key="bar.key" class="trend-chart__item">
                   <div class="trend-chart__count">{{ bar.displayValue }}</div>
@@ -109,7 +109,7 @@
               </div>
             </template>
 
-            <div v-if="durationTrendBars.length" class="trend-chart-scroll">
+            <div v-if="durationTrendBars.length" ref="durationChartRef" class="trend-chart-scroll">
               <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
                 <div v-for="bar in durationTrendBars" :key="bar.key" class="trend-chart__item">
                   <div class="trend-chart__count">{{ bar.displayValue }}</div>
@@ -132,7 +132,7 @@
               </div>
             </template>
 
-            <div v-if="tokenTrendBars.length" class="trend-chart-scroll">
+            <div v-if="tokenTrendBars.length" ref="tokenChartRef" class="trend-chart-scroll">
               <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
                 <div v-for="bar in tokenTrendBars" :key="bar.key" class="trend-chart__item">
                   <div class="trend-chart__count">{{ bar.displayValue }}</div>
@@ -238,7 +238,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, ref, watch } from 'vue'
+import { computed, h, nextTick, onMounted, ref, watch } from 'vue'
 import {
   NAlert,
   NButton,
@@ -288,6 +288,10 @@ const hasLoadedOnce = ref(false)
 const windowDays = ref<number>(30)
 const selectedProjectId = ref<number | null>(null)
 const selectedInitiatorUsername = ref<string | null>(null)
+const taskChartRef = ref<HTMLElement | null>(null)
+const changeChartRef = ref<HTMLElement | null>(null)
+const durationChartRef = ref<HTMLElement | null>(null)
+const tokenChartRef = ref<HTMLElement | null>(null)
 
 const windowOptions = computed(() => [
   { label: t('analytics.last7Days'), value: 7 },
@@ -656,11 +660,22 @@ async function fetchAnalytics() {
       selectedProjectId.value,
       selectedInitiatorUsername.value
     )
+    await nextTick()
+    scrollChartsToEnd()
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('analytics.failedToLoad'))
   } finally {
     hasLoadedOnce.value = true
     loading.value = false
+  }
+}
+
+function scrollChartsToEnd() {
+  const charts = [taskChartRef.value, changeChartRef.value, durationChartRef.value, tokenChartRef.value]
+  for (const chart of charts) {
+    if (chart) {
+      chart.scrollLeft = chart.scrollWidth
+    }
   }
 }
 
