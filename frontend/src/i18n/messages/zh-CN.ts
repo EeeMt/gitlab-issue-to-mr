@@ -823,10 +823,10 @@ const zhCN = {
     bootstrap: '引导规则',
     lastLogin: '最近登录',
     failedToFetchUsers: '获取用户失败',
-    updatedAccess: '已更新 @{username} 的访问设置',
+    updatedAccess: '已更新 \\@{username} 的访问设置',
     failedToUpdateUser: '更新用户访问失败',
-    revokedSessions: '已为 @{username} 撤销 {count} 个活跃会话',
-    noActiveSessions: '@{username} 当前没有活跃会话',
+    revokedSessions: '已为 \\@{username} 撤销 {count} 个活跃会话',
+    noActiveSessions: '\\@{username} 当前没有活跃会话',
     failedToRevokeSessions: '撤销用户会话失败'
   },
   oidcDiagnostics: {

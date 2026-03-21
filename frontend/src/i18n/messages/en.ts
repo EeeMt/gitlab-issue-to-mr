@@ -853,10 +853,10 @@ const en = {
     bootstrap: 'Bootstrap',
     lastLogin: 'Last login',
     failedToFetchUsers: 'Failed to fetch users',
-    updatedAccess: 'Updated access for @{username}',
+    updatedAccess: 'Updated access for \\@{username}',
     failedToUpdateUser: 'Failed to update user access',
-    revokedSessions: 'Revoked {count} active session(s) for @{username}',
-    noActiveSessions: 'No active sessions found for @{username}',
+    revokedSessions: 'Revoked {count} active session(s) for \\@{username}',
+    noActiveSessions: 'No active sessions found for \\@{username}',
     failedToRevokeSessions: 'Failed to revoke user sessions'
   },
   oidcDiagnostics: {
