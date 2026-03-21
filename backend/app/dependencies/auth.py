@@ -103,14 +103,15 @@ async def require_authenticated_user(
 async def require_admin_user(
     request: Request,
     auth_context: Optional[AuthContext] = Depends(require_authenticated_context),
-) -> Optional[User]:
+) -> User:
     """Require an admin user."""
-    # require_authenticated_context already validates auth
+    if auth_context is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+        )
     current_user = auth_context.user
     if current_user.platform_role != "platform_admin":
-        skip_redirect = request.headers.get("X-Skip-Auth-Redirect", "").lower() == "true"
-        if skip_redirect:
-            return None
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
