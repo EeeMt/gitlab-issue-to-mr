@@ -110,6 +110,8 @@ class Task(Base):
         Index("ix_tasks_status_created", "status", "created_at"),
         Index("ix_tasks_status_priority", "status", "priority", "scheduled_at"),
         Index("ix_tasks_project_issue", "project_id", "issue_iid"),
+        Index("ix_tasks_created_at_project", "created_at", "project_id"),
+        Index("ix_tasks_created_at_status", "created_at", "status"),
     )
 
 
