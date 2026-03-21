@@ -1,6 +1,6 @@
 """alter users gitlab_user_id to be nullable for local auth
 
-Revision ID: 018_alter_users_gitlab_user_id_nullable
+Revision ID: 018_users_gitlab_nullable
 Revises: 017_add_local_auth_bootstrap
 Create Date: 2026-03-21
 """
@@ -11,7 +11,7 @@ from alembic import op
 
 
 # revision identifiers, used by Alembic.
-revision: str = "018_alter_users_gitlab_user_id_nullable"
+revision: str = "018_users_gitlab_nullable"
 down_revision: Union[str, None] = "017_add_local_auth_bootstrap"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

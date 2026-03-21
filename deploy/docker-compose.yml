@@ -28,7 +28,7 @@ services:
       - DOCKER_TLS_CA=
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
-      - AUTO_MIGRATE=false
+      - AUTO_MIGRATE=true
       - COOKIE_SECURE=false
       # Custom CA certificate for HTTPS connections (GitLab, Mattermost, etc.)
       # The CA certificate is baked into the image at /etc/ssl/certs/custom-ca.crt
