@@ -74,18 +74,12 @@ async def get_optional_current_user(
 async def require_authenticated_context(
     request: Request,
     auth_context: Optional[AuthContext] = Depends(get_optional_auth_context),
-) -> Optional[AuthContext]:
+) -> AuthContext:
     """Require an authenticated request context.
 
-    If the X-Skip-Auth-Redirect header is present, return None instead of raising
-    an exception to allow the client to handle authentication failures gracefully.
+    Raises 401 if no valid authentication is found.
     """
-    # Allow clients to skip auth redirect for programmatic API calls
-    skip_redirect = request.headers.get("X-Skip-Auth-Redirect", "").lower() == "true"
-
     if auth_context is None:
-        if skip_redirect:
-            return None
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=getattr(request.state, "auth_failure_detail", None) or "Authentication required",

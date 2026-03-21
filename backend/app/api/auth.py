@@ -658,16 +658,10 @@ async def logout(
 
 @router.get("/auth/sessions", response_model=list[SessionInfoResponse])
 async def list_sessions(
-    auth_context: Optional[AuthContext] = Depends(require_authenticated_context),
+    auth_context: AuthContext = Depends(require_authenticated_context),
     db: AsyncSession = Depends(get_db),
 ):
     """List the current user's dashboard sessions."""
-    if auth_context is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Session management is only available when OIDC is enabled.",
-        )
-
     result = await db.execute(
         select(UserSession)
         .where(UserSession.user_id == auth_context.user.id)
@@ -702,16 +696,10 @@ async def list_sessions(
 @router.post("/auth/sessions/{session_id}/revoke", response_model=RevokeSessionResponse)
 async def revoke_session(
     session_id: str,
-    auth_context: Optional[AuthContext] = Depends(require_authenticated_context),
+    auth_context: AuthContext = Depends(require_authenticated_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Revoke one dashboard session owned by the current user."""
-    if auth_context is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Session management is only available when OIDC is enabled.",
-        )
-
     result = await db.execute(
         select(UserSession).where(
             UserSession.id == session_id,
