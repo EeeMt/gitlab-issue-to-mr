@@ -33,7 +33,7 @@ ANTHROPIC_MODEL=MiniMax-M2.5                  # 使用的模型
 
 ```bash
 # 1. 重新构建 worker 镜像（修改 entrypoint.sh 后需要）
-docker build -f deploy/Dockerfile.worker -t gitlab-issues-to-mr-worker:latest .
+docker build -f deploy/Dockerfile.worker -t deploy-worker:latest .
 
 # 2. 重新构建 backend 镜像（修改 worker.py 后需要）
 docker build -f deploy/Dockerfile.backend -t deploy-backend .
@@ -242,7 +242,7 @@ curl -s -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
 docker ps -a | grep gimr
 
 # 7. 重新构建 worker 镜像（修改 entrypoint.sh 后需要）
-docker build -f deploy/Dockerfile.worker -t gitlab-issues-to-mr-worker:latest .
+docker build -f deploy/Dockerfile.worker -t deploy-worker:latest .
 
 # 8. 重新构建 backend 镜像（修改 worker.py 后需要）
 docker build -f deploy/Dockerfile.backend -t deploy-backend .

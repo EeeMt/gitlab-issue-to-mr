@@ -7,7 +7,7 @@ ARCHIVE="${ROOT_DIR}/images/gimr-offline-images.tar.gz"
 IMAGES=(
   "deploy-backend:latest"
   "deploy-nginx:latest"
-  "gitlab-issues-to-mr-worker:latest"
+  "deploy-worker:latest"
   "postgres:16-alpine"
 )
 

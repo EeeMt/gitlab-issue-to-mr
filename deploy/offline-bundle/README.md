@@ -20,7 +20,7 @@ The deployment uses these image tags:
 
 - `deploy-backend:latest`
 - `deploy-nginx:latest`
-- `gitlab-issues-to-mr-worker:latest`
+- `deploy-worker:latest`
 - `postgres:16-alpine`
 
 ## Quick start on the offline host

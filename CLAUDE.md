@@ -89,7 +89,7 @@ cd deploy && docker-compose logs -f
 > docker-compose -f deploy/docker-compose.yml up -d backend
 >
 > # Rebuild worker image (if deploy/entrypoint.sh was modified)
-> docker build -f deploy/Dockerfile.worker -t gitlab-issues-to-mr-worker:latest .
+> docker build -f deploy/Dockerfile.worker -t deploy-worker:latest .
 > ```
 
 ### Testing & Debugging
@@ -155,7 +155,7 @@ Environment variables in `backend/.env`:
 - `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`
 - `DATABASE_URL` - PostgreSQL connection
 - `DOCKER_HOST` - Docker Engine API (default: tcp://localhost:2376)
-- `WORKER_IMAGE` - Worker container image (default: gitlab-issues-to-mr-worker:latest)
+- `WORKER_IMAGE` - Worker container image (default: deploy-worker:latest)
 - `MAX_CONCURRENCY` - Max parallel tasks (default: 3)
 - `TASK_TIMEOUT` - Task timeout in seconds (default: 1800 = 30 min)
 - `DEFAULT_TARGET_BRANCH` - Default branch for MRs (default: main)

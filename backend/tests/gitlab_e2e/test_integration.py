@@ -368,7 +368,7 @@ def start_docker_compose():
     # First, build the worker image
     logger.info("Building worker image...")
     run_command([
-        "docker", "build", "-t", "gitlab-issues-to-mr-worker:latest",
+        "docker", "build", "-t", "deploy-worker:latest",
         "-f", "deploy/Dockerfile.worker", "."
     ], check=False)
 
@@ -397,7 +397,7 @@ SECRET_KEY=your-secret-key-change-in-production
 LOG_LEVEL=INFO
 
 # Worker Configuration
-WORKER_IMAGE=gitlab-issues-to-mr-worker:latest
+WORKER_IMAGE=deploy-worker:latest
 
 # Scheduler Configuration
 MAX_CONCURRENCY=3

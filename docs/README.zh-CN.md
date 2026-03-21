@@ -134,7 +134,7 @@ docker build -f deploy/Dockerfile.frontend -t deploy-nginx:latest .
 cd deploy && docker-compose up -d --build nginx
 
 # worker
-docker build -f deploy/Dockerfile.worker -t gitlab-issues-to-mr-worker:latest .
+docker build -f deploy/Dockerfile.worker -t deploy-worker:latest .
 ```
 
 ## 使用方式
