@@ -43,8 +43,6 @@ async def get_optional_auth_context(
     await load_runtime_config_from_db(db)
     t1 = time.time()
     settings = get_effective_settings()
-    if not settings.oidc_enabled:
-        return None
 
     token = request.cookies.get(settings.session_cookie_name)
     result = await resolve_session_authentication(db, token)
