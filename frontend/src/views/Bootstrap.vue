@@ -36,7 +36,7 @@
         <n-form-item :label="t('bootstrap.displayName')" path="displayName">
           <n-input
             v-model:value="formData.displayName"
-            placeholder="Enter display name (optional)"
+            :placeholder="t('bootstrap.displayNamePlaceholder')"
           />
         </n-form-item>
 
@@ -53,7 +53,7 @@
             v-model:value="formData.password"
             type="password"
             show-password-on="click"
-            placeholder="Minimum 8 characters"
+            :placeholder="t('bootstrap.passwordPlaceholder')"
             autocomplete="new-password"
           />
         </n-form-item>
@@ -63,7 +63,7 @@
             v-model:value="formData.confirmPassword"
             type="password"
             show-password-on="click"
-            placeholder="Re-enter password"
+            :placeholder="t('bootstrap.confirmPasswordPlaceholder')"
             autocomplete="new-password"
           />
         </n-form-item>
