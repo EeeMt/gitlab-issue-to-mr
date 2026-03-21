@@ -94,11 +94,11 @@ async def _build_project_lookup(access_scope: ProjectAccessScope) -> dict[int, d
             for project in access_scope.accessible_projects
         }
 
-    # Use cached projects from tasks.py to avoid repeated GitLab API calls
-    from app.api.tasks import _get_cached_projects
+    # Use cached projects from gitlab_client to avoid repeated GitLab API calls
+    from app.core.gitlab_client import get_cached_projects
 
     try:
-        projects = await _get_cached_projects()
+        projects = await get_cached_projects()
         return {
             int(project["id"]): {
                 "project_name": project.get("name"),

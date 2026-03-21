@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from typing import Any, Optional
 from urllib.parse import urlsplit, urlunsplit
 
@@ -15,6 +16,12 @@ from app.config import Settings, get_effective_settings
 from app.core.ssl_utils import get_ssl_verify
 
 logger = logging.getLogger(__name__)
+
+# Project list cache
+_PROJECT_LIST_CACHE_TTL_SECONDS = 300  # 5-minute freshness window
+_project_list_cache: list[dict[str, Any]] = []
+_project_list_cache_expires_at = 0.0
+_project_list_refresh_task: Optional[asyncio.Task] = None
 
 
 class GitLabClient:
@@ -483,6 +490,61 @@ def get_gitlab_client() -> GitLabClient:
         _gitlab_client = GitLabClient(settings=settings)
         _gitlab_client_config = current_config
     return _gitlab_client
+
+
+async def _refresh_project_list_cache() -> list[dict[str, Any]]:
+    """Fetch fresh project list from GitLab and update the cache."""
+    global _project_list_cache, _project_list_cache_expires_at, _project_list_refresh_task
+
+    try:
+        gitlab = get_gitlab_client()
+        projects = await asyncio.to_thread(gitlab.get_projects)
+        _project_list_cache = projects
+        _project_list_cache_expires_at = time.time() + _PROJECT_LIST_CACHE_TTL_SECONDS
+        logger.info("Project list cache refreshed, %d projects", len(projects))
+    except Exception as exc:
+        logger.warning("Failed to refresh project list cache: %s", exc)
+    finally:
+        _project_list_refresh_task = None
+    return _project_list_cache
+
+
+async def get_cached_projects() -> list[dict[str, Any]]:
+    """Return cached GitLab project list using stale-while-revalidate.
+
+    Returns stale data immediately when the cache has expired, and kicks off
+    a background refresh so the next caller gets fresh data without blocking.
+    Only blocks on the very first call (cold cache with no data at all).
+    """
+    global _project_list_refresh_task
+
+    now = time.time()
+    if _project_list_cache and _project_list_cache_expires_at > now:
+        # Fresh — return without waiting.
+        return _project_list_cache
+
+    if _project_list_cache:
+        # Stale but not empty — return immediately and refresh in background.
+        if _project_list_refresh_task is None or _project_list_refresh_task.done():
+            _project_list_refresh_task = asyncio.create_task(_refresh_project_list_cache())
+        return _project_list_cache
+
+    # Cold cache: must wait for the first fetch.
+    return await _refresh_project_list_cache()
+
+
+def invalidate_project_list_cache() -> None:
+    """Manually invalidate the project list cache.
+
+    This forces the next call to get_cached_projects() to fetch fresh data.
+    """
+    global _project_list_cache, _project_list_cache_expires_at, _project_list_refresh_task
+    _project_list_cache = []
+    _project_list_cache_expires_at = 0.0
+    if _project_list_refresh_task is not None and not _project_list_refresh_task.done():
+        _project_list_refresh_task.cancel()
+    _project_list_refresh_task = None
+    logger.info("Project list cache invalidated")
 
 
 async def get_accessible_projects_for_oauth_token(

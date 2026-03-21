@@ -491,6 +491,13 @@
                     >
                       {{ t('config.testGitlabConnection') }}
                     </n-button>
+                    <n-button
+                      @click="handleInvalidateProjectCache"
+                      :loading="projectCacheInvalidating"
+                      :disabled="isSectionBusy('gitlab')"
+                    >
+                      {{ t('config.invalidateProjectCache') }}
+                    </n-button>
                      <n-button
                        @click="handleClearSecret('gitlab_bot_token')"
                        :disabled="isSectionBusy('gitlab') || !formValue.gitlab_bot_token_configured"
@@ -832,6 +839,7 @@ import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import {
   getConfig,
+  invalidateProjectCache,
   listGitLabProjectWebhookStatuses,
   resetConfig,
   resetConfigKey,
@@ -914,6 +922,7 @@ const sectionSaving = reactive<Record<ConfigSectionKey, boolean>>({
   session: false
 })
 const gitlabTesting = ref(false)
+const projectCacheInvalidating = ref(false)
 const webhookStatusLoading = ref(false)
 const webhookActionProjectId = ref<number | null>(null)
 const webhookStatuses = ref<GitLabProjectWebhookStatusResult[]>([])
@@ -1529,6 +1538,19 @@ async function handleTestGitLab() {
     message.error(detail)
   } finally {
     gitlabTesting.value = false
+  }
+}
+
+async function handleInvalidateProjectCache() {
+  projectCacheInvalidating.value = true
+  try {
+    await invalidateProjectCache()
+    message.success(t('config.projectCacheInvalidated'))
+  } catch (error: any) {
+    const detail = error?.response?.data?.detail || t('config.projectCacheInvalidateFailed')
+    message.error(detail)
+  } finally {
+    projectCacheInvalidating.value = false
   }
 }
 

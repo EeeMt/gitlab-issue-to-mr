@@ -1038,6 +1038,20 @@ async def delete_mattermost_notification_profile(
     return DeleteResponse(status="success")
 
 
+@router.post("/config/gitlab/projects/cache/invalidate")
+async def invalidate_project_cache(
+    _current_user=Depends(require_admin_user),
+):
+    """Invalidate the cached GitLab project list.
+
+    Forces the next request to fetch a fresh project list from GitLab.
+    """
+    from app.core.gitlab_client import invalidate_project_list_cache
+
+    invalidate_project_list_cache()
+    return {"status": "success", "message": "Project cache invalidated"}
+
+
 @router.post("/config/gitlab/test", response_model=GitLabConfigTestResponse)
 async def test_gitlab_config(
     request: GitLabConfigTestRequest,

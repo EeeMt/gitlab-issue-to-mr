@@ -671,6 +671,11 @@ export async function testGitLabConfig(
   return response.data
 }
 
+export async function invalidateProjectCache(): Promise<{ status: string; message: string }> {
+  const response = await api.post('/config/gitlab/projects/cache/invalidate')
+  return response.data
+}
+
 export async function setupGitLabProjectWebhook(
   projectId: number,
 ): Promise<GitLabProjectWebhookSetupResult> {
