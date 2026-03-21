@@ -27,7 +27,7 @@ router = APIRouter()
 
 class AdminUserSummary(BaseModel):
     id: int
-    gitlab_user_id: int
+    gitlab_user_id: Optional[int]
     username: str
     display_name: Optional[str]
     email: Optional[str]
