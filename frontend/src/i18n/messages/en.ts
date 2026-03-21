@@ -107,6 +107,8 @@ const en = {
       'Emergency admin access is enabled. Use it only for OIDC recovery or administrator lockout scenarios.',
     continueWithGitlab: 'Continue with GitLab',
     or: 'or',
+    usePasswordLogin: 'Sign in with password',
+    useGitlabLogin: 'Sign in with GitLab',
     localAuth: 'Local Authentication',
     oidcAuth: 'GitLab OIDC',
     oidcNotConfigured: 'OIDC is not configured yet',

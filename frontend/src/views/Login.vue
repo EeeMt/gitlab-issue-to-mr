@@ -68,42 +68,58 @@
       </n-tabs>
 
       <n-space v-else vertical :size="16" class="login-card__body">
+        <!-- GitLab Login (default) -->
         <n-button
-          v-if="authState.oidcEnabled"
+          v-if="!showPasswordLogin && authState.oidcEnabled"
           type="primary"
           size="large"
           block
+          class="login-card__gitlab-btn"
           @click="handleLogin"
         >
           {{ t('login.continueWithGitlab') }}
         </n-button>
 
-        <n-divider v-if="authState.oidcEnabled">{{ t('login.or') }}</n-divider>
-
-        <n-space vertical :size="12">
-          <n-input
-            v-model:value="localUsername"
-            :placeholder="t('login.username')"
-            autocomplete="username"
-          />
-          <n-input
-            v-model:value="localPassword"
-            type="password"
-            show-password-on="click"
-            :placeholder="t('login.password')"
-            autocomplete="current-password"
-            @keyup.enter="handleLocalLogin"
-          />
+        <!-- Password Login Toggle -->
+        <div class="login-card__password-toggle">
           <n-button
-            type="primary"
-            strong
-            block
-            :loading="localLoading"
-            @click="handleLocalLogin"
+            quaternary
+            @click="showPasswordLogin = !showPasswordLogin"
           >
-            {{ t('login.signIn') }}
+            <template #icon>
+              <n-icon :component="showPasswordLogin ? LogoGitlab : KeyOutline" />
+            </template>
+            {{ showPasswordLogin ? t('login.useGitlabLogin') : t('login.usePasswordLogin') }}
           </n-button>
-        </n-space>
+        </div>
+
+        <!-- Password Login Form -->
+        <n-collapse-transition :show="showPasswordLogin">
+          <n-space vertical :size="12">
+            <n-input
+              v-model:value="localUsername"
+              :placeholder="t('login.username')"
+              autocomplete="username"
+            />
+            <n-input
+              v-model:value="localPassword"
+              type="password"
+              show-password-on="click"
+              :placeholder="t('login.password')"
+              autocomplete="current-password"
+              @keyup.enter="handleLocalLogin"
+            />
+            <n-button
+              type="primary"
+              strong
+              block
+              :loading="localLoading"
+              @click="handleLocalLogin"
+            >
+              {{ t('login.signIn') }}
+            </n-button>
+          </n-space>
+        </n-collapse-transition>
 
         <div v-if="authState.breakGlassEnabled" class="login-card__break-glass">
           <n-divider>{{ t('login.emergencyAccess') }}</n-divider>
@@ -149,8 +165,8 @@
 import axios from 'axios'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton, NCard, NDivider, NIcon, NInput, NSpace, NTabPane, NTabs, NText, useMessage } from 'naive-ui'
-import { RocketOutline } from '@vicons/ionicons5'
+import { NAlert, NButton, NCard, NCollapseTransition, NDivider, NIcon, NInput, NSpace, NTabPane, NTabs, NText, useMessage } from 'naive-ui'
+import { LogoGitlab, KeyOutline, RocketOutline } from '@vicons/ionicons5'
 import { useRoute } from 'vue-router'
 import { authState, startLogin } from '../auth'
 import { breakGlassLogin } from '../api'
@@ -171,6 +187,7 @@ const loginReason = computed(() => {
 const localUsername = ref('')
 const localPassword = ref('')
 const localLoading = ref(false)
+const showPasswordLogin = ref(false)
 
 const breakGlassUsername = ref(authState.breakGlassUsername || '')
 const breakGlassPassword = ref('')
@@ -314,6 +331,10 @@ async function handleBreakGlassLogin() {
   margin-top: 20px;
 }
 
+.login-card__gitlab-btn {
+  margin-top: 16px;
+}
+
 .login-card__alert {
   border-radius: 12px;
   font-size: 13px;
@@ -327,6 +348,10 @@ async function handleBreakGlassLogin() {
 .login-card__hint {
   display: block;
   line-height: 1.5;
+}
+
+.login-card__password-toggle {
+  text-align: center;
 }
 
 @media (max-width: 767px) {

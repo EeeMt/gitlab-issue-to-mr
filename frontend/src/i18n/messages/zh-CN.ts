@@ -106,6 +106,8 @@ const zhCN = {
     breakGlassEnabled: '紧急管理员入口已启用。请仅在 OIDC 恢复或管理员被全部锁定时使用。',
     continueWithGitlab: '使用 GitLab 继续',
     or: '或',
+    usePasswordLogin: '使用密码登录',
+    useGitlabLogin: '使用 GitLab 登录',
     localAuth: '本地认证',
     oidcAuth: 'GitLab OIDC',
     oidcNotConfigured: 'OIDC 尚未配置',
