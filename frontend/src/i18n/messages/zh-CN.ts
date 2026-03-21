@@ -7,7 +7,7 @@ const zhCN = {
     displayName: '显示名称',
     displayNamePlaceholder: '输入显示名称（可选）',
     email: '邮箱',
-    emailPlaceholder: 'admin@example.com',
+    emailPlaceholder: 'admin\\@example.com',
     password: '密码',
     passwordPlaceholder: '至少 8 个字符',
     confirmPassword: '确认密码',

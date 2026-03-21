@@ -118,6 +118,37 @@ class TestBootstrapPage:
         viewport_width = viewport_size["width"]
         assert abs(box["x"] - (viewport_width - box["width"]) / 2) < 50  # Within 50px tolerance
 
+    def test_bootstrap_email_field_visible_in_chinese(self, page: Page, reset_database):
+        """
+        Test that the email field is visible when using Chinese locale.
+
+        This was a bug where the email field would not render in Chinese locale
+        due to issues with @ symbol escaping in vue-i18n.
+        """
+        # First go to bootstrap to get a page with localStorage access
+        page.goto("/bootstrap")
+        page.wait_for_selector(".bootstrap-card", timeout=10000)
+
+        # Set Chinese locale
+        page.evaluate("window.localStorage.setItem('gimr-locale', 'zh-CN')")
+
+        # Reload to apply Chinese locale
+        page.reload()
+        page.wait_for_selector(".bootstrap-card", timeout=10000)
+
+        # Count all form inputs - should be 5 (username, displayName, email, password, confirmPassword)
+        all_inputs = page.locator(".bootstrap-form input")
+        input_count = all_inputs.count()
+
+        # Assert we have 5 inputs
+        assert input_count == 5, f"Expected 5 inputs in bootstrap form (Chinese), found {input_count}"
+
+        # Check that email input (3rd input, index 2) is visible and is a text input (not password)
+        email_input = all_inputs.nth(2)
+        expect(email_input).to_be_visible()
+        expect(email_input).to_have_attribute("type", "text")
+        expect(email_input).to_have_attribute("placeholder", "admin@example.com")
+
     def test_bootstrap_submit_creates_admin_and_redirects(
         self, page: Page, reset_database
     ):
