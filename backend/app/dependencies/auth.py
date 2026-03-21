@@ -75,18 +75,14 @@ async def require_authenticated_context(
     request: Request,
     auth_context: Optional[AuthContext] = Depends(get_optional_auth_context),
 ) -> Optional[AuthContext]:
-    """Require an authenticated request context when OIDC is enabled.
-    
+    """Require an authenticated request context.
+
     If the X-Skip-Auth-Redirect header is present, return None instead of raising
     an exception to allow the client to handle authentication failures gracefully.
     """
-    settings = get_effective_settings()
-    if not settings.oidc_enabled:
-        return None
-    
     # Allow clients to skip auth redirect for programmatic API calls
     skip_redirect = request.headers.get("X-Skip-Auth-Redirect", "").lower() == "true"
-    
+
     if auth_context is None:
         if skip_redirect:
             return None
@@ -100,10 +96,7 @@ async def require_authenticated_context(
 async def require_authenticated_user(
     auth_context: Optional[AuthContext] = Depends(require_authenticated_context),
 ) -> Optional[User]:
-    """Require an authenticated user when OIDC is enabled."""
-    settings = get_effective_settings()
-    if not settings.oidc_enabled:
-        return None
+    """Require an authenticated user."""
     return auth_context.user if auth_context is not None else None
 
 
@@ -111,24 +104,11 @@ async def require_admin_user(
     request: Request,
     auth_context: Optional[AuthContext] = Depends(require_authenticated_context),
 ) -> Optional[User]:
-    """Require an admin user when auth is enabled."""
-    settings = get_effective_settings()
-    if not settings.oidc_enabled:
-        return None
-    
-    # If auth_context is None and skip-redirect header is set, allow the request
-    # to proceed (the API handler will handle the unauthenticated case)
-    skip_redirect = request.headers.get("X-Skip-Auth-Redirect", "").lower() == "true"
-    if auth_context is None:
-        if skip_redirect:
-            return None
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=getattr(request.state, "auth_failure_detail", None) or "Authentication required",
-        )
-    
+    """Require an admin user."""
+    # require_authenticated_context already validates auth
     current_user = auth_context.user
-    if current_user is None or current_user.platform_role != "platform_admin":
+    if current_user.platform_role != "platform_admin":
+        skip_redirect = request.headers.get("X-Skip-Auth-Redirect", "").lower() == "true"
         if skip_redirect:
             return None
         raise HTTPException(
@@ -145,9 +125,6 @@ def require_page_access(page_key: str):
         auth_context: Optional[AuthContext] = Depends(require_authenticated_context),
     ) -> Optional[User]:
         settings = get_effective_settings()
-        if not settings.oidc_enabled:
-            return None
-
         current_user = auth_context.user if auth_context is not None else None
         if can_access_page(page_key, current_user, settings):
             return current_user
