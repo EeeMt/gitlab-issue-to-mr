@@ -18,9 +18,9 @@ This folder contains the artifacts needed to deploy the current GIMR build into 
 
 The deployment uses these image tags:
 
-- `deploy-backend:latest`
-- `deploy-nginx:latest`
-- `deploy-worker:latest`
+- `gimr-backend:latest`
+- `gimr-nginx:latest`
+- `gimr-worker:latest`
 - `postgres:16-alpine`
 
 ## Quick start on the offline host

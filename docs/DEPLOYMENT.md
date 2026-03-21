@@ -13,7 +13,7 @@
 
 当前 compose 约定：
 
-- `backend` 与 `scheduler` 共用 `deploy-backend:latest`
+- `backend` 与 `scheduler` 共用 `gimr-backend:latest`
 - `backend` 使用 `AUTO_MIGRATE=false`
 - `scheduler` 使用 `AUTO_MIGRATE=true`
 - PostgreSQL 数据挂载在 Docker volume `postgres_data`
@@ -208,7 +208,7 @@ cd ../deploy && docker-compose build nginx && docker-compose up -d nginx
 请重建 Worker 镜像：
 
 ```bash
-docker build -f deploy/Dockerfile.worker -t deploy-worker:latest .
+docker build -f deploy/Dockerfile.worker -t gimr-worker:latest .
 ```
 
 如果 `WORKER_IMAGE` 使用了其他标签，请同步更新配置。

@@ -124,7 +124,7 @@ class Settings(BaseSettings):
     auth_break_glass_password_hash: str = Field(default="")
 
     # Worker Configuration
-    worker_image: str = Field(default="deploy-worker:latest")
+    worker_image: str = Field(default="gimr-worker:latest")
     maven_cache_host_path: str = Field(default="")  # Host path to .m2/repository dir; empty = disabled
     maven_settings_host_path: str = Field(default="")  # Host path to settings.xml; empty = disabled
 

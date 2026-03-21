@@ -13,7 +13,7 @@ services:
       - gimr-network
 
   backend:
-    image: deploy-backend:latest
+    image: gimr-backend:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile.backend
@@ -42,7 +42,7 @@ services:
       - gimr-network
 
   scheduler:
-    image: deploy-backend:latest
+    image: gimr-backend:latest
     container_name: gimr-scheduler
     command: ["python3", "-m", "app.scheduler_service"]
     env_file:

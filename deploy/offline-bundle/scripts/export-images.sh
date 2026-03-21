@@ -5,9 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARCHIVE="${ROOT_DIR}/images/gimr-offline-images.tar.gz"
 
 IMAGES=(
-  "deploy-backend:latest"
-  "deploy-nginx:latest"
-  "deploy-worker:latest"
+  "gimr-backend:latest"
+  "gimr-nginx:latest"
+  "gimr-worker:latest"
   "postgres:16-alpine"
 )
 

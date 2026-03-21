@@ -130,11 +130,11 @@ docker build -f deploy/Dockerfile.backend -t deploy-backend .
 cd deploy && docker-compose up -d backend scheduler
 
 # frontend / nginx
-docker build -f deploy/Dockerfile.frontend -t deploy-nginx:latest .
+docker build -f deploy/Dockerfile.frontend -t gimr-nginx:latest .
 cd deploy && docker-compose up -d --build nginx
 
 # worker
-docker build -f deploy/Dockerfile.worker -t deploy-worker:latest .
+docker build -f deploy/Dockerfile.worker -t gimr-worker:latest .
 ```
 
 ## 使用方式

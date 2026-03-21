@@ -349,7 +349,7 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 | `ANTHROPIC_MODEL` | 使用的模型 | `claude-opus-4-5` |
 | `DATABASE_URL` | PostgreSQL 连接串 | `postgresql+asyncpg://...` |
 | `DOCKER_HOST` | Docker 引擎地址 | `tcp://localhost:2376` |
-| `WORKER_IMAGE` | Worker 容器镜像 | `deploy-worker:latest` |
+| `WORKER_IMAGE` | Worker 容器镜像 | `gimr-worker:latest` |
 | `MAX_CONCURRENCY` | 最大并发 Worker 数 | `3` |
 | `TASK_TIMEOUT` | 任务超时秒数 | `1800` |
 | `DEFAULT_TARGET_BRANCH` | 默认 MR 目标分支 | `main` |

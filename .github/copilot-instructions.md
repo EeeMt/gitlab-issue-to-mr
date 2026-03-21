@@ -38,7 +38,7 @@ cd deploy && docker-compose logs -f
 
 # After source changes, rebuild images:
 docker build -f deploy/Dockerfile.backend -t deploy-backend .
-docker build -f deploy/Dockerfile.worker -t deploy-worker:latest .
+docker build -f deploy/Dockerfile.worker -t gimr-worker:latest .
 ```
 
 ## Architecture
