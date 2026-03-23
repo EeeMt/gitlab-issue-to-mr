@@ -88,13 +88,51 @@
 
             <div class="create-task-form__section">
               <div class="create-task-form__section-title">{{ t('createTask.implementationPrompt') }}</div>
-              <n-form-item :label="t('createTask.prompt')" path="user_prompt">
+              <n-form-item :label="t('createTask.prompt')" path="user_prompt" class="prompt-form-item">
                 <n-input
                   v-model:value="formValue.user_prompt"
                   type="textarea"
                   :rows="6"
                   :placeholder="t('createTask.promptPlaceholder')"
+                  :class="{ 'prompt-textarea--has-variables': unreplacedVariables.length > 0 }"
                 />
+                <n-popover trigger="click" placement="bottom-end" :width="300" :keep-alive-on-hover="false">
+                  <template #trigger>
+                    <n-button
+                      class="prompt-template-btn"
+                      size="small"
+                      :disabled="promptTemplatesLoading || promptTemplates.length === 0"
+                      :loading="promptTemplatesLoading"
+                      type="default"
+                    >
+                      <template #icon>
+                        <n-icon :component="DocumentTextOutline" />
+                      </template>
+                      {{ t('createTask.useTemplate') }}
+                    </n-button>
+                  </template>
+                  <div class="prompt-template-dropdown">
+                    <div class="prompt-template-dropdown__header">{{ t('createTask.selectPromptTemplate') }}</div>
+                    <div v-if="promptTemplates.length === 0" class="prompt-template-dropdown__empty">
+                      {{ t('createTask.noPromptTemplates') }}
+                    </div>
+                    <div
+                      v-for="tmpl in promptTemplates"
+                      :key="tmpl.id"
+                      class="prompt-template-dropdown__item"
+                      @click="applyPromptTemplate(tmpl)"
+                    >
+                      <div class="prompt-template-dropdown__item-name">{{ tmpl.name }}</div>
+                      <div class="prompt-template-dropdown__item-preview">{{ tmpl.content.substring(0, 50) }}...</div>
+                    </div>
+                  </div>
+                </n-popover>
+                <template #feedback>
+                  <div v-if="unreplacedVariables.length > 0" class="prompt-variable-warning">
+                    <n-icon :component="WarningOutline" size="14" />
+                    <span>{{ t('createTask.unreplacedVariablesHint') }}: {{ unreplacedVariables.join(', ') }}</span>
+                  </div>
+                </template>
               </n-form-item>
             </div>
 
@@ -194,12 +232,14 @@ import { useRouter } from 'vue-router'
 import {
   NCard, NForm, NFormItem, NSelect, NInput, NInputNumber,
   NButton, NSpin, NSpace, NRadioGroup, NRadio, NModal,
-  NDatePicker, NTag, NGrid, NGi, useMessage, FormInst, FormRules
+  NDatePicker, NTag, NGrid, NGi, NPopover, NIcon,
+  useMessage, FormInst, FormRules
 } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { getProjects, getBranches, createTask, type Project, type Branch, type CreateTaskRequest } from '../api'
+import { getProjects, getBranches, createTask, getPromptTemplates, type Project, type Branch, type CreateTaskRequest, type PromptTemplate } from '../api'
 import { formatDateTimeUtc8 } from '../utils/datetime'
+import { DocumentTextOutline, WarningOutline } from '@vicons/ionicons5'
 
 const router = useRouter()
 const message = useMessage()
@@ -212,10 +252,20 @@ const loading = ref(false)
 const projectsLoading = ref(false)
 const branchesLoading = ref(false)
 const submitting = ref(false)
+const promptTemplatesLoading = ref(false)
 
 // Data
 const projects = ref<Project[]>([])
 const branches = ref<Branch[]>([])
+const promptTemplates = ref<PromptTemplate[]>([])
+
+// Detect unreplaced variables in prompt
+const unreplacedVariables = computed(() => {
+  const content = formValue.value.user_prompt || ''
+  const matches = content.match(/\{\{([^}]+)\}\}/g)
+  if (!matches) return []
+  return matches.map(m => m.replace(/\{\{|\}\}/g, ''))
+})
 
 // Form state
 const formRef = ref<FormInst | null>(null)
@@ -409,6 +459,28 @@ async function fetchProjects() {
   }
 }
 
+// Fetch prompt templates
+async function fetchPromptTemplates() {
+  promptTemplatesLoading.value = true
+  try {
+    promptTemplates.value = await getPromptTemplates()
+  } catch (error) {
+    console.error('Failed to fetch prompt templates:', error)
+  } finally {
+    promptTemplatesLoading.value = false
+  }
+}
+
+// Apply prompt template
+function applyPromptTemplate(template: PromptTemplate) {
+  if (formValue.value.user_prompt && formValue.value.user_prompt.trim() !== '') {
+    if (!confirm(t('createTask.confirmOverwritePrompt'))) {
+      return
+    }
+  }
+  formValue.value.user_prompt = template.content
+}
+
 // Fetch branches when project changes
 async function fetchBranches(projectId: number) {
   branchesLoading.value = true
@@ -538,6 +610,7 @@ function createAnother() {
 
 onMounted(() => {
   fetchProjects()
+  fetchPromptTemplates()
 })
 </script>
 
@@ -638,5 +711,76 @@ onMounted(() => {
   .create-task-page__title {
     font-size: 24px;
   }
+}
+
+.prompt-form-item {
+  position: relative;
+}
+
+.prompt-form-item :deep(.n-input) {
+  width: 100%;
+  padding-right: 120px;
+}
+
+.prompt-template-btn {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 1;
+}
+
+.prompt-template-dropdown {
+  padding: 8px 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.prompt-template-dropdown__header {
+  padding: 0 12px 8px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.6);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  margin-bottom: 8px;
+}
+
+.prompt-template-dropdown__empty {
+  padding: 16px;
+  text-align: center;
+  color: rgba(15, 23, 42, 0.4);
+  font-size: 13px;
+}
+
+.prompt-template-dropdown__item {
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.prompt-template-dropdown__item:hover {
+  background-color: rgba(32, 128, 240, 0.08);
+}
+
+.prompt-template-dropdown__item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(15, 23, 42, 0.9);
+  margin-bottom: 2px;
+}
+
+.prompt-template-dropdown__item-preview {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.prompt-variable-warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #d97706;
+  font-size: 12px;
+  margin-top: 4px;
 }
 </style>

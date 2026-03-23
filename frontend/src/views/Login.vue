@@ -339,6 +339,8 @@ async function handleBreakGlassLogin() {
   border-radius: 12px;
   font-size: 13px;
   padding: 10px 14px;
+  text-align: center;
+  margin-top: 16px;
 }
 
 .login-card__break-glass {

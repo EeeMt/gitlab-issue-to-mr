@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import case, select, func, false
@@ -124,8 +125,8 @@ def _apply_project_scope(query, access_scope: ProjectAccessScope):
 def _apply_analytics_filters(
     query,
     access_scope: ProjectAccessScope,
-    project_id: int | None = None,
-    initiator_username: str | None = None,
+    project_id: Optional[int] = None,
+    initiator_username: Optional[str] = None,
 ):
     query = _apply_project_scope(query, access_scope)
     if project_id is not None:
@@ -192,8 +193,8 @@ def _summarize_error_message(error_message: str | None) -> str | None:
 @router.get("/stats/analytics")
 async def get_analytics(
     days: int = Query(default=30, ge=7, le=90),
-    project_id: int | None = Query(default=None),
-    initiator_username: str | None = Query(default=None),
+    project_id: Optional[int] = Query(default=None),
+    initiator_username: Optional[str] = Query(default=None),
     db: AsyncSession = Depends(get_db),
     _current_user=Depends(require_page_access("analytics")),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),

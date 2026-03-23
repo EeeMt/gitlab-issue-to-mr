@@ -164,7 +164,7 @@ async def health() -> dict:
 
 
 # Import and include routers
-from app.api import admin_users, auth, webhook, tasks, containers, stats, config
+from app.api import admin_users, auth, webhook, tasks, containers, stats, config, prompt_templates
 
 app.include_router(auth.router, prefix="/api", tags=["auth"])
 app.include_router(webhook.router, prefix="/api", tags=["webhook"])
@@ -191,6 +191,12 @@ app.include_router(
     prefix="/api",
     tags=["config"],
     dependencies=[Depends(require_authenticated_user)],
+)
+app.include_router(
+    prompt_templates.router,
+    prefix="/api",
+    tags=["prompt-templates"],
+    dependencies=[Depends(require_admin_user)],
 )
 app.include_router(
     admin_users.router,

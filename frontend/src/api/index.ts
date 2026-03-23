@@ -805,4 +805,33 @@ export async function rescheduleTask(taskId: number, request: RescheduleTaskRequ
   return response.data
 }
 
+// Prompt Template APIs
+export interface PromptTemplate {
+  id: number
+  name: string
+  content: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export async function getPromptTemplates(): Promise<PromptTemplate[]> {
+  const response = await api.get('/prompt-templates')
+  return response.data
+}
+
+export async function createPromptTemplate(template: { name: string; content: string; is_active?: boolean }): Promise<PromptTemplate> {
+  const response = await api.post('/prompt-templates', template)
+  return response.data
+}
+
+export async function updatePromptTemplate(templateId: number, template: { name?: string; content?: string; is_active?: boolean }): Promise<PromptTemplate> {
+  const response = await api.put(`/prompt-templates/${templateId}`, template)
+  return response.data
+}
+
+export async function deletePromptTemplate(templateId: number): Promise<void> {
+  await api.delete(`/prompt-templates/${templateId}`)
+}
+
 export default api

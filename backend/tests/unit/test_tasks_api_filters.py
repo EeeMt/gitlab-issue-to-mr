@@ -120,6 +120,8 @@ async def test_build_project_lookup_reuses_access_scope_projects_without_gitlab_
 
 @pytest.mark.asyncio
 async def test_list_projects_uses_ttl_cache_for_unrestricted_scope():
+    import app.core.gitlab_client as gitlab_client
+
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
     fake_projects = [
         {
@@ -128,13 +130,19 @@ async def test_list_projects_uses_ttl_cache_for_unrestricted_scope():
             "path_with_namespace": "team/project-alpha",
         }
     ]
-    tasks_api._project_list_cache = []
-    tasks_api._project_list_cache_expires_at = 0.0
+    # Reset cache in gitlab_client
+    gitlab_client._project_list_cache = []
+    gitlab_client._project_list_cache_expires_at = 0.0
+    gitlab_client._project_list_refresh_task = None
+
+    # Use a real time.time function to avoid issues with logging and other calls
+    import time
+    real_time = time.time
 
     with patch("app.core.gitlab_client.get_gitlab_client", return_value=SimpleNamespace(get_projects=object())), patch(
-        "app.api.tasks.asyncio.to_thread",
+        "app.core.gitlab_client.asyncio.to_thread",
         new=AsyncMock(return_value=fake_projects),
-    ) as to_thread, patch("app.api.tasks.time.time", side_effect=[100.0, 101.0]):
+    ) as to_thread:
         first = await list_projects(access_scope=access_scope)
         second = await list_projects(access_scope=access_scope)
 
