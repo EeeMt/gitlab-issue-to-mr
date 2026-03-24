@@ -21,12 +21,14 @@ router = APIRouter()
 class PromptTemplateCreate(BaseModel):
     name: str
     content: str
+    variable_tips: Optional[dict[str, str]] = None
     is_active: bool = True
 
 
 class PromptTemplateUpdate(BaseModel):
     name: Optional[str] = None
     content: Optional[str] = None
+    variable_tips: Optional[dict[str, str]] = None
     is_active: Optional[bool] = None
 
 
@@ -34,6 +36,7 @@ class PromptTemplateResponse(BaseModel):
     id: int
     name: str
     content: str
+    variable_tips: Optional[dict[str, str]] = None
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -58,6 +61,7 @@ async def list_prompt_templates(
             id=t.id,
             name=t.name,
             content=t.content,
+            variable_tips=t.variable_tips,
             is_active=t.is_active,
             created_at=t.created_at,
             updated_at=t.updated_at,
@@ -76,6 +80,7 @@ async def create_prompt_template(
     db_template = PromptTemplate(
         name=template.name,
         content=template.content,
+        variable_tips=template.variable_tips,
         is_active=template.is_active,
     )
     db.add(db_template)
@@ -85,6 +90,7 @@ async def create_prompt_template(
         id=db_template.id,
         name=db_template.name,
         content=db_template.content,
+        variable_tips=db_template.variable_tips,
         is_active=db_template.is_active,
         created_at=db_template.created_at,
         updated_at=db_template.updated_at,
@@ -111,6 +117,7 @@ async def get_prompt_template(
         id=template.id,
         name=template.name,
         content=template.content,
+        variable_tips=template.variable_tips,
         is_active=template.is_active,
         created_at=template.created_at,
         updated_at=template.updated_at,
@@ -139,6 +146,8 @@ async def update_prompt_template(
         template.name = update.name
     if update.content is not None:
         template.content = update.content
+    if update.variable_tips is not None:
+        template.variable_tips = update.variable_tips
     if update.is_active is not None:
         template.is_active = update.is_active
 
@@ -148,6 +157,7 @@ async def update_prompt_template(
         id=template.id,
         name=template.name,
         content=template.content,
+        variable_tips=template.variable_tips,
         is_active=template.is_active,
         created_at=template.created_at,
         updated_at=template.updated_at,

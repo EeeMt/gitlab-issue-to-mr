@@ -88,18 +88,11 @@
 
             <div class="create-task-form__section">
               <div class="create-task-form__section-title">{{ t('createTask.implementationPrompt') }}</div>
-              <n-form-item :label="t('createTask.prompt')" path="user_prompt" class="prompt-form-item">
-                <n-input
-                  v-model:value="formValue.user_prompt"
-                  type="textarea"
-                  :rows="6"
-                  :placeholder="t('createTask.promptPlaceholder')"
-                  :class="{ 'prompt-textarea--has-variables': unreplacedVariables.length > 0 }"
-                />
+              <div class="prompt-label-row">
+                <span class="prompt-label">{{ t('createTask.prompt') }}<span class="prompt-label__required">*</span></span>
                 <n-popover trigger="click" placement="bottom-end" :width="300" :keep-alive-on-hover="false">
                   <template #trigger>
                     <n-button
-                      class="prompt-template-btn"
                       size="small"
                       :disabled="promptTemplatesLoading || promptTemplates.length === 0"
                       :loading="promptTemplatesLoading"
@@ -127,6 +120,12 @@
                     </div>
                   </div>
                 </n-popover>
+              </div>
+              <n-form-item path="user_prompt" :show-label="false">
+                <VariableEditor
+                  v-model="formValue.user_prompt"
+                  :variable-tips="promptVariableTips"
+                />
                 <template #feedback>
                   <div v-if="unreplacedVariables.length > 0" class="prompt-variable-warning">
                     <n-icon :component="WarningOutline" size="14" />
@@ -240,6 +239,7 @@ import { useI18n } from 'vue-i18n'
 import { getProjects, getBranches, createTask, getPromptTemplates, type Project, type Branch, type CreateTaskRequest, type PromptTemplate } from '../api'
 import { formatDateTimeUtc8 } from '../utils/datetime'
 import { DocumentTextOutline, WarningOutline } from '@vicons/ionicons5'
+import VariableEditor from '../components/VariableEditor.vue'
 
 const router = useRouter()
 const message = useMessage()
@@ -258,6 +258,9 @@ const promptTemplatesLoading = ref(false)
 const projects = ref<Project[]>([])
 const branches = ref<Branch[]>([])
 const promptTemplates = ref<PromptTemplate[]>([])
+
+// Per-session variable tips from template (not persisted)
+const promptVariableTips = ref<Record<string, string> | undefined>(undefined)
 
 // Detect unreplaced variables in prompt
 const unreplacedVariables = computed(() => {
@@ -479,6 +482,7 @@ function applyPromptTemplate(template: PromptTemplate) {
     }
   }
   formValue.value.user_prompt = template.content
+  promptVariableTips.value = template.variable_tips
 }
 
 // Fetch branches when project changes
@@ -717,16 +721,21 @@ onMounted(() => {
   position: relative;
 }
 
-.prompt-form-item :deep(.n-input) {
-  width: 100%;
-  padding-right: 120px;
+.prompt-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
 }
 
-.prompt-template-btn {
-  position: absolute;
-  top: 8px;
-  right: 12px;
-  z-index: 1;
+.prompt-label {
+  font-size: 14px;
+  color: var(--n-label-text-color);
+}
+
+.prompt-label__required {
+  color: var(--n-color-error);
+  margin-left: 2px;
 }
 
 .prompt-template-dropdown {

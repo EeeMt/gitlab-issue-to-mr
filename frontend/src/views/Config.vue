@@ -854,6 +854,46 @@
           :rows="6"
         />
       </n-form-item>
+      <n-form-item :label="t('config.promptTemplateVariableTips')">
+        <div class="variable-tips-editor">
+          <div v-if="contentVariables.size === 0" class="variable-tips-editor__empty">
+            {{ t('config.promptTemplateNoVariables') }}
+          </div>
+          <div v-else-if="Object.keys(filteredVariableTips).length === 0" class="variable-tips-editor__empty">
+            {{ t('config.promptTemplateNoVariableTips') }}
+          </div>
+          <div v-for="(tip, varName) in filteredVariableTips" :key="varName" class="variable-tips-editor__row">
+            <code class="variable-tips-editor__var-name">{{ varName }}</code>
+            <n-input
+              :value="tip"
+              size="small"
+              :placeholder="t('config.promptTemplateTipPlaceholder')"
+              @update:value="(v: string) => promptTemplateForm.variable_tips[varName] = v"
+            />
+            <n-button size="small" @click="removeVariableTip(varName)" type="error" quaternary>
+              <template #icon><n-icon :component="CloseOutline" /></template>
+            </n-button>
+          </div>
+          <div v-if="availableVariables.length > 0" class="variable-tips-editor__add">
+            <n-select
+              v-model:value="newVariableName"
+              :options="availableVariables.map(v => ({ label: v, value: v }))"
+              size="small"
+              :placeholder="t('config.promptTemplateSelectVariable')"
+              style="width: 150px;"
+              clearable
+            />
+            <n-input
+              v-model:value="newVariableTip"
+              size="small"
+              :placeholder="t('config.promptTemplateTipPlaceholder')"
+            />
+            <n-button size="small" @click="addVariableTip()" type="primary" quaternary :disabled="!newVariableName">
+              <template #icon><n-icon :component="AddOutline" /></template>
+            </n-button>
+          </div>
+        </div>
+      </n-form-item>
       <n-form-item :label="t('config.promptTemplateActive')" path="is_active">
         <n-switch v-model:value="promptTemplateForm.is_active" />
       </n-form-item>
@@ -868,7 +908,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref, watch } from 'vue'
+import { computed, h, onMounted, reactive, ref, toRaw, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   NAlert,
@@ -879,6 +919,7 @@ import {
   NFormItem,
   NGi,
   NGrid,
+  NIcon,
   NInput,
   NInputNumber,
   NModal,
@@ -896,6 +937,7 @@ import {
 } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
+import { AddOutline, CloseOutline } from '@vicons/ionicons5'
 import {
   getConfig,
   invalidateProjectCache,
@@ -1005,8 +1047,55 @@ const promptTemplateFormRef = ref<FormInst | null>(null)
 const promptTemplateForm = reactive({
   name: '',
   content: '',
+  variable_tips: {} as Record<string, string>,
   is_active: true
 })
+const newVariableName = ref('')
+const newVariableTip = ref('')
+
+// Extract variables from Template Content
+const contentVariables = computed(() => {
+  const content = promptTemplateForm.content || ''
+  const matches = content.match(/\{\{([^}]+)\}\}/g)
+  if (!matches) return new Set<string>()
+  return new Set(matches.map(m => m.replace(/\{\{|\}\}/g, '')))
+})
+
+// Filter variable tips to only include variables that exist in content
+const filteredVariableTips = computed(() => {
+  const tips: Record<string, string> = {}
+  for (const [key, value] of Object.entries(promptTemplateForm.variable_tips)) {
+    if (contentVariables.value.has(key)) {
+      tips[key] = value
+    }
+  }
+  return tips
+})
+
+// Available variables (exist in content but not yet have tips)
+const availableVariables = computed(() => {
+  const vars: string[] = []
+  for (const v of contentVariables.value) {
+    if (!promptTemplateForm.variable_tips[v]) {
+      vars.push(v)
+    }
+  }
+  return vars
+})
+
+function addVariableTip(varName?: string) {
+  const name = varName || newVariableName.value.trim()
+  const tip = newVariableTip.value.trim()
+  if (name && contentVariables.value.has(name) && !promptTemplateForm.variable_tips[name]) {
+    promptTemplateForm.variable_tips[name] = tip
+    newVariableName.value = ''
+    newVariableTip.value = ''
+  }
+}
+
+function removeVariableTip(varName: string) {
+  delete promptTemplateForm.variable_tips[varName]
+}
 
 const sectionKeys: ConfigSectionKey[] = ['runtime', 'sharedPages', 'gitlab', 'oidc', 'session']
 
@@ -1601,6 +1690,7 @@ function handleCreatePromptTemplate() {
   promptTemplateEditingId.value = null
   promptTemplateForm.name = ''
   promptTemplateForm.content = ''
+  promptTemplateForm.variable_tips = {}
   promptTemplateForm.is_active = true
   promptTemplateModalVisible.value = true
 }
@@ -1609,17 +1699,63 @@ function handleEditPromptTemplate(template: PromptTemplate) {
   promptTemplateEditingId.value = template.id
   promptTemplateForm.name = template.name
   promptTemplateForm.content = template.content
+  promptTemplateForm.variable_tips = template.variable_tips ? JSON.parse(JSON.stringify(template.variable_tips)) : {}
   promptTemplateForm.is_active = template.is_active
   promptTemplateModalVisible.value = true
+
+  console.log('[PromptTemplate Edit] Loaded template:', {
+    id: template.id,
+    name: template.name,
+    content: template.content,
+    variable_tips: JSON.parse(JSON.stringify(template.variable_tips || {}))
+  })
 }
 
 async function handleSavePromptTemplate() {
+  // Capture current form state immediately
+  // Use JSON parse/stringify to deep clone the reactive object and avoid proxy issues
+  const currentContent = promptTemplateForm.content || ''
+  const rawTips = toRaw(promptTemplateForm.variable_tips)
+  const currentTips = rawTips ? JSON.parse(JSON.stringify(rawTips)) : {}
+
+  // Validate: extract variables from content
+  const contentMatches = currentContent.match(/\{\{([^}]+)\}\}/g) || []
+  const contentVars = new Set(contentMatches.map((m: string) => m.replace(/\{\{|\}\}/g, '')))
+  const tipKeys = Object.keys(currentTips)
+
+  console.log('[PromptTemplate Save] Validation:', {
+    templateName: promptTemplateForm.name,
+    editingId: promptTemplateEditingId.value,
+    content: currentContent,
+    extractedVars: Array.from(contentVars),
+    tips: currentTips,
+    tipKeys
+  })
+
+  // Find tips that don't have corresponding variables in content
+  const invalidTips = tipKeys.filter(varName => !contentVars.has(varName))
+
+  console.log('[PromptTemplate Save] Invalid tips check:', {
+    contentVars: Array.from(contentVars),
+    tipKeys,
+    invalidTips
+  })
+
+  if (invalidTips.length > 0) {
+    console.log('[PromptTemplate Save] BLOCKING SAVE - invalid tips detected')
+    message.warning(t('config.promptTemplateInvalidTips', { variables: invalidTips.join(', ') }))
+    return
+  }
+
+  console.log('[PromptTemplate Save] Proceeding with save...')
+
   try {
     const { createPromptTemplate, updatePromptTemplate } = await import('../api')
     if (promptTemplateEditingId.value) {
       await updatePromptTemplate(promptTemplateEditingId.value, {
         name: promptTemplateForm.name,
         content: promptTemplateForm.content,
+        variable_tips: currentTips,
         is_active: promptTemplateForm.is_active
       })
       message.success(t('config.updatePromptTemplateSuccess'))
@@ -1627,6 +1763,7 @@ async function handleSavePromptTemplate() {
       await createPromptTemplate({
         name: promptTemplateForm.name,
         content: promptTemplateForm.content,
+        variable_tips: currentTips,
         is_active: promptTemplateForm.is_active
       })
       message.success(t('config.createPromptTemplateSuccess'))
@@ -1858,6 +1995,12 @@ watch(
   },
   { immediate: true }
 )
+
+watch(activeConfigTab, (tab) => {
+  if (tab === 'prompt-templates' && promptTemplates.value.length === 0) {
+    fetchPromptTemplates()
+  }
+})
 </script>
 
 <style scoped>
@@ -2076,5 +2219,41 @@ watch(
   font-size: 13px;
   color: rgba(15, 23, 42, 0.7);
   line-height: 1.4;
+}
+
+.variable-tips-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.variable-tips-editor__empty {
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.45);
+  padding: 8px 0;
+}
+
+.variable-tips-editor__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.variable-tips-editor__var-name {
+  font-family: monospace;
+  background: rgba(245, 158, 11, 0.1);
+  color: #92400e;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  min-width: 80px;
+}
+
+.variable-tips-editor__add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
 }
 </style>

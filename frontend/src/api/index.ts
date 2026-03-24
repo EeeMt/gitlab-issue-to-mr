@@ -810,6 +810,7 @@ export interface PromptTemplate {
   id: number
   name: string
   content: string
+  variable_tips?: Record<string, string>
   is_active: boolean
   created_at: string
   updated_at: string
@@ -820,12 +821,12 @@ export async function getPromptTemplates(): Promise<PromptTemplate[]> {
   return response.data
 }
 
-export async function createPromptTemplate(template: { name: string; content: string; is_active?: boolean }): Promise<PromptTemplate> {
+export async function createPromptTemplate(template: { name: string; content: string; variable_tips?: Record<string, string>; is_active?: boolean }): Promise<PromptTemplate> {
   const response = await api.post('/prompt-templates', template)
   return response.data
 }
 
-export async function updatePromptTemplate(templateId: number, template: { name?: string; content?: string; is_active?: boolean }): Promise<PromptTemplate> {
+export async function updatePromptTemplate(templateId: number, template: { name?: string; content?: string; variable_tips?: Record<string, string>; is_active?: boolean }): Promise<PromptTemplate> {
   const response = await api.put(`/prompt-templates/${templateId}`, template)
   return response.data
 }
