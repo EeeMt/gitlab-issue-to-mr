@@ -9,7 +9,14 @@
       <div class="variable-tips-list">
         <div v-for="v in variablesWithTips" :key="v.name" class="variable-tip-item">
           <code class="variable-tip-item__name">{{ v.name }}</code>
-          <span class="variable-tip-item__tip">{{ v.tip || t('createTask.noTipAvailable') }}</span>
+          <n-input
+            v-if="editable"
+            :value="v.tip"
+            size="small"
+            :placeholder="t('createTask.noTipAvailable')"
+            @update:value="(tip) => handleTipChange(v.name, tip)"
+          />
+          <span v-else class="variable-tip-item__tip">{{ v.tip || t('createTask.noTipAvailable') }}</span>
         </div>
       </div>
     </div>
@@ -22,7 +29,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NIcon } from 'naive-ui'
+import { NIcon, NInput } from 'naive-ui'
 import { InformationCircleOutline } from '@vicons/ionicons5'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
@@ -35,10 +42,12 @@ const { t } = useI18n()
 const props = defineProps<{
   modelValue: string
   variableTips?: Record<string, string>
+  editable?: boolean
 }>()
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
+  'update:variableTips': [tips: Record<string, string>]
 }>()
 
 const editorContainer = ref<HTMLElement | null>(null)
@@ -64,6 +73,23 @@ watch(content, (val) => {
 watch(templateTips, (val) => {
   tipsRef.value = val
 })
+
+// When content changes, emit cleaned tips (without orphan tips) if editable
+// Use flush: 'post' to ensure this runs AFTER the migration in useVariableEditor
+watch(variables, () => {
+  if (props.editable && mergedTips.value) {
+    emit('update:variableTips', { ...mergedTips.value })
+  }
+}, { flush: 'post' })
+
+// Whether tips are editable
+const editable = computed(() => props.editable ?? false)
+
+// Handle tip change when editable - use mergedTips which is already cleaned
+function handleTipChange(varName: string, tip: string) {
+  const newTips = { ...mergedTips.value, [varName]: tip }
+  emit('update:variableTips', newTips)
+}
 
 // Variable pattern decoration
 const variableMark = Decoration.mark({ class: 'cm-variable-highlight' })

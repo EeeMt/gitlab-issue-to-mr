@@ -847,52 +847,12 @@
         <n-input v-model:value="promptTemplateForm.name" :placeholder="t('config.promptTemplateNamePlaceholder')" />
       </n-form-item>
       <n-form-item :label="t('config.promptTemplateContent')" path="content" required>
-        <n-input
-          v-model:value="promptTemplateForm.content"
-          type="textarea"
-          :placeholder="t('config.promptTemplateContentPlaceholder')"
-          :rows="6"
+        <VariableEditor
+          v-model="promptTemplateForm.content"
+          :variable-tips="promptTemplateForm.variable_tips"
+          editable
+          @update:variable-tips="(tips) => promptTemplateForm.variable_tips = tips"
         />
-      </n-form-item>
-      <n-form-item :label="t('config.promptTemplateVariableTips')">
-        <div class="variable-tips-editor">
-          <div v-if="contentVariables.size === 0" class="variable-tips-editor__empty">
-            {{ t('config.promptTemplateNoVariables') }}
-          </div>
-          <div v-else-if="Object.keys(filteredVariableTips).length === 0" class="variable-tips-editor__empty">
-            {{ t('config.promptTemplateNoVariableTips') }}
-          </div>
-          <div v-for="(tip, varName) in filteredVariableTips" :key="varName" class="variable-tips-editor__row">
-            <code class="variable-tips-editor__var-name">{{ varName }}</code>
-            <n-input
-              :value="tip"
-              size="small"
-              :placeholder="t('config.promptTemplateTipPlaceholder')"
-              @update:value="(v: string) => promptTemplateForm.variable_tips[varName] = v"
-            />
-            <n-button size="small" @click="removeVariableTip(varName)" type="error" quaternary>
-              <template #icon><n-icon :component="CloseOutline" /></template>
-            </n-button>
-          </div>
-          <div v-if="availableVariables.length > 0" class="variable-tips-editor__add">
-            <n-select
-              v-model:value="newVariableName"
-              :options="availableVariables.map(v => ({ label: v, value: v }))"
-              size="small"
-              :placeholder="t('config.promptTemplateSelectVariable')"
-              style="width: 150px;"
-              clearable
-            />
-            <n-input
-              v-model:value="newVariableTip"
-              size="small"
-              :placeholder="t('config.promptTemplateTipPlaceholder')"
-            />
-            <n-button size="small" @click="addVariableTip()" type="primary" quaternary :disabled="!newVariableName">
-              <template #icon><n-icon :component="AddOutline" /></template>
-            </n-button>
-          </div>
-        </div>
       </n-form-item>
       <n-form-item :label="t('config.promptTemplateActive')" path="is_active">
         <n-switch v-model:value="promptTemplateForm.is_active" />
@@ -908,7 +868,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref, toRaw, watch } from 'vue'
+import { computed, h, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   NAlert,
@@ -919,7 +879,6 @@ import {
   NFormItem,
   NGi,
   NGrid,
-  NIcon,
   NInput,
   NInputNumber,
   NModal,
@@ -937,7 +896,6 @@ import {
 } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { AddOutline, CloseOutline } from '@vicons/ionicons5'
 import {
   getConfig,
   invalidateProjectCache,
@@ -959,6 +917,7 @@ import {
 } from '../api'
 import MattermostNotificationsPanel from '../components/config/MattermostNotificationsPanel.vue'
 import OidcDiagnosticsPanel from '../components/config/OidcDiagnosticsPanel.vue'
+import VariableEditor from '../components/VariableEditor.vue'
 import WorkerSettingsPanel from '../components/config/WorkerSettingsPanel.vue'
 
 type ConfigForm = {
@@ -1050,52 +1009,6 @@ const promptTemplateForm = reactive({
   variable_tips: {} as Record<string, string>,
   is_active: true
 })
-const newVariableName = ref('')
-const newVariableTip = ref('')
-
-// Extract variables from Template Content
-const contentVariables = computed(() => {
-  const content = promptTemplateForm.content || ''
-  const matches = content.match(/\{\{([^}]+)\}\}/g)
-  if (!matches) return new Set<string>()
-  return new Set(matches.map(m => m.replace(/\{\{|\}\}/g, '')))
-})
-
-// Filter variable tips to only include variables that exist in content
-const filteredVariableTips = computed(() => {
-  const tips: Record<string, string> = {}
-  for (const [key, value] of Object.entries(promptTemplateForm.variable_tips)) {
-    if (contentVariables.value.has(key)) {
-      tips[key] = value
-    }
-  }
-  return tips
-})
-
-// Available variables (exist in content but not yet have tips)
-const availableVariables = computed(() => {
-  const vars: string[] = []
-  for (const v of contentVariables.value) {
-    if (!promptTemplateForm.variable_tips[v]) {
-      vars.push(v)
-    }
-  }
-  return vars
-})
-
-function addVariableTip(varName?: string) {
-  const name = varName || newVariableName.value.trim()
-  const tip = newVariableTip.value.trim()
-  if (name && contentVariables.value.has(name) && !promptTemplateForm.variable_tips[name]) {
-    promptTemplateForm.variable_tips[name] = tip
-    newVariableName.value = ''
-    newVariableTip.value = ''
-  }
-}
-
-function removeVariableTip(varName: string) {
-  delete promptTemplateForm.variable_tips[varName]
-}
 
 const sectionKeys: ConfigSectionKey[] = ['runtime', 'sharedPages', 'gitlab', 'oidc', 'session']
 
@@ -1699,62 +1612,35 @@ function handleEditPromptTemplate(template: PromptTemplate) {
   promptTemplateEditingId.value = template.id
   promptTemplateForm.name = template.name
   promptTemplateForm.content = template.content
-  promptTemplateForm.variable_tips = template.variable_tips ? JSON.parse(JSON.stringify(template.variable_tips)) : {}
+  // Set variable_tips - the watch will sync it to templateTipsRef
+  promptTemplateForm.variable_tips = template.variable_tips ? { ...template.variable_tips } : {}
   promptTemplateForm.is_active = template.is_active
   promptTemplateModalVisible.value = true
-
-  console.log('[PromptTemplate Edit] Loaded template:', {
-    id: template.id,
-    name: template.name,
-    content: template.content,
-    variable_tips: JSON.parse(JSON.stringify(template.variable_tips || {}))
-  })
 }
 
 async function handleSavePromptTemplate() {
-  // Capture current form state immediately
-  // Use JSON parse/stringify to deep clone the reactive object and avoid proxy issues
   const currentContent = promptTemplateForm.content || ''
-  const rawTips = toRaw(promptTemplateForm.variable_tips)
-  const currentTips = rawTips ? JSON.parse(JSON.stringify(rawTips)) : {}
+  const currentTips = { ...promptTemplateForm.variable_tips }
 
-  // Validate: extract variables from content
+  // Validate: extract variables from content and check for orphan tips
   const contentMatches = currentContent.match(/\{\{([^}]+)\}\}/g) || []
   const contentVars = new Set(contentMatches.map((m: string) => m.replace(/\{\{|\}\}/g, '')))
   const tipKeys = Object.keys(currentTips)
 
-  console.log('[PromptTemplate Save] Validation:', {
-    templateName: promptTemplateForm.name,
-    editingId: promptTemplateEditingId.value,
-    content: currentContent,
-    extractedVars: Array.from(contentVars),
-    tips: currentTips,
-    tipKeys
-  })
-
   // Find tips that don't have corresponding variables in content
   const invalidTips = tipKeys.filter(varName => !contentVars.has(varName))
 
-  console.log('[PromptTemplate Save] Invalid tips check:', {
-    contentVars: Array.from(contentVars),
-    tipKeys,
-    invalidTips
-  })
-
   if (invalidTips.length > 0) {
-    console.log('[PromptTemplate Save] BLOCKING SAVE - invalid tips detected')
     message.warning(t('config.promptTemplateInvalidTips', { variables: invalidTips.join(', ') }))
     return
   }
-
-  console.log('[PromptTemplate Save] Proceeding with save...')
 
   try {
     const { createPromptTemplate, updatePromptTemplate } = await import('../api')
     if (promptTemplateEditingId.value) {
       await updatePromptTemplate(promptTemplateEditingId.value, {
         name: promptTemplateForm.name,
-        content: promptTemplateForm.content,
+        content: currentContent,
         variable_tips: currentTips,
         is_active: promptTemplateForm.is_active
       })
@@ -1762,7 +1648,7 @@ async function handleSavePromptTemplate() {
     } else {
       await createPromptTemplate({
         name: promptTemplateForm.name,
-        content: promptTemplateForm.content,
+        content: currentContent,
         variable_tips: currentTips,
         is_active: promptTemplateForm.is_active
       })
