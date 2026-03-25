@@ -8,7 +8,8 @@ services:
     ports:
       - "8880:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - gimr-network
@@ -35,12 +36,19 @@ services:
       # The CA certificate is baked into the image at /etc/ssl/certs/custom-ca.crt
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
     networks:
       - gimr-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   scheduler:
     image: gimr-backend:latest
@@ -60,7 +68,10 @@ services:
       # Generic volume mounts for worker containers (JSON array)
       - "WORKER_VOLUME_MOUNTS=[{\"host_path\": \"/etc/ssl/certs/custom-ca.crt\", \"container_path\": \"/etc/ssl/certs/custom-ca.crt\", \"mode\": \"ro\"}]"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # Mount CA certificate into scheduler (enable when CA cert file is provided at deployment)
@@ -81,6 +92,12 @@ services:
     restart: unless-stopped
     networks:
       - gimr-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gimr -d gimr"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   e2e:
     build:
