@@ -148,6 +148,38 @@ git push -u origin refactor/<task-name>
 
 ## 现状分析总结
 
+### Frontend 代码组织问题
+
+| 问题 | 文件 | 严重度 |
+|------|------|--------|
+| 无测试框架 | `package.json` | Critical |
+| 文件过大 (800行) | `views/CreateTask.vue` | High |
+| 文件过大 (900行) | `views/TaskView.vue` | High |
+| 文件过大 (490行) | `views/Dashboard.vue` | Medium |
+| 复杂编辑器逻辑 | `components/VariableEditor.vue` | Medium |
+
+### Frontend 代码质量问题
+
+| 问题 | 位置 | 严重度 |
+|------|------|--------|
+| 缺少测试基础设施 | 整个 frontend | Critical |
+| 复杂表单状态管理 | `CreateTask.vue` - schedule/buildScheduleRequest | High |
+| 实时日志流处理 | `TaskView.vue` - EventSource/logStream | High |
+| 自动刷新逻辑 | `Dashboard.vue` - pollTimer | Medium |
+| 变量提取正则 | `useVariableEditor.ts` | Medium |
+
+### Frontend 测试覆盖问题
+
+| 问题 | 状态 | 优先级 |
+|------|------|--------|
+| 无 Vitest 配置 | 0 tests | Critical |
+| 无 Vue Test Utils | 0 tests | Critical |
+| 无 API mock 工具 | 0 tests | High |
+| 组件无单元测试 | CreateTask, TaskView, Dashboard | High |
+| Composables 无测试 | useVariableEditor | High |
+
+---
+
 ### 代码组织问题
 
 | 问题 | 文件 | 严重度 |
@@ -448,6 +480,13 @@ def test_list_containers_empty():
 | `backend/tests/unit/test_containers_api.py` | High |
 | `backend/tests/unit/test_stats_api.py` | High |
 | `backend/tests/unit/test_scrubbing.py` | Medium |
+| `frontend/vitest.config.ts` | Critical |
+| `frontend/src/test/setup.ts` | High |
+| `frontend/src/test/mocks/api.ts` | High |
+| `frontend/src/composables/useVariableEditor.spec.ts` | High |
+| `frontend/src/views/CreateTask.spec.ts` | High |
+| `frontend/src/views/Dashboard.spec.ts` | High |
+| `frontend/src/views/TaskView.spec.ts` | High |
 
 ### 需要修复 Bug 的文件
 | 文件 | 问题 |
@@ -498,6 +537,27 @@ Phase 4 (稳定性 - 1-2周):
   4.1 敏感数据清理测试
   4.2 Scheduler 核心逻辑测试
   4.3 GitLab Client 重试测试
+
+Phase 5 (前端测试基础设施 - 3-5天):
+  5.1 添加 Vitest + Vue Test Utils 依赖
+  5.2 创建 vitest.config.ts
+  5.3 创建 test/setup.ts
+  5.4 创建 API mock 工具
+  5.5 创建 i18n mock
+
+Phase 6 (前端 Composable/工具测试 - 2-3天):
+  6.1 useVariableEditor 测试
+  6.2 datetime 工具测试
+
+Phase 7 (前端组件测试 - 5-7天):
+  7.1 VariableEditor 测试
+  7.2 CreateTask 测试
+  7.3 Dashboard 测试
+  7.4 TaskView 测试
+
+Phase 8 (前端集成测试 - 2-3天):
+  8.1 API 层测试
+  8.2 Auth 模块测试
 ```
 
 **任务依赖关系:**
@@ -553,3 +613,641 @@ cd backend && pytest tests/e2e/ -v
 | 测试覆盖率 | > 80% | ~45% (需确认) |
 | 类型注解完整度 | 100% | - |
 | Critical bugs | 0 | 1 (bare except) |
+| Frontend 测试覆盖率 | > 70% | 0% (无测试) |
+
+---
+
+## Phase 5: Frontend 测试基础设施完善
+
+### 5.1 添加测试依赖 (Critical)
+
+**文件:** `frontend/package.json`
+
+**新增依赖:**
+```json
+{
+  "devDependencies": {
+    "vitest": "^2.1.0",
+    "@vue/test-utils": "^2.4.6",
+    "@testing-library/vue": "^8.1.0",
+    "jsdom": "^25.0.0",
+    "vitest-coverage-v8": "^2.0.0"
+  }
+}
+```
+
+**操作:**
+```bash
+cd frontend && npm install
+```
+
+### 5.2 创建 Vitest 配置 (Critical)
+
+**文件:** `frontend/vitest.config.ts` (新建)
+
+**内容:**
+```typescript
+import { defineConfig } from 'vitest/config'
+import vue from '@vitejs/plugin-vue'
+import { fileURLToPath, URL } from 'node:url'
+
+export default defineConfig({
+  plugins: [vue()],
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test/setup.ts'],
+    include: ['src/**/*.{test,spec}.{js,ts}'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      include: ['src/**/*.{ts,vue}'],
+      exclude: ['src/**/*.d.ts', 'src/main.ts', 'src/vite-env.d.ts']
+    }
+  },
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url))
+    }
+  }
+})
+```
+
+### 5.3 创建测试设置文件 (High)
+
+**文件:** `frontend/src/test/setup.ts` (新建)
+
+**内容:**
+```typescript
+import { cleanup } from '@vue/test-utils'
+import { afterEach, vi } from 'vitest'
+
+// Global cleanup after each test
+afterEach(() => {
+  cleanup()
+})
+
+// Mock window.matchMedia
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: vi.fn().mockImplementation(query => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn()
+  }))
+})
+
+// Mock ResizeObserver
+global.ResizeObserver = vi.fn().mockImplementation(() => ({
+  observe: vi.fn(),
+  unobserve: vi.fn(),
+  disconnect: vi.fn()
+}))
+
+// Mock Element.getBoundingClientRect
+Element.prototype.getBoundingClientRect = vi.fn(() => ({
+  width: 120,
+  height: 120,
+  top: 0,
+  left: 0,
+  bottom: 0,
+  right: 0
+}))
+```
+
+### 5.4 创建 API Mock 工具 (High)
+
+**文件:** `frontend/src/test/mocks/api.ts` (新建)
+
+**内容:**
+```typescript
+import { vi } from 'vitest'
+import type { Task, Project, Branch, PromptTemplate } from '@/api'
+
+// Mock data factories
+export const createMockTask = (overrides = {}): Task => ({
+  id: 1,
+  project_id: 1,
+  project_name: 'test-project',
+  project_path_with_namespace: 'group/test-project',
+  project_url: 'https://gitlab.example.com/group/test-project',
+  issue_iid: 42,
+  issue_url: 'https://gitlab.example.com/group/test-project/-/issues/42',
+  issue_id: 100,
+  note_id: null,
+  user_prompt: 'Fix the login bug',
+  initiator_user_id: 1,
+  initiator_gitlab_user_id: 10,
+  initiator_username: 'testuser',
+  branch_name: 'fix-login-bug',
+  branch_url: 'https://gitlab.example.com/group/test-project/-/tree/fix-login-bug',
+  merge_request_iid: null,
+  merge_request_url: null,
+  status: 'pending',
+  priority: 1,
+  scheduled_at: null,
+  container_id: null,
+  target_branch: 'main',
+  target_branch_url: null,
+  commit_sha: null,
+  error_message: null,
+  additions: 0,
+  deletions: 0,
+  total_changes: 0,
+  input_tokens: null,
+  output_tokens: null,
+  is_manual: true,
+  created_at: '2026-03-31T10:00:00Z',
+  updated_at: '2026-03-31T10:00:00Z',
+  started_at: null,
+  completed_at: null,
+  ...overrides
+})
+
+export const createMockProject = (overrides = {}): Project => ({
+  id: 1,
+  name: 'test-project',
+  path_with_namespace: 'group/test-project',
+  default_branch: 'main',
+  ...overrides
+})
+
+export const createMockBranch = (overrides = {}): Branch => ({
+  name: 'main',
+  ...overrides
+})
+
+export const createMockPromptTemplate = (overrides = {}): PromptTemplate => ({
+  id: 1,
+  name: 'Bug Fix Template',
+  content: 'Fix the {{issue_type}} in {{file_path}}',
+  variable_tips: { issue_type: 'Type of issue (bug, feature, etc.)', file_path: 'Path to the file' },
+  is_active: true,
+  created_at: '2026-03-31T10:00:00Z',
+  updated_at: '2026-03-31T10:00:00Z',
+  ...overrides
+})
+
+// Mock API functions
+export const mockApi = {
+  getTasks: vi.fn(),
+  getTask: vi.fn(),
+  getTaskLogs: vi.fn(),
+  cancelTask: vi.fn(),
+  retryTask: vi.fn(),
+  executeTask: vi.fn(),
+  rescheduleTask: vi.fn(),
+  getProjects: vi.fn(),
+  getBranches: vi.fn(),
+  createTask: vi.fn(),
+  getPromptTemplates: vi.fn(),
+  getStats: vi.fn(),
+  getConfig: vi.fn(),
+  updateConfig: vi.fn()
+}
+
+export const setupMockApi = () => {
+  return mockApi
+}
+```
+
+### 5.5 创建 i18n Mock (Medium)
+
+**文件:** `frontend/src/test/mocks/i18n.ts` (新建)
+
+**内容:**
+```typescript
+import { vi } from 'vitest'
+
+export const mockI18n = {
+  t: vi.fn((key: string) => key),
+  locale: { value: 'en' }
+}
+
+export const createI18nMock = () => mockI18n
+```
+
+---
+
+## Phase 6: Frontend 单元测试
+
+### 6.1 测试 useVariableEditor Composable (High)
+
+**文件:** `frontend/src/composables/useVariableEditor.spec.ts` (新建)
+
+**测试覆盖:**
+```typescript
+describe('useVariableEditor', () => {
+  // 变量提取
+  describe('extractVariables', () => {
+    it('should extract single variable', () => ...)
+    it('should extract multiple variables', () => ...)
+    it('should ignore empty variable names {{}}', () => ...)
+    it('should trim whitespace from variable names', () => ...)
+    it('should remove duplicate variables', () => ...)
+    it('should return empty array for content without variables', () => ...)
+  })
+
+  // Tips 合并
+  describe('mergedTips', () => {
+    it('should prioritize local tips over template tips', () => ...)
+    it('should only include tips for variables in content', () => ...)
+    it('should return empty object when no variables', () => ...)
+  })
+
+  // 变量重命名检测
+  describe('migrateTipsOnRename', () => {
+    it('should detect single variable rename', () => ...)
+    it('should not migrate when multiple variables change', () => ...)
+  })
+
+  // variablesWithTips
+  describe('variablesWithTips', () => {
+    it('should return array of VariableTip objects', () => ...)
+  })
+})
+```
+
+### 6.2 测试 datetime 工具函数 (Medium)
+
+**文件:** `frontend/src/utils/datetime.spec.ts` (新建)
+
+**测试覆盖:**
+```typescript
+describe('datetime utilities', () => {
+  describe('parseUtcDate', () => {
+    it('should parse ISO string with Z suffix', () => ...)
+    it('should parse ISO string without Z suffix', () => ...)
+    it('should handle Date object', () => ...)
+    it('should handle timestamp', () => ...)
+  })
+
+  describe('formatDateTimeUtc8', () => {
+    it('should format datetime in UTC+8 timezone', () => ...)
+    it('should use locale-specific format', () => ...)
+  })
+
+  describe('formatDateTimeUtc8Compact', () => {
+    it('should format datetime without seconds', () => ...)
+  })
+})
+```
+
+---
+
+## Phase 7: Frontend 组件测试
+
+### 7.1 测试 VariableEditor 组件 (High)
+
+**文件:** `frontend/src/components/VariableEditor.spec.ts` (新建)
+
+**测试覆盖:**
+```typescript
+describe('VariableEditor', () => {
+  // 基础渲染
+  it('should render codemirror editor', () => ...)
+  it('should display tips panel when variables exist', () => ...)
+  it('should show no-variables message when content has no variables', () => ...)
+
+  // 变量高亮
+  it('should highlight {{variable}} patterns', () => ...)
+
+  // 工具提示
+  it('should show tooltip on variable hover', () => ...)
+
+  // v-model 绑定
+  it('should emit update:modelValue on content change', () => ...)
+  it('should update editor when modelValue prop changes externally', () => ...)
+
+  // 模板提示
+  describe('variableTips prop', () => {
+    it('should display tips for variables', () => ...)
+    it('should handle editable tips mode', () => ...)
+    it('should emit update:variableTips on tip change', () => ...)
+  })
+
+  // 清理
+  it('should destroy editor on unmount', () => ...)
+})
+```
+
+### 7.2 测试 CreateTask 组件 (High)
+
+**文件:** `frontend/src/views/CreateTask.spec.ts` (新建)
+
+**测试覆盖:**
+```typescript
+describe('CreateTask', () => {
+  // 基础渲染
+  it('should render form with all sections', () => ...)
+  it('should show loading state during data fetch', () => ...)
+
+  // 项目选择
+  describe('project selection', () => {
+    it('should fetch projects on mount', () => ...)
+    it('should fetch branches when project changes', () => ...)
+    it('should reset branch selection when project changes', () => ...)
+    it('should set target branch to project default', () => ...)
+  })
+
+  // 分支选择
+  describe('branch selection', () => {
+    it('should populate branch options from API', () => ...)
+    it('should move main to top of target branch options', () => ...)
+    it('should clear new branch name when base branch changes', () => ...)
+  })
+
+  // 表单验证
+  describe('form validation', () => {
+    it('should require project selection', () => ...)
+    it('should require base branch selection', () => ...)
+    it('should require user prompt', () => ...)
+    it('should show branch conflict warning', () => ...)
+  })
+
+  // 调度选项
+  describe('schedule options', () => {
+    it('should show delay inputs when delay selected', () => ...)
+    it('should show datetime picker when scheduled selected', () => ...)
+    it('should calculate delay_seconds correctly', () => ...)
+    it('should validate scheduled time is in future', () => ...)
+  })
+
+  // Prompt 模板
+  describe('prompt templates', () => {
+    it('should fetch templates on mount', () => ...)
+    it('should apply template on selection', () => ...)
+    it('should confirm before overwriting existing prompt', () => ...)
+    it('should detect unreplaced variables', () => ...)
+  })
+
+  // 提交
+  describe('form submission', () => {
+    it('should call createTask API on submit', () => ...)
+    it('should show success modal on success', () => ...)
+    it('should navigate to task view on viewTask', () => ...)
+    it('should reset form on createAnother', () => ...)
+    it('should show error message on failure', () => ...)
+  })
+
+  // 重置
+  describe('form reset', () => {
+    it('should reset all form values', () => ...)
+    it('should clear validation errors', () => ...)
+  })
+})
+```
+
+### 7.3 测试 Dashboard 组件 (High)
+
+**文件:** `frontend/src/views/Dashboard.spec.ts` (新建)
+
+**测试覆盖:**
+```typescript
+describe('Dashboard', () => {
+  // 基础渲染
+  it('should render task list', () => ...)
+  it('should show loading state', () => ...)
+  it('should display summary cards', () => ...)
+
+  // 过滤器
+  describe('filters', () => {
+    it('should filter by status', () => ...)
+    it('should filter by project', () => ...)
+    it('should filter by initiator', () => ...)
+    it('should refetch tasks when filter changes', () => ...)
+  })
+
+  // 自动刷新
+  describe('auto-refresh', () => {
+    it('should poll every 15 seconds', () => ...)
+    it('should skip polling when tab not visible', () => ...)
+    it('should clear timer on unmount', () => ...)
+  })
+
+  // 任务操作
+  describe('task navigation', () => {
+    it('should navigate to task view on row click', () => ...)
+    it('should not navigate when clicking interactive elements', () => ...)
+  })
+
+  // 响应式
+  describe('responsive layout', () => {
+    it('should show mobile columns on narrow screens', () => ...)
+    it('should show desktop columns on wide screens', () => ...)
+  })
+
+  // 摘要计算
+  describe('summary calculation', () => {
+    it('should count total visible tasks', () => ...)
+    it('should count running tasks', () => ...)
+    it('should count pending/queued tasks', () => ...)
+    it('should count completed tasks', () => ...)
+  })
+})
+```
+
+### 7.4 测试 TaskView 组件 (High)
+
+**文件:** `frontend/src/views/TaskView.spec.ts` (新建)
+
+**测试覆盖:**
+```typescript
+describe('TaskView', () => {
+  // 基础渲染
+  it('should render task details', () => ...)
+  it('should show loading state', () => ...)
+  it('should display summary cards', () => ...)
+
+  // 任务操作
+  describe('task actions', () => {
+    it('should show cancel button for active tasks', () => ...)
+    it('should show retry button for failed/cancelled tasks', () => ...)
+    it('should show execute button for pending tasks', () => ...)
+    it('should show reschedule controls for scheduled tasks', () => ...)
+    it('should disable actions based on permissions', () => ...)
+  })
+
+  // 操作处理
+  describe('action handlers', () => {
+    it('should call cancelTask API on cancel', () => ...)
+    it('should call retryTask API on retry', () => ...)
+    it('should call executeTask API on execute', () => ...)
+    it('should call rescheduleTask API on reschedule', () => ...)
+    it('should refresh task after action', () => ...)
+  })
+
+  // 日志
+  describe('logs', () => {
+    it('should fetch task logs on mount', () => ...)
+    it('should connect to log stream for running tasks', () => ...)
+    it('should display logs with ANSI to HTML conversion', () => ...)
+    it('should trim large log buffers', () => ...)
+  })
+
+  // 自动刷新
+  describe('auto-refresh', () => {
+    it('should poll every 5 seconds for active tasks', () => ...)
+    it('should close log stream on unmount', () => ...)
+  })
+
+  // 权限检查
+  describe('canManageTask', () => {
+    it('should return true for admin users', () => ...)
+    it('should return true for task initiator', () => ...)
+    it('should return false for non-admin non-initiator', () => ...)
+  })
+})
+```
+
+---
+
+## Phase 8: Frontend 集成测试
+
+### 8.1 API 层测试 (Medium)
+
+**文件:** `frontend/src/api/api.spec.ts` (新建)
+
+**测试覆盖:**
+```typescript
+describe('API functions', () => {
+  // Task APIs
+  describe('getTasks', () => {
+    it('should call /api/tasks with params', () => ...)
+    it('should handle errors gracefully', () => ...)
+  })
+
+  describe('getTask', () => {
+    it('should call /api/tasks/:id', () => ...)
+  })
+
+  describe('createTask', () => {
+    it('should POST to /api/tasks with request body', () => ...)
+    it('should return created task', () => ...)
+  })
+
+  // 认证错误处理
+  describe('auth error handling', () => {
+    it('should redirect to login on 401', () => ...)
+    it('should skip redirect with X-Skip-Auth-Redirect header', () => ...)
+  })
+})
+```
+
+### 8.2 Auth 模块测试 (Medium)
+
+**文件:** `frontend/src/auth.spec.ts` (新建)
+
+**测试覆盖:**
+```typescript
+describe('auth module', () => {
+  describe('initializeAuth', () => {
+    it('should fetch auth status on first call', () => ...)
+    it('should return cached result on subsequent calls', () => ...)
+    it('should handle fetch errors gracefully', () => ...)
+  })
+
+  describe('authState', () => {
+    it('should have correct initial state', () => ...)
+  })
+
+  describe('isAdmin', () => {
+    it('should return true for platform_admin role', () => ...)
+    it('should return false for other roles', () => ...)
+  })
+
+  describe('canAccessSharedPage', () => {
+    it('should allow access when OIDC disabled', () => ...)
+    it('should allow access for admins', () => ...)
+    it('should check page permissions for regular users', () => ...)
+  })
+})
+```
+
+---
+
+## Frontend 测试文件清单
+
+### 需要新建的测试文件
+| 文件 | 优先级 | 依赖 |
+|------|--------|------|
+| `frontend/vitest.config.ts` | Critical | - |
+| `frontend/src/test/setup.ts` | High | - |
+| `frontend/src/test/mocks/api.ts` | High | - |
+| `frontend/src/test/mocks/i18n.ts` | Medium | - |
+| `frontend/src/composables/useVariableEditor.spec.ts` | High | setup.ts |
+| `frontend/src/utils/datetime.spec.ts` | Medium | setup.ts |
+| `frontend/src/components/VariableEditor.spec.ts` | High | setup.ts, mocks |
+| `frontend/src/views/CreateTask.spec.ts` | High | setup.ts, mocks |
+| `frontend/src/views/Dashboard.spec.ts` | High | setup.ts, mocks |
+| `frontend/src/views/TaskView.spec.ts` | High | setup.ts, mocks |
+| `frontend/src/api/api.spec.ts` | Medium | setup.ts |
+| `frontend/src/auth.spec.ts` | Medium | setup.ts |
+
+---
+
+## Frontend 验证方式
+
+```bash
+# 1. 安装测试依赖
+cd frontend && npm install
+
+# 2. 运行所有前端测试
+cd frontend && npx vitest run
+
+# 3. 运行测试并查看覆盖率
+cd frontend && npx vitest run --coverage
+
+# 4. 运行测试并监听变化 (开发模式)
+cd frontend && npx vitest
+
+# 5. 运行特定测试文件
+cd frontend && npx vitest run src/views/CreateTask.spec.ts
+
+# 6. 运行包含特定名称的测试
+cd frontend && npx vitest run -t "should fetch projects"
+```
+
+---
+
+## Frontend 实施顺序
+
+```
+Phase 5 (测试基础设施 - 3-5天):
+  5.1 添加测试依赖
+  5.2 创建 Vitest 配置
+  5.3 创建测试设置文件
+  5.4 创建 API Mock 工具
+  5.5 创建 i18n Mock
+
+Phase 6 (Composable/工具测试 - 2-3天):
+  6.1 测试 useVariableEditor
+  6.2 测试 datetime 工具
+
+Phase 7 (组件测试 - 5-7天):
+  7.1 测试 VariableEditor
+  7.2 测试 CreateTask
+  7.3 测试 Dashboard
+  7.4 测试 TaskView
+
+Phase 8 (集成测试 - 2-3天):
+  8.1 API 层测试
+  8.2 Auth 模块测试
+```
+
+---
+
+## Frontend 风险评估
+
+| 变更 | 风险 | 缓解措施 |
+|------|------|----------|
+| 添加测试依赖 | 低 | Vitest 是成熟框架 |
+| 组件测试 | 中 | 使用 Vue Test Utils 隔离组件 |
+| Mock API | 低 | 创建可复用的 mock 工厂 |
+| 定时器测试 | 中 | 使用 fake timers |
+| EventSource 测试 | 高 | 条件导入，JSDOM 不支持时跳过 |
