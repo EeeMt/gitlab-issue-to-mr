@@ -294,28 +294,60 @@ class WorkerExecutor:
         if mr_iid:
             return mr_iid, mr_web_url
 
-        # Check for existing open MRs from this branch
+        # Try to find existing open MR from this branch
+        existing = self._find_existing_mr(task)
+        if existing:
+            return existing
+
+        # No existing MR - create a new one
+        return self._create_new_mr(task)
+
+    def _find_existing_mr(
+        self,
+        task: Task,
+    ) -> tuple[Optional[int], Optional[str]] | None:
+        """Find existing open MR for the task's branch.
+
+        Args:
+            task: Task object
+
+        Returns:
+            Tuple of (mr_iid, mr_web_url) if found, None otherwise
+        """
         try:
             existing_mrs = self.gitlab.gl.projects.get(task.project_id).mergerequests.list(
                 source_branch=task.branch_name,
                 state="opened",
             )
-            if existing_mrs:
-                mr_iid = existing_mrs[0].iid
-                mr_web_url = self.gitlab.normalize_web_url(existing_mrs[0].web_url)
-                logger.info(f"[Task {task.id}] Reusing existing MR !{mr_iid} for branch {task.branch_name}")
-                return mr_iid, mr_web_url
+            if not existing_mrs:
+                return None
+
+            mr_iid = existing_mrs[0].iid
+            mr_web_url = self.gitlab.normalize_web_url(existing_mrs[0].web_url)
+            logger.info(f"[Task {task.id}] Reusing existing MR !{mr_iid} for branch {task.branch_name}")
+            return mr_iid, mr_web_url
         except Exception as e:
             logger.warning(f"[Task {task.id}] Failed to look up existing MR: {e}")
+        return None
 
-        # No existing MR - create a new one
+    def _create_new_mr(
+        self,
+        task: Task,
+    ) -> tuple[Optional[int], Optional[str]]:
+        """Create a new draft MR for the task.
+
+        Args:
+            task: Task object
+
+        Returns:
+            Tuple of (mr_iid, mr_web_url) if successful, (None, None) otherwise
+        """
         settings = get_settings()
         target_branch = task.target_branch or settings.default_target_branch
         mr_title = self._build_initial_mr_title(task)
+        initial_mr_desc = self._build_initial_mr_description(task)
 
         try:
-            initial_mr_desc = self._build_initial_mr_description(task)
-
             mr_response = self.gitlab.gl.projects.get(task.project_id).mergerequests.create({
                 "source_branch": task.branch_name,
                 "target_branch": target_branch,
@@ -323,13 +355,14 @@ class WorkerExecutor:
                 "description": initial_mr_desc,
                 "draft": True,  # Create as draft MR
             })
-            mr_iid = mr_response.iid
-            mr_web_url = self.gitlab.normalize_web_url(mr_response.web_url)
-            logger.info(f"[Task {task.id}] Created initial draft MR !{mr_iid}")
-            return mr_iid, mr_web_url
         except Exception as e:
             logger.warning(f"[Task {task.id}] Failed to create initial MR: {e}, continuing without MR")
             return None, None
+
+        mr_iid = mr_response.iid
+        mr_web_url = self.gitlab.normalize_web_url(mr_response.web_url)
+        logger.info(f"[Task {task.id}] Created initial draft MR !{mr_iid}")
+        return mr_iid, mr_web_url
 
     def _build_container_env(
         self,

@@ -4,23 +4,15 @@ import asyncio
 import logging
 import time
 from datetime import UTC, datetime
-from typing import Any, Optional
-from urllib.parse import quote
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, model_validator
-from sqlalchemy import select, func, false
+from sqlalchemy import select, false
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_effective_settings, get_settings
-from app.core.mattermost_notifications import (
-    MATTERMOST_EVENT_TASK_CANCELLED,
-    MATTERMOST_EVENT_TASK_EXECUTE_NOW,
-    MATTERMOST_EVENT_TASK_RESCHEDULED,
-    MATTERMOST_EVENT_TASK_RETRY_SCHEDULED,
-    notify_task_event,
-)
-from app.core.scheduling import normalize_scheduled_datetime, resolve_scheduled_at
+from app.core.projects import build_project_lookup, get_project_metadata
+from app.core.scheduling import resolve_scheduled_at
+from app.core.task_helpers import _serialize_task
 from app.database import get_db
 from app.dependencies.auth import get_optional_current_user, require_page_access
 from app.dependencies.project_access import (
@@ -30,109 +22,22 @@ from app.dependencies.project_access import (
 )
 from app.models import Task, TaskLog, TaskStatus, User
 
+from app.api.task_schemas import CreateTaskRequest, RescheduleTaskRequest, RetryTaskRequest
+from app.api.task_operations import (
+    get_task_with_access_check,
+    notify_task_cancelled,
+    notify_task_execute_now,
+    notify_task_rescheduled,
+    notify_task_retried,
+    validate_scheduled_datetime_in_future,
+    validate_task_status_for_cancel,
+    validate_task_status_for_execute,
+    validate_task_status_for_retry,
+    validate_task_status_for_reschedule,
+)
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-# Shared project utilities
-from app.core.projects import build_project_lookup, get_project_metadata
-
-# Re-export from gitlab_client for backwards compatibility
-from app.core.gitlab_client import get_cached_projects as _get_cached_projects
-
-
-def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-    """Serialize a task row for API responses."""
-    metadata = project_metadata or {}
-    settings = get_effective_settings()
-    project_path = metadata.get("project_path_with_namespace")
-    project_url = f"{settings.gitlab_url.rstrip('/')}/{project_path}" if project_path else None
-    issue_url = (
-        f"{project_url}/-/issues/{task.issue_iid}"
-        if project_url and task.issue_iid
-        else None
-    )
-    branch_url = (
-        f"{project_url}/-/tree/{quote(task.branch_name, safe='')}"
-        if project_url and task.branch_name
-        else None
-    )
-    target_branch_url = (
-        f"{project_url}/-/tree/{quote(task.target_branch, safe='')}"
-        if project_url and task.target_branch
-        else None
-    )
-    return {
-        "id": task.id,
-        "project_id": task.project_id,
-        "project_name": metadata.get("project_name"),
-        "project_path_with_namespace": metadata.get("project_path_with_namespace"),
-        "project_url": project_url,
-        "issue_iid": task.issue_iid,
-        "issue_url": issue_url,
-        "issue_id": task.issue_id,
-        "note_id": task.note_id,
-        "user_prompt": task.user_prompt,
-        "initiator_user_id": task.initiator_user_id,
-        "initiator_gitlab_user_id": task.initiator_gitlab_user_id,
-        "initiator_username": task.initiator_username,
-        "branch_name": task.branch_name,
-        "branch_url": branch_url,
-        "merge_request_iid": task.merge_request_iid,
-        "merge_request_url": task.merge_request_url,
-        "status": task.status.value,
-        "priority": task.priority,
-        "scheduled_at": task.scheduled_at.isoformat() if task.scheduled_at else None,
-        "container_id": task.container_id,
-        "target_branch": task.target_branch,
-        "target_branch_url": target_branch_url,
-        "commit_sha": task.commit_sha,
-        "error_message": task.error_message,
-        "additions": task.additions,
-        "deletions": task.deletions,
-        "total_changes": task.total_changes,
-        "input_tokens": task.input_tokens,
-        "output_tokens": task.output_tokens,
-        "is_manual": task.is_manual,
-        "created_at": task.created_at.isoformat(),
-        "updated_at": task.updated_at.isoformat(),
-        "started_at": task.started_at.isoformat() if task.started_at else None,
-        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
-    }
-
-
-def _can_manage_task(task: Task, current_user: Optional[User]) -> bool:
-    """Return whether the current user may operate on a task."""
-    settings = get_effective_settings()
-    if not settings.oidc_enabled:
-        return True
-
-    if current_user is None:
-        return False
-
-    if current_user.platform_role == "platform_admin":
-        return True
-
-    if task.initiator_user_id is not None and task.initiator_user_id == current_user.id:
-        return True
-
-    if (
-        task.initiator_gitlab_user_id is not None
-        and task.initiator_gitlab_user_id == current_user.gitlab_user_id
-    ):
-        return True
-
-    return False
-
-
-def _require_task_operator(task: Task, current_user: Optional[User]) -> None:
-    """Ensure the current user may operate on a task."""
-    if _can_manage_task(task, current_user):
-        return
-
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="You may only operate on your own tasks unless you are an admin",
-    )
 
 
 @router.get("/tasks")
@@ -284,16 +189,7 @@ async def get_task_logs(
     db: AsyncSession = Depends(get_db),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
-    """Get task logs.
-
-    Args:
-        task_id: Task ID
-        db: Database session
-
-    Returns:
-        List of task log entries
-    """
-    # Check if task exists
+    """Get task logs."""
     result = await db.execute(select(Task).where(Task.id == task_id))
     task = result.scalar_one_or_none()
 
@@ -304,7 +200,6 @@ async def get_task_logs(
         )
     require_project_access(task.project_id, access_scope)
 
-    # Get logs
     result = await db.execute(
         select(TaskLog)
         .where(TaskLog.task_id == task_id)
@@ -430,31 +325,9 @@ async def cancel_task(
     current_user: Optional[User] = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
-    """Cancel a task.
-
-    Args:
-        task_id: Task ID
-        db: Database session
-
-    Returns:
-        Success message
-    """
-    result = await db.execute(select(Task).where(Task.id == task_id))
-    task = result.scalar_one_or_none()
-
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Task {task_id} not found",
-        )
-    require_project_access(task.project_id, access_scope)
-    _require_task_operator(task, current_user)
-
-    if task.status not in [TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot cancel task with status {task.status.value}",
-        )
+    """Cancel a task."""
+    task = await get_task_with_access_check(task_id, db, access_scope, current_user)
+    validate_task_status_for_cancel(task)
 
     task.status = TaskStatus.CANCELLED
     task.completed_at = datetime.now(UTC).replace(tzinfo=None)
@@ -462,24 +335,10 @@ async def cancel_task(
     await db.commit()
     await db.refresh(task)
 
-    try:
-        await notify_task_event(task, MATTERMOST_EVENT_TASK_CANCELLED)
-    except Exception as exc:
-        logger.warning("Failed to send Mattermost cancel notification for task %s: %s", task_id, exc)
-
+    await notify_task_cancelled(task)
     logger.info(f"Task {task_id} cancelled via API")
 
     return {"status": "success", "message": f"Task {task_id} cancelled"}
-
-
-class RetryTaskRequest(BaseModel):
-    """Optional request body for retrying a task.
-
-    If scheduled_datetime is provided, the task will be retried at that time
-    instead of being queued immediately.
-    """
-
-    scheduled_datetime: Optional[datetime] = None
 
 
 @router.post("/tasks/{task_id}/retry")
@@ -495,41 +354,13 @@ async def retry_task(
     If a scheduled_datetime is supplied in the request body the task will be
     reset to PENDING and held until that time; otherwise it is queued
     immediately (existing behaviour).
-
-    Args:
-        task_id: Task ID
-        request: Optional body with scheduled_datetime
-        db: Database session
-
-    Returns:
-        Success message
     """
-    result = await db.execute(select(Task).where(Task.id == task_id))
-    task = result.scalar_one_or_none()
-
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Task {task_id} not found",
-        )
-    require_project_access(task.project_id, access_scope)
-    _require_task_operator(task, current_user)
-
-    if task.status not in [TaskStatus.FAILED, TaskStatus.CANCELLED]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot retry task with status {task.status.value}",
-        )
+    task = await get_task_with_access_check(task_id, db, access_scope, current_user)
+    validate_task_status_for_retry(task)
 
     scheduled_at: Optional[datetime] = None
     if request and request.scheduled_datetime is not None:
-        normalized = normalize_scheduled_datetime(request.scheduled_datetime)
-        if normalized is None or normalized <= datetime.now(UTC).replace(tzinfo=None):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Scheduled datetime must be in the future",
-            )
-        scheduled_at = normalized
+        scheduled_at = validate_scheduled_datetime_in_future(request.scheduled_datetime)
 
     previous_scheduled_at = task.scheduled_at
     task.status = TaskStatus.PENDING
@@ -545,34 +376,11 @@ async def retry_task(
     await db.commit()
     await db.refresh(task)
 
-    try:
-        await notify_task_event(
-            task,
-            MATTERMOST_EVENT_TASK_RETRY_SCHEDULED,
-            context={
-                "previous_scheduled_at": previous_scheduled_at,
-                "scheduled_at": scheduled_at,
-            },
-        )
-    except Exception as exc:
-        logger.warning("Failed to send Mattermost retry notification for task %s: %s", task_id, exc)
-
+    await notify_task_retried(task, previous_scheduled_at, scheduled_at)
     action = f"scheduled for retry at {scheduled_at}" if scheduled_at else "reset for retry"
     logger.info(f"Task {task_id} {action}")
 
     return {"status": "success", "message": f"Task {task_id} {action}"}
-
-class RescheduleTaskRequest(BaseModel):
-    """Request model for updating an existing task's scheduled time."""
-
-    scheduled_datetime: datetime
-
-    @model_validator(mode="after")
-    def validate_schedule_is_future(self) -> "RescheduleTaskRequest":
-        normalized_scheduled = normalize_scheduled_datetime(self.scheduled_datetime)
-        if normalized_scheduled is None or normalized_scheduled <= datetime.now(UTC).replace(tzinfo=None):
-            raise ValueError("Scheduled datetime must be in the future for manual tasks")
-        return self
 
 
 @router.post("/tasks/{task_id}/execute")
@@ -582,50 +390,16 @@ async def execute_task(
     current_user: Optional[User] = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
-    """Trigger immediate execution of a pending task.
+    """Trigger immediate execution of a pending task."""
+    task = await get_task_with_access_check(task_id, db, access_scope, current_user)
+    validate_task_status_for_execute(task)
 
-    Args:
-        task_id: Task ID
-        db: Database session
-
-    Returns:
-        Success message
-    """
-    result = await db.execute(select(Task).where(Task.id == task_id))
-    task = result.scalar_one_or_none()
-
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Task {task_id} not found",
-        )
-    require_project_access(task.project_id, access_scope)
-    _require_task_operator(task, current_user)
-
-    if task.status != TaskStatus.PENDING:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Task must be in PENDING status to execute immediately, current: {task.status.value}",
-        )
-
-    # Remove scheduled_at to execute immediately
     previous_scheduled_at = task.scheduled_at
     task.scheduled_at = None
     await db.commit()
     await db.refresh(task)
 
-    try:
-        await notify_task_event(
-            task,
-            MATTERMOST_EVENT_TASK_EXECUTE_NOW,
-            context={
-                "previous_scheduled_at": previous_scheduled_at,
-                "scheduled_at": None,
-            },
-        )
-    except Exception as exc:
-        logger.warning("Failed to send Mattermost execute-now notification for task %s: %s", task_id, exc)
-
+    await notify_task_execute_now(task, previous_scheduled_at)
     logger.info(f"Task {task_id} scheduled for immediate execution")
 
     return {"status": "success", "message": f"Task {task_id} scheduled for immediate execution"}
@@ -640,129 +414,20 @@ async def reschedule_task(
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Update the scheduled execution time for an existing pending scheduled task."""
-    result = await db.execute(select(Task).where(Task.id == task_id))
-    task = result.scalar_one_or_none()
+    task = await get_task_with_access_check(task_id, db, access_scope, current_user)
+    validate_task_status_for_reschedule(task)
 
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Task {task_id} not found",
-        )
-    require_project_access(task.project_id, access_scope)
-    _require_task_operator(task, current_user)
-
-    if task.status != TaskStatus.PENDING:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Task must be in PENDING status to reschedule, current: {task.status.value}",
-        )
-
-    if task.scheduled_at is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only scheduled tasks can update their scheduled time",
-        )
-
-    normalized_scheduled = normalize_scheduled_datetime(request.scheduled_datetime)
-    if normalized_scheduled is None or normalized_scheduled <= datetime.now(UTC).replace(tzinfo=None):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Scheduled datetime must be in the future for manual tasks",
-        )
+    normalized_scheduled = validate_scheduled_datetime_in_future(request.scheduled_datetime)
 
     previous_scheduled_at = task.scheduled_at
     task.scheduled_at = normalized_scheduled
     await db.commit()
     await db.refresh(task)
 
-    try:
-        await notify_task_event(
-            task,
-            MATTERMOST_EVENT_TASK_RESCHEDULED,
-            context={
-                "previous_scheduled_at": previous_scheduled_at,
-                "scheduled_at": normalized_scheduled,
-            },
-        )
-    except Exception as exc:
-        logger.warning("Failed to send Mattermost reschedule notification for task %s: %s", task_id, exc)
-
+    await notify_task_rescheduled(task, previous_scheduled_at, normalized_scheduled)
     logger.info("Task %s rescheduled to %s via API", task_id, normalized_scheduled.isoformat())
 
     return _serialize_task(task, await get_project_metadata(task.project_id))
-
-
-# Pydantic models for manual task creation
-class CreateTaskRequest(BaseModel):
-    """Request model for creating a manual task."""
-    project_id: int
-    branch_name: str
-    base_branch: Optional[str] = None
-    target_branch: str = "main"
-    user_prompt: str
-    priority: int = 0
-    delay_seconds: Optional[int] = None
-    scheduled_datetime: Optional[datetime] = None
-
-    @model_validator(mode="after")
-    def validate_distinct_branches(self) -> "CreateTaskRequest":
-        """Manual tasks must use distinct source and target branches."""
-        if self.branch_name == self.target_branch:
-            raise ValueError("Source branch and target branch must be different for manual tasks")
-        return self
-
-    @model_validator(mode="after")
-    def validate_schedule_is_future(self) -> "CreateTaskRequest":
-        """Manual tasks can only be scheduled in the future."""
-        if self.delay_seconds is not None and self.delay_seconds <= 0:
-            raise ValueError("Delay seconds must be greater than 0 for manual tasks")
-
-        if self.scheduled_datetime is None:
-            return self
-
-        normalized_scheduled = normalize_scheduled_datetime(self.scheduled_datetime)
-        if normalized_scheduled is not None and normalized_scheduled <= datetime.now(UTC).replace(tzinfo=None):
-            raise ValueError("Scheduled datetime must be in the future for manual tasks")
-
-        return self
-@router.get("/projects")
-async def list_projects(
-    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
-):
-    """List accessible GitLab projects.
-
-    Returns:
-        List of projects with id, name, and path
-    """
-    from app.core.gitlab_client import get_gitlab_client
-    if not access_scope.is_unrestricted:
-        return access_scope.accessible_projects
-    try:
-        return await _get_cached_projects()
-    except Exception as exc:
-        logger.warning("Failed to load accessible projects: %s", exc)
-        gitlab = get_gitlab_client()
-        return await asyncio.to_thread(gitlab.get_projects)
-
-
-@router.get("/projects/{project_id}/branches")
-async def list_branches(
-    project_id: int,
-    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
-):
-    """List branches for a GitLab project.
-
-    Args:
-        project_id: GitLab project ID
-
-    Returns:
-        List of branch names
-    """
-    from app.core.gitlab_client import get_gitlab_client
-    require_project_access(project_id, access_scope)
-    gitlab = get_gitlab_client()
-    branches = await asyncio.to_thread(gitlab.get_branches, project_id)
-    return branches
 
 
 @router.post("/tasks")

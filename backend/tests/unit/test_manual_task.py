@@ -16,9 +16,9 @@ from pydantic import ValidationError
 from app.api.tasks import (
     CreateTaskRequest,
     RescheduleTaskRequest,
-    _can_manage_task,
     reschedule_task,
 )
+from app.core.task_helpers import _can_manage_task
 from app.dependencies.project_access import ProjectAccessScope
 from app.core.scheduling import normalize_scheduled_datetime, resolve_scheduled_at
 from app.models import Task, TaskStatus, User
@@ -441,7 +441,7 @@ class TestRescheduleTask:
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
         current_user = User(id=11, gitlab_user_id=101, username="other", platform_role="platform_user")
 
-        with patch("app.api.tasks.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
+        with patch("app.core.task_helpers.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
             with pytest.raises(HTTPException, match="You may only operate on your own tasks"):
                 await reschedule_task(
                     task_id=1,
@@ -457,28 +457,28 @@ class TestTaskOperatorPermissions:
         task = Task(project_id=1, user_prompt="Test", branch_name="feature", initiator_user_id=10)
         current_user = User(id=99, gitlab_user_id=999, username="admin", platform_role="platform_admin")
 
-        with patch("app.api.tasks.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
+        with patch("app.core.task_helpers.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
             assert _can_manage_task(task, current_user) is True
 
     def test_can_manage_task_allows_owner_by_dashboard_user_id(self):
         task = Task(project_id=1, user_prompt="Test", branch_name="feature", initiator_user_id=10)
         current_user = User(id=10, gitlab_user_id=999, username="owner", platform_role="platform_user")
 
-        with patch("app.api.tasks.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
+        with patch("app.core.task_helpers.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
             assert _can_manage_task(task, current_user) is True
 
     def test_can_manage_task_allows_owner_by_gitlab_user_id(self):
         task = Task(project_id=1, user_prompt="Test", branch_name="feature", initiator_gitlab_user_id=123)
         current_user = User(id=10, gitlab_user_id=123, username="owner", platform_role="platform_user")
 
-        with patch("app.api.tasks.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
+        with patch("app.core.task_helpers.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
             assert _can_manage_task(task, current_user) is True
 
     def test_can_manage_task_rejects_other_user(self):
         task = Task(project_id=1, user_prompt="Test", branch_name="feature", initiator_user_id=10, initiator_gitlab_user_id=123)
         current_user = User(id=11, gitlab_user_id=456, username="other", platform_role="platform_user")
 
-        with patch("app.api.tasks.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
+        with patch("app.core.task_helpers.get_effective_settings", return_value=MagicMock(oidc_enabled=True)):
             assert _can_manage_task(task, current_user) is False
 
 

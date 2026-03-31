@@ -11,7 +11,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import app.api.tasks as tasks_api
 from app.core.projects import build_project_lookup
-from app.api.tasks import list_projects, list_tasks
+from app.api.tasks import list_tasks
+from app.api.projects import list_projects
 from app.dependencies.project_access import ProjectAccessScope
 from app.models import Task, TaskStatus
 
