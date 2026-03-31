@@ -1169,6 +1169,47 @@ describe('auth module', () => {
 })
 ```
 
+### 8.3 E2E 测试 (pytest-playwright)
+
+**技术选型:** Python pytest-playwright，与现有 backend E2E 测试统一，复用 `backend/tests/e2e/` 基础设施。
+
+**优势:**
+- E2E 测试全栈行为 (frontend + backend + db)，与现有 backend E2E 一致
+- 复用 `reset_database` fixture 避免状态污染
+- 统一运行: `cd backend && pytest tests/e2e/`
+- CI/CD 一致: 现有 GitHub Actions 已配置
+
+#### 8.3.1 Dashboard E2E
+
+**文件:** `backend/tests/e2e/tests/test_dashboard.py` (新建)
+
+**测试覆盖:**
+- 显示任务列表
+- 过滤器交互 (status/project/initiator)
+- 任务行点击跳转到详情
+- 自动刷新行为
+- 摘要卡片显示
+
+#### 8.3.2 CreateTask E2E
+
+**文件:** `backend/tests/e2e/tests/test_create_task.py` (新建)
+
+**测试覆盖:**
+- 填写项目/分支/prompt
+- 选择调度选项
+- 提交表单
+- 验证成功提示
+
+#### 8.3.3 TaskView E2E
+
+**文件:** `backend/tests/e2e/tests/test_task_view.py` (新建)
+
+**测试覆盖:**
+- 显示任务详情
+- cancel/retry/execute 按钮操作
+- 日志显示
+- 权限检查
+
 ---
 
 ## Frontend 测试文件清单
@@ -1188,6 +1229,9 @@ describe('auth module', () => {
 | `frontend/src/views/TaskView.spec.ts` | High | setup.ts, mocks |
 | `frontend/src/api/api.spec.ts` | Medium | setup.ts |
 | `frontend/src/auth.spec.ts` | Medium | setup.ts |
+| `backend/tests/e2e/tests/test_dashboard.py` | High | conftest.py |
+| `backend/tests/e2e/tests/test_create_task.py` | High | conftest.py |
+| `backend/tests/e2e/tests/test_task_view.py` | High | conftest.py |
 
 ---
 
@@ -1238,6 +1282,10 @@ Phase 7 (组件测试 - 5-7天):
 Phase 8 (集成测试 - 2-3天):
   8.1 API 层测试
   8.2 Auth 模块测试
+  8.3 E2E 测试 (pytest-playwright)
+    8.3.1 Dashboard E2E
+    8.3.2 CreateTask E2E
+    8.3.3 TaskView E2E
 ```
 
 ---
