@@ -7,8 +7,8 @@
 | P0 | Bug 修复 | Completed | - | 2026-03-31 |
 | P1 | 基础测试建设 | Completed | 2026-03-31 | 2026-03-31 |
 | Phase 1 | 模块划分优化 | Completed | 2026-03-31 | 2026-03-31 |
-| Phase 2 | 代码质量提升 | Pending | - | - |
-| Phase 3 | 测试基础设施完善 | Pending | - | - |
+| Phase 2 | 代码质量提升 | Completed | 2026-03-31 | 2026-03-31 |
+| Phase 3 | 测试基础设施完善 | Partial | 2026-03-31 | - |
 | Phase 4 | 稳定性增强 | Pending | - | - |
 | Phase 5 | Frontend 测试基础设施完善 | Completed | 2026-03-31 | 2026-03-31 |
 | Phase 6 | Frontend 单元测试 | Completed | 2026-03-31 | 2026-03-31 |
@@ -314,17 +314,42 @@
 
 ### 任务清单
 
-- [ ] 2.2 修复 async 中使用同步 requests
-  - [ ] `worker.py:789-795` - 改用 httpx.AsyncClient (先试点)
-  - [ ] `gitlab_client.py:217-224` - 改用 httpx.AsyncClient
+- [x] 2.2 修复 async 中使用同步 requests
+  - [x] `gitlab_client.py:217-224` - `get_merge_request_stats` 改为 async，使用 httpx.AsyncClient
+  - [x] `worker.py:785-795` - `_send_failure_alert` 改为 async，使用 httpx.AsyncClient
+  - [x] `worker.py:656-716` - `_notify_task_completed` 改为 async，调用方更新为 await
 
-- [ ] 2.3 添加类型注解
-  - [ ] `scheduler.py` - `get_settings()` 返回类型
-  - [ ] `worker.py` - `get_settings()` 返回类型
-  - [ ] `docker_client.py` - Container 参数类型
+- [x] 2.3 添加类型注解
+  - [x] `docker_client.py` - Container 参数类型 (Container 替代 Any)
+  - [x] `scheduler.py` - get_settings wrapper 已移除，直接使用 config.get_effective_settings
+  - [x] `worker.py` - get_settings wrapper 已移除，直接使用 config.get_effective_settings
 
 - [ ] 2.4 简化深度嵌套代码
   - [ ] `worker.py:330-365` - MR 创建逻辑重构
+
+### 完成记录
+
+#### 2026-03-31 Phase 2 代码质量提升
+
+**完成**
+- [x] `gitlab_client.py` - `get_merge_request_stats()` 改为 `async def`，使用 `httpx.AsyncClient`
+- [x] `worker.py` - `_send_failure_alert()` 改为 `async def`，使用 `httpx.AsyncClient`
+- [x] `worker.py` - `_notify_task_completed()` 改为 `async def`，使用 `asyncio.to_thread()` 包装同步 GitLab 调用
+- [x] `worker.py` - 所有 `_notify_task_completed()` 调用方更新为 `await`
+- [x] `docker_client.py` - 添加 `Container` 类型导入，`wait_for_container()` 参数和 `create_container()` 返回值使用 `Container` 类型
+
+**测试验证**
+- 单元测试: ✅ 164 passed, 2 skipped
+
+**变更分析**
+- `gitlab_client.py`: get_merge_request_stats 改为 async
+- `worker.py`: _send_failure_alert, _notify_task_completed 改为 async，添加 httpx 导入
+- `docker_client.py`: 添加 Container 类型导入
+- `tests/unit/test_notifications.py`: 6个测试改为 async，使用 @pytest.mark.asyncio
+- `tests/unit/test_priority.py`: 1个测试使用 asyncio.run()
+
+**后续待办**
+- [ ] 2.4 简化深度嵌套代码 (worker.py:330-365 MR 创建逻辑)
 
 ---
 
@@ -339,17 +364,44 @@
   - [x] `remove_container()` 测试
   - [x] `get_container_logs()` 测试
 
-- [ ] 3.3 修复 Print-Based 测试
-  - [ ] `test_webhook.py` - 转换为 pytest 断言
+- [x] 3.3 修复 Print-Based 测试
+  - [x] `test_webhook.py` - 转换为 pytest 断言 (47个测试)
 
-- [ ] 3.4 添加 API Endpoint 测试
-  - [ ] `test_containers_api.py` 新建
-  - [ ] `test_stats_api.py` 新建
+- [x] 3.4 添加 API Endpoint 测试
+  - [x] `test_containers_api.py` 新建 (7个测试)
+  - [x] `test_stats_api.py` 新建 (14个测试)
 
 - [ ] 3.5 改进 E2E 测试覆盖
   - [ ] `test_task_queue.py` 新建
   - [ ] `test_task_details.py` 新建
   - [ ] `test_manual_task.py` 新建
+
+### 完成记录
+
+#### 2026-03-31 Phase 3.3 & 3.4 测试完善
+
+**3.3 Print-Based 测试修复**
+- [x] `test_webhook.py` - 将手动计数 print 断言转换为标准 pytest 断言
+- [x] 将单个大测试拆分为 47 个独立测试用例
+- [x] 测试覆盖: webhook payload 解析、验证、状态转换、并发控制、延迟计算、定时解析
+
+**3.4 API Endpoint 测试**
+- [x] `test_containers_api.py` (7个测试)
+  - 容器名称模式匹配测试
+  - 容器信息提取逻辑测试
+  - 容器日志响应结构测试
+- [x] `test_stats_api.py` (14个测试)
+  - stats/analytics 参数验证测试
+  - 错误消息分类逻辑测试 (Timeout, Resource, Docker, Auth, Network, Git, Dependencies, Tests, Code)
+  - 错误消息摘要测试
+
+**测试验证**
+- 单元测试: ✅ 225 passed, 2 skipped
+
+**变更分析**
+- `tests/unit/test_webhook.py` - 完全重写，47个独立测试
+- `tests/unit/test_containers_api.py` - 新建
+- `tests/unit/test_stats_api.py` - 新建
 
 ---
 

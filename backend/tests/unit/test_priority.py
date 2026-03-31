@@ -371,7 +371,7 @@ def test_mr_iid_in_issue_comment():
     task.merge_request_url = "http://gitlab.example.com/project/-/merge_requests/42"
     task.merge_request_iid = 42
 
-    worker._notify_task_completed(task, success=True, notify_target="issue")
+    asyncio.run(worker._notify_task_completed(task, success=True, notify_target="issue"))
 
     mock_gitlab.create_note.assert_called()
     call_args = mock_gitlab.create_note.call_args[0]

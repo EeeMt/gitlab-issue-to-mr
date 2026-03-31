@@ -9,6 +9,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any, Optional
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -497,7 +498,7 @@ class WorkerExecutor:
                 elif task.merge_request_iid:
                     try:
                         logger.info(f"[Task {task_id}] Getting MR stats for MR !{task.merge_request_iid}")
-                        stats = self.gitlab.get_merge_request_stats(
+                        stats = await self.gitlab.get_merge_request_stats(
                             task.project_id, task.merge_request_iid
                         )
                         logger.info(f"[Task {task_id}] MR stats result: {stats}")
@@ -523,7 +524,7 @@ class WorkerExecutor:
 
                 # Send "completed" notification with MR URL
                 try:
-                    self._notify_task_completed(task, success=True, notify_target="mr" if had_existing_mr else "issue")
+                    await self._notify_task_completed(task, success=True, notify_target="mr" if had_existing_mr else "issue")
                 except Exception as e:
                     logger.warning(f"Failed to send completion notification: {e}")
                 try:
@@ -548,7 +549,7 @@ class WorkerExecutor:
 
                 # Send "failed" notification
                 try:
-                    self._notify_task_completed(task, success=False, notify_target="mr" if had_existing_mr else "issue")
+                    await self._notify_task_completed(task, success=False, notify_target="mr" if had_existing_mr else "issue")
                 except Exception as e:
                     logger.warning(f"Failed to send failure notification: {e}")
                 try:
@@ -614,7 +615,7 @@ class WorkerExecutor:
 
             # Send failure notification for exceptions
             try:
-                self._notify_task_completed(task, success=False, notify_target="mr" if had_existing_mr else "issue")
+                await self._notify_task_completed(task, success=False, notify_target="mr" if had_existing_mr else "issue")
             except Exception as notify_error:
                 logger.warning(f"Failed to send failure notification: {notify_error}")
             try:
@@ -653,7 +654,7 @@ class WorkerExecutor:
             )
             logger.info(f"Sent start notification for task {task.id}")
 
-    def _notify_task_completed(self, task: Task, success: bool, notify_target: str = "issue") -> None:
+    async def _notify_task_completed(self, task: Task, success: bool, notify_target: str = "issue") -> None:
         """Send notification when task completes.
 
         Args:
@@ -693,7 +694,7 @@ class WorkerExecutor:
 
         # Send notification to the original trigger discussion.
         if notify_target == "mr" and mr_iid:
-            self.gitlab.create_mr_note(task.project_id, mr_iid, message)
+            await asyncio.to_thread(self.gitlab.create_mr_note, task.project_id, mr_iid, message)
             logger.info(f"Sent completion notification to MR !{mr_iid} for task {task.id}, success={success}")
 
             # Update MR description with execution progress
@@ -703,16 +704,12 @@ class WorkerExecutor:
                 except Exception as e:
                     logger.warning(f"Failed to update MR description: {e}")
         elif task.issue_iid:
-            self.gitlab.create_note(
-                task.project_id,
-                task.issue_iid,
-                message,
-            )
+            await asyncio.to_thread(self.gitlab.create_note, task.project_id, task.issue_iid, message)
             logger.info(f"Sent completion notification for task {task.id}, success={success}")
 
         # Send webhook alert if configured
         if not success:
-            self._send_failure_alert(task)
+            await self._send_failure_alert(task)
 
     def _update_mr_description(self, task: Task, mr_iid: int) -> None:
         """Update MR description with execution progress.
@@ -753,7 +750,7 @@ class WorkerExecutor:
         mr.save()
         logger.info(f"Updated MR !{mr_iid} description with task #{task.id} progress")
 
-    def _send_failure_alert(self, task: Task) -> None:
+    async def _send_failure_alert(self, task: Task) -> None:
         """Send failure alert to webhook URL.
 
         Args:
@@ -782,13 +779,11 @@ class WorkerExecutor:
 
         # Send webhook request
         try:
-            import requests
-            response = requests.post(
-                settings.alert_webhook_url,
-                json=alert_data,
-                timeout=10,
-                verify=get_ssl_verify(settings),
-            )
+            async with httpx.AsyncClient(timeout=10.0, verify=get_ssl_verify(settings)) as client:
+                response = await client.post(
+                    settings.alert_webhook_url,
+                    json=alert_data,
+                )
             if response.status_code < 400:
                 logger.info(f"Sent failure alert for task {task.id}")
             else:
