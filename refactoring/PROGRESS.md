@@ -10,6 +10,7 @@
 | Phase 2 | 代码质量提升 | Pending | - | - |
 | Phase 3 | 测试基础设施完善 | Pending | - | - |
 | Phase 5 | Frontend 测试基础设施 | Pending | - | - |
+| Phase 6 | Frontend 单元测试 | Pending | - | - |
 
 ---
 
@@ -210,7 +211,54 @@
 - 新增行数: ~350 行
 
 **后续待办**
-- Phase 6: Frontend 单元测试 (useVariableEditor, datetime utils)
+- Phase 7: Frontend 组件测试 (VariableEditor, CreateTask, Dashboard, TaskView)
+
+---
+
+## Phase 6: Frontend 单元测试
+
+### 任务清单
+
+- [x] 6.1 测试 useVariableEditor Composable
+  - [x] `src/composables/useVariableEditor.spec.ts` 新建
+  - [x] extractVariables 测试 (6 cases)
+  - [x] mergedTips 测试 (3 cases)
+  - [x] migrateTipsOnRename 测试 (2 cases)
+  - [x] variablesWithTips 测试 (3 cases)
+  - [x] updateTip 测试 (2 cases)
+  - [x] setTemplateTips 测试 (2 cases)
+
+- [x] 6.2 测试 datetime 工具函数
+  - [x] `src/utils/datetime.spec.ts` 新建
+  - [x] parseUtcDate 测试 (4 cases)
+  - [x] formatDateTimeUtc8 测试 (3 cases)
+  - [x] formatDateTimeUtc8Compact 测试 (2 cases)
+
+### 完成记录
+
+#### 2026-03-31 实施 Phase 6 前端单元测试
+
+**完成**
+- [x] `frontend/src/composables/useVariableEditor.spec.ts` - 18 个测试
+- [x] `frontend/src/utils/datetime.spec.ts` - 9 个测试
+
+**测试覆盖**
+- `useVariableEditor`: 变量提取、Tips 合并、变量重命名检测、variablesWithTips、updateTip、setTemplateTips
+- `datetime`: parseUtcDate、formatDateTimeUtc8、formatDateTimeUtc8Compact
+
+**验证**
+- `npx vitest run` - 27 passed (2 test files)
+
+**变更分析**
+- 文件改动: 2 个
+  - `frontend/src/test/setup.ts` (移除无效的 cleanup import)
+  - `refactoring/PROGRESS.md` (更新进度)
+- 新增文件: 2 个
+  - `frontend/src/composables/useVariableEditor.spec.ts`
+  - `frontend/src/utils/datetime.spec.ts`
+- 新增行数: ~450 行
+
+**后续待办**
 - Phase 7: Frontend 组件测试 (VariableEditor, CreateTask, Dashboard, TaskView)
 
 ---

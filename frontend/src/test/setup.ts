@@ -1,10 +1,4 @@
-import { cleanup } from '@vue/test-utils'
-import { afterEach, vi } from 'vitest'
-
-// Global cleanup after each test
-afterEach(() => {
-  cleanup()
-})
+import { vi } from 'vitest'
 
 // Mock window.matchMedia
 Object.defineProperty(window, 'matchMedia', {
