@@ -379,6 +379,8 @@ assert len(errors) == 0, f"{tc['name']}: {errors}"
 **新建测试文件:**
 - `backend/tests/unit/test_containers_api.py` - 测试 `api/containers.py`
 - `backend/tests/unit/test_stats_api.py` - 测试 `api/stats.py`
+- `backend/tests/unit/test_config_runtime_api.py` - 测试 `/config/runtime` 端点
+- `backend/tests/unit/test_config_integration_api.py` - 测试 `/config/gitlab/test` 端点
 
 **使用 FastAPI TestClient:**
 ```python
@@ -388,6 +390,13 @@ def test_list_containers_empty():
     """Test containers endpoint returns empty list"""
     ...
 ```
+
+**Config API Endpoint 覆盖:**
+- `GET /config/runtime` - 运行时配置获取
+- `PATCH /config/runtime` - 运行时配置更新
+- `DELETE /config/runtime/{key}` - 单个配置重置
+- `POST /config/gitlab/test` - GitLab 连通性测试
+- `POST /config/reset` - 重置所有配置
 
 ### 3.5 改进 E2E 测试覆盖 (High)
 

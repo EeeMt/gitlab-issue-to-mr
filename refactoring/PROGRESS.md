@@ -254,6 +254,28 @@
 
 ---
 
+### 1.1.7 完成记录
+
+#### 2026-03-31 补充 Config Runtime API 端点测试
+
+**完成**
+- [x] 创建 `backend/tests/unit/test_config_runtime_api.py` (7 个测试)
+  - `test_get_runtime_config_returns_current_settings()` - GET /config/runtime
+  - `test_patch_runtime_config_updates_max_concurrency()` - PATCH /config/runtime
+  - `test_patch_runtime_config_updates_multiple_fields()` - PATCH 多字段
+  - `test_patch_runtime_config_rejects_invalid_max_concurrency()` - 无效值拒绝
+  - `test_patch_runtime_config_rejects_invalid_task_timeout()` - 超时验证
+  - `test_patch_runtime_config_rejects_invalid_url()` - URL 格式验证
+  - `test_patch_runtime_config_rejects_empty_model()` - 空值拒绝
+
+**测试验证**
+- 单元测试: ✅ 164 passed, 2 skipped (新增 7 个测试)
+
+**变更分析**
+- 新增文件: `backend/tests/unit/test_config_runtime_api.py`
+
+---
+
 ### 任务清单
 
 - [x] 1.1 拆分 `api/config.py`
@@ -263,6 +285,7 @@
   - [x] 1.1.4 创建 `api/config_integration.py` (169行)
   - [x] 1.1.5 创建 `api/config_runtime.py` (299行)
   - [x] 1.1.6 清理 config.py 移除测试专用代码
+  - [x] 1.1.7 补充 Config Runtime API 端点测试
   - [x] 保留 `api/config.py` 仅含聚合层 (255行)
   - [x] 更新路由注册
   - [x] 更新 imports
