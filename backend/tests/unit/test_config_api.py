@@ -9,11 +9,8 @@ from fastapi import HTTPException
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from app.api.config import (
-    _normalize_updates,
-    _serialize_effective_config,
-    _validate_config_value,
-)
+from app.api.config import _serialize_effective_config
+from app.api._validators import _validate_config_value, _normalize_updates
 from app.api.mattermost import MattermostNotificationProfileInput
 from app.api.project_webhooks import (
     _build_gitlab_project_webhook_status_response,

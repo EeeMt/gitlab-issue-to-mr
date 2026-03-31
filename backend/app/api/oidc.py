@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._validators import _is_valid_http_url
 from app.config import Settings, get_effective_settings
 from app.core.config_crypto import ConfigEncryptionError
 from app.core.oidc import (
@@ -30,11 +31,6 @@ from app.api.config import AuthConfigUpdate
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-
-def _is_valid_http_url(value: str) -> bool:
-    parsed = urlparse(value)
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
 def _normalize_updates(updates: dict[str, Any]) -> dict[str, Any]:
