@@ -600,6 +600,129 @@ describe('auth module', () => {
 
 ---
 
+## Phase 9: Frontend 代码质量提升
+
+> **来源:** `FRONTEND_CODE_QUALITY_REPORT.md` 深度分析
+
+### 9.1 P0 严重问题修复
+
+#### 9.1.1 Config.vue 拆分 (Critical)
+
+**问题:** `Config.vue` 约 2145 行，体积过大无法有效维护
+
+**目标:** 将其拆分为多个独立 Tab 组件
+
+**拆分方案:**
+```
+frontend/src/views/config/
+├── RuntimeSettingsPanel.vue   # AI Provider + Worker Settings
+├── GitLabSettingsPanel.vue     # GitLab Integration
+├── AuthSettingsPanel.vue       # Auth/OIDC Settings
+├── GeneralSettingsPanel.vue    # 其他配置
+└── Config.vue                 # 聚合层 (Tab 容器)
+```
+
+**现有可复用组件:**
+- `components/config/MattermostNotificationsPanel.vue` (820行)
+- `components/config/OidcDiagnosticsPanel.vue` (363行)
+- `components/config/WorkerSettingsPanel.vue` (567行)
+
+#### 9.1.2 VariableEditor.vue 状态同步修复 (Critical)
+
+**问题:** `variablesRef`/`tipsRef` 镜像 props，`watch(content)` 和 `watch(templateTips)` 可能导致循环
+
+**位置:** `frontend/src/components/VariableEditor.vue:65-75`
+
+**修复方案:** 重新设计状态同步逻辑，避免双向 watch 循环
+
+#### 9.1.3 WorkerSettingsPanel JSON.parse 错误边界 (Critical)
+
+**问题:** `parseMounts` 中 JSON.parse 缺少错误边界，运行时可能崩溃
+
+**位置:** `frontend/src/components/config/WorkerSettingsPanel.vue:342-357`
+
+**修复:**
+```typescript
+function parseMounts(input: string): MountConfig[] {
+  if (!input.trim()) return []
+  try {
+    return JSON.parse(input)
+  } catch (e) {
+    console.error('Invalid JSON in mounts field:', e)
+    return []
+  }
+}
+```
+
+### 9.2 P1 高优先级任务
+
+#### 9.2.1 提取重复函数到 utils/format.ts
+
+**问题:** `formatPriority`、`getProjectLabel`、`formatDuration` 等函数在多个组件重复定义
+
+**重复位置:**
+| 函数名 | 出现位置 |
+|--------|----------|
+| `formatPriority` | Dashboard.vue, TaskView.vue, Monitor.vue, ScheduleOverview.vue, Analytics.vue |
+| `getProjectLabel` | Dashboard.vue, TaskView.vue, Monitor.vue, ScheduleOverview.vue |
+| `isSameLocalDay` | CreateTask.vue, ScheduleOverview.vue |
+| `formatDuration` | Monitor.vue, Analytics.vue |
+
+**新建文件:** `frontend/src/utils/format.ts`
+
+```typescript
+// utils/format.ts
+export function formatPriority(priority?: string | number | null): string { ... }
+export function getProjectLabel(task: Task): string { ... }
+export function formatDuration(ms: number): string { ... }
+export function isSameLocalDay(date1: Date, date2: Date): boolean { ... }
+```
+
+#### 9.2.2 提取可复用 Composables
+
+**新建 `composables/usePolling.ts`:**
+```typescript
+// 封装 setInterval + visibilityState
+export function usePolling(fn: () => void, interval: number) { ... }
+```
+
+**新建 `composables/useDirtyDetection.ts`:**
+```typescript
+// 封装 JSON.stringify 脏值检测
+export function useDirtyDetection<T>(current: Ref<T>, lastLoaded: Ref<T>) { ... }
+```
+
+### 9.3 P2 中优先级任务
+
+#### 9.3.1 类型安全增强
+
+| 位置 | 问题 |
+|------|------|
+| `api/index.ts:580-585` | `getTaskContainerLogs` 返回 `any` |
+| `CreateTask.vue:277-291` | 表单类型混合 |
+| `Task, Container` 接口 | `status: string` 应为联合类型 |
+
+#### 9.3.2 API 层统一错误处理
+
+**问题:** 各组件错误处理不一致
+
+**建议:** 在 `api/index.ts` 添加统一的错误拦截器
+
+### 9.4 实施顺序
+
+```
+Phase 9:
+  9.1.3 JSON.parse 错误边界 (P0, 小改动, 低风险)
+  9.1.2 VariableEditor 状态修复 (P0, 中等风险)
+  9.2.1 提取重复函数 (P1, 无功能变更, 低风险)
+  9.2.2 提取 Composables (P1, 无功能变更, 低风险)
+  9.3.1 类型安全增强 (P2)
+  9.1.1 Config.vue 拆分 (P0, 大改动, 高风险)
+  9.3.2 API 错误处理统一 (P2)
+```
+
+---
+
 ## 关键文件清单
 
 ### 需要拆分/重构的文件
@@ -608,6 +731,21 @@ describe('auth module', () => {
 | `backend/app/api/config.py` | 255 ✅ | 拆分为多个模块 ✅ |
 | `backend/app/api/tasks.py` | 860 | 提取共享代码 |
 | `backend/app/core/worker.py` | 824 | 提取辅助方法 |
+| `frontend/src/views/Config.vue` | 2145 | 拆分为多个 Tab 组件 |
+| `frontend/src/components/VariableEditor.vue` | 342 | 状态同步逻辑重构 |
+
+### 需要新建的前端工具/Composables
+| 文件 | 优先级 | 说明 |
+|------|--------|------|
+| `frontend/src/utils/format.ts` | P1 | 提取重复的格式化函数 |
+| `frontend/src/composables/usePolling.ts` | P1 | 封装自动刷新逻辑 |
+| `frontend/src/composables/useDirtyDetection.ts` | P1 | 封装脏值检测逻辑 |
+
+### 需要修复的前端 Bug
+| 文件 | 问题 | 优先级 |
+|------|------|--------|
+| `frontend/src/components/config/WorkerSettingsPanel.vue:342-357` | JSON.parse 无错误边界 | P0 |
+| `frontend/src/components/VariableEditor.vue:65-75` | watch 循环风险 | P0 |
 
 ### 需要新建的测试文件
 | 文件 | 优先级 |
@@ -669,6 +807,15 @@ Phase 4 (稳定性 - 1-2周):
   4.1 敏感数据清理测试
   4.2 Scheduler 核心逻辑测试
   4.3 GitLab Client 重试测试
+
+Phase 9 (Frontend 代码质量 - 2-4周):
+  9.1.3 WorkerSettingsPanel JSON.parse 错误边界 (P0)
+  9.1.2 VariableEditor 状态修复 (P0)
+  9.2.1 提取重复函数到 utils/format.ts (P1)
+  9.2.2 提取 Composables (P1)
+  9.3.1 类型安全增强 (P2)
+  9.1.1 Config.vue 拆分 (P0, 高风险)
+  9.3.2 API 错误处理统一 (P2)
 ```
 
 **任务依赖关系:**
@@ -686,20 +833,27 @@ Phase 4 (稳定性 - 1-2周):
 ## 验证方式
 
 ```bash
-# 1. 运行单元测试
+# Backend 单元测试
 cd backend && pytest tests/unit/ -v --tb=short
 
-# 2. 运行 Mock E2E
+# Backend Mock E2E
 cd backend && pytest tests/mock_e2e/ -v
 
-# 3. 检查代码行数 (验证拆分)
+# 检查代码行数 (验证拆分)
 wc -l backend/app/api/config.py  # 应该 < 400
+wc -l frontend/src/views/Config.vue  # 目标 < 500
 
-# 4. 类型检查
+# Backend 类型检查
 cd backend && mypy app/ --ignore-missing-imports
 
-# 5. E2E 测试
+# Backend E2E 测试
 cd backend && pytest tests/e2e/ -v
+
+# Frontend 单元测试
+cd frontend && npx vitest run
+
+# Frontend 类型检查
+cd frontend && npx vue-tsc --noEmit
 ```
 
 ---
@@ -711,11 +865,15 @@ cd backend && pytest tests/e2e/ -v
 | ✅ 拆分 config.py | 已完成 | 已拆分 7 个子模块 |
 | 拆分 worker.py | 中 - 内部重构 | 保持 public API 不变 |
 | 修改测试框架 | 低 | 增量修改，保留旧测试 |
+| 拆分 Config.vue | 高 - 2000+ 行 | 分步实施，先拆分子组件 |
+| VariableEditor 状态修复 | 中 | 避免 watch 循环，保持响应式 |
+| 提取重复工具函数 | 低 | 无功能变更，纯粹重构 |
 
 ---
 
 ## 成果统计
 
+### Backend 指标
 | 指标 | 目标 | 当前 | 状态 |
 |------|------|------|------|
 | 代码行数 (config.py) | < 400 | 255 | ✅ |
@@ -724,3 +882,11 @@ cd backend && pytest tests/e2e/ -v
 | 测试覆盖率 | > 80% | ~45% (需确认) | ⏳ |
 | 类型注解完整度 | 100% | - | ⏳ |
 | Critical bugs | 0 | 0 | ✅ |
+
+### Frontend 指标
+| 指标 | 目标 | 当前 | 状态 |
+|------|------|------|------|
+| 代码行数 (Config.vue) | < 500 | 2145 | ⏳ |
+| 重复工具函数 | 0 | 4+ | ⏳ |
+| 类型安全 (any 返回) | 0 | 5+ | ⏳ |
+| Critical bugs | 0 | 2 | ⏳ |

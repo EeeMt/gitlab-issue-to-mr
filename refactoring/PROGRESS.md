@@ -13,7 +13,8 @@
 | Phase 5 | Frontend 测试基础设施完善 | Completed | 2026-03-31 | 2026-03-31 |
 | Phase 6 | Frontend 单元测试 | Completed | 2026-03-31 | 2026-03-31 |
 | Phase 7 | Frontend 组件测试 | Completed | 2026-03-31 | 2026-03-31 |
-| Phase 8 | Frontend 集成测试 | Pending | - | - |
+| Phase 8 | Frontend 集成测试 | Partial | 2026-03-31 | - |
+| Phase 9 | Frontend 代码质量提升 | Pending | - | - |
 
 ---
 
@@ -526,21 +527,21 @@
   - [ ] isAdmin 测试
   - [ ] canAccessSharedPage 测试
 
-- [ ] 8.3 E2E 测试 (pytest-playwright)
-  - [ ] 8.3.1 Dashboard E2E
+- [~] 8.3 E2E 测试 (pytest-playwright) - 部分完成
+  - [~] 8.3.1 Dashboard E2E - 待完成
     - [ ] `backend/tests/e2e/tests/test_dashboard.py` 新建
     - [ ] 任务列表显示
     - [ ] 过滤器交互
     - [ ] 任务行点击跳转
     - [ ] 自动刷新行为
     - [ ] 摘要卡片显示
-  - [ ] 8.3.2 CreateTask E2E
+  - [ ] 8.3.2 CreateTask E2E - 待完成
     - [ ] `backend/tests/e2e/tests/test_create_task.py` 新建
     - [ ] 填写项目/分支/prompt
     - [ ] 选择调度选项
     - [ ] 提交表单
     - [ ] 验证成功提示
-  - [ ] 8.3.3 TaskView E2E
+  - [ ] 8.3.3 TaskView E2E - 待完成
     - [ ] `backend/tests/e2e/tests/test_task_view.py` 新建
     - [ ] 任务详情显示
     - [ ] cancel/retry/execute 按钮操作
@@ -548,6 +549,46 @@
     - [ ] 权限检查
 
 **技术选型:** Python pytest-playwright，与现有 backend E2E 测试统一，复用 `backend/tests/e2e/` 基础设施。
+
+**当前进度:**
+- 已有 E2E 测试: `test_bootstrap.py`, `test_navigation.py`, `test_access_management.py`, `test_prompt_template.py`
+- 待完成: `test_dashboard.py`, `test_create_task.py`, `test_task_view.py`
+
+---
+
+## Phase 9: Frontend 代码质量提升
+
+### 任务清单
+
+- [ ] 9.1.3 WorkerSettingsPanel JSON.parse 错误边界 (P0)
+  - [ ] `WorkerSettingsPanel.vue:342-357` 添加 try-catch
+
+- [ ] 9.1.2 VariableEditor.vue 状态同步修复 (P0)
+  - [ ] 重新设计 `variablesRef`/`tipsRef` 状态同步
+  - [ ] 避免 watch 循环
+
+- [ ] 9.2.1 提取重复函数到 utils/format.ts (P1)
+  - [ ] `formatPriority` 合并
+  - [ ] `getProjectLabel` 合并
+  - [ ] `formatDuration` 合并
+  - [ ] `isSameLocalDay` 合并
+
+- [ ] 9.2.2 提取可复用 Composables (P1)
+  - [ ] `composables/usePolling.ts`
+  - [ ] `composables/useDirtyDetection.ts`
+
+- [ ] 9.3.1 类型安全增强 (P2)
+  - [ ] `api/index.ts` 移除 `any` 返回类型
+  - [ ] `Task`, `Container` 接口 status 改为联合类型
+
+- [ ] 9.1.1 Config.vue 拆分 (P0)
+  - [ ] 提取 RuntimeSettingsPanel
+  - [ ] 提取 GitLabSettingsPanel
+  - [ ] 提取 AuthSettingsPanel
+  - [ ] 提取 GeneralSettingsPanel
+
+- [ ] 9.3.2 API 层统一错误处理 (P2)
+  - [ ] 添加错误拦截器
 
 ---
 
@@ -567,6 +608,7 @@
 
 ## 成果统计
 
+### Backend 指标
 | 指标 | 目标 | 当前 | 状态 |
 |------|------|------|------|
 | 代码行数 (config.py) | < 400 | 255 | ✅ 达成目标 |
@@ -577,6 +619,14 @@
 | Critical bugs | 0 | 0 | ✅ |
 | 单元测试通过率 | 100% | 157 passed, 2 skipped | ✅ |
 
+### Frontend 指标
+| 指标 | 目标 | 当前 | 状态 |
+|------|------|------|------|
+| 代码行数 (Config.vue) | < 500 | 2145 | ⏳ |
+| 重复工具函数 | 0 | 4+ | ⏳ |
+| 类型安全 (any 返回) | 0 | 5+ | ⏳ |
+| Critical bugs | 0 | 2 (P0) | ⏳ |
+
 **Phase 1 完成情况:**
 - ✅ 1.1.1 oidc.py (351行)
 - ✅ 1.1.2 project_webhooks.py (299行)
@@ -585,3 +635,9 @@
 - ✅ 1.1.5 config_runtime.py (299行)
 - ✅ 1.1.6 _validators.py (共享验证工具)
 - ✅ config.py 聚合层 (255行，目标 <400) ✅
+
+**Phase 9 待处理:**
+- P0: Config.vue 拆分 (2145行 → 多个 <500行组件)
+- P0: VariableEditor 状态同步修复
+- P0: WorkerSettingsPanel JSON.parse 错误边界
+- P1: 提取重复工具函数到 utils/format.ts
