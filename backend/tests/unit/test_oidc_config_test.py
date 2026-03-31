@@ -74,18 +74,18 @@ class OIDCConfigTestEndpointTests(unittest.TestCase):
         # Override the dependencies using FastAPI's dependency_overrides
         app.dependency_overrides[require_authenticated_context] = mock_require_authenticated_context
         try:
-            with patch('app.api.config.get_effective_settings', return_value=mock_settings):
-                with patch('app.api.config.load_runtime_config_from_db', new_callable=AsyncMock) as mock_load:
+            with patch('app.api.oidc.get_effective_settings', return_value=mock_settings):
+                with patch('app.api.oidc.load_runtime_config_from_db', new_callable=AsyncMock) as mock_load:
                     mock_load.return_value = None
-                    with patch('app.api.config._build_preview_settings', return_value=mock_settings):
-                        with patch('app.api.config.get_oidc_discovery_document_for_settings', new_callable=AsyncMock) as mock_discovery:
+                    with patch('app.api.oidc._build_preview_settings', return_value=mock_settings):
+                        with patch('app.api.oidc.get_oidc_discovery_document_for_settings', new_callable=AsyncMock) as mock_discovery:
                             mock_discovery.return_value = {
                                 "issuer": "https://example.com",
                                 "authorization_endpoint": "https://example.com/oauth/authorize",
                                 "token_endpoint": "https://example.com/oauth/token",
                                 "userinfo_endpoint": "https://example.com/userinfo",
                             }
-                            with patch('app.api.config.build_authorization_url_for_settings', new_callable=AsyncMock) as mock_auth_url:
+                            with patch('app.api.oidc.build_authorization_url_for_settings', new_callable=AsyncMock) as mock_auth_url:
                                 mock_auth_url.return_value = "https://example.com/oauth/authorize?client_id=test"
 
                                 # Should not raise 401
@@ -108,7 +108,7 @@ class OIDCConfigTestEndpointTests(unittest.TestCase):
         mock_settings = MagicMock()
         mock_settings.oidc_enabled = True
 
-        with patch('app.api.config.get_effective_settings', return_value=mock_settings):
+        with patch('app.api.oidc.get_effective_settings', return_value=mock_settings):
             # Without skip-redirect header, should get 401
             response = self.client.post(
                 "/api/config/oidc/test",
@@ -135,7 +135,7 @@ class OIDCConfigTestEndpointTests(unittest.TestCase):
         mock_settings.break_glass_enabled = False
         mock_settings.admin_gitlab_groups = set()
 
-        with patch('app.api.config.get_effective_settings', return_value=mock_settings):
+        with patch('app.api.oidc.get_effective_settings', return_value=mock_settings):
             # When OIDC is enabled and there's no authenticated session,
             # require_admin_user raises 401 before endpoint body runs
             response = self.client.post(
@@ -186,19 +186,19 @@ class OIDCConfigTestWithLocalAuthTests(unittest.TestCase):
         # Override the dependencies using FastAPI's dependency_overrides
         app.dependency_overrides[require_authenticated_context] = mock_require_authenticated_context
         try:
-            with patch('app.api.config.get_effective_settings', return_value=mock_settings):
-                with patch('app.api.config.load_runtime_config_from_db', new_callable=AsyncMock) as mock_load:
+            with patch('app.api.oidc.get_effective_settings', return_value=mock_settings):
+                with patch('app.api.oidc.load_runtime_config_from_db', new_callable=AsyncMock) as mock_load:
                     mock_load.return_value = None
-                    with patch('app.api.config._normalize_updates', return_value={}):
-                        with patch('app.api.config._build_preview_settings', return_value=mock_settings):
-                            with patch('app.api.config.get_oidc_discovery_document_for_settings', new_callable=AsyncMock) as mock_discovery:
+                    with patch('app.api.oidc._normalize_updates', return_value={}):
+                        with patch('app.api.oidc._build_preview_settings', return_value=mock_settings):
+                            with patch('app.api.oidc.get_oidc_discovery_document_for_settings', new_callable=AsyncMock) as mock_discovery:
                                 mock_discovery.return_value = {
                                     "issuer": "https://example.com",
                                     "authorization_endpoint": "https://example.com/oauth/authorize",
                                     "token_endpoint": "https://example.com/oauth/token",
                                     "userinfo_endpoint": "https://example.com/userinfo",
                                 }
-                                with patch('app.api.config.build_authorization_url_for_settings', new_callable=AsyncMock) as mock_auth_url:
+                                with patch('app.api.oidc.build_authorization_url_for_settings', new_callable=AsyncMock) as mock_auth_url:
                                     mock_auth_url.return_value = "https://example.com/oauth/authorize?client_id=test"
 
                                     # Simulate authenticated request

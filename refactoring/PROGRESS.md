@@ -5,8 +5,8 @@
 | Priority | Phase | 状态 | 开始日期 | 完成日期 |
 |----------|-------|------|---------|----------|
 | P0 | Bug 修复 | Completed | - | 2026-03-31 |
-| P1 | 基础测试建设 | In Progress | 2026-03-31 | - |
-| Phase 1 | 模块划分优化 | Pending | - | - |
+| P1 | 基础测试建设 | Completed | 2026-03-31 | 2026-03-31 |
+| Phase 1 | 模块划分优化 | In Progress | 2026-03-31 | - |
 | Phase 2 | 代码质量提升 | Pending | - | - |
 | Phase 3 | 测试基础设施完善 | Pending | - | - |
 | Phase 4 | 稳定性增强 | Pending | - | - |
@@ -108,15 +108,82 @@
 
 ## Phase 1: 模块划分优化
 
+### 1.1.1 完成记录
+
+#### 2026-03-31 创建 api/oidc.py
+
+**完成**
+- [x] 创建 `backend/app/api/oidc.py` (351行)
+- [x] 移动 OIDCConfigTestRequest/Response 模型到 oidc.py
+- [x] 移动 OIDCDiagnosticsCheck/Response 模型到 oidc.py
+- [x] 移动 `_build_oidc_diagnostics_warnings()` 到 oidc.py
+- [x] 移动 `_build_endpoint_checks()` 到 oidc.py
+- [x] 移动 OIDC 端点到 oidc.py
+- [x] 更新 config.py - 移除 OIDC 相关代码
+- [x] 更新 main.py - 注册 oidc 路由
+- [x] 更新测试文件导入路径
+
+**测试验证**
+- 单元测试: ✅ 157 passed, 2 skipped
+
+**变更分析**
+- 新增文件: `backend/app/api/oidc.py` (351行)
+- config.py: -291行
+- main.py: +8行
+- 测试文件更新导入路径
+
+**成果统计**
+| 指标 | 拆分前 | 拆分后 |
+|------|--------|--------|
+| config.py 行数 | 1441 | 890 |
+| oidc.py 行数 | 0 | 351 |
+| mattermost.py 行数 | 0 | 310 |
+
+**后续待办**
+- 继续拆分 Project Webhooks 到 `api/project_webhooks.py`
+- 目标: config.py < 400行
+
+---
+
+### 1.1.3 完成记录
+
+#### 2026-03-31 创建 api/mattermost.py
+
+**完成**
+- [x] 创建 `backend/app/api/mattermost.py` (310行)
+- [x] 移动 Mattermost 模型到 mattermost.py
+- [x] 移动 Mattermost 端点到 mattermost.py
+- [x] 更新 config.py - 移除 Mattermost 相关代码
+- [x] 更新 main.py - 注册 mattermost 路由
+- [x] 更新测试文件导入路径
+
+**测试验证**
+- 单元测试: ✅ 157 passed, 2 skipped
+
+**变更分析**
+- 新增文件: `backend/app/api/mattermost.py` (310行)
+- config.py: -260行
+- main.py: +14行
+- 测试文件更新导入路径
+
+**成果统计**
+| 指标 | 1.1.1 后 | 1.1.3 后 |
+|------|----------|----------|
+| config.py 行数 | 1150 | 890 |
+| oidc.py 行数 | 351 | 351 |
+| mattermost.py 行数 | 0 | 310 |
+
+---
+
 ### 任务清单
 
 - [ ] 1.1 拆分 `api/config.py`
-  - [ ] 1.1.1 创建 `api/oidc.py` (最独立，先拆)
+  - [x] 1.1.1 创建 `api/oidc.py` (最独立，先拆)
+  - [x] 1.1.3 创建 `api/mattermost.py`
   - [ ] 1.1.2 创建 `api/project_webhooks.py`
-  - [ ] 1.1.3 创建 `api/mattermost.py`
-  - [ ] 1.1.4 保留 `api/config.py` 仅含 Runtime config
-  - [ ] 更新路由注册
-  - [ ] 更新 imports
+  - [x] 保留 `api/config.py` 仅含 Runtime config (890行，还需继续)
+  - [x] 更新路由注册
+  - [x] 更新 imports
 
 - [ ] 1.2 拆分 `core/worker.py`
   - [ ] 提取 `_create_mr_if_needed()`

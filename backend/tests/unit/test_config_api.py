@@ -10,12 +10,14 @@ from fastapi import HTTPException
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app.api.config import (
-    MattermostNotificationProfileInput,
-    _build_gitlab_project_webhook_status_response,
-    _build_gitlab_webhook_target_url,
     _normalize_updates,
     _serialize_effective_config,
     _validate_config_value,
+)
+from app.api.mattermost import MattermostNotificationProfileInput
+from app.api.project_webhooks import (
+    _build_gitlab_project_webhook_status_response,
+    _build_gitlab_webhook_target_url,
     _validate_gitlab_webhook_ready,
 )
 from app.config import get_settings, reset_runtime_config, set_runtime_config

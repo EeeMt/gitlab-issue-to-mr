@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from app.api.config import _build_endpoint_checks, _build_oidc_diagnostics_warnings
+from app.api.oidc import _build_endpoint_checks, _build_oidc_diagnostics_warnings
 from app.core.oidc import get_required_oidc_scope_string, get_required_oidc_scopes
 
 
