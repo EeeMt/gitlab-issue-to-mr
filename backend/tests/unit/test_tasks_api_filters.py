@@ -1,6 +1,6 @@
 import os
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Optional
 from unittest.mock import AsyncMock, patch
@@ -21,7 +21,7 @@ def _make_task(
     status: TaskStatus,
     initiator_username: Optional[str] = None,
 ) -> Task:
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     return Task(
         id=task_id,
         project_id=project_id,

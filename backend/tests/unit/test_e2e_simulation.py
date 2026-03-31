@@ -7,7 +7,7 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from app.models import Task, TaskStatus
 from app.core.parser import parse_ai_bot_command
 
@@ -33,7 +33,7 @@ def simulate_full_workflow():
 
     # Step 3: Create task
     print("\n📋 Step 3: Create task")
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     scheduled_at = now + timedelta(seconds=cmd.delay_seconds) if cmd.delay_seconds else None
 
     task = Task(
@@ -61,14 +61,14 @@ def simulate_full_workflow():
     # Scheduler checks
     can_run = (
         task.status in [TaskStatus.PENDING, TaskStatus.QUEUED] and
-        (task.scheduled_at is None or task.scheduled_at <= datetime.utcnow())
+        (task.scheduled_at is None or task.scheduled_at <= datetime.now(UTC))
     )
     print(f"   Can run: {can_run}")
 
     # Step 5: Execute task
     print("\n🚀 Step 5: Execute task")
     task.status = TaskStatus.RUNNING
-    task.started_at = datetime.utcnow()
+    task.started_at = datetime.now(UTC)
     task.container_id = "gimr-1-p123-i789"
     print(f"   Status: {task.status.value}")
     print(f"   Container: {task.container_id}")
@@ -76,7 +76,7 @@ def simulate_full_workflow():
     # Step 6: Task completes
     print("\n✅ Step 6: Task completes")
     task.status = TaskStatus.COMPLETED
-    task.completed_at = datetime.utcnow()
+    task.completed_at = datetime.now(UTC)
     task.merge_request_url = "https://gitlab.example.com/!1"
     task.commit_sha = "abc123def456"
     print(f"   Status: {task.status.value}")
@@ -93,7 +93,7 @@ def simulate_full_workflow():
     running_task = task  # reuse previous task for demo
     if running_task.status == TaskStatus.RUNNING:
         running_task.status = TaskStatus.CANCELLED
-        running_task.completed_at = datetime.utcnow()
+        running_task.completed_at = datetime.now(UTC)
         running_task.error_message = "Cancelled by user"
         print(f"   Cancelled task: {running_task.id}")
 

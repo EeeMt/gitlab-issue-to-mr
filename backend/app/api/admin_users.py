@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -94,7 +94,7 @@ async def list_admin_users(
     db: AsyncSession = Depends(get_db),
 ):
     """List dashboard users with their current access state and session summary."""
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     active_sessions = (
         select(
             UserSession.user_id.label("user_id"),
@@ -203,7 +203,7 @@ async def update_admin_user(
         ).where(
             UserSession.user_id == user.id,
             UserSession.revoked_at.is_(None),
-            UserSession.expires_at > datetime.utcnow(),
+            UserSession.expires_at > datetime.now(UTC),
         )
     )
     active_session_count, last_session_seen_at = active_count_result.one()

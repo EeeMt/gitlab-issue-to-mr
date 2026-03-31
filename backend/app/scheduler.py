@@ -6,13 +6,13 @@ import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Set
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_effective_settings
+from app.config import get_effective_settings as get_settings
 from app.core.docker_client import get_docker_client
 from app.core.session import cleanup_stale_sessions
 from app.core.worker import WorkerExecutor
@@ -26,10 +26,6 @@ _SESSION_CLEANUP_INTERVAL_SECONDS = 3600
 # Thread pool for running worker tasks (to avoid blocking the event loop)
 _worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-")
 
-
-def get_settings():
-    """Get effective settings (with runtime overrides)."""
-    return get_effective_settings()
 
 WORKER_CONTAINER_PATTERN = re.compile(r"^gimr-\d+-p\d+-i\d+$")
 
@@ -118,7 +114,7 @@ class Scheduler:
 
     async def _get_next_task(self, db: AsyncSession) -> Task | None:
         """Get the next task to execute based on priority and scheduled time."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         # Query for next task:
         # - status in (PENDING, QUEUED)
@@ -146,7 +142,7 @@ class Scheduler:
         try:
             # Update status to RUNNING
             task.status = TaskStatus.RUNNING
-            task.started_at = datetime.utcnow()
+            task.started_at = datetime.now(UTC)
             await db.commit()
 
             # Execute via worker in a thread pool WITHOUT waiting
@@ -158,7 +154,7 @@ class Scheduler:
             logger.exception(f"Task {task.id} failed with exception")
             task.status = TaskStatus.FAILED
             task.error_message = str(e)[:500]
-            task.completed_at = datetime.utcnow()
+            task.completed_at = datetime.now(UTC)
             await db.commit()
 
             # Clean up tracking
@@ -244,7 +240,7 @@ class Scheduler:
             for task in stuck_tasks:
                 task.status = TaskStatus.FAILED
                 task.error_message = "Task was running when service crashed"
-                task.completed_at = datetime.utcnow()
+                task.completed_at = datetime.now(UTC)
                 logger.warning(f"Marked task {task.id} as failed")
 
             await db.commit()

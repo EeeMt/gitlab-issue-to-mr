@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -218,7 +218,7 @@ async def get_analytics(
                 detail=f"Project {project_id} is not available for analytics.",
             )
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     since = now - timedelta(days=days - 1)
 
     finished_task_expr = case((Task.status.in_(FINISHED_TASK_STATUSES), 1), else_=0)

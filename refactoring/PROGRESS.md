@@ -61,15 +61,15 @@
   - [x] `test_task_analytics_api.py` - 重写 MockResult 类
   - [x] `test_prompt_templates_api.py` - MagicMock 替代 AsyncMock
   - [x] 独立脚本函数重命名 (`test_*` -> `check_*`) 消除 pytest 误报
-- [ ] 1.3 移动错误放置的代码
-  - [ ] 移动 `build_enhanced_prompt()` 到 parser.py
-  - [ ] 移动 `build_prompt_with_issue_context()` 到 parser.py
-  - [ ] 更新 imports
-- [ ] 1.4 消除重复代码
-  - [ ] 删除 `scheduler.py` 中的 `get_settings()` wrapper
-  - [ ] 删除 `worker.py` 中的 `get_settings()` wrapper
-  - [ ] 提取 `_build_project_lookup()` 到共享模块
-  - [ ] 更新相关 imports
+- [x] 1.3 移动错误放置的代码
+  - [x] 移动 `build_enhanced_prompt()` 到 parser.py
+  - [x] 移动 `build_prompt_with_issue_context()` 到 parser.py
+  - [x] 更新 imports
+- [x] 1.4 消除重复代码
+  - [x] 删除 `scheduler.py` 中的 `get_settings()` wrapper
+  - [x] 删除 `worker.py` 中的 `get_settings()` wrapper
+  - [ ] 提取 `_build_project_lookup()` 到共享模块 (延后到 Phase 1)
+  - [x] 更新相关 imports
 
 ### 完成记录
 

@@ -6,13 +6,13 @@ import logging
 import re
 import threading
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings, get_effective_settings
+from app.config import get_effective_settings as get_settings
 from app.core.docker_client import DockerClientWrapper, get_docker_client
 from app.core.gitlab_client import GitLabClient, get_gitlab_client
 from app.core.ssl_utils import get_ssl_verify
@@ -82,11 +82,6 @@ def sanitize_sensitive_data(text: str) -> str:
     text = re.sub(r'[\ud800-\udfff\ufffe\uffff]', '', text)
 
     return text
-
-
-def get_settings():
-    """Get effective settings with runtime overrides."""
-    return get_effective_settings()
 
 
 class WorkerExecutor:
@@ -299,7 +294,7 @@ class WorkerExecutor:
 
         # Update task status to running
         task.status = TaskStatus.RUNNING
-        task.started_at = datetime.utcnow()
+        task.started_at = datetime.now(UTC)
         await db.commit()
 
         # Send "starting" notification to issue
@@ -454,7 +449,7 @@ class WorkerExecutor:
             # Process results
             if exit_code == 0:
                 task.status = TaskStatus.COMPLETED
-                task.completed_at = datetime.utcnow()
+                task.completed_at = datetime.now(UTC)
                 # Parse MR URL from logs
                 # Try to find web_url in any line of logs
                 for line in logs.split("\n"):
@@ -537,7 +532,7 @@ class WorkerExecutor:
                     logger.warning(f"Failed to send Mattermost completion notification: {e}")
             else:
                 task.status = TaskStatus.FAILED
-                task.completed_at = datetime.utcnow()
+                task.completed_at = datetime.now(UTC)
                 task.error_message = sanitize_sensitive_data(logs)[-1000:]
                 logger.error(f"[Task {task_id}] Failed with exit code {exit_code}")
 
@@ -548,7 +543,7 @@ class WorkerExecutor:
                     previous_scheduled_at = task.scheduled_at
                     task.retry_count += 1
                     task.status = TaskStatus.PENDING
-                    task.scheduled_at = datetime.utcnow()
+                    task.scheduled_at = datetime.now(UTC)
                     logger.info(f"[Task {task_id}] Scheduling retry {task.retry_count}/{settings.max_retries}")
 
                 # Send "failed" notification
@@ -604,7 +599,7 @@ class WorkerExecutor:
         except Exception as e:
             logger.exception(f"Task {task_id} failed with exception: {e}")
             task.status = TaskStatus.FAILED
-            task.completed_at = datetime.utcnow()
+            task.completed_at = datetime.now(UTC)
             # Sanitize error message
             task.error_message = sanitize_sensitive_data(str(e))[:1000]
             await db.commit()

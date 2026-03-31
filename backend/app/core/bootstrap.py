@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
 
 from sqlalchemy import select
@@ -66,7 +66,7 @@ async def initialize_system(
     bootstrap = await get_bootstrap_state(db)
     bootstrap.initialized = True
     bootstrap.initial_admin_user_id = admin_user.id
-    bootstrap.initialized_at = datetime.utcnow()
+    bootstrap.initialized_at = datetime.now(UTC)
     
     await db.flush()
     return bootstrap

@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Optional
 from urllib.parse import quote
 
@@ -488,7 +488,7 @@ async def cancel_task(
         )
 
     task.status = TaskStatus.CANCELLED
-    task.completed_at = datetime.utcnow()
+    task.completed_at = datetime.now(UTC).replace(tzinfo=None)
     task.error_message = "Cancelled by user"
     await db.commit()
     await db.refresh(task)
@@ -555,7 +555,7 @@ async def retry_task(
     scheduled_at: Optional[datetime] = None
     if request and request.scheduled_datetime is not None:
         normalized = normalize_scheduled_datetime(request.scheduled_datetime)
-        if normalized is None or normalized <= datetime.utcnow():
+        if normalized is None or normalized <= datetime.now(UTC).replace(tzinfo=None):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Scheduled datetime must be in the future",
@@ -601,7 +601,7 @@ class RescheduleTaskRequest(BaseModel):
     @model_validator(mode="after")
     def validate_schedule_is_future(self) -> "RescheduleTaskRequest":
         normalized_scheduled = normalize_scheduled_datetime(self.scheduled_datetime)
-        if normalized_scheduled is None or normalized_scheduled <= datetime.utcnow():
+        if normalized_scheduled is None or normalized_scheduled <= datetime.now(UTC).replace(tzinfo=None):
             raise ValueError("Scheduled datetime must be in the future for manual tasks")
         return self
 
@@ -695,7 +695,7 @@ async def reschedule_task(
         )
 
     normalized_scheduled = normalize_scheduled_datetime(request.scheduled_datetime)
-    if normalized_scheduled is None or normalized_scheduled <= datetime.utcnow():
+    if normalized_scheduled is None or normalized_scheduled <= datetime.now(UTC).replace(tzinfo=None):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Scheduled datetime must be in the future for manual tasks",
@@ -752,7 +752,7 @@ class CreateTaskRequest(BaseModel):
             return self
 
         normalized_scheduled = normalize_scheduled_datetime(self.scheduled_datetime)
-        if normalized_scheduled is not None and normalized_scheduled <= datetime.utcnow():
+        if normalized_scheduled is not None and normalized_scheduled <= datetime.now(UTC).replace(tzinfo=None):
             raise ValueError("Scheduled datetime must be in the future for manual tasks")
 
         return self

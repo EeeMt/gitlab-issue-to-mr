@@ -31,7 +31,7 @@ import logging
 import subprocess
 import requests
 import argparse
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 
 # Configuration
@@ -216,7 +216,7 @@ def test_scheduled_at():
     logger.info("=" * 60)
 
     # Calculate test time (1 minute from now for at=)
-    test_time = (datetime.utcnow() + timedelta(minutes=1)).strftime("%H:%M")
+    test_time = (datetime.now(UTC) + timedelta(minutes=1)).strftime("%H:%M")
 
     test_cases = [
         {
@@ -284,7 +284,7 @@ def test_scheduled_at():
                 scheduled_at = task.get("scheduled_at")
                 if scheduled_at:
                     scheduled_time = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
-                    now = datetime.utcnow()
+                    now = datetime.now(UTC)
                     diff = (scheduled_time - now).total_seconds()
                     if 0 <= diff <= 120:  # Within 2 minutes
                         logger.info(f"✅ PASS: {test_name} - scheduled_at is set correctly ({diff:.0f}s from now)")

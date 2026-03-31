@@ -4,7 +4,7 @@
 import os
 import sys
 import unittest
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 from unittest.mock import patch
 
@@ -72,7 +72,7 @@ class AuthSessionTests(unittest.IsolatedAsyncioTestCase):
         mock_db = MagicMock()
         mock_db.add = MagicMock()
         mock_db.flush = AsyncMock()
-        max_expires_at = datetime.utcnow() + timedelta(minutes=10)
+        max_expires_at = datetime.now(UTC) + timedelta(minutes=10)
 
         await create_user_session(mock_db, user, max_expires_at=max_expires_at)
 
@@ -85,7 +85,7 @@ class AuthSessionTests(unittest.IsolatedAsyncioTestCase):
             id="session-1",
             user_id=1,
             session_token_hash=hash_session_token("valid"),
-            expires_at=datetime.utcnow() + timedelta(hours=1),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
         )
         mock_result = MagicMock()
         mock_result.first.return_value = (user, session)
@@ -106,7 +106,7 @@ class AuthSessionTests(unittest.IsolatedAsyncioTestCase):
             id="session-1",
             user_id=1,
             session_token_hash=hash_session_token("expired"),
-            expires_at=datetime.utcnow() - timedelta(minutes=1),
+            expires_at=datetime.now(UTC) - timedelta(minutes=1),
         )
         mock_result = MagicMock()
         mock_result.first.return_value = (user, session)
@@ -126,7 +126,7 @@ class AuthSessionTests(unittest.IsolatedAsyncioTestCase):
             id="session-1",
             user_id=1,
             session_token_hash=hash_session_token("expired"),
-            expires_at=datetime.utcnow() - timedelta(minutes=1),
+            expires_at=datetime.now(UTC) - timedelta(minutes=1),
         )
         mock_result = MagicMock()
         mock_result.first.return_value = (user, session)
@@ -145,7 +145,7 @@ class AuthSessionTests(unittest.IsolatedAsyncioTestCase):
             id="session-1",
             user_id=1,
             session_token_hash="hash",
-            expires_at=datetime.utcnow() + timedelta(hours=4),
+            expires_at=datetime.now(UTC) + timedelta(hours=4),
         )
         mock_db = MagicMock()
         mock_db.flush = AsyncMock()
@@ -156,7 +156,7 @@ class AuthSessionTests(unittest.IsolatedAsyncioTestCase):
                 session,
                 gitlab_access_token="access-token",
                 gitlab_refresh_token="refresh-token",
-                max_expires_at=datetime.utcnow() + timedelta(hours=1),
+                max_expires_at=datetime.now(UTC) + timedelta(hours=1),
             )
 
         self.assertEqual(session.gitlab_access_token_encrypted, "encrypted-access")
@@ -169,7 +169,7 @@ class AuthSessionTests(unittest.IsolatedAsyncioTestCase):
             user_id=1,
             session_token_hash="hash",
             gitlab_refresh_token_encrypted="encrypted-refresh",
-            expires_at=datetime.utcnow() + timedelta(hours=1),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
         )
 
         with patch("app.core.session.decrypt_config_secret", return_value="refresh-token"):
@@ -180,13 +180,13 @@ class AuthSessionTests(unittest.IsolatedAsyncioTestCase):
             id="session-1",
             user_id=1,
             session_token_hash="a",
-            expires_at=datetime.utcnow() + timedelta(hours=1),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
         )
         active_two = UserSession(
             id="session-2",
             user_id=1,
             session_token_hash="b",
-            expires_at=datetime.utcnow() + timedelta(hours=1),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
         )
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [active_one, active_two]

@@ -7,7 +7,7 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from app.models import Task, TaskStatus
 
 
@@ -21,11 +21,11 @@ def check_timeout_detection():
 
     test_cases = [
         # (started_at, expected_timed_out)
-        (datetime.utcnow() - timedelta(minutes=10), False),   # 10 min ago - not timed out
-        (datetime.utcnow() - timedelta(minutes=25), False),    # 25 min ago - not timed out (within 30min)
-        (datetime.utcnow() - timedelta(minutes=30), True),      # 30 min ago - exactly timed out
-        (datetime.utcnow() - timedelta(minutes=31), True),      # 31 min ago - timed out
-        (datetime.utcnow() - timedelta(hours=1), True),         # 1 hour ago - definitely timed out
+        (datetime.now(UTC) - timedelta(minutes=10), False),   # 10 min ago - not timed out
+        (datetime.now(UTC) - timedelta(minutes=25), False),    # 25 min ago - not timed out (within 30min)
+        (datetime.now(UTC) - timedelta(minutes=30), True),      # 30 min ago - exactly timed out
+        (datetime.now(UTC) - timedelta(minutes=31), True),      # 31 min ago - timed out
+        (datetime.now(UTC) - timedelta(hours=1), True),         # 1 hour ago - definitely timed out
         (None, False),                                         # Not started - not timed out
     ]
 
@@ -37,7 +37,7 @@ def check_timeout_detection():
         if started_at is None:
             is_timed_out = False
         else:
-            elapsed = (datetime.utcnow() - started_at).total_seconds()
+            elapsed = (datetime.now(UTC) - started_at).total_seconds()
             is_timed_out = elapsed > task_timeout
 
         if is_timed_out == expected_timed_out:
@@ -90,11 +90,11 @@ def check_crash_recovery_logic():
 
     # Simulate tasks that were running when crash happened
     tasks = [
-        {"id": 1, "status": TaskStatus.RUNNING, "started_at": datetime.utcnow() - timedelta(minutes=10)},
-        {"id": 2, "status": TaskStatus.RUNNING, "started_at": datetime.utcnow() - timedelta(hours=1)},
+        {"id": 1, "status": TaskStatus.RUNNING, "started_at": datetime.now(UTC) - timedelta(minutes=10)},
+        {"id": 2, "status": TaskStatus.RUNNING, "started_at": datetime.now(UTC) - timedelta(hours=1)},
         {"id": 3, "status": TaskStatus.PENDING, "started_at": None},
-        {"id": 4, "status": TaskStatus.COMPLETED, "started_at": datetime.utcnow() - timedelta(hours=2)},
-        {"id": 5, "status": TaskStatus.RUNNING, "started_at": datetime.utcnow() - timedelta(minutes=5)},
+        {"id": 4, "status": TaskStatus.COMPLETED, "started_at": datetime.now(UTC) - timedelta(hours=2)},
+        {"id": 5, "status": TaskStatus.RUNNING, "started_at": datetime.now(UTC) - timedelta(minutes=5)},
     ]
 
     task_timeout = 1800  # 30 minutes
@@ -106,7 +106,7 @@ def check_crash_recovery_logic():
         if task["status"] == TaskStatus.RUNNING:
             # Check if task was running too long (likely crashed)
             if task["started_at"]:
-                elapsed = (datetime.utcnow() - task["started_at"]).total_seconds()
+                elapsed = (datetime.now(UTC) - task["started_at"]).total_seconds()
                 if elapsed > task_timeout:
                     print(f"✅ RECOVER: Task {task['id']} timed out (ran {elapsed/60:.1f} min), marking as FAILED")
                     task["status"] = TaskStatus.FAILED
@@ -182,14 +182,14 @@ def check_status_transition_on_timeout():
     task = {
         "id": 1,
         "status": TaskStatus.RUNNING,
-        "started_at": datetime.utcnow() - timedelta(hours=1),
+        "started_at": datetime.now(UTC) - timedelta(hours=1),
         "error_message": None
     }
 
     task_timeout = 1800  # 30 minutes
 
     # Check if timed out
-    elapsed = (datetime.utcnow() - task["started_at"]).total_seconds()
+    elapsed = (datetime.now(UTC) - task["started_at"]).total_seconds()
     is_timed_out = elapsed > task_timeout
 
     print(f"Task {task['id']}: elapsed={elapsed}s, timeout={task_timeout}s, timed_out={is_timed_out}")

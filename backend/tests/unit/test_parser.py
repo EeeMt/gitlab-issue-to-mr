@@ -8,7 +8,7 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from app.core.parser import (
     parse_ai_bot_command,
     PRIORITY_LOW, PRIORITY_NORMAL, PRIORITY_HIGH, PRIORITY_URGENT,
@@ -123,7 +123,7 @@ def check_task_creation():
     print("=" * 60)
 
     # Simulate task creation (without DB, defaults won't be applied)
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     scheduled = now + timedelta(minutes=5)
 
     task = Task(
@@ -163,7 +163,7 @@ def check_scheduler_logic():
     print("=" * 60)
 
     # Create mock tasks
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
 
     tasks = [
         # (priority, scheduled_at, status, name)

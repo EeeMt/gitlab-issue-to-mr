@@ -3,7 +3,7 @@
 import logging
 import re
 import secrets
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings
 from app.core.gitlab_client import get_gitlab_client
-from app.core.parser import BotCommand, parse_ai_bot_command
+from app.core.parser import BotCommand, build_enhanced_prompt, build_prompt_with_issue_context, parse_ai_bot_command
 from app.core.scheduling import resolve_scheduled_at
 from app.database import get_db
 from app.models import Task, TaskStatus, User
@@ -60,50 +60,6 @@ def is_generic_prompt(prompt: str) -> bool:
     return False
 
 
-def build_enhanced_prompt(prompt: str, issue_title: str, issue_description: Optional[str]) -> str:
-    """Build enhanced prompt using issue details.
-
-    Args:
-        prompt: Original user prompt
-        issue_title: Issue title from GitLab
-        issue_description: Issue description from GitLab
-
-    Returns:
-        Enhanced prompt with issue details
-    """
-    parts = []
-
-    # Add issue title
-    if issue_title:
-        parts.append(f"Issue: {issue_title}")
-
-    # Add issue description if available
-    if issue_description:
-        parts.append(f"\n需求描述:\n{issue_description}")
-    else:
-        parts.append("\n需求描述: (无详细描述)")
-
-    return "\n".join(parts)
-
-
-def build_prompt_with_issue_context(prompt: str, issue_title: str, issue_description: Optional[str]) -> str:
-    """Build prompt that combines explicit instruction with issue context.
-
-    Args:
-        prompt: User prompt from comment
-        issue_title: Issue title
-        issue_description: Issue description
-
-    Returns:
-        Combined prompt text
-    """
-    issue_context = build_enhanced_prompt("", issue_title, issue_description)
-    trimmed_prompt = (prompt or "").strip()
-
-    if not trimmed_prompt:
-        return issue_context
-
-    return f"{issue_context}\n\n用户补充要求: {trimmed_prompt}"
 router = APIRouter()
 
 
@@ -357,7 +313,7 @@ async def _handle_cancel_command(
 
     if task:
         task.status = TaskStatus.CANCELLED
-        task.completed_at = datetime.utcnow()
+        task.completed_at = datetime.now(UTC)
         task.error_message = "Cancelled by user"
         await db.commit()
 
@@ -382,7 +338,7 @@ async def _handle_cancel_command(
     if pending_tasks:
         for task in pending_tasks:
             task.status = TaskStatus.CANCELLED
-            task.completed_at = datetime.utcnow()
+            task.completed_at = datetime.now(UTC)
         await db.commit()
         return {
             "status": "success",

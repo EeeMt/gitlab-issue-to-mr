@@ -19,7 +19,7 @@ import time
 import threading
 import http.server
 import socketserver
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, AsyncMock, patch
 from typing import Optional
 
@@ -296,11 +296,11 @@ class TestManualTaskScheduling:
         if request.scheduled_datetime:
             scheduled_at = request.scheduled_datetime
         elif request.delay_seconds:
-            scheduled_at = datetime.utcnow() + timedelta(seconds=request.delay_seconds)
+            scheduled_at = datetime.now(UTC) + timedelta(seconds=request.delay_seconds)
 
         assert scheduled_at is not None
         # Should be approximately 10 minutes from now
-        diff = (scheduled_at - datetime.utcnow()).total_seconds()
+        diff = (scheduled_at - datetime.now(UTC)).total_seconds()
         assert 590 <= diff <= 610
 
     def test_scheduled_at_calculation_absolute(self):
@@ -320,7 +320,7 @@ class TestManualTaskScheduling:
         if request.scheduled_datetime:
             scheduled_at = request.scheduled_datetime
         elif request.delay_seconds:
-            scheduled_at = datetime.utcnow() + timedelta(seconds=request.delay_seconds)
+            scheduled_at = datetime.now(UTC) + timedelta(seconds=request.delay_seconds)
 
         assert scheduled_at == scheduled
 

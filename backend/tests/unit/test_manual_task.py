@@ -8,7 +8,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch, AsyncMock
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -57,7 +57,7 @@ class TestCreateTaskRequest:
 
     def test_task_with_scheduled_datetime(self):
         """Test creating a task with scheduled datetime."""
-        scheduled = datetime.utcnow() + timedelta(days=30)
+        scheduled = datetime.now(UTC) + timedelta(days=30)
         request = CreateTaskRequest(
             project_id=1,
             branch_name="feature/test",
@@ -240,7 +240,7 @@ class TestScheduledAtCalculation:
         if request.scheduled_datetime:
             scheduled_at = request.scheduled_datetime
         elif request.delay_seconds:
-            scheduled_at = datetime.utcnow() + timedelta(seconds=request.delay_seconds)
+            scheduled_at = datetime.now(UTC) + timedelta(seconds=request.delay_seconds)
 
         assert scheduled_at is None
 
@@ -253,7 +253,7 @@ class TestScheduledAtCalculation:
             delay_seconds=300,
         )
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         scheduled_at = None
         if request.scheduled_datetime:
             scheduled_at = request.scheduled_datetime
@@ -267,7 +267,7 @@ class TestScheduledAtCalculation:
 
     def test_absolute_scheduling(self):
         """Test absolute datetime scheduling."""
-        scheduled_time = datetime.utcnow() + timedelta(days=30)
+        scheduled_time = datetime.now(UTC) + timedelta(days=30)
         request = CreateTaskRequest(
             project_id=1,
             branch_name="feature/test",
@@ -279,13 +279,13 @@ class TestScheduledAtCalculation:
         if request.scheduled_datetime:
             scheduled_at = request.scheduled_datetime
         elif request.delay_seconds:
-            scheduled_at = datetime.utcnow() + timedelta(seconds=request.delay_seconds)
+            scheduled_at = datetime.now(UTC) + timedelta(seconds=request.delay_seconds)
 
         assert scheduled_at == scheduled_time
 
     def test_absolute_takes_precedence(self):
         """Test absolute datetime takes precedence over delay."""
-        scheduled_time = datetime.utcnow() + timedelta(days=30)
+        scheduled_time = datetime.now(UTC) + timedelta(days=30)
         request = CreateTaskRequest(
             project_id=1,
             branch_name="feature/test",
@@ -299,7 +299,7 @@ class TestScheduledAtCalculation:
         if request.scheduled_datetime:
             scheduled_at = request.scheduled_datetime
         elif request.delay_seconds:
-            scheduled_at = datetime.utcnow() + timedelta(seconds=request.delay_seconds)
+            scheduled_at = datetime.now(UTC) + timedelta(seconds=request.delay_seconds)
 
         # Absolute time should take precedence
         assert scheduled_at == scheduled_time
@@ -329,7 +329,7 @@ class TestScheduledAtCalculation:
 class TestRescheduleTask:
     @pytest.mark.asyncio
     async def test_reschedule_task_updates_pending_scheduled_task(self):
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
         task = Task(
             id=1,
             project_id=1,
@@ -371,12 +371,12 @@ class TestRescheduleTask:
             branch_name="feature/test",
             target_branch="main",
             status=TaskStatus.RUNNING,
-            scheduled_at=datetime.utcnow() + timedelta(hours=1),
+            scheduled_at=datetime.now(UTC) + timedelta(hours=1),
             is_manual=True,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
-        request = RescheduleTaskRequest(scheduled_datetime=datetime.utcnow() + timedelta(hours=2))
+        request = RescheduleTaskRequest(scheduled_datetime=datetime.now(UTC) + timedelta(hours=2))
         db = AsyncMock()
         db.execute.return_value = MagicMock(scalar_one_or_none=lambda: task)
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -401,10 +401,10 @@ class TestRescheduleTask:
             status=TaskStatus.PENDING,
             scheduled_at=None,
             is_manual=True,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
-        request = RescheduleTaskRequest(scheduled_datetime=datetime.utcnow() + timedelta(hours=2))
+        request = RescheduleTaskRequest(scheduled_datetime=datetime.now(UTC) + timedelta(hours=2))
         db = AsyncMock()
         db.execute.return_value = MagicMock(scalar_one_or_none=lambda: task)
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -420,7 +420,7 @@ class TestRescheduleTask:
 
     @pytest.mark.asyncio
     async def test_reschedule_task_rejects_other_users(self):
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         task = Task(
             id=1,
             project_id=1,

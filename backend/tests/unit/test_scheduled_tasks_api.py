@@ -1,6 +1,6 @@
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -14,7 +14,7 @@ from app.models import Task, TaskStatus
 
 
 def _make_task(task_id: int, project_id: int, scheduled_at: datetime, status: TaskStatus) -> Task:
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     return Task(
         id=task_id,
         project_id=project_id,
@@ -37,7 +37,7 @@ def _make_task(task_id: int, project_id: int, scheduled_at: datetime, status: Ta
 
 @pytest.mark.asyncio
 async def test_list_scheduled_tasks_serializes_active_scheduled_rows():
-    scheduled_time = datetime.utcnow() + timedelta(hours=2)
+    scheduled_time = datetime.now(UTC) + timedelta(hours=2)
     task = _make_task(1, 101, scheduled_time, TaskStatus.PENDING)
     db = AsyncMock()
     db.execute.return_value = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [task]))
@@ -61,7 +61,7 @@ async def test_list_scheduled_tasks_serializes_active_scheduled_rows():
 
 @pytest.mark.asyncio
 async def test_list_scheduled_tasks_uses_accessible_project_scope():
-    task = _make_task(2, 202, datetime.utcnow() + timedelta(hours=1), TaskStatus.QUEUED)
+    task = _make_task(2, 202, datetime.now(UTC) + timedelta(hours=1), TaskStatus.QUEUED)
     db = AsyncMock()
     db.execute.return_value = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [task]))
     access_scope = ProjectAccessScope(

@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, time
+from datetime import UTC, datetime, timedelta, time
 from typing import Optional
 
 
@@ -93,7 +93,7 @@ def parse_scheduled_datetime(time_str: str) -> Optional[datetime]:
         datetime object or None if invalid
     """
     time_str = time_str.strip().lower()
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
 
     # Handle "tomorrow" prefix
     is_tomorrow = time_str.startswith("tomorrow ")
@@ -323,3 +323,49 @@ def parse_ai_bot_command(comment_body: str) -> Optional[BotCommand]:
             )
 
     return None
+
+
+def build_enhanced_prompt(prompt: str, issue_title: str, issue_description: Optional[str]) -> str:
+    """Build enhanced prompt using issue details.
+
+    Args:
+        prompt: Original user prompt
+        issue_title: Issue title from GitLab
+        issue_description: Issue description from GitLab
+
+    Returns:
+        Enhanced prompt with issue details
+    """
+    parts = []
+
+    # Add issue title
+    if issue_title:
+        parts.append(f"Issue: {issue_title}")
+
+    # Add issue description if available
+    if issue_description:
+        parts.append(f"\n需求描述:\n{issue_description}")
+    else:
+        parts.append("\n需求描述: (无详细描述)")
+
+    return "\n".join(parts)
+
+
+def build_prompt_with_issue_context(prompt: str, issue_title: str, issue_description: Optional[str]) -> str:
+    """Build prompt that combines explicit instruction with issue context.
+
+    Args:
+        prompt: User prompt from comment
+        issue_title: Issue title
+        issue_description: Issue description
+
+    Returns:
+        Combined prompt text
+    """
+    issue_context = build_enhanced_prompt("", issue_title, issue_description)
+    trimmed_prompt = (prompt or "").strip()
+
+    if not trimmed_prompt:
+        return issue_context
+
+    return f"{issue_context}\n\n用户补充要求: {trimmed_prompt}"

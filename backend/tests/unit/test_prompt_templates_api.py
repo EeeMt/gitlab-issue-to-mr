@@ -3,7 +3,7 @@
 
 import os
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -24,7 +24,7 @@ from app.models import PromptTemplate
 
 
 def _make_template(template_id: int, name: str, content: str, is_active: bool = True) -> PromptTemplate:
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     return PromptTemplate(
         id=template_id,
         name=name,
@@ -65,8 +65,8 @@ async def test_create_prompt_template_adds_new_template():
     # Mock refresh to set id and timestamps on the object
     def mock_refresh(obj):
         obj.id = 1
-        obj.created_at = datetime.utcnow()
-        obj.updated_at = datetime.utcnow()
+        obj.created_at = datetime.now(UTC)
+        obj.updated_at = datetime.now(UTC)
     db.refresh = AsyncMock(side_effect=mock_refresh)
 
     template_input = PromptTemplateCreate(name="Bug Fix", content="Fix the bug in {{component}}", is_active=True)

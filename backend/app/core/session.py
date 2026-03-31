@@ -7,7 +7,7 @@ import secrets
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
 from sqlalchemy import delete, func, select
@@ -27,7 +27,7 @@ _last_seen_written_at: dict[str, float] = {}
 
 
 def _utcnow() -> datetime:
-    return datetime.utcnow()
+    return datetime.now(UTC)
 
 
 @dataclass
