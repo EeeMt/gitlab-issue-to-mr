@@ -153,6 +153,15 @@ def pytest_configure(config):
         "markers", "navigation: mark test as a navigation test"
     )
     config.addinivalue_line(
+        "markers", "dashboard: mark test as a dashboard test"
+    )
+    config.addinivalue_line(
+        "markers", "task_details: mark test as a task detail view test"
+    )
+    config.addinivalue_line(
+        "markers", "manual_task: mark test as a manual task creation test"
+    )
+    config.addinivalue_line(
         "markers", "slow: mark test as slow running"
     )
 

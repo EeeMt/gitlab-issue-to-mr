@@ -8,7 +8,7 @@
 | P1 | 基础测试建设 | Completed | 2026-03-31 | 2026-03-31 |
 | Phase 1 | 模块划分优化 | Completed | 2026-03-31 | 2026-03-31 |
 | Phase 2 | 代码质量提升 | Completed | 2026-03-31 | 2026-03-31 |
-| Phase 3 | 测试基础设施完善 | Partial | 2026-03-31 | - |
+| Phase 3 | 测试基础设施完善 | Completed | 2026-03-31 | 2026-03-31 |
 | Phase 4 | 稳定性增强 | Pending | - | - |
 | Phase 5 | Frontend 测试基础设施完善 | Completed | 2026-03-31 | 2026-03-31 |
 | Phase 6 | Frontend 单元测试 | Completed | 2026-03-31 | 2026-03-31 |
@@ -371,12 +371,47 @@
   - [x] `test_containers_api.py` 新建 (7个测试)
   - [x] `test_stats_api.py` 新建 (14个测试)
 
-- [ ] 3.5 改进 E2E 测试覆盖
-  - [ ] `test_task_queue.py` 新建
-  - [ ] `test_task_details.py` 新建
-  - [ ] `test_manual_task.py` 新建
+- [x] 3.5 改进 E2E 测试覆盖
+  - [x] `test_task_queue.py` 新建 (12个测试)
+  - [x] `test_task_details.py` 新建 (15个测试)
+  - [x] `test_manual_task.py` 新建 (18个测试)
 
 ### 完成记录
+
+#### 2026-03-31 Phase 3.5 E2E 测试覆盖
+
+**3.5 E2E 测试覆盖**
+- [x] `test_task_queue.py` (12个测试)
+  - Dashboard 页面加载
+  - 过滤器存在性
+  - 摘要卡片显示
+  - 任务表格显示
+  - 刷新按钮功能
+  - 行点击导航
+- [x] `test_task_details.py` (15个测试)
+  - Task View 页面加载
+  - 标题和摘要卡片
+  - 任务详情卡片
+  - 操作按钮 (cancel/retry/execute)
+  - 日志显示
+  - 权限检查
+- [x] `test_manual_task.py` (18个测试)
+  - 创建任务表单
+  - 项目/分支选择器
+  - 优先级选项
+  - 调度选项
+  - Prompt 编辑器
+  - 表单验证
+  - 导航测试
+
+**测试验证**
+- pytest --collect-only: 45 个新测试收集成功
+
+**变更分析**
+- `backend/tests/e2e/tests/test_task_queue.py` - 新建
+- `backend/tests/e2e/tests/test_task_details.py` - 新建
+- `backend/tests/e2e/tests/test_manual_task.py` - 新建
+- `backend/tests/e2e/conftest.py` - 添加新 markers
 
 #### 2026-03-31 Phase 3.3 & 3.4 测试完善
 
