@@ -106,13 +106,6 @@ def reset_database(postgres_url):
         # Delete all users to allow fresh bootstrap
         cursor.execute("DELETE FROM users")
 
-        # Reset alembic_version to head of initial migration (017)
-        # to ensure clean state
-        cursor.execute("""
-            UPDATE alembic_version
-            SET version_num = '017_add_local_auth_bootstrap'
-        """)
-
         yield
 
     finally:
