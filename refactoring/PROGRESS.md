@@ -9,7 +9,7 @@
 | Phase 1 | 模块划分优化 | Pending | - | - |
 | Phase 2 | 代码质量提升 | Pending | - | - |
 | Phase 3 | 测试基础设施完善 | Pending | - | - |
-| Phase 4 | 稳定性增强 | Pending | - | - |
+| Phase 5 | Frontend 测试基础设施 | Pending | - | - |
 
 ---
 
@@ -159,6 +159,59 @@
   - [ ] API 错误处理测试
   - [ ] 超时行为测试
   - [ ] Rate limit 响应测试
+
+---
+
+## Phase 5: Frontend 测试基础设施完善
+
+### 任务清单
+
+- [x] 5.1 添加测试依赖
+  - [x] `vitest` - 测试运行器
+  - [x] `@vue/test-utils` - Vue 组件测试工具
+  - [x] `@testing-library/vue` - Vue 测试库
+  - [x] `jsdom` - DOM 环境模拟
+  - [x] `@vitest/coverage-v8` - V8 覆盖率提供者
+
+- [x] 5.2 创建 Vitest 配置
+  - [x] `vitest.config.ts` - jsdom 环境、全局 API、别名配置
+
+- [x] 5.3 创建测试设置文件
+  - [x] `src/test/setup.ts` - 全局清理、matchMedia/ResizeObserver/getBoundingClientRect mocks
+
+- [x] 5.4 创建 API Mock 工具
+  - [x] `src/test/mocks/api.ts` - Task, Project, Branch, PromptTemplate 等 mock 工厂
+
+- [x] 5.5 创建 i18n Mock
+  - [x] `src/test/mocks/i18n.ts` - t, locale 等 i18n 函数 mock
+
+### 完成记录
+
+#### 2026-03-31 实施 Phase 5 前端测试基础设施
+
+**完成**
+- [x] `frontend/package.json` - 添加 Vitest 及相关依赖
+- [x] `frontend/vitest.config.ts` - Vitest 配置 (jsdom, globals, aliases)
+- [x] `frontend/src/test/setup.ts` - 测试环境设置
+- [x] `frontend/src/test/mocks/api.ts` - API mock 工厂函数
+- [x] `frontend/src/test/mocks/i18n.ts` - i18n mock
+
+**验证**
+- `npm install` - 成功安装 334 个包
+- `npx vitest --version` - vitest 2.1.9 可用
+
+**变更分析**
+- 文件改动: 1 个 (package.json)
+- 新增文件: 4 个
+  - `frontend/vitest.config.ts`
+  - `frontend/src/test/setup.ts`
+  - `frontend/src/test/mocks/api.ts`
+  - `frontend/src/test/mocks/i18n.ts`
+- 新增行数: ~350 行
+
+**后续待办**
+- Phase 6: Frontend 单元测试 (useVariableEditor, datetime utils)
+- Phase 7: Frontend 组件测试 (VariableEditor, CreateTask, Dashboard, TaskView)
 
 ---
 

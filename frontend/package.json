@@ -25,9 +25,14 @@
     "vue3-highlight-text": "^1.0.7"
   },
   "devDependencies": {
+    "@testing-library/vue": "^8.1.0",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "^2.4.6",
+    "jsdom": "^25.0.0",
     "typescript": "~5.7.2",
     "vite": "^6.0.7",
+    "vitest": "^2.1.0",
+    "@vitest/coverage-v8": "^2.0.0",
     "vue-tsc": "^2.2.0"
   }
 }
