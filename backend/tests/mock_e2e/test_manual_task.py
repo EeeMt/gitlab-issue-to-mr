@@ -193,7 +193,7 @@ class TestManualTaskCreation:
         """Test creating a task with scheduled datetime."""
         from app.api.tasks import CreateTaskRequest
 
-        scheduled = datetime(2026, 3, 15, 14, 30, 0)
+        scheduled = datetime.now(UTC) + timedelta(days=30)
         request = CreateTaskRequest(
             project_id=TEST_PROJECT_ID,
             branch_name=TEST_BRANCH,
