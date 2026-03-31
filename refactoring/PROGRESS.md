@@ -300,9 +300,31 @@
   - [x] 错误处理测试 (fetch 失败时优雅处理)
   - [x] 发起人选项测试 (唯一性提取、字母排序)
 
-- [ ] 7.4 测试 TaskView 组件 (High)
+- [x] 7.4 测试 TaskView 组件 (High)
 
 ### 完成记录
+
+#### 2026-03-31 实施 Phase 7.4 TaskView 组件测试
+
+**完成**
+- [x] `frontend/src/views/TaskView.spec.ts` - 37 个测试
+
+**测试覆盖**
+- TaskView: 基础渲染、任务操作按钮显示/禁用、操作处理器 (cancel/retry/execute/reschedule)、日志获取和显示、自动刷新、canManageTask 权限检查、计算属性、错误处理、日期选择器验证
+
+**验证**
+- `npx vitest run src/views/TaskView.spec.ts` - 37 passed
+- `npx vitest run` - 139 passed (6 test files)
+
+**变更分析**
+- 新增文件: 1 个
+  - `frontend/src/views/TaskView.spec.ts`
+- 新增行数: ~760 行
+
+**后续待办**
+- Phase 7 完成 - 所有组件测试已完成
+
+---
 
 #### 2026-03-31 实施 Phase 7.1 VariableEditor 组件测试
 
@@ -365,7 +387,7 @@
 - 新增行数: ~680 行
 
 **后续待办**
-- Phase 7.4: TaskView 组件测试
+- Phase 7 完成 - 所有组件测试已完成
 
 ---
 
