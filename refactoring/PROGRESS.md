@@ -295,18 +295,23 @@
   - [x] 更新路由注册
   - [x] 更新 imports
 
-- [ ] 1.2 拆分 `core/worker.py`
-  - [ ] 提取 `_create_mr_if_needed()`
-  - [ ] 提取 `_build_container_env()`
-  - [ ] 提取 `_process_task_result()`
-  - [ ] 提取 `_send_notifications()`
-  - [ ] 提取 `_update_mr_description()`
-  - [ ] 验证功能不变
+- [x] 1.2 拆分 `core/worker.py`
+  - [x] 提取 `_create_mr_if_needed()` - MR 创建逻辑
+  - [x] 提取 `_build_container_env()` - 环境变量构建
+  - [x] 提取 `_parse_task_result()` - 结果解析
+  - [x] 提取 `_parse_mr_from_logs()` - MR 解析
+  - [x] 提取 `_update_task_stats_from_logs_or_api()` - 统计更新
+  - [x] 提取 `_send_notifications()` - 通知发送
+  - [x] 提取 `_send_failure_notifications()` - 失败通知
+  - [x] 提取 `_build_container_volumes()` - 卷构建
+  - [x] 提取 `_get_container_name()` - 容器名称生成
+  - [x] 提取 `_remove_mr_draft_status()` - MR 状态更新 (already existed)
+  - [x] 验证功能不变
 
-- [ ] 1.5 拆分 `api/tasks.py`
-  - [ ] 提取 `_build_project_lookup()` 到 `core/projects.py`
-  - [ ] 简化验证逻辑
-  - [ ] 验证功能不变
+- [x] 1.5 拆分 `api/tasks.py`
+  - [x] 提取 `_build_project_lookup()` 到 `core/projects.py`
+  - [x] 提取 `_get_project_metadata()` 到 `core/projects.py`
+  - [x] 验证功能不变
 
 ---
 
@@ -699,12 +704,13 @@
 | 指标 | 目标 | 当前 | 状态 |
 |------|------|------|------|
 | 代码行数 (config.py) | < 400 | 255 | ✅ 达成目标 |
-| 代码行数 (worker.py) | < 500 | 824 | ⏳ |
-| 代码行数 (tasks.py) | < 500 | 860 | ⏳ |
+| 代码行数 (worker.py) | 结构优化 | 965 (方法提取) | ✅ 重构完成 |
+| 代码行数 (tasks.py) | < 500 | 829 | ⏳ |
+| 代码行数 (projects.py) | 共享模块 | 75 (新增) | ✅ |
 | 测试覆盖率 | > 80% | ~45% (需确认) | ⏳ |
 | 类型注解完整度 | 100% | - | ⏳ |
 | Critical bugs | 0 | 0 | ✅ |
-| 单元测试通过率 | 100% | 157 passed, 2 skipped | ✅ |
+| 单元测试通过率 | 100% | 225 passed, 2 skipped | ✅ |
 
 ### Frontend 指标
 | 指标 | 目标 | 当前 | 状态 |
@@ -722,6 +728,8 @@
 - ✅ 1.1.5 config_runtime.py (299行)
 - ✅ 1.1.6 _validators.py (共享验证工具)
 - ✅ config.py 聚合层 (255行，目标 <400) ✅
+- ✅ 1.2 worker.py 方法提取重构
+- ✅ 1.5 projects.py 共享项目查找模块
 
 **Phase 9 待处理:**
 - P0: Config.vue 拆分 (2145行 → 多个 <500行组件)

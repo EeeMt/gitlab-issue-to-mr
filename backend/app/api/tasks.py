@@ -33,48 +33,11 @@ from app.models import Task, TaskLog, TaskStatus, User
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Shared project utilities
+from app.core.projects import build_project_lookup, get_project_metadata
+
 # Re-export from gitlab_client for backwards compatibility
 from app.core.gitlab_client import get_cached_projects as _get_cached_projects
-
-
-def _projects_to_lookup(projects: list[dict[str, Any]]) -> dict[int, dict[str, Optional[str]]]:
-    return {
-        int(project["id"]): {
-            "project_name": project.get("name"),
-            "project_path_with_namespace": project.get("path_with_namespace"),
-        }
-        for project in projects
-    }
-
-
-async def _build_project_lookup(access_scope: ProjectAccessScope) -> dict[int, dict[str, Optional[str]]]:
-    """Build a project metadata lookup keyed by GitLab project ID."""
-    if not access_scope.is_unrestricted:
-        return _projects_to_lookup(access_scope.accessible_projects)
-
-    try:
-        return _projects_to_lookup(await _get_cached_projects())
-    except Exception as exc:
-        logger.warning(f"Failed to load project metadata: {exc}")
-        return {}
-
-
-async def _get_project_metadata(project_id: int) -> dict[str, Optional[str]]:
-    """Get project metadata for a single task response, using the shared cache."""
-    try:
-        projects = await _get_cached_projects()
-        project = next((p for p in projects if int(p["id"]) == project_id), None)
-        if project:
-            return {
-                "project_name": project.get("name"),
-                "project_path_with_namespace": project.get("path_with_namespace"),
-            }
-    except Exception as exc:
-        logger.warning(f"Failed to load project {project_id} metadata: {exc}")
-    return {
-        "project_name": None,
-        "project_path_with_namespace": None,
-    }
 
 
 def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -215,7 +178,10 @@ async def list_tasks(
 
     result = await db.execute(query.limit(100))
     tasks = result.scalars().all()
-    project_lookup = await _build_project_lookup(access_scope)
+    project_lookup = await build_project_lookup(
+        accessible_projects=access_scope.accessible_projects,
+        is_unrestricted=access_scope.is_unrestricted,
+    )
 
     return [
         _serialize_task(task, project_lookup.get(task.project_id))
@@ -256,7 +222,10 @@ async def list_scheduled_tasks(
 
     result = await db.execute(query)
     tasks = result.scalars().all()
-    project_lookup = await _build_project_lookup(access_scope)
+    project_lookup = await build_project_lookup(
+        accessible_projects=access_scope.accessible_projects,
+        is_unrestricted=access_scope.is_unrestricted,
+    )
 
     return [
         _serialize_task(task, project_lookup.get(task.project_id))
@@ -293,7 +262,7 @@ async def get_task(
     require_project_access(task.project_id, access_scope)
 
     t2 = time.time()
-    metadata = await _get_project_metadata(task.project_id)
+    metadata = await get_project_metadata(task.project_id)
     t3 = time.time()
     result_data = _serialize_task(task, metadata)
     t4 = time.time()
@@ -720,7 +689,7 @@ async def reschedule_task(
 
     logger.info("Task %s rescheduled to %s via API", task_id, normalized_scheduled.isoformat())
 
-    return _serialize_task(task, await _get_project_metadata(task.project_id))
+    return _serialize_task(task, await get_project_metadata(task.project_id))
 
 
 # Pydantic models for manual task creation

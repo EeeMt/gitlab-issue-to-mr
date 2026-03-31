@@ -10,7 +10,8 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import app.api.tasks as tasks_api
-from app.api.tasks import _build_project_lookup, list_projects, list_tasks
+from app.core.projects import build_project_lookup
+from app.api.tasks import list_projects, list_tasks
 from app.dependencies.project_access import ProjectAccessScope
 from app.models import Task, TaskStatus
 
@@ -50,7 +51,7 @@ async def test_list_tasks_serializes_initiator_fields():
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
     with patch(
-        "app.api.tasks._build_project_lookup",
+        "app.core.projects.build_project_lookup",
         new=AsyncMock(
             return_value={
                 101: {
@@ -78,7 +79,7 @@ async def test_list_tasks_applies_project_and_initiator_filters():
         accessible_projects=[{"id": 202, "name": "Project Beta"}],
     )
 
-    with patch("app.api.tasks._build_project_lookup", new=AsyncMock(return_value={})):
+    with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
         result = await list_tasks(
             project_id=202,
             initiator_username="alice",
@@ -106,8 +107,11 @@ async def test_build_project_lookup_reuses_access_scope_projects_without_gitlab_
         ],
     )
 
-    with patch("app.api.tasks.asyncio.to_thread", new=AsyncMock()) as to_thread:
-        lookup = await _build_project_lookup(access_scope)
+    with patch("app.core.projects.get_cached_projects", new=AsyncMock()) as get_cached:
+        lookup = await build_project_lookup(
+            accessible_projects=access_scope.accessible_projects,
+            is_unrestricted=access_scope.is_unrestricted,
+        )
 
     assert lookup == {
         202: {
@@ -115,7 +119,7 @@ async def test_build_project_lookup_reuses_access_scope_projects_without_gitlab_
             "project_path_with_namespace": "team/project-beta",
         }
     }
-    to_thread.assert_not_awaited()
+    get_cached.assert_not_awaited()
 
 
 @pytest.mark.asyncio
