@@ -152,7 +152,7 @@ git push -u origin refactor/<task-name>
 
 | 问题 | 文件 | 严重度 |
 |------|------|--------|
-| 文件过大 (1441行) | `api/config.py` | Critical |
+| 文件过大 (255行，已改善) | `api/config.py` | Medium (was Critical) |
 | 文件过大 (860行) | `api/tasks.py` | High |
 | 文件过大 (824行) | `core/worker.py` | High |
 | 代码位置错误 | `webhook.py` 中的 prompt building | Medium |
@@ -185,13 +185,16 @@ git push -u origin refactor/<task-name>
 
 ### 1.1 拆分 `api/config.py` (Critical - 1441行)
 
-**目标:** 将巨大的 config.py 拆分为职责明确的模块
+**目标:** 将巨大的 config.py 拆分为职责明确的模块 ✅ 已完成
 
 **拆分会出现的文件:**
-- `api/config.py` - Runtime config API (~300行)
-- `api/mattermost.py` - Mattermost profile CRUD (~400行)
-- `api/oidc.py` - OIDC 配置 (~300行)
-- `api/project_webhooks.py` - 项目 webhook 配置 (~200行)
+- `api/config.py` - 聚合层 (~255行) ✅
+- `api/mattermost.py` - Mattermost profile CRUD (~310行) ✅
+- `api/oidc.py` - OIDC 配置 (~351行) ✅
+- `api/project_webhooks.py` - 项目 webhook 配置 (~299行) ✅
+- `api/config_integration.py` - GitLab 集成配置 (~169行) ✅
+- `api/config_runtime.py` - 运行时配置 (~299行) ✅
+- `api/_validators.py` - 共享验证工具 (~180行) ✅
 
 **操作:**
 ```bash
@@ -436,7 +439,7 @@ def test_list_containers_empty():
 ### 需要拆分/重构的文件
 | 文件 | 当前行数 | 目标 |
 |------|----------|------|
-| `backend/app/api/config.py` | 1441 | 拆分为 4 个模块 |
+| `backend/app/api/config.py` | 255 ✅ | 拆分为多个模块 ✅ |
 | `backend/app/api/tasks.py` | 860 | 提取共享代码 |
 | `backend/app/core/worker.py` | 824 | 提取辅助方法 |
 
@@ -476,11 +479,13 @@ P1 (优先执行):
   1.4 消除重复代码                   # 低风险，小改动
 
 Phase 1 (模块划分 - 4-6周):
-  1.1 拆分 api/config.py
-    1.1.1 先拆分 oidc.py (最独立)
-    1.1.2 再拆分 project_webhooks.py
-    1.1.3 最后拆分 mattermost.py
-    1.1.4 保留 config.py 仅含 Runtime config
+  ✅ 1.1 拆分 api/config.py (已完成)
+    ✅ 1.1.1 拆分 oidc.py
+    ✅ 1.1.2 拆分 project_webhooks.py
+    ✅ 1.1.3 拆分 mattermost.py
+    ✅ 1.1.4 拆分 config_integration.py
+    ✅ 1.1.5 拆分 config_runtime.py
+    ✅ 1.1.6 清理 config.py 移除测试专用代码
   1.2 拆分 core/worker.py
   1.5 拆分 api/tasks.py              # 新增: 860行也需要处理
 
@@ -537,7 +542,7 @@ cd backend && pytest tests/e2e/ -v
 
 | 变更 | 风险 | 缓解措施 |
 |------|------|----------|
-| 拆分 config.py | 高 - 涉及路由 | 先拆分新文件，逐步迁移 |
+| ✅ 拆分 config.py | 已完成 | 已拆分 7 个子模块 |
 | 拆分 worker.py | 中 - 内部重构 | 保持 public API 不变 |
 | 修改测试框架 | 低 | 增量修改，保留旧测试 |
 
@@ -545,11 +550,11 @@ cd backend && pytest tests/e2e/ -v
 
 ## 成果统计
 
-| 指标 | 目标 | 当前 |
-|------|------|------|
-| 代码行数 (config.py) | < 400 | 1441 |
-| 代码行数 (worker.py) | < 500 | 824 |
-| 代码行数 (tasks.py) | < 500 | 860 |
-| 测试覆盖率 | > 80% | ~45% (需确认) |
-| 类型注解完整度 | 100% | - |
-| Critical bugs | 0 | 1 (bare except) |
+| 指标 | 目标 | 当前 | 状态 |
+|------|------|------|------|
+| 代码行数 (config.py) | < 400 | 255 | ✅ |
+| 代码行数 (worker.py) | < 500 | 824 | ⏳ |
+| 代码行数 (tasks.py) | < 500 | 860 | ⏳ |
+| 测试覆盖率 | > 80% | ~45% (需确认) | ⏳ |
+| 类型注解完整度 | 100% | - | ⏳ |
+| Critical bugs | 0 | 0 | ✅ |

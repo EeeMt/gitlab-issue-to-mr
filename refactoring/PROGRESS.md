@@ -6,7 +6,7 @@
 |----------|-------|------|---------|----------|
 | P0 | Bug 修复 | Completed | - | 2026-03-31 |
 | P1 | 基础测试建设 | Completed | 2026-03-31 | 2026-03-31 |
-| Phase 1 | 模块划分优化 | In Progress | 2026-03-31 | - |
+| Phase 1 | 模块划分优化 | Completed | 2026-03-31 | 2026-03-31 |
 | Phase 2 | 代码质量提升 | Pending | - | - |
 | Phase 3 | 测试基础设施完善 | Pending | - | - |
 | Phase 4 | 稳定性增强 | Pending | - | - |
@@ -175,13 +175,95 @@
 
 ---
 
+### 1.1.4 & 1.1.5 完成记录
+
+#### 2026-03-31 创建 config_integration.py 和 config_runtime.py
+
+**完成**
+- [x] 创建 `backend/app/api/config_integration.py` (169行)
+  - IntegrationConfigSection, IntegrationConfigUpdate 模型
+  - GitLabConfigTestRequest/Response 模型
+  - test_gitlab_config 端点
+  - invalidate_project_cache 端点
+  - 集成验证和预览设置函数
+- [x] 创建 `backend/app/api/config_runtime.py` (299行)
+  - RuntimeConfigSection, RuntimeConfigUpdate 模型
+  - 运行时配置序列化和验证
+  - get_runtime_config, update_runtime_config, reset_runtime_config_key 端点
+- [x] 简化 `backend/app/api/config.py` 为聚合层 (435行)
+  - 保留共享模型和聚合端点
+  - 保留完整 `_validate_config_value` (向后兼容测试)
+  - 导入并聚合子模块
+
+**测试验证**
+- 单元测试: ✅ 157 passed, 2 skipped
+
+**变更分析**
+- 新增文件: `backend/app/api/config_integration.py` (169行)
+- 新增文件: `backend/app/api/config_runtime.py` (299行)
+- config.py: 890行 -> 435行 (减少 455行)
+
+**成果统计**
+| 指标 | 拆分前 | 拆分后 |
+|------|--------|--------|
+| config.py 行数 | 890 | 435 |
+| oidc.py 行数 | 351 | 351 |
+| mattermost.py 行数 | 310 | 310 |
+| project_webhooks.py 行数 | 299 | 299 |
+| config_integration.py 行数 | 0 | 169 |
+| config_runtime.py 行数 | 0 | 299 |
+
+---
+
+### 1.1.6 完成记录
+
+#### 2026-03-31 清理 config.py - 移除仅测试使用的代码
+
+**完成**
+- [x] 创建 `backend/app/api/_validators.py` (共享验证工具)
+  - `_is_valid_http_url()` - URL 验证
+  - `_sanitize_string_list()` - 字符串列表清理
+  - `_validate_config_value()` - 全配置类型验证
+  - `_normalize_updates()` - 统一规范化
+- [x] 更新 `config_runtime.py` - 移除本地重复的验证函数，导入共享工具
+- [x] 更新 `config_integration.py` - 移除本地 `_is_valid_http_url`
+- [x] 更新 `oidc.py` - 移除本地 `_is_valid_http_url`
+- [x] 清理 `config.py` - 移除 `_validate_config_value` 和 `_normalize_updates` (测试专用)
+- [x] 更新 `test_config_api.py` - 从 `_validators` 导入测试需要的函数
+
+**测试验证**
+- 单元测试: ✅ 157 passed, 2 skipped
+
+**变更分析**
+- 新增文件: `backend/app/api/_validators.py`
+- config.py: 435行 -> 255行 (减少 180行)
+- config_runtime.py: 导入优化
+- config_integration.py: 导入优化
+- oidc.py: 导入优化
+- 测试文件更新导入路径
+
+**成果统计**
+| 指标 | 清理前 | 清理后 |
+|------|--------|--------|
+| config.py 行数 | 435 | 255 |
+| _is_valid_http_url 重复 | 4份 | 1份 |
+| 单元测试 | 157 passed | 157 passed |
+
+**后续待办**
+- ✅ config.py < 400 行目标达成
+
+---
+
 ### 任务清单
 
-- [ ] 1.1 拆分 `api/config.py`
+- [x] 1.1 拆分 `api/config.py`
   - [x] 1.1.1 创建 `api/oidc.py` (最独立，先拆)
   - [x] 1.1.3 创建 `api/mattermost.py`
-  - [ ] 1.1.2 创建 `api/project_webhooks.py`
-  - [x] 保留 `api/config.py` 仅含 Runtime config (890行，还需继续)
+  - [x] 1.1.2 创建 `api/project_webhooks.py` (299行)
+  - [x] 1.1.4 创建 `api/config_integration.py` (169行)
+  - [x] 1.1.5 创建 `api/config_runtime.py` (299行)
+  - [x] 1.1.6 清理 config.py 移除测试专用代码
+  - [x] 保留 `api/config.py` 仅含聚合层 (255行)
   - [x] 更新路由注册
   - [x] 更新 imports
 
@@ -280,12 +362,21 @@
 
 ## 成果统计
 
-| 指标 | 目标 | 当前 |
-|------|------|------|
-| 代码行数 (config.py) | < 400 | 1441 |
-| 代码行数 (worker.py) | < 500 | 824 |
-| 代码行数 (tasks.py) | < 500 | 860 |
-| 测试覆盖率 | > 80% | ~45% (需确认) |
-| 类型注解完整度 | 100% | - |
-| Critical bugs | 0 | 0 (已修复) |
-| 单元测试通过率 | 100% | 157 passed, 2 skipped |
+| 指标 | 目标 | 当前 | 状态 |
+|------|------|------|------|
+| 代码行数 (config.py) | < 400 | 255 | ✅ 达成目标 |
+| 代码行数 (worker.py) | < 500 | 824 | ⏳ |
+| 代码行数 (tasks.py) | < 500 | 860 | ⏳ |
+| 测试覆盖率 | > 80% | ~45% (需确认) | ⏳ |
+| 类型注解完整度 | 100% | - | ⏳ |
+| Critical bugs | 0 | 0 | ✅ |
+| 单元测试通过率 | 100% | 157 passed, 2 skipped | ✅ |
+
+**Phase 1 完成情况:**
+- ✅ 1.1.1 oidc.py (351行)
+- ✅ 1.1.2 project_webhooks.py (299行)
+- ✅ 1.1.3 mattermost.py (310行)
+- ✅ 1.1.4 config_integration.py (169行)
+- ✅ 1.1.5 config_runtime.py (299行)
+- ✅ 1.1.6 _validators.py (共享验证工具)
+- ✅ config.py 聚合层 (255行，目标 <400) ✅
