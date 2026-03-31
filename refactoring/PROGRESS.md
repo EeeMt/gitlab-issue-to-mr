@@ -9,12 +9,12 @@
 | Phase 1 | 模块划分优化 | Completed | 2026-03-31 | 2026-03-31 |
 | Phase 2 | 代码质量提升 | Completed | 2026-03-31 | 2026-03-31 |
 | Phase 3 | 测试基础设施完善 | Completed | 2026-03-31 | 2026-03-31 |
-| Phase 4 | 稳定性增强 | Pending | - | - |
+| Phase 4 | 稳定性增强 | Completed | 2026-03-31 | 2026-03-31 |
 | Phase 5 | Frontend 测试基础设施完善 | Completed | 2026-03-31 | 2026-03-31 |
 | Phase 6 | Frontend 单元测试 | Completed | 2026-03-31 | 2026-03-31 |
 | Phase 7 | Frontend 组件测试 | Completed | 2026-03-31 | 2026-03-31 |
 | Phase 8 | Frontend 集成测试 | Partial | 2026-03-31 | - |
-| Phase 9 | Frontend 代码质量提升 | Pending | - | - |
+| Phase 9 | Frontend 代码质量提升 | Partial | 2026-03-31 | - |
 
 ---
 
@@ -449,20 +449,38 @@
 
 ### 任务清单
 
-- [ ] 4.1 添加敏感数据清理测试
-  - [ ] `test_scrubbing.py` 新建
-  - [ ] `scrub_sensitive_data()` 测试
-  - [ ] `sanitize_sensitive_data()` 测试
+- [x] 4.1 添加敏感数据清理测试
+  - [x] `test_scrubbing.py` 新建 (27 tests)
+  - [x] `scrub_sensitive_data()` 测试
+  - [x] `sanitize_sensitive_data()` 测试
 
-- [ ] 4.2 添加 Scheduler 核心逻辑测试
-  - [ ] Priority queue ordering 测试
-  - [ ] Issue mutex behavior 测试
-  - [ ] Concurrency limiting 测试
+- [x] 4.2 添加 Scheduler 核心逻辑测试
+  - [x] Priority queue ordering 测试
+  - [x] Issue mutex behavior 测试
+  - [x] Concurrency limiting 测试
 
-- [ ] 4.3 添加 GitLab Client 重试测试
-  - [ ] API 错误处理测试
-  - [ ] 超时行为测试
-  - [ ] Rate limit 响应测试
+- [x] 4.3 添加 GitLab Client 重试测试
+  - [x] API 错误处理测试
+  - [x] 超时行为测试
+  - [x] Rate limit 响应测试
+
+### 完成记录
+
+#### 2026-03-31 Phase 4 稳定性增强
+
+**完成**
+- [x] `test_scrubbing.py` - 27 tests (GitLab tokens, API keys, ANSI codes)
+- [x] `test_scheduler_core.py` - 14 tests (priority queue, mutex, concurrency)
+- [x] `test_gitlab_client_access.py` - 扩展 19 tests (error handling, timeout, rate limit)
+- [x] 修复 RuntimeWarning: MagicMock 替代 AsyncMock 用于同步方法
+
+**测试验证**
+- 单元测试: ✅ 276 passed, 2 skipped, 0 warnings
+
+**变更分析**
+- 新增文件: `test_scrubbing.py`, `test_scheduler_core.py`
+- 修改文件: `test_gitlab_client_access.py`
+- 新增测试: +60 tests
 
 ---
 
@@ -718,12 +736,12 @@
 |------|------|------|------|
 | 代码行数 (config.py) | < 400 | 255 | ✅ 达成目标 |
 | 代码行数 (worker.py) | 结构优化 | 965 (方法提取) | ✅ 重构完成 |
-| 代码行数 (tasks.py) | < 500 | 829 | ⏳ |
+| 代码行数 (tasks.py) | < 500 | 494 | ✅ 达成目标 |
 | 代码行数 (projects.py) | 共享模块 | 75 (新增) | ✅ |
 | 测试覆盖率 | > 80% | ~45% (需确认) | ⏳ |
 | 类型注解完整度 | 100% | - | ⏳ |
 | Critical bugs | 0 | 0 | ✅ |
-| 单元测试通过率 | 100% | 225 passed, 2 skipped | ✅ |
+| 单元测试通过率 | 100% | 276 passed, 2 skipped | ✅ |
 
 ### Frontend 指标
 | 指标 | 目标 | 当前 | 状态 |
@@ -757,3 +775,8 @@
 - ✅ 9.1.1 Config.vue 测试覆盖完善 (45% → 92.33%)
 - ✅ 9.1.2 VariableEditor.vue 状态同步修复 (P0)
 - ✅ 9.1.3 WorkerSettingsPanel JSON.parse 错误边界 (P0)
+
+**Phase 4 完成情况:**
+- ✅ 4.1 敏感数据清理测试 (test_scrubbing.py - 27 tests)
+- ✅ 4.2 Scheduler 核心逻辑测试 (test_scheduler_core.py - 14 tests)
+- ✅ 4.3 GitLab Client 重试测试 (扩展 - 19 tests)
