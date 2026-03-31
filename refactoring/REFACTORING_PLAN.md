@@ -443,6 +443,71 @@ def test_list_containers_empty():
 
 ---
 
+## Phase 5: Frontend 测试基础设施完善
+
+### 5.1 添加测试依赖 (Critical)
+
+**文件:** `frontend/package.json`
+
+**新增依赖:**
+```json
+{
+  "devDependencies": {
+    "vitest": "^2.1.0",
+    "@vue/test-utils": "^2.4.6",
+    "@testing-library/vue": "^8.1.0",
+    "jsdom": "^25.0.0",
+    "vitest-coverage-v8": "^2.0.0"
+  }
+}
+```
+
+### 5.2 创建 Vitest 配置 (Critical)
+
+**文件:** `frontend/vitest.config.ts` (新建)
+
+### 5.3 创建测试设置文件 (High)
+
+**文件:** `frontend/src/test/setup.ts` (新建)
+
+### 5.4 创建 API Mock 工具 (High)
+
+**文件:** `frontend/src/test/mocks/api.ts` (新建)
+
+### 5.5 创建 i18n Mock (Medium)
+
+**文件:** `frontend/src/test/mocks/i18n.ts` (新建)
+
+---
+
+## Phase 6: Frontend 单元测试
+
+### 6.1 测试 useVariableEditor Composable (High)
+
+**文件:** `frontend/src/composables/useVariableEditor.spec.ts` (新建)
+
+### 6.2 测试 datetime 工具函数 (Medium)
+
+**文件:** `frontend/src/utils/datetime.spec.ts` (新建)
+
+---
+
+## Phase 7: Frontend 组件测试
+
+### 7.1 测试 VariableEditor 组件 (High)
+
+**文件:** `frontend/src/components/VariableEditor.spec.ts` (新建)
+
+### 7.2 测试 CreateTask 组件 (High)
+
+**文件:** `frontend/src/views/CreateTask.spec.ts` (新建)
+
+### 7.3 测试 Dashboard 组件 (High)
+
+**文件:** `frontend/src/views/Dashboard.spec.ts` (新建)
+
+---
+
 ## Phase 8: Frontend 集成测试
 
 ### 8.1 API 层测试 (Medium)

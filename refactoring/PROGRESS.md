@@ -10,6 +10,9 @@
 | Phase 2 | 代码质量提升 | Pending | - | - |
 | Phase 3 | 测试基础设施完善 | Pending | - | - |
 | Phase 4 | 稳定性增强 | Pending | - | - |
+| Phase 5 | Frontend 测试基础设施完善 | Completed | 2026-03-31 | 2026-03-31 |
+| Phase 6 | Frontend 单元测试 | Completed | 2026-03-31 | 2026-03-31 |
+| Phase 7 | Frontend 组件测试 | Completed | 2026-03-31 | 2026-03-31 |
 | Phase 8 | Frontend 集成测试 | Pending | - | - |
 
 ---
@@ -367,6 +370,141 @@
   - [ ] API 错误处理测试
   - [ ] 超时行为测试
   - [ ] Rate limit 响应测试
+
+---
+
+## Phase 5: Frontend 测试基础设施完善
+
+### 任务清单
+
+- [x] 5.1 添加测试依赖
+  - [x] `vitest` - 测试运行器
+  - [x] `@vue/test-utils` - Vue 组件测试工具
+  - [x] `@testing-library/vue` - Vue 测试库
+  - [x] `jsdom` - DOM 环境模拟
+  - [x] `@vitest/coverage-v8` - V8 覆盖率提供者
+
+- [x] 5.2 创建 Vitest 配置
+  - [x] `vitest.config.ts` - jsdom 环境、全局 API、别名配置
+
+- [x] 5.3 创建测试设置文件
+  - [x] `src/test/setup.ts` - 全局清理、matchMedia/ResizeObserver/getBoundingClientRect mocks
+
+- [x] 5.4 创建 API Mock 工具
+  - [x] `src/test/mocks/api.ts` - Task, Project, Branch, PromptTemplate 等 mock 工厂
+
+- [x] 5.5 创建 i18n Mock
+  - [x] `src/test/mocks/i18n.ts` - t, locale 等 i18n 函数 mock
+
+### 完成记录
+
+#### 2026-03-31 实施 Phase 5 前端测试基础设施
+
+**完成**
+- [x] `frontend/package.json` - 添加 Vitest 及相关依赖
+- [x] `frontend/vitest.config.ts` - Vitest 配置 (jsdom, globals, aliases)
+- [x] `frontend/src/test/setup.ts` - 测试环境设置
+- [x] `frontend/src/test/mocks/api.ts` - API mock 工厂函数
+- [x] `frontend/src/test/mocks/i18n.ts` - i18n mock
+
+**验证**
+- `npm install` - 成功安装 334 个包
+- `npx vitest --version` - vitest 2.1.9 可用
+
+**变更分析**
+- 文件改动: 1 个 (package.json)
+- 新增文件: 4 个
+- 新增行数: ~350 行
+
+---
+
+## Phase 6: Frontend 单元测试
+
+### 任务清单
+
+- [x] 6.1 测试 useVariableEditor Composable
+  - [x] `src/composables/useVariableEditor.spec.ts` 新建
+  - [x] extractVariables 测试 (6 cases)
+  - [x] mergedTips 测试 (3 cases)
+  - [x] migrateTipsOnRename 测试 (2 cases)
+  - [x] variablesWithTips 测试 (3 cases)
+  - [x] updateTip 测试 (2 cases)
+  - [x] setTemplateTips 测试 (2 cases)
+
+- [x] 6.2 测试 datetime 工具函数
+  - [x] `src/utils/datetime.spec.ts` 新建
+  - [x] parseUtcDate 测试 (4 cases)
+  - [x] formatDateTimeUtc8 测试 (3 cases)
+  - [x] formatDateTimeUtc8Compact 测试 (2 cases)
+
+### 完成记录
+
+#### 2026-03-31 实施 Phase 6 前端单元测试
+
+**完成**
+- [x] `frontend/src/composables/useVariableEditor.spec.ts` - 18 个测试
+- [x] `frontend/src/utils/datetime.spec.ts` - 9 个测试
+
+**测试覆盖**
+- `useVariableEditor`: 变量提取、Tips 合并、变量重命名检测、variablesWithTips、updateTip、setTemplateTips
+- `datetime`: parseUtcDate、formatDateTimeUtc8、formatDateTimeUtc8Compact
+
+**验证**
+- `npx vitest run` - 27 passed (2 test files)
+
+**变更分析**
+- 新增文件: 2 个
+- 新增行数: ~450 行
+
+---
+
+## Phase 7: Frontend 组件测试
+
+### 任务清单
+
+- [x] 7.1 测试 VariableEditor 组件
+  - [x] `src/components/VariableEditor.spec.ts` 新建
+  - [x] 基础渲染测试
+  - [x] v-model 绑定测试
+  - [x] variableTips prop 测试
+  - [x] 清理测试
+  - [x] 变量高亮测试
+  - [x] 工具提示测试
+
+- [x] 7.2 测试 CreateTask 组件
+  - [x] `src/views/CreateTask.spec.ts` 新建
+  - [x] 基础渲染测试
+  - [x] 项目选择测试
+  - [x] 分支选择测试
+  - [x] 表单验证测试
+  - [x] 调度选项测试
+  - [x] Prompt 模板测试
+  - [x] 表单提交测试
+  - [x] 表单重置测试
+  - [x] scheduleSummary 计算属性测试
+
+- [x] 7.3 测试 Dashboard 组件
+  - [x] `src/views/Dashboard.spec.ts` 新建
+  - [x] 基础渲染测试
+  - [x] 过滤器测试
+  - [x] 自动刷新测试
+  - [x] 任务导航测试
+  - [x] 响应式布局测试
+  - [x] 摘要计算测试
+
+### 完成记录
+
+#### 2026-03-31 实施 Phase 7 前端组件测试
+
+**完成**
+- [x] `frontend/src/components/VariableEditor.spec.ts`
+- [x] `frontend/src/views/CreateTask.spec.ts`
+- [x] `frontend/src/views/Dashboard.spec.ts`
+
+**测试覆盖**
+- VariableEditor: 渲染、v-model、tips、清理、高亮、tooltip
+- CreateTask: 项目/分支选择、验证、调度、模板、提交
+- Dashboard: 列表、过滤、刷新、导航、响应式
 
 ---
 
