@@ -74,13 +74,14 @@ watch(templateTips, (val) => {
   tipsRef.value = val
 })
 
-// When content changes, emit cleaned tips (without orphan tips) if editable
+// Watch mergedTips directly to emit cleaned tips when they actually change
+// This avoids the circular dependency issue with watching `variables`
 // Use flush: 'post' to ensure this runs AFTER the migration in useVariableEditor
-watch(variables, () => {
-  if (props.editable && mergedTips.value) {
-    emit('update:variableTips', { ...mergedTips.value })
+watch(mergedTips, (newTips) => {
+  if (props.editable && newTips) {
+    emit('update:variableTips', { ...newTips })
   }
-}, { flush: 'post' })
+}, { flush: 'post', deep: true })
 
 // Whether tips are editable
 const editable = computed(() => props.editable ?? false)

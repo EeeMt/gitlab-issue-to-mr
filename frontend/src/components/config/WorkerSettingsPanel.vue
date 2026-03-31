@@ -465,7 +465,13 @@ async function handleSaveWorker() {
         maven_settings_host_path: workerFormValue.value.maven_settings_host_path.trim()
       }
     })
-    lastLoadedWorker.value = JSON.parse(JSON.stringify(workerFormValue.value))
+    // Safely clone the form value to preserve current state
+    try {
+      lastLoadedWorker.value = JSON.parse(JSON.stringify(workerFormValue.value))
+    } catch {
+      // Cloning failed, but save succeeded - use empty object as fallback
+      lastLoadedWorker.value = { mounts: [] }
+    }
     message.success(t('config.saved'))
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('config.saveError'))
@@ -475,7 +481,17 @@ async function handleSaveWorker() {
 }
 
 function resetWorker() {
-  workerFormValue.value = JSON.parse(JSON.stringify(lastLoadedWorker.value))
+  // Safely clone last loaded worker config with error boundary
+  if (!lastLoadedWorker.value) {
+    workerFormValue.value = { mounts: [] }
+    return
+  }
+  try {
+    workerFormValue.value = JSON.parse(JSON.stringify(lastLoadedWorker.value))
+  } catch {
+    // If cloning fails, reset to empty mounts
+    workerFormValue.value = { mounts: [] }
+  }
 }
 
 onMounted(() => {
