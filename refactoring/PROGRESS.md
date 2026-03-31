@@ -276,7 +276,17 @@
   - [x] 变量高亮测试 (Decoration.mark configured)
   - [x] 工具提示测试 (hoverTooltip configured)
 
-- [ ] 7.2 测试 CreateTask 组件 (High)
+- [x] 7.2 测试 CreateTask 组件 (High)
+  - [x] `src/views/CreateTask.spec.ts` 新建
+  - [x] 基础渲染测试 (表单渲染、loading 状态、API 调用)
+  - [x] 项目选择测试 (获取项目、切换项目时获取分支、重置分支选择、设置默认目标分支)
+  - [x] 分支选择测试 (填充分支选项、移动 main 到顶部、切换基础分支时清空新分支名)
+  - [x] 表单验证测试 (项目必填、目标分支冲突警告)
+  - [x] 调度选项测试 (delay/ scheduled 类型切换、delay_seconds 计算、调度时间验证)
+  - [x] Prompt 模板测试 (获取模板、应用模板、覆盖确认、变量检测)
+  - [x] 表单提交测试 (API 调用、成功弹窗、查看任务导航、创建另一个重置表单、错误处理)
+  - [x] 表单重置测试 (重置所有值、清除验证错误)
+  - [x] scheduleSummary 计算属性测试
 
 - [ ] 7.3 测试 Dashboard 组件 (High)
 
@@ -305,6 +315,26 @@
 
 **后续待办**
 - Phase 7.2: CreateTask 组件测试
+- Phase 7.3: Dashboard 组件测试
+- Phase 7.4: TaskView 组件测试
+
+#### 2026-03-31 实施 Phase 7.2 CreateTask 组件测试
+
+**完成**
+- [x] `frontend/src/views/CreateTask.spec.ts` - 33 个测试
+
+**测试覆盖**
+- CreateTask: 基础渲染、项目选择、分支选择、表单验证、调度选项、Prompt 模板、表单提交、表单重置、scheduleSummary 计算属性
+
+**验证**
+- `npx vitest run src/views/CreateTask.spec.ts` - 33 passed
+
+**变更分析**
+- 新增文件: 1 个
+  - `frontend/src/views/CreateTask.spec.ts`
+- 新增行数: ~750 行
+
+**后续待办**
 - Phase 7.3: Dashboard 组件测试
 - Phase 7.4: TaskView 组件测试
 
