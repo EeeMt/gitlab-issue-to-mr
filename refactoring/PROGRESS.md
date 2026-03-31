@@ -263,6 +263,53 @@
 
 ---
 
+## Phase 7: Frontend 组件测试
+
+### 任务清单
+
+- [x] 7.1 测试 VariableEditor 组件 (High)
+  - [x] `src/components/VariableEditor.spec.ts` 新建
+  - [x] 基础渲染测试 (editor container, tips panel, no-variables message)
+  - [x] v-model 绑定测试 (update:modelValue, external prop changes)
+  - [x] variableTips prop 测试 (display tips, editable mode, emit on change)
+  - [x] 清理测试 (editorContainer ref, destroy on unmount)
+  - [x] 变量高亮测试 (Decoration.mark configured)
+  - [x] 工具提示测试 (hoverTooltip configured)
+
+- [ ] 7.2 测试 CreateTask 组件 (High)
+
+- [ ] 7.3 测试 Dashboard 组件 (High)
+
+- [ ] 7.4 测试 TaskView 组件 (High)
+
+### 完成记录
+
+#### 2026-03-31 实施 Phase 7.1 VariableEditor 组件测试
+
+**完成**
+- [x] `frontend/src/components/VariableEditor.spec.ts` - 12 个测试
+
+**测试覆盖**
+- VariableEditor: 基础渲染、v-model 绑定、variableTips prop、清理、变量高亮、工具提示
+
+**验证**
+- `npx vitest run` - 39 passed (3 test files)
+  - `useVariableEditor.spec.ts` - 18 tests
+  - `VariableEditor.spec.ts` - 12 tests
+  - `datetime.spec.ts` - 9 tests
+
+**变更分析**
+- 新增文件: 1 个
+  - `frontend/src/components/VariableEditor.spec.ts`
+- 新增行数: ~320 行
+
+**后续待办**
+- Phase 7.2: CreateTask 组件测试
+- Phase 7.3: Dashboard 组件测试
+- Phase 7.4: TaskView 组件测试
+
+---
+
 ## 变更记录
 
 <!-- 每次重构后在此记录 -->
