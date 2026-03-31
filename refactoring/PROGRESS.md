@@ -10,6 +10,7 @@
 | Phase 2 | 代码质量提升 | Pending | - | - |
 | Phase 3 | 测试基础设施完善 | Pending | - | - |
 | Phase 4 | 稳定性增强 | Pending | - | - |
+| Phase 8 | Frontend 集成测试 | Pending | - | - |
 
 ---
 
@@ -366,6 +367,49 @@
   - [ ] API 错误处理测试
   - [ ] 超时行为测试
   - [ ] Rate limit 响应测试
+
+---
+
+## Phase 8: Frontend 集成测试
+
+### 任务清单
+
+- [ ] 8.1 API 层测试 (Medium)
+  - [ ] `frontend/src/api/api.spec.ts` 新建
+  - [ ] getTasks 测试
+  - [ ] getTask 测试
+  - [ ] createTask 测试
+  - [ ] 认证错误处理测试 (401 重定向、X-Skip-Auth-Redirect)
+
+- [ ] 8.2 Auth 模块测试 (Medium)
+  - [ ] `frontend/src/auth.spec.ts` 新建
+  - [ ] initializeAuth 测试 (首次获取、缓存、错误处理)
+  - [ ] authState 测试
+  - [ ] isAdmin 测试
+  - [ ] canAccessSharedPage 测试
+
+- [ ] 8.3 E2E 测试 (pytest-playwright)
+  - [ ] 8.3.1 Dashboard E2E
+    - [ ] `backend/tests/e2e/tests/test_dashboard.py` 新建
+    - [ ] 任务列表显示
+    - [ ] 过滤器交互
+    - [ ] 任务行点击跳转
+    - [ ] 自动刷新行为
+    - [ ] 摘要卡片显示
+  - [ ] 8.3.2 CreateTask E2E
+    - [ ] `backend/tests/e2e/tests/test_create_task.py` 新建
+    - [ ] 填写项目/分支/prompt
+    - [ ] 选择调度选项
+    - [ ] 提交表单
+    - [ ] 验证成功提示
+  - [ ] 8.3.3 TaskView E2E
+    - [ ] `backend/tests/e2e/tests/test_task_view.py` 新建
+    - [ ] 任务详情显示
+    - [ ] cancel/retry/execute 按钮操作
+    - [ ] 日志显示
+    - [ ] 权限检查
+
+**技术选型:** Python pytest-playwright，与现有 backend E2E 测试统一，复用 `backend/tests/e2e/` 基础设施。
 
 ---
 

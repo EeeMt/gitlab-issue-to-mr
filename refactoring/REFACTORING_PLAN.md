@@ -443,6 +443,98 @@ def test_list_containers_empty():
 
 ---
 
+## Phase 8: Frontend 集成测试
+
+### 8.1 API 层测试 (Medium)
+
+**文件:** `frontend/src/api/api.spec.ts` (新建)
+
+**测试覆盖:**
+```typescript
+describe('API functions', () => {
+  // Task APIs
+  describe('getTasks', () => {
+    it('should call /api/tasks with params', () => ...)
+    it('should handle errors gracefully', () => ...)
+  })
+
+  describe('getTask', () => {
+    it('should call /api/tasks/:id', () => ...)
+  })
+
+  describe('createTask', () => {
+    it('should POST to /api/tasks with request body', () => ...)
+    it('should return created task', () => ...)
+  })
+
+  // 认证错误处理
+  describe('auth error handling', () => {
+    it('should redirect to login on 401', () => ...)
+    it('should skip redirect with X-Skip-Auth-Redirect header', () => ...)
+  })
+})
+```
+
+### 8.2 Auth 模块测试 (Medium)
+
+**文件:** `frontend/src/auth.spec.ts` (新建)
+
+**测试覆盖:**
+```typescript
+describe('auth module', () => {
+  describe('initializeAuth', () => {
+    it('should fetch auth status on first call', () => ...)
+    it('should return cached result on subsequent calls', () => ...)
+    it('should handle fetch errors gracefully', () => ...)
+  })
+
+  describe('authState', () => {
+    it('should have correct initial state', () => ...)
+  })
+
+  describe('isAdmin', () => {
+    it('should return true for platform_admin role', () => ...)
+    it('should return false for other roles', () => ...)
+  })
+
+  describe('canAccessSharedPage', () => {
+    it('should allow access when OIDC disabled', () => ...)
+    it('should allow access for admins', () => ...)
+    it('should check page permissions for regular users', () => ...)
+  })
+})
+```
+
+### 8.3 E2E 测试 (pytest-playwright)
+
+**技术选型:** Python pytest-playwright，与现有 backend E2E 测试统一
+
+**测试文件:**
+- `backend/tests/e2e/tests/test_dashboard.py` - Dashboard E2E
+- `backend/tests/e2e/tests/test_create_task.py` - CreateTask E2E
+- `backend/tests/e2e/tests/test_task_view.py` - TaskView E2E
+
+**Dashboard E2E:**
+- 任务列表显示
+- 过滤器交互
+- 任务行点击跳转
+- 自动刷新行为
+- 摘要卡片显示
+
+**CreateTask E2E:**
+- 填写项目/分支/prompt
+- 选择调度选项
+- 提交表单
+- 验证成功提示
+
+**TaskView E2E:**
+- 任务详情显示
+- cancel/retry/execute 按钮操作
+- 日志显示
+- 权限检查
+
+---
+
 ## 关键文件清单
 
 ### 需要拆分/重构的文件
