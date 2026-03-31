@@ -57,7 +57,7 @@ class TestCreateTaskRequest:
 
     def test_task_with_scheduled_datetime(self):
         """Test creating a task with scheduled datetime."""
-        scheduled = datetime(2026, 3, 15, 14, 30, 0)
+        scheduled = datetime.utcnow() + timedelta(days=30)
         request = CreateTaskRequest(
             project_id=1,
             branch_name="feature/test",
@@ -267,7 +267,7 @@ class TestScheduledAtCalculation:
 
     def test_absolute_scheduling(self):
         """Test absolute datetime scheduling."""
-        scheduled_time = datetime(2026, 3, 15, 14, 30, 0)
+        scheduled_time = datetime.utcnow() + timedelta(days=30)
         request = CreateTaskRequest(
             project_id=1,
             branch_name="feature/test",
@@ -285,7 +285,7 @@ class TestScheduledAtCalculation:
 
     def test_absolute_takes_precedence(self):
         """Test absolute datetime takes precedence over delay."""
-        scheduled_time = datetime(2026, 3, 15, 14, 30, 0)
+        scheduled_time = datetime.utcnow() + timedelta(days=30)
         request = CreateTaskRequest(
             project_id=1,
             branch_name="feature/test",
@@ -306,20 +306,23 @@ class TestScheduledAtCalculation:
 
     def test_timezone_aware_scheduled_datetime_is_normalized_to_naive_utc(self):
         """Test timezone-aware datetimes are normalized before DB storage."""
-        scheduled_time = datetime(2026, 3, 31, 22, 32, 34, tzinfo=timezone(timedelta(hours=8)))
+        # Use a fixed future date: +30 days, 10 hours offset -> subtract 10 hours
+        scheduled_time = datetime(2030, 6, 15, 22, 32, 34, tzinfo=timezone(timedelta(hours=8)))
 
         normalized = normalize_scheduled_datetime(scheduled_time)
 
-        assert normalized == datetime(2026, 3, 31, 14, 32, 34)
+        # 22:32:34 +08:00 -> 14:32:34 UTC (subtract 8 hours)
+        assert normalized == datetime(2030, 6, 15, 14, 32, 34)
         assert normalized.tzinfo is None
 
     def test_resolve_scheduled_at_normalizes_absolute_datetime(self):
         """Test absolute scheduled datetimes are converted to naive UTC."""
-        scheduled_time = datetime(2026, 3, 31, 14, 32, 34, tzinfo=timezone.utc)
+        # Use a fixed future date in UTC
+        scheduled_time = datetime(2030, 6, 15, 14, 32, 34, tzinfo=timezone.utc)
 
         scheduled_at = resolve_scheduled_at(scheduled_time, None)
 
-        assert scheduled_at == datetime(2026, 3, 31, 14, 32, 34)
+        assert scheduled_at == datetime(2030, 6, 15, 14, 32, 34)
         assert scheduled_at.tzinfo is None
 
 

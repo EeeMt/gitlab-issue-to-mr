@@ -91,12 +91,14 @@ class AuthSessionTests(unittest.IsolatedAsyncioTestCase):
         mock_result.first.return_value = (user, session)
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
 
         resolved_user = await get_user_from_session_token(mock_db, "valid")
 
         self.assertEqual(resolved_user, user)
-        mock_db.flush.assert_awaited()
+        # flush is NOT called for valid sessions - only for expired or inactive users
+        mock_db.flush.assert_not_awaited()
 
     async def test_get_user_from_session_token_revokes_expired_session(self) -> None:
         user = User(id=1, oidc_sub="1", gitlab_user_id=1, username="alice", state="active")

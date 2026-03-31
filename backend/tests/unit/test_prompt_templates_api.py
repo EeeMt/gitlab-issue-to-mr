@@ -5,7 +5,7 @@ import os
 import sys
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -59,7 +59,7 @@ async def test_list_prompt_templates_returns_all_templates():
 
 @pytest.mark.asyncio
 async def test_create_prompt_template_adds_new_template():
-    db = AsyncMock()
+    db = MagicMock()
     db.commit = AsyncMock()
 
     # Mock refresh to set id and timestamps on the object

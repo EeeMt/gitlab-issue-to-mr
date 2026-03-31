@@ -16,7 +16,7 @@ from app.core.parser import (
 from app.models import Task, TaskStatus
 
 
-def test_parser():
+def check_parser():
     """Test command parser."""
     print("=" * 60)
     print("Testing Parser")
@@ -77,7 +77,7 @@ def test_parser():
     return failed == 0
 
 
-def test_models():
+def check_models():
     """Test data models."""
     print("\n" + "=" * 60)
     print("Testing Models")
@@ -116,7 +116,7 @@ def test_models():
     return True
 
 
-def test_task_creation():
+def check_task_creation():
     """Test task creation with new fields."""
     print("\n" + "=" * 60)
     print("Testing Task Creation")
@@ -156,7 +156,7 @@ def test_task_creation():
     return True
 
 
-def test_scheduler_logic():
+def check_scheduler_logic():
     """Test scheduler selection logic (without DB)."""
     print("\n" + "=" * 60)
     print("Testing Scheduler Logic (Mock)")
@@ -208,7 +208,7 @@ def test_scheduler_logic():
     return True
 
 
-def test_issue_mutex():
+def check_issue_mutex():
     """Test issue-level mutex logic."""
     print("\n" + "=" * 60)
     print("Testing Issue Mutex Logic")
@@ -242,7 +242,7 @@ def test_issue_mutex():
     return True
 
 
-def test_issue_context_prompt_builders():
+def check_issue_context_prompt_builders():
     """Test issue-context prompt helpers for generic and explicit prompts."""
     print("\n" + "=" * 60)
     print("Testing Issue Context Prompt Builders")
@@ -278,12 +278,12 @@ def main():
 
     results = []
 
-    results.append(("Parser", test_parser()))
-    results.append(("Models", test_models()))
-    results.append(("Task Creation", test_task_creation()))
-    results.append(("Scheduler Logic", test_scheduler_logic()))
-    results.append(("Issue Mutex", test_issue_mutex()))
-    results.append(("Issue Context Prompt Builders", test_issue_context_prompt_builders()))
+    results.append(("Parser", check_parser()))
+    results.append(("Models", check_models()))
+    results.append(("Task Creation", check_task_creation()))
+    results.append(("Scheduler Logic", check_scheduler_logic()))
+    results.append(("Issue Mutex", check_issue_mutex()))
+    results.append(("Issue Context Prompt Builders", check_issue_context_prompt_builders()))
 
     print("\n" + "=" * 60)
     print("Test Summary")

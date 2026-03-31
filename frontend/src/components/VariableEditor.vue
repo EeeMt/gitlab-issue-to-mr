@@ -91,8 +91,11 @@ function handleTipChange(varName: string, tip: string) {
   emit('update:variableTips', newTips)
 }
 
-// Variable pattern decoration
-const variableMark = Decoration.mark({ class: 'cm-variable-highlight' })
+// Variable pattern decoration - use inclusive: false to not interfere with selection
+const variableMark = Decoration.mark({
+  class: 'cm-variable-highlight',
+  inclusive: false
+})
 
 // Create a view plugin that highlights variables
 const variableHighlightPlugin = ViewPlugin.fromClass(class {
@@ -103,7 +106,8 @@ const variableHighlightPlugin = ViewPlugin.fromClass(class {
   }
 
   update(update: ViewUpdate) {
-    if (update.docChanged || update.viewportChanged) {
+    // Always rebuild decorations on any update to ensure sync
+    if (update.docChanged || update.viewportChanged || update.geometryChanged) {
       this.decorations = this.buildDecorations(update.view)
     }
   }
@@ -311,10 +315,16 @@ watch(() => props.modelValue, (newVal) => {
 
 /* Global styles for CodeMirror variable highlighting */
 :deep(.cm-variable-highlight) {
-  background: #fef3c7;
-  color: #92400e;
+  background-color: #fef3c7 !important;
+  color: #92400e !important;
   padding: 1px 2px;
   border-radius: 3px;
+}
+
+/* When highlighted text is selected, keep the highlight background */
+:deep(.cm-selectionBackground),
+:deep(::selection) {
+  background-color: #fef3c7 !important;
 }
 
 /* Tooltip styling */

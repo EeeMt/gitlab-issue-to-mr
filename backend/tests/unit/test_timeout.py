@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from app.models import Task, TaskStatus
 
 
-def test_timeout_detection():
+def check_timeout_detection():
     """Test task timeout detection logic."""
     print("=" * 60)
     print("Testing Timeout Detection")
@@ -51,7 +51,7 @@ def test_timeout_detection():
     return failed == 0
 
 
-def test_container_naming():
+def check_container_naming():
     """Test container naming convention."""
     print("\n" + "=" * 60)
     print("Testing Container Naming Convention")
@@ -82,7 +82,7 @@ def test_container_naming():
     return failed == 0
 
 
-def test_crash_recovery_logic():
+def check_crash_recovery_logic():
     """Test crash recovery logic."""
     print("\n" + "=" * 60)
     print("Testing Crash Recovery Logic")
@@ -135,7 +135,7 @@ def test_crash_recovery_logic():
     return passed
 
 
-def test_container_cleanup_pattern():
+def check_container_cleanup_pattern():
     """Test container cleanup pattern matching."""
     print("\n" + "=" * 60)
     print("Testing Container Cleanup Pattern")
@@ -172,7 +172,7 @@ def test_container_cleanup_pattern():
     return failed == 0
 
 
-def test_status_transition_on_timeout():
+def check_status_transition_on_timeout():
     """Test that timeout properly transitions task status."""
     print("\n" + "=" * 60)
     print("Testing Status Transition on Timeout")
@@ -217,11 +217,11 @@ def main():
 
     results = []
 
-    results.append(("Timeout Detection", test_timeout_detection()))
-    results.append(("Container Naming", test_container_naming()))
-    results.append(("Crash Recovery Logic", test_crash_recovery_logic()))
-    results.append(("Container Cleanup Pattern", test_container_cleanup_pattern()))
-    results.append(("Status Transition on Timeout", test_status_transition_on_timeout()))
+    results.append(("Timeout Detection", check_timeout_detection()))
+    results.append(("Container Naming", check_container_naming()))
+    results.append(("Crash Recovery Logic", check_crash_recovery_logic()))
+    results.append(("Container Cleanup Pattern", check_container_cleanup_pattern()))
+    results.append(("Status Transition on Timeout", check_status_transition_on_timeout()))
 
     print("\n" + "=" * 60)
     print("Test Summary")

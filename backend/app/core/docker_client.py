@@ -132,8 +132,8 @@ class DockerClientWrapper:
             # Try to get logs even if wait failed
             try:
                 logs = container.logs(stdout=True, stderr=True).decode("utf-8")
-            except:
-                logs = f"Failed to get logs: {e}"
+            except Exception as inner_e:
+                logs = f"Failed to get logs: {inner_e}"
             return -1, logs
 
         # Get logs

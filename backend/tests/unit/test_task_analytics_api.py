@@ -56,6 +56,7 @@ async def test_handle_generate_command_persists_webhook_initiator_metadata():
     db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: None))
     db.add = MagicMock()
     db.commit = AsyncMock()
+    db.flush = AsyncMock()
 
     async def refresh(task):
         task.id = 88
@@ -88,31 +89,64 @@ async def test_handle_generate_command_persists_webhook_initiator_metadata():
     assert result["task_id"] == 88
 
 
+class MockResult:
+    """Simple mock result that behaves like SQLAlchemy execute result."""
+    def __init__(self, data):
+        self._data = data
+
+    def one(self):
+        return tuple(self._data)
+
+    def all(self):
+        return self._data
+
+    def scalars(self):
+        return self
+
+    def scalar(self):
+        return self._data[0] if self._data else None
+
+
 @pytest.mark.asyncio
 async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
     fixed_now = datetime(2026, 3, 14, 12, 0, 0)
-    db = AsyncMock()
-    db.execute.side_effect = [
-        SimpleNamespace(
-            one=lambda: (
-                4,
-                21,
-                9,
-                30,
-                3,
-                1,
-                0,
-                4,
-                2,
-                datetime(2026, 3, 12, 8, 0, 0),
-                540.0,
-                900.0,
-                180.0,
-                300.0,
-            )
-        ),
-        SimpleNamespace(
-            all=lambda: [
+
+    # Create mock db
+    db = MagicMock()
+
+    # Track call count for side_effect
+    call_count = [0]
+
+    def execute_side_effect(query):
+        call_count[0] += 1
+
+        # Summary query (call 1)
+        if call_count[0] == 1:
+            return MockResult([
+                4,      # total_tasks
+                21,     # total_additions
+                9,      # total_deletions
+                30,     # total_changes
+                1000,   # total_input_tokens
+                2000,   # total_output_tokens
+                3,      # completed_tasks
+                1,      # failed_tasks
+                0,      # cancelled_tasks
+                4,      # finished_tasks
+                2,      # tracked_initiator_tasks
+                2,      # token_tracked_tasks
+                datetime(2026, 3, 12, 8, 0, 0),  # initiator_tracking_started_at
+                540.0,  # avg_execution_seconds
+                900.0,  # max_execution_seconds
+                180.0,  # avg_queue_wait_seconds
+                300.0,  # max_queue_wait_seconds
+                1500.0, # avg_total_tokens_per_tracked_task
+                2000.0, # max_total_tokens_per_tracked_task
+            ])
+
+        # Project query (call 2)
+        elif call_count[0] == 2:
+            return MockResult([
                 SimpleNamespace(
                     project_id=101,
                     task_count=3,
@@ -122,14 +156,22 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
                     additions=16,
                     deletions=5,
                     total_changes=21,
+                    input_tokens=800,
+                    output_tokens=1600,
+                    total_tokens=2400,
                     avg_execution_seconds=600.0,
                     avg_queue_wait_seconds=150.0,
                     last_task_at=datetime(2026, 3, 14, 9, 0, 0),
                 )
-            ]
-        ),
-        SimpleNamespace(
-            all=lambda: [
+            ])
+
+        # Available initiators query (call 3)
+        elif call_count[0] == 3:
+            return MockResult([])
+
+        # Initiators breakdown query (call 4)
+        elif call_count[0] == 4:
+            return MockResult([
                 SimpleNamespace(
                     initiator_username="alice",
                     initiator_gitlab_user_id=77,
@@ -140,14 +182,18 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
                     additions=10,
                     deletions=4,
                     total_changes=14,
+                    input_tokens=500,
+                    output_tokens=1000,
+                    total_tokens=1500,
                     avg_execution_seconds=420.0,
                     avg_queue_wait_seconds=120.0,
                     last_task_at=datetime(2026, 3, 14, 9, 0, 0),
                 )
-            ]
-        ),
-        SimpleNamespace(
-            all=lambda: [
+            ])
+
+        # Trend query (call 5)
+        elif call_count[0] == 5:
+            return MockResult([
                 SimpleNamespace(
                     day=date(2026, 3, 12),
                     task_count=1,
@@ -157,6 +203,9 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
                     additions=4,
                     deletions=1,
                     total_changes=5,
+                    input_tokens=100,
+                    output_tokens=200,
+                    total_tokens=300,
                     avg_execution_seconds=300.0,
                 ),
                 SimpleNamespace(
@@ -168,12 +217,16 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
                     additions=17,
                     deletions=8,
                     total_changes=25,
+                    input_tokens=500,
+                    output_tokens=1000,
+                    total_tokens=1500,
                     avg_execution_seconds=720.0,
                 ),
-            ]
-        ),
-        SimpleNamespace(
-            all=lambda: [
+            ])
+
+        # Priority wait query (call 6)
+        elif call_count[0] == 6:
+            return MockResult([
                 SimpleNamespace(
                     priority=0,
                     task_count=2,
@@ -186,15 +239,19 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
                     avg_queue_wait_seconds=300.0,
                     max_queue_wait_seconds=300.0,
                 ),
-            ]
-        ),
-        SimpleNamespace(
-            all=lambda: [
+            ])
+
+        # Error breakdown query (call 7)
+        elif call_count[0] == 7:
+            return MockResult([
                 SimpleNamespace(error_message="Task timed out after 30m", count=2),
                 SimpleNamespace(error_message="docker container exited unexpectedly", count=1),
-            ]
-        ),
-    ]
+            ])
+
+        return MockResult([])
+
+    db.execute = AsyncMock(side_effect=execute_side_effect)
+
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
     with patch("app.api.stats.datetime") as datetime_mock, patch(
@@ -209,7 +266,7 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
         ),
     ):
         datetime_mock.utcnow.return_value = fixed_now
-        response = await get_analytics(days=7, db=db, _current_user=None, access_scope=access_scope)
+        response = await get_analytics(days=7, project_id=None, initiator_username=None, db=db, _current_user=None, access_scope=access_scope)
 
     assert response["window_days"] == 7
     assert response["summary"]["total_tasks"] == 4
