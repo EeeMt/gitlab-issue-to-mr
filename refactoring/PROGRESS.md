@@ -288,7 +288,17 @@
   - [x] 表单重置测试 (重置所有值、清除验证错误)
   - [x] scheduleSummary 计算属性测试
 
-- [ ] 7.3 测试 Dashboard 组件 (High)
+- [x] 7.3 测试 Dashboard 组件 (High)
+  - [x] `src/views/Dashboard.spec.ts` 新建
+  - [x] 基础渲染测试 (任务列表、loading 状态、摘要卡片、API 调用)
+  - [x] 过滤器测试 (按状态/项目/发起人筛选、多条件组合、筛选变更时重新获取)
+  - [x] 自动刷新测试 (15 秒轮询、Tab 不可见时跳过、恢复可见时继续、组件卸载时清除)
+  - [x] 任务导航测试 (行点击跳转、点击交互元素时不跳转)
+  - [x] 响应式布局测试 (默认桌面列数、isMobile 计算属性)
+  - [x] 摘要计算测试 (总数、运行中、待处理/排队中、已完成、空任务列表、任务变更时更新)
+  - [x] 手动刷新测试 (refreshTasks 调用、刷新时 loading 状态)
+  - [x] 错误处理测试 (fetch 失败时优雅处理)
+  - [x] 发起人选项测试 (唯一性提取、字母排序)
 
 - [ ] 7.4 测试 TaskView 组件 (High)
 
@@ -336,6 +346,25 @@
 
 **后续待办**
 - Phase 7.3: Dashboard 组件测试
+- Phase 7.4: TaskView 组件测试
+
+#### 2026-03-31 实施 Phase 7.3 Dashboard 组件测试
+
+**完成**
+- [x] `frontend/src/views/Dashboard.spec.ts` - 30 个测试
+
+**测试覆盖**
+- Dashboard: 基础渲染、过滤器、自动刷新、任务导航、响应式布局、摘要计算、手动刷新、错误处理、发起人选项
+
+**验证**
+- `npx vitest run src/views/Dashboard.spec.ts` - 30 passed
+
+**变更分析**
+- 新增文件: 1 个
+  - `frontend/src/views/Dashboard.spec.ts`
+- 新增行数: ~680 行
+
+**后续待办**
 - Phase 7.4: TaskView 组件测试
 
 ---
