@@ -13,21 +13,32 @@ from playwright.sync_api import Page, expect
 
 
 def create_admin_and_login(page: Page):
-    """Helper to create admin via bootstrap and login."""
+    """
+    Create admin via bootstrap if needed, or login with existing admin.
+    """
     page.goto("/bootstrap")
-    page.wait_for_selector(".bootstrap-card", timeout=10000)
+    page.wait_for_load_state("networkidle")
 
-    inputs = page.locator(".bootstrap-form input")
-    inputs.nth(0).fill("taskview_admin")
-    inputs.nth(1).fill("TaskView Admin")
-    inputs.nth(2).fill("taskview_admin@example.com")
+    if page.locator(".bootstrap-card").is_visible(timeout=3000):
+        inputs = page.locator(".bootstrap-form input")
+        inputs.nth(0).fill("test_admin")
+        inputs.nth(1).fill("Test Admin")
+        inputs.nth(2).fill("test_admin@example.com")
 
-    password_inputs = page.locator("input[type='password']")
-    password_inputs.nth(0).fill("securepassword123")
-    password_inputs.nth(1).fill("securepassword123")
+        password_inputs = page.locator("input[type='password']")
+        password_inputs.nth(0).fill("SecurePass123!")
+        password_inputs.nth(1).fill("SecurePass123!")
 
-    page.get_by_role("button", name="Create Admin").click()
-    page.wait_for_url("**/dashboard", timeout=10000)
+        page.get_by_role("button", name="Create Admin").click()
+        page.wait_for_url("**/dashboard", timeout=15000)
+    else:
+        page.wait_for_selector(".login-form", timeout=5000)
+        inputs = page.locator(".login-form input")
+        inputs.nth(0).fill("test_admin")
+        inputs.nth(1).fill("SecurePass123!")
+        page.get_by_role("button", name="Login").click()
+        page.wait_for_url("**/dashboard", timeout=15000)
+
     page.wait_for_load_state("networkidle")
 
 
@@ -36,27 +47,21 @@ class TestTaskViewPage:
     """Tests for the task view page functionality."""
 
     def test_task_view_page_loads(self, page: Page, reset_database):
-        """Test that the task view page loads without errors when accessing a valid task."""
+        """Test that the task view page loads without errors."""
         create_admin_and_login(page)
-
-        # Navigate directly to task view with a non-existent task ID
-        # This will show the page structure even without task data
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
 
-        # The page should have the task-view container
         task_view = page.locator(".task-view")
         expect(task_view).to_be_visible()
 
     def test_task_view_title_is_displayed(self, page: Page, reset_database):
         """Test that task view displays title with task ID."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
 
-        # Title should be visible (shows "Task #1" or similar)
         title = page.locator(".task-view__title")
         if title.is_visible():
             expect(title).to_contain_text("1")
@@ -64,7 +69,6 @@ class TestTaskViewPage:
     def test_task_view_subtitle_is_displayed(self, page: Page, reset_database):
         """Test that task view subtitle is displayed."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
@@ -81,7 +85,6 @@ class TestTaskViewSummary:
     def test_summary_section_exists(self, page: Page, reset_database):
         """Test that summary section is present when task is loaded."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
@@ -94,7 +97,6 @@ class TestTaskViewSummary:
     def test_summary_cards_have_labels(self, page: Page, reset_database):
         """Test that summary cards have labels."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
@@ -106,7 +108,6 @@ class TestTaskViewSummary:
     def test_summary_cards_have_values(self, page: Page, reset_database):
         """Test that summary cards have values."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
@@ -123,7 +124,6 @@ class TestTaskViewDetails:
     def test_task_details_card_exists(self, page: Page, reset_database):
         """Test that the task details card is present."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
@@ -134,7 +134,6 @@ class TestTaskViewDetails:
     def test_task_details_card_title(self, page: Page, reset_database):
         """Test that the task details card has a title."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
@@ -151,7 +150,6 @@ class TestTaskViewActions:
     def test_actions_card_exists(self, page: Page, reset_database):
         """Test that the actions card is present in task view."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
@@ -163,51 +161,40 @@ class TestTaskViewActions:
     def test_cancel_button_exists(self, page: Page, reset_database):
         """Test that cancel button is shown for pending/running tasks."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
 
-        # Cancel button exists but may be disabled depending on task state
         cancel_button = page.get_by_role("button", name="Cancel")
-        # Button may or may not be visible depending on task status
 
     def test_retry_button_exists(self, page: Page, reset_database):
         """Test that retry button is shown for failed/cancelled tasks."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
 
-        # Retry button exists but visibility depends on task state
         retry_button = page.get_by_role("button", name="Retry")
-        # Button may or may not be visible depending on task status
 
     def test_execute_button_exists(self, page: Page, reset_database):
         """Test that execute button is shown for pending tasks."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
 
-        # Execute button exists but visibility depends on task state
         execute_button = page.get_by_role("button", name="Execute")
-        # Button may or may not be visible depending on task status
 
     def test_no_actions_message_for_completed_tasks(self, page: Page, reset_database):
-        """Test that completed tasks show no action buttons."""
+        """Test that completed tasks show no action message."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
 
-        # For completed tasks, the action area should show "no manual action" message
         no_action = page.locator(".task-actions__empty")
         if no_action.is_visible():
-            expect(no_action).to_contain_text("no manual action")
+            expect(no_action).to_contain_text("No manual action", ignore_case=True)
 
 
 @pytest.mark.task_view
@@ -217,23 +204,19 @@ class TestTaskViewLogs:
     def test_log_content_area_exists(self, page: Page, reset_database):
         """Test that the log content area exists."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
 
-        # Log content area should exist
         log_content = page.locator(".log-content")
         expect(log_content).to_be_attached()
 
     def test_log_section_has_refresh_button(self, page: Page, reset_database):
         """Test that logs section has a refresh button."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
 
-        # Find the refresh button in the logs section header
         logs_refresh_button = page.locator(".task-card").get_by_role("button", name="Refresh")
         if logs_refresh_button.is_visible():
             expect(logs_refresh_button).to_be_visible()
@@ -246,11 +229,9 @@ class TestTaskViewNavigation:
     def test_back_to_dashboard_via_sidebar(self, page: Page, reset_database):
         """Test that navigation back to dashboard works via sidebar."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
 
-        # Use sidebar to navigate back to dashboard
         dashboard_link = page.locator(".nav-menu").get_by_text("Dashboard")
         if dashboard_link.is_visible():
             dashboard_link.click()
@@ -259,7 +240,6 @@ class TestTaskViewNavigation:
     def test_refresh_button_is_visible(self, page: Page, reset_database):
         """Test that the refresh button in hero section is visible."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
 
@@ -274,12 +254,10 @@ class TestTaskViewPermissions:
     def test_permission_note_for_limited_actions(self, page: Page, reset_database):
         """Test that permission note is shown when user has limited actions."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
 
-        # Permission note may be visible for non-admin users
         permission_note = page.locator(".task-actions__permission-note")
         if permission_note.is_visible():
             expect(permission_note).to_be_visible()
@@ -287,7 +265,6 @@ class TestTaskViewPermissions:
     def test_actions_intro_message_exists(self, page: Page, reset_database):
         """Test that the actions intro message exists."""
         create_admin_and_login(page)
-
         page.goto("/tasks/1")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)

@@ -1,0 +1,91 @@
+# Docker Compose for E2E Testing
+# Uses isolated PostgreSQL without persistent volume for clean test environment
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gimr-e2e-postgres
+    environment:
+      POSTGRES_USER: gimr
+      POSTGRES_PASSWORD: gimr_password
+      POSTGRES_DB: gimr
+    # No persistent volume - fresh database on each start
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks:
+      - gimr-e2e-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gimr -d gimr"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  backend:
+    image: gimr-backend:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    container_name: gimr-e2e-backend
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://gimr:gimr_password@postgres:5432/gimr
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DOCKER_TLS_CA=
+      - DOCKER_TLS_CERT=
+      - DOCKER_TLS_KEY=
+      - AUTO_MIGRATE=true
+      - COOKIE_SECURE=false
+      - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - gimr-e2e-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  nginx:
+    image: gimr-nginx:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+    container_name: gimr-e2e-nginx
+    ports:
+      - "8880:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - gimr-e2e-network
+
+  e2e:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.e2e
+    container_name: gimr-e2e-tester
+    environment:
+      - E2E_BASE_URL=http://nginx:80
+      - E2E_BACKEND_URL=http://backend:8000
+      - E2E_GITLAB_URL=http://gitlab:8080
+      - E2E_POSTGRES_URL=postgresql://gimr:gimr_password@postgres:5432/gimr
+      - PYTEST_ARGS=-v
+    depends_on:
+      nginx:
+        condition: service_started
+      backend:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - gimr-e2e-network
+    # Keep running during tests
+    shm_size: '2gb'
+
+networks:
+  gimr-e2e-network:
+    driver: bridge
