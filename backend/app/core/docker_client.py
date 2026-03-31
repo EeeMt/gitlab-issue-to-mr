@@ -6,6 +6,7 @@ from typing import Any, BinaryIO, Optional
 
 import docker
 from docker.client import DockerClient
+from docker.models.containers import Container
 
 from app.config import get_settings
 
@@ -73,7 +74,7 @@ class DockerClientWrapper:
         working_dir: Optional[str] = None,
         network: Optional[str] = None,
         name: Optional[str] = None,
-    ) -> Any:
+    ) -> Container:
         """Create and start a Docker container.
 
         Args:
@@ -106,7 +107,7 @@ class DockerClientWrapper:
         return container
 
     def wait_for_container(
-        self, container: Any, timeout: int = 600
+        self, container: Container, timeout: int = 600
     ) -> tuple[int, str]:
         """Wait for container to complete execution.
 

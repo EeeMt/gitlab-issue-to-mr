@@ -3,10 +3,12 @@
 Test worker notification logic without external dependencies.
 """
 
+import asyncio
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pytest
 from unittest.mock import MagicMock, patch
 from app.core.worker import WorkerExecutor
 from app.models import Task, TaskStatus
@@ -57,7 +59,8 @@ def test_notify_task_started():
     print("✓ _notify_task_started sends correct message")
 
 
-def test_notify_task_completed_success_with_mr():
+@pytest.mark.asyncio
+async def test_notify_task_completed_success_with_mr():
     """Test continuation tasks send completion updates to the MR."""
     print("=" * 60)
     print("Testing _notify_task_completed (success with MR)")
@@ -76,7 +79,7 @@ def test_notify_task_completed_success_with_mr():
         status=TaskStatus.COMPLETED,
     )
 
-    worker._notify_task_completed(task, success=True, notify_target="mr")
+    await worker._notify_task_completed(task, success=True, notify_target="mr")
 
     mock_gitlab.create_mr_note.assert_called_once()
     call_args = mock_gitlab.create_mr_note.call_args
@@ -88,7 +91,8 @@ def test_notify_task_completed_success_with_mr():
     print("✓ _notify_task_completed sends MR completion message")
 
 
-def test_notify_task_completed_success_to_issue_with_mr_link():
+@pytest.mark.asyncio
+async def test_notify_task_completed_success_to_issue_with_mr_link():
     """Test issue-triggered tasks still report completion back to the issue."""
     print("=" * 60)
     print("Testing _notify_task_completed (success without MR)")
@@ -107,7 +111,7 @@ def test_notify_task_completed_success_to_issue_with_mr_link():
         status=TaskStatus.COMPLETED,
     )
 
-    worker._notify_task_completed(task, success=True, notify_target="issue")
+    await worker._notify_task_completed(task, success=True, notify_target="issue")
 
     mock_gitlab.create_note.assert_called_once()
     call_args = mock_gitlab.create_note.call_args
@@ -119,7 +123,8 @@ def test_notify_task_completed_success_to_issue_with_mr_link():
     print("✓ _notify_task_completed sends issue completion message for issue tasks")
 
 
-def test_notify_task_completed_failure():
+@pytest.mark.asyncio
+async def test_notify_task_completed_failure():
     """Test _notify_task_completed sends failure message."""
     print("=" * 60)
     print("Testing _notify_task_completed (failure)")
@@ -137,7 +142,7 @@ def test_notify_task_completed_failure():
         status=TaskStatus.FAILED,
     )
 
-    worker._notify_task_completed(task, success=False)
+    await worker._notify_task_completed(task, success=False)
 
     mock_gitlab.create_note.assert_called_once()
     call_args = mock_gitlab.create_note.call_args
@@ -148,7 +153,8 @@ def test_notify_task_completed_failure():
     print("✓ _notify_task_completed sends failure message")
 
 
-def test_notify_task_completed_failure_long_message():
+@pytest.mark.asyncio
+async def test_notify_task_completed_failure_long_message():
     """Test _notify_task_completed truncates long error messages."""
     print("=" * 60)
     print("Testing _notify_task_completed (long error message)")
@@ -169,7 +175,7 @@ def test_notify_task_completed_failure_long_message():
         status=TaskStatus.FAILED,
     )
 
-    worker._notify_task_completed(task, success=False)
+    await worker._notify_task_completed(task, success=False)
 
     mock_gitlab.create_note.assert_called_once()
     call_args = mock_gitlab.create_note.call_args
@@ -182,7 +188,8 @@ def test_notify_task_completed_failure_long_message():
     print("✓ _notify_task_completed truncates long error messages")
 
 
-def test_notify_task_completed_failure_no_message():
+@pytest.mark.asyncio
+async def test_notify_task_completed_failure_no_message():
     """Test _notify_task_completed handles missing error message."""
     print("=" * 60)
     print("Testing _notify_task_completed (no error message)")
@@ -200,7 +207,7 @@ def test_notify_task_completed_failure_no_message():
         status=TaskStatus.FAILED,
     )
 
-    worker._notify_task_completed(task, success=False)
+    await worker._notify_task_completed(task, success=False)
 
     mock_gitlab.create_note.assert_called_once()
     call_args = mock_gitlab.create_note.call_args
@@ -212,12 +219,11 @@ def test_notify_task_completed_failure_no_message():
 
 
 if __name__ == "__main__":
-    test_notify_task_started()
-    test_notify_task_completed_success_with_mr()
-    test_notify_task_completed_success_to_issue_with_mr_link()
-    test_notify_task_completed_failure()
-    test_notify_task_completed_failure_long_message()
-    test_notify_task_completed_failure_no_message()
+    asyncio.run(test_notify_task_completed_success_with_mr())
+    asyncio.run(test_notify_task_completed_success_to_issue_with_mr_link())
+    asyncio.run(test_notify_task_completed_failure())
+    asyncio.run(test_notify_task_completed_failure_long_message())
+    asyncio.run(test_notify_task_completed_failure_no_message())
 
     print("\n" + "=" * 60)
     print("All notification tests passed!")

@@ -43,7 +43,7 @@ async def test_list_scheduled_tasks_serializes_active_scheduled_rows():
     db.execute.return_value = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [task]))
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
-    with patch("app.api.tasks._build_project_lookup", new=AsyncMock(return_value={
+    with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={
         101: {
             "project_name": "Project Alpha",
             "project_path_with_namespace": "group/project-alpha",
@@ -69,7 +69,7 @@ async def test_list_scheduled_tasks_uses_accessible_project_scope():
         accessible_projects=[{"id": 202, "name": "Project Beta"}],
     )
 
-    with patch("app.api.tasks._build_project_lookup", new=AsyncMock(return_value={})):
+    with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
         result = await list_scheduled_tasks(db=db, access_scope=access_scope)
 
     executed_query = db.execute.await_args.args[0]

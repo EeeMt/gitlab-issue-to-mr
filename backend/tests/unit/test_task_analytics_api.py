@@ -255,7 +255,7 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
     with patch("app.api.stats.datetime") as datetime_mock, patch(
-        "app.api.stats._build_project_lookup",
+        "app.api.stats.build_project_lookup",
         new=AsyncMock(
             return_value={
                 101: {

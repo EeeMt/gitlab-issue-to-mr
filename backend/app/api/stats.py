@@ -16,6 +16,7 @@ from app.database import get_db
 from app.dependencies.auth import require_page_access
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
 from app.models import Task, TaskStatus
+from app.core.projects import build_project_lookup
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -83,33 +84,6 @@ async def get_stats(
         "failed": status_counts.get("failed", 0),
         "cancelled": status_counts.get("cancelled", 0),
     }
-
-
-async def _build_project_lookup(access_scope: ProjectAccessScope) -> dict[int, dict[str, str | None]]:
-    if not access_scope.is_unrestricted:
-        return {
-            int(project["id"]): {
-                "project_name": project.get("name"),
-                "project_path_with_namespace": project.get("path_with_namespace"),
-            }
-            for project in access_scope.accessible_projects
-        }
-
-    # Use cached projects from gitlab_client to avoid repeated GitLab API calls
-    from app.core.gitlab_client import get_cached_projects
-
-    try:
-        projects = await get_cached_projects()
-        return {
-            int(project["id"]): {
-                "project_name": project.get("name"),
-                "project_path_with_namespace": project.get("path_with_namespace"),
-            }
-            for project in projects
-        }
-    except Exception as exc:
-        logger.warning("Failed to load project metadata for analytics: %s", exc)
-        return {}
 
 
 def _apply_project_scope(query, access_scope: ProjectAccessScope):
@@ -337,7 +311,10 @@ async def get_analytics(
         initiator_username=selected_initiator_username,
     )
     project_rows = (await db.execute(project_query)).all()
-    project_lookup = await _build_project_lookup(access_scope)
+    project_lookup = await build_project_lookup(
+        accessible_projects=access_scope.accessible_projects,
+        is_unrestricted=access_scope.is_unrestricted,
+    )
 
     available_initiators_query = (
         select(

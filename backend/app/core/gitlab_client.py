@@ -197,7 +197,7 @@ class GitLabClient:
             "issue_iid": getattr(mr, 'issue_iid', None),
         }
 
-    def get_merge_request_stats(
+    async def get_merge_request_stats(
         self, project_id: int, mr_iid: int
     ) -> Optional[dict]:
         """Get merge request change statistics.
@@ -214,13 +214,12 @@ class GitLabClient:
             deletions = 0
 
             # Use GitLab API directly via HTTP request
-            import requests
             url = f"{self.base_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/changes"
-            response = requests.get(
-                url,
-                headers={"PRIVATE-TOKEN": self.private_token},
-                timeout=30
-            )
+            async with httpx.AsyncClient(timeout=30.0, verify=get_ssl_verify()) as client:
+                response = await client.get(
+                    url,
+                    headers={"PRIVATE-TOKEN": self.private_token},
+                )
             response.raise_for_status()
             data = response.json()
 
