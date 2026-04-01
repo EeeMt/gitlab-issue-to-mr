@@ -213,7 +213,8 @@ function createTooltip(view: EditorView, pos: number) {
 }
 
 const variableTooltip = hoverTooltip((view, pos) => createTooltip(view, pos), {
-  hoverTime: 300
+  hoverTime: 300,
+  hideOnChange: true
 })
 
 function createEditor() {
@@ -222,6 +223,7 @@ function createEditor() {
   const editorExtensions = [
     basicSetup,
     variableHighlightPlugin,
+    variableTooltip,
     EditorView.updateListener.of((update) => {
       if (update.docChanged) {
         const newContent = update.state.doc.toString()
@@ -247,10 +249,6 @@ function createEditor() {
       }
     })
   ]
-
-  if (!editable.value) {
-    editorExtensions.splice(2, 0, variableTooltip)
-  }
 
   const startState = EditorState.create({
     doc: content.value,
