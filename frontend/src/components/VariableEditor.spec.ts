@@ -4,7 +4,8 @@ import { ref, computed, nextTick } from 'vue'
 
 // Create mock values that can be updated per test
 const mockVariables = ref<string[]>([])
-const mockMergedTips = computed(() => ({}))
+const mockMergedTipsState = ref<Record<string, string>>({})
+const mockMergedTips = computed(() => mockMergedTipsState.value)
 const mockVariablesWithTips = ref<Array<{ name: string; tip: string }>>([])
 
 // Use vi.hoisted to properly hoist the mock before vi.mock is hoisted
@@ -12,6 +13,7 @@ const { mockUseVariableEditor } = vi.hoisted(() => {
   const mockUseVariableEditor = vi.fn().mockImplementation(() => ({
     variables: mockVariables,
     mergedTips: mockMergedTips,
+    updateTip: vi.fn(),
     variablesWithTips: mockVariablesWithTips
   }))
 
@@ -131,11 +133,13 @@ describe('VariableEditor', () => {
     vi.clearAllMocks()
     // Reset mock values
     mockVariables.value = []
+    mockMergedTipsState.value = {}
     mockVariablesWithTips.value = []
     // Reset mock implementation
     mockUseVariableEditor.mockImplementation(() => ({
       variables: mockVariables,
       mergedTips: mockMergedTips,
+      updateTip: vi.fn(),
       variablesWithTips: mockVariablesWithTips
     }))
   })
@@ -265,6 +269,7 @@ describe('VariableEditor', () => {
 
     it('should emit update:variableTips on tip change', async () => {
       mockVariables.value = ['issue_type']
+      mockMergedTipsState.value = { issue_type: 'Original tip' }
       mockVariablesWithTips.value = [{ name: 'issue_type', tip: 'Original tip' }]
 
       const wrapper = shallowMount(VariableEditor, {
@@ -279,13 +284,31 @@ describe('VariableEditor', () => {
 
       await nextTick()
 
-      // Simulate tip change
-      wrapper.vm.$emit('update:variableTips', { issue_type: 'Updated tip' })
+      wrapper.vm.handleTipChange('issue_type', 'Updated tip')
 
-      // Check that the event was emitted
       const emitted = wrapper.emitted()
       expect(emitted['update:variableTips']).toBeTruthy()
       expect(emitted['update:variableTips']?.[0]).toEqual([{ issue_type: 'Updated tip' }])
+    })
+
+    it('should not emit update:variableTips when merged tips already match props', async () => {
+      mockVariables.value = ['issue_type']
+      mockMergedTipsState.value = { issue_type: 'Original tip' }
+      mockVariablesWithTips.value = [{ name: 'issue_type', tip: 'Original tip' }]
+
+      const wrapper = shallowMount(VariableEditor, {
+        props: {
+          modelValue: 'Fix {{issue_type}}',
+          variableTips: {
+            issue_type: 'Original tip'
+          },
+          editable: true
+        }
+      })
+
+      await nextTick()
+
+      expect(wrapper.emitted()['update:variableTips']).toBeFalsy()
     })
   })
 

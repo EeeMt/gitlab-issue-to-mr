@@ -64,7 +64,7 @@ const hasVariables = computed(() => content.value.includes('{{') && content.valu
 // Use composable logic inline since we need reactive access
 const variablesRef = ref(content.value)
 const tipsRef = ref(templateTips.value)
-const { variables, mergedTips, variablesWithTips } = useVariableEditor(variablesRef, tipsRef)
+const { variables, mergedTips, updateTip, variablesWithTips } = useVariableEditor(variablesRef, tipsRef)
 
 // Keep reactive refs in sync
 watch(content, (val) => {
@@ -74,11 +74,27 @@ watch(templateTips, (val) => {
   tipsRef.value = val
 })
 
-// Watch mergedTips directly to emit cleaned tips when they actually change
-// This avoids the circular dependency issue with watching `variables`
-// Use flush: 'post' to ensure this runs AFTER the migration in useVariableEditor
+function areTipsEqual(
+  left: Record<string, string> | undefined,
+  right: Record<string, string> | undefined
+) {
+  const leftEntries = Object.entries(left ?? {}).sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+  const rightEntries = Object.entries(right ?? {}).sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+
+  if (leftEntries.length !== rightEntries.length) {
+    return false
+  }
+
+  return leftEntries.every(([key, value], index) => {
+    const [otherKey, otherValue] = rightEntries[index] ?? []
+    return key === otherKey && value === otherValue
+  })
+}
+
+// Only emit when merged tips actually diverge from the parent prop.
+// This avoids re-emitting equivalent objects on every keystroke.
 watch(mergedTips, (newTips) => {
-  if (props.editable && newTips) {
+  if (props.editable && newTips && !areTipsEqual(newTips, props.variableTips)) {
     emit('update:variableTips', { ...newTips })
   }
 }, { flush: 'post', deep: true })
@@ -88,8 +104,11 @@ const editable = computed(() => props.editable ?? false)
 
 // Handle tip change when editable - use mergedTips which is already cleaned
 function handleTipChange(varName: string, tip: string) {
+  updateTip(varName, tip)
   const newTips = { ...mergedTips.value, [varName]: tip }
-  emit('update:variableTips', newTips)
+  if (!areTipsEqual(newTips, props.variableTips)) {
+    emit('update:variableTips', newTips)
+  }
 }
 
 // Variable pattern decoration - use inclusive: false to not interfere with selection
