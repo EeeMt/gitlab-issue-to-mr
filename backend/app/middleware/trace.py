@@ -7,6 +7,7 @@ import time
 import uuid
 from typing import Callable
 from fastapi import Request, Response
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
@@ -31,6 +32,7 @@ class TraceMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         # 1. 获取或生成 Trace ID
         trace_id = request.headers.get("X-Trace-ID") or str(uuid.uuid4())[:8]
+        request.state.trace_id = trace_id
 
         # 2. 记录请求开始
         self.logger.bind(trace_id=trace_id).info(
@@ -40,15 +42,12 @@ class TraceMiddleware(BaseHTTPMiddleware):
         # 3. 记录开始时间
         start_time = time.time()
 
-        # 4. 将 trace_id 存入 request.state（后续可直接获取）
-        request.state.trace_id = trace_id
-
-        # 5. 执行请求
+        # 4. 执行请求
         try:
             response = await call_next(request)
             duration_ms = (time.time() - start_time) * 1000
 
-            # 6. 记录请求完成
+            # 5. 记录请求完成
             status_code = response.status_code
             if status_code >= 400:
                 self.logger.bind(trace_id=trace_id).warning(
@@ -59,21 +58,28 @@ class TraceMiddleware(BaseHTTPMiddleware):
                     f"<- {status_code} ({duration_ms:.0f}ms)"
                 )
 
-            # 7. 响应头添加 Trace ID
+            # 6. 响应头添加 Trace ID
             response.headers["X-Trace-ID"] = trace_id
-
             return response
 
         except Exception as e:
             duration_ms = (time.time() - start_time) * 1000
 
-            # 8. 记录异常
+            # 7. 记录异常
             self.logger.bind(trace_id=trace_id).error(
                 f"X {type(e).__name__}: {str(e)} ({duration_ms:.0f}ms)"
             )
 
-            # 重新抛出，让异常处理器处理
-            raise
+            # 8. 返回错误响应，确保包含 Trace ID
+            return JSONResponse(
+                status_code=500,
+                headers={"X-Trace-ID": trace_id},
+                content={
+                    "error": "Internal server error",
+                    "trace_id": trace_id,
+                    "type": type(e).__name__,
+                }
+            )
 
 
 def get_trace_id(request: Request) -> str:

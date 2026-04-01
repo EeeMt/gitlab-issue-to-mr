@@ -133,6 +133,7 @@ async def handle_exception(request: Request, exc: Exception):
 
     return JSONResponse(
         status_code=500,
+        headers={"X-Trace-ID": trace_id},
         content={
             "error": "Internal server error",
             "trace_id": trace_id,

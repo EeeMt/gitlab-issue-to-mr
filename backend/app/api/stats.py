@@ -192,7 +192,7 @@ async def get_analytics(
                 detail=f"Project {project_id} is not available for analytics.",
             )
 
-    now = datetime.now(UTC)
+    now = datetime.now(UTC).replace(tzinfo=None)
     since = now - timedelta(days=days - 1)
 
     finished_task_expr = case((Task.status.in_(FINISHED_TASK_STATUSES), 1), else_=0)
