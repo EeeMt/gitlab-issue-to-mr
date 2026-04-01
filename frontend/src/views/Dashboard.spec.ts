@@ -43,7 +43,7 @@ vi.mock('vue-i18n', () => ({
     locale: { value: 'en' },
     d: vi.fn((value: unknown) => String(value)),
     n: vi.fn((value: number) => String(value)),
-    te: vi.fn((key: string) => false)
+    te: vi.fn((_key: string) => false)
   })
 }))
 
@@ -64,7 +64,7 @@ vi.mock('naive-ui', () => ({
   NSpace: {
     name: 'NSpace',
     props: ['vertical', 'size', 'justify', 'wrap', 'align'],
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-space' }, slots.default?.())
     },
     template: '<div class="n-space"><slot /></div>'
@@ -95,7 +95,7 @@ vi.mock('naive-ui', () => ({
   NCard: {
     name: 'NCard',
     props: ['bordered', 'size'],
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-card' }, [
         slots.header?.(),
         slots.default?.()
@@ -106,7 +106,7 @@ vi.mock('naive-ui', () => ({
   NDataTable: {
     name: 'NDataTable',
     props: ['columns', 'data', 'loading', 'row-key', 'row-props', 'pagination', 'bordered', 'scroll-x'],
-    setup(props: any, { slots }: any) {
+    setup(props: any) {
       return () => h('div', { class: 'n-data-table' }, props.data?.map((row: any) =>
         h('div', { class: 'n-data-table-row', 'data-id': row.id })
       ))
@@ -116,7 +116,7 @@ vi.mock('naive-ui', () => ({
   NGrid: {
     name: 'NGrid',
     props: ['cols', 'x-gap', 'y-gap'],
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-grid' }, slots.default?.())
     },
     template: '<div class="n-grid"><slot /></div>'
@@ -124,7 +124,7 @@ vi.mock('naive-ui', () => ({
   NGi: {
     name: 'NGi',
     props: [],
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-gi' }, slots.default?.())
     },
     template: '<div class="n-gi"><slot /></div>'
@@ -169,7 +169,6 @@ const mockProjects = [
 
 describe('Dashboard', () => {
   let wrapper: VueWrapper<any>
-  let tickTimer: number | null = null
 
   beforeEach(async () => {
     vi.clearAllMocks()
@@ -184,15 +183,10 @@ describe('Dashboard', () => {
     })
 
     // Mock setInterval to capture the timer
-    vi.spyOn(global, 'setInterval').mockImplementation((callback: any) => {
-      tickTimer = 1
-      return 1
-    })
+    vi.spyOn(globalThis, 'setInterval').mockImplementation(() => 1 as ReturnType<typeof setInterval>)
 
     // Spy on clearInterval
-    vi.spyOn(global, 'clearInterval').mockImplementation(() => {
-      tickTimer = null
-    })
+    vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => undefined)
   })
 
   afterEach(() => {
@@ -427,7 +421,7 @@ describe('Dashboard', () => {
       // Advance time a bit
       vi.advanceTimersByTime(5000)
 
-      const clearIntervalSpy = vi.spyOn(global, 'clearInterval')
+      const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval')
 
       wrapper.unmount()
       await nextTick()
@@ -466,7 +460,7 @@ describe('Dashboard', () => {
       const task = mockTasks[0]
       const props = wrapper.vm.getRowProps(task)
 
-      props.onClick({ target: button } as MouseEvent)
+      props.onClick({ target: button } as unknown as MouseEvent)
 
       // push should not be called
       expect(pushSpy).not.toHaveBeenCalled()
@@ -482,7 +476,7 @@ describe('Dashboard', () => {
       const task = mockTasks[0]
       const props = wrapper.vm.getRowProps(task)
 
-      props.onClick({ target: link } as MouseEvent)
+      props.onClick({ target: link } as unknown as MouseEvent)
 
       expect(pushSpy).not.toHaveBeenCalled()
     })

@@ -4,16 +4,17 @@
       <template #description>{{ t('monitor.loading') }}</template>
 
       <n-space vertical :size="16">
-        <section class="monitor-page__hero">
-          <div>
-            <h1>{{ t('monitor.title') }}</h1>
-            <p>{{ t('monitor.subtitle') }}</p>
-          </div>
-
-          <n-button secondary :loading="loading && hasLoadedOnce" @click="fetchData()">
-            {{ t('common.refresh') }}
-          </n-button>
-        </section>
+        <PageHeader
+          :title="t('monitor.title')"
+          :subtitle="t('monitor.subtitle')"
+          root-class="monitor-page__hero"
+        >
+          <template #actions>
+            <n-button secondary :loading="loading && hasLoadedOnce" @click="fetchData()">
+              {{ t('common.refresh') }}
+            </n-button>
+          </template>
+        </PageHeader>
 
         <n-alert type="info" :show-icon="false">
           {{ t('monitor.dataSourceInfo') }}
@@ -37,11 +38,15 @@
             <n-space vertical :size="16">
               <n-grid :x-gap="16" :y-gap="16" cols="2 s:2 l:4" responsive="screen">
                 <n-gi v-for="item in runtimeCards" :key="item.key" class="monitor-grid-cell">
-                  <n-card size="small" class="monitor-summary-card">
-                    <div class="summary-label">{{ item.label }}</div>
-                    <div class="summary-value">{{ item.value }}</div>
-                    <p class="summary-help">{{ item.help }}</p>
-                  </n-card>
+                  <SummaryCard
+                    :label="item.label"
+                    :value="item.value"
+                    :note="item.help"
+                    card-class="monitor-summary-card"
+                    label-class="summary-label"
+                    value-class="summary-value"
+                    note-class="summary-help"
+                  />
                 </n-gi>
               </n-grid>
 
@@ -97,11 +102,15 @@
             <n-space vertical :size="16">
               <n-grid :x-gap="16" :y-gap="16" cols="2 s:2 l:4" responsive="screen">
                 <n-gi v-for="item in debugCards" :key="item.key" class="monitor-grid-cell">
-                  <n-card size="small" class="monitor-summary-card">
-                    <div class="summary-label">{{ item.label }}</div>
-                    <div class="summary-value">{{ item.value }}</div>
-                    <p class="summary-help">{{ item.help }}</p>
-                  </n-card>
+                  <SummaryCard
+                    :label="item.label"
+                    :value="item.value"
+                    :note="item.help"
+                    card-class="monitor-summary-card"
+                    label-class="summary-label"
+                    value-class="summary-value"
+                    note-class="summary-help"
+                  />
                 </n-gi>
               </n-grid>
 
@@ -251,6 +260,8 @@ import {
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { getContainers, getStats, getTasks, type Container, type Stats, type Task } from '../api'
+import PageHeader from '../components/PageHeader.vue'
+import SummaryCard from '../components/SummaryCard.vue'
 import { formatDateTimeUtc8Compact, parseUtcDate } from '../utils/datetime'
 
 type CardTagType = 'default' | 'info' | 'success' | 'warning' | 'error'
@@ -990,24 +1001,12 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.monitor-page {
+  max-width: var(--app-page-max-width);
+}
+
 .monitor-page__hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.monitor-page__hero h1 {
-  margin: 0;
-  font-size: 28px;
-  font-weight: 700;
-}
-
-.monitor-page__hero p {
-  margin: 8px 0 0;
-  color: rgba(15, 23, 42, 0.68);
-  max-width: 760px;
-  line-height: 1.6;
+  --app-page-header-gap: 20px;
 }
 
 .monitor-summary-card :deep(.n-card__content),
@@ -1027,6 +1026,11 @@ onBeforeUnmount(() => {
 .monitor-summary-card,
 .monitor-card--stretch {
   height: 100%;
+}
+
+.monitor-summary-card {
+  border-radius: var(--app-card-radius);
+  background: var(--app-summary-card-background);
 }
 
 .monitor-summary-card :deep(.n-card__content) {
@@ -1186,11 +1190,6 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 768px) {
-  .monitor-page__hero {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
   .monitor-card__header {
     flex-direction: column;
     align-items: flex-start;

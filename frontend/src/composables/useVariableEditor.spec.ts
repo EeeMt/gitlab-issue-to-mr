@@ -1,7 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { ref, nextTick } from 'vue'
 import { useVariableEditor } from './useVariableEditor'
-import type { VariableTip } from '../types/prompt'
 
 describe('useVariableEditor', () => {
   describe('extractVariables', () => {
@@ -106,7 +105,7 @@ describe('useVariableEditor', () => {
       await nextTick()
 
       // The localTips should be migrated
-      const { variablesWithTips } = useVariableEditor(ref(content.value), templateTips)
+      useVariableEditor(ref(content.value), templateTips)
 
       // After rename, new_var should have the migrated tip
       // Since useVariableEditor creates a fresh state, we need to test the function directly

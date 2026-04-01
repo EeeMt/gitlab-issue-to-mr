@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mount, shallowMount } from '@vue/test-utils'
+import { shallowMount } from '@vue/test-utils'
 import { ref, computed, nextTick } from 'vue'
 
 // Create mock values that can be updated per test
@@ -124,6 +124,7 @@ vi.mock('@vicons/ionicons5', () => ({
 
 // Import the component after mocks are set up
 import VariableEditor from './VariableEditor.vue'
+import { Decoration, hoverTooltip } from '@codemirror/view'
 
 describe('VariableEditor', () => {
   beforeEach(() => {
@@ -340,14 +341,12 @@ describe('VariableEditor', () => {
 
   describe('变量高亮', () => {
     it('should have variable highlight decoration configured', () => {
-      const { Decoration } = require('@codemirror/view')
       expect(Decoration.mark).toBeDefined()
     })
   })
 
   describe('工具提示', () => {
     it('should have hoverTooltip configured', () => {
-      const { hoverTooltip } = require('@codemirror/view')
       expect(hoverTooltip).toBeDefined()
     })
   })

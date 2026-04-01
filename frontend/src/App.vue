@@ -169,9 +169,9 @@ import {
   SettingsOutline,
   SpeedometerOutline
 } from '@vicons/ionicons5'
-import { useWindowSize } from '@vueuse/core'
 import { authState, canAccessSharedPage, initializeAuth, isAdmin, logoutAndClearAuth } from './auth'
 import LanguageToggle from './components/LanguageToggle.vue'
+import { useBreakpoints } from './composables/useBreakpoints'
 import {
   naiveUiDateLocale,
   naiveUiLocale,
@@ -183,8 +183,7 @@ const { t } = useI18n()
 const collapsed = ref(false)
 const showDrawer = ref(false)
 
-const { width } = useWindowSize()
-const isMobile = computed(() => width.value < 768)
+const { isMobile } = useBreakpoints()
 
 const activeKey = computed(() => route.name as string)
 const isLoginRoute = computed(() => route.name === 'Login')
@@ -290,6 +289,22 @@ onMounted(() => {
 </script>
 
 <style>
+:root {
+  --app-page-max-width: 1240px;
+  --app-page-max-width-wide: 1400px;
+  --app-page-gap: 16px;
+  --app-page-gap-large: 20px;
+  --app-card-radius: 18px;
+  --app-card-radius-small: 12px;
+  --app-card-shadow-soft: 0 10px 24px rgba(15, 23, 42, 0.05);
+  --app-page-title-size: 28px;
+  --app-page-title-size-mobile: 24px;
+  --app-page-subtitle-max-width: 760px;
+  --app-page-subtitle-color: rgba(15, 23, 42, 0.68);
+  --app-page-header-gap: 16px;
+  --app-summary-card-background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
+}
+
 html, body, #app {
   margin: 0;
   padding: 0;
@@ -333,7 +348,7 @@ body {
 }
 
 .app-shell__content-inner {
-  max-width: 1400px;
+  max-width: var(--app-page-max-width-wide);
   margin: 0 auto;
 }
 

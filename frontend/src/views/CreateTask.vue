@@ -1,19 +1,21 @@
 <template>
   <div class="create-task-page">
     <n-space vertical :size="20">
-      <div class="create-task-page__hero">
-        <div>
-          <h2 class="create-task-page__title">{{ t('createTask.title') }}</h2>
-          <p class="create-task-page__subtitle">
-            {{ t('createTask.subtitle') }}
-          </p>
-        </div>
-        <n-space :size="8" wrap>
-          <n-tag size="small" round type="info">{{ t('createTask.manualTrigger') }}</n-tag>
-          <n-tag size="small" round>{{ t('createTask.schedulerAware') }}</n-tag>
-          <n-tag size="small" round>{{ t('createTask.gitlabBranchWorkflow') }}</n-tag>
-        </n-space>
-      </div>
+      <PageHeader
+        root-class="create-task-page__hero"
+        title-class="create-task-page__title"
+        subtitle-class="create-task-page__subtitle"
+        :title="t('createTask.title')"
+        :subtitle="t('createTask.subtitle')"
+      >
+        <template #actions>
+          <n-space :size="8" wrap class="create-task-page__tags">
+            <n-tag size="small" round type="info">{{ t('createTask.manualTrigger') }}</n-tag>
+            <n-tag size="small" round>{{ t('createTask.schedulerAware') }}</n-tag>
+            <n-tag size="small" round>{{ t('createTask.gitlabBranchWorkflow') }}</n-tag>
+          </n-space>
+        </template>
+      </PageHeader>
 
       <n-card class="create-task-card" :bordered="false">
         <template #header>
@@ -234,18 +236,18 @@ import {
   NDatePicker, NTag, NGrid, NGi, NPopover, NIcon,
   useMessage, FormInst, FormRules
 } from 'naive-ui'
-import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { getProjects, getBranches, createTask, getPromptTemplates, type Project, type Branch, type CreateTaskRequest, type PromptTemplate } from '../api'
 import { formatDateTimeUtc8 } from '../utils/datetime'
 import { DocumentTextOutline, WarningOutline } from '@vicons/ionicons5'
+import PageHeader from '../components/PageHeader.vue'
 import VariableEditor from '../components/VariableEditor.vue'
+import { useBreakpoints } from '../composables/useBreakpoints'
 
 const router = useRouter()
 const message = useMessage()
 const { t } = useI18n()
-const { width } = useWindowSize()
-const isMobile = computed(() => width.value < 768)
+const { isMobile } = useBreakpoints()
 
 // Loading states
 const loading = ref(false)
@@ -620,30 +622,15 @@ onMounted(() => {
 
 <style scoped>
 .create-task-page {
-  max-width: 1240px;
+  max-width: var(--app-page-max-width);
 }
 
-.create-task-page__hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.create-task-page__title {
-  margin: 0;
-  font-size: 28px;
-  line-height: 1.2;
-}
-
-.create-task-page__subtitle {
-  margin: 8px 0 0;
-  color: rgba(15, 23, 42, 0.68);
-  max-width: 760px;
+.create-task-page__tags {
+  justify-content: flex-end;
 }
 
 .create-task-card {
-  border-radius: 18px;
+  border-radius: var(--app-card-radius);
 }
 
 .create-task-card__header {
@@ -702,18 +689,18 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
-  .create-task-page__hero,
   .create-task-card__header {
     flex-direction: column;
     align-items: flex-start;
   }
 
-  .create-task-form__actions {
-    justify-content: stretch;
+  .create-task-page__tags {
+    width: 100%;
+    justify-content: flex-start;
   }
 
-  .create-task-page__title {
-    font-size: 24px;
+  .create-task-form__actions {
+    justify-content: stretch;
   }
 }
 

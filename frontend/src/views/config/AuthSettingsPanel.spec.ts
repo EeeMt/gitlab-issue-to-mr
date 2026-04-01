@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
-import { h, ref, defineComponent } from 'vue'
+import { h, ref } from 'vue'
 import AuthSettingsPanel from './AuthSettingsPanel.vue'
 
 // Mock OidcDiagnosticsPanel

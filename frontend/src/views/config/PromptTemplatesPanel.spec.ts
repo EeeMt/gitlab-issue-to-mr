@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
-import { h, ref, reactive } from 'vue'
+import { h } from 'vue'
 import PromptTemplatesPanel from './PromptTemplatesPanel.vue'
 
 // Mock VariableEditor
@@ -8,7 +8,7 @@ vi.mock('../../components/VariableEditor.vue', () => ({
   default: {
     name: 'VariableEditor',
     props: ['variableTips', 'editable'],
-    setup(props: any, { emit }: any) {
+    setup() {
       return () => h('div', { class: 'variable-editor' }, 'VariableEditor')
     }
   }
@@ -44,7 +44,7 @@ vi.mock('naive-ui', () => ({
   NDataTable: {
     name: 'NDataTable',
     props: ['columns', 'data', 'loading', 'rowKey', 'pagination', 'bordered'],
-    setup(props: any, { slots }: any) {
+    setup(props: any) {
       return () => h('div', { class: 'n-data-table' },
         props.data?.map((row: any) => h('div', { class: 'n-data-table-row', key: row.id }))
       )

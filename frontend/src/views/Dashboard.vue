@@ -2,20 +2,21 @@
   <div class="dashboard">
     <n-spin :show="initialLoading" :description="t('common.loadingTasks')">
       <n-space vertical :size="16">
-        <div class="dashboard__hero">
-          <div>
-            <h2 class="dashboard__title">{{ t('dashboard.title') }}</h2>
-            <p class="dashboard__subtitle">
-              {{ t('dashboard.subtitle') }}
-            </p>
-          </div>
-          <n-space align="center" wrap class="dashboard__filters">
+        <PageHeader
+          root-class="dashboard__hero"
+          title-class="dashboard__title"
+          subtitle-class="dashboard__subtitle"
+          actions-class="dashboard__filters"
+          :title="t('dashboard.title')"
+          :subtitle="t('dashboard.subtitle')"
+        >
+          <template #actions>
             <n-select
               v-model:value="statusFilter"
               :options="statusOptions"
               :placeholder="t('dashboard.status')"
               clearable
-              style="width: 140px"
+              class="dashboard__filter dashboard__filter--status"
             />
             <n-select
               v-model:value="projectFilter"
@@ -23,7 +24,7 @@
               :placeholder="t('dashboard.project')"
               clearable
               filterable
-              style="width: min(280px, 70vw)"
+              class="dashboard__filter dashboard__filter--project"
             />
             <n-select
               v-model:value="initiatorFilter"
@@ -31,20 +32,23 @@
               :placeholder="t('dashboard.initiator')"
               clearable
               filterable
-              style="width: 180px"
+              class="dashboard__filter dashboard__filter--initiator"
             />
-            <n-button @click="refreshTasks" :loading="loading" size="small">
+            <n-button @click="refreshTasks" :loading="loading" size="small" class="dashboard__refresh">
               {{ t('common.refresh') }}
             </n-button>
-          </n-space>
-        </div>
+          </template>
+        </PageHeader>
 
         <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
           <n-gi v-for="item in summaryItems" :key="item.label">
-            <n-card size="small" class="dashboard-summary-card" :bordered="false">
-              <div class="dashboard-summary-card__label">{{ item.label }}</div>
-              <div class="dashboard-summary-card__value">{{ item.value }}</div>
-            </n-card>
+            <SummaryCard
+              :label="item.label"
+              :value="item.value"
+              card-class="dashboard-summary-card"
+              label-class="dashboard-summary-card__label"
+              value-class="dashboard-summary-card__value"
+            />
           </n-gi>
         </n-grid>
 
@@ -69,17 +73,17 @@
 import { ref, onMounted, onBeforeUnmount, h, watch, computed } from 'vue'
 import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
-import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { getProjects, getTasks, type Project, type Task } from '../api'
+import PageHeader from '../components/PageHeader.vue'
+import SummaryCard from '../components/SummaryCard.vue'
+import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
 
 const router = useRouter()
 const message = useMessage()
 const { t } = useI18n()
-const { width } = useWindowSize()
-
-const isMobile = computed(() => width.value < 768)
+const { isMobile } = useBreakpoints()
 
 const tasks = ref<Task[]>([])
 const projects = ref<Project[]>([])
@@ -415,60 +419,38 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .dashboard {
-  max-width: 1240px;
-}
-
-.dashboard__hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: 16px;
-}
-
-.dashboard__title {
-  margin: 0;
-  font-size: 28px;
-  line-height: 1.2;
+  max-width: var(--app-page-max-width);
 }
 
 .dashboard__filters {
+  display: inline-flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.dashboard__subtitle {
-  margin: 8px 0 0;
-  color: rgba(15, 23, 42, 0.68);
-  max-width: 760px;
+.dashboard__filter--status {
+  width: 140px;
+}
+
+.dashboard__filter--project {
+  width: min(280px, 70vw);
+}
+
+.dashboard__filter--initiator {
+  width: 180px;
 }
 
 .dashboard-summary-card {
-  border-radius: 12px;
-  background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
-}
-
-.dashboard-summary-card__label {
-  margin-bottom: 8px;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.6);
-}
-
-.dashboard-summary-card__value {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--n-text-color-1);
+  min-height: 100%;
 }
 
 .dashboard-table-card {
-  border-radius: 18px;
+  border-radius: var(--app-card-radius);
 }
 
 @media (max-width: 768px) {
-  .dashboard__hero {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
   .dashboard__filters {
     width: 100%;
     justify-content: flex-start;
@@ -481,10 +463,6 @@ onBeforeUnmount(() => {
   .dashboard__filters :deep(.n-base-selection),
   .dashboard__filters :deep(.n-button) {
     width: 100%;
-  }
-
-  .dashboard__title {
-    font-size: 24px;
   }
 }
 </style>

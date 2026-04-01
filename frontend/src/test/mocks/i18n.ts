@@ -5,7 +5,7 @@ export const mockI18n = {
   locale: { value: 'en' },
   d: vi.fn((value: unknown) => String(value)),
   n: vi.fn((value: number) => String(value)),
-  te: vi.fn((key: string) => false)
+  te: vi.fn((_key: string) => false)
 }
 
 export const createI18nMock = () => mockI18n

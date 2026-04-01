@@ -307,7 +307,7 @@ const workerFormValue = ref<WorkerFormValue>({
 })
 
 const lastLoadedAi = ref({ ...aiFormValue.value })
-const lastLoadedWorker = ref<WorkerFormValue>({ mounts: [], maven_cache_host_path: '', maven_settings_host_path: '' })
+const lastLoadedWorker = ref<WorkerFormValue>(createEmptyWorkerFormValue())
 
 const isAiDirty = computed(() =>
   JSON.stringify(aiFormValue.value) !== JSON.stringify(lastLoadedAi.value)
@@ -451,6 +451,14 @@ function addMount() {
   })
 }
 
+function createEmptyWorkerFormValue(): WorkerFormValue {
+  return {
+    mounts: [],
+    maven_cache_host_path: '',
+    maven_settings_host_path: ''
+  }
+}
+
 function removeMount(index: number) {
   workerFormValue.value.mounts.splice(index, 1)
 }
@@ -470,7 +478,7 @@ async function handleSaveWorker() {
       lastLoadedWorker.value = JSON.parse(JSON.stringify(workerFormValue.value))
     } catch {
       // Cloning failed, but save succeeded - use empty object as fallback
-      lastLoadedWorker.value = { mounts: [] }
+      lastLoadedWorker.value = createEmptyWorkerFormValue()
     }
     message.success(t('config.saved'))
   } catch (error: any) {
@@ -483,14 +491,14 @@ async function handleSaveWorker() {
 function resetWorker() {
   // Safely clone last loaded worker config with error boundary
   if (!lastLoadedWorker.value) {
-    workerFormValue.value = { mounts: [] }
+    workerFormValue.value = createEmptyWorkerFormValue()
     return
   }
   try {
     workerFormValue.value = JSON.parse(JSON.stringify(lastLoadedWorker.value))
   } catch {
     // If cloning fails, reset to empty mounts
-    workerFormValue.value = { mounts: [] }
+    workerFormValue.value = createEmptyWorkerFormValue()
   }
 }
 
@@ -504,78 +512,6 @@ watch(() => props.reloadKey, () => {
 </script>
 
 <style scoped>
-:deep(.config-card-header) {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-:deep(.config-card-header__title) {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-:deep(.config-card-header__subtitle) {
-  font-size: 13px;
-  color: rgba(15, 23, 42, 0.58);
-  margin-top: 4px;
-}
-
-.config-mounts-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.config-mount-item {
-  background: rgba(15, 23, 42, 0.02);
-  border: 1px solid rgba(15, 23, 42, 0.09);
-  border-radius: 8px;
-  padding: 12px;
-  position: relative;
-}
-
-.config-mount-remove {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-}
-
-.config-empty {
-  color: rgba(15, 23, 42, 0.45);
-  font-size: 14px;
-  text-align: center;
-  padding: 24px;
-}
-
-.config-form__section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-:deep(.config-form__section-title) {
-  margin-bottom: 0;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: rgba(15, 23, 42, 0.62);
-  text-transform: uppercase;
-}
-
-:deep(.config-section-form) {
-  display: grid;
-  gap: 0;
-}
-
-:deep(.config-card-actions) {
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(15, 23, 42, 0.08);
-}
-
 .config-maven-section {
   margin-top: 20px;
 }

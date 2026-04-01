@@ -49,7 +49,7 @@ vi.mock('../auth', () => ({
     user: null,
     initialized: true
   },
-  isAdmin: { value: false },
+  isAdmin: ref(false),
   initializeAuth: vi.fn<() => Promise<any>>()
 }))
 
@@ -72,7 +72,7 @@ vi.mock('vue-i18n', () => ({
     locale: { value: 'en' },
     d: vi.fn((value: unknown) => String(value)),
     n: vi.fn((value: number) => String(value)),
-    te: vi.fn((key: string) => false)
+    te: vi.fn((_key: string) => false)
   })
 }))
 
@@ -93,8 +93,7 @@ vi.mock('naive-ui', () => ({
   NForm: {
     name: 'NForm',
     props: ['model', 'rules', 'label-placement'],
-    setup(props: any, { expose }: any) {
-      const formRef = { value: null }
+    setup(_props: any, { expose }: any) {
       expose({ validate: vi.fn(), restoreValidation: vi.fn() })
       return () => h('form', {}, h('div', {}, 'form content'))
     },
@@ -103,7 +102,7 @@ vi.mock('naive-ui', () => ({
   NFormItem: {
     name: 'NFormItem',
     props: ['path', 'label', 'show-label'],
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-form-item' }, slots.default?.())
     },
     template: '<div class="n-form-item"><slot /></div>'
@@ -153,7 +152,7 @@ vi.mock('naive-ui', () => ({
   NDatePicker: {
     name: 'NDatePicker',
     props: ['value', 'type', 'placeholder', 'is-date-disabled', 'disabled'],
-    setup(props: any, { emit }: any) {
+    setup(props: any) {
       return () => h('div', {
         class: 'n-date-picker',
         'data-value': props.value
@@ -164,7 +163,7 @@ vi.mock('naive-ui', () => ({
   NRadioGroup: {
     name: 'NRadioGroup',
     props: ['value', 'name'],
-    setup(props: any, { emit }: any) {
+    setup(_props: any) {
       return () => h('div', { class: 'n-radio-group' })
     },
     template: '<div class="n-radio-group"></div>'
@@ -172,7 +171,7 @@ vi.mock('naive-ui', () => ({
   NRadio: {
     name: 'NRadio',
     props: ['value'],
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-radio' }, slots.default?.())
     },
     template: '<div class="n-radio"><slot /></div>'
@@ -192,7 +191,7 @@ vi.mock('naive-ui', () => ({
   NCard: {
     name: 'NCard',
     props: ['bordered'],
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-card' }, [
         slots.header?.(),
         slots.default?.()
@@ -203,7 +202,7 @@ vi.mock('naive-ui', () => ({
   NSpace: {
     name: 'NSpace',
     props: ['vertical', 'size', 'justify', 'wrap', 'align'],
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-space' }, slots.default?.())
     },
     template: '<div class="n-space"><slot /></div>'
@@ -211,7 +210,7 @@ vi.mock('naive-ui', () => ({
   NGrid: {
     name: 'NGrid',
     props: ['cols', 'x-gap', 'y-gap'],
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-grid' }, slots.default?.())
     },
     template: '<div class="n-grid"><slot /></div>'
@@ -219,7 +218,7 @@ vi.mock('naive-ui', () => ({
   NGi: {
     name: 'NGi',
     props: [],
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-gi' }, slots.default?.())
     },
     template: '<div class="n-gi"><slot /></div>'
@@ -235,15 +234,15 @@ vi.mock('naive-ui', () => ({
   NPopover: {
     name: 'NPopover',
     props: ['trigger', 'placement', 'width', 'keep-alive-on-hover'],
-    setup(props: any, { slots }: any) {
-      return () => h('div', { class: 'n-popover' }, slots.trigger?.(), slots.default?.())
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-popover' }, [slots.trigger?.(), slots.default?.()])
     },
     template: '<div class="n-popover"><slot name="trigger" /><slot /></div>'
   },
   NIcon: {
     name: 'NIcon',
     props: ['component'],
-    setup(props: any) {
+    setup(_props: any) {
       return () => h('i', { class: 'n-icon' })
     },
     template: '<i class="n-icon"></i>'
@@ -266,7 +265,7 @@ vi.mock('naive-ui', () => ({
   },
   NText: {
     name: 'NText',
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('span', { class: 'n-text' }, slots.default?.())
     },
     template: '<span class="n-text"><slot /></span>'
@@ -274,7 +273,7 @@ vi.mock('naive-ui', () => ({
   NDescriptions: {
     name: 'NDescriptions',
     props: ['column', 'label-placement'],
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-descriptions' }, slots.default?.())
     },
     template: '<div class="n-descriptions"><slot /></div>'
@@ -485,7 +484,7 @@ describe('TaskView', () => {
       // Mock OIDC enabled but user is not admin and not the task initiator
       const { authState } = await import('../auth')
       authState.oidcEnabled = true
-      authState.user = { id: 999, platform_role: 'user', gitlab_user_id: 999 }
+      authState.user = { id: 999, gitlab_user_id: 999, username: 'user-999', display_name: null, email: null, avatar_url: null, platform_role: 'user' }
 
       await mountComponent({ status: 'pending', initiator_user_id: 1 })
 
@@ -766,8 +765,8 @@ describe('TaskView', () => {
     it('should return true for admin users', async () => {
       const { authState, isAdmin } = await import('../auth')
       authState.oidcEnabled = true
-      authState.user = { id: 999, platform_role: 'platform_admin', gitlab_user_id: 999 }
-      isAdmin.value = true
+      authState.user = { id: 999, gitlab_user_id: 999, username: 'admin-999', display_name: null, email: null, avatar_url: null, platform_role: 'platform_admin' }
+      ;(isAdmin as unknown as { value: boolean }).value = true
 
       await mountComponent({ status: 'pending', initiator_user_id: 1 })
 
@@ -781,8 +780,8 @@ describe('TaskView', () => {
     it('should return true for task initiator by user_id', async () => {
       const { authState, isAdmin } = await import('../auth')
       authState.oidcEnabled = true
-      authState.user = { id: 1, platform_role: 'user', gitlab_user_id: 999 }
-      isAdmin.value = false
+      authState.user = { id: 1, gitlab_user_id: 999, username: 'user-1', display_name: null, email: null, avatar_url: null, platform_role: 'user' }
+      ;(isAdmin as unknown as { value: boolean }).value = false
 
       await mountComponent({ status: 'pending', initiator_user_id: 1, initiator_gitlab_user_id: null })
 
@@ -796,8 +795,8 @@ describe('TaskView', () => {
     it('should return true for task initiator by gitlab_user_id', async () => {
       const { authState, isAdmin } = await import('../auth')
       authState.oidcEnabled = true
-      authState.user = { id: 999, platform_role: 'user', gitlab_user_id: 10 }
-      isAdmin.value = false
+      authState.user = { id: 999, gitlab_user_id: 10, username: 'user-10', display_name: null, email: null, avatar_url: null, platform_role: 'user' }
+      ;(isAdmin as unknown as { value: boolean }).value = false
 
       await mountComponent({
         status: 'pending',
@@ -815,8 +814,8 @@ describe('TaskView', () => {
     it('should return false for non-admin non-initiator', async () => {
       const { authState, isAdmin } = await import('../auth')
       authState.oidcEnabled = true
-      authState.user = { id: 999, platform_role: 'user', gitlab_user_id: 999 }
-      isAdmin.value = false
+      authState.user = { id: 999, gitlab_user_id: 999, username: 'user-999', display_name: null, email: null, avatar_url: null, platform_role: 'user' }
+      ;(isAdmin as unknown as { value: boolean }).value = false
 
       await mountComponent({ status: 'pending', initiator_user_id: 1, initiator_gitlab_user_id: 10 })
 
@@ -831,7 +830,7 @@ describe('TaskView', () => {
       const { authState, isAdmin } = await import('../auth')
       authState.oidcEnabled = true
       authState.user = null
-      isAdmin.value = false
+      ;(isAdmin as unknown as { value: boolean }).value = false
 
       await mountComponent({ status: 'pending' })
 

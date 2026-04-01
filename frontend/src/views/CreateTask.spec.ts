@@ -48,7 +48,7 @@ vi.mock('vue-i18n', () => ({
     locale: { value: 'en' },
     d: vi.fn((value: unknown) => String(value)),
     n: vi.fn((value: number) => String(value)),
-    te: vi.fn((key: string) => false)
+    te: vi.fn((_key: string) => false)
   })
 }))
 
@@ -61,8 +61,7 @@ vi.mock('naive-ui', () => ({
   NForm: {
     name: 'NForm',
     props: ['model', 'rules', 'label-placement'],
-    setup(props: any, { expose }: any) {
-      const formRef = { value: null }
+    setup(_props: any, { expose }: any) {
       expose({ validate: vi.fn(), restoreValidation: vi.fn() })
       return () => h('form', {}, h('div', {}, 'form content'))
     },
@@ -71,7 +70,7 @@ vi.mock('naive-ui', () => ({
   NFormItem: {
     name: 'NFormItem',
     props: ['path', 'label', 'show-label'],
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-form-item' }, slots.default?.())
     },
     template: '<div class="n-form-item"><slot /></div>'
@@ -121,7 +120,7 @@ vi.mock('naive-ui', () => ({
   NDatePicker: {
     name: 'NDatePicker',
     props: ['value', 'type', 'placeholder', 'is-date-disabled', 'is-time-disabled'],
-    setup(props: any, { emit }: any) {
+    setup(props: any) {
       return () => h('div', { class: 'n-date-picker' }, props.placeholder)
     },
     template: '<div class="n-date-picker"></div>'
@@ -129,7 +128,7 @@ vi.mock('naive-ui', () => ({
   NRadioGroup: {
     name: 'NRadioGroup',
     props: ['value', 'name'],
-    setup(props: any, { emit }: any) {
+    setup(_props: any) {
       return () => h('div', { class: 'n-radio-group' })
     },
     template: '<div class="n-radio-group"></div>'
@@ -137,7 +136,7 @@ vi.mock('naive-ui', () => ({
   NRadio: {
     name: 'NRadio',
     props: ['value'],
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-radio' }, slots.default?.())
     },
     template: '<div class="n-radio"><slot /></div>'
@@ -156,7 +155,7 @@ vi.mock('naive-ui', () => ({
   NCard: {
     name: 'NCard',
     props: ['bordered'],
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-card' }, [
         slots.header?.(),
         slots.default?.()
@@ -167,7 +166,7 @@ vi.mock('naive-ui', () => ({
   NSpace: {
     name: 'NSpace',
     props: ['vertical', 'size', 'justify', 'wrap', 'align'],
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-space' }, slots.default?.())
     },
     template: '<div class="n-space"><slot /></div>'
@@ -175,7 +174,7 @@ vi.mock('naive-ui', () => ({
   NGrid: {
     name: 'NGrid',
     props: ['cols', 'x-gap', 'y-gap'],
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-grid' }, slots.default?.())
     },
     template: '<div class="n-grid"><slot /></div>'
@@ -183,7 +182,7 @@ vi.mock('naive-ui', () => ({
   NGi: {
     name: 'NGi',
     props: [],
-    setup(props: any, { slots }: any) {
+    setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-gi' }, slots.default?.())
     },
     template: '<div class="n-gi"><slot /></div>'
@@ -199,15 +198,15 @@ vi.mock('naive-ui', () => ({
   NPopover: {
     name: 'NPopover',
     props: ['trigger', 'placement', 'width', 'keep-alive-on-hover'],
-    setup(props: any, { slots }: any) {
-      return () => h('div', { class: 'n-popover' }, slots.trigger?.(), slots.default?.())
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-popover' }, [slots.trigger?.(), slots.default?.()])
     },
     template: '<div class="n-popover"><slot name="trigger" /><slot /></div>'
   },
   NIcon: {
     name: 'NIcon',
     props: ['component'],
-    setup(props: any) {
+    setup(_props: any) {
       return () => h('i', { class: 'n-icon' })
     },
     template: '<i class="n-icon"></i>'
@@ -242,7 +241,7 @@ vi.mock('../components/VariableEditor.vue', () => ({
     name: 'VariableEditor',
     props: ['modelValue', 'variableTips', 'editable'],
     emits: ['update:modelValue', 'update:variableTips'],
-    setup(props: any, { emit }: any) {
+    setup(props: any) {
       return () => h('div', { class: 'variable-editor' }, props.modelValue || '')
     },
     template: '<div class="variable-editor">{{ modelValue }}</div>'
