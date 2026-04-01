@@ -92,13 +92,13 @@ import MaintenancePanel from './config/MaintenancePanel.vue'
 import PromptTemplatesPanel from './config/PromptTemplatesPanel.vue'
 
 // External components
-import MattermostNotificationsPanel from './components/config/MattermostNotificationsPanel.vue'
-import OidcDiagnosticsPanel from './components/config/OidcDiagnosticsPanel.vue'
-import WorkerSettingsPanel from './components/config/WorkerSettingsPanel.vue'
+import MattermostNotificationsPanel from '../components/config/MattermostNotificationsPanel.vue'
+import OidcDiagnosticsPanel from '../components/config/OidcDiagnosticsPanel.vue'
+import WorkerSettingsPanel from '../components/config/WorkerSettingsPanel.vue'
 
 // Composable
 import { provideConfigForm, useConfigForm } from './config/useConfigForm'
-import { getConfig } from './api'
+import { getConfig } from '../api'
 
 const { t } = useI18n()
 const route = useRoute()
