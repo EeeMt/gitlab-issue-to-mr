@@ -20,49 +20,19 @@ cd backend && uvicorn app.main:app --reload
 # Run database migrations (auto-run on startup if auto_migrate=true)
 cd backend && alembic upgrade head
 
-# Run all tests
-cd backend && pytest
+# Run backend unit tests
+cd backend && python -m pytest tests/unit/ -v
 
-# Run unit tests only
-cd backend && pytest tests/unit/ -v
+# Run frontend unit tests
+cd frontend && npx vitest run
 
 # Run Mock E2E tests
-cd backend && pytest tests/mock_e2e/ -v
+cd backend && python -m pytest tests/mock_e2e/ -v
 
-# Run GitLab E2E tests (requires real GitLab)
-cd backend && pytest tests/gitlab_e2e/ -v
-
-# Run tests for manual task feature
-cd backend && pytest tests/unit/test_manual_task.py -v
-cd backend && pytest tests/mock_e2e/test_manual_task.py -v
-cd backend && pytest tests/gitlab_e2e/test_manual_task.py -v
-
-# Run standalone test script
-cd backend && python tests/unit/test_timeout.py
-
-# Run E2E integration test (requires real GitLab)
-cd backend && python tests/gitlab_e2e/test_integration.py --skip-startup
-
-# Run E2E mock test (no GitLab required)
-cd backend && python tests/mock_e2e/test_integration.py --skip-startup
-
-# Run Playwright E2E tests (requires running services)
-cd backend && pytest tests/e2e/ -v
-
-# Run Playwright E2E tests with visible browser
-cd backend && pytest tests/e2e/ -v --headed
-
-# Run specific E2E test
-cd backend && pytest tests/e2e/ -v -k "bootstrap"
-
-# Build E2E test container
-docker build -f deploy/Dockerfile.e2e -t gimr-e2e:latest .
-
-# Run E2E tests with Docker Compose
-docker-compose --profile e2e run --rm e2e
-
-# Run P0.1 tests (initial MR creation, MR_IID passing)
-cd backend && python tests/unit/test_priority.py
+# Run Playwright E2E tests (requires Docker environment)
+# See docs/TESTING.md for full test commands and options
+cd deploy && docker-compose -f docker-compose.e2e.yml up -d
+docker-compose -f docker-compose.e2e.yml run --rm e2e
 
 # Run frontend dev server
 cd frontend && npm run dev

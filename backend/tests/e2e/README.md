@@ -1,5 +1,7 @@
 # E2E Tests with Playwright
 
+> **注意**：完整的测试指南请参阅 [docs/TESTING.md](../../docs/TESTING.md)
+
 This directory contains end-to-end tests using Playwright for headless browser automation.
 
 ## Setup

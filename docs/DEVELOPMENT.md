@@ -219,60 +219,34 @@ cd deploy && docker-compose up -d --build
 cd deploy && docker-compose logs -f
 ```
 
-## 8. 测试命令
+## 8. 测试
 
-### 8.1 后端测试
+详细测试指南请参阅：[TESTING.md](TESTING.md)
 
-```bash
-# 全量 backend 测试
-cd backend && pytest
+### 快速参考
 
-# 单元测试
-cd backend && pytest tests/unit/ -v
+| 测试类型 | 命令 |
+|---------|------|
+| 后端单元测试 | `cd backend && python -m pytest tests/unit/ -v` |
+| 前端单元测试 | `cd frontend && npx vitest run` |
+| Mock E2E | `cd backend && python -m pytest tests/mock_e2e/ -v` |
+| Playwright E2E | `cd deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e` |
 
-# Mock E2E
-cd backend && pytest tests/mock_e2e/ -v
-
-# 真实 GitLab E2E
-cd backend && pytest tests/gitlab_e2e/ -v
-```
-
-### 8.2 特定功能测试
-
-```bash
-# 手动任务
-cd backend && pytest tests/unit/test_manual_task.py -v
-cd backend && pytest tests/mock_e2e/test_manual_task.py -v
-cd backend && pytest tests/gitlab_e2e/test_manual_task.py -v
-
-# 调度/优先级
-cd backend && python tests/unit/test_priority.py
-
-# 超时脚本
-cd backend && python tests/unit/test_timeout.py
-```
-
-### 8.3 前端验证
+### 前端验证
 
 ```bash
 cd frontend && npm run build
 ```
 
-## 9. 真实 GitLab 测试的安全注意事项
+### 安全注意事项
 
-真实 GitLab E2E 只应该跑在隔离测试环境。
+> **警告**：真实 GitLab E2E 测试只应该跑在隔离测试环境。
 
-原因：
+- 测试可能创建任务、分支、MR、Issue 评论
+- 不要对着正式环境运行
+- 确保测试环境有适当的清理机制
 
-- 真实测试可能创建任务、分支、MR、Issue 评论
-- 测试环境中保存着运行时配置、OIDC 配置、用户和会话
-- 错误的清理动作可能影响正在使用的共享环境
-
-尤其要避免把带清理逻辑的测试脚本对着正式环境运行。
-
-如需深入排查，请阅读 [e2e-debugging.md](e2e-debugging.md)。
-
-## 10. 本地开发常见问题
+## 9. 本地开发常见问题
 
 ### 10.1 后端启动时报数据库连接失败
 
@@ -306,7 +280,7 @@ cd frontend && npm run build
 - OIDC 配置是否因数据库重置而丢失
 - `/api/config` 与 `/api/auth/me` 返回值是否正常
 
-## 11. 推荐开发流程
+## 10. 推荐开发流程
 
 比较稳妥的日常流程如下：
 
@@ -317,7 +291,7 @@ cd frontend && npm run build
 5. 后端行为改动至少跑对应单元测试 / E2E
 6. 需要接近生产验证时，再用 compose 或远程 Docker 环境复测
 
-## 12. 相关文档
+## 11. 相关文档
 
 - [文档索引](README.md)
 - [项目总览 README](../README.md)
