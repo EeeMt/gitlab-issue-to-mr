@@ -8,22 +8,21 @@ from typing import AsyncGenerator
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.config import get_settings
+from app.core.logging import setup_logging, get_logger
 from app.database import close_db, init_db
 from app.dependencies.auth import require_admin_user, require_authenticated_user
 from app.migrations import run_migrations
+from app.middleware.trace import TraceMiddleware, get_trace_id
 from app.runtime_config import load_runtime_config_from_db
 
 settings = get_settings()
 
-# Configure logging with structured format
-logging.basicConfig(
-    level=getattr(logging, settings.log_level.upper()),
-    format="%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(__name__)
+# Initialize loguru logging
+setup_logging()
+logger = get_logger(__name__)
 
 
 async def _event_loop_lag_monitor():
@@ -85,6 +84,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Register Trace middleware
+app.add_middleware(TraceMiddleware)
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -120,6 +122,25 @@ async def log_slow_requests(request: Request, call_next):
     return response
 
 
+# Unified exception handler
+@app.exception_handler(Exception)
+async def handle_exception(request: Request, exc: Exception):
+    trace_id = get_trace_id(request)
+
+    logger.bind(trace_id=trace_id).error(
+        f"Unhandled exception: {type(exc).__name__}: {str(exc)}"
+    )
+
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "trace_id": trace_id,
+            "type": type(exc).__name__,
+        }
+    )
+
+
 @app.get("/")
 async def root() -> dict:
     """Root endpoint."""
@@ -131,9 +152,10 @@ async def root() -> dict:
 
 
 @app.get("/health")
-async def health() -> dict:
+async def health(request: Request) -> dict:
     """Health check endpoint with dependency checks."""
-    health_status = {"status": "healthy", "checks": {}}
+    trace_id = get_trace_id(request)
+    health_status = {"status": "healthy", "checks": {}, "trace_id": trace_id}
 
     # Check database connection
     try:
@@ -159,7 +181,6 @@ async def health() -> dict:
     # Set appropriate status code
     status_code = 200 if health_status["status"] == "healthy" else 503
 
-    from fastapi.responses import JSONResponse
     return JSONResponse(content=health_status, status_code=status_code)
 
 
