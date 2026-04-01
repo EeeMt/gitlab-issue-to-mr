@@ -11,17 +11,23 @@ GIMR (GitLab Issue to MR Bot) - An AI-powered code generation service that autom
 ### Development
 
 ```bash
+# Create and activate virtual environment (if not exists)
+cd backend
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+# or: .\.venv\Scripts\Activate.ps1  # Windows
+
 # Install backend dependencies
-cd backend && pip install -r requirements.txt
+pip install -r requirements.txt
 
 # Run backend locally (requires PostgreSQL running)
-cd backend && uvicorn app.main:app --reload
+uvicorn app.main:app --reload
 
 # Run database migrations (auto-run on startup if auto_migrate=true)
-cd backend && alembic upgrade head
+alembic upgrade head
 
 # Run backend unit tests
-cd backend && python -m pytest tests/unit/ -v
+python -m pytest tests/unit/ -v
 
 # Run frontend unit tests
 cd frontend && npx vitest run
@@ -32,7 +38,7 @@ cd backend && python -m pytest tests/mock_e2e/ -v
 # Run Playwright E2E tests (requires Docker environment)
 # See docs/TESTING.md for full test commands and options
 cd deploy && docker-compose -f docker-compose.e2e.yml up -d
-cd deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e
+docker-compose -f docker-compose.e2e.yml run --rm e2e
 
 # Run frontend dev server
 cd frontend && npm run dev

@@ -22,8 +22,10 @@
 # 进入 backend 目录
 cd backend
 
-# 安装依赖（如果没有虚拟环境，需要先创建）
-source .venv/bin/activate
+# 如果没有虚拟环境，需要先创建并安装依赖
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+# 或: .\.venv\Scripts\Activate.ps1  # Windows
 pip install -r requirements.txt
 
 # 运行所有单元测试
@@ -85,7 +87,7 @@ npx vitest run --coverage
 
 ```bash
 cd backend
-source .venv/bin/activate
+source .venv/bin/activate  # 或 .\venv\Scripts\Activate.ps1 (Windows)
 
 # 运行所有 Mock E2E 测试
 python -m pytest tests/mock_e2e/ -v
@@ -204,7 +206,7 @@ GitLab E2E 测试需要真实的 GitLab 环境。
 
 ```bash
 cd backend
-source .venv/bin/activate
+source .venv/bin/activate  # 或 .\venv\Scripts\Activate.ps1 (Windows)
 
 # 运行所有 GitLab E2E 测试
 python -m pytest tests/gitlab_e2e/ -v
@@ -243,7 +245,8 @@ python tests/gitlab_e2e/test_integration.py --skip-startup
 # ...
 
 # 2. 运行后端单元测试验证
-cd backend && source .venv/bin/activate
+cd backend
+source .venv/bin/activate  # 或 .\venv\Scripts\Activate.ps1 (Windows)
 python -m pytest tests/unit/ -v
 
 # 3. 运行前端单元测试
@@ -261,11 +264,13 @@ docker-compose -f docker-compose.e2e.yml run --rm e2e
 
 | 命令 | 说明 |
 |------|------|
-| `cd backend && python -m pytest tests/unit/ -v` | 后端单元测试 |
+| `cd backend && source .venv/bin/activate && python -m pytest tests/unit/ -v` | 后端单元测试 |
 | `cd frontend && npx vitest run` | 前端单元测试 |
-| `cd backend && python -m pytest tests/mock_e2e/ -v` | Mock E2E |
+| `cd backend && source .venv/bin/activate && python -m pytest tests/mock_e2e/ -v` | Mock E2E |
 | `cd deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e` | Playwright E2E |
-| `cd backend && python -m pytest tests/gitlab_e2e/ -v` | GitLab E2E |
+| `cd backend && source .venv/bin/activate && python -m pytest tests/gitlab_e2e/ -v` | GitLab E2E |
+
+> **注意**：后端测试需要先激活虚拟环境 `source .venv/bin/activate`（或 Windows 上 `.\.venv\Scripts\Activate.ps1`）。
 
 ---
 
