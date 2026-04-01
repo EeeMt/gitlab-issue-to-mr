@@ -268,6 +268,7 @@ cd backend && python -m pytest tests/mock_e2e/ -v
 # 5. 如果需要完整验证，运行 Playwright E2E
 cd deploy && docker-compose -f docker-compose.e2e.yml up -d
 docker-compose -f docker-compose.e2e.yml run --rm e2e
+docker-compose -f docker-compose.e2e.yml down  # 清理环境
 ```
 
 ### 常用测试命令速查

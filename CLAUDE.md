@@ -39,6 +39,8 @@ cd backend && python -m pytest tests/mock_e2e/ -v
 # See docs/TESTING.md for full test commands and options
 cd deploy && docker-compose -f docker-compose.e2e.yml up -d
 docker-compose -f docker-compose.e2e.yml run --rm e2e
+# Cleanup E2E environment after tests
+docker-compose -f docker-compose.e2e.yml down
 
 # Run frontend dev server
 cd frontend && npm run dev
