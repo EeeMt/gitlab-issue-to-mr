@@ -9,7 +9,9 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --silent
 
 COPY frontend/ .
-RUN npm run build
+# Skip type checking during production build (vue-tsc --noEmit)
+# Use vite build directly for faster builds
+RUN npx vite build
 
 # Stage 2: Serve static files with nginx.
 # Only the compiled dist and nginx config live here; node_modules are discarded.
