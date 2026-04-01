@@ -219,37 +219,42 @@ const variableTooltip = hoverTooltip((view, pos) => createTooltip(view, pos), {
 function createEditor() {
   if (!editorContainer.value) return
 
+  const editorExtensions = [
+    basicSetup,
+    variableHighlightPlugin,
+    EditorView.updateListener.of((update) => {
+      if (update.docChanged) {
+        const newContent = update.state.doc.toString()
+        content.value = newContent
+      }
+    }),
+    EditorView.theme({
+      '&': {
+        fontSize: '14px',
+        maxHeight: '200px',
+        width: '100%',
+        display: 'block'
+      },
+      '.cm-scroller': {
+        fontFamily: 'monospace',
+        overflow: 'auto'
+      },
+      '.cm-content': {
+        padding: '8px 0'
+      },
+      '.cm-line': {
+        padding: '0 12px'
+      }
+    })
+  ]
+
+  if (!editable.value) {
+    editorExtensions.splice(2, 0, variableTooltip)
+  }
+
   const startState = EditorState.create({
     doc: content.value,
-    extensions: [
-      basicSetup,
-      variableHighlightPlugin,
-      variableTooltip,
-      EditorView.updateListener.of((update) => {
-        if (update.docChanged) {
-          const newContent = update.state.doc.toString()
-          content.value = newContent
-        }
-      }),
-      EditorView.theme({
-        '&': {
-          fontSize: '14px',
-          maxHeight: '200px',
-          width: '100%',
-          display: 'block'
-        },
-        '.cm-scroller': {
-          fontFamily: 'monospace',
-          overflow: 'auto'
-        },
-        '.cm-content': {
-          padding: '8px 0'
-        },
-        '.cm-line': {
-          padding: '0 12px'
-        }
-      })
-    ]
+    extensions: editorExtensions
   })
 
   editorView = new EditorView({
