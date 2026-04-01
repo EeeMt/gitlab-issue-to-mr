@@ -40,7 +40,7 @@ COPY --from=claude-installer /usr/local/bin/claude /usr/local/bin/claude
 RUN claude --version
 
 # Copy custom CA certificate into the image
-COPY ca.crt /etc/ssl/certs/custom-ca.crt
+COPY deploy/ca.crt /etc/ssl/certs/custom-ca.crt
 
 # Copy entrypoint scripts
 COPY deploy/entrypoint.sh /entrypoint.sh

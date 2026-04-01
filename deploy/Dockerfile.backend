@@ -69,7 +69,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 COPY --from=python-builder /venv /venv
 
 # Copy custom CA certificate into the image
-COPY ca.crt /etc/ssl/certs/custom-ca.crt
+COPY deploy/ca.crt /etc/ssl/certs/custom-ca.crt
 
 # Copy entrypoint script
 COPY deploy/entrypoint.backend.sh /entrypoint.sh
