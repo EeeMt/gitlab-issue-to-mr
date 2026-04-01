@@ -68,6 +68,7 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.e2e
     container_name: gimr-e2e-tester
+    command: pytest tests/e2e/tests/ -v
     environment:
       - E2E_BASE_URL=http://nginx:80
       - E2E_BACKEND_URL=http://backend:8000

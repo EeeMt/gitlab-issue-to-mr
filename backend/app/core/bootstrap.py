@@ -66,7 +66,7 @@ async def initialize_system(
     bootstrap = await get_bootstrap_state(db)
     bootstrap.initialized = True
     bootstrap.initial_admin_user_id = admin_user.id
-    bootstrap.initialized_at = datetime.now(UTC)
+    bootstrap.initialized_at = datetime.now(UTC).replace(tzinfo=None)
     
     await db.flush()
     return bootstrap

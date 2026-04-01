@@ -27,7 +27,7 @@ _last_seen_written_at: dict[str, float] = {}
 
 
 def _utcnow() -> datetime:
-    return datetime.now(UTC)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 @dataclass

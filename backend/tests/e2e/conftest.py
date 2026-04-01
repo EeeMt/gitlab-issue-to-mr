@@ -2,12 +2,11 @@
 Pytest configuration and fixtures for E2E tests.
 
 This module provides shared fixtures for Playwright-based E2E tests.
-Uses transaction-based state management for reliable test isolation.
+Tests that need authentication should call login_as_admin() in their setup.
 """
 
 import os
 import pytest
-from typing import Generator
 
 import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
@@ -80,102 +79,119 @@ def postgres_url() -> str:
     )
 
 
-@pytest.fixture(scope="function")
-def reset_database(postgres_url):
+@pytest.fixture(scope="session")
+def setup_database(postgres_url):
     """
-    Reset the database to uninitialized state before test using transaction savepoints.
+    Initialize the database connection for the test session.
 
-    This fixture ensures:
-    1. Database starts in uninitialized state for each test
-    2. State changes are rolled back after test completes
-    3. No side effects between tests
-
-    Uses PostgreSQL SAVEPOINT mechanism for efficient state management.
+    Creates a connection that will be used to reset state between tests.
     """
-    # Connect to PostgreSQL
     conn = psycopg2.connect(postgres_url)
     conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
     cursor = conn.cursor()
 
-    # Check if system is already uninitialized
-    cursor.execute("SELECT initialized FROM system_bootstrap WHERE id = 1")
-    row = cursor.fetchone()
-    was_uninitialized = row is None or not row[0]
-
-    if not was_uninitialized:
-        # Save current state for restoration later
-        cursor.execute("SELECT id, username, display_name, email, local_password_hash, platform_role, "
-                       "gitlab_user_id, oidc_sub, avatar_url, state, last_login_at, "
-                       "created_at, updated_at, platform_role_source, auth_provider "
-                       "FROM users")
-        saved_users = cursor.fetchall()
-
-        # Reset to uninitialized state
-        cursor.execute("""
-            UPDATE system_bootstrap
-            SET initialized = FALSE,
-                initial_admin_user_id = NULL,
-                initialized_at = NULL
-            WHERE id = 1
-        """)
-        cursor.execute("DELETE FROM users")
-
-    # Create a savepoint
-    cursor.execute("SAVEPOINT e2e_test_sp")
-
-    try:
-        yield
-    finally:
-        # Rollback to savepoint (undoes all changes made during test)
-        cursor.execute("ROLLBACK TO SAVEPOINT e2e_test_sp")
-
-        if not was_uninitialized:
-            # Restore users
-            for user in saved_users:
-                cursor.execute("""
-                    INSERT INTO users (id, username, display_name, email, local_password_hash, platform_role,
-                                      gitlab_user_id, oidc_sub, avatar_url, state, last_login_at,
-                                      created_at, updated_at, platform_role_source, auth_provider)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (id) DO UPDATE SET
-                        username = EXCLUDED.username,
-                        display_name = EXCLUDED.display_name,
-                        email = EXCLUDED.email,
-                        local_password_hash = EXCLUDED.local_password_hash,
-                        platform_role = EXCLUDED.platform_role,
-                        gitlab_user_id = EXCLUDED.gitlab_user_id,
-                        oidc_sub = EXCLUDED.oidc_sub,
-                        avatar_url = EXCLUDED.avatar_url,
-                        state = EXCLUDED.state,
-                        last_login_at = EXCLUDED.last_login_at,
-                        updated_at = EXCLUDED.updated_at,
-                        platform_role_source = EXCLUDED.platform_role_source,
-                        auth_provider = EXCLUDED.auth_provider
-                """, user)
+    yield cursor
 
     cursor.close()
     conn.close()
 
 
 @pytest.fixture(scope="function")
-def clean_database(postgres_url):
+def reset_database(postgres_url):
     """
-    Provide a completely clean database for tests that don't need bootstrap flow.
+    Reset the database to uninitialized state before and after each test.
 
-    This fixture ensures all tables are clean before the test.
-    Use this for tests that create their own data.
+    This fixture creates its own database connection to avoid cursor state issues.
     """
     conn = psycopg2.connect(postgres_url)
     conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
     cursor = conn.cursor()
 
+    def reset_state():
+        try:
+            cursor.execute("DELETE FROM user_sessions")
+            cursor.execute("DELETE FROM users")
+            cursor.execute("""
+                UPDATE system_bootstrap
+                SET initialized = FALSE,
+                    initial_admin_user_id = NULL,
+                    initialized_at = NULL
+                WHERE id = 1
+            """)
+        except Exception as e:
+            print(f"Reset warning: {e}")
+
+    reset_state()  # Reset before test
+
     try:
         yield
     finally:
-        # Rollback any transaction
-        cursor.execute("ROLLBACK")
+        reset_state()  # Reset after test
         cursor.close()
         conn.close()
+
+
+@pytest.fixture(scope="function")
+def page(browser, base_url):
+    """
+    Create a new browser page for testing.
+
+    Each test gets a fresh page with no authentication state.
+    Tests that need authentication should call login_as_admin(page) in their setup.
+    """
+    context = browser.new_context(base_url=base_url)
+    page = context.new_page()
+
+    yield page
+
+    context.close()
+
+
+@pytest.fixture
+def logged_in_page(page, reset_database):
+    """
+    Create a page that is logged in as admin.
+
+    This fixture:
+    1. Uses the reset_database fixture to ensure clean state
+    2. Logs in via bootstrap or existing admin credentials
+    3. Returns the authenticated page
+
+    Use this fixture instead of `page` when tests need authentication.
+    """
+    _do_login(page)
+    return page
+
+
+def _do_login(page):
+    """
+    Internal helper to perform login via bootstrap or existing admin.
+    """
+    page.goto("/bootstrap")
+    page.wait_for_load_state("networkidle")
+
+    if page.locator(".bootstrap-card").is_visible(timeout=5000):
+        # System not initialized - create admin via bootstrap
+        inputs = page.locator(".bootstrap-form input")
+        inputs.nth(0).fill("test_admin")
+        inputs.nth(1).fill("Test Admin")
+        inputs.nth(2).fill("test_admin@example.com")
+
+        password_inputs = page.locator("input[type='password']")
+        password_inputs.nth(0).fill("SecurePass123!")
+        password_inputs.nth(1).fill("SecurePass123!")
+
+        page.get_by_role("button", name="Create Admin").click()
+        page.wait_for_url("**/dashboard", timeout=15000)
+    elif page.locator(".login-form").is_visible(timeout=5000):
+        # System already initialized - login with existing admin
+        inputs = page.locator(".login-form input")
+        inputs.nth(0).fill("test_admin")
+        inputs.nth(1).fill("SecurePass123!")
+        page.get_by_role("button", name="Login").click()
+        page.wait_for_url("**/dashboard", timeout=15000)
+
+    page.wait_for_load_state("networkidle")
 
 
 def pytest_configure(config):
