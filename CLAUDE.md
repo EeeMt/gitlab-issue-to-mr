@@ -32,7 +32,7 @@ cd backend && python -m pytest tests/mock_e2e/ -v
 # Run Playwright E2E tests (requires Docker environment)
 # See docs/TESTING.md for full test commands and options
 cd deploy && docker-compose -f docker-compose.e2e.yml up -d
-docker-compose -f docker-compose.e2e.yml run --rm e2e
+cd deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e
 
 # Run frontend dev server
 cd frontend && npm run dev

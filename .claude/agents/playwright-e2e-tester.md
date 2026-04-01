@@ -91,13 +91,13 @@ class DashboardPage:
 docker build -f deploy/Dockerfile.e2e -t gimr-e2e:latest .
 
 # Run all E2E tests
-docker-compose --profile e2e run --rm e2e
+docker-compose -f deploy/docker-compose.e2e.yml run --rm e2e
 
 # Run specific test file
-docker-compose --profile e2e run --rm e2e pytest tests/e2e/ -v -k "test_name"
+docker-compose -f deploy/docker-compose.e2e.yml run --rm e2e pytest tests/e2e/ -v -k "test_name"
 
 # Run with visible browser (headed mode)
-docker-compose --profile e2e run --rm -e HEADED=1 e2e pytest tests/e2e/ -v -k "test_name"
+docker-compose -f deploy/docker-compose.e2e.yml run --rm -e HEADED=1 e2e pytest tests/e2e/ -v -k "test_name"
 ```
 
 ## Quality Standards

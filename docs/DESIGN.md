@@ -1705,7 +1705,7 @@ gitlab_issues_to_mr/
 │   ├── Dockerfile.backend          # 后端镜像
 │   ├── Dockerfile.frontend         # 前端构建 → 静态文件
 │   ├── docker-compose.yml
-│   ├── nginx.conf                  # Nginx: 托管前端静态文件 + 反向代理后端 API
+│   ├── Dockerfile.frontend         # 前端构建 → 静态文件
 │   └── docker-tls/                 # Docker Engine TLS 证书
 │       ├── ca.pem
 │       ├── client-cert.pem
@@ -1989,11 +1989,9 @@ services:
   nginx:
     build:
       context: .
-      dockerfile: deploy/Dockerfile.frontend          # 多阶段: npm build → nginx
+      dockerfile: deploy/Dockerfile.frontend          # 多阶段: npm build → nginx（配置内嵌）
     ports:
       - "443:443"
-    volumes:
-      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf
     depends_on:
       - backend
 
@@ -2021,7 +2019,7 @@ RUN npm run build
 # 阶段 2: Nginx 托管静态文件
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
-# nginx.conf 通过 volume mount 注入
+# Nginx 配置通过 dockerfile 内嵌
 ```
 
 #### 8. vLLM 监控端点

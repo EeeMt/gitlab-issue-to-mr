@@ -5,7 +5,8 @@ services:
     ports:
       - "8880:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - gimr-network
@@ -22,17 +23,23 @@ services:
       - DOCKER_TLS_CA=
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
-      - AUTO_MIGRATE=false
-      - CUSTOM_CA_BUNDLE=
+      - AUTO_MIGRATE=true
+      - COOKIE_SECURE=false
+      - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # Uncomment and adjust to mount a custom CA certificate:
-      # - /path/to/ca.crt:/certs/ca.crt:ro
     restart: unless-stopped
     networks:
       - gimr-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   scheduler:
     image: gimr-backend:latest
@@ -46,13 +53,14 @@ services:
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
       - AUTO_MIGRATE=true
-      - CUSTOM_CA_BUNDLE=
+      - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # Uncomment and adjust to mount a custom CA certificate:
-      # - /path/to/ca.crt:/certs/ca.crt:ro
     restart: unless-stopped
     networks:
       - gimr-network
@@ -67,6 +75,12 @@ services:
     restart: unless-stopped
     networks:
       - gimr-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gimr -d gimr"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
 volumes:
   postgres_data:
