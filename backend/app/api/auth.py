@@ -667,7 +667,7 @@ async def list_sessions(
         .where(UserSession.user_id == auth_context.user.id)
         .order_by(UserSession.created_at.desc())
     )
-    now = datetime.now(UTC)
+    now = datetime.now(UTC).replace(tzinfo=None)
     sessions = result.scalars().all()
     return [
         SessionInfoResponse(
