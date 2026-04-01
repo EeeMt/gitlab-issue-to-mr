@@ -1,29 +1,33 @@
 <template>
   <div class="task-view">
     <n-space vertical :size="16">
-      <div class="task-view__hero">
-        <div>
-          <div class="task-view__headline">
-            <h2 class="task-view__title">{{ t('taskView.title', { id: taskId }) }}</h2>
-            <n-tag v-if="task" :type="statusColors[task.status]" round>{{ t(`status.${task.status}`) }}</n-tag>
-          </div>
-          <p class="task-view__subtitle">
-            {{ t('taskView.subtitle') }}
-          </p>
-        </div>
-        <n-button @click="refreshTask" :loading="loading">
-          {{ t('common.refresh') }}
-        </n-button>
-      </div>
+      <PageHeader
+        root-class="task-view__hero"
+        subtitle-class="task-view__subtitle"
+        :subtitle="t('taskView.subtitle')"
+      >
+        <template #title>
+          <h2 class="task-view__title">{{ t('taskView.title', { id: taskId }) }}</h2>
+          <n-tag v-if="task" :type="statusColors[task.status]" round>{{ t(`status.${task.status}`) }}</n-tag>
+        </template>
+        <template #actions>
+          <n-button @click="refreshTask" :loading="loading">
+            {{ t('common.refresh') }}
+          </n-button>
+        </template>
+      </PageHeader>
 
       <n-spin :show="initialLoading">
         <div class="task-view__content">
           <n-grid :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16" class="task-view__summary" v-if="task">
             <n-gi v-for="item in summaryItems" :key="item.label">
-              <n-card size="small" class="task-summary-card" :bordered="false">
-                <div class="task-summary-card__label">{{ item.label }}</div>
-                <div class="task-summary-card__value">{{ item.value }}</div>
-              </n-card>
+              <SummaryCard
+                :label="item.label"
+                :value="item.value"
+                card-class="task-summary-card"
+                label-class="task-summary-card__label"
+                value-class="task-summary-card__value"
+              />
             </n-gi>
           </n-grid>
 
@@ -328,10 +332,12 @@ import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { NButton, NSpace, NCard, NDescriptions, NDescriptionsItem, NTag, NGrid, NGi, NSpin, NAlert, NText, NDatePicker, useMessage, NIcon } from 'naive-ui'
 import { PersonOutline, LogoGitlab } from '@vicons/ionicons5'
-import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, type Task } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
+import PageHeader from '../components/PageHeader.vue'
+import SummaryCard from '../components/SummaryCard.vue'
+import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8, parseUtcDate } from '../utils/datetime'
 import AnsiToHtml from 'ansi-to-html'
 
@@ -340,8 +346,7 @@ const ansiConverter = new AnsiToHtml({ escapeXML: true })
 const route = useRoute()
 const message = useMessage()
 const { t } = useI18n()
-const { width } = useWindowSize()
-const isMobile = computed(() => width.value < 768)
+const { isMobile } = useBreakpoints()
 
 const taskId = computed(() => Number(route.params.id))
 
@@ -719,7 +724,7 @@ onBeforeUnmount(() => {
   word-break: break-all;
 }
 .task-view {
-  max-width: 1240px;
+  max-width: var(--app-page-max-width);
 }
 
 .task-view__content {
@@ -727,53 +732,24 @@ onBeforeUnmount(() => {
   gap: 20px;
 }
 
-.task-view__hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: 16px;
-}
-
-.task-view__headline {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
 
 .task-view__title {
   margin: 0;
-  font-size: 28px;
+  font-size: var(--app-page-title-size);
   line-height: 1.2;
 }
 
-.task-view__subtitle {
-  margin: 8px 0 0;
-  color: rgba(15, 23, 42, 0.68);
-  max-width: 760px;
+/* Summary cards are rendered inside SummaryCard's scope; use :deep() to cross the boundary */
+:deep(.task-summary-card) {
+  min-height: 100%;
 }
 
-.task-summary-card {
-  border-radius: 12px;
-  background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
-}
-
-.task-summary-card__label {
-  margin-bottom: 8px;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.6);
-}
-
-.task-summary-card__value {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--n-text-color-1);
+:deep(.task-summary-card__value) {
   word-break: break-word;
 }
 
 .task-card {
-  border-radius: 18px;
+  border-radius: var(--app-card-radius);
 }
 
 .task-card--spaced {
@@ -883,14 +859,9 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 768px) {
-  .task-view__hero,
   .task-card__header {
     flex-direction: column;
     align-items: flex-start;
-  }
-
-  .task-view__title {
-    font-size: 24px;
   }
 
   .task-actions__item {

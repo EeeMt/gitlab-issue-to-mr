@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Create mock functions and handlers using hoisted to ensure they're available when vi.mock runs
-const { mockAxiosGet, mockAxiosPost, mockAxiosPatch, mockAxiosDelete, errorHandler } = vi.hoisted(() => {
+const { mockAxiosGet, mockAxiosPost, mockAxiosPatch, mockAxiosDelete } = vi.hoisted(() => {
   let successHandler: ((response: any) => any) | null = null
   let errorHandler: ((error: any) => any) | null = null
 
@@ -26,8 +26,8 @@ vi.mock('axios', () => {
       response: {
         use: vi.fn((success, error) => {
           // Store handlers for testing
-          mockInstance._successHandler = success
-          mockInstance._errorHandler = error
+          ;(mockInstance as any)._successHandler = success
+          ;(mockInstance as any)._errorHandler = error
         })
       }
     }
@@ -53,8 +53,7 @@ import {
   getStats,
   getProjects,
   getBranches,
-  getAuthStatus,
-  testOidcConfig
+  getAuthStatus
 } from './index'
 
 describe('API functions', () => {

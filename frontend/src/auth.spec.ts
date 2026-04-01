@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
 import { authState, initializeAuth, isAdmin, canAccessSharedPage, buildLoginUrl, startLogin, logoutAndClearAuth } from './auth'
 import * as apiModule from './api'
 
 vi.mock('./api')
 
-const mockGetAuthStatus = apiModule.getAuthStatus as vi.Mock
+const mockGetAuthStatus = apiModule.getAuthStatus as Mock
 
 describe('auth module', () => {
   beforeEach(() => {

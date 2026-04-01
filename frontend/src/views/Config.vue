@@ -1,21 +1,23 @@
 <template>
   <div class="config-page">
     <n-space vertical :size="16">
-      <div class="config-page__hero">
-        <div>
-          <h2 class="config-page__title">{{ t('config.title') }}</h2>
-          <p class="config-page__subtitle">
-            {{ t('config.subtitle') }}
-          </p>
-        </div>
-        <n-space :size="8" wrap>
-          <n-tag v-if="isDirty" size="small" round type="warning">{{ t('config.unsavedChanges') }}</n-tag>
-          <n-tag v-else size="small" round type="success">{{ t('config.inSync') }}</n-tag>
-          <n-tag size="small" round type="info">{{ t('config.dbOverride') }}</n-tag>
-          <n-tag size="small" round>{{ t('config.envFallback') }}</n-tag>
-          <n-tag size="small" round>{{ t('config.defaultFallback') }}</n-tag>
-        </n-space>
-      </div>
+      <PageHeader
+        root-class="config-page__hero"
+        title-class="config-page__title"
+        subtitle-class="config-page__subtitle"
+        :title="t('config.title')"
+        :subtitle="t('config.subtitle')"
+      >
+        <template #actions>
+          <n-space :size="8" wrap>
+            <n-tag v-if="isDirty" size="small" round type="warning">{{ t('config.unsavedChanges') }}</n-tag>
+            <n-tag v-else size="small" round type="success">{{ t('config.inSync') }}</n-tag>
+            <n-tag size="small" round type="info">{{ t('config.dbOverride') }}</n-tag>
+            <n-tag size="small" round>{{ t('config.envFallback') }}</n-tag>
+            <n-tag size="small" round>{{ t('config.defaultFallback') }}</n-tag>
+          </n-space>
+        </template>
+      </PageHeader>
 
       <n-alert type="info" :show-icon="false">
         {{ t('config.secretInfo') }}
@@ -23,10 +25,13 @@
 
       <n-grid :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
         <n-gi v-for="item in summaryItems" :key="item.label">
-          <n-card size="small" class="config-summary-card" :bordered="false">
-            <div class="config-summary-card__label">{{ item.label }}</div>
-            <div class="config-summary-card__value">{{ item.value }}</div>
-          </n-card>
+          <SummaryCard
+            :label="item.label"
+            :value="item.value"
+            card-class="config-summary-card"
+            label-class="config-summary-card__label"
+            value-class="config-summary-card__value"
+          />
         </n-gi>
       </n-grid>
 
@@ -72,7 +77,6 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   NAlert,
-  NCard,
   NGrid,
   NGi,
   NSpace,
@@ -81,8 +85,10 @@ import {
   NTag,
   NTabs
 } from 'naive-ui'
-import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
+import PageHeader from '../components/PageHeader.vue'
+import SummaryCard from '../components/SummaryCard.vue'
+import { useBreakpoints } from '../composables/useBreakpoints'
 
 // Panel components
 import RuntimeSettingsPanel from './config/RuntimeSettingsPanel.vue'
@@ -93,25 +99,22 @@ import PromptTemplatesPanel from './config/PromptTemplatesPanel.vue'
 
 // External components
 import MattermostNotificationsPanel from '../components/config/MattermostNotificationsPanel.vue'
-import OidcDiagnosticsPanel from '../components/config/OidcDiagnosticsPanel.vue'
 import WorkerSettingsPanel from '../components/config/WorkerSettingsPanel.vue'
 
 // Composable
-import { provideConfigForm, useConfigForm } from './config/useConfigForm'
+import { provideConfigForm } from './config/useConfigForm'
 import { getConfig } from '../api'
 
 const { t } = useI18n()
 const route = useRoute()
-const { width } = useWindowSize()
-const isMobile = computed(() => width.value < 768)
+const { isMobile } = useBreakpoints()
 
 // Provide shared config form state to all panel components
 const {
   formValue,
   loading,
   isDirty,
-  syncForm,
-  fetchConfig
+  syncForm
 } = provideConfigForm()
 
 // Panel refs
@@ -177,182 +180,27 @@ onMounted(() => {
 })
 </script>
 
+<style src="../styles/config-panels.css"></style>
+
 <style scoped>
 .config-page {
-  max-width: 1240px;
-}
-
-.config-page__hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.config-page__title {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 600;
-}
-
-.config-page__subtitle {
-  margin: 4px 0 0;
-  color: var(--text-color-secondary);
+  max-width: var(--app-page-max-width);
 }
 
 .config-summary-card {
-  text-align: center;
+  min-height: 100%;
 }
 
 .config-summary-card__label {
-  font-size: 12px;
-  color: var(--text-color-secondary);
+  text-align: center;
 }
 
 .config-summary-card__value {
-  font-size: 20px;
-  font-weight: 600;
   margin-top: 4px;
+  text-align: center;
 }
 
 .config-tabs {
   margin-top: 8px;
-}
-
-.config-layout__main {
-  padding: 8px 0;
-}
-
-.config-form-card {
-  margin-bottom: 16px;
-}
-
-.config-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.config-card-header--stacked {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.config-card-header__title {
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.config-card-header__subtitle {
-  font-size: 13px;
-  color: var(--text-color-secondary);
-  margin-top: 2px;
-}
-
-.config-form__section {
-  margin-bottom: 24px;
-}
-
-.config-form__section:last-child {
-  margin-bottom: 0;
-}
-
-.config-form__section-title {
-  font-size: 14px;
-  font-weight: 500;
-  margin-bottom: 12px;
-  color: var(--text-color);
-}
-
-.config-section-form {
-  max-width: 800px;
-}
-
-.config-form__input {
-  width: 100%;
-}
-
-.config-card-actions {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-color);
-}
-
-.config-page-actions {
-  padding: 8px 0;
-}
-
-.config-actions__alert {
-  margin-top: 12px;
-}
-
-.config-table-wrapper {
-  margin-top: 16px;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-}
-
-.config-webhook-project {
-  display: flex;
-  flex-direction: column;
-}
-
-.config-webhook-project__name {
-  font-weight: 500;
-}
-
-.config-webhook-project__meta {
-  font-size: 12px;
-  color: var(--text-color-secondary);
-}
-
-.config-webhook-checks {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 12px;
-  color: var(--text-color-secondary);
-}
-
-.config-webhook-summary {
-  margin-bottom: 16px;
-}
-
-.config-webhook-mobile__empty {
-  text-align: center;
-  padding: 24px;
-  color: var(--text-color-secondary);
-}
-
-.config-webhook-mobile__item {
-  padding: 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  margin-bottom: 8px;
-}
-
-.config-webhook-mobile__item-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.config-webhook-mobile__item-tags {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.config-webhook-mobile__item-detail {
-  font-size: 12px;
-  color: var(--text-color-secondary);
-}
-
-.prompt-template-content-preview {
-  font-family: monospace;
-  font-size: 12px;
 }
 </style>

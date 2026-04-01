@@ -40,7 +40,7 @@ vi.mock('naive-ui', () => ({
   NDataTable: {
     name: 'NDataTable',
     props: ['columns', 'data', 'loading', 'bordered', 'pagination', 'scrollX', 'rowKey'],
-    setup(props: any, { slots }: any) {
+    setup(props: any) {
       return () => h('div', { class: 'n-data-table' },
         props.data?.map((row: any) => h('div', { class: 'n-data-table-row', key: props.rowKey(row) }))
       )

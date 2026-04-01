@@ -16,18 +16,11 @@ Object.defineProperty(window, 'matchMedia', {
 })
 
 // Mock ResizeObserver
-global.ResizeObserver = vi.fn().mockImplementation(() => ({
+globalThis.ResizeObserver = vi.fn().mockImplementation(() => ({
   observe: vi.fn(),
   unobserve: vi.fn(),
   disconnect: vi.fn()
-}))
+})) as unknown as typeof ResizeObserver
 
 // Mock Element.getBoundingClientRect
-Element.prototype.getBoundingClientRect = vi.fn(() => ({
-  width: 120,
-  height: 120,
-  top: 0,
-  left: 0,
-  bottom: 0,
-  right: 0
-}))
+Element.prototype.getBoundingClientRect = vi.fn(() => new DOMRect(0, 0, 120, 120))
