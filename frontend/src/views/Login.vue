@@ -1,18 +1,22 @@
 <template>
   <div class="login-page">
     <n-card class="login-card" :bordered="false">
-      <div class="login-card__header">
-        <div class="login-card__brand">
-          <div class="login-card__mark">
-            <n-icon size="26" :component="RocketOutline" />
+      <PageHeader root-class="login-card__header">
+        <template #title>
+          <div class="login-card__brand">
+            <div class="login-card__mark">
+              <n-icon :size="isCompact ? 22 : 26" :component="RocketOutline" />
+            </div>
+            <div>
+              <h1 class="login-card__title">{{ t('app.brandTitle') }}</h1>
+              <p class="login-card__subtitle">{{ t('login.subtitle') }}</p>
+            </div>
           </div>
-          <div>
-            <h1 class="login-card__title">{{ t('app.brandTitle') }}</h1>
-            <p class="login-card__subtitle">{{ t('login.subtitle') }}</p>
-          </div>
-        </div>
-        <LanguageToggle size="small" class="login-card__language-switcher" />
-      </div>
+        </template>
+        <template #actions>
+          <LanguageToggle size="small" class="login-card__language-switcher" />
+        </template>
+      </PageHeader>
 
       <n-alert v-if="loginReason" type="warning" :show-icon="false" class="login-card__alert">
         {{ loginReason }}
@@ -171,10 +175,13 @@ import { useRoute } from 'vue-router'
 import { authState, startLogin } from '../auth'
 import { breakGlassLogin } from '../api'
 import LanguageToggle from '../components/LanguageToggle.vue'
+import PageHeader from '../components/PageHeader.vue'
+import { useBreakpoints } from '../composables/useBreakpoints'
 
 const route = useRoute()
 const message = useMessage()
 const { t } = useI18n()
+const { isCompact } = useBreakpoints()
 const nextTarget = computed(() => {
   const next = route.query.next
   return typeof next === 'string' ? next : '/dashboard'
@@ -280,19 +287,16 @@ async function handleBreakGlassLogin() {
 .login-card {
   width: min(480px, 100%);
   margin: 0 auto;
-  border-radius: var(--app-card-radius, 24px);
+  border-radius: var(--app-card-radius, 18px);
   background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(14px);
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
   border: 1px solid rgba(148, 163, 184, 0.14);
 }
 
-.login-card__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
+/* login-card__header is now PageHeader's root (via root-class). PageHeader provides the
+   flex layout; we only need to override its 767 px column-stack because the card is
+   narrow and should stack only at the compact (480 px) breakpoint. */
 
 .login-card__brand {
   display: flex;
@@ -367,8 +371,16 @@ async function handleBreakGlassLogin() {
     padding-right: 16px;
   }
 
-  .login-card__header {
+  /* Keep header horizontal until the compact breakpoint */
+  .login-card :deep(.page-header) {
+    flex-direction: row;
+    align-items: flex-start;
     gap: 12px;
+  }
+
+  .login-card :deep(.page-header__actions) {
+    width: auto;
+    justify-content: flex-end;
   }
 
   .login-card__brand {
@@ -377,14 +389,14 @@ async function handleBreakGlassLogin() {
 }
 
 @media (max-width: 480px) {
-  .login-card__header {
+  /* Stack header at compact size */
+  .login-card :deep(.page-header) {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .login-card__language-switcher {
-    align-self: flex-end;
-    margin-top: 0;
+  .login-card :deep(.page-header__actions) {
+    justify-content: flex-end;
   }
 }
 </style>

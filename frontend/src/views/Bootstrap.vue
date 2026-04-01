@@ -1,18 +1,22 @@
 <template>
   <div class="bootstrap-page">
     <n-card class="bootstrap-card" :bordered="false">
-      <div class="bootstrap-card__header">
-        <div class="bootstrap-card__brand">
-          <div class="bootstrap-card__mark">
-            <n-icon size="26" :component="RocketOutline" />
+      <PageHeader root-class="bootstrap-card__header">
+        <template #title>
+          <div class="bootstrap-card__brand">
+            <div class="bootstrap-card__mark">
+              <n-icon :size="isCompact ? 22 : 26" :component="RocketOutline" />
+            </div>
+            <div>
+              <h1 class="bootstrap-card__title">{{ t('app.brandTitle') }}</h1>
+              <p class="bootstrap-card__subtitle">{{ t('bootstrap.subtitle') }}</p>
+            </div>
           </div>
-          <div>
-            <h1 class="bootstrap-card__title">{{ t('app.brandTitle') }}</h1>
-            <p class="bootstrap-card__subtitle">{{ t('bootstrap.subtitle') }}</p>
-          </div>
-        </div>
-        <LanguageToggle size="small" class="bootstrap-card__language-switcher" />
-      </div>
+        </template>
+        <template #actions>
+          <LanguageToggle size="small" class="bootstrap-card__language-switcher" />
+        </template>
+      </PageHeader>
 
       <n-alert type="info" :show-icon="false" class="bootstrap-card__intro">
         {{ t('bootstrap.intro') }}
@@ -108,9 +112,12 @@ import {
 } from 'naive-ui'
 import { RocketOutline } from '@vicons/ionicons5'
 import LanguageToggle from '../components/LanguageToggle.vue'
+import PageHeader from '../components/PageHeader.vue'
+import { useBreakpoints } from '../composables/useBreakpoints'
 
 const message = useMessage()
 const { t } = useI18n()
+const { isCompact } = useBreakpoints()
 
 const formRef = ref<FormInst | null>(null)
 const submitting = ref(false)
@@ -225,18 +232,17 @@ async function handleSubmit() {
 .bootstrap-card {
   width: min(520px, 100%);
   margin: 0 auto;
-  border-radius: var(--app-card-radius, 24px);
+  border-radius: var(--app-card-radius, 18px);
   background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(14px);
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
   border: 1px solid rgba(148, 163, 184, 0.14);
 }
 
+/* bootstrap-card__header is now PageHeader's root (via root-class). PageHeader provides
+   the flex layout; preserve margin-bottom and override the 767 px column-stack so the
+   header only stacks at the compact (480 px) breakpoint. */
 .bootstrap-card__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
   margin-bottom: 24px;
 }
 
@@ -300,8 +306,16 @@ async function handleSubmit() {
     padding-right: 16px;
   }
 
-  .bootstrap-card__header {
+  /* Keep header horizontal until the compact breakpoint */
+  .bootstrap-card :deep(.page-header) {
+    flex-direction: row;
+    align-items: flex-start;
     gap: 12px;
+  }
+
+  .bootstrap-card :deep(.page-header__actions) {
+    width: auto;
+    justify-content: flex-end;
   }
 
   .bootstrap-card__brand {
@@ -310,13 +324,14 @@ async function handleSubmit() {
 }
 
 @media (max-width: 480px) {
-  .bootstrap-card__header {
+  /* Stack header at compact size */
+  .bootstrap-card :deep(.page-header) {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .bootstrap-card__language-switcher {
-    align-self: flex-end;
+  .bootstrap-card :deep(.page-header__actions) {
+    justify-content: flex-end;
   }
 }
 </style>
