@@ -108,6 +108,7 @@ import { computed, onMounted, ref } from 'vue'
 import {
   NAlert,
   NButton,
+  NCard,
   NEmpty,
   NGi,
   NGrid,

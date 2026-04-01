@@ -179,6 +179,7 @@ import {
   NAlert,
   NAvatar,
   NButton,
+  NCard,
   NEmpty,
   NFormItem,
   NGi,

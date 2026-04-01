@@ -1,10 +1,11 @@
 <template>
   <div class="create-task-page">
-    <n-space vertical :size="20">
+    <n-space vertical :size="16">
       <PageHeader
         root-class="create-task-page__hero"
         title-class="create-task-page__title"
         subtitle-class="create-task-page__subtitle"
+        actions-class="create-task-page__actions"
         :title="t('createTask.title')"
         :subtitle="t('createTask.subtitle')"
       >
@@ -625,6 +626,14 @@ onMounted(() => {
   max-width: var(--app-page-max-width);
 }
 
+.create-task-page__actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .create-task-page__tags {
   justify-content: flex-end;
 }
@@ -663,6 +672,10 @@ onMounted(() => {
   border-top: 1px solid rgba(148, 163, 184, 0.18);
 }
 
+.create-task-form__actions :deep(.n-space) {
+  justify-content: flex-end;
+}
+
 .create-task-form__section-title {
   margin-bottom: 12px;
   font-size: 13px;
@@ -689,6 +702,11 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
+  .create-task-page__actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .create-task-card__header {
     flex-direction: column;
     align-items: flex-start;
@@ -701,6 +719,12 @@ onMounted(() => {
 
   .create-task-form__actions {
     justify-content: stretch;
+  }
+
+  .create-task-form__actions :deep(.n-space),
+  .create-task-form__actions :deep(.n-space-item),
+  .create-task-form__actions :deep(.n-button) {
+    width: 100%;
   }
 }
 

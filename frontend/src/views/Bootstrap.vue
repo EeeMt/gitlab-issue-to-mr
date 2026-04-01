@@ -217,15 +217,19 @@ async function handleSubmit() {
   padding: 24px;
   padding-top: max(24px, env(safe-area-inset-top));
   padding-bottom: max(24px, env(safe-area-inset-bottom));
+  background:
+    radial-gradient(circle at top left, rgba(32, 128, 240, 0.12), transparent 28%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.94), rgba(241, 245, 249, 0.98));
 }
 
 .bootstrap-card {
   width: min(520px, 100%);
   margin: 0 auto;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.86);
+  border-radius: var(--app-card-radius, 24px);
+  background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(14px);
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.14);
 }
 
 .bootstrap-card__header {
@@ -269,7 +273,7 @@ async function handleSubmit() {
 
 .bootstrap-card__subtitle {
   margin: 8px 0 0;
-  color: rgba(15, 23, 42, 0.66);
+  color: var(--app-page-subtitle-color, rgba(15, 23, 42, 0.66));
 }
 
 .bootstrap-card__intro {

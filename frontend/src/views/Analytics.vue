@@ -319,7 +319,7 @@ const initiatorOptions = computed(() =>
 
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 const trendChartMinWidth = computed(() => {
-  const points = analytics.value?.trends.length || 0
+  const points = analytics.value?.trends?.length ?? 0
   const barWidth = isMobile.value ? 24 : 32
   const gap = isMobile.value ? 8 : 10
   return `${Math.max(points * barWidth + Math.max(points - 1, 0) * gap, isMobile.value ? 0 : 760)}px`

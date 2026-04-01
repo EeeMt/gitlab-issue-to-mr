@@ -4,6 +4,7 @@
       <PageHeader
         root-class="task-view__hero"
         subtitle-class="task-view__subtitle"
+        actions-class="task-view__actions"
         :subtitle="t('taskView.subtitle')"
       >
         <template #title>
@@ -727,6 +728,14 @@ onBeforeUnmount(() => {
   max-width: var(--app-page-max-width);
 }
 
+.task-view__actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .task-view__content {
   display: grid;
   gap: 20px;
@@ -744,7 +753,12 @@ onBeforeUnmount(() => {
   min-height: 100%;
 }
 
+:deep(.task-summary-card__label) {
+  text-align: center;
+}
+
 :deep(.task-summary-card__value) {
+  text-align: center;
   word-break: break-word;
 }
 
@@ -859,6 +873,11 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 768px) {
+  .task-view__actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .task-card__header {
     flex-direction: column;
     align-items: flex-start;
