@@ -170,7 +170,13 @@ const variableHighlightPlugin = ViewPlugin.fromClass(class {
 
 // Tooltip for hovering over variables
 function createTooltip(view: EditorView, pos: number) {
-  const line = view.state.doc.lineAt(pos)
+  const docLength = view.state.doc.length
+  if (docLength === 0) {
+    return null
+  }
+
+  const safePos = Math.min(Math.max(pos, 0), docLength)
+  const line = view.state.doc.lineAt(safePos)
   const lineText = line.text
   const lineStart = line.from
 
@@ -182,12 +188,13 @@ function createTooltip(view: EditorView, pos: number) {
     const matchStart = lineStart + match.index
     const matchEnd = matchStart + match[0].length
 
-    if (pos >= matchStart && pos <= matchEnd) {
+    if (safePos >= matchStart && safePos <= matchEnd && matchStart >= 0 && matchEnd <= docLength) {
       const varName = match[1]
       const tip = mergedTips.value[varName] || ''
 
       return {
-        pos: line.from,
+        pos: matchStart,
+        end: matchEnd,
         above: true,
         create: () => {
           const dom = document.createElement('div')
