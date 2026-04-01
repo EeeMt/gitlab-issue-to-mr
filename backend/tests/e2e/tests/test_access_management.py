@@ -17,7 +17,7 @@ class TestAccessManagement:
     def test_update_user_role_success(self, logged_in_page: Page, reset_database):
         """Test that updating a user's role shows success message."""
         logged_in_page.goto("/access-management")
-        logged_in_page.wait_for_load_state("networkidle")
+        logged_in_page.wait_for_load_state("domcontentloaded")
         logged_in_page.wait_for_timeout(2000)
         expect(logged_in_page.get_by_test_id("access-management-page")).to_be_visible()
 
@@ -49,7 +49,7 @@ class TestAccessManagement:
     def test_update_user_role_click_save_access(self, logged_in_page: Page, reset_database):
         """Test clicking Save Access button does not show error."""
         logged_in_page.goto("/access-management")
-        logged_in_page.wait_for_load_state("networkidle")
+        logged_in_page.wait_for_load_state("domcontentloaded")
         logged_in_page.wait_for_timeout(3000)
         expect(logged_in_page.get_by_test_id("access-management-page")).to_be_visible()
 

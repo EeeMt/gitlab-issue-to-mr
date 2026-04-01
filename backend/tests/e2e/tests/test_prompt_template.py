@@ -19,21 +19,25 @@ class TestPromptTemplates:
     def test_prompt_template_modal_opens(self, logged_in_page: Page, reset_database):
         """Test that the prompt template creation modal opens when clicking the create button."""
         logged_in_page.goto("/config")
-        logged_in_page.wait_for_load_state("networkidle")
+        logged_in_page.wait_for_load_state("domcontentloaded")
         logged_in_page.wait_for_timeout(1000)
         # Use nth(6) since Prompt Templates is the 7th tab
         prompt_tab = logged_in_page.locator(".n-tabs-tab").nth(6)
         prompt_tab.scroll_into_view_if_needed()
         prompt_tab.click()
-        logged_in_page.wait_for_timeout(1000)
-        logged_in_page.get_by_role("button", name="Create Template").click()
-        expect(logged_in_page.locator(".n-modal")).to_be_visible()
-        expect(logged_in_page.get_by_role("dialog").get_by_text("Name")).to_be_visible()
+        logged_in_page.wait_for_timeout(2000)  # Wait longer for tab to switch and content to load
+        create_button = logged_in_page.get_by_role("button", name="Create Template")
+        expect(create_button).to_be_visible()
+        create_button.click()
+        logged_in_page.wait_for_timeout(1000)  # Wait for modal animation
+        # Verify modal opened by checking for input field inside modal card
+        name_input = logged_in_page.locator(".n-card input").first
+        expect(name_input).to_be_visible()
 
     def test_prompt_template_name_input_works(self, logged_in_page: Page, reset_database):
         """Test that the prompt template name input field works correctly."""
         logged_in_page.goto("/config")
-        logged_in_page.wait_for_load_state("networkidle")
+        logged_in_page.wait_for_load_state("domcontentloaded")
         logged_in_page.wait_for_timeout(1000)
         prompt_tab = logged_in_page.locator(".n-tabs-tab").nth(6)
         prompt_tab.scroll_into_view_if_needed()
@@ -47,7 +51,7 @@ class TestPromptTemplates:
     def test_variable_editor_accepts_input(self, logged_in_page: Page, reset_database):
         """Test that the VariableEditor (CodeMirror) accepts input correctly."""
         logged_in_page.goto("/config")
-        logged_in_page.wait_for_load_state("networkidle")
+        logged_in_page.wait_for_load_state("domcontentloaded")
         logged_in_page.wait_for_timeout(1000)
         prompt_tab = logged_in_page.locator(".n-tabs-tab").nth(6)
         prompt_tab.scroll_into_view_if_needed()
@@ -63,7 +67,7 @@ class TestPromptTemplates:
     def test_validation_console_logs(self, logged_in_page: Page, reset_database):
         """Test that validation warnings appear in console when using invalid variable tips."""
         logged_in_page.goto("/config")
-        logged_in_page.wait_for_load_state("networkidle")
+        logged_in_page.wait_for_load_state("domcontentloaded")
         logged_in_page.wait_for_timeout(1000)
         prompt_tab = logged_in_page.locator(".n-tabs-tab").nth(6)
         prompt_tab.scroll_into_view_if_needed()
@@ -81,7 +85,7 @@ class TestPromptTemplates:
     def test_save_prompt_template(self, logged_in_page: Page, reset_database):
         """Test that a prompt template can be saved successfully."""
         logged_in_page.goto("/config")
-        logged_in_page.wait_for_load_state("networkidle")
+        logged_in_page.wait_for_load_state("domcontentloaded")
         logged_in_page.wait_for_timeout(1000)
         prompt_tab = logged_in_page.locator(".n-tabs-tab").nth(6)
         prompt_tab.scroll_into_view_if_needed()

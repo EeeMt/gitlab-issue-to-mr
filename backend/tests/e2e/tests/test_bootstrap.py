@@ -20,7 +20,7 @@ class TestBootstrapPage:
 
         # Wait for bootstrap card to be visible (system should be uninitialized)
         page.wait_for_selector(".bootstrap-card", timeout=10000)
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
     def test_bootstrap_page_has_no_sider(self, page: Page, reset_database):
         """
@@ -181,7 +181,7 @@ class TestBootstrapPage:
         expect(page).to_have_url(re.compile(r".*dashboard"))
 
         # Verify the dashboard loaded (should have main content area)
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
     def test_bootstrap_redirects_when_already_initialized(
         self, page: Page, reset_database

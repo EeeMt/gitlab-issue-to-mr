@@ -80,12 +80,34 @@ def postgres_url() -> str:
     )
 
 
-@pytest.fixture(scope="session")
-def setup_database(postgres_url):
+# Reusable DB reset function
+def _reset_db(cursor, clear_sessions=True):
     """
-    Initialize the database connection for the test session.
+    Reset database to uninitialized state.
 
-    Creates a connection that will be used to reset state between tests.
+    Args:
+        cursor: Database cursor
+        clear_sessions: If True, delete sessions. If False, keep sessions.
+    """
+    try:
+        if clear_sessions:
+            cursor.execute("DELETE FROM user_sessions")
+        cursor.execute("DELETE FROM users")
+        cursor.execute("""
+            UPDATE system_bootstrap
+            SET initialized = FALSE,
+                initial_admin_user_id = NULL,
+                initialized_at = NULL
+            WHERE id = 1
+        """)
+    except Exception as e:
+        print(f"Reset warning: {e}")
+
+
+@pytest.fixture(scope="session")
+def db_cursor(postgres_url):
+    """
+    Session-scoped database cursor for efficient DB operations.
     """
     conn = psycopg2.connect(postgres_url)
     conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
@@ -98,70 +120,35 @@ def setup_database(postgres_url):
 
 
 @pytest.fixture(scope="function")
-def reset_database(postgres_url):
+def reset_database(db_cursor):
     """
     Reset the database to uninitialized state before and after each test.
-
-    This fixture creates its own database connection to avoid cursor state issues.
+    Sessions are cleared to ensure clean auth state for each test.
     """
-    conn = psycopg2.connect(postgres_url)
-    conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-    cursor = conn.cursor()
-
-    def reset_state():
-        try:
-            cursor.execute("DELETE FROM user_sessions")
-            cursor.execute("DELETE FROM users")
-            cursor.execute("""
-                UPDATE system_bootstrap
-                SET initialized = FALSE,
-                    initial_admin_user_id = NULL,
-                    initialized_at = NULL
-                WHERE id = 1
-            """)
-        except Exception as e:
-            print(f"Reset warning: {e}")
-
-    reset_state()  # Reset before test
+    _reset_db(db_cursor, clear_sessions=True)  # Reset before test
 
     try:
         yield
     finally:
-        reset_state()  # Reset after test
-        cursor.close()
-        conn.close()
+        _reset_db(db_cursor, clear_sessions=True)  # Reset after test
 
 
 @pytest.fixture(scope="function")
-def page(browser, base_url):
+def logged_in_page(browser, base_url, db_cursor, reset_database):
     """
-    Create a new browser page for testing.
+    Create a logged-in page for a test.
 
-    Each test gets a fresh page with no authentication state.
-    Tests that need authentication should call login_as_admin(page) in their setup.
+    Each test gets a fresh authenticated page from a new browser context.
+    The reset_database fixture ensures a clean state before login.
     """
     context = browser.new_context(base_url=base_url)
     page = context.new_page()
 
+    _do_login(page)
+
     yield page
 
     context.close()
-
-
-@pytest.fixture
-def logged_in_page(page, reset_database):
-    """
-    Create a page that is logged in as admin.
-
-    This fixture:
-    1. Uses the reset_database fixture to ensure clean state
-    2. Logs in via bootstrap or existing admin credentials
-    3. Returns the authenticated page
-
-    Use this fixture instead of `page` when tests need authentication.
-    """
-    _do_login(page)
-    return page
 
 
 def _do_login(page):
@@ -169,7 +156,10 @@ def _do_login(page):
     Internal helper to perform login via bootstrap or existing admin.
     """
     page.goto("/bootstrap")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
+
+    # Wait for Vue app to fully render
+    page.wait_for_timeout(500)
 
     if page.locator(".bootstrap-card").is_visible(timeout=5000):
         # System not initialized - create admin via bootstrap
@@ -206,8 +196,28 @@ def _do_login(page):
         submit_button = page.get_by_role("button", name=re.compile(r"Sign In|Login", re.I)).first
         submit_button.click()
         page.wait_for_function("() => window.location.pathname === '/dashboard'", timeout=15000)
+    else:
+        # Check if we're already on dashboard (session exists)
+        if "/dashboard" in page.url:
+            return
+        # Otherwise, wait a bit more and check again
+        page.wait_for_timeout(1000)
+        if "/dashboard" not in page.url:
+            # Final check - reload and try bootstrap flow
+            page.reload()
+            page.wait_for_load_state("domcontentloaded")
+            if page.locator(".bootstrap-card").is_visible(timeout=5000):
+                inputs = page.locator(".bootstrap-form input")
+                inputs.nth(0).fill("test_admin")
+                inputs.nth(1).fill("Test Admin")
+                inputs.nth(2).fill("test_admin@example.com")
+                password_inputs = page.locator("input[type='password']")
+                password_inputs.nth(0).fill("SecurePass123!")
+                password_inputs.nth(1).fill("SecurePass123!")
+                page.get_by_role("button", name="Create Admin").click()
+                page.wait_for_function("() => window.location.pathname === '/dashboard'", timeout=15000)
 
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
 
 
 def pytest_configure(config):
