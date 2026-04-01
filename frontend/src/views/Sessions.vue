@@ -1,22 +1,29 @@
 <template>
   <div class="sessions-page">
     <n-space vertical :size="16">
-      <div class="sessions-page__hero">
-        <div>
-          <h2 class="sessions-page__title">{{ t('sessions.title') }}</h2>
-          <p class="sessions-page__subtitle">
-            {{ t('sessions.subtitle') }}
-          </p>
-        </div>
-        <n-button @click="fetchSessions" :loading="loading" :disabled="loading">{{ t('sessions.reloadSessions') }}</n-button>
-      </div>
+      <PageHeader
+        :title="t('sessions.title')"
+        :subtitle="t('sessions.subtitle')"
+        root-class="sessions-page__hero"
+        title-class="sessions-page__title"
+        subtitle-class="sessions-page__subtitle"
+      >
+        <template #actions>
+          <n-button @click="fetchSessions" :loading="loading" :disabled="loading">
+            {{ t('sessions.reloadSessions') }}
+          </n-button>
+        </template>
+      </PageHeader>
 
       <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
         <n-gi v-for="item in summaryItems" :key="item.label">
-          <n-card size="small" class="sessions-summary-card" :bordered="false">
-            <div class="sessions-summary-card__label">{{ item.label }}</div>
-            <div class="sessions-summary-card__value">{{ item.value }}</div>
-          </n-card>
+          <SummaryCard
+            :label="item.label"
+            :value="item.value"
+            card-class="sessions-summary-card"
+            label-class="sessions-summary-card__label"
+            value-class="sessions-summary-card__value"
+          />
         </n-gi>
       </n-grid>
 
@@ -101,7 +108,6 @@ import { computed, onMounted, ref } from 'vue'
 import {
   NAlert,
   NButton,
-  NCard,
   NEmpty,
   NGi,
   NGrid,
@@ -110,16 +116,17 @@ import {
   NTag,
   useMessage
 } from 'naive-ui'
-import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { getSessions, revokeSession, type SessionInfo } from '../api'
 import { initializeAuth, logoutAndClearAuth } from '../auth'
+import PageHeader from '../components/PageHeader.vue'
+import SummaryCard from '../components/SummaryCard.vue'
+import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeLocal } from '../utils/datetime'
 
 const message = useMessage()
 const { t } = useI18n()
-const { width } = useWindowSize()
-const isMobile = computed(() => width.value < 768)
+const { isMobile } = useBreakpoints()
 
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
@@ -202,43 +209,15 @@ onMounted(() => {
 
 <style scoped>
 .sessions-page {
-  max-width: 1240px;
-}
-
-.sessions-page__hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.sessions-page__title {
-  margin: 0;
-  font-size: 28px;
-  line-height: 1.2;
-}
-
-.sessions-page__subtitle {
-  margin: 8px 0 0;
-  color: rgba(15, 23, 42, 0.68);
-  max-width: 760px;
+  max-width: var(--app-page-max-width);
 }
 
 .sessions-summary-card {
-  background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
-  border-radius: 12px;
-}
-
-.sessions-summary-card__label {
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.6);
-  margin-bottom: 8px;
+  border-radius: var(--app-card-radius);
 }
 
 .sessions-summary-card__value {
   font-size: 20px;
-  font-weight: 600;
-  color: var(--n-text-color-1);
   word-break: break-word;
 }
 
@@ -316,19 +295,6 @@ onMounted(() => {
 }
 
 @media (max-width: 767px) {
-  .sessions-page__hero {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .sessions-page__title {
-    font-size: 24px;
-  }
-
-  .sessions-page__subtitle {
-    max-width: none;
-  }
-
   .sessions-card__header {
     flex-direction: column;
   }

@@ -2,14 +2,15 @@
   <div class="analytics-page">
     <n-spin :show="initialLoading" :description="t('analytics.loading')">
       <n-space vertical :size="20">
-        <div class="analytics-page__hero">
-          <div>
-            <h2 class="analytics-page__title">{{ t('analytics.title') }}</h2>
-            <p class="analytics-page__subtitle">
-              {{ t('analytics.subtitle') }}
-            </p>
-          </div>
-          <n-space align="center" wrap class="analytics-page__controls">
+        <PageHeader
+          :title="t('analytics.title')"
+          :subtitle="t('analytics.subtitle')"
+          root-class="analytics-page__hero"
+          title-class="analytics-page__title"
+          subtitle-class="analytics-page__subtitle"
+          actions-class="analytics-page__controls"
+        >
+          <template #actions>
             <n-select
               v-model:value="windowDays"
               :options="windowOptions"
@@ -35,8 +36,8 @@
             <n-button @click="refresh" :loading="loading" :style="{ width: isMobile ? '100%' : undefined }">
               {{ t('common.refresh') }}
             </n-button>
-          </n-space>
-        </div>
+          </template>
+        </PageHeader>
 
         <n-alert type="info" :show-icon="false">
           {{ t('analytics.projectInfo') }}
@@ -44,11 +45,15 @@
 
         <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 2 : 3" :x-gap="16" :y-gap="16">
           <n-gi v-for="item in summaryItems" :key="item.label" class="analytics-grid-cell">
-            <n-card size="small" class="analytics-summary-card" :bordered="false">
-              <div class="analytics-summary-card__label">{{ item.label }}</div>
-              <div class="analytics-summary-card__value">{{ item.value }}</div>
-              <div v-if="item.note" class="analytics-summary-card__note">{{ item.note }}</div>
-            </n-card>
+            <SummaryCard
+              :label="item.label"
+              :value="item.value"
+              :note="item.note"
+              card-class="analytics-summary-card"
+              label-class="analytics-summary-card__label"
+              value-class="analytics-summary-card__value"
+              note-class="analytics-summary-card__note"
+            />
           </n-gi>
         </n-grid>
 
@@ -252,7 +257,6 @@ import {
   useMessage,
   type DataTableColumns
 } from 'naive-ui'
-import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import {
   getAnalytics,
@@ -265,6 +269,9 @@ import {
   type AnalyticsResponse,
   type Project
 } from '../api'
+import PageHeader from '../components/PageHeader.vue'
+import SummaryCard from '../components/SummaryCard.vue'
+import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeLocal, formatMonthDayLocal } from '../utils/datetime'
 
 type TrendBar = {
@@ -277,8 +284,7 @@ type TrendBar = {
 
 const message = useMessage()
 const { t } = useI18n()
-const { width } = useWindowSize()
-const isMobile = computed(() => width.value < 768)
+const { isMobile } = useBreakpoints()
 
 const analytics = ref<AnalyticsResponse | null>(null)
 const availableProjects = ref<Project[]>([])
@@ -729,37 +735,12 @@ onMounted(() => {
 
 <style scoped>
 .analytics-page {
-  max-width: 1280px;
-}
-
-.analytics-page__hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.analytics-page__controls {
-  flex: 1;
-  justify-content: flex-end;
-}
-
-.analytics-page__title {
-  margin: 0;
-  font-size: 28px;
-  line-height: 1.2;
-}
-
-.analytics-page__subtitle {
-  margin: 8px 0 0;
-  color: rgba(15, 23, 42, 0.68);
-  max-width: 760px;
+  max-width: var(--app-page-max-width);
 }
 
 .analytics-summary-card,
 .analytics-card {
-  border-radius: 18px;
+  border-radius: var(--app-card-radius);
 }
 
 .analytics-grid-cell {
@@ -775,33 +756,12 @@ onMounted(() => {
   height: 100%;
 }
 
-.analytics-summary-card {
-  background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
-}
-
-.analytics-summary-card :deep(.n-card__content) {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.analytics-summary-card__label {
-  margin-bottom: 8px;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.6);
-}
-
 .analytics-summary-card__value {
   font-size: 22px;
-  font-weight: 600;
-  color: var(--n-text-color-1);
 }
 
 .analytics-summary-card__note {
-  margin-top: auto;
-  padding-top: 6px;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.56);
+  margin-top: 10px;
 }
 
 .analytics-card__header {
@@ -896,11 +856,11 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
-  .analytics-page__title {
-    font-size: 24px;
+  .analytics-page__controls {
+    width: 100%;
   }
 
-  .analytics-page__controls {
+  .analytics-page__controls > * {
     width: 100%;
   }
 
