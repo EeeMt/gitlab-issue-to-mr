@@ -21,19 +21,19 @@ class TestDashboardPage:
         """Test that the dashboard page loads without errors."""
         logged_in_page.goto("/dashboard")
         logged_in_page.wait_for_load_state("networkidle")
-        expect(logged_in_page.locator(".dashboard__title")).to_be_visible()
+        expect(logged_in_page.get_by_test_id("dashboard-header")).to_be_visible()
 
     def test_dashboard_title_is_displayed(self, logged_in_page: Page, reset_database):
         """Test that the dashboard title is displayed."""
         logged_in_page.goto("/dashboard")
         logged_in_page.wait_for_load_state("networkidle")
-        expect(logged_in_page.locator(".dashboard__title")).to_be_visible()
+        expect(logged_in_page.get_by_test_id("dashboard-header")).to_be_visible()
 
     def test_dashboard_subtitle_is_displayed(self, logged_in_page: Page, reset_database):
         """Test that the dashboard subtitle is displayed."""
         logged_in_page.goto("/dashboard")
         logged_in_page.wait_for_load_state("networkidle")
-        expect(logged_in_page.locator(".dashboard__subtitle")).to_be_visible()
+        expect(logged_in_page.get_by_test_id("dashboard-header")).to_be_visible()
 
 
 @pytest.mark.dashboard
@@ -44,14 +44,14 @@ class TestDashboardFilters:
         """Test that status filter dropdown is present."""
         logged_in_page.goto("/dashboard")
         logged_in_page.wait_for_load_state("networkidle")
-        status_filter = logged_in_page.locator(".dashboard__filters .n-select").first
+        status_filter = logged_in_page.locator(".dashboard__filters .n-base-selection").nth(0)
         expect(status_filter).to_be_visible()
 
     def test_project_filter_is_present(self, logged_in_page: Page, reset_database):
         """Test that project filter dropdown is present."""
         logged_in_page.goto("/dashboard")
         logged_in_page.wait_for_load_state("networkidle")
-        project_filter = logged_in_page.locator(".dashboard__filters .n-select").nth(1)
+        project_filter = logged_in_page.locator(".dashboard__filters .n-base-selection").nth(1)
         expect(project_filter).to_be_visible()
 
     def test_initiator_filter_is_present(self, logged_in_page: Page, reset_database):
@@ -59,7 +59,7 @@ class TestDashboardFilters:
         logged_in_page.goto("/dashboard")
         logged_in_page.wait_for_load_state("networkidle")
         logged_in_page.wait_for_timeout(500)
-        initiator_filter = logged_in_page.locator(".dashboard__filters .n-select").nth(2)
+        initiator_filter = logged_in_page.locator(".dashboard__filters .n-base-selection").nth(2)
         if initiator_filter.is_visible():
             expect(initiator_filter).to_be_visible()
 

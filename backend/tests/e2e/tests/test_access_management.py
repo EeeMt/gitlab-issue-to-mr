@@ -19,6 +19,7 @@ class TestAccessManagement:
         logged_in_page.goto("/access-management")
         logged_in_page.wait_for_load_state("networkidle")
         logged_in_page.wait_for_timeout(2000)
+        expect(logged_in_page.get_by_test_id("access-management-page")).to_be_visible()
 
         save_buttons = logged_in_page.get_by_role("button", name="Save Access")
         button_count = save_buttons.count()
@@ -50,8 +51,9 @@ class TestAccessManagement:
         logged_in_page.goto("/access-management")
         logged_in_page.wait_for_load_state("networkidle")
         logged_in_page.wait_for_timeout(3000)
+        expect(logged_in_page.get_by_test_id("access-management-page")).to_be_visible()
 
-        role_selects = logged_in_page.locator(".n-data-table .n-select")
+        role_selects = logged_in_page.locator(".user-management__card .n-select")
         select_count = role_selects.count()
         print(f"Found {select_count} select elements on page")
 

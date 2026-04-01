@@ -1,7 +1,8 @@
 <template>
-  <div class="access-page">
+  <div class="access-page" data-testid="access-management-page">
     <n-space vertical :size="16">
       <PageHeader
+        data-testid="access-management-header"
         :title="t('accessManagement.title')"
         :subtitle="t('accessManagement.subtitle')"
         root-class="access-page__hero"
@@ -19,11 +20,18 @@
         {{ t('accessManagement.intro') }}
       </n-alert>
 
-      <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
+      <n-grid
+        v-if="hasLoadedOnce"
+        data-testid="access-management-summary"
+        :cols="isMobile ? 2 : 4"
+        :x-gap="16"
+        :y-gap="16"
+      >
         <n-gi v-for="item in summaryItems" :key="item.label">
           <SummaryCard
             :label="item.label"
             :value="item.value"
+            data-testid="access-management-summary-card"
             card-class="access-summary-card"
             label-class="access-summary-card__label"
             value-class="access-summary-card__value"
@@ -31,16 +39,18 @@
         </n-gi>
       </n-grid>
 
-      <n-card class="access-card" :bordered="false">
+      <n-card class="access-card" :bordered="false" data-testid="access-management-card">
         <div class="user-management__toolbar">
           <n-space :size="12" wrap>
             <n-input
+              data-testid="access-management-search"
               v-model:value="userSearch"
                :placeholder="t('accessManagement.searchPlaceholder')"
               clearable
               class="user-management__search"
             />
             <n-select
+              data-testid="access-management-role-filter"
               v-model:value="roleFilter"
               :options="roleFilterOptions"
               clearable
@@ -48,6 +58,7 @@
               class="user-management__filter"
             />
             <n-select
+              data-testid="access-management-state-filter"
               v-model:value="stateFilter"
               :options="stateFilterOptions"
               clearable
@@ -65,6 +76,7 @@
               size="small"
               class="user-management__card"
               :bordered="false"
+              data-testid="access-management-user-card"
             >
               <div class="user-management__card-top">
                 <div class="user-management__identity">
@@ -142,17 +154,19 @@
               </n-grid>
 
               <div class="user-management__actions">
-                <n-button
-                  type="primary"
-                  secondary
-                  @click="handleSaveUser(user)"
+                 <n-button
+                   type="primary"
+                   secondary
+                   data-testid="access-management-save-button"
+                   @click="handleSaveUser(user)"
                   :loading="isUserSaving(user.id)"
                   :disabled="user.is_current_user || !isUserDirty(user)"
                 >
                    {{ t('accessManagement.saveAccess') }}
                 </n-button>
-                <n-button
-                  @click="handleRevokeUserSessions(user)"
+                 <n-button
+                   data-testid="access-management-revoke-button"
+                   @click="handleRevokeUserSessions(user)"
                   :loading="isUserRevoking(user.id)"
                   :disabled="user.is_current_user || isUserRevoking(user.id)"
                 >

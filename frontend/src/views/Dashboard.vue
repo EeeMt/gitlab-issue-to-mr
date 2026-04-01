@@ -1,8 +1,9 @@
 <template>
-  <div class="dashboard">
+  <div class="dashboard" data-testid="dashboard-page">
     <n-spin :show="initialLoading" :description="t('common.loadingTasks')">
       <n-space vertical :size="16">
         <PageHeader
+          data-testid="dashboard-header"
           root-class="dashboard__hero"
           title-class="dashboard__title"
           subtitle-class="dashboard__subtitle"
@@ -40,11 +41,18 @@
           </template>
         </PageHeader>
 
-        <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
+        <n-grid
+          v-if="hasLoadedOnce"
+          data-testid="dashboard-summary"
+          :cols="isMobile ? 2 : 4"
+          :x-gap="16"
+          :y-gap="16"
+        >
           <n-gi v-for="item in summaryItems" :key="item.label">
             <SummaryCard
               :label="item.label"
               :value="item.value"
+              data-testid="dashboard-summary-card"
               card-class="dashboard-summary-card"
               label-class="dashboard-summary-card__label"
               value-class="dashboard-summary-card__value"
@@ -52,8 +60,9 @@
           </n-gi>
         </n-grid>
 
-        <n-card class="dashboard-table-card" :bordered="false">
+        <n-card class="dashboard-table-card" :bordered="false" data-testid="dashboard-table-card">
           <n-data-table
+            data-testid="dashboard-table"
             :columns="columns"
             :data="tasks"
             :loading="tableLoading"

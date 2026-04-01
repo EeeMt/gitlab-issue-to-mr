@@ -1,7 +1,7 @@
 <template>
-  <div class="login-page">
-    <n-card class="login-card" :bordered="false">
-      <PageHeader root-class="login-card__header">
+  <div class="login-page" data-testid="login-page">
+    <n-card class="login-card" :bordered="false" data-testid="login-card">
+      <PageHeader data-testid="login-header" root-class="login-card__header">
         <template #title>
           <div class="login-card__brand">
             <div class="login-card__mark">
@@ -26,15 +26,23 @@
         {{ t('login.breakGlassEnabled') }}
       </n-alert>
 
-      <n-tabs v-if="!authState.systemInitialized" type="card" animated class="login-card__tabs">
+      <n-tabs
+        v-if="!authState.systemInitialized"
+        type="card"
+        animated
+        class="login-card__tabs"
+        data-testid="login-tabs"
+      >
         <n-tab-pane name="local" :tab="t('login.localAuth')">
-          <n-space vertical :size="16">
+          <n-space vertical :size="16" class="login-form">
             <n-input
+              data-testid="login-username-input"
               v-model:value="localUsername"
               :placeholder="t('login.username')"
               autocomplete="username"
             />
             <n-input
+              data-testid="login-password-input"
               v-model:value="localPassword"
               type="password"
               show-password-on="click"
@@ -43,6 +51,7 @@
               @keyup.enter="handleLocalLogin"
             />
             <n-button
+              data-testid="login-submit-button"
               type="primary"
               strong
               block
@@ -99,13 +108,15 @@
 
         <!-- Password Login Form -->
         <n-collapse-transition :show="showPasswordLogin">
-          <n-space vertical :size="12">
+          <n-space vertical :size="12" data-testid="login-password-form">
             <n-input
+              data-testid="login-password-toggle-username-input"
               v-model:value="localUsername"
               :placeholder="t('login.username')"
               autocomplete="username"
             />
             <n-input
+              data-testid="login-password-toggle-password-input"
               v-model:value="localPassword"
               type="password"
               show-password-on="click"
@@ -114,6 +125,7 @@
               @keyup.enter="handleLocalLogin"
             />
             <n-button
+              data-testid="login-password-toggle-submit-button"
               type="primary"
               strong
               block
@@ -127,7 +139,7 @@
 
         <div v-if="authState.breakGlassEnabled" class="login-card__break-glass">
           <n-divider>{{ t('login.emergencyAccess') }}</n-divider>
-          <n-space vertical :size="12">
+          <n-space vertical :size="12" class="login-form">
             <n-input
               v-model:value="breakGlassUsername"
               :placeholder="t('login.emergencyUsername')"

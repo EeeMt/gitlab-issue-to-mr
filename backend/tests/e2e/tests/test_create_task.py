@@ -24,19 +24,19 @@ class TestCreateTaskPage:
         """Test that the create task page loads without errors."""
         logged_in_page.goto("/create-task")
         logged_in_page.wait_for_load_state("networkidle")
-        expect(logged_in_page.locator(".create-task-page__title")).to_be_visible()
+        expect(logged_in_page.get_by_test_id("create-task-header")).to_be_visible()
 
     def test_create_task_title_is_displayed(self, logged_in_page: Page, reset_database):
         """Test that the create task title is displayed."""
         logged_in_page.goto("/create-task")
         logged_in_page.wait_for_load_state("networkidle")
-        expect(logged_in_page.locator(".create-task-page__title")).to_be_visible()
+        expect(logged_in_page.get_by_test_id("create-task-header")).to_be_visible()
 
     def test_create_task_subtitle_is_displayed(self, logged_in_page: Page, reset_database):
         """Test that the create task subtitle is displayed."""
         logged_in_page.goto("/create-task")
         logged_in_page.wait_for_load_state("networkidle")
-        expect(logged_in_page.locator(".create-task-page__subtitle")).to_be_visible()
+        expect(logged_in_page.get_by_test_id("create-task-header")).to_be_visible()
 
     def test_create_task_form_exists(self, logged_in_page: Page, reset_database):
         """Test that the create task form is present."""
@@ -190,7 +190,7 @@ class TestCreateTaskNavigation:
         """Test that create task page is directly reachable."""
         logged_in_page.goto("/create-task")
         logged_in_page.wait_for_load_state("networkidle")
-        expect(logged_in_page.locator(".create-task-page")).to_be_visible()
+        expect(logged_in_page.get_by_test_id("create-task-page")).to_be_visible()
 
     def test_info_tags_are_displayed(self, logged_in_page: Page, reset_database):
         """Test that informational tags are displayed on create task page."""

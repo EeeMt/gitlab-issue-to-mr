@@ -22,7 +22,7 @@ class TestTaskViewPage:
         """Test that the task view page loads without errors."""
         logged_in_page.goto("/tasks/1")
         logged_in_page.wait_for_load_state("networkidle")
-        task_view = logged_in_page.locator(".task-view")
+        task_view = logged_in_page.get_by_test_id("task-view-page")
         expect(task_view).to_be_visible()
 
     def test_task_view_title_is_displayed(self, logged_in_page: Page, reset_database):
@@ -50,7 +50,7 @@ class TestTaskViewSummary:
         """Test that summary section is present when task is loaded."""
         logged_in_page.goto("/tasks/1")
         logged_in_page.wait_for_load_state("networkidle")
-        summary = logged_in_page.locator(".task-view__summary")
+        summary = logged_in_page.get_by_test_id("task-view-summary")
         if summary.is_visible():
             summary_cards = logged_in_page.locator(".task-summary-card")
             expect(summary_cards.first).to_be_visible()
@@ -100,7 +100,7 @@ class TestTaskViewActions:
         """Test that the actions card is present in task view."""
         logged_in_page.goto("/tasks/1")
         logged_in_page.wait_for_load_state("networkidle")
-        task_actions = logged_in_page.locator(".task-actions")
+        task_actions = logged_in_page.get_by_test_id("task-actions")
         if task_actions.is_visible():
             expect(task_actions).to_be_visible()
 

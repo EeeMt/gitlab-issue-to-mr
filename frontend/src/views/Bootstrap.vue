@@ -1,7 +1,7 @@
 <template>
-  <div class="bootstrap-page">
-    <n-card class="bootstrap-card" :bordered="false">
-      <PageHeader root-class="bootstrap-card__header">
+  <div class="bootstrap-page" data-testid="bootstrap-page">
+    <n-card class="bootstrap-card" :bordered="false" data-testid="bootstrap-card">
+      <PageHeader data-testid="bootstrap-header" root-class="bootstrap-card__header">
         <template #title>
           <div class="bootstrap-card__brand">
             <div class="bootstrap-card__mark">
@@ -28,9 +28,11 @@
         :rules="formRules()"
         label-placement="top"
         class="bootstrap-form"
+        data-testid="bootstrap-form"
       >
         <n-form-item :label="t('bootstrap.username')" path="username">
           <n-input
+            data-testid="bootstrap-username-input"
             v-model:value="formData.username"
             placeholder="Enter administrator username"
             autocomplete="username"
@@ -39,6 +41,7 @@
 
         <n-form-item :label="t('bootstrap.displayName')" path="displayName">
           <n-input
+            data-testid="bootstrap-display-name-input"
             v-model:value="formData.displayName"
             :placeholder="t('bootstrap.displayNamePlaceholder')"
           />
@@ -46,6 +49,7 @@
 
         <n-form-item :label="t('bootstrap.email')" path="email">
           <n-input
+            data-testid="bootstrap-email-input"
             v-model:value="formData.email"
             :placeholder="t('bootstrap.emailPlaceholder')"
             autocomplete="email"
@@ -54,6 +58,7 @@
 
         <n-form-item :label="t('bootstrap.password')" path="password">
           <n-input
+            data-testid="bootstrap-password-input"
             v-model:value="formData.password"
             type="password"
             show-password-on="click"
@@ -64,6 +69,7 @@
 
         <n-form-item :label="t('bootstrap.confirmPassword')" path="confirmPassword">
           <n-input
+            data-testid="bootstrap-confirm-password-input"
             v-model:value="formData.confirmPassword"
             type="password"
             show-password-on="click"
@@ -74,6 +80,7 @@
 
         <n-space vertical :size="16" class="bootstrap-form__actions">
           <n-button
+            data-testid="bootstrap-submit-button"
             type="primary"
             size="large"
             block

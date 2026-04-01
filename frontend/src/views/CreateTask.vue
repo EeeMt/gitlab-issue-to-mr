@@ -1,7 +1,8 @@
 <template>
-  <div class="create-task-page">
+  <div class="create-task-page" data-testid="create-task-page">
     <n-space vertical :size="16">
       <PageHeader
+        data-testid="create-task-header"
         root-class="create-task-page__hero"
         title-class="create-task-page__title"
         subtitle-class="create-task-page__subtitle"
@@ -18,7 +19,7 @@
         </template>
       </PageHeader>
 
-      <n-card class="create-task-card" :bordered="false">
+      <n-card class="create-task-card" :bordered="false" data-testid="create-task-card">
         <template #header>
           <div class="create-task-card__header">
             <div>
@@ -28,14 +29,23 @@
           </div>
         </template>
         <n-spin :show="loading">
-          <n-form :key="formResetKey" ref="formRef" :model="formValue" :rules="rules" label-placement="top" class="create-task-form">
+          <n-form
+            :key="formResetKey"
+            ref="formRef"
+            :model="formValue"
+            :rules="rules"
+            label-placement="top"
+            class="create-task-form"
+            data-testid="create-task-form"
+          >
             <div class="create-task-form__section">
               <div class="create-task-form__section-title">{{ t('createTask.repositoryBranches') }}</div>
               <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                 <n-gi>
                   <n-form-item :label="t('createTask.project')" path="project_id">
-                    <n-select
-                      v-model:value="formValue.project_id"
+                      <n-select
+                        data-testid="create-task-project-select"
+                        v-model:value="formValue.project_id"
                       :options="projectOptions"
                       :loading="projectsLoading"
                       :placeholder="t('createTask.selectProject')"
@@ -45,8 +55,9 @@
                 </n-gi>
                 <n-gi>
                   <n-form-item :label="t('createTask.baseBranch')" path="base_branch">
-                    <n-select
-                      v-model:value="formValue.base_branch"
+                      <n-select
+                        data-testid="create-task-base-branch-select"
+                        v-model:value="formValue.base_branch"
                       :options="branchOptions"
                       :loading="branchesLoading"
                       :placeholder="t('createTask.selectBaseBranch')"
@@ -60,8 +71,9 @@
                 </n-gi>
                 <n-gi>
                   <n-form-item :label="t('createTask.newBranchName')" path="new_branch_name">
-                    <n-input
-                      v-model:value="formValue.new_branch_name"
+                      <n-input
+                        data-testid="create-task-new-branch-input"
+                        v-model:value="formValue.new_branch_name"
                       :placeholder="t('createTask.newBranchPlaceholder')"
                       :disabled="!formValue.project_id || !formValue.base_branch"
                     />
@@ -72,8 +84,9 @@
                 </n-gi>
                 <n-gi>
                   <n-form-item :label="t('createTask.targetBranch')" path="target_branch">
-                    <n-select
-                      v-model:value="formValue.target_branch"
+                      <n-select
+                        data-testid="create-task-target-branch-select"
+                        v-model:value="formValue.target_branch"
                       :options="targetBranchOptions"
                       :disabled="!formValue.project_id"
                       :placeholder="t('createTask.selectTargetBranch')"
@@ -126,6 +139,7 @@
               </div>
               <n-form-item path="user_prompt" :show-label="false">
                 <VariableEditor
+                  data-testid="create-task-prompt-editor"
                   v-model="formValue.user_prompt"
                   :variable-tips="promptVariableTips"
                 />
@@ -143,7 +157,7 @@
               <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                 <n-gi>
                   <n-form-item :label="t('common.priority')" path="priority">
-                    <n-radio-group v-model:value="formValue.priority">
+                    <n-radio-group v-model:value="formValue.priority" data-testid="create-task-priority-group">
                       <n-space vertical :size="8">
                         <n-radio :value="0">{{ t('createTask.p0') }}</n-radio>
                         <n-radio :value="1">{{ t('createTask.p1') }}</n-radio>
@@ -155,7 +169,11 @@
                 <n-gi>
                   <n-form-item :label="t('createTask.schedule')" path="schedule_type">
                     <n-space vertical :size="10" style="width: 100%">
-                      <n-radio-group v-model:value="scheduleType" name="scheduleType">
+                        <n-radio-group
+                          v-model:value="scheduleType"
+                          name="scheduleType"
+                          data-testid="create-task-schedule-group"
+                        >
                         <n-space vertical :size="8">
                           <n-radio value="now">{{ t('createTask.executeNow') }}</n-radio>
                           <n-radio value="delay">{{ t('createTask.delay') }}</n-radio>
@@ -201,14 +219,21 @@
             </div>
 
             <div class="create-task-form__actions">
-              <n-space justify="end" wrap>
-                <n-button secondary strong round @click="handleReset">
+               <n-space justify="end" wrap data-testid="create-task-form-actions">
+                 <n-button secondary strong round data-testid="create-task-reset-button" @click="handleReset">
                   {{ t('common.reset') }}
-                </n-button>
-                <n-button type="primary" strong round @click="handleSubmit" :loading="submitting">
-                  {{ t('common.createTask') }}
-                </n-button>
-              </n-space>
+                 </n-button>
+                 <n-button
+                   type="primary"
+                   strong
+                   round
+                   data-testid="create-task-submit-button"
+                   @click="handleSubmit"
+                   :loading="submitting"
+                 >
+                   {{ t('common.createTask') }}
+                 </n-button>
+               </n-space>
             </div>
           </n-form>
         </n-spin>

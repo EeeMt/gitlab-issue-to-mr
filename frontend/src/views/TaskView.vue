@@ -1,7 +1,8 @@
 <template>
-  <div class="task-view">
+  <div class="task-view" data-testid="task-view-page">
     <n-space vertical :size="16">
       <PageHeader
+        data-testid="task-view-header"
         root-class="task-view__hero"
         subtitle-class="task-view__subtitle"
         actions-class="task-view__actions"
@@ -20,11 +21,19 @@
 
       <n-spin :show="initialLoading">
         <div class="task-view__content">
-          <n-grid :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16" class="task-view__summary" v-if="task">
+          <n-grid
+            :cols="isMobile ? 2 : 4"
+            :x-gap="16"
+            :y-gap="16"
+            class="task-view__summary"
+            data-testid="task-view-summary"
+            v-if="task"
+          >
             <n-gi v-for="item in summaryItems" :key="item.label">
               <SummaryCard
                 :label="item.label"
                 :value="item.value"
+                data-testid="task-view-summary-card"
                 card-class="task-summary-card"
                 label-class="task-summary-card__label"
                 value-class="task-summary-card__value"
@@ -34,7 +43,7 @@
 
           <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
             <n-gi>
-              <n-card class="task-card" :bordered="false">
+              <n-card class="task-card" :bordered="false" data-testid="task-details-card">
                 <template #header>
                   <div class="task-card__header">
                     <div>
@@ -110,7 +119,7 @@
             </n-gi>
 
             <n-gi>
-              <n-card class="task-card" :bordered="false">
+              <n-card class="task-card" :bordered="false" data-testid="task-actions-card">
                 <template #header>
                   <div class="task-card__header">
                     <div>
@@ -120,7 +129,7 @@
                   </div>
                 </template>
 
-                <div class="task-actions">
+                <div class="task-actions" data-testid="task-actions">
                   <div class="task-actions__intro" v-if="hasActions">
                     {{ t('taskView.actionsIntro') }}
                   </div>

@@ -78,7 +78,6 @@ class TestBootstrapPage:
         inputs = page.locator(".bootstrap-form input")
         inputs.nth(0).fill("testuser")
         inputs.nth(2).fill("test@example.com")
-
         password_inputs = page.locator("input[type='password']")
         password_inputs.nth(0).fill("short")
         password_inputs.nth(1).fill("short")
@@ -102,7 +101,7 @@ class TestBootstrapPage:
     def test_bootstrap_card_is_centered(self, page: Page, reset_database):
         """Test that the bootstrap card is properly centered on the page."""
         page.goto("/bootstrap")
-        page.wait_for_selector(".bootstrap-card", timeout=10000)
+        page.wait_for_selector("[data-testid='bootstrap-card']", timeout=10000)
 
         # The bootstrap card should be visible and centered
         bootstrap_card = page.locator(".bootstrap-card")
@@ -139,11 +138,7 @@ class TestBootstrapPage:
         # Count all form inputs - should be 5 (username, displayName, email, password, confirmPassword)
         all_inputs = page.locator(".bootstrap-form input")
         input_count = all_inputs.count()
-
-        # Assert we have 5 inputs
         assert input_count == 5, f"Expected 5 inputs in bootstrap form (Chinese), found {input_count}"
-
-        # Check that email input (3rd input, index 2) is visible and is a text input (not password)
         email_input = all_inputs.nth(2)
         expect(email_input).to_be_visible()
         expect(email_input).to_have_attribute("type", "text")
@@ -171,8 +166,6 @@ class TestBootstrapPage:
         inputs.nth(0).fill("e2e_admin")
         inputs.nth(1).fill("E2E Test Admin")
         inputs.nth(2).fill("e2e_admin@test.com")
-
-        # Fill password fields (type='password')
         password_inputs = page.locator("input[type='password']")
         password_inputs.nth(0).fill("securepassword123")
         password_inputs.nth(1).fill("securepassword123")
@@ -206,8 +199,6 @@ class TestBootstrapPage:
         inputs.nth(0).fill("initial_admin")
         inputs.nth(1).fill("Initial Admin")
         inputs.nth(2).fill("initial@test.com")
-
-        # Fill password fields
         password_inputs = page.locator("input[type='password']")
         password_inputs.nth(0).fill("securepassword123")
         password_inputs.nth(1).fill("securepassword123")

@@ -6,6 +6,7 @@ Tests that need authentication should call login_as_admin() in their setup.
 """
 
 import os
+import re
 import pytest
 
 import psycopg2
@@ -182,14 +183,29 @@ def _do_login(page):
         password_inputs.nth(1).fill("SecurePass123!")
 
         page.get_by_role("button", name="Create Admin").click()
-        page.wait_for_url("**/dashboard", timeout=15000)
-    elif page.locator(".login-form").is_visible(timeout=5000):
-        # System already initialized - login with existing admin
+        page.wait_for_function("() => window.location.pathname === '/dashboard'", timeout=15000)
+    elif page.locator(".login-card").is_visible(timeout=5000):
+        # System already initialized - reveal password login if needed
+        login_form = page.locator(".login-form").filter(has=page.locator("input"))
+        if login_form.count() == 0 or not login_form.first.is_visible():
+            toggle_button = page.locator(".login-card__password-toggle button")
+            if toggle_button.count() > 0 and toggle_button.first.is_visible():
+                toggle_button.first.click()
+                page.wait_for_timeout(300)
+
         inputs = page.locator(".login-form input")
-        inputs.nth(0).fill("test_admin")
-        inputs.nth(1).fill("SecurePass123!")
-        page.get_by_role("button", name="Login").click()
-        page.wait_for_url("**/dashboard", timeout=15000)
+        if inputs.count() >= 2:
+            inputs.nth(0).fill("test_admin")
+            inputs.nth(1).fill("SecurePass123!")
+        else:
+            username_input = page.locator("input[autocomplete='username']").first
+            password_input = page.locator("input[autocomplete='current-password']").first
+            username_input.fill("test_admin")
+            password_input.fill("SecurePass123!")
+
+        submit_button = page.get_by_role("button", name=re.compile(r"Sign In|Login", re.I)).first
+        submit_button.click()
+        page.wait_for_function("() => window.location.pathname === '/dashboard'", timeout=15000)
 
     page.wait_for_load_state("networkidle")
 
