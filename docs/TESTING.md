@@ -121,9 +121,11 @@ docker-compose -f docker-compose.e2e.yml up -d
 # 2. 运行所有 E2E 测试
 docker-compose -f docker-compose.e2e.yml run --rm e2e
 
-# 3. 清理环境
+# 3. 清理环境（测试完成后）
 docker-compose -f docker-compose.e2e.yml down
 ```
+
+> **注意**：测试环境使用 `18980` 端口，避免与开发环境 `8880` 冲突。
 
 ### 运行特定测试
 
@@ -162,6 +164,14 @@ docker cp <container_id>:/app/report.html ./
 | `E2E_BACKEND_URL` | `http://backend:8000` | 后端 API 地址 |
 | `E2E_GITLAB_URL` | `http://gitlab:8080` | GitLab 地址 |
 | `E2E_POSTGRES_URL` | `postgresql://...` | PostgreSQL 数据库地址 |
+
+### 端口映射
+
+| 服务 | 端口 | 说明 |
+|------|------|------|
+| nginx | `18980:80` | E2E 前端（避免与开发环境 8880 冲突） |
+| backend | 无 | 仅在内部网络访问 |
+| postgres | 无 | 仅在内部网络访问 |
 
 ### 重建镜像
 
