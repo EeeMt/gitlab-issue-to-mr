@@ -114,24 +114,26 @@ Playwright E2E 测试需要完整的 Docker 环境。
 ### 快速开始
 
 ```bash
-# 1. 启动测试环境
+# 1. 启动测试环境（仅启动 postgres、backend、nginx，不运行测试）
 cd deploy
 docker-compose -f docker-compose.e2e.yml up -d
 
 # 2. 运行所有 E2E 测试
-docker-compose -f docker-compose.e2e.yml run --rm e2e
+docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/ -v
 
 # 3. 清理环境（测试完成后）
 docker-compose -f docker-compose.e2e.yml down
 ```
 
-> **注意**：测试环境使用 `18980` 端口，避免与开发环境 `8880` 冲突。
+> **注意**：
+> - 测试环境使用 `18980` 端口，避免与开发环境 `8880` 冲突
+> - E2E 容器**不会**在 `up -d` 时自动运行测试，必须使用 `run --rm e2e` 明确运行测试
 
 ### 运行特定测试
 
 ```bash
 # 运行特定测试文件
-docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/test_dashboard.py -v
+docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/test_dashboard.py::TestDashboardPage -v
 
 # 运行特定测试类
 docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/test_dashboard.py::TestDashboardPage -v
