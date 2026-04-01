@@ -18,7 +18,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { getLastError, getLastTraceId } from '../api/interceptors'
+import { getLastError } from '../api/interceptors'
 
 const visible = ref(false)
 const message = ref('')

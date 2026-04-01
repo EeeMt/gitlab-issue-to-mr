@@ -13,6 +13,41 @@
         </div>
       </template>
 
+      <div v-if="promptTemplateEditorVisible" class="prompt-template-editor" data-testid="prompt-template-editor">
+        <div class="prompt-template-editor__header">
+          <div class="config-card-header__title">
+            {{ promptTemplateEditingId ? t('config.editPromptTemplate') : t('config.createPromptTemplate') }}
+          </div>
+          <div class="config-card-header__subtitle">
+            {{ t('config.promptTemplatesSubtitle') }}
+          </div>
+        </div>
+
+        <n-form ref="promptTemplateFormRef" :model="promptTemplateForm" label-placement="top" class="config-section-form">
+          <n-form-item :label="t('config.promptTemplateName')" path="name" required>
+            <n-input v-model:value="promptTemplateForm.name" :placeholder="t('config.promptTemplateNamePlaceholder')" />
+          </n-form-item>
+          <n-form-item :label="t('config.promptTemplateContent')" path="content" required>
+            <VariableEditor
+              v-model="promptTemplateForm.content"
+              :variable-tips="promptTemplateForm.variable_tips"
+              editable
+              @update:variable-tips="(tips) => promptTemplateForm.variable_tips = tips"
+            />
+          </n-form-item>
+          <n-form-item :label="t('config.promptTemplateActive')" path="is_active">
+            <n-switch v-model:value="promptTemplateForm.is_active" />
+          </n-form-item>
+        </n-form>
+
+        <div class="config-card-actions prompt-template-editor__actions">
+          <n-space justify="end">
+            <n-button @click="handleCancelPromptTemplateEditing">{{ t('common.cancel') }}</n-button>
+            <n-button type="primary" @click="handleSavePromptTemplate">{{ t('common.save') }}</n-button>
+          </n-space>
+        </div>
+      </div>
+
       <n-data-table
         :columns="promptTemplateColumns"
         :data="promptTemplates"
@@ -22,38 +57,6 @@
         :bordered="false"
       />
     </n-card>
-
-    <!-- Prompt Template Edit Modal -->
-    <n-modal
-      v-model:show="promptTemplateModalVisible"
-      preset="card"
-      :title="promptTemplateEditingId ? t('config.editPromptTemplate') : t('config.createPromptTemplate')"
-      style="width: 600px; max-width: 90vw;"
-      :mask-closable="false"
-    >
-      <n-form ref="promptTemplateFormRef" :model="promptTemplateForm" label-placement="top">
-        <n-form-item :label="t('config.promptTemplateName')" path="name" required>
-          <n-input v-model:value="promptTemplateForm.name" :placeholder="t('config.promptTemplateNamePlaceholder')" />
-        </n-form-item>
-        <n-form-item :label="t('config.promptTemplateContent')" path="content" required>
-          <VariableEditor
-            v-model="promptTemplateForm.content"
-            :variable-tips="promptTemplateForm.variable_tips"
-            editable
-            @update:variable-tips="(tips) => promptTemplateForm.variable_tips = tips"
-          />
-        </n-form-item>
-        <n-form-item :label="t('config.promptTemplateActive')" path="is_active">
-          <n-switch v-model:value="promptTemplateForm.is_active" />
-        </n-form-item>
-      </n-form>
-      <template #footer>
-        <n-space justify="end">
-          <n-button @click="promptTemplateModalVisible = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" @click="handleSavePromptTemplate">{{ t('common.save') }}</n-button>
-        </n-space>
-      </template>
-    </n-modal>
   </div>
 </template>
 
@@ -66,7 +69,6 @@ import {
   NForm,
   NFormItem,
   NInput,
-  NModal,
   NSpace,
   NSwitch,
   NTag,
@@ -90,7 +92,7 @@ const message = useMessage()
 // Prompt Templates state
 const promptTemplates = ref<PromptTemplate[]>([])
 const promptTemplatesLoading = ref(false)
-const promptTemplateModalVisible = ref(false)
+const promptTemplateEditorVisible = ref(false)
 const promptTemplateEditingId = ref<number | null>(null)
 const promptTemplateFormRef = ref<FormInst | null>(null)
 const promptTemplateForm = reactive({
@@ -151,13 +153,17 @@ async function fetchPromptTemplates() {
   }
 }
 
-function handleCreatePromptTemplate() {
+function resetPromptTemplateForm() {
   promptTemplateEditingId.value = null
   promptTemplateForm.name = ''
   promptTemplateForm.content = ''
   promptTemplateForm.variable_tips = {}
   promptTemplateForm.is_active = true
-  promptTemplateModalVisible.value = true
+}
+
+function handleCreatePromptTemplate() {
+  resetPromptTemplateForm()
+  promptTemplateEditorVisible.value = true
 }
 
 function handleEditPromptTemplate(template: PromptTemplate) {
@@ -166,7 +172,12 @@ function handleEditPromptTemplate(template: PromptTemplate) {
   promptTemplateForm.content = template.content
   promptTemplateForm.variable_tips = template.variable_tips ? { ...template.variable_tips } : {}
   promptTemplateForm.is_active = template.is_active
-  promptTemplateModalVisible.value = true
+  promptTemplateEditorVisible.value = true
+}
+
+function handleCancelPromptTemplateEditing() {
+  promptTemplateEditorVisible.value = false
+  resetPromptTemplateForm()
 }
 
 async function handleSavePromptTemplate() {
@@ -204,7 +215,7 @@ async function handleSavePromptTemplate() {
       })
       message.success(t('config.createPromptTemplateSuccess'))
     }
-    promptTemplateModalVisible.value = false
+    handleCancelPromptTemplateEditing()
     await fetchPromptTemplates()
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('config.savePromptTemplateFailed'))
@@ -226,3 +237,22 @@ defineExpose({
   fetchPromptTemplates
 })
 </script>
+
+<style scoped>
+.prompt-template-editor {
+  margin-bottom: 20px;
+  padding: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.82);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.prompt-template-editor__header {
+  margin-bottom: 16px;
+}
+
+.prompt-template-editor__actions {
+  margin-top: 0;
+}
+</style>
