@@ -32,7 +32,7 @@
               v-model="promptTemplateForm.content"
               :variable-tips="promptTemplateForm.variable_tips"
               editable
-              @update:variable-tips="(tips) => promptTemplateForm.variable_tips = tips"
+              @update:variable-tips="handlePromptTemplateVariableTipsUpdate"
             />
           </n-form-item>
           <n-form-item :label="t('config.promptTemplateActive')" path="is_active">
@@ -101,6 +101,31 @@ const promptTemplateForm = reactive({
   variable_tips: {} as Record<string, string>,
   is_active: true
 })
+
+function areTipsEqual(
+  left: Record<string, string> | undefined,
+  right: Record<string, string> | undefined
+) {
+  const leftEntries = Object.entries(left ?? {}).sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+  const rightEntries = Object.entries(right ?? {}).sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+
+  if (leftEntries.length !== rightEntries.length) {
+    return false
+  }
+
+  return leftEntries.every(([key, value], index) => {
+    const [otherKey, otherValue] = rightEntries[index] ?? []
+    return key === otherKey && value === otherValue
+  })
+}
+
+function handlePromptTemplateVariableTipsUpdate(tips: Record<string, string>) {
+  if (areTipsEqual(tips, promptTemplateForm.variable_tips)) {
+    return
+  }
+
+  promptTemplateForm.variable_tips = { ...tips }
+}
 
 // Table columns
 const promptTemplateColumns = computed<DataTableColumns<PromptTemplate>>(() => [

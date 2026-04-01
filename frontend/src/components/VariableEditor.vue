@@ -91,11 +91,31 @@ function areTipsEqual(
   })
 }
 
+const lastSyncedTips = ref<Record<string, string>>({ ...(props.variableTips ?? {}) })
+
+watch(
+  () => props.variableTips,
+  (newTips) => {
+    lastSyncedTips.value = { ...(newTips ?? {}) }
+  },
+  { deep: true, immediate: true }
+)
+
+function syncVariableTips(nextTips: Record<string, string>) {
+  if (areTipsEqual(nextTips, lastSyncedTips.value)) {
+    return
+  }
+
+  const clonedTips = { ...nextTips }
+  lastSyncedTips.value = clonedTips
+  emit('update:variableTips', clonedTips)
+}
+
 // Only emit when merged tips actually diverge from the parent prop.
 // This avoids re-emitting equivalent objects on every keystroke.
 watch(mergedTips, (newTips) => {
-  if (props.editable && newTips && !areTipsEqual(newTips, props.variableTips)) {
-    emit('update:variableTips', { ...newTips })
+  if (props.editable && newTips) {
+    syncVariableTips(newTips)
   }
 }, { flush: 'post', deep: true })
 
@@ -106,9 +126,7 @@ const editable = computed(() => props.editable ?? false)
 function handleTipChange(varName: string, tip: string) {
   updateTip(varName, tip)
   const newTips = { ...mergedTips.value, [varName]: tip }
-  if (!areTipsEqual(newTips, props.variableTips)) {
-    emit('update:variableTips', newTips)
-  }
+  syncVariableTips(newTips)
 }
 
 // Variable pattern decoration - use inclusive: false to not interfere with selection

@@ -276,6 +276,20 @@ describe('PromptTemplatesPanel', () => {
     })
   })
 
+  describe('handlePromptTemplateVariableTipsUpdate', () => {
+    it('should ignore equivalent tips updates', async () => {
+      const wrapper = mountComponent()
+      await vi.waitFor(() => {})
+
+      wrapper.vm.handleCreatePromptTemplate()
+      wrapper.vm.promptTemplateForm.variable_tips = { issue_type: 'Type of issue' }
+
+      wrapper.vm.handlePromptTemplateVariableTipsUpdate({ issue_type: 'Type of issue' })
+
+      expect(wrapper.vm.promptTemplateForm.variable_tips).toEqual({ issue_type: 'Type of issue' })
+    })
+  })
+
   describe('handleDeletePromptTemplate', () => {
     it('should call delete API and refresh', async () => {
       mockApi.deletePromptTemplate.mockResolvedValue(undefined)
