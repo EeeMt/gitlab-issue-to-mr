@@ -49,6 +49,11 @@ rebuild-backend: ## Rebuild backend image and restart container
 	cd $(PROJECT_ROOT)/deploy && docker-compose build backend
 	cd $(PROJECT_ROOT)/deploy && docker-compose up -d backend
 
+.PHONY: rebuild-scheduler
+rebuild-scheduler: ## Rebuild scheduler image and restart container
+	cd $(PROJECT_ROOT)/deploy && docker-compose build scheduler
+	cd $(PROJECT_ROOT)/deploy && docker-compose up -d scheduler
+
 .PHONY: rebuild-nginx
 rebuild-nginx: ## Rebuild nginx image and restart container
 	cd $(PROJECT_ROOT)/deploy && docker-compose build nginx
@@ -183,6 +188,7 @@ help:
 	@echo ""
 	@echo "Rebuild Services:"
 	@echo "  make rebuild-backend   Rebuild backend image and restart"
+	@echo "  make rebuild-scheduler Rebuild scheduler image and restart"
 	@echo "  make rebuild-nginx    Rebuild nginx image and restart"
 	@echo "  make rebuild-worker   Rebuild worker image"
 	@echo ""
