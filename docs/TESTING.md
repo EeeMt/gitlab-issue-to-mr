@@ -134,6 +134,123 @@ docker-compose -f docker-compose.e2e.yml run --rm e2e pytest \
 | 并行（无状态） | `test_create_task`, `test_dashboard`, `test_manual_task`, `test_navigation`, `test_task_details`, `test_task_queue`, `test_task_view` | 116 | `make test-e2e-run` |
 | 串行（有状态） | `test_bootstrap`, `test_prompt_template`, `test_access_management` | 18+2 | `--override-ini` 串行运行 |
 
+### 并行架构设计
+
+```
+pytest -n auto --dist=loadfile
+      │
+      ├─ gw0 ── test_dashboard.py ──── test_admin_gw0 用户
+      ├─ gw1 ── test_navigation.py ─── test_admin_gw1 用户
+      ├─ gw2 ── test_create_task.py ── test_admin_gw2 用户
+      └─ gw3 ── test_task_view.py ──── test_admin_gw3 用户
+```
+
+**关键机制：**
+
+| 组件 | 串行模式 | 并行（xdist）模式 |
+|------|---------|----------------|
+| 管理员用户 | `test_admin`（每次测试重新注册） | `test_admin_gw0/gw1/…`（session 级别，各 worker 独立） |
+| 用户创建方式 | `POST /api/auth/local/register` | 直接 INSERT DB（绕过 API 竞态） |
+| 密码 Hash | 600,000 次 PBKDF2 | 1 次 PBKDF2（快速；backend 从 hash 字符串读取迭代次数） |
+| `reset_database` | 清空全部 users + sessions + 重置 bootstrap | 仅删除**本 worker** 的 sessions（不碰其他 worker 的用户） |
+| `_api_login` | register→fallback login | 直接 `/login`（system 已初始化） |
+| `PYTEST_XDIST_WORKER` | 未设置 | 设置为 `gw0`, `gw1`, … |
+
+**串行组自动跳过：** `test_bootstrap.py`、`test_prompt_template.py`、`test_access_management.py` 顶部有：
+```python
+pytestmark = pytest.mark.skipif(
+    bool(os.environ.get("PYTEST_XDIST_WORKER")),
+    reason="Requires serial execution (modifies shared DB state)"
+)
+```
+这些测试在 xdist worker 中自动跳过，需单独用 `--override-ini` 运行。
+
+### 编写新测试用例的规则
+
+#### 1. 先判断分组——并行 or 串行？
+
+**可以并行**（放入现有并行文件或新建并行文件）：
+- 只读取页面 UI 元素（导航、布局、静态内容）
+- 不创建/修改数据库记录
+- 不依赖 `system_bootstrap.initialized` 的值
+
+**必须串行**（放入或新建带 `pytestmark skipif` 的文件）：
+- 修改 `system_bootstrap`（bootstrap 流程测试）
+- 在共享表中创建/删除命名记录（如 prompt_templates）
+- 修改其他用户的角色或权限
+- 依赖数据库中只有一个用户的假设
+
+新建串行测试文件时，在文件顶部添加：
+```python
+import os
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    bool(os.environ.get("PYTEST_XDIST_WORKER")),
+    reason="Requires serial execution (modifies shared DB state)"
+)
+```
+并将该文件加入串行运行命令中。
+
+#### 2. 使用 `logged_in_page` 而非手动登录
+
+```python
+# ✅ 正确：使用 fixture，自动处理 xdist 和串行两种模式
+def test_something(self, logged_in_page: Page, reset_database):
+    logged_in_page.goto("/dashboard")
+    ...
+
+# ❌ 错误：手动调用 bootstrap UI 或 login 页面
+def test_something(self, page: Page):
+    page.goto("/bootstrap")  # 不要这样做
+    ...
+```
+
+#### 3. 用确定性等待，不用 `wait_for_timeout`
+
+```python
+# ✅ 正确：等待具体元素或状态
+page.wait_for_selector(".my-component", state="visible", timeout=10000)
+page.wait_for_load_state("networkidle")
+expect(page.get_by_role("button", name="Save")).to_be_visible()
+
+# ❌ 错误：硬编码延迟
+page.wait_for_timeout(2000)
+```
+
+#### 4. Naive UI 组件的选择器规则
+
+Naive UI 的 `n-button`、`n-input` 等**不会**将 `data-testid` 透传到底层 DOM 元素：
+
+```python
+# ✅ 正确
+page.get_by_role("button", name="Create Template")
+page.locator(".my-panel input").first
+page.locator(".my-panel").get_by_role("button", name="Delete")
+
+# ❌ 错误（data-testid 不会出现在 DOM 中）
+page.get_by_test_id("create-button")   # n-button 不透传
+page.get_by_test_id("name-input")      # n-input 不透传
+```
+
+`n-popconfirm` 的确认按钮渲染在 body 级别的 portal 中，不在触发元素旁边：
+```python
+# ✅ 正确：从 body 级 portal 查找
+page.locator(".n-popover").get_by_role("button", name="Delete").click()
+```
+
+#### 5. 配置页面的 Tab 导航
+
+```python
+# ✅ 正确：通过 URL query 参数导航并等待 networkidle
+page.goto("/configuration?tab=prompt-templates")
+page.wait_for_load_state("networkidle")
+
+# ❌ 不稳定：直接点击 tab 而不等待内容加载
+page.get_by_role("tab", name="Prompt Templates").click()
+# 点击后可能需要等待 API 响应完成
+```
+
 ### 运行特定测试
 
 ```bash
