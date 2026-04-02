@@ -30,5 +30,5 @@ build/
 node_modules/
 
 
-# Test
-*.log
+# E2E video recordings
+deploy/e2e-videos/*.webm

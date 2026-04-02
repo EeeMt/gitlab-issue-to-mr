@@ -300,7 +300,7 @@ def _api_login(backend_url: str, base_url_str: str) -> dict:
 
 
 @pytest.fixture(scope="function")
-def logged_in_page(browser, base_url, backend_url, db_cursor, reset_database, worker_admin_setup):
+def logged_in_page(request, browser, base_url, backend_url, db_cursor, reset_database, worker_admin_setup):
     """
     Create a logged-in page for a test using fast API-based authentication.
 
@@ -309,14 +309,39 @@ def logged_in_page(browser, base_url, backend_url, db_cursor, reset_database, wo
     inject it into a fresh browser context via Playwright's storage_state.
     Each test still gets an isolated context; the DB is reset beforehand by
     the reset_database dependency.
+
+    Video recording is enabled when the E2E_RECORD_VIDEO environment variable
+    is set (any non-empty value).  Videos are written to /videos/ inside the
+    container (mount deploy/e2e-videos → /videos via docker-compose) and
+    renamed to <test_name>_<worker_id>.webm after each test.
     """
     storage_state = _api_login(backend_url, base_url)
-    context = browser.new_context(base_url=base_url, storage_state=storage_state)
+
+    record_video = bool(os.environ.get("E2E_RECORD_VIDEO"))
+    context_kwargs: dict = dict(base_url=base_url, storage_state=storage_state)
+    if record_video:
+        os.makedirs("/videos", exist_ok=True)
+        context_kwargs["record_video_dir"] = "/videos"
+        context_kwargs["record_video_size"] = {"width": 1280, "height": 720}
+
+    context = browser.new_context(**context_kwargs)
     page = context.new_page()
 
     yield page
 
-    context.close()
+    if record_video and page.video:
+        # Capture path BEFORE close; after close the file is fully written.
+        video_tmp_path = page.video.path()
+        context.close()
+        test_name = re.sub(r"[^\w\-]", "_", request.node.name)
+        worker_id = os.environ.get("PYTEST_XDIST_WORKER", "main")
+        new_path = f"/videos/{test_name}_{worker_id}.webm"
+        try:
+            os.rename(video_tmp_path, new_path)
+        except OSError:
+            pass  # Keep UUID name if rename fails (e.g. cross-device move)
+    else:
+        context.close()
 
 
 def _do_login(page):

@@ -275,6 +275,34 @@ docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/tes
 make test-e2e-logs
 ```
 
+### 视频录制
+
+每个测试过程可录制为 `.webm` 视频，方便 review 失败用例。
+
+```bash
+# 录制并行测试（视频保存到 deploy/e2e-videos/）
+make test-e2e-record
+
+# 或手动录制（视频存在容器内，手动提取）
+-docker rm -f gimr-e2e-recorder
+E2E_RECORD_VIDEO=1 docker-compose -f docker-compose.e2e.yml run \
+  --name gimr-e2e-recorder e2e pytest tests/e2e/tests/test_dashboard.py
+docker cp gimr-e2e-recorder:/videos/. ./e2e-videos/
+docker rm -f gimr-e2e-recorder
+```
+
+视频文件命名格式：`<test_name>_<worker_id>.webm`，例如：
+```
+test_dashboard_page_loads_chromium_gw0.webm
+test_navigation_links_exist_chromium_gw2.webm
+```
+
+> **注意**：
+> - 视频录制仅对使用 `logged_in_page` fixture 的测试生效
+> - 录制会增加约 20-30% 的运行时间
+> - 视频保存在容器内 `/videos/` 目录，`make test-e2e-record` 会自动用 `docker cp` 提取到本地
+> - `deploy/e2e-videos/` 目录已加入 `.gitignore`，不会提交到仓库
+
 ### 环境说明
 - E2E 测试环境使用 `18980` 端口，避免与开发环境 `8880` 冲突
 - 使用独立的 PostgreSQL（tmpfs，无持久化）

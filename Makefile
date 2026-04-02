@@ -100,6 +100,24 @@ test-e2e-specific: ## Run specific E2E test (Usage: make test-e2e-specific TEST_
 test-e2e-down: ## Stop E2E test environment
 	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml down
 
+.PHONY: test-e2e-serial
+test-e2e-serial: ## Run serial E2E tests (bootstrap/prompt_template/access_management)
+	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e \
+	  pytest tests/e2e/tests/test_bootstrap.py \
+	         tests/e2e/tests/test_prompt_template.py \
+	         tests/e2e/tests/test_access_management.py \
+	  --override-ini="addopts=-v --tb=short --strict-markers --disable-warnings"
+
+.PHONY: test-e2e-record
+test-e2e-record: test-e2e-up ## Run E2E tests with video recording (videos saved to deploy/e2e-videos/)
+	mkdir -p $(PROJECT_ROOT)/deploy/e2e-videos
+	-docker rm -f gimr-e2e-recorder 2>/dev/null || true
+	cd $(PROJECT_ROOT)/deploy && E2E_RECORD_VIDEO=1 \
+	  docker-compose -f docker-compose.e2e.yml run --name gimr-e2e-recorder e2e; \
+	  docker cp gimr-e2e-recorder:/videos/. $(PROJECT_ROOT)/deploy/e2e-videos/ 2>/dev/null || true; \
+	  docker rm -f gimr-e2e-recorder 2>/dev/null || true
+	@echo "Videos saved to deploy/e2e-videos/"
+
 .PHONY: test-e2e-logs
 test-e2e-logs: ## View E2E test logs
 	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml logs -f
@@ -138,8 +156,10 @@ help:
 	@echo "Playwright E2E Tests:"
 	@echo "  make test-e2e          Full workflow: up -> run -> down"
 	@echo "  make test-e2e-up       Start E2E test environment"
-	@echo "  make test-e2e-run      Run Playwright E2E tests"
+	@echo "  make test-e2e-run      Run Playwright E2E tests (parallel, 116 tests)"
+	@echo "  make test-e2e-serial   Run serial E2E tests (bootstrap/prompt_template/access_management)"
 	@echo "  make test-e2e-specific Run specific E2E test"
+	@echo "  make test-e2e-record   Run E2E tests with video recording (videos → deploy/e2e-videos/)"
 	@echo "  make test-e2e-down      Stop E2E test environment"
 	@echo "  make test-e2e-logs     View E2E test logs"
 	@echo ""

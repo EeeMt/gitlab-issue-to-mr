@@ -83,6 +83,7 @@ services:
       - E2E_BACKEND_URL=http://backend:8000
       - E2E_GITLAB_URL=http://gitlab:8080
       - E2E_POSTGRES_URL=postgresql://gimr:gimr_password@postgres:5432/gimr
+      - E2E_RECORD_VIDEO=${E2E_RECORD_VIDEO:-}
     depends_on:
       nginx:
         condition: service_started
