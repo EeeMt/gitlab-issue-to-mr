@@ -158,9 +158,6 @@ def _do_login(page):
     page.goto("/bootstrap")
     page.wait_for_load_state("domcontentloaded")
 
-    # Wait for Vue app to fully render
-    page.wait_for_timeout(500)
-
     if page.locator(".bootstrap-card").is_visible(timeout=5000):
         # System not initialized - create admin via bootstrap
         inputs = page.locator(".bootstrap-form input")
@@ -173,7 +170,7 @@ def _do_login(page):
         password_inputs.nth(1).fill("SecurePass123!")
 
         page.get_by_role("button", name="Create Admin").click()
-        page.wait_for_function("() => window.location.pathname === '/dashboard'", timeout=15000)
+        page.wait_for_function("() => window.location.pathname === '/dashboard'", timeout=10000)
     elif page.locator(".login-card").is_visible(timeout=5000):
         # System already initialized - reveal password login if needed
         login_form = page.locator(".login-form").filter(has=page.locator("input"))
@@ -181,7 +178,6 @@ def _do_login(page):
             toggle_button = page.locator(".login-card__password-toggle button")
             if toggle_button.count() > 0 and toggle_button.first.is_visible():
                 toggle_button.first.click()
-                page.wait_for_timeout(300)
 
         inputs = page.locator(".login-form input")
         if inputs.count() >= 2:
@@ -195,13 +191,13 @@ def _do_login(page):
 
         submit_button = page.get_by_role("button", name=re.compile(r"Sign In|Login", re.I)).first
         submit_button.click()
-        page.wait_for_function("() => window.location.pathname === '/dashboard'", timeout=15000)
+        page.wait_for_function("() => window.location.pathname === '/dashboard'", timeout=10000)
     else:
         # Check if we're already on dashboard (session exists)
         if "/dashboard" in page.url:
             return
         # Otherwise, wait a bit more and check again
-        page.wait_for_timeout(1000)
+        page.wait_for_timeout(500)
         if "/dashboard" not in page.url:
             # Final check - reload and try bootstrap flow
             page.reload()
@@ -215,9 +211,7 @@ def _do_login(page):
                 password_inputs.nth(0).fill("SecurePass123!")
                 password_inputs.nth(1).fill("SecurePass123!")
                 page.get_by_role("button", name="Create Admin").click()
-                page.wait_for_function("() => window.location.pathname === '/dashboard'", timeout=15000)
-
-    page.wait_for_load_state("domcontentloaded")
+                page.wait_for_function("() => window.location.pathname === '/dashboard'", timeout=10000)
 
 
 def pytest_configure(config):
