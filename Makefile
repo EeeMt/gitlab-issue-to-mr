@@ -1,89 +1,115 @@
-# Makefile for GIMR development
-# Usage: make build | make up | make logs | make clean
+# Makefile for GIMR
+# ============================================
+
+# Project root directory
+PROJECT_ROOT := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 
 # Enable Docker BuildKit for faster builds
 export DOCKER_BUILDKIT := 1
 export COMPOSE_DOCKER_CLI_BUILD := 1
 
-# Development environment
+# ============================================
+# Development Environment
+# ============================================
+
 .PHONY: build
-PROJECT_ROOT := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
-build:
+build: ## Build all images (backend, nginx, worker)
 	cd $(PROJECT_ROOT)/deploy && docker-compose build
 	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t gimr-worker:latest $(PROJECT_ROOT)
 
 .PHONY: up
-up:
-	cd deploy && docker-compose up -d --build
+up: ## Start development environment
+	cd $(PROJECT_ROOT)/deploy && docker-compose up -d --build
 
 .PHONY: down
-down:
-	cd deploy && docker-compose down
+down: ## Stop development environment
+	cd $(PROJECT_ROOT)/deploy && docker-compose down
 
 .PHONY: logs
-logs:
-	cd deploy && docker-compose logs -f
+logs: ## View logs (Ctrl+C to exit)
+	cd $(PROJECT_ROOT)/deploy && docker-compose logs -f
 
 .PHONY: ps
-ps:
-	cd deploy && docker-compose ps
+ps: ## Show running containers
+	cd $(PROJECT_ROOT)/deploy && docker-compose ps
 
 .PHONY: clean
-clean:
-	cd deploy && docker-compose down -v --rmi local
+clean: ## Remove containers and volumes
+	cd $(PROJECT_ROOT)/deploy && docker-compose down -v --rmi local
 
-# Rebuild specific service (e.g., make rebuild-backend)
+.PHONY: restart
+restart: down up ## Restart development environment
+
+# ============================================
+# Rebuild specific service
+# ============================================
+# Usage: make rebuild-backend or make rebuild-nginx
+
 rebuild-%:
-	cd deploy && docker-compose build $(shell echo $* | sed 's/_/-/g')
-	cd deploy && docker-compose up -d $(shell echo $* | sed 's/_/-/g')
+	cd $(PROJECT_ROOT)/deploy && docker-compose build $(shell echo $* | sed 's/_/-/g')
+	cd $(PROJECT_ROOT)/deploy && docker-compose up -d $(shell echo $* | sed 's/_/-/g')
 
-# ---- E2E Tests ----
+# ============================================
+# E2E Tests (Playwright)
+# ============================================
+
 .PHONY: e2e-up
-e2e-up:
-	cd deploy && docker-compose -f docker-compose.e2e.yml up -d --build
+e2e-up: ## Start E2E test environment
+	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml up -d --build
 
 .PHONY: e2e-test
-e2e-test:
-	cd deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e
+e2e-test: ## Run all E2E tests
+	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e
 
 .PHONY: e2e-test-specific
-e2e-test-specific:
-	cd deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/$(TEST_FILE) -v
+e2e-test-specific: ## Run specific E2E test file (Usage: make e2e-test-specific TEST_FILE=test_dashboard.py)
+	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/$(TEST_FILE) -v
 
 .PHONY: e2e-down
-e2e-down:
-	cd deploy && docker-compose -f docker-compose.e2e.yml down
+e2e-down: ## Stop E2E test environment
+	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml down
 
 .PHONY: e2e-logs
-e2e-logs:
-	cd deploy && docker-compose -f docker-compose.e2e.yml logs -f
+e2e-logs: ## View E2E logs
+	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml logs -f
 
-# Usage: make e2e-test-specific TEST_FILE=test_dashboard.py
 .PHONY: e2e
-e2e: e2e-up e2e-test e2e-down
+e2e: e2e-up e2e-test e2e-down ## Full E2E workflow: up -> test -> down
 
-# ---- Unit Tests ----
+# ============================================
+# Unit Tests
+# ============================================
+
 .PHONY: test-backend
-test-backend:
-	cd backend && python -m pytest tests/unit/ -v
+test-backend: ## Run backend unit tests
+	cd $(PROJECT_ROOT)/backend && python -m pytest tests/unit/ -v
 
 .PHONY: test-frontend
-test-frontend:
-	cd frontend && npx vitest run
+test-frontend: ## Run frontend unit tests
+	cd $(PROJECT_ROOT)/frontend && npx vitest run
 
 .PHONY: test-mock-e2e
-test-mock-e2e:
-	cd backend && python -m pytest tests/mock_e2e/ -v
+test-mock-e2e: ## Run mock E2E tests
+	cd $(PROJECT_ROOT)/backend && python -m pytest tests/mock_e2e/ -v
 
 .PHONY: test-gitlab-e2e
-test-gitlab-e2e:
-	cd backend && python -m pytest tests/gitlab_e2e/ -v
+test-gitlab-e2e: ## Run GitLab E2E tests (requires real GitLab)
+	cd $(PROJECT_ROOT)/backend && python -m pytest tests/gitlab_e2e/ -v
 
-# Run all tests except Playwright E2E
 .PHONY: test
-test: test-backend test-frontend test-mock-e2e
+test: test-backend test-frontend test-mock-e2e ## Run all non-E2E tests
 
-# Run ALL tests including Playwright E2E (requires Docker)
-# This starts E2E environment, runs all tests, then cleans up
 .PHONY: test-all
-test-all: test-backend test-frontend test-mock-e2e test-gitlab-e2e e2e
+test-all: test-backend test-frontend test-mock-e2e test-gitlab-e2e e2e ## Run ALL tests
+
+# ============================================
+# Help
+# ============================================
+
+.PHONY: help
+help:
+	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | sort | while IFS= read -r line; do \
+		printf "%-20s %s\n" "$${line%%:*}$${line#*:}" ; \
+	done
+
+.DEFAULT_GOAL := help
