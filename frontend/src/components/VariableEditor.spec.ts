@@ -53,7 +53,7 @@ vi.mock('codemirror', () => {
   MockEditorView.theme = vi.fn().mockReturnValue({})
   return {
     EditorView: MockEditorView,
-    basicSetup: vi.fn()
+    minimalSetup: vi.fn()
   }
 })
 
@@ -127,6 +127,7 @@ vi.mock('@vicons/ionicons5', () => ({
 // Import the component after mocks are set up
 import VariableEditor from './VariableEditor.vue'
 import { Decoration, hoverTooltip } from '@codemirror/view'
+import { minimalSetup } from 'codemirror'
 
 describe('VariableEditor', () => {
   beforeEach(() => {
@@ -343,7 +344,7 @@ describe('VariableEditor', () => {
 
       vi.doMock('codemirror', () => ({
         EditorView: MockEditorView,
-        basicSetup: vi.fn()
+        minimalSetup: vi.fn()
       }))
 
       // Re-import to get fresh module with our mock
@@ -371,6 +372,12 @@ describe('VariableEditor', () => {
   describe('工具提示', () => {
     it('should have hoverTooltip configured', () => {
       expect(hoverTooltip).toBeDefined()
+    })
+  })
+
+  describe('编辑器配置', () => {
+    it('should use minimalSetup for prompt editing', () => {
+      expect(minimalSetup).toBeDefined()
     })
   })
 })

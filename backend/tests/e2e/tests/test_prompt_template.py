@@ -16,8 +16,8 @@ from playwright.sync_api import Page, expect
 class TestPromptTemplates:
     """Tests for the prompt template management feature."""
 
-    def test_prompt_template_modal_opens(self, logged_in_page: Page, reset_database):
-        """Test that the prompt template creation modal opens when clicking the create button."""
+    def test_prompt_template_editor_opens_inline(self, logged_in_page: Page, reset_database):
+        """Test that the prompt template creation editor opens inline when clicking create."""
         logged_in_page.goto("/config")
         logged_in_page.wait_for_load_state("domcontentloaded")
         logged_in_page.wait_for_timeout(1000)
@@ -29,9 +29,10 @@ class TestPromptTemplates:
         create_button = logged_in_page.get_by_role("button", name="Create Template")
         expect(create_button).to_be_visible()
         create_button.click()
-        logged_in_page.wait_for_timeout(1000)  # Wait for modal animation
-        # Verify modal opened by checking for input field inside modal card
-        name_input = logged_in_page.locator(".n-card input").first
+        logged_in_page.wait_for_timeout(500)
+        editor = logged_in_page.get_by_test_id("prompt-template-editor")
+        expect(editor).to_be_visible()
+        name_input = editor.locator("input").first
         expect(name_input).to_be_visible()
 
     def test_prompt_template_name_input_works(self, logged_in_page: Page, reset_database):
@@ -63,6 +64,38 @@ class TestPromptTemplates:
         cm_content.click()
         cm_content.fill("This is a test prompt with {{variable}} placeholder")
         expect(cm_content).to_contain_text("{{variable}}")
+
+    def test_first_character_input_has_no_codemirror_crash(self, logged_in_page: Page, reset_database):
+        """Test that the first typed character does not trigger a CodeMirror plugin crash."""
+        console_errors = []
+        page_errors = []
+
+        logged_in_page.on(
+            "console",
+            lambda msg: console_errors.append(msg.text)
+            if msg.type == "error"
+            else None,
+        )
+        logged_in_page.on("pageerror", lambda error: page_errors.append(str(error)))
+
+        logged_in_page.goto("/config")
+        logged_in_page.wait_for_load_state("domcontentloaded")
+        logged_in_page.wait_for_timeout(1000)
+        prompt_tab = logged_in_page.locator(".n-tabs-tab").nth(6)
+        prompt_tab.scroll_into_view_if_needed()
+        prompt_tab.click()
+        logged_in_page.wait_for_timeout(1000)
+        logged_in_page.get_by_role("button", name="Create Template").click()
+
+        cm_content = logged_in_page.locator(".variable-editor .cm-content")
+        expect(cm_content).to_be_visible()
+        cm_content.click()
+        logged_in_page.keyboard.type("a")
+        logged_in_page.wait_for_timeout(500)
+
+        joined_errors = "\n".join(console_errors + page_errors)
+        assert "CodeMirror plugin crashed" not in joined_errors
+        assert "Position 1 is out of range for changeset of length 0" not in joined_errors
 
     def test_validation_console_logs(self, logged_in_page: Page, reset_database):
         """Test that validation warnings appear in console when using invalid variable tips."""

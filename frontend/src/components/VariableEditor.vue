@@ -31,7 +31,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NIcon, NInput } from 'naive-ui'
 import { InformationCircleOutline } from '@vicons/ionicons5'
-import { EditorView, basicSetup } from 'codemirror'
+import { EditorView, minimalSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
 import { Decoration, DecorationSet, ViewPlugin, ViewUpdate, hoverTooltip } from '@codemirror/view'
 import { RangeSetBuilder } from '@codemirror/state'
@@ -221,7 +221,7 @@ function createEditor() {
   if (!editorContainer.value) return
 
   const editorExtensions = [
-    basicSetup,
+    minimalSetup,
     variableHighlightPlugin,
     variableTooltip,
     EditorView.updateListener.of((update) => {
