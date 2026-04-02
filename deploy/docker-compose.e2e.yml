@@ -70,6 +70,12 @@ services:
         condition: service_healthy
     networks:
       - gimr-e2e-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/ || exit 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
 
   e2e:
     image: gimr-e2e:latest
@@ -86,7 +92,7 @@ services:
       - E2E_RECORD_VIDEO=${E2E_RECORD_VIDEO:-}
     depends_on:
       nginx:
-        condition: service_started
+        condition: service_healthy
       backend:
         condition: service_healthy
       postgres:

@@ -97,24 +97,20 @@ test-gitlab-e2e: ## Run GitLab E2E tests (requires real GitLab)
 
 .PHONY: test-e2e
 test-e2e: test-e2e-up ## Run ALL Playwright E2E tests: parallel + serial [RECORD_VIDEO=1 for video]
-	$(_E2E_PRE) $(_E2E_RUN) pytest tests/e2e/tests/ $(_E2E_POST)
+	$(_E2E_PRE) $(_E2E_RUN) pytest tests/e2e/tests/ -m "not serial" $(_E2E_POST)
 	$(_E2E_PRE) $(_E2E_RUN) \
-	  pytest tests/e2e/tests/test_bootstrap.py \
-	         tests/e2e/tests/test_prompt_template.py \
-	         tests/e2e/tests/test_access_management.py \
+	  pytest tests/e2e/tests/ -m serial \
 	  --override-ini="addopts=-v --tb=short --strict-markers --disable-warnings" $(_E2E_POST)
 	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml down
 
 .PHONY: test-e2e-parallel
 test-e2e-parallel: ## Run parallel E2E tests only (116 tests, ~44s) [RECORD_VIDEO=1 for video]
-	$(_E2E_PRE) $(_E2E_RUN) pytest tests/e2e/tests/ $(_E2E_POST)
+	$(_E2E_PRE) $(_E2E_RUN) pytest tests/e2e/tests/ -m "not serial" $(_E2E_POST)
 
 .PHONY: test-e2e-serial
 test-e2e-serial: ## Run serial E2E tests only: bootstrap/prompt_template/access_management (~42s) [RECORD_VIDEO=1]
 	$(_E2E_PRE) $(_E2E_RUN) \
-	  pytest tests/e2e/tests/test_bootstrap.py \
-	         tests/e2e/tests/test_prompt_template.py \
-	         tests/e2e/tests/test_access_management.py \
+	  pytest tests/e2e/tests/ -m serial \
 	  --override-ini="addopts=-v --tb=short --strict-markers --disable-warnings" $(_E2E_POST)
 
 .PHONY: test-e2e-specific
@@ -123,7 +119,7 @@ test-e2e-specific: ## Run specific E2E test file [TEST_FILE=test_dashboard.py] [
 
 .PHONY: test-e2e-up
 test-e2e-up: ## Start E2E test environment (builds images if changed)
-	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml up -d --build
+	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml up -d --build --wait postgres backend nginx
 
 .PHONY: test-e2e-down
 test-e2e-down: ## Stop E2E test environment

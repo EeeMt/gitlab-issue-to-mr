@@ -78,21 +78,22 @@ class TestDashboardSummaryCards:
     def test_summary_cards_are_displayed(self, logged_in_page: Page, reset_database):
         """Test that summary cards are displayed on the dashboard."""
         logged_in_page.goto("/dashboard")
-        logged_in_page.wait_for_load_state("domcontentloaded")
+        # Wait for the summary grid (rendered only after first API response via v-if="hasLoadedOnce")
+        logged_in_page.wait_for_selector("[data-testid='dashboard-summary']")
         summary_cards = logged_in_page.locator(".dashboard-summary-card")
         expect(summary_cards.first).to_be_visible()
 
     def test_summary_card_has_label(self, logged_in_page: Page, reset_database):
         """Test that summary cards have labels."""
         logged_in_page.goto("/dashboard")
-        logged_in_page.wait_for_load_state("domcontentloaded")
+        logged_in_page.wait_for_selector("[data-testid='dashboard-summary']")
         summary_label = logged_in_page.locator(".dashboard-summary-card__label").first
         expect(summary_label).to_be_visible()
 
     def test_summary_card_has_value(self, logged_in_page: Page, reset_database):
         """Test that summary cards have values."""
         logged_in_page.goto("/dashboard")
-        logged_in_page.wait_for_load_state("domcontentloaded")
+        logged_in_page.wait_for_selector("[data-testid='dashboard-summary']")
         summary_value = logged_in_page.locator(".dashboard-summary-card__value").first
         expect(summary_value).to_be_visible()
 
