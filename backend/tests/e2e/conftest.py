@@ -74,11 +74,11 @@ def postgres_url() -> str:
     Get the PostgreSQL connection URL for database operations.
 
     Can be overridden via E2E_POSTGRES_URL environment variable.
-    Default: postgresql://gimr:gimr@postgres:5432/gimr
+    Default: postgresql://codify:codify@postgres:5432/codify
     """
     return os.environ.get(
         "E2E_POSTGRES_URL",
-        "postgresql://gimr:gimr_password@postgres:5432/gimr"
+        "postgresql://codify:codify_password@postgres:5432/codify"
     )
 
 
@@ -276,17 +276,17 @@ def _api_login(backend_url: str, base_url_str: str) -> dict:
     if resp.status_code not in (200, 201):
         raise RuntimeError(f"API login failed: {resp.status_code} {resp.text[:200]}")
 
-    session_token = resp.cookies.get("gimr_session")
+    session_token = resp.cookies.get("codify_session")
     if not session_token:
         raise RuntimeError(
-            f"No gimr_session cookie in API login response. "
+            f"No codify_session cookie in API login response. "
             f"Status: {resp.status_code}, Cookies: {dict(resp.cookies)}"
         )
 
     return {
         "cookies": [
             {
-                "name": "gimr_session",
+                "name": "codify_session",
                 "value": session_token,
                 "domain": cookie_domain,
                 "path": "/",

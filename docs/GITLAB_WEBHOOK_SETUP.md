@@ -1,4 +1,4 @@
-# GitLab Issue to MR Bot (GIMR)
+# Codify
 
 ## GitLab Webhook Configuration
 

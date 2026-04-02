@@ -50,9 +50,9 @@ If the environment is fully offline, both endpoints must exist inside the intran
 
 ### Database
 
-- `POSTGRES_USER`: PostgreSQL username, usually `gimr`
+- `POSTGRES_USER`: PostgreSQL username, usually `codify`
 - `POSTGRES_DB`: database name
-- `POSTGRES_PASSWORD`: password for the `gimr` PostgreSQL user
+- `POSTGRES_PASSWORD`: password for the `codify` PostgreSQL user
 - `DATABASE_URL`: backend/scheduler connection string; keep it consistent with the PostgreSQL values above
 
 ### Worker/scheduler

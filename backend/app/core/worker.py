@@ -37,13 +37,13 @@ _ANSI_ESCAPE = re.compile(
 )
 
 # Emitted by entrypoint.sh after Claude finishes; contains token usage JSON.
-_GIMR_STATS_RE = re.compile(r'^GIMR_STATS:(.+)$', re.MULTILINE)
-# Emitted by entrypoint.sh; git-computed change stats (e.g. GIMR_DIFF:+18-21).
-_GIMR_DIFF_RE = re.compile(r'^GIMR_DIFF:\+(\d+)-(\d+)$', re.MULTILINE)
+_CODIFY_STATS_RE = re.compile(r'^CODIFY_STATS:(.+)$', re.MULTILINE)
+# Emitted by entrypoint.sh; git-computed change stats (e.g. CODIFY_DIFF:+18-21).
+_CODIFY_DIFF_RE = re.compile(r'^CODIFY_DIFF:\+(\d+)-(\d+)$', re.MULTILINE)
 
 # Volume mount constants
-_MAVEN_CACHE_CONTAINER_PATH = "/home/gimr/.m2/repository"
-_MAVEN_SETTINGS_CONTAINER_PATH = "/home/gimr/.m2/settings.xml"
+_MAVEN_CACHE_CONTAINER_PATH = "/home/codify/.m2/repository"
+_MAVEN_SETTINGS_CONTAINER_PATH = "/home/codify/.m2/settings.xml"
 
 
 def scrub_sensitive_data(text: str) -> str:
@@ -461,8 +461,8 @@ class WorkerExecutor:
             db: Database session
             exit_code: Container exit code
         """
-        # Extract token usage from GIMR_STATS marker line
-        stats_match = _GIMR_STATS_RE.search(logs)
+        # Extract token usage from CODIFY_STATS marker line
+        stats_match = _CODIFY_STATS_RE.search(logs)
         if stats_match:
             try:
                 usage = _json.loads(stats_match.group(1).strip())
@@ -473,7 +473,7 @@ class WorkerExecutor:
                     f"in={task.input_tokens} out={task.output_tokens}"
                 )
             except Exception:
-                logger.debug(f"[Task {task.id}] Failed to parse GIMR_STATS")
+                logger.debug(f"[Task {task.id}] Failed to parse CODIFY_STATS")
 
         if exit_code == 0:
             task.status = TaskStatus.COMPLETED
@@ -531,7 +531,7 @@ class WorkerExecutor:
             logs: Container logs
         """
         # Get MR change stats — prefer log-parsed git diff (accurate), fall back to GitLab API.
-        diff_match = _GIMR_DIFF_RE.search(logs)
+        diff_match = _CODIFY_DIFF_RE.search(logs)
         if diff_match:
             task.additions = int(diff_match.group(1))
             task.deletions = int(diff_match.group(2))
@@ -673,7 +673,7 @@ class WorkerExecutor:
             Container name string
         """
         issue_suffix = f"i{task.issue_iid}" if task.issue_iid else "manual"
-        return f"gimr-{task.id}-p{task.project_id}-{issue_suffix}"
+        return f"codify-{task.id}-p{task.project_id}-{issue_suffix}"
 
     async def execute_task(self, db: AsyncSession, task_id: int) -> bool:
         """Execute a task.

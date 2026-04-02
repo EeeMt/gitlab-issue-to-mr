@@ -88,7 +88,7 @@ class DashboardPage:
 
 ```bash
 # Build E2E test container
-docker build -f deploy/Dockerfile.e2e -t gimr-e2e:latest .
+docker build -f deploy/Dockerfile.e2e -t codify-e2e:latest .
 
 # Run all E2E tests
 docker-compose -f deploy/docker-compose.e2e.yml run --rm e2e

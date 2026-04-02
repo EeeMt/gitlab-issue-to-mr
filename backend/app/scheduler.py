@@ -27,7 +27,7 @@ _SESSION_CLEANUP_INTERVAL_SECONDS = 3600
 _worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-")
 
 
-WORKER_CONTAINER_PATTERN = re.compile(r"^gimr-\d+-p\d+-i\d+$")
+WORKER_CONTAINER_PATTERN = re.compile(r"^codify-\d+-p\d+-i\d+$")
 
 
 class Scheduler:
@@ -215,12 +215,12 @@ class Scheduler:
                 docker = get_docker_client()
                 all_containers = docker.client.containers.list(
                     all=True,
-                    filters={"name": "gimr-"}
+                    filters={"name": "codify-"}
                 )
 
                 for container in all_containers:
-                    # Only manage worker containers: gimr-{task_id}-p{project_id}-i{issue_iid}
-                    # Avoid touching compose-managed service containers like gimr-backend/gimr-postgres.
+                    # Only manage worker containers: codify-{task_id}-p{project_id}-i{issue_iid}
+                    # Avoid touching compose-managed service containers like codify-backend/codify-postgres.
                     if not WORKER_CONTAINER_PATTERN.match(container.name):
                         continue
 

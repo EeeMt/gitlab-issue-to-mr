@@ -1,5 +1,5 @@
 """
-GIMR E2E Test Suite
+Codify E2E Test Suite
 
 End-to-end tests using Playwright for headless browser automation.
 

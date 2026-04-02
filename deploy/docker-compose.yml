@@ -1,10 +1,10 @@
 services:
   nginx:
-    image: gimr-nginx:latest
+    image: codify-nginx:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile.frontend
-    container_name: gimr-nginx
+    container_name: codify-nginx
     ports:
       - "8880:80"
     depends_on:
@@ -12,20 +12,20 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - gimr-network
+      - codify-network
 
   backend:
-    image: gimr-backend:latest
+    image: codify-backend:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile.backend
-    container_name: gimr-backend
+    container_name: codify-backend
     ports:
       - "8000:8000"
     env_file:
       - .env.test
     environment:
-      - DATABASE_URL=postgresql+asyncpg://gimr:gimr_password@postgres:5432/gimr
+      - DATABASE_URL=postgresql+asyncpg://codify:codify_password@postgres:5432/codify
       - DOCKER_HOST=unix:///var/run/docker.sock
       - DOCKER_TLS_CA=
       - DOCKER_TLS_CERT=
@@ -42,7 +42,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
     networks:
-      - gimr-network
+      - codify-network
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 5s
@@ -51,13 +51,13 @@ services:
       start_period: 30s
 
   scheduler:
-    image: gimr-backend:latest
-    container_name: gimr-scheduler
+    image: codify-backend:latest
+    container_name: codify-scheduler
     command: ["python3", "-m", "app.scheduler_service"]
     env_file:
       - .env.test
     environment:
-      - DATABASE_URL=postgresql+asyncpg://gimr:gimr_password@postgres:5432/gimr
+      - DATABASE_URL=postgresql+asyncpg://codify:codify_password@postgres:5432/codify
       - DOCKER_HOST=unix:///var/run/docker.sock
       - DOCKER_TLS_CA=
       - DOCKER_TLS_CERT=
@@ -78,22 +78,22 @@ services:
       # - ./ca.crt:/etc/ssl/certs/custom-ca.crt:ro
     restart: unless-stopped
     networks:
-      - gimr-network
+      - codify-network
 
   postgres:
     image: postgres:16-alpine
-    container_name: gimr-postgres
+    container_name: codify-postgres
     environment:
-      POSTGRES_USER: gimr
-      POSTGRES_PASSWORD: gimr_password
-      POSTGRES_DB: gimr
+      POSTGRES_USER: codify
+      POSTGRES_PASSWORD: codify_password
+      POSTGRES_DB: codify
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     networks:
-      - gimr-network
+      - codify-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gimr -d gimr"]
+      test: ["CMD-SHELL", "pg_isready -U codify -d codify"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -103,5 +103,5 @@ volumes:
   postgres_data:
 
 networks:
-  gimr-network:
+  codify-network:
     driver: bridge

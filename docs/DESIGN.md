@@ -1,4 +1,4 @@
-# GitLab Issue to MR Bot - 设计方案
+# Codify - 设计方案
 
 ## 一、项目概述
 
@@ -383,7 +383,7 @@ CREATE TABLE tasks (
     finished_at         TIMESTAMP WITH TIME ZONE,
     branch_name         TEXT,               -- 关联的 git 分支
     mr_iid              INTEGER,            -- 关联的 MR iid
-    container_name      TEXT,               -- Docker 容器名（用于 stop/logs，格式: gimr-{task_id}-p{project_id}-i{issue_iid}）
+    container_name      TEXT,               -- Docker 容器名（用于 stop/logs，格式: codify-{task_id}-p{project_id}-i{issue_iid}）
     container_id        TEXT,               -- Docker 容器 ID（docker create 返回的完整 ID）
     error_message       TEXT,
     created_at          TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -577,14 +577,14 @@ fi
 
 #### 7.4.4 容器命名规范
 
-所有 Worker 容器使用统一前缀 `gimr-`（gitlab issue-mr 缩写），便于识别和批量操作：
+所有 Worker 容器使用统一前缀 `codify-`（gitlab issue-mr 缩写），便于识别和批量操作：
 
 ```
-格式:  gimr-{task_id}-p{project_id}-i{issue_iid}
-示例:  gimr-42-p17-i123
+格式:  codify-{task_id}-p{project_id}-i{issue_iid}
+示例:  codify-42-p17-i123
 ```
 
-- `gimr-` 前缀：标识属于本系统的容器，与其他容器区分
+- `codify-` 前缀：标识属于本系统的容器，与其他容器区分
 - `{task_id}`：任务 ID，唯一标识
 - `p{project_id}`：GitLab 项目 ID
 - `i{issue_iid}`：Issue 编号
@@ -593,19 +593,19 @@ fi
 
 ```bash
 # 查看所有 bot 容器
-docker ps --filter "name=gimr-"
+docker ps --filter "name=codify-"
 
 # 批量停止所有 bot 容器 (紧急情况)
-docker stop $(docker ps -q --filter "name=gimr-")
+docker stop $(docker ps -q --filter "name=codify-")
 
 # 清理所有已停止的 bot 容器 (如果没用 --rm)
-docker rm $(docker ps -aq --filter "name=gimr-" --filter "status=exited")
+docker rm $(docker ps -aq --filter "name=codify-" --filter "status=exited")
 
 # 查看某个项目的所有容器
-docker ps --filter "name=gimr-.*-p17"
+docker ps --filter "name=codify-.*-p17"
 
 # 查看某个 issue 的容器
-docker ps --filter "name=gimr-.*-i123"
+docker ps --filter "name=codify-.*-i123"
 ```
 
 #### 7.4.5 宿主机 Worker Manager
@@ -629,11 +629,11 @@ docker_client = httpx.AsyncClient(
 )
 
 # 容器命名前缀
-CONTAINER_PREFIX = "gimr"
+CONTAINER_PREFIX = "codify"
 
 async def execute_task(task):
     container_name = f"{CONTAINER_PREFIX}-{task.id}-p{task.gitlab_project_id}-i{task.gitlab_issue_iid}"
-    branch = f"gimr/issue-{task.gitlab_issue_iid}"
+    branch = f"codify/issue-{task.gitlab_issue_iid}"
 
     # 确保裸仓库存在 (仅首次初始化, 不做 fetch — fetch 由容器内完成)
     bare_repo = f"/data/repos/{task.gitlab_project_id}/.bare"
@@ -669,7 +669,7 @@ async def execute_task(task):
                 "/data/config/claude:/root/.claude:ro",
                 f"{prompt_dir}:/task",
             ],
-            "NetworkMode": "gimr-network",
+            "NetworkMode": "codify-network",
             "NanoCpus": 4_000_000_000,  # 4 CPUs
             "Memory": 8 * 1024**3,       # 8GB
             "AutoRemove": True,
@@ -973,7 +973,7 @@ Confidential:   Yes
 
 **Session 设计：**
 
-- 浏览器只持有 `HttpOnly + Secure` Cookie，例如 `gimr_session`
+- 浏览器只持有 `HttpOnly + Secure` Cookie，例如 `codify_session`
 - 数据库只保存 session token 的 hash，不保存明文
 - session 过期、注销、禁用用户后立即失效
 - API 不向前端暴露长期 access token / refresh token
@@ -1319,7 +1319,7 @@ can_manage_task(task, action)      # 任务级权限判定
 │  │ ┌──────────────────────────┬──────────────────────────────────┐ │ │
 │  │ │ 项目     myapp           │ 触发用户   张三                   │ │ │
 │  │ │ Issue    #123 实现用户登录 → │ 类型      新建任务              │ │ │
-│  │ │ 分支     gimr/issue-123  │ 容器      gimr-42-p17-i123      │ │ │
+│  │ │ 分支     codify/issue-123  │ 容器      codify-42-p17-i123      │ │ │
 │  │ │ MR       !46 (Draft) →   │ 优先级    普通                   │ │ │
 │  │ │ 创建时间  2026-03-08 10:30│ 开始时间  2026-03-08 10:31      │ │ │
 │  │ └──────────────────────────┴──────────────────────────────────┘ │ │
@@ -1341,14 +1341,14 @@ can_manage_task(task, action)      # 任务级权限判定
 │  │                                                              │    │
 │  │  Tab 1: 执行日志                                             │    │
 │  │  ┌──────────────────────────────────────────────────────┐    │    │
-│  │  │ 10:31:01 [INFO]  启动容器 gimr-42-p17-i123          │    │    │
+│  │  │ 10:31:01 [INFO]  启动容器 codify-42-p17-i123          │    │    │
 │  │  │ 10:31:02 [INFO]  git clone 完成 (1.2s)               │    │    │
-│  │  │ 10:31:02 [INFO]  创建分支 gimr/issue-123             │    │    │
+│  │  │ 10:31:02 [INFO]  创建分支 codify/issue-123             │    │    │
 │  │  │ 10:31:03 [INFO]  开始调用 Claude CLI...               │    │    │
 │  │  │ 10:32:45 [INFO]  Claude CLI 执行完成 (102s)           │    │    │
 │  │  │ 10:32:46 [INFO]  git add -A (5 files changed)        │    │    │
 │  │  │ 10:32:46 [INFO]  git commit: bot: implement #123     │    │    │
-│  │  │ 10:32:48 [INFO]  git push origin gimr/issue-123      │    │    │
+│  │  │ 10:32:48 [INFO]  git push origin codify/issue-123      │    │    │
 │  │  │ 10:32:49 [INFO]  创建 MR !46                         │    │    │
 │  │  │ 10:32:50 [INFO]  任务完成                             │    │    │
 │  │  │                                                      │    │    │
@@ -1403,10 +1403,10 @@ can_manage_task(task, action)      # 任务级权限判定
 │  │ ┌──────────────────────┬──────┬────────┬──────┬───────┬──────┐ │ │
 │  │ │ 容器名               │ 用户 │ Issue  │ CPU  │ 内存  │ 运行 │ │ │
 │  │ ├──────────────────────┼──────┼────────┼──────┼───────┼──────┤ │ │
-│  │ │ gimr-42-p17-i123     │ 张三 │ #123   │ 2.3c │ 1.8G  │ 3m   │ │ │
-│  │ │ gimr-43-p17-i124     │ 张三 │ #124   │ 1.1c │ 0.9G  │ 1m   │ │ │
-│  │ │ gimr-44-p22-i56      │ 李四 │ #56    │ 3.8c │ 4.2G  │ 8m   │ │ │
-│  │ │ gimr-45-p22-i57      │ 王五 │ #57    │ 0.5c │ 0.3G  │ 30s  │ │ │
+│  │ │ codify-42-p17-i123     │ 张三 │ #123   │ 2.3c │ 1.8G  │ 3m   │ │ │
+│  │ │ codify-43-p17-i124     │ 张三 │ #124   │ 1.1c │ 0.9G  │ 1m   │ │ │
+│  │ │ codify-44-p22-i56      │ 李四 │ #56    │ 3.8c │ 4.2G  │ 8m   │ │ │
+│  │ │ codify-45-p22-i57      │ 王五 │ #57    │ 0.5c │ 0.3G  │ 30s  │ │ │
 │  │ └──────────────────────┴──────┴────────┴──────┴───────┴──────┘ │ │
 │  └─────────────────────────────────────────────────────────────────┘ │
 │                                                                      │
@@ -1445,7 +1445,7 @@ can_manage_task(task, action)      # 任务级权限判定
 │  │                                                                 │ │
 │  │ Bot 触发词          [@ai-bot          ]                         │ │
 │  │ 默认分支            [main             ]                         │ │
-│  │ 分支命名模板        [gimr/issue-{iid} ]                         │ │
+│  │ 分支命名模板        [codify/issue-{iid} ]                         │ │
 │  └─────────────────────────────────────────────────────────────────┘ │
 │                                                                      │
 │  ┌─────────────────────────────────────────────────────────────────┐ │
@@ -1463,7 +1463,7 @@ can_manage_task(task, action)      # 任务级权限判定
 │  │                                                                 │ │
 │  │ CPU 限制(核)        [4    ]                                     │ │
 │  │ 内存限制            [8g   ]                                     │ │
-│  │ Docker 网络         [gimr-network      ]                         │ │
+│  │ Docker 网络         [codify-network      ]                         │ │
 │  │ Worker 镜像         [bot-worker:latest]                         │ │
 │  └─────────────────────────────────────────────────────────────────┘ │
 │                                                                      │
@@ -1648,7 +1648,7 @@ PUT    /api/users/:id/state          # 禁用/启用用户
 ## 八、项目目录结构
 
 ```
-gitlab_issues_to_mr/
+codify/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py                 # FastAPI 入口
@@ -1763,7 +1763,7 @@ gitlab_issues_to_mr/
 - 延迟/定时执行 (scheduled_at)
 - 任务状态流转完整实现
 - 任务超时检测 + 容器停止 (Docker HTTP API)
-- 容器命名规范 (gimr-{id}-p{pid}-i{iid})
+- 容器命名规范 (codify-{id}-p{pid}-i{iid})
 - **崩溃恢复** (服务启动时清理残留容器 + 修复 stuck running 任务状态)
 
 ### P2 - 管理后台
@@ -1818,11 +1818,11 @@ GITLAB_WEBHOOK_SECRET=your-webhook-secret    # Webhook 校验密钥
 
 # ===== OIDC 认证 =====
 OIDC_ISSUER_URL=https://gitlab.internal.com  # GitLab OIDC issuer (可配置)
-OIDC_CLIENT_ID=gimr-bot-dashboard            # GitLab OAuth Application ID
+OIDC_CLIENT_ID=codify-bot-dashboard            # GitLab OAuth Application ID
 OIDC_CLIENT_SECRET=xxxxxxxxxxxxxxxx          # GitLab OAuth Application Secret
 OIDC_REDIRECT_URI=https://bot.internal.com/api/auth/callback
 OIDC_ENABLED=true                            # 是否启用 OIDC 登录
-SESSION_COOKIE_NAME=gimr_session            # session cookie 名称
+SESSION_COOKIE_NAME=codify_session            # session cookie 名称
 SESSION_TTL_SECONDS=28800                   # session 有效期（秒）
 SESSION_SECRET=change-me                    # session/token hash 签名密钥
 COOKIE_SECURE=true                          # 生产环境必须为 true
@@ -1841,7 +1841,7 @@ ANTHROPIC_MODEL=your-model-name              # 模型名称
 VLLM_METRICS_URL=http://10.0.1.5:8000/metrics  # vLLM Prometheus 端点
 
 # ===== 服务自身 =====
-DATABASE_URL=postgresql+asyncpg://gimr:password@localhost:5432/gimr  # PostgreSQL 连接
+DATABASE_URL=postgresql+asyncpg://codify:password@localhost:5432/codify  # PostgreSQL 连接
 SECRET_KEY=your-session-secret-key           # JWT Session 签名密钥
 LOG_LEVEL=INFO
 
@@ -1857,7 +1857,7 @@ DOCKER_TLS_KEY=/etc/docker/tls/client-key.pem
 ```yaml
 # Bot 行为
 bot_trigger_keyword: "@ai-bot"          # 触发词 (可配置)
-branch_name_template: "gimr/issue-{iid}" # 分支命名模板
+branch_name_template: "codify/issue-{iid}" # 分支命名模板
 
 # 调度
 max_concurrency: 6                       # 最大并发容器数
@@ -1869,7 +1869,7 @@ vllm_load_threshold_percent: 80          # vLLM 负载阈值
 # 容器资源
 container_cpus: "4"                      # 容器 CPU 限制
 container_memory: "8g"                   # 容器内存限制
-container_network: "gimr-network"         # Docker 网络名
+container_network: "codify-network"         # Docker 网络名
 worker_image: "bot-worker:latest"        # Worker 镜像
 
 # 权限
@@ -1939,13 +1939,13 @@ if task.status == "running":
 
 #### 6. 分支命名规则
 
-模板：`gimr/issue-{iid}`，通过 `branch_name_template` 可配置。
+模板：`codify/issue-{iid}`，通过 `branch_name_template` 可配置。
 
 示例：
 
 ```
-Issue #123 → 分支 gimr/issue-123
-Issue #456 → 分支 gimr/issue-456
+Issue #123 → 分支 codify/issue-123
+Issue #456 → 分支 codify/issue-456
 ```
 
 #### 7. 部署方式
@@ -1958,13 +1958,13 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: gimr
-      POSTGRES_USER: gimr
+      POSTGRES_DB: codify
+      POSTGRES_USER: codify
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gimr"]
+      test: ["CMD-SHELL", "pg_isready -U codify"]
       interval: 5s
       retries: 5
 
@@ -1974,10 +1974,10 @@ services:
       dockerfile: deploy/Dockerfile.backend
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://gimr:${POSTGRES_PASSWORD}@postgres:5432/gimr
+      DATABASE_URL: postgresql+asyncpg://codify:${POSTGRES_PASSWORD}@postgres:5432/codify
     volumes:
-      - gimr-repos:/data/repos                        # 裸仓库缓存
-      - gimr-shared:/data/shared                      # 共享依赖
+      - codify-repos:/data/repos                        # 裸仓库缓存
+      - codify-shared:/data/shared                      # 共享依赖
       - ./deploy/docker-tls:/etc/docker/tls:ro        # Docker TLS 证书
     depends_on:
       postgres:
@@ -1997,12 +1997,12 @@ services:
 
 volumes:
   pgdata:
-  gimr-repos:
-  gimr-shared:
+  codify-repos:
+  codify-shared:
 
 networks:
   default:
-    name: gimr-network      # Worker 容器也加入此网络
+    name: codify-network      # Worker 容器也加入此网络
 ```
 
 **前端多阶段 Dockerfile** (`deploy/Dockerfile.frontend`)：

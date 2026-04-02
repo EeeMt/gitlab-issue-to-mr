@@ -236,12 +236,12 @@ class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         from app.scheduler import WORKER_CONTAINER_PATTERN
 
         # Valid worker container names
-        self.assertTrue(WORKER_CONTAINER_PATTERN.match("gimr-1-p1-i10"))
-        self.assertTrue(WORKER_CONTAINER_PATTERN.match("gimr-123-p456-i789"))
+        self.assertTrue(WORKER_CONTAINER_PATTERN.match("codify-1-p1-i10"))
+        self.assertTrue(WORKER_CONTAINER_PATTERN.match("codify-123-p456-i789"))
 
         # Non-worker containers should not match
-        self.assertFalse(WORKER_CONTAINER_PATTERN.match("gimr-backend"))
-        self.assertFalse(WORKER_CONTAINER_PATTERN.match("gimr-postgres"))
+        self.assertFalse(WORKER_CONTAINER_PATTERN.match("codify-backend"))
+        self.assertFalse(WORKER_CONTAINER_PATTERN.match("codify-postgres"))
         self.assertFalse(WORKER_CONTAINER_PATTERN.match("random-container"))
 
 

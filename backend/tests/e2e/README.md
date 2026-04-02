@@ -45,7 +45,7 @@ pytest tests/e2e/ -v --html=report.html --self-contained-html
 ### Build Image
 
 ```bash
-docker build -f deploy/Dockerfile.e2e -t gimr-e2e:latest .
+docker build -f deploy/Dockerfile.e2e -t codify-e2e:latest .
 ```
 
 ### Run with Docker Compose
@@ -104,7 +104,7 @@ For GitLab CI, add a job like:
 
 ```yaml
 e2e-tests:
-  image: gimr-e2e:latest
+  image: codify-e2e:latest
   services:
     - postgres:16-alpine
     - nginx

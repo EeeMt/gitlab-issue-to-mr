@@ -106,9 +106,9 @@ def test_gitlab_get_mr_stats_from_diff():
 
 
 def test_worker_saves_mr_stats_after_completion():
-    """Test that worker uses GIMR_DIFF log line (primary) for MR change stats."""
+    """Test that worker uses CODIFY_DIFF log line (primary) for MR change stats."""
     print("\n" + "=" * 60)
-    print("Testing: Worker saves MR stats from GIMR_DIFF log line (primary path)")
+    print("Testing: Worker saves MR stats from CODIFY_DIFF log line (primary path)")
     print("=" * 60)
 
     mock_settings = MagicMock()
@@ -142,7 +142,7 @@ def test_worker_saves_mr_stats_after_completion():
             issue_iid=456,
             note_id=791,
             user_prompt="Add feature",
-            branch_name="gimr-3-p123-i456",
+            branch_name="codify-3-p123-i456",
             target_branch="main",
             priority=2,
             status=TaskStatus.PENDING,
@@ -153,13 +153,13 @@ def test_worker_saves_mr_stats_after_completion():
 
         mock_db = create_mock_db(task)
 
-        # Simulate logs that contain GIMR_DIFF and an MR URL
+        # Simulate logs that contain CODIFY_DIFF and an MR URL
         fake_logs = (
             "Cloning repo...\n"
             "Running claude...\n"
             "http://gitlab.example.com/project/-/merge_requests/42\n"
-            "GIMR_DIFF:+100-50\n"
-            "GIMR_STATS:{\"input_tokens\":1000,\"output_tokens\":200}\n"
+            "CODIFY_DIFF:+100-50\n"
+            "CODIFY_STATS:{\"input_tokens\":1000,\"output_tokens\":200}\n"
         )
 
         async def run_test():
@@ -168,23 +168,23 @@ def test_worker_saves_mr_stats_after_completion():
 
         asyncio.run(run_test())
 
-        # GIMR_DIFF is present → no API call needed
+        # CODIFY_DIFF is present → no API call needed
         mock_gitlab.get_merge_request_stats.assert_not_called()
 
         assert task.additions == 100, f"Expected additions=100, got {task.additions}"
         assert task.deletions == 50, f"Expected deletions=50, got {task.deletions}"
         assert task.total_changes == 150, f"Expected total_changes=150, got {task.total_changes}"
 
-        print("✓ Worker saves MR stats from GIMR_DIFF log line")
+        print("✓ Worker saves MR stats from CODIFY_DIFF log line")
         print(f"  - Additions: +{task.additions}")
         print(f"  - Deletions: -{task.deletions}")
         print(f"  - Total: {task.total_changes}")
 
 
 def test_worker_handles_missing_mr_stats():
-    """Test fallback to GitLab API when GIMR_DIFF is absent; None API result leaves stats at 0."""
+    """Test fallback to GitLab API when CODIFY_DIFF is absent; None API result leaves stats at 0."""
     print("\n" + "=" * 60)
-    print("Testing: Worker falls back to GitLab API when GIMR_DIFF absent")
+    print("Testing: Worker falls back to GitLab API when CODIFY_DIFF absent")
     print("=" * 60)
 
     mock_settings = MagicMock()
@@ -219,7 +219,7 @@ def test_worker_handles_missing_mr_stats():
             issue_iid=456,
             note_id=792,
             user_prompt="Add feature",
-            branch_name="gimr-4-p123-i456",
+            branch_name="codify-4-p123-i456",
             target_branch="main",
             priority=2,
             status=TaskStatus.PENDING,
@@ -230,11 +230,11 @@ def test_worker_handles_missing_mr_stats():
 
         mock_db = create_mock_db(task)
 
-        # Logs without GIMR_DIFF → fallback to GitLab API
+        # Logs without CODIFY_DIFF → fallback to GitLab API
         fake_logs = (
             "Cloning repo...\n"
             "http://gitlab.example.com/project/-/merge_requests/42\n"
-            "GIMR_STATS:{\"input_tokens\":500,\"output_tokens\":100}\n"
+            "CODIFY_STATS:{\"input_tokens\":500,\"output_tokens\":100}\n"
         )
 
         async def run_test():

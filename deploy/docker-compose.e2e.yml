@@ -7,35 +7,35 @@
 #   docker-compose -f docker-compose.e2e.yml run --rm e2e    # Run tests
 #   docker-compose -f docker-compose.e2e.yml down            # Clean up
 
-name: gimr-e2e
+name: codify-e2e
 
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: gimr-e2e-postgres
+    container_name: codify-e2e-postgres
     environment:
-      POSTGRES_USER: gimr
-      POSTGRES_PASSWORD: gimr_password
-      POSTGRES_DB: gimr
+      POSTGRES_USER: codify
+      POSTGRES_PASSWORD: codify_password
+      POSTGRES_DB: codify
     # No persistent volume - fresh database on each start
     tmpfs:
       - /var/lib/postgresql/data
     networks:
-      - gimr-e2e-network
+      - codify-e2e-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gimr -d gimr"]
+      test: ["CMD-SHELL", "pg_isready -U codify -d codify"]
       interval: 2s
       timeout: 5s
       retries: 30
 
   backend:
-    image: gimr-backend:latest
+    image: codify-backend:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile.backend
-    container_name: gimr-e2e-backend
+    container_name: codify-e2e-backend
     environment:
-      - DATABASE_URL=postgresql+asyncpg://gimr:gimr_password@postgres:5432/gimr
+      - DATABASE_URL=postgresql+asyncpg://codify:codify_password@postgres:5432/codify
       - DOCKER_HOST=unix:///var/run/docker.sock
       - DOCKER_TLS_CA=
       - DOCKER_TLS_CERT=
@@ -49,7 +49,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
-      - gimr-e2e-network
+      - codify-e2e-network
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 5s
@@ -58,18 +58,18 @@ services:
       start_period: 10s
 
   nginx:
-    image: gimr-nginx:latest
+    image: codify-nginx:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile.frontend
-    container_name: gimr-e2e-nginx
+    container_name: codify-e2e-nginx
     ports:
       - "18980:80"
     depends_on:
       backend:
         condition: service_healthy
     networks:
-      - gimr-e2e-network
+      - codify-e2e-network
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:80/ || exit 1"]
       interval: 3s
@@ -78,17 +78,17 @@ services:
       start_period: 5s
 
   e2e:
-    image: gimr-e2e:latest
+    image: codify-e2e:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile.e2e
-    container_name: gimr-e2e-tester
+    container_name: codify-e2e-tester
     # Note: Do NOT add default command here. Use: docker-compose run --rm e2e pytest ...
     environment:
       - E2E_BASE_URL=http://nginx:80
       - E2E_BACKEND_URL=http://backend:8000
       - E2E_GITLAB_URL=http://gitlab:8080
-      - E2E_POSTGRES_URL=postgresql://gimr:gimr_password@postgres:5432/gimr
+      - E2E_POSTGRES_URL=postgresql://codify:codify_password@postgres:5432/codify
       - E2E_RECORD_VIDEO=${E2E_RECORD_VIDEO:-}
     depends_on:
       nginx:
@@ -98,9 +98,9 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - gimr-e2e-network
+      - codify-e2e-network
     shm_size: '2gb'
 
 networks:
-  gimr-e2e-network:
+  codify-e2e-network:
     driver: bridge

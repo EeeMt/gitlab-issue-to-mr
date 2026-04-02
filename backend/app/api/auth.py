@@ -44,9 +44,9 @@ from app.page_permissions import get_page_permissions
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-STATE_COOKIE_NAME = "gimr_oidc_state"
-NONCE_COOKIE_NAME = "gimr_oidc_nonce"
-NEXT_COOKIE_NAME = "gimr_oidc_next"
+STATE_COOKIE_NAME = "codify_oidc_state"
+NONCE_COOKIE_NAME = "codify_oidc_nonce"
+NEXT_COOKIE_NAME = "codify_oidc_next"
 
 
 class LocalLoginRequestBody(BaseModel):

@@ -133,7 +133,7 @@ class TestBootstrapPage:
         page.wait_for_selector(".bootstrap-card", timeout=10000)
 
         # Set Chinese locale
-        page.evaluate("window.localStorage.setItem('gimr-locale', 'zh-CN')")
+        page.evaluate("window.localStorage.setItem('codify-locale', 'zh-CN')")
 
         # Reload to apply Chinese locale
         page.reload()

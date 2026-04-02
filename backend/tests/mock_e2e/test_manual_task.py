@@ -234,7 +234,7 @@ class TestManualTaskNotification:
             issue_id=456,
             note_id=789,
             user_prompt=TEST_PROMPT,
-            branch_name="gimr/issue-123",
+            branch_name="codify/issue-123",
             is_manual=False,
         )
 

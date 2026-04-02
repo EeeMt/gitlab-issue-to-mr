@@ -1,6 +1,6 @@
 # E2E 测试指南
 
-本文档介绍 GIMR 项目的 Playwright E2E 浏览器测试的开发、运行和调试方法。
+本文档介绍 Codify 项目的 Playwright E2E 浏览器测试的开发、运行和调试方法。
 
 ## 目录
 
@@ -86,13 +86,13 @@ services:
     # 使用 tmpfs 存储，测试后数据不持久化
 
   backend:
-    image: gimr-backend:latest
+    image: codify-backend:latest
     environment:
-      - DATABASE_URL=postgresql+asyncpg://gimr:gimr_password@postgres:5432/gimr
+      - DATABASE_URL=postgresql+asyncpg://codify:codify_password@postgres:5432/codify
       - AUTO_MIGRATE=true
 
   nginx:
-    image: gimr-nginx:latest
+    image: codify-nginx:latest
 
   e2e:
     build:
@@ -102,7 +102,7 @@ services:
     environment:
       - E2E_BASE_URL=http://nginx:80
       - E2E_BACKEND_URL=http://backend:8000
-      - E2E_POSTGRES_URL=postgresql://gimr:gimr_password@postgres:5432/gimr
+      - E2E_POSTGRES_URL=postgresql://codify:codify_password@postgres:5432/codify
 ```
 
 ### 环境变量说明
@@ -412,7 +412,7 @@ expect(page).to_have_url("**/dashboard", timeout=5000)
 
 **检查表名：**
 ```bash
-docker exec gimr-e2e-postgres psql -U gimr -d gimr -c "\dt"
+docker exec codify-e2e-postgres psql -U codify -d codify -c "\dt"
 ```
 
 ### 5. 滚动元素不可见
@@ -534,20 +534,20 @@ docker-compose -f docker-compose.e2e.yml run --rm e2e pytest -m dashboard -v
 docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/test_dashboard.py -v --headed
 
 # 6. 查看容器日志
-docker logs gimr-e2e-backend --tail 100
-docker logs gimr-e2e-postgres --tail 100
+docker logs codify-e2e-backend --tail 100
+docker logs codify-e2e-postgres --tail 100
 
 # 7. 进入测试容器
-docker run --rm -it --network=deploy_gimr-e2e-network gimr-e2e:latest /bin/bash
+docker run --rm -it --network=deploy_codify-e2e-network codify-e2e:latest /bin/bash
 
 # 8. 检查数据库表
-docker exec gimr-e2e-postgres psql -U gimr -d gimr -c "\dt"
+docker exec codify-e2e-postgres psql -U codify -d codify -c "\dt"
 
 # 9. 清理环境
 docker-compose -f docker-compose.e2e.yml down -v
 
 # 10. 重新构建镜像（代码修改后必须）
-docker build --no-cache -f deploy/Dockerfile.e2e -t gimr-e2e:latest .
+docker build --no-cache -f deploy/Dockerfile.e2e -t codify-e2e:latest .
 ```
 
 ---

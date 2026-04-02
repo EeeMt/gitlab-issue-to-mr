@@ -98,7 +98,7 @@ ComponentName.vue
 
 ## Project Context
 
-This is the GIMR (GitLab Issue to MR Bot) frontend built with Vue 3. Key pages include:
+This is the Codify (Codify) frontend built with Vue 3. Key pages include:
 - Dashboard.vue - Task queue with P0/P1/P2 priority tabs
 - TaskView.vue - Task details and execution logs
 - Config.vue - Runtime configuration management

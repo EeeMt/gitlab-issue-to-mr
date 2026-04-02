@@ -121,7 +121,7 @@ async def test_mr_comment_with_mock_db():
     mock_task.project_id = 12345
     mock_task.issue_iid = 1
     mock_task.issue_id = 1234501
-    mock_task.branch_name = "gimr/issue-1"
+    mock_task.branch_name = "codify/issue-1"
     mock_task.target_branch = "main"
     mock_task.merge_request_iid = 1
     mock_task.status = TaskStatus.COMPLETED
@@ -148,7 +148,7 @@ async def test_mr_comment_with_mock_db():
     with patch('app.api.webhook.get_gitlab_client') as mock_gitlab:
         mock_gitlab_client = MagicMock()
         mock_gitlab_client.get_mr_by_iid.return_value = {
-            "source_branch": "gimr/issue-1",
+            "source_branch": "codify/issue-1",
             "target_branch": "main",
             "title": "Add login feature",
             "state": "open"

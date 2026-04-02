@@ -59,9 +59,9 @@ def check_container_naming():
 
     test_cases = [
         # (task_id, project_id, issue_iid, expected_name)
-        (1, 123, 456, "gimr-1-p123-i456"),
-        (10, 1, 99, "gimr-10-p1-i99"),
-        (100, 999, 1000, "gimr-100-p999-i1000"),
+        (1, 123, 456, "codify-1-p123-i456"),
+        (10, 1, 99, "codify-10-p1-i99"),
+        (100, 999, 1000, "codify-100-p999-i1000"),
     ]
 
     passed = 0
@@ -69,7 +69,7 @@ def check_container_naming():
 
     for task_id, project_id, issue_iid, expected in test_cases:
         # Generate container name using the convention
-        actual = f"gimr-{task_id}-p{project_id}-i{issue_iid}"
+        actual = f"codify-{task_id}-p{project_id}-i{issue_iid}"
 
         if actual == expected:
             print(f"✅ PASS: {actual}")
@@ -142,16 +142,16 @@ def check_container_cleanup_pattern():
     print("=" * 60)
 
     import re
-    WORKER_CONTAINER_PATTERN = re.compile(r"^gimr-\d+-p\d+-i\d+$")
+    WORKER_CONTAINER_PATTERN = re.compile(r"^codify-\d+-p\d+-i\d+$")
 
     test_cases = [
         # (container_name, should_clean)
-        ("gimr-1-p123-i456", True),      # Worker container - clean
-        ("gimr-10-p1-i99", True),        # Worker container - clean
-        ("gimr-backend", False),         # Backend service - skip
-        ("gimr-postgres", False),         # Postgres service - skip
+        ("codify-1-p123-i456", True),      # Worker container - clean
+        ("codify-10-p1-i99", True),        # Worker container - clean
+        ("codify-backend", False),         # Backend service - skip
+        ("codify-postgres", False),         # Postgres service - skip
         ("random-container", False),       # Unrelated - skip
-        ("gimr-", False),                # Invalid pattern - skip
+        ("codify-", False),                # Invalid pattern - skip
     ]
 
     passed = 0
@@ -212,7 +212,7 @@ def check_status_transition_on_timeout():
 def main():
     """Run all timeout and crash recovery tests."""
     print("\n" + "=" * 60)
-    print("GIMR Timeout & Crash Recovery Tests")
+    print("Codify Timeout & Crash Recovery Tests")
     print("=" * 60)
 
     results = []

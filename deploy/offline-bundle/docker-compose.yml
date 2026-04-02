@@ -1,7 +1,7 @@
 services:
   nginx:
-    image: gimr-nginx:latest
-    container_name: gimr-nginx
+    image: codify-nginx:latest
+    container_name: codify-nginx
     ports:
       - "8880:80"
     depends_on:
@@ -9,11 +9,11 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - gimr-network
+      - codify-network
 
   backend:
-    image: gimr-backend:latest
-    container_name: gimr-backend
+    image: codify-backend:latest
+    container_name: codify-backend
     ports:
       - "8000:8000"
     env_file:
@@ -33,7 +33,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
     networks:
-      - gimr-network
+      - codify-network
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 5s
@@ -42,8 +42,8 @@ services:
       start_period: 30s
 
   scheduler:
-    image: gimr-backend:latest
-    container_name: gimr-scheduler
+    image: codify-backend:latest
+    container_name: codify-scheduler
     command: ["python3", "-m", "app.scheduler_service"]
     env_file:
       - ./config/.env.offline
@@ -63,20 +63,20 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
     networks:
-      - gimr-network
+      - codify-network
 
   postgres:
     image: postgres:16-alpine
-    container_name: gimr-postgres
+    container_name: codify-postgres
     env_file:
       - ./config/.env.offline
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     networks:
-      - gimr-network
+      - codify-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gimr -d gimr"]
+      test: ["CMD-SHELL", "pg_isready -U codify -d codify"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -86,5 +86,5 @@ volumes:
   postgres_data:
 
 networks:
-  gimr-network:
+  codify-network:
     driver: bridge

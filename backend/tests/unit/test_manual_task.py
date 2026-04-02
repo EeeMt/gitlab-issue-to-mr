@@ -217,7 +217,7 @@ class TestTaskModel:
             issue_id=456,
             note_id=789,
             user_prompt="Test prompt",
-            branch_name="gimr/issue-123",
+            branch_name="codify/issue-123",
             is_manual=False,
         )
         assert task.issue_iid == 123

@@ -157,7 +157,7 @@ function createDefaultFormValue(): ConfigForm {
     oidc_issuer_url: '',
     oidc_client_id: '',
     oidc_redirect_uri: '',
-    session_cookie_name: 'gimr_session',
+    session_cookie_name: 'codify_session',
     session_ttl_seconds: 28800,
     cookie_secure: true,
     cookie_samesite: 'lax',

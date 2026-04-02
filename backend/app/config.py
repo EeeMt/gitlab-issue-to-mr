@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     claude_max_turns: int = Field(default=20)
 
     # Database Configuration - require via env var
-    database_url: str = Field(default="postgresql+asyncpg://gimr:gimr_password@localhost:5432/gimr")
+    database_url: str = Field(default="postgresql+asyncpg://codify:codify_password@localhost:5432/codify")
 
     # Docker Engine HTTP API Configuration
     docker_host: str = Field(default="tcp://localhost:2376")
@@ -117,7 +117,7 @@ class Settings(BaseSettings):
     oidc_client_id: str = Field(default="")
     oidc_client_secret: str = Field(default="")
     oidc_redirect_uri: str = Field(default="")
-    session_cookie_name: str = Field(default="gimr_session")
+    session_cookie_name: str = Field(default="codify_session")
     session_ttl_seconds: int = Field(default=28800)
     cookie_secure: bool = Field(default=True)
     cookie_samesite: str = Field(default="lax")
@@ -128,7 +128,7 @@ class Settings(BaseSettings):
     auth_break_glass_password_hash: str = Field(default="")
 
     # Worker Configuration
-    worker_image: str = Field(default="gimr-worker:latest")
+    worker_image: str = Field(default="codify-worker:latest")
     maven_cache_host_path: str = Field(default="")  # Host path to .m2/repository dir; empty = disabled
     maven_settings_host_path: str = Field(default="")  # Host path to settings.xml; empty = disabled
     # JSON array of volume mounts: [{"host_path": "/path", "container_path": "/path", "mode": "ro"}]

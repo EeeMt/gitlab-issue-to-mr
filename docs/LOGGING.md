@@ -241,7 +241,7 @@ from app.middleware.trace import TraceMiddleware, get_trace_id
 setup_logging()
 logger = get_logger("main")
 
-app = FastAPI(title="GIMR API")
+app = FastAPI(title="Codify API")
 
 # 注册 Trace 中间件
 app.add_middleware(TraceMiddleware)

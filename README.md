@@ -1,8 +1,8 @@
-# GitLab Issue to MR Bot (GIMR)
+# Codify
 
 [中文说明](docs/README.zh-CN.md)
 
-GIMR is an AI-assisted service that turns GitLab issue comments into code changes, branches, commits, and Merge Requests. It also ships with a Vue-based dashboard for task operations, scheduling, monitoring, analytics, configuration, and access control.
+Codify is an AI-assisted service that turns GitLab issue comments into code changes, branches, commits, and Merge Requests. It also ships with a Vue-based dashboard for task operations, scheduling, monitoring, analytics, configuration, and access control.
 
 ## What it does
 
@@ -135,7 +135,7 @@ Comment on an issue with:
 @ai-bot create a hello world function
 ```
 
-GIMR will queue a task, run the worker, push changes, create or update an MR, and report progress back to GitLab.
+Codify will queue a task, run the worker, push changes, create or update an MR, and report progress back to GitLab.
 
 ### Manual task flow
 

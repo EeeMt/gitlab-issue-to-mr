@@ -1,6 +1,6 @@
 # Dashboard Screenshots
 
-This document provides a visual overview of the GIMR dashboard interface.
+This document provides a visual overview of the Codify dashboard interface.
 
 ## Login Page
 

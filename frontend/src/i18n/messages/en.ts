@@ -25,7 +25,7 @@ const en = {
     registrationFailed: 'Failed to create administrator account'
   },
   app: {
-    brandTitle: 'GIMR Admin',
+    brandTitle: 'Codify Admin',
     brandSubtitle: 'Task operations console',
     navigation: 'Navigation',
     language: 'Language'

@@ -193,7 +193,7 @@ class TestCreateContainer:
         wrapper.client.containers.run.return_value = mock_container
 
         result = wrapper.create_container(
-            image="gimr-worker:latest",
+            image="codify-worker:latest",
             command="python run.py",
         )
 

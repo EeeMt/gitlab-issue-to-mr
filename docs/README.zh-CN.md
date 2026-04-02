@@ -1,8 +1,8 @@
-# GitLab Issue to MR Bot (GIMR)
+# Codify
 
 [English README](../README.md)
 
-GIMR 是一个基于 GitLab Issue 的 AI 代码生成服务。用户在 Issue 评论中输入 `@ai-bot <需求>` 后，系统会创建任务、调度 Worker 容器执行 Claude CLI、提交代码并创建 Merge Request。项目同时提供一个 Web Dashboard，用于任务管理、调度、监控、统计、配置和访问控制。
+Codify 是一个基于 GitLab Issue 的 AI 代码生成服务。用户在 Issue 评论中输入 `@ai-bot <需求>` 后，系统会创建任务、调度 Worker 容器执行 Claude CLI、提交代码并创建 Merge Request。项目同时提供一个 Web Dashboard，用于任务管理、调度、监控、统计、配置和访问控制。
 
 ## 它能做什么
 
@@ -130,11 +130,11 @@ docker build -f deploy/Dockerfile.backend -t deploy-backend .
 cd deploy && docker-compose up -d backend scheduler
 
 # frontend / nginx
-docker build -f deploy/Dockerfile.frontend -t gimr-nginx:latest .
+docker build -f deploy/Dockerfile.frontend -t codify-nginx:latest .
 cd deploy && docker-compose up -d --build nginx
 
 # worker
-docker build -f deploy/Dockerfile.worker -t gimr-worker:latest .
+docker build -f deploy/Dockerfile.worker -t codify-worker:latest .
 ```
 
 ## 使用方式
@@ -147,7 +147,7 @@ docker build -f deploy/Dockerfile.worker -t gimr-worker:latest .
 @ai-bot create a hello world function
 ```
 
-GIMR 会创建任务、启动 Worker、推送代码、创建或更新 MR，并把进度回写到 GitLab。
+Codify 会创建任务、启动 Worker、推送代码、创建或更新 MR，并把进度回写到 GitLab。
 
 ### 手动任务
 

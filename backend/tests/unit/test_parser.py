@@ -132,7 +132,7 @@ def check_task_creation():
         issue_iid=789,
         note_id=111,
         user_prompt="test prompt",
-        branch_name="gimr/issue-789",
+        branch_name="codify/issue-789",
         priority=PRIORITY_HIGH,
         scheduled_at=scheduled,
         target_branch="develop",
@@ -273,7 +273,7 @@ def check_issue_context_prompt_builders():
 def main():
     """Run all tests."""
     print("\n" + "=" * 60)
-    print("GIMR P1 - Local Tests")
+    print("Codify P1 - Local Tests")
     print("=" * 60)
 
     results = []

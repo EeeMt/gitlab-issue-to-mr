@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Mock-based End-to-End Integration Test for GIMR (GitLab Issue to MR Bot)
+Mock-based End-to-End Integration Test for Codify (Codify)
 
 This test uses mock GitLab API and simulates the entire workflow without
 requiring a real GitLab instance.
@@ -131,7 +131,7 @@ class MockGitLabHandler(http.server.BaseHTTPRequestHandler):
                 "iid": mr_id,
                 "web_url": f"{GITLAB_URL}/!{mr_id}",
                 "state": "opened",
-                "source_branch": "gimr/issue-1",
+                "source_branch": "codify/issue-1",
                 "description": "Mock MR"
             }
             self.send_response(201)
@@ -277,7 +277,7 @@ def verify_task_completion(task_id: int) -> bool:
 
 def main():
     """Run the mock end-to-end integration test."""
-    parser = argparse.ArgumentParser(description="GIMR Mock E2E Integration Test")
+    parser = argparse.ArgumentParser(description="Codify Mock E2E Integration Test")
     parser.add_argument("--skip-startup", action="store_true",
                        help="Skip backend startup")
     parser.add_argument("--keep-running", action="store_true",
@@ -285,7 +285,7 @@ def main():
     args = parser.parse_args()
 
     logger.info("=" * 60)
-    logger.info("GIMR Mock End-to-End Integration Test")
+    logger.info("Codify Mock End-to-End Integration Test")
     logger.info("=" * 60)
 
     mock_gitlab_port = 8888

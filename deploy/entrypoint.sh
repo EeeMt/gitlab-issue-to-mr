@@ -117,8 +117,8 @@ git clone "${GIT_REPO_URL}" /workspace
 cd /workspace
 
 # Configure git
-git config --global user.email "bot@gimr.local"
-git config --global user.name "GIMR Bot"
+git config --global user.email "bot@codify.local"
+git config --global user.name "Codify Bot"
 git config --global --add safe.directory /workspace
 
 # Checkout/create branch
@@ -414,7 +414,7 @@ ${USER_PROMPT}
 EOF
 
 chmod 644 /tmp/claude_prompt.txt
-chown -R gimr:gimr /workspace /tmp/claude_prompt.txt
+chown -R codify:codify /workspace /tmp/claude_prompt.txt
 
 export ANTHROPIC_BASE_URL
 export ANTHROPIC_API_KEY
@@ -434,7 +434,7 @@ update_mr_description "$(build_running_mr_description)" || true
 
 echo "Starting Claude CLI (streaming mode)..."
 set +e
-env HOME=/home/gimr timeout 300 su -m -s /bin/bash gimr -c \
+env HOME=/home/codify timeout 300 su -m -s /bin/bash codify -c \
     'cd /workspace && export PATH="/usr/local/bin:/usr/bin:/bin:${JAVA_HOME}/bin" && /usr/local/bin/ci-claude.sh "$(cat /tmp/claude_prompt.txt)"' \
     > /tmp/claude_result.json
 SCRIPT_RESULT=$?
@@ -459,7 +459,7 @@ if [ -f /tmp/claude_result.json ] && [ -s /tmp/claude_result.json ]; then
 
     # Emit machine-parseable usage stats for backend collection
     USAGE_JSON=$(jq -c '.usage // {}' /tmp/claude_result.json 2>/dev/null || echo '{}')
-    echo "GIMR_STATS:${USAGE_JSON}"
+    echo "CODIFY_STATS:${USAGE_JSON}"
 fi
 
 # Now commit and push the changes
@@ -512,7 +512,7 @@ if [ -n "$CHANGES" ]; then
     TOTAL_CHANGES=$((ADDITIONS + DELETIONS))
 
     echo "Changes: +${ADDITIONS} -${DELETIONS} (${TOTAL_CHANGES} total)"
-    echo "GIMR_DIFF:+${ADDITIONS}-${DELETIONS}"
+    echo "CODIFY_DIFF:+${ADDITIONS}-${DELETIONS}"
 
     # Collect changed file lists from the staged diff before committing.
     NEW_FILES=""
@@ -544,10 +544,10 @@ if [ -n "$CHANGES" ]; then
     COMMIT_MESSAGE_PROMPT=$(build_commit_message_prompt "${CHANGED_FILES_TEXT}" "${COMMIT_DIFF_STATS}" "${FINAL_SUMMARY_CONTENT}")
     printf '%s\n' "${COMMIT_MESSAGE_PROMPT}" > /tmp/commit_message_prompt.txt
     chmod 644 /tmp/commit_message_prompt.txt
-    chown gimr:gimr /tmp/commit_message_prompt.txt
+    chown codify:codify /tmp/commit_message_prompt.txt
 
     set +e
-    GENERATED_COMMIT_MESSAGE=$(env HOME=/home/gimr timeout 60 su -m -s /bin/bash gimr -c '/usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" "$(cat /tmp/commit_message_prompt.txt)"' 2>/dev/null)
+    GENERATED_COMMIT_MESSAGE=$(env HOME=/home/codify timeout 60 su -m -s /bin/bash codify -c '/usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" "$(cat /tmp/commit_message_prompt.txt)"' 2>/dev/null)
     COMMIT_MESSAGE_RESULT=$?
     set -e
 
@@ -619,10 +619,10 @@ AI-Generated: true"
         TITLE_PROMPT=$(build_mr_title_prompt "${CHANGED_FILES_TEXT}")
         printf '%s\n' "${TITLE_PROMPT}" > /tmp/mr_title_prompt.txt
         chmod 644 /tmp/mr_title_prompt.txt
-        chown gimr:gimr /tmp/mr_title_prompt.txt
+        chown codify:codify /tmp/mr_title_prompt.txt
 
         set +e
-        GENERATED_MR_TITLE=$(env HOME=/home/gimr timeout 60 su -m -s /bin/bash gimr -c '/usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" "$(cat /tmp/mr_title_prompt.txt)"' 2>/dev/null)
+        GENERATED_MR_TITLE=$(env HOME=/home/codify timeout 60 su -m -s /bin/bash codify -c '/usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" "$(cat /tmp/mr_title_prompt.txt)"' 2>/dev/null)
         TITLE_RESULT=$?
         set -e
 

@@ -1,5 +1,5 @@
 {
-  "name": "gitlab-issues-to-mr-frontend",
+  "name": "codify-frontend",
   "version": "0.1.0",
   "type": "module",
   "scripts": {

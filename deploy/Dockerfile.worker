@@ -26,9 +26,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd --create-home --shell /bin/bash --uid 1000 gimr \
-    && mkdir -p /home/gimr/.m2/repository \
-    && chown -R gimr:gimr /home/gimr/.m2
+RUN useradd --create-home --shell /bin/bash --uid 1000 codify \
+    && mkdir -p /home/codify/.m2/repository \
+    && chown -R codify:codify /home/codify/.m2
 
 ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 ENV PATH="${JAVA_HOME}/bin:/usr/local/bin:${PATH}"

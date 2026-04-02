@@ -1,4 +1,4 @@
-# Makefile for GIMR
+# Makefile for Codify
 # ============================================
 
 # Project root directory
@@ -15,7 +15,7 @@ export COMPOSE_DOCKER_CLI_BUILD := 1
 .PHONY: build
 build: ## Build all images (backend, nginx, worker)
 	cd $(PROJECT_ROOT)/deploy && docker-compose build
-	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t gimr-worker:latest $(PROJECT_ROOT)
+	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t codify-worker:latest $(PROJECT_ROOT)
 
 .PHONY: up
 up: ## Start development environment
@@ -56,7 +56,7 @@ rebuild-nginx: ## Rebuild nginx image and restart container
 
 .PHONY: rebuild-worker
 rebuild-worker: ## Rebuild worker image
-	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t gimr-worker:latest $(PROJECT_ROOT)
+	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t codify-worker:latest $(PROJECT_ROOT)
 
 # ============================================
 # Testing
@@ -95,9 +95,9 @@ setup: setup-venv setup-npm ## Install all dependencies (backend venv + frontend
 RECORD_VIDEO ?= 0
 
 ifeq ($(RECORD_VIDEO),1)
-_E2E_PRE  = docker rm -f gimr-e2e-recorder 2>/dev/null || true && mkdir -p $(PROJECT_ROOT)/deploy/e2e-videos &&
-_E2E_RUN  = cd $(PROJECT_ROOT)/deploy && E2E_RECORD_VIDEO=1 docker-compose -f docker-compose.e2e.yml run --name gimr-e2e-recorder e2e
-_E2E_POST = ; E2E_EXIT=$$?; docker cp gimr-e2e-recorder:/videos/. $(PROJECT_ROOT)/deploy/e2e-videos/ 2>/dev/null || true; docker rm -f gimr-e2e-recorder 2>/dev/null || true; echo "Videos → deploy/e2e-videos/"; exit $$E2E_EXIT
+_E2E_PRE  = docker rm -f codify-e2e-recorder 2>/dev/null || true && mkdir -p $(PROJECT_ROOT)/deploy/e2e-videos &&
+_E2E_RUN  = cd $(PROJECT_ROOT)/deploy && E2E_RECORD_VIDEO=1 docker-compose -f docker-compose.e2e.yml run --name codify-e2e-recorder e2e
+_E2E_POST = ; E2E_EXIT=$$?; docker cp codify-e2e-recorder:/videos/. $(PROJECT_ROOT)/deploy/e2e-videos/ 2>/dev/null || true; docker rm -f codify-e2e-recorder 2>/dev/null || true; echo "Videos → deploy/e2e-videos/"; exit $$E2E_EXIT
 else
 _E2E_PRE  =
 _E2E_RUN  = cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e

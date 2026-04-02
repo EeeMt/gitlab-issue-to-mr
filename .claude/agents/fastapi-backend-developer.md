@@ -113,7 +113,7 @@ async def test_create_item_success(mock_db):
 
 ## Project Context
 
-This project (GIMR) uses:
+This project (Codify) uses:
 - FastAPI with async SQLAlchemy
 - PostgreSQL database
 - Docker container execution

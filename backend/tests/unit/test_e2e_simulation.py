@@ -42,7 +42,7 @@ def simulate_full_workflow():
         issue_iid=789,
         note_id=111,
         user_prompt=cmd.args,
-        branch_name="gimr/issue-789",
+        branch_name="codify/issue-789",
         priority=cmd.priority,
         scheduled_at=scheduled_at,
         target_branch="main",
@@ -69,7 +69,7 @@ def simulate_full_workflow():
     print("\n🚀 Step 5: Execute task")
     task.status = TaskStatus.RUNNING
     task.started_at = datetime.now(UTC)
-    task.container_id = "gimr-1-p123-i789"
+    task.container_id = "codify-1-p123-i789"
     print(f"   Status: {task.status.value}")
     print(f"   Container: {task.container_id}")
 
@@ -222,7 +222,7 @@ def test_simulate_priority_queue():
 def main():
     """Run all E2E simulations."""
     print("\n" + "#" * 60)
-    print("# GIMR End-to-End Simulations")
+    print("# Codify End-to-End Simulations")
     print("#" * 60)
 
     results = []

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-GIMR (GitLab Issue to MR Bot) - An AI-powered code generation service that automatically creates branches, generates code using Claude CLI, commits changes, and creates Merge Requests from GitLab Issues.
+Codify (Codify) - An AI-powered code generation service that automatically creates branches, generates code using Claude CLI, commits changes, and creates Merge Requests from GitLab Issues.
 
 ## Commands
 
@@ -50,10 +50,10 @@ See [docs/TESTING.md](docs/TESTING.md) for detailed testing guide.
 Quick debug commands:
 ```bash
 # View backend logs
-docker logs gimr-backend --tail 100
+docker logs codify-backend --tail 100
 
 # Check task status in database
-docker exec gimr-postgres psql -U gimr -d gimr -c "SELECT id, status, error_message FROM tasks ORDER BY id DESC LIMIT 3;"
+docker exec codify-postgres psql -U codify -d codify -c "SELECT id, status, error_message FROM tasks ORDER BY id DESC LIMIT 3;"
 
 # Check GitLab issue comments (replace token from deploy/.env.test)
 curl -s -H "PRIVATE-TOKEN: glpat-xxx" "http://192.168.50.129:8080/api/v4/projects/1/issues/1/notes"
@@ -106,7 +106,7 @@ Environment variables in `backend/.env`:
 - `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`
 - `DATABASE_URL` - PostgreSQL connection
 - `DOCKER_HOST` - Docker Engine API (default: tcp://localhost:2376)
-- `WORKER_IMAGE` - Worker container image (default: gimr-worker:latest)
+- `WORKER_IMAGE` - Worker container image (default: codify-worker:latest)
 - `MAX_CONCURRENCY` - Max parallel tasks (default: 3)
 - `TASK_TIMEOUT` - Task timeout in seconds (default: 1800 = 30 min)
 - `DEFAULT_TARGET_BRANCH` - Default branch for MRs (default: main)
@@ -134,7 +134,7 @@ Environment variables in `backend/.env`:
 
 - **Async SQLAlchemy**: All database operations are async (`AsyncSession`)
 - **Scheduler Loop**: Background asyncio task that polls for pending tasks
-- **Container Isolation**: Each task runs in its own Docker container with naming pattern `gimr-{task_id}-p{project_id}-i{issue_iid}`
+- **Container Isolation**: Each task runs in its own Docker container with naming pattern `codify-{task_id}-p{project_id}-i{issue_iid}`
 - **Crash Recovery**: On startup, scheduler cleans up stale containers and marks stuck tasks as failed
 - **Issue Mutex**: Prevents multiple tasks for the same issue from running concurrently
 - **Runtime Config**: Scheduler settings can be overridden via `/api/config` endpoints without restart

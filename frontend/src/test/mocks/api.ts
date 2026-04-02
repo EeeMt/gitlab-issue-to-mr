@@ -89,7 +89,7 @@ export const createMockStats = (overrides = {}): Stats => ({
 
 export const createMockContainer = (overrides = {}): Container => ({
   id: 'container-1',
-  name: 'gimr-1-p1-i42',
+  name: 'codify-1-p1-i42',
   status: 'running',
   task_id: 1,
   project_id: 1,

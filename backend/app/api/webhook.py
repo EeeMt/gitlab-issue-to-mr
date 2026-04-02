@@ -487,7 +487,7 @@ async def _handle_generate_command(
         initiator_user_id=await _resolve_initiator_user_id(db, initiator),
         initiator_gitlab_user_id=_coerce_int(initiator.get("id")) if initiator else None,
         initiator_username=_coerce_str(initiator.get("username")) if initiator else None,
-        branch_name=f"gimr/issue-{issue_iid}",
+        branch_name=f"codify/issue-{issue_iid}",
         priority=command.priority,
         scheduled_at=scheduled_at,
         target_branch=target_branch,

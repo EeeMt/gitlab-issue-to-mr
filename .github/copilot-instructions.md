@@ -2,7 +2,7 @@
 
 ## Project
 
-GIMR (GitLab Issue to MR Bot) — AI-powered service that receives GitLab webhook events, generates code via Claude CLI running inside isolated Docker containers, and creates Merge Requests automatically.
+Codify (Codify) — AI-powered service that receives GitLab webhook events, generates code via Claude CLI running inside isolated Docker containers, and creates Merge Requests automatically.
 
 ## Commands
 
@@ -38,7 +38,7 @@ cd deploy && docker-compose logs -f
 
 # After source changes, rebuild images:
 docker build -f deploy/Dockerfile.backend -t deploy-backend .
-docker build -f deploy/Dockerfile.worker -t gimr-worker:latest .
+docker build -f deploy/Dockerfile.worker -t codify-worker:latest .
 ```
 
 ## Architecture
@@ -48,15 +48,15 @@ docker build -f deploy/Dockerfile.worker -t gimr-worker:latest .
 1. GitLab posts a webhook to `POST /api/webhook/gitlab`
 2. `webhook.py` verifies the secret (per-project first, global fallback), parses `@ai-bot <prompt>` from issue comments, and inserts a `Task` record (status=PENDING)
 3. The **Scheduler** (separate process: `python -m app.scheduler_service`) polls for PENDING tasks using a priority queue
-4. Scheduler calls `WorkerExecutor`, which spawns a Docker container named `gimr-{task_id}-p{project_id}-i{issue_iid}`
+4. Scheduler calls `WorkerExecutor`, which spawns a Docker container named `codify-{task_id}-p{project_id}-i{issue_iid}`
 5. The container (`deploy/entrypoint.sh`) clones the repo, runs Claude CLI to generate code, commits, pushes, and creates an MR
 6. Worker updates task status and posts the MR link back as a GitLab issue comment
 
 ### Service split in Docker Compose
 
-- **backend** (`gimr-backend`): FastAPI HTTP server, `AUTO_MIGRATE=false`
-- **scheduler** (`gimr-scheduler`): same image, runs `app.scheduler_service`, `AUTO_MIGRATE=true` (owns migrations)
-- **nginx** (`gimr-nginx`): serves built frontend and proxies `/api` to backend
+- **backend** (`codify-backend`): FastAPI HTTP server, `AUTO_MIGRATE=false`
+- **scheduler** (`codify-scheduler`): same image, runs `app.scheduler_service`, `AUTO_MIGRATE=true` (owns migrations)
+- **nginx** (`codify-nginx`): serves built frontend and proxies `/api` to backend
 
 ### Database
 
@@ -93,7 +93,7 @@ Settings have two layers:
 
 ### Container naming
 
-Worker containers follow the pattern `gimr-{task_id}-p{project_id}-i{issue_iid}` (matched by `WORKER_CONTAINER_PATTERN` regex). Crash recovery on scheduler startup identifies and cleans up stale containers by this pattern.
+Worker containers follow the pattern `codify-{task_id}-p{project_id}-i{issue_iid}` (matched by `WORKER_CONTAINER_PATTERN` regex). Crash recovery on scheduler startup identifies and cleans up stale containers by this pattern.
 
 ### Priority levels
 

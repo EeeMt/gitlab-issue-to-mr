@@ -28,7 +28,7 @@ class AuthDependencyTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(),
         ) as load_runtime_config_mock, patch(
             "app.dependencies.auth.get_effective_settings",
-            return_value=SimpleNamespace(oidc_enabled=True, session_cookie_name="gimr_session"),
+            return_value=SimpleNamespace(oidc_enabled=True, session_cookie_name="codify_session"),
         ), patch(
             "app.dependencies.auth.resolve_session_authentication",
             new=AsyncMock(return_value=SimpleNamespace(user=user, session=session, failure_detail=None)),
@@ -39,7 +39,7 @@ class AuthDependencyTests(unittest.IsolatedAsyncioTestCase):
             "app.dependencies.auth.get_gitlab_refresh_token_from_session",
             return_value=None,
         ):
-            request._cookies = {"gimr_session": "token-123"}
+            request._cookies = {"codify_session": "token-123"}
             result = await get_optional_auth_context(request=request, db=mock_db)
 
         load_runtime_config_mock.assert_awaited_once_with(mock_db)

@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Handles startup and shutdown events.
     """
     # Startup
-    logger.info("Starting GitLab Issue to MR Bot...")
+    logger.info("Starting Codify...")
 
     # Run database migrations first
     try:
@@ -78,7 +78,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(
-    title="GitLab Issue to MR Bot",
+    title="Codify",
     description="AI-powered code generation from GitLab Issues",
     version="0.1.0",
     lifespan=lifespan,
@@ -146,7 +146,7 @@ async def handle_exception(request: Request, exc: Exception):
 async def root() -> dict:
     """Root endpoint."""
     return {
-        "name": "GitLab Issue to MR Bot",
+        "name": "Codify",
         "version": "0.1.0",
         "status": "running",
     }

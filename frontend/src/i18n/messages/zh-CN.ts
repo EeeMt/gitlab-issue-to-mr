@@ -25,7 +25,7 @@ const zhCN = {
     registrationFailed: '创建管理员账户失败'
   },
   app: {
-    brandTitle: 'GIMR Admin',
+    brandTitle: 'Codify Admin',
     brandSubtitle: '任务运营控制台',
     navigation: '导航',
     language: '语言'

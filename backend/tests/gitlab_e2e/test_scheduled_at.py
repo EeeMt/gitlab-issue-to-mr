@@ -41,8 +41,8 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 WEBHOOK_URL = f"{BACKEND_URL}/api/webhook/gitlab"
 WEBHOOK_SECRET = os.getenv("GITLAB_WEBHOOK_SECRET", "test_webhook_secret")
 
-TEST_PROJECT_ID = 1  # root/gimr_test
-TEST_PROJECT_NAME = "gimr_test"
+TEST_PROJECT_ID = 1  # root/codify_test
+TEST_PROJECT_NAME = "codify_test"
 
 logging.basicConfig(
     level=logging.INFO,

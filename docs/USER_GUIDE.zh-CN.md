@@ -1,6 +1,6 @@
-# GIMR 使用说明
+# Codify 使用说明
 
-> GitLab Issue to MR Bot — AI 驱动的自动化代码生成与 Merge Request 创建服务
+> Codify — AI 驱动的自动化代码生成与 Merge Request 创建服务
 
 ---
 
@@ -28,7 +28,7 @@
 
 ## 1. 产品概述
 
-GIMR（GitLab Issue to MR Bot）是一个 AI 驱动的代码生成服务，核心能力如下：
+Codify（Codify）是一个 AI 驱动的代码生成服务，核心能力如下：
 
 - 监听 GitLab Issue 评论，识别 `@ai-bot <需求>` 指令
 - 将每条需求封装为**任务（Task）**，按优先级调度执行
@@ -61,7 +61,7 @@ GitLab Issue 评论 "@ai-bot 需求"
   │    └─ Claude CLI (stream-json)│
   │  git add + commit + push     │
   │  调用 GitLab API 创建 MR      │
-  │  打印 GIMR_STATS（token 用量）│
+  │  打印 CODIFY_STATS（token 用量）│
   └──────────────────────────────┘
         │
         ▼
@@ -349,7 +349,7 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 | `ANTHROPIC_MODEL` | 使用的模型 | `claude-opus-4-5` |
 | `DATABASE_URL` | PostgreSQL 连接串 | `postgresql+asyncpg://...` |
 | `DOCKER_HOST` | Docker 引擎地址 | `tcp://localhost:2376` |
-| `WORKER_IMAGE` | Worker 容器镜像 | `gimr-worker:latest` |
+| `WORKER_IMAGE` | Worker 容器镜像 | `codify-worker:latest` |
 | `MAX_CONCURRENCY` | 最大并发 Worker 数 | `3` |
 | `TASK_TIMEOUT` | 任务超时秒数 | `1800` |
 | `DEFAULT_TARGET_BRANCH` | 默认 MR 目标分支 | `main` |
@@ -367,7 +367,7 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 1. 检查 Webhook 是否已配置并触发（GitLab → 项目 → Settings → Webhooks → 查看最近的请求）
 2. 检查 Bot 账号是否有项目的 Developer 权限
 3. 检查 Webhook Secret 是否与服务端配置一致
-4. 查看 backend 服务日志：`docker logs gimr-backend --tail 50`
+4. 查看 backend 服务日志：`docker logs codify-backend --tail 50`
 
 ---
 
@@ -416,10 +416,10 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 每个 Worker 容器的命名格式为：
 
 ```
-gimr-{task_id}-p{project_id}-i{issue_iid}
+codify-{task_id}-p{project_id}-i{issue_iid}
 ```
 
-例如：`gimr-42-p7-i15`，表示任务 #42，项目 ID 7，Issue #15。
+例如：`codify-42-p7-i15`，表示任务 #42，项目 ID 7，Issue #15。
 
 手动任务（无 Issue）中 `issue_iid` 部分为 `iNone`。
 
@@ -427,7 +427,7 @@ gimr-{task_id}-p{project_id}-i{issue_iid}
 
 **Q: 日志中的颜色和 emoji 不显示？**
 
-请确认使用的是最新部署版本。GIMR 支持 ANSI 颜色渲染和 emoji 显示，旧版本日志以纯文本格式存储，升级后的新任务日志将正常显示颜色和 emoji。
+请确认使用的是最新部署版本。Codify 支持 ANSI 颜色渲染和 emoji 显示，旧版本日志以纯文本格式存储，升级后的新任务日志将正常显示颜色和 emoji。
 
 ---
 

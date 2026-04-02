@@ -1,6 +1,6 @@
-# GIMR Offline Deployment Bundle
+# Codify Offline Deployment Bundle
 
-This folder contains the artifacts needed to deploy the current GIMR build into an intranet / offline environment without rebuilding images on the target host.
+This folder contains the artifacts needed to deploy the current Codify build into an intranet / offline environment without rebuilding images on the target host.
 
 ## Bundle contents
 
@@ -18,9 +18,9 @@ This folder contains the artifacts needed to deploy the current GIMR build into 
 
 The deployment uses these image tags:
 
-- `gimr-backend:latest`
-- `gimr-nginx:latest`
-- `gimr-worker:latest`
+- `codify-backend:latest`
+- `codify-nginx:latest`
+- `codify-worker:latest`
 - `postgres:16-alpine`
 
 ## Quick start on the offline host
@@ -37,6 +37,6 @@ The deployment uses these image tags:
 
 - The scheduler runs database migrations automatically on startup.
 - `backend` and `scheduler` need access to the local Docker socket because worker containers are created dynamically.
-- `scripts/load-images.sh` loads all bundled images, including `deploy-backend`, `deploy-nginx`, `gitlab-issues-to-mr-worker`, and `postgres`.
+- `scripts/load-images.sh` loads all bundled images, including `deploy-backend`, `deploy-nginx`, `codify-worker`, and `postgres`.
 - If you change `WORKER_IMAGE` in `config/.env.offline`, load an image with the same tag on the offline host.
 - If your intranet environment has no outbound internet access, `ANTHROPIC_BASE_URL` must point to an internal Claude-compatible endpoint.

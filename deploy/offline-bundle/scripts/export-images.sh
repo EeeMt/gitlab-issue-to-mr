@@ -2,12 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ARCHIVE="${ROOT_DIR}/images/gimr-offline-images.tar.gz"
+ARCHIVE="${ROOT_DIR}/images/codify-offline-images.tar.gz"
 
 IMAGES=(
-  "gimr-backend:latest"
-  "gimr-nginx:latest"
-  "gimr-worker:latest"
+  "codify-backend:latest"
+  "codify-nginx:latest"
+  "codify-worker:latest"
   "postgres:16-alpine"
 )
 

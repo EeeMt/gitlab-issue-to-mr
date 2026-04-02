@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-End-to-End Integration Test for GIMR (GitLab Issue to MR Bot)
+End-to-End Integration Test for Codify (Codify)
 
 Workflow:
 1. Start system (Docker Compose)
@@ -49,9 +49,9 @@ WEBHOOK_SECRET = os.getenv("GITLAB_WEBHOOK_SECRET", "test_webhook_secret")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 WEBHOOK_URL = f"{BACKEND_URL}/api/webhook/gitlab"
 
-# Test configuration - use existing gimr_test project
-TEST_PROJECT_ID = 1  # root/gimr_test
-TEST_PROJECT_NAME = "gimr_test"
+# Test configuration - use existing codify_test project
+TEST_PROJECT_ID = 1  # root/codify_test
+TEST_PROJECT_NAME = "codify_test"
 TEST_TITLE = "E2E Test: Add a hello world function"
 TEST_ISSUE_DESCRIPTION = "This is an end-to-end integration test issue."
 TEST_PROMPT = "Create a simple hello.py file with hello() function"
@@ -144,7 +144,7 @@ def get_or_create_test_project() -> dict:
     logger.info(f"Creating test project: {TEST_PROJECT_NAME}")
     resp = gitlab_request("POST", "/projects", json={
         "name": TEST_PROJECT_NAME,
-        "description": "Test project for GIMR E2E tests",
+        "description": "Test project for Codify E2E tests",
         "visibility": "private",
         "initialize_with_readme": True
     })
@@ -368,7 +368,7 @@ def start_docker_compose():
     # First, build the worker image
     logger.info("Building worker image...")
     run_command([
-        "docker", "build", "-t", "gimr-worker:latest",
+        "docker", "build", "-t", "codify-worker:latest",
         "-f", "deploy/Dockerfile.worker", "."
     ], check=False)
 
@@ -384,7 +384,7 @@ ANTHROPIC_API_KEY=sk-cp-9d52R8LpyawPBsGZMxpD7R5AYPmLreWk8eAzp2fESRbYcM3iRCaNcgCu
 ANTHROPIC_MODEL=MiniMax-M2.5
 
 # PostgreSQL
-DATABASE_URL=postgresql+asyncpg://gimr:gimr_password@postgres:5432/gimr
+DATABASE_URL=postgresql+asyncpg://codify:codify_password@postgres:5432/codify
 
 # Docker Engine - use local socket
 DOCKER_HOST=unix:///var/run/docker.sock
@@ -397,7 +397,7 @@ SECRET_KEY=your-secret-key-change-in-production
 LOG_LEVEL=INFO
 
 # Worker Configuration
-WORKER_IMAGE=gimr-worker:latest
+WORKER_IMAGE=codify-worker:latest
 
 # Scheduler Configuration
 MAX_CONCURRENCY=3
@@ -444,7 +444,7 @@ def run_migration():
     logger.info("Running database migrations...")
     try:
         run_command([
-            "docker", "exec", "gimr-backend",
+            "docker", "exec", "codify-backend",
             "alembic", "upgrade", "head"
         ])
     except Exception as e:
@@ -453,7 +453,7 @@ def run_migration():
 
 def main():
     """Run the end-to-end integration test."""
-    parser = argparse.ArgumentParser(description="GIMR E2E Integration Test")
+    parser = argparse.ArgumentParser(description="Codify E2E Integration Test")
     parser.add_argument("--skip-startup", action="store_true",
                        help="Skip Docker Compose startup (use existing services)")
     parser.add_argument("--cleanup", action="store_true",
@@ -471,7 +471,7 @@ def main():
         args.test_type = "java"
 
     logger.info("=" * 60)
-    logger.info("GIMR End-to-End Integration Test")
+    logger.info("Codify End-to-End Integration Test")
     logger.info(f"Test type: {args.test_type}")
     logger.info("=" * 60)
 
@@ -540,7 +540,7 @@ def main():
             logger.warning(f"Unexpected webhook result: {result}")
 
         # Step 6: Wait for MR to be created
-        branch_name = f"gimr/issue-{issue_iid}"
+        branch_name = f"codify/issue-{issue_iid}"
         logger.info(f"\n[Step 6] Waiting for MR (branch: {branch_name})...")
 
         try:

@@ -139,7 +139,7 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
         set_runtime_config({
             "oidc_enabled": True,
             "oidc_issuer_url": "https://gitlab.example.com",
-            "oidc_client_id": "gimr",
+            "oidc_client_id": "codify",
             "oidc_client_secret": "stored-secret",
             "oidc_redirect_uri": "https://bot.example.com/api/auth/callback",
         })

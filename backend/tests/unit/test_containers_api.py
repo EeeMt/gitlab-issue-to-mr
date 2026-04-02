@@ -24,9 +24,9 @@ class ContainerPatternTests(unittest.TestCase):
     def test_worker_container_pattern_valid(self):
         """Valid worker container names should match."""
         valid_names = [
-            "gimr-1-p123-i456",
-            "gimr-100-p1-i999",
-            "gimr-99999-p99999-i1",
+            "codify-1-p123-i456",
+            "codify-100-p1-i999",
+            "codify-99999-p99999-i1",
         ]
         for name in valid_names:
             self.assertTrue(WORKER_CONTAINER_PATTERN.match(name), f"'{name}' should match")
@@ -36,10 +36,10 @@ class ContainerPatternTests(unittest.TestCase):
         invalid_names = [
             "nginx-web",
             "redis-cache",
-            "gimr-1",  # Missing parts
-            "gimr-1-p",  # Missing project/issue
-            "gimr--p123-i456",  # Missing task_id
-            "something-gimr-1-p123-i456",  # Prefix before gimr
+            "codify-1",  # Missing parts
+            "codify-1-p",  # Missing project/issue
+            "codify--p123-i456",  # Missing task_id
+            "something-codify-1-p123-i456",  # Prefix before codify
         ]
         for name in invalid_names:
             self.assertFalse(WORKER_CONTAINER_PATTERN.match(name), f"'{name}' should NOT match")
@@ -51,10 +51,10 @@ class ContainerLogsHelpersTests(unittest.TestCase):
     def test_extract_container_info_valid_name(self):
         """Test extracting task/project/issue info from valid container name."""
         # This tests the logic that's inline in list_containers
-        name = "gimr-42-p123-i789"
+        name = "codify-42-p123-i789"
 
         parts = name.split("-")
-        self.assertEqual(parts[0], "gimr")
+        self.assertEqual(parts[0], "codify")
         self.assertEqual(parts[1], "42")  # task_id
         self.assertEqual(parts[2], "p123")  # project_id
         self.assertEqual(parts[3], "i789")  # issue_iid
@@ -73,12 +73,12 @@ class ContainerLogsHelpersTests(unittest.TestCase):
 
         parts = name.split("-")
         # For non-worker containers, parsing should fail
-        if len(parts) >= 5 and parts[0] == "gimr":
+        if len(parts) >= 5 and parts[0] == "codify":
             # Would extract
             pass
         else:
             # Should skip - this is what the code does
-            self.assertTrue(len(parts) < 5 or parts[0] != "gimr")
+            self.assertTrue(len(parts) < 5 or parts[0] != "codify")
 
 
 class TaskContainerLogsAPIHelperTests(unittest.TestCase):

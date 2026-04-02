@@ -48,7 +48,7 @@ class MattermostNotificationTests(unittest.IsolatedAsyncioTestCase):
             enabled=True,
             target_type=MATTERMOST_TARGET_TYPE_CHANNEL,
             team_name="engineering",
-            channel_name="gimr",
+            channel_name="codify",
             mention_in_channel=True,
             event_types_json='["task_completed"]',
             field_keys_json='["task_id","status"]',
@@ -79,7 +79,7 @@ class MattermostNotificationTests(unittest.IsolatedAsyncioTestCase):
         ):
             await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
 
-        mock_client.get_channel_by_name.assert_awaited_once_with("engineering", "gimr")
+        mock_client.get_channel_by_name.assert_awaited_once_with("engineering", "codify")
         create_post_args = mock_client.create_post.await_args.args
         self.assertEqual(create_post_args[0], "channel-1")
         self.assertIn("@alice", create_post_args[1])

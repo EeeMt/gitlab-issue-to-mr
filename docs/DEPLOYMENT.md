@@ -1,6 +1,6 @@
 # 生产环境部署指南
 
-本文档面向运维和部署人员，说明如何在长期运行的环境中部署 GIMR（GitLab Issue to MR Bot），以及如何安全地更新、备份和排障。
+本文档面向运维和部署人员，说明如何在长期运行的环境中部署 Codify（Codify），以及如何安全地更新、备份和排障。
 
 ## 1. 部署目标与架构
 
@@ -13,7 +13,7 @@
 
 当前 compose 约定：
 
-- `backend` 与 `scheduler` 共用 `gimr-backend:latest`
+- `backend` 与 `scheduler` 共用 `codify-backend:latest`
 - `backend` 使用 `AUTO_MIGRATE=false`
 - `scheduler` 使用 `AUTO_MIGRATE=true`
 - PostgreSQL 数据挂载在 Docker volume `postgres_data`
@@ -208,7 +208,7 @@ cd ../deploy && docker-compose build nginx && docker-compose up -d nginx
 请重建 Worker 镜像：
 
 ```bash
-docker build -f deploy/Dockerfile.worker -t gimr-worker:latest .
+docker build -f deploy/Dockerfile.worker -t codify-worker:latest .
 ```
 
 如果 `WORKER_IMAGE` 使用了其他标签，请同步更新配置。
@@ -227,14 +227,14 @@ docker-compose logs -f nginx
 ### 7.2 查看数据库中的任务状态
 
 ```bash
-docker exec gimr-postgres psql -U gimr -d gimr -c \
+docker exec codify-postgres psql -U codify -d codify -c \
   "SELECT id, status, error_message FROM tasks ORDER BY id DESC LIMIT 10;"
 ```
 
 ### 7.3 查看最近任务日志
 
 ```bash
-docker exec gimr-postgres psql -U gimr -d gimr -c \
+docker exec codify-postgres psql -U codify -d codify -c \
   "SELECT task_id, level, message, created_at FROM task_logs ORDER BY id DESC LIMIT 20;"
 ```
 
