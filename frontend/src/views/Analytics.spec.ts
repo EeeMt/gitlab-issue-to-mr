@@ -1,0 +1,334 @@
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import { h, nextTick, ref } from 'vue'
+import Analytics from './Analytics.vue'
+
+// ---------------------------------------------------------------------------
+// Hoisted mocks
+// ---------------------------------------------------------------------------
+
+const { mockApi, resetMockApi } = vi.hoisted(() => {
+  const mock = {
+    getAnalytics: vi.fn(),
+    getProjects: vi.fn()
+  }
+  const resetMockApi = () => {
+    Object.values(mock).forEach(fn => fn.mockReset())
+  }
+  return { mockApi: mock, resetMockApi }
+})
+
+vi.mock('../api', () => ({
+  getAnalytics: mockApi.getAnalytics,
+  getProjects: mockApi.getProjects
+}))
+
+vi.mock('../utils/datetime', () => ({
+  formatDateTimeLocal: vi.fn((v: any) => `date:${v}`),
+  formatMonthDayLocal: vi.fn((v: any) => `monthday:${v}`)
+}))
+
+vi.mock('../i18n', () => ({
+  currentLocale: ref('en')
+}))
+
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: vi.fn((key: string) => key),
+    locale: { value: 'en' },
+    d: vi.fn((value: unknown) => String(value)),
+    n: vi.fn((value: number) => String(value)),
+    te: vi.fn((_key: string) => false)
+  })
+}))
+
+vi.mock('@vueuse/core', () => ({
+  useWindowSize: vi.fn(() => ({ width: ref(1200) }))
+}))
+
+vi.mock('naive-ui', () => ({
+  NSpin: {
+    name: 'NSpin',
+    props: ['show', 'description'],
+    setup(props: any, { slots }: any) {
+      return () => h('div', { class: props.show ? 'n-spin--loading' : 'n-spin' }, slots.default?.())
+    }
+  },
+  NSpace: {
+    name: 'NSpace',
+    props: ['vertical', 'size'],
+    setup(_p: any, { slots }: any) { return () => h('div', slots.default?.()) }
+  },
+  NButton: {
+    name: 'NButton',
+    props: ['loading', 'type'],
+    emits: ['click'],
+    setup(props: any, { slots, emit }: any) {
+      return () => h('button', { class: 'n-button', onClick: () => emit('click') }, slots.default?.())
+    }
+  },
+  NSelect: {
+    name: 'NSelect',
+    props: ['value', 'options', 'loading', 'placeholder', 'clearable', 'filterable'],
+    emits: ['update:value'],
+    setup(props: any, { emit }: any) {
+      return () => h('select', {
+        class: 'n-select',
+        onChange: (e: Event) => emit('update:value', (e.target as HTMLSelectElement).value)
+      }, props.options?.map((o: any) => h('option', { value: o.value }, o.label)))
+    }
+  },
+  NAlert: {
+    name: 'NAlert',
+    props: ['type', 'showIcon'],
+    setup(_p: any, { slots }: any) { return () => h('div', { class: 'n-alert' }, slots.default?.()) }
+  },
+  NCard: {
+    name: 'NCard',
+    props: ['bordered'],
+    setup(_p: any, { slots }: any) {
+      return () => h('div', { class: 'n-card' }, [slots.header?.(), slots.default?.()])
+    }
+  },
+  NGrid: {
+    name: 'NGrid',
+    props: ['cols', 'xGap', 'yGap'],
+    setup(_p: any, { slots }: any) { return () => h('div', { class: 'n-grid' }, slots.default?.()) }
+  },
+  NGi: {
+    name: 'NGi',
+    props: [],
+    setup(_p: any, { slots }: any) { return () => h('div', { class: 'n-gi' }, slots.default?.()) }
+  },
+  NDataTable: {
+    name: 'NDataTable',
+    props: ['columns', 'data', 'loading', 'rowKey', 'bordered', 'scrollX', 'pagination'],
+    setup() { return () => h('div', { class: 'n-data-table' }) }
+  },
+  NTag: {
+    name: 'NTag',
+    props: ['size', 'round', 'type'],
+    setup(_p: any, { slots }: any) { return () => h('span', { class: 'n-tag' }, slots.default?.()) }
+  },
+  useMessage: () => ({
+    error: vi.fn(),
+    success: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn()
+  })
+}))
+
+// ---------------------------------------------------------------------------
+// Mock data
+// ---------------------------------------------------------------------------
+
+const mockAnalytics = {
+  window_days: 30,
+  generated_at: '2026-01-01T00:00:00Z',
+  summary: {
+    total_tasks: 42,
+    success_rate: 0.857,
+    finished_tasks: 35,
+    completed_tasks: 30,
+    failed_tasks: 4,
+    cancelled_tasks: 1,
+    avg_execution_seconds: 125.5,
+    max_execution_seconds: 600,
+    avg_queue_wait_seconds: 5.2,
+    max_queue_wait_seconds: 30,
+    total_changes: 1500,
+    total_additions: 1000,
+    total_deletions: 500,
+    total_tokens: 50000,
+    total_input_tokens: 30000,
+    total_output_tokens: 20000,
+    avg_total_tokens_per_tracked_task: 1200,
+    max_total_tokens_per_tracked_task: 5000,
+    token_tracked_tasks: 40,
+    tracked_initiator_tasks: 38,
+    initiator_tracking_started_at: '2026-01-01T00:00:00Z'
+  },
+  available_initiators: [
+    { initiator_username: 'alice', task_count: 20 },
+    { initiator_username: 'bob', task_count: 22 }
+  ],
+  projects: [],
+  initiators: [],
+  trends: [],
+  priority_waits: [],
+  error_breakdown: []
+}
+
+const mockProjects = [
+  { id: 1, name: 'Project A', path_with_namespace: 'group/project-a' },
+  { id: 2, name: 'Project B', path_with_namespace: 'group/project-b' }
+]
+
+// ---------------------------------------------------------------------------
+// Test helpers
+// ---------------------------------------------------------------------------
+
+const mountOptions = {
+  global: {
+    stubs: {
+      PageHeader: {
+        template: '<div class="page-header"><slot name="actions"/></div>'
+      },
+      SummaryCard: {
+        props: ['label', 'value', 'note', 'cardClass', 'labelClass', 'valueClass', 'noteClass'],
+        template: '<div class="summary-card"><span class="label">{{ label }}</span><span class="value">{{ value }}</span></div>'
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('Analytics', () => {
+  let wrapper: ReturnType<typeof mount> | null = null
+
+  beforeEach(() => {
+    resetMockApi()
+    ;(mockApi.getAnalytics as Mock).mockResolvedValue(mockAnalytics)
+    ;(mockApi.getProjects as Mock).mockResolvedValue(mockProjects)
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+  })
+
+  it('calls getAnalytics and getProjects on mount', async () => {
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    expect(mockApi.getAnalytics).toHaveBeenCalledTimes(1)
+    expect(mockApi.getProjects).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows loading state during initial fetch', async () => {
+    let resolveAnalytics!: (value: any) => void
+    ;(mockApi.getAnalytics as Mock).mockReturnValue(new Promise(r => { resolveAnalytics = r }))
+    ;(mockApi.getProjects as Mock).mockResolvedValue(mockProjects)
+
+    wrapper = mount(Analytics, mountOptions)
+
+    // Synchronous part of fetchAnalytics has set loading = true before the await
+    expect(wrapper.vm.loading).toBe(true)
+    expect(wrapper.vm.initialLoading).toBe(true)
+
+    resolveAnalytics(mockAnalytics)
+    await flushPromises()
+
+    expect(wrapper.vm.loading).toBe(false)
+    expect(wrapper.vm.initialLoading).toBe(false)
+  })
+
+  it('shows summary cards after data loads', async () => {
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    expect(wrapper.vm.hasLoadedOnce).toBe(true)
+    expect(wrapper.findAll('.summary-card').length).toBeGreaterThan(0)
+  })
+
+  it('summary items computed correctly from analytics data', async () => {
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    const items = wrapper.vm.summaryItems as any[]
+    expect(items).toHaveLength(8)
+    // First item: total_tasks = 42
+    expect(items[0].value).toBe('42')
+    // Second item: success_rate = 0.857 → 85.7%
+    expect(items[1].value).toBe('85.7%')
+    // Fifth item: total_changes = 1500
+    expect(items[4].value).toBe('1500')
+  })
+
+  it('does not show summary when hasLoadedOnce is false', async () => {
+    let resolveAnalytics!: (value: any) => void
+    ;(mockApi.getAnalytics as Mock).mockReturnValue(new Promise(r => { resolveAnalytics = r }))
+
+    wrapper = mount(Analytics, mountOptions)
+    await nextTick()
+
+    expect(wrapper.vm.hasLoadedOnce).toBe(false)
+    expect(wrapper.findAll('.summary-card').length).toBe(0)
+
+    // Resolve to confirm it appears after loading
+    resolveAnalytics(mockAnalytics)
+    await flushPromises()
+
+    expect(wrapper.vm.hasLoadedOnce).toBe(true)
+    expect(wrapper.findAll('.summary-card').length).toBeGreaterThan(0)
+  })
+
+  it('handles getAnalytics error gracefully', async () => {
+    ;(mockApi.getAnalytics as Mock).mockRejectedValue(new Error('API Error'))
+    ;(mockApi.getProjects as Mock).mockResolvedValue(mockProjects)
+
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    // hasLoadedOnce is set in the finally block — should be true even on error
+    expect(wrapper.vm.hasLoadedOnce).toBe(true)
+    expect(wrapper.vm.loading).toBe(false)
+    expect(wrapper.vm.analytics).toBeNull()
+  })
+
+  it('refetches when windowDays changes', async () => {
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    // Clear after the initial call
+    ;(mockApi.getAnalytics as Mock).mockClear()
+
+    wrapper.vm.windowDays = 7
+    await nextTick()
+    await flushPromises()
+
+    expect(mockApi.getAnalytics).toHaveBeenCalledTimes(1)
+    expect(mockApi.getAnalytics).toHaveBeenCalledWith(7, null, null)
+  })
+
+  it('refetches when selectedInitiatorUsername changes', async () => {
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    ;(mockApi.getAnalytics as Mock).mockClear()
+
+    wrapper.vm.selectedInitiatorUsername = 'alice'
+    await nextTick()
+    await flushPromises()
+
+    expect(mockApi.getAnalytics).toHaveBeenCalledTimes(1)
+    expect(mockApi.getAnalytics).toHaveBeenCalledWith(30, null, 'alice')
+  })
+
+  it('initiatorOptions computed from available_initiators', async () => {
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    const options = wrapper.vm.initiatorOptions as any[]
+    expect(options).toHaveLength(2)
+    expect(options[0]).toEqual({ label: 'alice (20)', value: 'alice' })
+    expect(options[1]).toEqual({ label: 'bob (22)', value: 'bob' })
+  })
+
+  it('refresh button triggers fetchAnalytics', async () => {
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    ;(mockApi.getAnalytics as Mock).mockClear()
+
+    await wrapper.find('button.n-button').trigger('click')
+    await flushPromises()
+
+    expect(mockApi.getAnalytics).toHaveBeenCalledTimes(1)
+  })
+})

@@ -3,7 +3,12 @@ import { ref } from 'vue'
 import {
   parseUtcDate,
   formatDateTimeUtc8,
-  formatDateTimeUtc8Compact
+  formatDateTimeUtc8Compact,
+  formatMonthDayTimeUtc8,
+  formatMonthDayWeekdayUtc8,
+  formatTimeUtc8,
+  formatDateTimeLocal,
+  formatMonthDayLocal
 } from './datetime'
 import { currentLocale } from '../i18n'
 
@@ -102,6 +107,110 @@ describe('datetime utilities', () => {
       const result = formatDateTimeUtc8Compact('2026-03-31T02:00:00Z')
       // UTC+8: 02:00 UTC = 10:00 UTC+8
       expect(result).toContain('10')
+    })
+  })
+
+  describe('formatMonthDayTimeUtc8', () => {
+    beforeEach(() => { currentLocale.value = 'en' })
+
+    it('should format month, day, hour, minute in UTC+8', () => {
+      const result = formatMonthDayTimeUtc8('2026-03-31T02:00:00Z')
+      expect(result).toContain('31') // day
+      expect(result).toContain('10') // hour in UTC+8 (02:00 UTC = 10:00 UTC+8)
+    })
+
+    it('should not include seconds', () => {
+      const result = formatMonthDayTimeUtc8('2026-03-31T02:00:00Z')
+      expect(result).not.toMatch(/:\d{2}:\d{2}/)
+    })
+
+    it('should not include year', () => {
+      const result = formatMonthDayTimeUtc8('2026-03-31T02:00:00Z')
+      expect(result).not.toContain('2026')
+    })
+  })
+
+  describe('formatMonthDayWeekdayUtc8', () => {
+    beforeEach(() => { currentLocale.value = 'en' })
+
+    it('should include weekday', () => {
+      const result = formatMonthDayWeekdayUtc8('2026-03-31T02:00:00Z')
+      // 2026-03-31 is a Tuesday
+      expect(result).toMatch(/Tue/i)
+    })
+
+    it('should not include time', () => {
+      const result = formatMonthDayWeekdayUtc8('2026-03-31T02:00:00Z')
+      expect(result).not.toMatch(/\d{2}:\d{2}/)
+    })
+
+    it('should not include year', () => {
+      const result = formatMonthDayWeekdayUtc8('2026-03-31T02:00:00Z')
+      expect(result).not.toContain('2026')
+    })
+  })
+
+  describe('formatTimeUtc8', () => {
+    beforeEach(() => { currentLocale.value = 'en' })
+
+    it('should format time in UTC+8', () => {
+      const result = formatTimeUtc8('2026-03-31T02:00:00Z')
+      expect(result).toContain('10') // 02:00 UTC = 10:00 UTC+8
+      expect(result).toContain('00') // minutes
+    })
+
+    it('should not include date', () => {
+      const result = formatTimeUtc8('2026-03-31T02:00:00Z')
+      expect(result).not.toContain('2026')
+      expect(result).not.toContain('31')
+    })
+
+    it('should handle midnight UTC', () => {
+      const result = formatTimeUtc8('2026-03-31T16:00:00Z')
+      // 16:00 UTC = 00:00 next day UTC+8
+      expect(result).toContain('00')
+    })
+  })
+
+  describe('formatDateTimeLocal', () => {
+    beforeEach(() => { currentLocale.value = 'en' })
+
+    it('should format date and time', () => {
+      const result = formatDateTimeLocal('2026-03-31T10:00:00Z')
+      expect(result).toContain('2026')
+      expect(result).toContain('31')
+    })
+
+    it('should use custom options when provided', () => {
+      const result = formatDateTimeLocal('2026-03-31T10:00:00Z', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      })
+      expect(result).toContain('2026')
+      expect(result).toContain('31')
+    })
+
+    it('should return a non-empty string', () => {
+      const result = formatDateTimeLocal('2026-03-31T10:00:00Z')
+      expect(typeof result).toBe('string')
+      expect(result.length).toBeGreaterThan(0)
+    })
+  })
+
+  describe('formatMonthDayLocal', () => {
+    beforeEach(() => { currentLocale.value = 'en' })
+
+    it('should format month and day without year', () => {
+      const result = formatMonthDayLocal('2026-03-31T10:00:00Z')
+      expect(result).toContain('31') // day
+      expect(result).not.toContain('2026') // no year
+    })
+
+    it('should return a non-empty string', () => {
+      const result = formatMonthDayLocal('2026-06-15T10:00:00Z')
+      expect(typeof result).toBe('string')
+      expect(result.length).toBeGreaterThan(0)
     })
   })
 })

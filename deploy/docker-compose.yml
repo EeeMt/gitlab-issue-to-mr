@@ -63,10 +63,14 @@ services:
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
       - AUTO_MIGRATE=true
-      # Custom CA certificate — mounted into scheduler and passed to workers
+      # Custom CA certificate is baked into the worker image (deploy/ca.crt → /etc/ssl/certs/custom-ca.crt)
+      # The scheduler itself also has it baked in; CUSTOM_CA_BUNDLE tells it where to find it.
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
-      # Generic volume mounts for worker containers (JSON array)
-      - "WORKER_VOLUME_MOUNTS=[{\"host_path\": \"/etc/ssl/certs/custom-ca.crt\", \"container_path\": \"/etc/ssl/certs/custom-ca.crt\", \"mode\": \"ro\"}]"
+      # Generic volume mounts for worker containers (JSON array).
+      # Leave empty when CA cert is baked into the worker image (the default).
+      # Set to '[{"host_path":"/path/to/ca.crt","container_path":"/etc/ssl/certs/custom-ca.crt","mode":"ro"}]'
+      # only when deploying with a host-level CA cert file instead of a baked-in one.
+      - WORKER_VOLUME_MOUNTS=
     depends_on:
       postgres:
         condition: service_healthy

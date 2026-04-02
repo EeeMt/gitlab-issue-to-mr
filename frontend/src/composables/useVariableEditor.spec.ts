@@ -123,6 +123,45 @@ describe('useVariableEditor', () => {
 
       expect(variables.value).toEqual(['var1', 'var2'])
     })
+
+    it('should migrate localTips to new variable name when single rename occurs', async () => {
+      const content = ref('{{old_var}}')
+      const templateTips = ref<Record<string, string> | undefined>(undefined)
+      const { updateTip, mergedTips } = useVariableEditor(content, templateTips)
+
+      // Set a local tip for the original variable
+      updateTip('old_var', 'Tip for old var')
+      expect(mergedTips.value.old_var).toBe('Tip for old var')
+
+      // Rename the variable by updating content
+      content.value = '{{new_var}}'
+      // flush: 'post' watcher needs two nextTick cycles
+      await nextTick()
+      await nextTick()
+
+      // The tip should be migrated to the new variable name
+      expect(mergedTips.value.new_var).toBe('Tip for old var')
+      // Old variable tip should be gone
+      expect(mergedTips.value.old_var).toBeUndefined()
+    })
+
+    it('should preserve tips for existing variables while migrating renamed one', async () => {
+      const content = ref('{{keep_var}} {{old_var}}')
+      const templateTips = ref<Record<string, string> | undefined>(undefined)
+      const { updateTip, mergedTips } = useVariableEditor(content, templateTips)
+
+      updateTip('keep_var', 'Tip to keep')
+      updateTip('old_var', 'Tip to migrate')
+
+      // Rename old_var → new_var, keep keep_var
+      content.value = '{{keep_var}} {{new_var}}'
+      await nextTick()
+      await nextTick()
+
+      expect(mergedTips.value.keep_var).toBe('Tip to keep')
+      expect(mergedTips.value.new_var).toBe('Tip to migrate')
+      expect(mergedTips.value.old_var).toBeUndefined()
+    })
   })
 
   describe('variablesWithTips', () => {
