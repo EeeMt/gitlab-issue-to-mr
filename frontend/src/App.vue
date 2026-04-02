@@ -366,7 +366,8 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin: 14px 20px 0;
+  width: min(calc(100% - 40px), var(--app-page-max-width-wide));
+  margin: 14px auto 0;
   padding: 12px 14px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.72);
