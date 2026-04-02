@@ -32,14 +32,22 @@ services:
       - DOCKER_TLS_KEY=
       - AUTO_MIGRATE=true
       - COOKIE_SECURE=false
-      # Custom CA certificate for HTTPS connections (GitLab, Mattermost, etc.)
-      # The CA certificate is baked into the image at /etc/ssl/certs/custom-ca.crt
+      # Custom CA certificate — mount from local file (not baked into image).
+      # Place deploy/ca.crt on the Docker host; see .env.test for CUSTOM_CA_BUNDLE.
+      # If absent, entrypoint falls back to git http.sslVerify=false.
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Mount CA cert (local-only, not in git — place deploy/ca.crt on Docker host)
+      - type: bind
+        source: ./ca.crt
+        target: /etc/ssl/certs/custom-ca.crt
+        read_only: true
+        bind:
+          create_host_path: false
     restart: unless-stopped
     networks:
       - codify-network
@@ -63,14 +71,13 @@ services:
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
       - AUTO_MIGRATE=true
-      # Custom CA certificate is baked into the worker image (deploy/ca.crt → /etc/ssl/certs/custom-ca.crt)
-      # The scheduler itself also has it baked in; CUSTOM_CA_BUNDLE tells it where to find it.
+      # Custom CA certificate is mounted from local file (not baked into image).
+      # CUSTOM_CA_BUNDLE tells the scheduler and worker entrypoints where to find it.
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
-      # Generic volume mounts for worker containers (JSON array).
-      # Leave empty when CA cert is baked into the worker image (the default).
-      # Set to '[{"host_path":"/path/to/ca.crt","container_path":"/etc/ssl/certs/custom-ca.crt","mode":"ro"}]'
-      # only when deploying with a host-level CA cert file instead of a baked-in one.
-      - WORKER_VOLUME_MOUNTS=
+      # WORKER_VOLUME_MOUNTS: pass CA cert into spawned worker containers.
+      # Set in .env.test as: WORKER_VOLUME_MOUNTS=[{"host_path":"/abs/path/to/ca.crt",...}]
+      # Use the absolute path of deploy/ca.crt on the Docker host.
+      - WORKER_VOLUME_MOUNTS=${WORKER_VOLUME_MOUNTS:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,8 +85,13 @@ services:
         condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # Mount CA certificate into scheduler (enable when CA cert file is provided at deployment)
-      # - ./ca.crt:/etc/ssl/certs/custom-ca.crt:ro
+      # Mount CA cert (local-only, not in git — place deploy/ca.crt on Docker host)
+      - type: bind
+        source: ./ca.crt
+        target: /etc/ssl/certs/custom-ca.crt
+        read_only: true
+        bind:
+          create_host_path: false
     restart: unless-stopped
     networks:
       - codify-network

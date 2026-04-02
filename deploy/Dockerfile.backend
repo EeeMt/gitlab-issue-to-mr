@@ -69,9 +69,6 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # Copy pre-built venv from builder stage (cached until requirements.txt changes)
 COPY --from=python-builder /venv /venv
 
-# Copy custom CA certificate into the image
-COPY deploy/ca.crt /etc/ssl/certs/custom-ca.crt
-
 # Copy entrypoint script
 COPY deploy/entrypoint.backend.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

@@ -32,3 +32,7 @@ node_modules/
 
 # E2E video recordings
 deploy/e2e-videos/*.webm
+
+# Local-only deployment files (not committed; place on Docker host manually)
+deploy/ca.crt
+deploy/.env.test
