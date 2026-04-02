@@ -11,6 +11,7 @@ export COMPOSE_DOCKER_CLI_BUILD := 1
 # ============================================
 # Development Environment
 # ============================================
+# Commands for building, running, and managing the local development environment
 
 .PHONY: build
 build: ## Build all images (backend, nginx, worker)
@@ -44,6 +45,7 @@ restart: down up ## Restart development environment
 # Rebuild specific service
 # ============================================
 # Usage: make rebuild-backend or make rebuild-nginx
+# Examples: rebuild-backend, rebuild-nginx
 
 rebuild-%:
 	cd $(PROJECT_ROOT)/deploy && docker-compose build $(shell echo $* | sed 's/_/-/g')
@@ -52,6 +54,7 @@ rebuild-%:
 # ============================================
 # Testing
 # ============================================
+# Commands for running various test suites
 
 # --- Unit Tests (no Docker required) ---
 
