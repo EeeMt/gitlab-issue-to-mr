@@ -107,25 +107,24 @@ Playwright E2E 测试需要完整的 Docker 环境。测试套件使用 **pytest
 ### 运行命令
 
 ```bash
-# 完整流程（启动环境 -> 运行测试 -> 清理）
+# 完整流程（启动环境 → 并行 + 串行 → 关闭环境）
 make test-e2e
 
-# 或分步执行
-make test-e2e-up      # 启动测试环境
-make test-e2e-run     # 运行并行测试（116 个，~44s，默认 -n auto）
-make test-e2e-down    # 清理环境
+# 仅并行测试（116 个，~44s）
+make test-e2e-parallel
 
-# 串行运行状态相关测试（bootstrap/prompt_template/access_management，~42s）
-docker-compose -f docker-compose.e2e.yml run --rm e2e pytest \
-  tests/e2e/tests/test_bootstrap.py \
-  tests/e2e/tests/test_prompt_template.py \
-  tests/e2e/tests/test_access_management.py \
-  --override-ini="addopts=-v --tb=short --strict-markers --disable-warnings"
+# 仅串行测试（bootstrap/prompt_template/access_management，~42s）
+make test-e2e-serial
+
+# 运行特定测试文件
+make test-e2e-specific TEST_FILE=test_dashboard.py
+
+# 分步控制
+make test-e2e-up      # 启动测试环境（自动构建镜像）
+make test-e2e-down    # 关闭测试环境
 ```
 
-> **注意**：
-> - 测试环境使用 `18980` 端口，避免与开发环境 `8880` 冲突
-> - `pytest.ini` 默认启用 `-n auto --dist=loadfile`；状态相关测试在 xdist worker 中自动跳过，须用上方串行命令单独运行
+> **注意**：`pytest.ini` 默认启用 `-n auto --dist=loadfile`；状态相关测试（bootstrap/prompt_template/access_management）在 xdist worker 中自动跳过，须用 `test-e2e-serial` 单独运行
 
 ### 测试分组说明
 
@@ -163,7 +162,7 @@ pytestmark = pytest.mark.skipif(
     reason="Requires serial execution (modifies shared DB state)"
 )
 ```
-这些测试在 xdist worker 中自动跳过，需单独用 `--override-ini` 运行。
+这些测试在 xdist worker 中自动跳过，需单独用 `make test-e2e-serial` 运行。
 
 ### 编写新测试用例的规则
 
@@ -257,10 +256,13 @@ page.get_by_role("tab", name="Prompt Templates").click()
 # 运行特定测试文件
 make test-e2e-specific TEST_FILE=test_dashboard.py
 
-# 运行特定测试方法
+# 运行特定测试文件（含视频录制）
+make test-e2e-specific TEST_FILE=test_dashboard.py RECORD=1
+
+# 运行特定测试方法（直接调用 docker-compose，需已 up）
 docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/test_dashboard.py::TestDashboardPage::test_dashboard_page_loads
 
-# 按标记运行（如只运行 dashboard 相关测试）
+# 按标记运行
 docker-compose -f docker-compose.e2e.yml run --rm e2e pytest -m dashboard -v
 ```
 
@@ -277,31 +279,25 @@ make test-e2e-logs
 
 ### 视频录制
 
-每个测试过程可录制为 `.webm` 视频，方便 review 失败用例。
+在任意测试命令后加 `RECORD=1` 即可开启录制：
 
 ```bash
-# 录制并行测试（视频保存到 deploy/e2e-videos/）
-make test-e2e-record
-
-# 或手动录制（视频存在容器内，手动提取）
--docker rm -f gimr-e2e-recorder
-E2E_RECORD_VIDEO=1 docker-compose -f docker-compose.e2e.yml run \
-  --name gimr-e2e-recorder e2e pytest tests/e2e/tests/test_dashboard.py
-docker cp gimr-e2e-recorder:/videos/. ./e2e-videos/
-docker rm -f gimr-e2e-recorder
+make test-e2e RECORD=1                              # 录制全套测试
+make test-e2e-parallel RECORD=1                     # 仅录制并行测试
+make test-e2e-serial RECORD=1                       # 仅录制串行测试
+make test-e2e-specific TEST_FILE=test_dashboard.py RECORD=1  # 录制指定文件
 ```
 
-视频文件命名格式：`<test_name>_<worker_id>.webm`，例如：
+视频文件保存到 `deploy/e2e-videos/`，命名格式：`<test_name>_<worker_id>.webm`，例如：
 ```
 test_dashboard_page_loads_chromium_gw0.webm
-test_navigation_links_exist_chromium_gw2.webm
 ```
 
 > **注意**：
 > - 视频录制仅对使用 `logged_in_page` fixture 的测试生效
 > - 录制会增加约 20-30% 的运行时间
-> - 视频保存在容器内 `/videos/` 目录，`make test-e2e-record` 会自动用 `docker cp` 提取到本地
-> - `deploy/e2e-videos/` 目录已加入 `.gitignore`，不会提交到仓库
+> - 视频存储在容器内 `/videos/`，通过 `docker cp` 自动提取到本地（兼容远程 Docker daemon）
+> - `deploy/e2e-videos/*.webm` 已加入 `.gitignore`，不会提交到仓库
 
 ### 环境说明
 - E2E 测试环境使用 `18980` 端口，避免与开发环境 `8880` 冲突
