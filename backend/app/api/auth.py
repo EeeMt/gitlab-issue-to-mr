@@ -169,7 +169,7 @@ async def _get_or_create_break_glass_user(db: AsyncSession, username: str) -> Us
     user.platform_role = "platform_admin"
     user.platform_role_source = ROLE_SOURCE_BREAK_GLASS
     user.state = "active"
-    user.last_login_at = datetime.now(UTC)
+    user.last_login_at = datetime.now(UTC).replace(tzinfo=None)
     await db.flush()
     return user
 
@@ -213,7 +213,7 @@ async def _upsert_user(db: AsyncSession, claims: dict[str, Any], userinfo: dict[
     user.display_name = display_name
     user.email = email
     user.avatar_url = avatar_url
-    user.last_login_at = datetime.now(UTC)
+    user.last_login_at = datetime.now(UTC).replace(tzinfo=None)
 
     settings = get_effective_settings()
     groups = set()
@@ -622,7 +622,7 @@ async def callback(
         gitlab_access_token=tokens.get("access_token"),
         gitlab_refresh_token=tokens.get("refresh_token"),
         max_expires_at=(
-            datetime.now(UTC) + timedelta(seconds=int(tokens["expires_in"]))
+            datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=int(tokens["expires_in"]))
             if tokens.get("expires_in")
             else None
         ),

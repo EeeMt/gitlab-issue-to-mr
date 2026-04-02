@@ -93,7 +93,7 @@ def parse_scheduled_datetime(time_str: str) -> Optional[datetime]:
         datetime object or None if invalid
     """
     time_str = time_str.strip().lower()
-    now = datetime.now(UTC)
+    now = datetime.now(UTC).replace(tzinfo=None)
 
     # Handle "tomorrow" prefix
     is_tomorrow = time_str.startswith("tomorrow ")

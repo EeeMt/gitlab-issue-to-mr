@@ -196,7 +196,7 @@ async def _refresh_auth_context_tokens(auth_context: AuthContext, db: AsyncSessi
                 auth_context.user.id,
                 exc.response.status_code,
             )
-            auth_context.session.revoked_at = datetime.now(UTC)
+            auth_context.session.revoked_at = datetime.now(UTC).replace(tzinfo=None)
             await db.flush()
             _project_access_cache.pop(auth_context.session.id, None)
             return False
@@ -222,14 +222,14 @@ async def _refresh_auth_context_tokens(auth_context: AuthContext, db: AsyncSessi
             auth_context.session.id,
             auth_context.user.id,
         )
-        auth_context.session.revoked_at = datetime.now(UTC)
+        auth_context.session.revoked_at = datetime.now(UTC).replace(tzinfo=None)
         await db.flush()
         _project_access_cache.pop(auth_context.session.id, None)
         return False
 
     refresh_token = tokens.get("refresh_token") or auth_context.gitlab_refresh_token
     max_expires_at = (
-        datetime.now(UTC) + timedelta(seconds=int(tokens["expires_in"]))
+        datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=int(tokens["expires_in"]))
         if tokens.get("expires_in")
         else None
     )

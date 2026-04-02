@@ -477,12 +477,12 @@ class WorkerExecutor:
 
         if exit_code == 0:
             task.status = TaskStatus.COMPLETED
-            task.completed_at = datetime.now(UTC)
+            task.completed_at = datetime.now(UTC).replace(tzinfo=None)
             await self._parse_mr_from_logs(task, logs)
             await self._update_task_stats_from_logs_or_api(task, logs)
         else:
             task.status = TaskStatus.FAILED
-            task.completed_at = datetime.now(UTC)
+            task.completed_at = datetime.now(UTC).replace(tzinfo=None)
             task.error_message = sanitize_sensitive_data(logs)[-1000:]
 
     async def _parse_mr_from_logs(self, task: Task, logs: str) -> None:
@@ -701,7 +701,7 @@ class WorkerExecutor:
 
         # Update task status to running
         task.status = TaskStatus.RUNNING
-        task.started_at = datetime.now(UTC)
+        task.started_at = datetime.now(UTC).replace(tzinfo=None)
         await db.commit()
 
         # Send "starting" notification to issue
@@ -784,7 +784,7 @@ class WorkerExecutor:
                     previous_scheduled_at = task.scheduled_at
                     task.retry_count += 1
                     task.status = TaskStatus.PENDING
-                    task.scheduled_at = datetime.now(UTC)
+                    task.scheduled_at = datetime.now(UTC).replace(tzinfo=None)
                     logger.info(f"[Task {task_id}] Scheduling retry {task.retry_count}/{settings.max_retries}")
 
                 # Send failure notifications
@@ -823,7 +823,7 @@ class WorkerExecutor:
         except Exception as e:
             logger.exception(f"Task {task_id} failed with exception: {e}")
             task.status = TaskStatus.FAILED
-            task.completed_at = datetime.now(UTC)
+            task.completed_at = datetime.now(UTC).replace(tzinfo=None)
             # Sanitize error message
             task.error_message = sanitize_sensitive_data(str(e))[:1000]
             await db.commit()

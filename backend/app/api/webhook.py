@@ -313,7 +313,7 @@ async def _handle_cancel_command(
 
     if task:
         task.status = TaskStatus.CANCELLED
-        task.completed_at = datetime.now(UTC)
+        task.completed_at = datetime.now(UTC).replace(tzinfo=None)
         task.error_message = "Cancelled by user"
         await db.commit()
 
@@ -338,7 +338,7 @@ async def _handle_cancel_command(
     if pending_tasks:
         for task in pending_tasks:
             task.status = TaskStatus.CANCELLED
-            task.completed_at = datetime.now(UTC)
+            task.completed_at = datetime.now(UTC).replace(tzinfo=None)
         await db.commit()
         return {
             "status": "success",

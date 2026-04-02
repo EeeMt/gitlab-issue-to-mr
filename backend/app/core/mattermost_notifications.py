@@ -277,7 +277,7 @@ async def _resolve_mattermost_user_id(
         user_mapping_query = select(MattermostUserMapping).where(or_(*filters))
         existing_mapping = (await session.execute(user_mapping_query)).scalars().first()
     if existing_mapping is not None:
-        existing_mapping.last_verified_at = datetime.now(UTC)
+        existing_mapping.last_verified_at = datetime.now(UTC).replace(tzinfo=None)
         return existing_mapping.mattermost_user_id
 
     username = (task.initiator_username or "").strip()
@@ -296,14 +296,14 @@ async def _resolve_mattermost_user_id(
         mattermost_user_id=mattermost_user_id,
         mattermost_username=str(mattermost_user.get("username", username)),
         source="username",
-        last_verified_at=datetime.now(UTC),
+        last_verified_at=datetime.now(UTC).replace(tzinfo=None),
     )
     if existing_mapping is None:
         session.add(mapping)
     else:
         mapping.mattermost_username = str(mattermost_user.get("username", username))
         mapping.source = "username"
-        mapping.last_verified_at = datetime.now(UTC)
+        mapping.last_verified_at = datetime.now(UTC).replace(tzinfo=None)
 
     return mattermost_user_id
 
