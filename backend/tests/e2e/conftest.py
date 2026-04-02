@@ -5,6 +5,7 @@ This module provides shared fixtures for Playwright-based E2E tests.
 Tests that need authentication should call login_as_admin() in their setup.
 """
 
+import hashlib
 import os
 import re
 import pytest
@@ -82,27 +83,61 @@ def postgres_url() -> str:
 
 
 # Reusable DB reset function
+def _hash_password_for_test(password: str, worker_id: str) -> str:
+    """
+    Generate a PBKDF2-HMAC-SHA256 hash compatible with the backend's verify logic.
+
+    Uses a deterministic salt and a single iteration for speed; the backend
+    reads the iteration count and salt from the stored hash string so any
+    valid pbkdf2_sha256$<iter>$<salt>$<digest> value works.
+    """
+    salt = f"test_salt_{worker_id}"
+    iterations = 1
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations
+    ).hex()
+    return f"pbkdf2_sha256${iterations}${salt}${digest}"
+
+
 def _reset_db(cursor, clear_sessions=True):
     """
-    Reset database to uninitialized state.
+    Reset database state.
+
+    In xdist mode: only clears this worker's sessions to avoid cross-worker
+    interference.  The worker's user record and system_bootstrap are left
+    intact so other workers stay authenticated.
+
+    In non-xdist mode: performs a full reset (original behaviour).
 
     Args:
         cursor: Database cursor
         clear_sessions: If True, delete sessions. If False, keep sessions.
     """
-    try:
+    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "")
+    if worker_id:
+        # xdist: only clear this worker's own sessions; preserve user + bootstrap
         if clear_sessions:
-            cursor.execute("DELETE FROM user_sessions")
-        cursor.execute("DELETE FROM users")
-        cursor.execute("""
-            UPDATE system_bootstrap
-            SET initialized = FALSE,
-                initial_admin_user_id = NULL,
-                initialized_at = NULL
-            WHERE id = 1
-        """)
-    except Exception as e:
-        print(f"Reset warning: {e}")
+            username = f"test_admin_{worker_id}"
+            cursor.execute(
+                "DELETE FROM user_sessions WHERE user_id IN "
+                "(SELECT id FROM users WHERE username = %s)",
+                (username,),
+            )
+    else:
+        # Non-xdist: full reset (original behavior)
+        try:
+            if clear_sessions:
+                cursor.execute("DELETE FROM user_sessions")
+            cursor.execute("DELETE FROM users")
+            cursor.execute("""
+                UPDATE system_bootstrap
+                SET initialized = FALSE,
+                    initial_admin_user_id = NULL,
+                    initialized_at = NULL
+                WHERE id = 1
+            """)
+        except Exception as e:
+            print(f"Reset warning: {e}")
 
 
 @pytest.fixture(scope="session")
@@ -118,6 +153,62 @@ def db_cursor(postgres_url):
 
     cursor.close()
     conn.close()
+
+
+@pytest.fixture(scope="session")
+def worker_admin_setup(db_cursor, backend_url):
+    """
+    Session-scoped fixture that creates a per-worker admin user when running
+    under pytest-xdist.
+
+    Each xdist worker gets its own ``test_admin_<worker_id>`` account inserted
+    directly into the database (idempotent ON CONFLICT DO NOTHING).  This
+    avoids the cross-worker contention that would arise if all workers shared
+    a single user and the ``reset_database`` fixture deleted it.
+
+    In non-xdist mode (``PYTEST_XDIST_WORKER`` unset) this fixture is a no-op
+    so existing serial behaviour is unchanged.
+    """
+    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "")
+    if not worker_id:
+        yield
+        return
+
+    password = "SecurePass123!"
+    username = f"test_admin_{worker_id}"
+
+    # Ensure the system is initialized. Multiple workers may race here; a 403
+    # response simply means another worker already initialized it — that's fine.
+    db_cursor.execute("SELECT initialized FROM system_bootstrap WHERE id = 1")
+    row = db_cursor.fetchone()
+    if not row or not row[0]:
+        with _httpx.Client(timeout=15) as c:
+            c.post(
+                f"{backend_url}/api/auth/local/register",
+                json={
+                    "username": "test_admin_master",
+                    "display_name": "Master Admin",
+                    "email": "master@test.example.com",
+                    "password": password,
+                },
+            )
+        # 200/201 = we initialized it; 403 = another worker beat us. Both OK.
+
+    # Insert this worker's dedicated admin user (idempotent)
+    password_hash = _hash_password_for_test(password, worker_id)
+    db_cursor.execute(
+        """
+        INSERT INTO users (
+            username, display_name, email, auth_provider, local_password_hash,
+            platform_role, platform_role_source, state, created_at, updated_at
+        )
+        VALUES (%s, %s, %s, 'local', %s, 'platform_admin', 'bootstrap', 'active', NOW(), NOW())
+        ON CONFLICT (username) DO NOTHING
+        """,
+        (username, f"Test Admin {worker_id}", f"{username}@test.example.com", password_hash),
+    )
+
+    yield
 
 
 @pytest.fixture(scope="function")
@@ -138,35 +229,49 @@ def _api_login(backend_url: str, base_url_str: str) -> dict:
     """
     Fast API-based login — skips the browser UI bootstrap flow entirely.
 
-    After a DB reset the system is uninitialized, so we call the register
-    endpoint; if the system is already initialized we fall back to the
-    regular login endpoint.  The returned storage_state dict can be passed
-    directly to ``browser.new_context(storage_state=...)`` so the browser
-    context starts with an authenticated session cookie.
+    In xdist mode the system is already initialized and each worker has its
+    own ``test_admin_<worker_id>`` account, so we call the login endpoint
+    directly with those credentials.
+
+    In non-xdist mode (original behaviour) we attempt to register first
+    (succeeds when system is uninitialized after a DB reset) then fall back
+    to regular login if the system is already initialized.
+
+    The returned storage_state dict can be passed directly to
+    ``browser.new_context(storage_state=...)`` so the browser context starts
+    with an authenticated session cookie.
     """
     from urllib.parse import urlparse
 
     parsed = urlparse(base_url_str)
     cookie_domain = parsed.hostname or "nginx"
 
-    # Try to register (works when system is uninitialized after a DB reset)
-    with _httpx.Client(timeout=10) as client:
-        resp = client.post(
-            f"{backend_url}/api/auth/local/register",
-            json={
-                "username": "test_admin",
-                "display_name": "Test Admin",
-                "email": "test_admin@example.com",
-                "password": "SecurePass123!",
-            },
-        )
+    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "")
 
-        if resp.status_code == 403:
-            # System already initialized — login instead
+    with _httpx.Client(timeout=10) as client:
+        if worker_id:
+            # xdist: system is initialized; use worker-specific credentials
+            username = f"test_admin_{worker_id}"
             resp = client.post(
                 f"{backend_url}/api/auth/local/login",
-                json={"username": "test_admin", "password": "SecurePass123!"},
+                json={"username": username, "password": "SecurePass123!"},
             )
+        else:
+            # Non-xdist: register if uninitialized, login otherwise
+            resp = client.post(
+                f"{backend_url}/api/auth/local/register",
+                json={
+                    "username": "test_admin",
+                    "display_name": "Test Admin",
+                    "email": "test_admin@example.com",
+                    "password": "SecurePass123!",
+                },
+            )
+            if resp.status_code == 403:
+                resp = client.post(
+                    f"{backend_url}/api/auth/local/login",
+                    json={"username": "test_admin", "password": "SecurePass123!"},
+                )
 
     if resp.status_code not in (200, 201):
         raise RuntimeError(f"API login failed: {resp.status_code} {resp.text[:200]}")
@@ -195,7 +300,7 @@ def _api_login(backend_url: str, base_url_str: str) -> dict:
 
 
 @pytest.fixture(scope="function")
-def logged_in_page(browser, base_url, backend_url, db_cursor, reset_database):
+def logged_in_page(browser, base_url, backend_url, db_cursor, reset_database, worker_admin_setup):
     """
     Create a logged-in page for a test using fast API-based authentication.
 

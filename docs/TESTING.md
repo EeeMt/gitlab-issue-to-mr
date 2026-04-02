@@ -109,7 +109,7 @@ python -m pytest tests/mock_e2e/test_manual_task.py -v
 
 ## 4. Playwright E2E 测试
 
-Playwright E2E 测试需要完整的 Docker 环境。
+Playwright E2E 测试需要完整的 Docker 环境。测试套件使用 **pytest-xdist 并行执行**，运行时间约 44 秒（状态无关测试并行）+ 42 秒（状态相关测试串行）。
 
 ### 快速开始
 
@@ -118,8 +118,15 @@ Playwright E2E 测试需要完整的 Docker 环境。
 cd deploy
 docker-compose -f docker-compose.e2e.yml up -d
 
-# 2. 运行所有 E2E 测试
-docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/ -v
+# 2a. 并行运行无状态测试（116 个测试，~44 秒，默认使用 -n auto）
+docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/
+
+# 2b. 串行运行状态相关测试（bootstrap/prompt_template/access_management，~42 秒）
+docker-compose -f docker-compose.e2e.yml run --rm e2e pytest \
+  tests/e2e/tests/test_bootstrap.py \
+  tests/e2e/tests/test_prompt_template.py \
+  tests/e2e/tests/test_access_management.py \
+  --override-ini="addopts=-v --tb=short --strict-markers --disable-warnings"
 
 # 3. 清理环境（测试完成后）
 docker-compose -f docker-compose.e2e.yml down
@@ -128,21 +135,26 @@ docker-compose -f docker-compose.e2e.yml down
 > **注意**：
 > - 测试环境使用 `18980` 端口，避免与开发环境 `8880` 冲突
 > - E2E 容器**不会**在 `up -d` 时自动运行测试，必须使用 `run --rm e2e` 明确运行测试
+> - `pytest.ini` 默认启用 `-n auto --dist=loadfile`，状态相关测试在 xdist worker 中自动跳过，须用步骤 2b 单独运行
+
+### 测试分组说明
+
+| 分组 | 文件 | 测试数 | 运行方式 |
+|------|------|--------|---------|
+| 并行（无状态） | `test_create_task`, `test_dashboard`, `test_manual_task`, `test_navigation`, `test_task_details`, `test_task_queue`, `test_task_view` | 116 | 默认并行（步骤 2a） |
+| 串行（有状态） | `test_bootstrap`, `test_prompt_template`, `test_access_management` | 18+2 | 需 `--override-ini` 串行运行（步骤 2b） |
 
 ### 运行特定测试
 
 ```bash
-# 运行特定测试文件
-docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/test_dashboard.py::TestDashboardPage -v
-
-# 运行特定测试类
-docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/test_dashboard.py::TestDashboardPage -v
+# 运行特定测试文件（并行模式，默认 addopts）
+docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/test_dashboard.py
 
 # 运行特定测试方法
-docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/test_dashboard.py::TestDashboardPage::test_dashboard_page_loads -v
+docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/test_dashboard.py::TestDashboardPage::test_dashboard_page_loads
 
 # 按标记运行（如只运行 dashboard 相关测试）
-docker-compose -f docker-compose.e2e.yml run --rm e2e pytest -m dashboard -v
+docker-compose -f docker-compose.e2e.yml run --rm e2e pytest -m dashboard
 ```
 
 ### 调试选项
