@@ -283,10 +283,10 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
 
 
 def _make_app_client_with_db(mock_db, extra_overrides=None):
-    """Build a TestClient with DB and access scope overridden."""
+    """Build a TestClient with DB, access scope, and auth overridden."""
     from app.main import app
     from app.database import get_db
-    from app.dependencies.auth import get_optional_current_user
+    from app.dependencies.auth import get_optional_current_user, require_authenticated_user
     from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
 
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -296,6 +296,7 @@ def _make_app_client_with_db(mock_db, extra_overrides=None):
 
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_optional_current_user] = lambda: None
+    app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
     app.dependency_overrides[require_project_access_scope] = lambda: access_scope
     if extra_overrides:
         app.dependency_overrides.update(extra_overrides)
@@ -640,41 +641,34 @@ class CreateTaskAPITests(unittest.TestCase):
 
     def test_create_task_success(self):
         """POST /api/tasks should create a new task and return its ID."""
-        created_task = MagicMock()
-        created_task.id = 99
-        created_task.project_id = 1
-        created_task.user_prompt = "Fix the login bug"
-        created_task.branch_name = "fix/login"
-        created_task.target_branch = "main"
-        created_task.status = TaskStatus.PENDING
-        created_task.priority = 0
-        created_task.scheduled_at = None
-        created_task.is_manual = True
-        created_task.created_at = datetime(2024, 1, 1, 12, 0, 0)
+        from app.main import app
+        from app.database import get_db
+        from app.dependencies.auth import get_optional_current_user, require_authenticated_user
+        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        async def fake_refresh(task):
+            """Simulate DB commit by setting required fields."""
+            task.id = 99
+            if task.status is None:
+                task.status = TaskStatus.PENDING
+            if task.created_at is None:
+                task.created_at = datetime(2024, 1, 1, 12, 0, 0)
+            if task.updated_at is None:
+                task.updated_at = datetime(2024, 1, 1, 12, 0, 0)
 
         mock_db = MagicMock()
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
-        mock_db.refresh = AsyncMock(side_effect=lambda t: None)
-
-        # Simulate refresh setting id
-        async def fake_refresh(task):
-            task.id = created_task.id
-
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
-
-        from app.main import app
-        from app.database import get_db
-        from app.dependencies.auth import get_optional_current_user
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
-
-        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
         async def override_db():
             yield mock_db
 
         app.dependency_overrides[get_db] = override_db
         app.dependency_overrides[get_optional_current_user] = lambda: None
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
         app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
         client = TestClient(app, raise_server_exceptions=False)
@@ -724,3 +718,220 @@ class CancelTaskAdditionalTests(unittest.TestCase):
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 400)
+
+
+# ---------------------------------------------------------------------------
+# GET /tasks/{task_id} — get single task endpoint
+# ---------------------------------------------------------------------------
+
+class GetTaskEndpointTests(unittest.TestCase):
+    """Tests for GET /api/tasks/{task_id} endpoint."""
+
+    def tearDown(self):
+        from app.main import app
+        app.dependency_overrides.clear()
+
+    def test_get_task_returns_serialized_task(self):
+        """GET /api/tasks/{id} should return the serialized task."""
+        task = _make_serializable_task(task_status=TaskStatus.RUNNING, task_id=42)
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = task
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        client, app = _make_app_client_with_db(mock_db)
+
+        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+            response = client.get("/api/tasks/42")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["id"], 42)
+        self.assertEqual(data["status"], "running")
+
+    def test_get_task_returns_404_when_not_found(self):
+        """GET /api/tasks/{id} should return 404 when task does not exist."""
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        client, app = _make_app_client_with_db(mock_db)
+        response = client.get("/api/tasks/9999")
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 404)
+
+
+# ---------------------------------------------------------------------------
+# PATCH /tasks/{task_id}/stats — update task stats endpoint
+# ---------------------------------------------------------------------------
+
+class UpdateTaskStatsAPITests(unittest.TestCase):
+    """Tests for PATCH /api/tasks/{task_id}/stats endpoint."""
+
+    def tearDown(self):
+        from app.main import app
+        app.dependency_overrides.clear()
+
+    def test_update_task_stats_success(self):
+        """PATCH /api/tasks/{id}/stats should update stats and return success."""
+        task = _make_serializable_task()
+        task.id = 30
+        task.project_id = 1
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = task
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.commit = AsyncMock()
+
+        client, app = _make_app_client_with_db(mock_db)
+        response = client.patch("/api/tasks/30/stats?additions=100&deletions=20&total=120")
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["status"], "success")
+        self.assertEqual(data["additions"], 100)
+        self.assertEqual(data["deletions"], 20)
+        self.assertEqual(data["total"], 120)
+        self.assertEqual(task.additions, 100)
+        self.assertEqual(task.deletions, 20)
+
+    def test_update_task_stats_returns_404_when_not_found(self):
+        """PATCH /api/tasks/{id}/stats returns 404 when task not found."""
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        client, app = _make_app_client_with_db(mock_db)
+        response = client.patch("/api/tasks/9999/stats?additions=0&deletions=0&total=0")
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 404)
+
+
+# ---------------------------------------------------------------------------
+# POST /tasks/{task_id}/retry — with scheduled_datetime
+# ---------------------------------------------------------------------------
+
+class RetryTaskWithScheduleTests(unittest.TestCase):
+    """Tests for retry task with a scheduled_datetime in request body."""
+
+    def tearDown(self):
+        from app.main import app
+        app.dependency_overrides.clear()
+
+    def test_retry_task_with_future_scheduled_datetime(self):
+        """POST /api/tasks/{id}/retry with future scheduled_datetime schedules retry."""
+        from datetime import timezone
+        task = _make_serializable_task(task_status=TaskStatus.FAILED)
+        task.id = 80
+        task.project_id = 1
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = task
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        client, app = _make_app_client_with_db(mock_db)
+
+        future_dt = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+
+        with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
+            with patch("app.core.task_helpers._require_task_operator", return_value=None):
+                response = client.post("/api/tasks/80/retry", json={
+                    "scheduled_datetime": future_dt
+                })
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNotNone(task.scheduled_at)
+
+
+# ---------------------------------------------------------------------------
+# GET /tasks — list tasks with restricted access scope
+# ---------------------------------------------------------------------------
+
+class ListTasksRestrictedScopeTests(unittest.TestCase):
+    """Tests for GET /api/tasks with restricted access scope."""
+
+    def tearDown(self):
+        from app.main import app
+        app.dependency_overrides.clear()
+
+    def _setup_restricted_client(self, tasks_list, accessible_project_ids):
+        from app.main import app
+        from app.database import get_db
+        from app.dependencies.auth import get_optional_current_user, require_authenticated_user
+        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+
+        accessible_projects = [{"id": pid, "name": f"Project {pid}"} for pid in accessible_project_ids]
+        access_scope = ProjectAccessScope(
+            is_unrestricted=False,
+            accessible_projects=accessible_projects,
+        )
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = tasks_list
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[get_optional_current_user] = lambda: None
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        return TestClient(app, raise_server_exceptions=False), app
+
+    def test_list_tasks_with_accessible_projects_uses_filter(self):
+        """GET /api/tasks with restricted scope queries only accessible projects."""
+        task = _make_serializable_task(project_id=1)
+        client, app = self._setup_restricted_client([task], accessible_project_ids=[1])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            response = client.get("/api/tasks")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_list_tasks_with_no_accessible_projects_returns_empty(self):
+        """GET /api/tasks with restricted scope and no projects returns empty."""
+        client, app = self._setup_restricted_client([], accessible_project_ids=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            response = client.get("/api/tasks")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [])
+
+    def test_list_tasks_with_project_id_filter_and_restricted_scope(self):
+        """GET /api/tasks?project_id=1 with restricted scope applies project filter."""
+        task = _make_serializable_task(project_id=1)
+        client, app = self._setup_restricted_client([task], accessible_project_ids=[1])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            response = client.get("/api/tasks?project_id=1")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)

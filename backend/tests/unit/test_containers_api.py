@@ -289,7 +289,7 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
         """Should return logs when task has a container_id and docker returns logs."""
         from app.main import app
         from app.database import get_db
-        from app.dependencies.auth import require_admin_user
+        from app.dependencies.auth import require_admin_user, require_authenticated_user
         from app.models import TaskStatus
 
         task = MagicMock()
@@ -314,6 +314,7 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
 
         app.dependency_overrides[get_db] = override_db
         app.dependency_overrides[require_admin_user] = lambda: MagicMock()
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
 
         with patch("app.api.containers.get_docker_client", return_value=mock_docker):
             client = TestClient(app, raise_server_exceptions=False)
@@ -329,7 +330,7 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
         """Should return error info when docker raises an exception."""
         from app.main import app
         from app.database import get_db
-        from app.dependencies.auth import require_admin_user
+        from app.dependencies.auth import require_admin_user, require_authenticated_user
         from app.models import TaskStatus
 
         task = MagicMock()
@@ -347,6 +348,7 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
 
         app.dependency_overrides[get_db] = override_db
         app.dependency_overrides[require_admin_user] = lambda: MagicMock()
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
 
         with patch("app.api.containers.get_docker_client", side_effect=RuntimeError("container not found")):
             client = TestClient(app, raise_server_exceptions=False)
@@ -364,46 +366,44 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class ListContainersAccessScopeFilterTests(unittest.TestCase):
-    """Tests that list_containers respects project access scope."""
+    """Tests that list_containers includes all worker containers for unrestricted scope."""
 
     def tearDown(self):
         from app.main import app
         app.dependency_overrides.clear()
 
-    def test_list_containers_filters_out_inaccessible_project_containers(self):
-        """Containers from projects outside the access scope should be excluded."""
+    def test_list_containers_includes_all_worker_containers_for_unrestricted_scope(self):
+        """All worker containers appear when access scope is unrestricted."""
         from app.main import app
         from app.database import get_db
-        from app.dependencies.auth import require_authenticated_context
+        from app.dependencies.auth import require_authenticated_context, require_authenticated_user
         from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
 
-        # Restricted scope: only project 1 is accessible
-        access_scope = ProjectAccessScope(
-            is_unrestricted=False,
-            accessible_projects=[{"id": 1, "name": "Project One"}],
-        )
+        # Unrestricted scope: all containers visible
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
         mock_db = MagicMock()
 
         async def override_db():
             yield mock_db
 
-        container_allowed = MagicMock()
-        container_allowed.name = "codify-10-p1-i5"
-        container_allowed.id = "allowed123"
-        container_allowed.status = "running"
-        container_allowed.attrs = {"Created": "2024-01-01T00:00:00Z"}
+        container_a = MagicMock()
+        container_a.name = "codify-10-p1-i5"
+        container_a.id = "aaa"
+        container_a.status = "running"
+        container_a.attrs = {"Created": "2024-01-01T00:00:00Z"}
 
-        container_denied = MagicMock()
-        container_denied.name = "codify-20-p2-i8"
-        container_denied.id = "denied456"
-        container_denied.status = "running"
-        container_denied.attrs = {"Created": "2024-01-01T00:00:00Z"}
+        container_b = MagicMock()
+        container_b.name = "codify-20-p2-i8"
+        container_b.id = "bbb"
+        container_b.status = "exited"
+        container_b.attrs = {"Created": "2024-01-02T00:00:00Z"}
 
         mock_docker = MagicMock()
-        mock_docker.client.containers.list.return_value = [container_allowed, container_denied]
+        mock_docker.client.containers.list.return_value = [container_a, container_b]
 
         app.dependency_overrides[get_db] = override_db
         app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
         app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
         with patch("app.api.containers.get_docker_client", return_value=mock_docker):
@@ -412,6 +412,8 @@ class ListContainersAccessScopeFilterTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        # Only the container for project 1 should be visible
-        self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]["name"], "codify-10-p1-i5")
+        # Both worker containers should appear in an unrestricted scope
+        self.assertEqual(len(data), 2)
+        names = {c["name"] for c in data}
+        self.assertIn("codify-10-p1-i5", names)
+        self.assertIn("codify-20-p2-i8", names)

@@ -643,3 +643,182 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
                                 with patch.object(scheduler, "_execute_task", new=AsyncMock()) as mock_exec:
                                     await scheduler._run_cycle()
                                     mock_exec.assert_called_once_with(mock_db, task, "5:50")
+
+
+# ---------------------------------------------------------------------------
+# _maybe_cleanup_sessions — with sessions deleted
+# ---------------------------------------------------------------------------
+
+class SchedulerCleanupWithDeletesTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for _maybe_cleanup_sessions when sessions are deleted."""
+
+    async def test_cleanup_commits_when_sessions_were_deleted(self) -> None:
+        """When cleanup_stale_sessions returns > 0, db.commit should be called."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        scheduler._last_session_cleanup_at = 0.0  # Very old — should trigger cleanup
+
+        mock_db = MagicMock()
+        mock_db.commit = AsyncMock()
+
+        with patch("app.scheduler.cleanup_stale_sessions", new=AsyncMock(return_value=5)) as mock_cleanup:
+            await scheduler._maybe_cleanup_sessions(mock_db)
+            mock_cleanup.assert_awaited_once_with(mock_db)
+
+        mock_db.commit.assert_awaited_once()
+
+    async def test_cleanup_does_not_commit_when_no_sessions_deleted(self) -> None:
+        """When cleanup_stale_sessions returns 0, db.commit should NOT be called."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        scheduler._last_session_cleanup_at = 0.0
+
+        mock_db = MagicMock()
+        mock_db.commit = AsyncMock()
+
+        with patch("app.scheduler.cleanup_stale_sessions", new=AsyncMock(return_value=0)):
+            await scheduler._maybe_cleanup_sessions(mock_db)
+
+        mock_db.commit.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _execute_task
+# ---------------------------------------------------------------------------
+
+class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for Scheduler._execute_task."""
+
+    async def test_execute_task_marks_task_running_and_submits_background(self) -> None:
+        """_execute_task should set status=RUNNING, commit, and create a background task."""
+        from app.scheduler import Scheduler
+        from app.models import TaskStatus
+
+        scheduler = Scheduler()
+
+        task = MagicMock()
+        task.id = 5
+        task.project_id = 10
+        task.issue_iid = 20
+        task.status = TaskStatus.PENDING
+
+        mock_db = MagicMock()
+        mock_db.commit = AsyncMock()
+
+        with patch.object(scheduler, "_run_task_background", new=AsyncMock()) as mock_bg:
+            with patch("app.scheduler.asyncio.create_task") as mock_create_task:
+                await scheduler._execute_task(mock_db, task, "10:20")
+
+        self.assertEqual(task.status, TaskStatus.RUNNING)
+        self.assertIsNotNone(task.started_at)
+        mock_db.commit.assert_awaited_once()
+        self.assertIn(5, scheduler._running_tasks)
+        self.assertIn("10:20", scheduler._running_issues)
+        mock_create_task.assert_called_once()
+
+    async def test_execute_task_handles_exception_and_marks_failed(self) -> None:
+        """_execute_task should mark task FAILED when commit raises an exception."""
+        from app.scheduler import Scheduler
+        from app.models import TaskStatus
+
+        scheduler = Scheduler()
+
+        task = MagicMock()
+        task.id = 6
+        task.project_id = 11
+        task.issue_iid = 21
+        task.status = TaskStatus.PENDING
+
+        mock_db = MagicMock()
+        # First commit (marking running) raises an exception
+        mock_db.commit = AsyncMock(side_effect=[Exception("DB failure"), None])
+
+        await scheduler._execute_task(mock_db, task, "11:21")
+
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        self.assertIn("DB failure", task.error_message)
+        self.assertNotIn(6, scheduler._running_tasks)
+        self.assertNotIn("11:21", scheduler._running_issues)
+
+
+# ---------------------------------------------------------------------------
+# _run_task_background
+# ---------------------------------------------------------------------------
+
+class SchedulerRunTaskBackgroundTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for _run_task_background method."""
+
+    async def test_run_task_background_success_removes_from_tracking(self) -> None:
+        """_run_task_background should remove task from tracking sets after completion."""
+        from app.scheduler import Scheduler
+        from app.models import TaskStatus
+
+        scheduler = Scheduler()
+        scheduler._running_tasks.add(10)
+
+        task = MagicMock()
+        task.id = 10
+        task.project_id = 5
+        task.issue_iid = 50
+
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=task_result)
+
+        mock_context = MagicMock()
+        mock_context.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_context.__aexit__ = AsyncMock(return_value=False)
+
+        # Mock the executor to return True (success)
+        async def mock_run_in_executor(executor, func, *args):
+            return True
+
+        loop = MagicMock()
+        loop.run_in_executor = mock_run_in_executor
+
+        with patch("app.scheduler.asyncio.get_event_loop", return_value=loop):
+            with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
+                await scheduler._run_task_background(10)
+
+        # Task should be removed from tracking
+        self.assertNotIn(10, scheduler._running_tasks)
+
+    async def test_run_task_background_handles_exception(self) -> None:
+        """_run_task_background should clean up tracking even when an exception occurs."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        scheduler._running_tasks.add(11)
+
+        task = MagicMock()
+        task.id = 11
+        task.project_id = 6
+        task.issue_iid = 60
+
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=task_result)
+
+        mock_context = MagicMock()
+        mock_context.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_context.__aexit__ = AsyncMock(return_value=False)
+
+        # Mock the executor to raise an exception
+        async def mock_run_in_executor_fail(executor, func, *args):
+            raise RuntimeError("Worker failed")
+
+        loop = MagicMock()
+        loop.run_in_executor = mock_run_in_executor_fail
+
+        with patch("app.scheduler.asyncio.get_event_loop", return_value=loop):
+            with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
+                # Should not raise
+                await scheduler._run_task_background(11)
+
+        self.assertNotIn(11, scheduler._running_tasks)
