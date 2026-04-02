@@ -1,0 +1,351 @@
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import { h, nextTick, ref } from 'vue'
+import ScheduleOverview from './ScheduleOverview.vue'
+import { createMockTask } from '../test/mocks/api'
+
+// ---------------------------------------------------------------------------
+// Hoisted mocks
+// ---------------------------------------------------------------------------
+const { mockApi, mockMessage, resetMockApi } = vi.hoisted(() => {
+  const api = {
+    getScheduledTasks: vi.fn(),
+    rescheduleTask: vi.fn()
+  }
+  const msg = {
+    error: vi.fn(),
+    success: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn()
+  }
+  const resetMockApi = () => Object.values(api).forEach(fn => fn.mockReset())
+  return { mockApi: api, mockMessage: msg, resetMockApi }
+})
+
+// ---------------------------------------------------------------------------
+// Module mocks
+// ---------------------------------------------------------------------------
+vi.mock('../api', () => ({
+  getScheduledTasks: mockApi.getScheduledTasks,
+  rescheduleTask: mockApi.rescheduleTask
+}))
+
+vi.mock('../auth', () => ({
+  authState: { oidcEnabled: false },
+  isAdmin: ref(true),
+  initializeAuth: vi.fn().mockResolvedValue(undefined)
+}))
+
+vi.mock('../utils/datetime', () => ({
+  formatDateTimeUtc8Compact: vi.fn((v: any) => `fmt:${v}`),
+  formatMonthDayTimeUtc8: vi.fn((v: any) => `mdt:${v}`),
+  formatMonthDayWeekdayUtc8: vi.fn((v: any) => `mdw:${v}`),
+  formatTimeUtc8: vi.fn((v: any) => `time:${v}`),
+  parseUtcDate: vi.fn((v: any) => new Date(v || Date.now()))
+}))
+
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: vi.fn() })
+}))
+
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: vi.fn((key: string) => key),
+    locale: { value: 'en' }
+  })
+}))
+
+vi.mock('@vueuse/core', () => ({
+  useWindowSize: vi.fn(() => ({ width: ref(1200) }))
+}))
+
+// ---------------------------------------------------------------------------
+// Naive-UI mock
+// ---------------------------------------------------------------------------
+vi.mock('naive-ui', () => ({
+  NSpin: {
+    name: 'NSpin',
+    props: ['show', 'description'],
+    setup(props: any, { slots }: any) {
+      return () => h('div', { class: props.show ? 'n-spin--loading' : 'n-spin' }, slots.default?.())
+    }
+  },
+  NSpace: {
+    name: 'NSpace',
+    props: ['vertical', 'size', 'justify', 'wrap', 'align'],
+    setup(_p: any, { slots }: any) { return () => h('div', { class: 'n-space' }, slots.default?.()) }
+  },
+  NButton: {
+    name: 'NButton',
+    props: ['type', 'loading', 'disabled', 'secondary', 'size', 'strong'],
+    emits: ['click'],
+    setup(props: any, { slots, emit }: any) {
+      return () => h('button', {
+        class: 'n-button',
+        disabled: props.disabled || props.loading,
+        onClick: () => emit('click')
+      }, slots.default?.())
+    }
+  },
+  NCard: {
+    name: 'NCard',
+    props: ['bordered', 'size'],
+    setup(_p: any, { slots }: any) {
+      return () => h('div', { class: 'n-card' }, [slots.header?.(), slots.default?.()])
+    }
+  },
+  NGrid: {
+    name: 'NGrid',
+    props: ['cols', 'xGap', 'yGap'],
+    setup(_p: any, { slots }: any) { return () => h('div', { class: 'n-grid' }, slots.default?.()) }
+  },
+  NGi: {
+    name: 'NGi',
+    setup(_p: any, { slots }: any) { return () => h('div', { class: 'n-gi' }, slots.default?.()) }
+  },
+  NTag: {
+    name: 'NTag',
+    props: ['size', 'round', 'type'],
+    setup(_p: any, { slots }: any) { return () => h('span', { class: 'n-tag' }, slots.default?.()) }
+  },
+  NDataTable: {
+    name: 'NDataTable',
+    props: ['columns', 'data', 'loading', 'rowKey', 'bordered', 'scrollX', 'pagination', 'rowProps'],
+    setup(props: any) {
+      return () => h('div', {
+        class: 'n-data-table',
+        'data-row-count': String(props.data?.length ?? 0)
+      })
+    }
+  },
+  NAlert: {
+    name: 'NAlert',
+    props: ['type', 'showIcon'],
+    setup(_p: any, { slots }: any) { return () => h('div', { class: 'n-alert' }, slots.default?.()) }
+  },
+  NEmpty: {
+    name: 'NEmpty',
+    props: ['description'],
+    setup(props: any) { return () => h('div', { class: 'n-empty' }, props.description) }
+  },
+  NText: {
+    name: 'NText',
+    props: ['depth'],
+    setup(_p: any, { slots }: any) { return () => h('span', slots.default?.()) }
+  },
+  NSelect: {
+    name: 'NSelect',
+    props: ['value', 'options'],
+    emits: ['update:value'],
+    setup(props: any, { emit }: any) {
+      return () => h('select', {
+        class: 'n-select',
+        onChange: (e: Event) => emit('update:value', (e.target as HTMLSelectElement).value)
+      }, props.options?.map((o: any) => h('option', { value: o.value }, o.label)))
+    }
+  },
+  NDatePicker: {
+    name: 'NDatePicker',
+    props: ['value', 'type', 'isDateDisabled', 'isTimeDisabled'],
+    emits: ['update:value'],
+    setup() { return () => h('div', { class: 'n-date-picker' }) }
+  },
+  NTabs: {
+    name: 'NTabs',
+    props: ['value'],
+    emits: ['update:value'],
+    setup(_p: any, { slots }: any) { return () => h('div', { class: 'n-tabs' }, slots.default?.()) }
+  },
+  NTabPane: {
+    name: 'NTabPane',
+    props: ['name', 'tab'],
+    setup(_p: any, { slots }: any) { return () => h('div', { class: 'n-tab-pane' }, slots.default?.()) }
+  },
+  useMessage: () => mockMessage
+}))
+
+// ---------------------------------------------------------------------------
+// Mock data — tasks scheduled in the future
+// ---------------------------------------------------------------------------
+const futureTime = new Date(Date.now() + 60 * 60 * 1000).toISOString() // +1h
+const farFutureTime = new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString() // +25h
+
+const mockScheduledTasks = [
+  createMockTask({ id: 1, status: 'queued', scheduled_at: futureTime, project_id: 1 }),
+  createMockTask({ id: 2, status: 'queued', scheduled_at: farFutureTime, project_id: 2 }),
+  createMockTask({ id: 3, status: 'running', scheduled_at: null, project_id: 1 })
+]
+
+// ---------------------------------------------------------------------------
+// Mount helper
+// ---------------------------------------------------------------------------
+const mountComponent = () =>
+  mount(ScheduleOverview, {
+    global: {
+      stubs: {
+        SummaryCard: {
+          props: ['label', 'value'],
+          template: '<div class="summary-card"><span class="sc-label">{{ label }}</span><span class="sc-value">{{ value }}</span></div>'
+        }
+      }
+    }
+  })
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+describe('ScheduleOverview', () => {
+  let wrapper: ReturnType<typeof mount> | null = null
+
+  beforeEach(() => {
+    resetMockApi()
+    ;(mockApi.getScheduledTasks as Mock).mockResolvedValue(mockScheduledTasks)
+    vi.spyOn(window, 'setInterval').mockImplementation(() => 1 as any)
+    vi.spyOn(window, 'clearInterval').mockImplementation(() => undefined)
+  })
+
+  afterEach(() => {
+    if (wrapper) {
+      wrapper.unmount()
+      wrapper = null
+    }
+    vi.restoreAllMocks()
+  })
+
+  // -------------------------------------------------------------------------
+  it('calls getScheduledTasks on mount', async () => {
+    wrapper = mountComponent()
+    await flushPromises()
+    expect(mockApi.getScheduledTasks).toHaveBeenCalledTimes(1)
+  })
+
+  // -------------------------------------------------------------------------
+  it('shows loading spinner during initial fetch', async () => {
+    let resolve!: (v: any) => void
+    ;(mockApi.getScheduledTasks as Mock).mockReturnValue(new Promise(r => { resolve = r }))
+
+    wrapper = mountComponent()
+    await nextTick()
+
+    expect(wrapper.vm.initialLoading).toBe(true)
+    expect(wrapper.vm.loading).toBe(true)
+
+    resolve(mockScheduledTasks)
+    await flushPromises()
+
+    expect(wrapper.vm.loading).toBe(false)
+  })
+
+  // -------------------------------------------------------------------------
+  it('sets hasLoadedOnce after data loads', async () => {
+    wrapper = mountComponent()
+    expect(wrapper.vm.hasLoadedOnce).toBe(false)
+    await flushPromises()
+    expect(wrapper.vm.hasLoadedOnce).toBe(true)
+  })
+
+  // -------------------------------------------------------------------------
+  it('stores tasks in component state after load', async () => {
+    wrapper = mountComponent()
+    await flushPromises()
+
+    expect(wrapper.vm.tasks.length).toBe(3)
+  })
+
+  // -------------------------------------------------------------------------
+  it('summary items are computed from tasks', async () => {
+    wrapper = mountComponent()
+    await flushPromises()
+
+    const items = wrapper.vm.summaryItems as any[]
+    expect(items.length).toBeGreaterThan(0)
+    // Each item should have label and value
+    items.forEach((item: any) => {
+      expect(item).toHaveProperty('label')
+      expect(item).toHaveProperty('value')
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  it('starts polling timer on mount', async () => {
+    wrapper = mountComponent()
+    await flushPromises()
+    expect(window.setInterval).toHaveBeenCalled()
+  })
+
+  // -------------------------------------------------------------------------
+  it('clears polling timer on unmount', async () => {
+    wrapper = mountComponent()
+    await flushPromises()
+
+    wrapper.unmount()
+    wrapper = null
+
+    expect(window.clearInterval).toHaveBeenCalled()
+  })
+
+  // -------------------------------------------------------------------------
+  it('refresh button triggers fetchData', async () => {
+    wrapper = mountComponent()
+    await flushPromises()
+
+    ;(mockApi.getScheduledTasks as Mock).mockClear()
+
+    const btn = wrapper.find('button.n-button')
+    await btn.trigger('click')
+    await flushPromises()
+
+    expect(mockApi.getScheduledTasks).toHaveBeenCalledTimes(1)
+  })
+
+  // -------------------------------------------------------------------------
+  it('handles fetch error gracefully', async () => {
+    ;(mockApi.getScheduledTasks as Mock).mockRejectedValue(new Error('Network error'))
+
+    wrapper = mountComponent()
+    await flushPromises()
+
+    expect(mockMessage.error).toHaveBeenCalled()
+    expect(wrapper.vm.hasLoadedOnce).toBe(true)
+    expect(wrapper.vm.loading).toBe(false)
+  })
+
+  // -------------------------------------------------------------------------
+  it('reschedule updates the task in state on success', async () => {
+    const updatedTask = createMockTask({
+      id: 1,
+      status: 'queued',
+      scheduled_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString()
+    })
+    ;(mockApi.rescheduleTask as Mock).mockResolvedValue(updatedTask)
+
+    wrapper = mountComponent()
+    await flushPromises()
+
+    // Set up a future draft timestamp
+    const futureMs = Date.now() + 2 * 60 * 60 * 1000
+    wrapper.vm.scheduleDrafts[1] = futureMs
+
+    await wrapper.vm.handleTaskReschedule(mockScheduledTasks[0])
+    await flushPromises()
+
+    expect(mockApi.rescheduleTask).toHaveBeenCalledWith(1, expect.objectContaining({
+      scheduled_datetime: expect.any(String)
+    }))
+    expect(mockMessage.success).toHaveBeenCalled()
+  })
+
+  // -------------------------------------------------------------------------
+  it('shows error when reschedule time is in the past', async () => {
+    wrapper = mountComponent()
+    await flushPromises()
+
+    // Set a past timestamp
+    wrapper.vm.scheduleDrafts[1] = Date.now() - 1000
+
+    await wrapper.vm.handleTaskReschedule(mockScheduledTasks[0])
+
+    expect(mockApi.rescheduleTask).not.toHaveBeenCalled()
+    expect(mockMessage.error).toHaveBeenCalled()
+  })
+})

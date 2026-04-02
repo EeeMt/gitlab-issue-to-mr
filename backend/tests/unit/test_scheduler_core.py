@@ -398,3 +398,248 @@ class SchedulerMaybeCleanupTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# _get_running_count
+# ---------------------------------------------------------------------------
+
+class SchedulerGetRunningCountTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for _get_running_count."""
+
+    async def test_get_running_count_returns_correct_value(self) -> None:
+        """_get_running_count should return the DB count of RUNNING tasks."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+
+        count_result = MagicMock()
+        count_result.scalar.return_value = 3
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=count_result)
+
+        count = await scheduler._get_running_count(mock_db)
+
+        self.assertEqual(count, 3)
+        mock_db.execute.assert_called_once()
+
+    async def test_get_running_count_returns_zero_when_result_is_none(self) -> None:
+        """_get_running_count should return 0 when scalar() is None."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+
+        count_result = MagicMock()
+        count_result.scalar.return_value = None
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=count_result)
+
+        count = await scheduler._get_running_count(mock_db)
+
+        self.assertEqual(count, 0)
+
+
+# ---------------------------------------------------------------------------
+# _crash_recovery
+# ---------------------------------------------------------------------------
+
+class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for crash recovery logic."""
+
+    async def test_crash_recovery_marks_stuck_tasks_as_failed(self) -> None:
+        """_crash_recovery should mark any RUNNING task as FAILED."""
+        from app.scheduler import Scheduler
+        from app.models import TaskStatus
+
+        scheduler = Scheduler()
+
+        stuck_task = MagicMock()
+        stuck_task.id = 42
+        stuck_task.status = TaskStatus.RUNNING
+
+        tasks_result = MagicMock()
+        tasks_result.scalars.return_value.all.return_value = [stuck_task]
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=tasks_result)
+        mock_db.commit = AsyncMock()
+
+        mock_context = MagicMock()
+        mock_context.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_context.__aexit__ = AsyncMock(return_value=False)
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.list.return_value = []
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
+            with patch("app.scheduler.get_docker_client", return_value=mock_docker):
+                await scheduler._crash_recovery()
+
+        self.assertEqual(stuck_task.status, TaskStatus.FAILED)
+        self.assertIn("crashed", stuck_task.error_message)
+        mock_db.commit.assert_awaited_once()
+
+    async def test_crash_recovery_handles_docker_error_gracefully(self) -> None:
+        """_crash_recovery should continue even if docker client raises."""
+        from app.scheduler import Scheduler
+        from app.models import TaskStatus
+
+        scheduler = Scheduler()
+
+        stuck_task = MagicMock()
+        stuck_task.id = 43
+        stuck_task.status = TaskStatus.RUNNING
+
+        tasks_result = MagicMock()
+        tasks_result.scalars.return_value.all.return_value = [stuck_task]
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=tasks_result)
+        mock_db.commit = AsyncMock()
+
+        mock_context = MagicMock()
+        mock_context.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_context.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
+            with patch("app.scheduler.get_docker_client", side_effect=RuntimeError("docker down")):
+                # Should not raise — docker failure is logged and skipped
+                await scheduler._crash_recovery()
+
+        # Task should still be marked failed
+        self.assertEqual(stuck_task.status, TaskStatus.FAILED)
+
+    async def test_crash_recovery_with_no_stuck_tasks(self) -> None:
+        """_crash_recovery should handle the case with no stuck tasks."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+
+        tasks_result = MagicMock()
+        tasks_result.scalars.return_value.all.return_value = []
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=tasks_result)
+        mock_db.commit = AsyncMock()
+
+        mock_context = MagicMock()
+        mock_context.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_context.__aexit__ = AsyncMock(return_value=False)
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.list.return_value = []
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
+            with patch("app.scheduler.get_docker_client", return_value=mock_docker):
+                await scheduler._crash_recovery()
+
+        # Should still commit (even if nothing to update)
+        mock_db.commit.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# _run_cycle
+# ---------------------------------------------------------------------------
+
+class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for the main _run_cycle method."""
+
+    def _make_mock_db_context(self):
+        """Helper: create an async context manager mock for AsyncSessionLocal."""
+        mock_db = MagicMock()
+        mock_db.commit = AsyncMock()
+        mock_context = MagicMock()
+        mock_context.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_context.__aexit__ = AsyncMock(return_value=False)
+        return mock_context, mock_db
+
+    async def test_run_cycle_skips_when_max_concurrency_reached(self) -> None:
+        """_run_cycle should return early when running count >= max_concurrency."""
+        from app.scheduler import Scheduler
+        from types import SimpleNamespace
+
+        scheduler = Scheduler()
+        mock_context, mock_db = self._make_mock_db_context()
+        mock_settings = SimpleNamespace(max_concurrency=2, scheduler_interval=1)
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
+            with patch("app.scheduler.load_runtime_config_from_db", new=AsyncMock()):
+                with patch.object(scheduler, "_maybe_cleanup_sessions", new=AsyncMock()):
+                    with patch("app.scheduler.get_settings", return_value=mock_settings):
+                        with patch.object(scheduler, "_get_running_count", new=AsyncMock(return_value=2)):
+                            with patch.object(scheduler, "_get_next_task", new=AsyncMock()) as mock_next:
+                                await scheduler._run_cycle()
+                                mock_next.assert_not_called()
+
+    async def test_run_cycle_skips_when_no_task_available(self) -> None:
+        """_run_cycle should return early when no pending task exists."""
+        from app.scheduler import Scheduler
+        from types import SimpleNamespace
+
+        scheduler = Scheduler()
+        mock_context, mock_db = self._make_mock_db_context()
+        mock_settings = SimpleNamespace(max_concurrency=4, scheduler_interval=1)
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
+            with patch("app.scheduler.load_runtime_config_from_db", new=AsyncMock()):
+                with patch.object(scheduler, "_maybe_cleanup_sessions", new=AsyncMock()):
+                    with patch("app.scheduler.get_settings", return_value=mock_settings):
+                        with patch.object(scheduler, "_get_running_count", new=AsyncMock(return_value=0)):
+                            with patch.object(scheduler, "_get_next_task", new=AsyncMock(return_value=None)):
+                                with patch.object(scheduler, "_execute_task", new=AsyncMock()) as mock_exec:
+                                    await scheduler._run_cycle()
+                                    mock_exec.assert_not_called()
+
+    async def test_run_cycle_skips_when_issue_mutex_active(self) -> None:
+        """_run_cycle should skip a task when its issue is already being processed."""
+        from app.scheduler import Scheduler
+        from app.models import TaskStatus
+        from types import SimpleNamespace
+
+        scheduler = Scheduler()
+        mock_context, mock_db = self._make_mock_db_context()
+        mock_settings = SimpleNamespace(max_concurrency=4, scheduler_interval=1)
+
+        task = MagicMock()
+        task.id = 1
+        task.project_id = 10
+        task.issue_iid = 99
+
+        # Pre-populate the running issues mutex
+        scheduler._running_issues.add("10:99")
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
+            with patch("app.scheduler.load_runtime_config_from_db", new=AsyncMock()):
+                with patch.object(scheduler, "_maybe_cleanup_sessions", new=AsyncMock()):
+                    with patch("app.scheduler.get_settings", return_value=mock_settings):
+                        with patch.object(scheduler, "_get_running_count", new=AsyncMock(return_value=0)):
+                            with patch.object(scheduler, "_get_next_task", new=AsyncMock(return_value=task)):
+                                with patch.object(scheduler, "_execute_task", new=AsyncMock()) as mock_exec:
+                                    await scheduler._run_cycle()
+                                    mock_exec.assert_not_called()
+
+    async def test_run_cycle_executes_task_when_available(self) -> None:
+        """_run_cycle should call _execute_task when a task is available and conditions allow."""
+        from app.scheduler import Scheduler
+        from types import SimpleNamespace
+
+        scheduler = Scheduler()
+        mock_context, mock_db = self._make_mock_db_context()
+        mock_settings = SimpleNamespace(max_concurrency=4, scheduler_interval=1)
+
+        task = MagicMock()
+        task.id = 2
+        task.project_id = 5
+        task.issue_iid = 50
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
+            with patch("app.scheduler.load_runtime_config_from_db", new=AsyncMock()):
+                with patch.object(scheduler, "_maybe_cleanup_sessions", new=AsyncMock()):
+                    with patch("app.scheduler.get_settings", return_value=mock_settings):
+                        with patch.object(scheduler, "_get_running_count", new=AsyncMock(return_value=0)):
+                            with patch.object(scheduler, "_get_next_task", new=AsyncMock(return_value=task)):
+                                with patch.object(scheduler, "_execute_task", new=AsyncMock()) as mock_exec:
+                                    await scheduler._run_cycle()
+                                    mock_exec.assert_called_once_with(mock_db, task, "5:50")

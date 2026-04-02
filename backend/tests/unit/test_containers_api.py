@@ -272,3 +272,146 @@ class GetContainerLogsEndpointTests(unittest.TestCase):
         data = response.json()
         self.assertIsNone(data["container_id"])
         self.assertEqual(data["logs"], "")
+
+
+# ---------------------------------------------------------------------------
+# Extended tests: get_task_container_logs with a container_id set
+# ---------------------------------------------------------------------------
+
+class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
+    """Tests for container-logs endpoint when the task has a container_id."""
+
+    def tearDown(self):
+        from app.main import app
+        app.dependency_overrides.clear()
+
+    def test_get_task_container_logs_returns_logs_when_container_exists(self):
+        """Should return logs when task has a container_id and docker returns logs."""
+        from app.main import app
+        from app.database import get_db
+        from app.dependencies.auth import require_admin_user
+        from app.models import TaskStatus
+
+        task = MagicMock()
+        task.id = 10
+        task.container_id = "abc123def456"
+        task.status = TaskStatus.RUNNING
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = task
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        async def override_db():
+            yield mock_db
+
+        mock_container = MagicMock()
+        mock_container.status = "running"
+        mock_container.logs.return_value = b"Starting task\nStep 1 done\n"
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.get.return_value = mock_container
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
+
+        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/tasks/10/container-logs")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["container_id"], "abc123def456")
+        self.assertEqual(data["container_status"], "running")
+        self.assertIn("Starting task", data["logs"])
+
+    def test_get_task_container_logs_returns_error_when_docker_fails(self):
+        """Should return error info when docker raises an exception."""
+        from app.main import app
+        from app.database import get_db
+        from app.dependencies.auth import require_admin_user
+        from app.models import TaskStatus
+
+        task = MagicMock()
+        task.id = 11
+        task.container_id = "xyz789"
+        task.status = TaskStatus.RUNNING
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = task
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
+
+        with patch("app.api.containers.get_docker_client", side_effect=RuntimeError("container not found")):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/tasks/11/container-logs")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["container_id"], "xyz789")
+        self.assertIn("error", data)
+        self.assertIn("Error", data["logs"])
+
+
+# ---------------------------------------------------------------------------
+# Access scope filtering for list_containers
+# ---------------------------------------------------------------------------
+
+class ListContainersAccessScopeFilterTests(unittest.TestCase):
+    """Tests that list_containers respects project access scope."""
+
+    def tearDown(self):
+        from app.main import app
+        app.dependency_overrides.clear()
+
+    def test_list_containers_filters_out_inaccessible_project_containers(self):
+        """Containers from projects outside the access scope should be excluded."""
+        from app.main import app
+        from app.database import get_db
+        from app.dependencies.auth import require_authenticated_context
+        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+
+        # Restricted scope: only project 1 is accessible
+        access_scope = ProjectAccessScope(
+            is_unrestricted=False,
+            accessible_projects=[{"id": 1, "name": "Project One"}],
+        )
+        mock_db = MagicMock()
+
+        async def override_db():
+            yield mock_db
+
+        container_allowed = MagicMock()
+        container_allowed.name = "codify-10-p1-i5"
+        container_allowed.id = "allowed123"
+        container_allowed.status = "running"
+        container_allowed.attrs = {"Created": "2024-01-01T00:00:00Z"}
+
+        container_denied = MagicMock()
+        container_denied.name = "codify-20-p2-i8"
+        container_denied.id = "denied456"
+        container_denied.status = "running"
+        container_denied.attrs = {"Created": "2024-01-01T00:00:00Z"}
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.list.return_value = [container_allowed, container_denied]
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/containers")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        # Only the container for project 1 should be visible
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["name"], "codify-10-p1-i5")
