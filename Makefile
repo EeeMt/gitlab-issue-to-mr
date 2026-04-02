@@ -9,6 +9,7 @@ export COMPOSE_DOCKER_CLI_BUILD := 1
 .PHONY: build
 build:
 	cd deploy && docker-compose build
+	docker build -f deploy/Dockerfile.worker -t gimr-worker:latest ..
 
 .PHONY: up
 up:
