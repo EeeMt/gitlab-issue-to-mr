@@ -91,6 +91,14 @@ class DockerClientWrapper:
         """
         logger.info(f"Creating container with image: {image}, name: {name}")
 
+        if name:
+            try:
+                existing = self.client.containers.get(name)
+                logger.info(f"Removing stale container {name} (status: {existing.status})")
+                existing.remove(force=True)
+            except docker.errors.NotFound:
+                pass
+
         container = self.client.containers.run(
             image,
             command,
