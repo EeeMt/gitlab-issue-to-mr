@@ -167,6 +167,11 @@ test-all: test test-gitlab-e2e test-e2e ## Run ALL tests (unit + gitlab-e2e + pl
 .PHONY: help
 help:
 	@echo ""
+	@echo "Setup (run once after fresh checkout):"
+	@echo "  make setup             Install all dependencies (backend venv + frontend npm)"
+	@echo "  make setup-venv        Create/update backend Python virtualenv"
+	@echo "  make setup-npm         Install frontend npm dependencies"
+	@echo ""
 	@echo "Development Environment:"
 	@echo "  make build              Build all images (backend, nginx, worker)"
 	@echo "  make up                Start development environment"
