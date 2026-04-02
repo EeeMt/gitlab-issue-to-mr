@@ -63,7 +63,7 @@
             </n-tab-pane>
 
             <n-tab-pane name="prompt-templates" :tab="t('config.promptTemplatesTab')">
-              <PromptTemplatesPanel ref="promptTemplatesPanelRef" />
+              <PromptTemplatesPanel ref="promptTemplatesPanelRef" :is-mobile="isMobile" />
             </n-tab-pane>
           </n-tabs>
         </div>

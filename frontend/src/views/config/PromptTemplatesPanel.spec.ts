@@ -44,8 +44,8 @@ vi.mock('naive-ui', () => ({
   NDataTable: {
     name: 'NDataTable',
     props: ['columns', 'data', 'loading', 'rowKey', 'pagination', 'bordered'],
-    setup(props: any) {
-      return () => h('div', { class: 'n-data-table' },
+    setup(props: any, { attrs }: any) {
+      return () => h('div', { class: 'n-data-table', ...attrs },
         props.data?.map((row: any) => h('div', { class: 'n-data-table-row', key: row.id }))
       )
     }
@@ -61,18 +61,33 @@ vi.mock('naive-ui', () => ({
     name: 'NFormItem',
     props: ['label', 'path'],
     setup(_props: any, { slots }: any) {
-      return () => h('div', { class: 'n-form-item' }, slots.default?.())
+      return () => h('div', { class: 'n-form-item' }, [slots.default?.(), slots.feedback?.()])
+    }
+  },
+  NGrid: {
+    name: 'NGrid',
+    props: ['cols', 'xGap', 'yGap'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-grid' }, slots.default?.())
+    }
+  },
+  NGi: {
+    name: 'NGi',
+    props: ['span'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-gi' }, slots.default?.())
     }
   },
   NInput: {
     name: 'NInput',
     props: ['value', 'placeholder', 'type'],
-    setup(props: any, { emit }: any) {
+    setup(props: any, { emit, attrs }: any) {
       return () => h('input', {
         class: 'n-input',
         type: props.type || 'text',
         value: props.value,
         placeholder: props.placeholder,
+        ...attrs,
         onInput: (e: Event) => emit('update:value', (e.target as HTMLInputElement).value)
       })
     }
@@ -80,9 +95,10 @@ vi.mock('naive-ui', () => ({
   NSwitch: {
     name: 'NSwitch',
     props: ['value'],
-    setup(props: any, { emit }: any) {
+    setup(props: any, { emit, attrs }: any) {
       return () => h('button', {
         class: 'n-switch',
+        ...attrs,
         onClick: () => emit('update:value', !props.value)
       })
     }
@@ -97,12 +113,25 @@ vi.mock('naive-ui', () => ({
   NButton: {
     name: 'NButton',
     props: ['type', 'loading', 'disabled', 'secondary'],
-    setup(props: any, { slots }: any) {
+    setup(props: any, { slots, attrs }: any) {
       return () => h('button', {
         class: ['n-button', props.type],
         disabled: props.disabled || props.loading,
+        ...attrs,
         onClick: () => {}
       }, slots.default?.())
+    }
+  },
+  NPopconfirm: {
+    name: 'NPopconfirm',
+    props: ['positiveText', 'negativeText', 'positiveButtonProps', 'negativeButtonProps'],
+    setup(props: any, { slots }: any) {
+      return () => h('div', { class: 'n-popconfirm' }, [
+        slots.trigger?.(),
+        h('div', { class: 'n-popconfirm__content' }, slots.default?.()),
+        h('button', { class: 'n-popconfirm__positive', ...(props.positiveButtonProps || {}) }, props.positiveText),
+        h('button', { class: 'n-popconfirm__negative', ...(props.negativeButtonProps || {}) }, props.negativeText)
+      ])
     }
   },
   NSpace: {
@@ -110,6 +139,13 @@ vi.mock('naive-ui', () => ({
     props: ['size', 'wrap', 'justify'],
     setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-space' }, slots.default?.())
+    }
+  },
+  NSpin: {
+    name: 'NSpin',
+    props: ['show'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-spin' }, slots.default?.())
     }
   },
   useMessage: () => ({
@@ -184,9 +220,7 @@ describe('PromptTemplatesPanel', () => {
     it('should have create button', async () => {
       const wrapper = mountComponent()
       await vi.waitFor(() => {
-        const buttons = wrapper.findAll('.n-button')
-        const buttonTexts = buttons.map(btn => btn.text())
-        expect(buttonTexts.some(text => text.includes('config.createPromptTemplate'))).toBe(true)
+        expect(wrapper.find('[data-testid="prompt-template-create-button"]').exists()).toBe(true)
       })
     })
 
@@ -372,6 +406,22 @@ describe('PromptTemplatesPanel', () => {
       await wrapper.vm.$nextTick()
 
       expect(wrapper.find('[data-testid="prompt-template-editor"]').exists()).toBe(true)
+    })
+  })
+
+  describe('responsive rendering', () => {
+    it('should render mobile cards instead of data table when isMobile is true', async () => {
+      const wrapper = mount(PromptTemplatesPanel, {
+        props: {
+          isMobile: true
+        }
+      })
+
+      wrapper.vm.promptTemplates = mockTemplates
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.find('[data-testid="prompt-template-table"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="prompt-template-card-1"]').exists()).toBe(true)
     })
   })
 })

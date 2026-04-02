@@ -22,6 +22,15 @@ class TestPromptTemplates:
         page.wait_for_timeout(1000)
         expect(page.get_by_test_id("prompt-template-create-button")).to_be_visible()
 
+    def create_template(self, page: Page, name: str, content: str):
+        page.get_by_test_id("prompt-template-create-button").click()
+        page.get_by_test_id("prompt-template-name-input").fill(name)
+        cm_content = page.locator(".variable-editor .cm-content")
+        cm_content.click()
+        cm_content.fill(content)
+        page.get_by_test_id("prompt-template-save-button").click()
+        page.wait_for_timeout(1000)
+
     def test_prompt_template_editor_opens_inline(self, logged_in_page: Page, reset_database):
         """Test that the prompt template creation editor opens inline when clicking create."""
         self.open_prompt_templates(logged_in_page)
@@ -93,13 +102,39 @@ class TestPromptTemplates:
     def test_save_prompt_template(self, logged_in_page: Page, reset_database):
         """Test that a prompt template can be saved successfully."""
         self.open_prompt_templates(logged_in_page)
-        logged_in_page.get_by_test_id("prompt-template-create-button").click()
-        name_input = logged_in_page.get_by_test_id("prompt-template-name-input")
-        name_input.fill("My Test Template")
-        cm_content = logged_in_page.locator(".variable-editor .cm-content")
-        cm_content.click()
-        cm_content.fill("Please review the changes in {{files}}")
-        logged_in_page.get_by_test_id("prompt-template-save-button").click()
-        logged_in_page.wait_for_timeout(1000)
+        self.create_template(logged_in_page, "My Test Template", "Please review the changes in {{files}}")
         expect(logged_in_page.get_by_test_id("prompt-template-table")).to_be_visible()
         expect(logged_in_page.get_by_text("My Test Template").first).to_be_visible()
+
+    def test_edit_prompt_template(self, logged_in_page: Page, reset_database):
+        """Test that an existing prompt template can be edited."""
+        self.open_prompt_templates(logged_in_page)
+        self.create_template(logged_in_page, "Editable Template", "Original {{files}}")
+
+        edit_button = logged_in_page.locator('[data-testid^="prompt-template-edit-button-"]').first
+        expect(edit_button).to_be_visible()
+        edit_button.click()
+
+        name_input = logged_in_page.get_by_test_id("prompt-template-name-input")
+        expect(name_input).to_have_value("Editable Template")
+        name_input.fill("Edited Template")
+        logged_in_page.get_by_test_id("prompt-template-save-button").click()
+        logged_in_page.wait_for_timeout(1000)
+
+        expect(logged_in_page.get_by_text("Edited Template").first).to_be_visible()
+
+    def test_delete_prompt_template(self, logged_in_page: Page, reset_database):
+        """Test that an existing prompt template can be deleted after confirmation."""
+        self.open_prompt_templates(logged_in_page)
+        self.create_template(logged_in_page, "Disposable Template", "Disposable {{files}}")
+
+        delete_button = logged_in_page.locator('[data-testid^="prompt-template-delete-button-"]').first
+        expect(delete_button).to_be_visible()
+        delete_button.click()
+
+        confirm_button = logged_in_page.locator('[class*="prompt-template-delete-popconfirm-"]').get_by_role("button", name="Delete").first
+        expect(confirm_button).to_be_visible()
+        confirm_button.click()
+        logged_in_page.wait_for_timeout(1000)
+
+        expect(logged_in_page.get_by_text("Disposable Template")).to_have_count(0)
