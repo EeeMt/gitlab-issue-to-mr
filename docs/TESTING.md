@@ -177,14 +177,16 @@ docker cp <container_id>:/app/report.html ./
 
 ### 重建镜像
 
-代码修改后需要重建镜像：
+代码修改后需要重建镜像（由于 docker-compose.e2e.yml 已指定 image 字段，镜像会自动 build）：
 
 ```bash
-# 重建 backend 镜像
-docker build -f deploy/Dockerfile.backend -t gimr-backend:latest ..
+# 启动并构建所有镜像
+docker-compose -f docker-compose.e2e.yml up -d --build
 
-# 重建 frontend 镜像
+# 或单独重建特定镜像
+docker build -f deploy/Dockerfile.backend -t gimr-backend:latest ..
 docker build -f deploy/Dockerfile.frontend -t gimr-nginx:latest ..
+docker build -f deploy/Dockerfile.e2e -t gimr-e2e:latest ..
 
 # 重启服务
 docker-compose -f docker-compose.e2e.yml up -d backend nginx
