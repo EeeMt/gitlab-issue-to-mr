@@ -81,3 +81,8 @@ test-gitlab-e2e:
 # Run all tests except Playwright E2E
 .PHONY: test
 test: test-backend test-frontend test-mock-e2e
+
+# Run ALL tests including Playwright E2E (requires Docker)
+# This starts E2E environment, runs all tests, then cleans up
+.PHONY: test-all
+test-all: test-backend test-frontend test-mock-e2e test-gitlab-e2e e2e
