@@ -257,7 +257,7 @@ page.get_by_role("tab", name="Prompt Templates").click()
 make test-e2e-specific TEST_FILE=test_dashboard.py
 
 # 运行特定测试文件（含视频录制）
-make test-e2e-specific TEST_FILE=test_dashboard.py RECORD=1
+make test-e2e-specific TEST_FILE=test_dashboard.py RECORD_VIDEO=1
 
 # 运行特定测试方法（直接调用 docker-compose，需已 up）
 docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/test_dashboard.py::TestDashboardPage::test_dashboard_page_loads
@@ -279,13 +279,13 @@ make test-e2e-logs
 
 ### 视频录制
 
-在任意测试命令后加 `RECORD=1` 即可开启录制：
+在任意测试命令后加 `RECORD_VIDEO=1` 即可开启录制：
 
 ```bash
-make test-e2e RECORD=1                              # 录制全套测试
-make test-e2e-parallel RECORD=1                     # 仅录制并行测试
-make test-e2e-serial RECORD=1                       # 仅录制串行测试
-make test-e2e-specific TEST_FILE=test_dashboard.py RECORD=1  # 录制指定文件
+make test-e2e RECORD_VIDEO=1                              # 录制全套测试
+make test-e2e-parallel RECORD_VIDEO=1                     # 仅录制并行测试
+make test-e2e-serial RECORD_VIDEO=1                       # 仅录制串行测试
+make test-e2e-specific TEST_FILE=test_dashboard.py RECORD_VIDEO=1  # 录制指定文件
 ```
 
 视频文件保存到 `deploy/e2e-videos/`，命名格式：`<test_name>_<worker_id>.webm`，例如：

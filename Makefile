@@ -62,11 +62,11 @@ rebuild-worker: ## Rebuild worker image
 # Testing
 # ============================================
 
-# Video recording option: set RECORD=1 to record .webm videos for each test
-# Example: make test-e2e-parallel RECORD=1
-RECORD ?= 0
+# Video recording option: set RECORD_VIDEO=1 to record .webm videos for each test
+# Example: make test-e2e-parallel RECORD_VIDEO=1
+RECORD_VIDEO ?= 0
 
-ifeq ($(RECORD),1)
+ifeq ($(RECORD_VIDEO),1)
 _E2E_PRE  = docker rm -f gimr-e2e-recorder 2>/dev/null || true && mkdir -p $(PROJECT_ROOT)/deploy/e2e-videos &&
 _E2E_RUN  = cd $(PROJECT_ROOT)/deploy && E2E_RECORD_VIDEO=1 docker-compose -f docker-compose.e2e.yml run --name gimr-e2e-recorder e2e
 _E2E_POST = ; E2E_EXIT=$$?; docker cp gimr-e2e-recorder:/videos/. $(PROJECT_ROOT)/deploy/e2e-videos/ 2>/dev/null || true; docker rm -f gimr-e2e-recorder 2>/dev/null || true; echo "Videos → deploy/e2e-videos/"; exit $$E2E_EXIT
@@ -96,7 +96,7 @@ test-gitlab-e2e: ## Run GitLab E2E tests (requires real GitLab)
 	cd $(PROJECT_ROOT)/backend && python -m pytest tests/gitlab_e2e/ -v
 
 .PHONY: test-e2e
-test-e2e: test-e2e-up ## Run ALL Playwright E2E tests: parallel + serial [RECORD=1 for video]
+test-e2e: test-e2e-up ## Run ALL Playwright E2E tests: parallel + serial [RECORD_VIDEO=1 for video]
 	$(_E2E_PRE) $(_E2E_RUN) pytest tests/e2e/tests/ $(_E2E_POST)
 	$(_E2E_PRE) $(_E2E_RUN) \
 	  pytest tests/e2e/tests/test_bootstrap.py \
@@ -106,11 +106,11 @@ test-e2e: test-e2e-up ## Run ALL Playwright E2E tests: parallel + serial [RECORD
 	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml down
 
 .PHONY: test-e2e-parallel
-test-e2e-parallel: ## Run parallel E2E tests only (116 tests, ~44s) [RECORD=1 for video]
+test-e2e-parallel: ## Run parallel E2E tests only (116 tests, ~44s) [RECORD_VIDEO=1 for video]
 	$(_E2E_PRE) $(_E2E_RUN) pytest tests/e2e/tests/ $(_E2E_POST)
 
 .PHONY: test-e2e-serial
-test-e2e-serial: ## Run serial E2E tests only: bootstrap/prompt_template/access_management (~42s) [RECORD=1]
+test-e2e-serial: ## Run serial E2E tests only: bootstrap/prompt_template/access_management (~42s) [RECORD_VIDEO=1]
 	$(_E2E_PRE) $(_E2E_RUN) \
 	  pytest tests/e2e/tests/test_bootstrap.py \
 	         tests/e2e/tests/test_prompt_template.py \
@@ -118,7 +118,7 @@ test-e2e-serial: ## Run serial E2E tests only: bootstrap/prompt_template/access_
 	  --override-ini="addopts=-v --tb=short --strict-markers --disable-warnings" $(_E2E_POST)
 
 .PHONY: test-e2e-specific
-test-e2e-specific: ## Run specific E2E test file [TEST_FILE=test_dashboard.py] [RECORD=1]
+test-e2e-specific: ## Run specific E2E test file [TEST_FILE=test_dashboard.py] [RECORD_VIDEO=1]
 	$(_E2E_PRE) $(_E2E_RUN) pytest tests/e2e/tests/$(TEST_FILE) -v $(_E2E_POST)
 
 .PHONY: test-e2e-up
@@ -166,16 +166,16 @@ help:
 	@echo ""
 	@echo "Playwright E2E Tests:"
 	@echo "  make test-e2e                        Run ALL E2E tests (parallel + serial + down)"
-	@echo "  make test-e2e RECORD=1               Run ALL E2E tests with video recording"
+	@echo "  make test-e2e RECORD_VIDEO=1               Run ALL E2E tests with video recording"
 	@echo "  make test-e2e-parallel               Run parallel tests only (116 tests, ~44s)"
-	@echo "  make test-e2e-parallel RECORD=1      Run parallel tests with video recording"
+	@echo "  make test-e2e-parallel RECORD_VIDEO=1      Run parallel tests with video recording"
 	@echo "  make test-e2e-serial                 Run serial tests only (18 tests, ~42s)"
-	@echo "  make test-e2e-serial RECORD=1        Run serial tests with video recording"
+	@echo "  make test-e2e-serial RECORD_VIDEO=1        Run serial tests with video recording"
 	@echo "  make test-e2e-specific TEST_FILE=..  Run specific test file"
 	@echo "  make test-e2e-up                     Start E2E environment"
 	@echo "  make test-e2e-down                   Stop E2E environment"
 	@echo "  make test-e2e-logs                   View E2E logs"
-	@echo "  Videos are saved to deploy/e2e-videos/ (RECORD=1 only)"
+	@echo "  Videos are saved to deploy/e2e-videos/ (RECORD_VIDEO=1 only)"
 	@echo ""
 	@echo "All Tests:"
 	@echo "  make test-all          Run ALL tests (unit + gitlab-e2e + playwright-e2e)"
