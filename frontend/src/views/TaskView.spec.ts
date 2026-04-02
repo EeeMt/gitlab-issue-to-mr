@@ -561,20 +561,21 @@ describe('TaskView', () => {
     it('should call rescheduleTask API on reschedule', async () => {
       await mountComponent({
         status: 'pending',
-        scheduled_at: '2026-04-01T10:00:00Z'
+        scheduled_at: new Date(Date.now() + 60 * 60 * 1000).toISOString()
       })
 
       await vi.waitFor(() => {
         return (mockApi.getTask as Mock).mock.calls.length > 0
       })
 
-      const futureDate = new Date('2026-04-02T10:00:00Z').getTime()
+      const futureTimestamp = Date.now() + 24 * 60 * 60 * 1000
+      const futureIso = new Date(futureTimestamp).toISOString()
       ;(mockApi.rescheduleTask as Mock).mockResolvedValue(
-        createMockTaskWithStatus('pending', { scheduled_at: '2026-04-02T10:00:00Z' })
+        createMockTaskWithStatus('pending', { scheduled_at: futureIso })
       )
 
       // Set the reschedule datetime
-      wrapper.vm.rescheduleDatetime = futureDate
+      wrapper.vm.rescheduleDatetime = futureTimestamp
 
       // Call handleReschedule directly
       await wrapper.vm.handleReschedule()
@@ -593,12 +594,13 @@ describe('TaskView', () => {
         return (mockApi.getTask as Mock).mock.calls.length > 0
       })
 
-      const futureDate = new Date('2026-04-02T10:00:00Z').toISOString()
+      const futureTimestamp = Date.now() + 24 * 60 * 60 * 1000
+      const futureDate = new Date(futureTimestamp).toISOString()
       ;(mockApi.retryTask as Mock).mockResolvedValue(undefined)
       ;(mockApi.getTask as Mock).mockResolvedValue(createMockTaskWithStatus('pending'))
 
       // Set the retry schedule datetime
-      wrapper.vm.retryScheduleDatetime = new Date('2026-04-02T10:00:00Z').getTime()
+      wrapper.vm.retryScheduleDatetime = futureTimestamp
 
       // Call handleRetryWithSchedule directly
       await wrapper.vm.handleRetryWithSchedule()

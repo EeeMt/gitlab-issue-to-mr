@@ -62,6 +62,20 @@ rebuild-worker: ## Rebuild worker image
 # Testing
 # ============================================
 
+# Backend virtual environment
+VENV      := $(PROJECT_ROOT)/backend/.venv
+VENV_PYTHON := $(VENV)/bin/python
+
+# Sentinel file: recreated whenever requirements change
+$(VENV)/.installed: $(PROJECT_ROOT)/backend/requirements.txt $(PROJECT_ROOT)/backend/requirements-test.txt
+	python3 -m venv $(VENV)
+	$(VENV)/bin/pip install -r $(PROJECT_ROOT)/backend/requirements.txt -q
+	$(VENV)/bin/pip install -r $(PROJECT_ROOT)/backend/requirements-test.txt -q
+	touch $(VENV)/.installed
+
+.PHONY: setup-venv
+setup-venv: $(VENV)/.installed ## Create/update backend virtualenv
+
 # Video recording option: set RECORD_VIDEO=1 to record .webm videos for each test
 # Example: make test-e2e-parallel RECORD_VIDEO=1
 RECORD_VIDEO ?= 0
@@ -80,20 +94,20 @@ endif
 test: test-backend test-frontend test-mock-e2e ## Run all unit tests
 
 .PHONY: test-backend
-test-backend: ## Run backend unit tests
-	cd $(PROJECT_ROOT)/backend && python -m pytest tests/unit/ -v
+test-backend: $(VENV)/.installed ## Run backend unit tests
+	cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/unit/ -v
 
 .PHONY: test-frontend
 test-frontend: ## Run frontend unit tests
 	cd $(PROJECT_ROOT)/frontend && npx vitest run
 
 .PHONY: test-mock-e2e
-test-mock-e2e: ## Run mock E2E tests
-	cd $(PROJECT_ROOT)/backend && python -m pytest tests/mock_e2e/ -v
+test-mock-e2e: $(VENV)/.installed ## Run mock E2E tests
+	cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/mock_e2e/ -v
 
 .PHONY: test-gitlab-e2e
-test-gitlab-e2e: ## Run GitLab E2E tests (requires real GitLab)
-	cd $(PROJECT_ROOT)/backend && python -m pytest tests/gitlab_e2e/ -v
+test-gitlab-e2e: $(VENV)/.installed ## Run GitLab E2E tests (requires real GitLab)
+	cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/gitlab_e2e/ -v
 
 .PHONY: test-e2e
 test-e2e: test-e2e-up ## Run ALL Playwright E2E tests: parallel + serial [RECORD_VIDEO=1 for video]
