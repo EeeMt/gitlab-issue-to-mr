@@ -50,35 +50,13 @@ rebuild-%:
 	cd $(PROJECT_ROOT)/deploy && docker-compose up -d $(shell echo $* | sed 's/_/-/g')
 
 # ============================================
-# E2E Tests (Playwright)
+# Testing
 # ============================================
 
-.PHONY: e2e-up
-e2e-up: ## Start E2E test environment
-	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml up -d --build
+# --- Unit Tests (no Docker required) ---
 
-.PHONY: e2e-test
-e2e-test: ## Run all E2E tests
-	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e
-
-.PHONY: e2e-test-specific
-e2e-test-specific: ## Run specific E2E test file (Usage: make e2e-test-specific TEST_FILE=test_dashboard.py)
-	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/$(TEST_FILE) -v
-
-.PHONY: e2e-down
-e2e-down: ## Stop E2E test environment
-	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml down
-
-.PHONY: e2e-logs
-e2e-logs: ## View E2E logs
-	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml logs -f
-
-.PHONY: e2e
-e2e: e2e-up e2e-test e2e-down ## Full E2E workflow: up -> test -> down
-
-# ============================================
-# Unit Tests
-# ============================================
+.PHONY: test
+test: test-backend test-frontend test-mock-e2e ## Run all unit tests
 
 .PHONY: test-backend
 test-backend: ## Run backend unit tests
@@ -96,11 +74,35 @@ test-mock-e2e: ## Run mock E2E tests
 test-gitlab-e2e: ## Run GitLab E2E tests (requires real GitLab)
 	cd $(PROJECT_ROOT)/backend && python -m pytest tests/gitlab_e2e/ -v
 
-.PHONY: test
-test: test-backend test-frontend test-mock-e2e ## Run all non-E2E tests
+# --- E2E Tests (requires Docker) ---
+
+.PHONY: test-e2e
+test-e2e: e2e-up e2e-test e2e-down ## Full E2E test workflow: up -> test -> down
+
+.PHONY: e2e-up
+e2e-up: ## Start E2E test environment
+	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml up -d --build
+
+.PHONY: e2e-test
+e2e-test: ## Run Playwright E2E tests
+	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e
+
+.PHONY: e2e-test-specific
+e2e-test-specific: ## Run specific E2E test file (Usage: make e2e-test-specific TEST_FILE=test_dashboard.py)
+	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/$(TEST_FILE) -v
+
+.PHONY: e2e-down
+e2e-down: ## Stop E2E test environment
+	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml down
+
+.PHONY: e2e-logs
+e2e-logs: ## View E2E logs
+	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml logs -f
+
+# --- All Tests ---
 
 .PHONY: test-all
-test-all: test-backend test-frontend test-mock-e2e test-gitlab-e2e e2e ## Run ALL tests
+test-all: test test-gitlab-e2e test-e2e ## Run ALL tests (unit + gitlab-e2e + playwright-e2e)
 
 # ============================================
 # Help
@@ -109,7 +111,7 @@ test-all: test-backend test-frontend test-mock-e2e test-gitlab-e2e e2e ## Run AL
 .PHONY: help
 help:
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | sort | while IFS= read -r line; do \
-		printf "%-20s %s\n" "$${line%%:*}$${line#*:}" ; \
+		printf "%-22s %s\n" "$${line%%:*}$${line#*:}" ; \
 	done
 
 .DEFAULT_GOAL := help
