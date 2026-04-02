@@ -6,7 +6,8 @@ FROM node:22-alpine AS node-builder
 WORKDIR /app
 
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci --silent
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --silent
 
 COPY frontend/ .
 # Skip type checking during production build (vue-tsc --noEmit)

@@ -105,36 +105,24 @@ Recommended rollout:
 
 ## Common commands
 
-### Backend
+Run `make help` to see all available commands. Key commands:
 
 ```bash
-cd backend && pip install -r requirements.txt
-cd backend && uvicorn app.main:app --reload
-cd backend && alembic upgrade head
-cd backend && pytest
-```
+# Development
+make up                     # Start development environment
+make build                  # Build all images
+make logs                   # View logs
+make ps                     # Show running containers
 
-### Frontend
+# Testing
+make test                   # Run unit tests
+make test-all               # Run all tests (including E2E)
+make test-e2e              # Run Playwright E2E tests
 
-```bash
-cd frontend && npm install
-cd frontend && npm run dev
-cd frontend && npm run build
-```
-
-### Rebuild deployment images
-
-```bash
-# backend / scheduler
-docker build -f deploy/Dockerfile.backend -t deploy-backend .
-cd deploy && docker-compose up -d backend scheduler
-
-# frontend / nginx
-docker build -f deploy/Dockerfile.frontend -t gimr-nginx:latest .
-cd deploy && docker-compose up -d --build nginx
-
-# worker
-docker build -f deploy/Dockerfile.worker -t gimr-worker:latest .
+# Rebuild specific service
+make rebuild-backend        # Rebuild backend image
+make rebuild-nginx          # Rebuild frontend image
+make rebuild-worker         # Rebuild worker image
 ```
 
 ## Usage

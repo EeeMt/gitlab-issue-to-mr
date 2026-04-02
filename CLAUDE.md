@@ -8,71 +8,44 @@ GIMR (GitLab Issue to MR Bot) - An AI-powered code generation service that autom
 
 ## Commands
 
+所有命令统一使用 `make` 运行。运行 `make help` 查看所有可用命令。
+
 ### Development
 
 ```bash
-# Create and activate virtual environment (if not exists)
-cd backend
-python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-# or: .\.venv\Scripts\Activate.ps1  # Windows
+make help                    # 查看所有可用命令
 
-# Install backend dependencies
-pip install -r requirements.txt
+# 开发环境
+make build                   # 构建所有镜像 (backend, nginx, worker)
+make up                     # 启动开发环境
+make down                   # 停止开发环境
+make restart                # 重启开发环境
+make logs                   # 查看日志
+make ps                     # 查看运行中的容器
 
-# Run backend locally (requires PostgreSQL running)
-uvicorn app.main:app --reload
+# 重建特定服务
+make rebuild-backend         # 重建后端镜像并重启
+make rebuild-nginx           # 重建前端镜像并重启
+make rebuild-worker          # 重建 worker 镜像
 
-# Run database migrations (auto-run on startup if auto_migrate=true)
-alembic upgrade head
+# 测试
+make test                   # 运行所有单元测试
+make test-backend           # 后端单元测试
+make test-frontend          # 前端单元测试
+make test-mock-e2e         # Mock E2E 测试
+make test-gitlab-e2e        # GitLab E2E 测试
+make test-e2e               # Playwright E2E 测试
+make test-all               # 运行所有测试
 
-# Run backend unit tests
-python -m pytest tests/unit/ -v
-
-# Run frontend unit tests
-cd frontend && npx vitest run
-
-# Run Mock E2E tests
-cd backend && python -m pytest tests/mock_e2e/ -v
-
-# Run Playwright E2E tests (requires Docker environment)
-# See docs/TESTING.md for full test commands and options
-cd deploy
-docker-compose -f docker-compose.e2e.yml up -d
-docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/ -v
-docker-compose -f docker-compose.e2e.yml down  # Cleanup after tests
-
-# Run frontend dev server
-cd frontend && npm run dev
-
-# Build frontend for production
-cd frontend && npm run build
+# Playwright E2E 分步执行
+make test-e2e-up            # 启动 E2E 测试环境
+make test-e2e-run           # 运行 E2E 测试
+make test-e2e-down          # 停止 E2E 测试环境
 ```
-
-### Deployment
-
-```bash
-# Build and start all services (PostgreSQL + Backend)
-cd deploy && docker-compose up -d --build
-
-# View logs
-cd deploy && docker-compose logs -f
-```
-
-> **Important**: After modifying source code, you must rebuild the Docker images:
->
-> ```bash
-> # Rebuild backend image
-> docker build -f deploy/Dockerfile.backend -t deploy-backend .
-> docker-compose -f deploy/docker-compose.yml up -d backend
->
-> # Rebuild worker image (if deploy/entrypoint.sh was modified)
-> docker build -f deploy/Dockerfile.worker -t gimr-worker:latest .
-> ```
 
 ### Testing & Debugging
 
-See [docs/e2e-debugging.md](docs/e2e-debugging.md) for detailed debugging guide.
+See [docs/TESTING.md](docs/TESTING.md) for detailed testing guide.
 
 Quick debug commands:
 ```bash
