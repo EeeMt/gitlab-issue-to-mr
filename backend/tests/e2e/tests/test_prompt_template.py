@@ -16,49 +16,36 @@ from playwright.sync_api import Page, expect
 class TestPromptTemplates:
     """Tests for the prompt template management feature."""
 
+    def open_prompt_templates(self, page: Page):
+        page.goto("/config?tab=prompt-templates")
+        page.wait_for_load_state("domcontentloaded")
+        page.wait_for_timeout(1000)
+        expect(page.get_by_test_id("prompt-template-create-button")).to_be_visible()
+
     def test_prompt_template_editor_opens_inline(self, logged_in_page: Page, reset_database):
         """Test that the prompt template creation editor opens inline when clicking create."""
-        logged_in_page.goto("/config")
-        logged_in_page.wait_for_load_state("domcontentloaded")
-        logged_in_page.wait_for_timeout(1000)
-        # Use nth(6) since Prompt Templates is the 7th tab
-        prompt_tab = logged_in_page.locator(".n-tabs-tab").nth(6)
-        prompt_tab.scroll_into_view_if_needed()
-        prompt_tab.click()
-        logged_in_page.wait_for_timeout(2000)  # Wait longer for tab to switch and content to load
-        create_button = logged_in_page.get_by_role("button", name="Create Template")
+        self.open_prompt_templates(logged_in_page)
+        create_button = logged_in_page.get_by_test_id("prompt-template-create-button")
         expect(create_button).to_be_visible()
         create_button.click()
         logged_in_page.wait_for_timeout(500)
         editor = logged_in_page.get_by_test_id("prompt-template-editor")
         expect(editor).to_be_visible()
-        name_input = editor.locator("input").first
+        name_input = logged_in_page.get_by_test_id("prompt-template-name-input")
         expect(name_input).to_be_visible()
 
     def test_prompt_template_name_input_works(self, logged_in_page: Page, reset_database):
         """Test that the prompt template name input field works correctly."""
-        logged_in_page.goto("/config")
-        logged_in_page.wait_for_load_state("domcontentloaded")
-        logged_in_page.wait_for_timeout(1000)
-        prompt_tab = logged_in_page.locator(".n-tabs-tab").nth(6)
-        prompt_tab.scroll_into_view_if_needed()
-        prompt_tab.click()
-        logged_in_page.wait_for_timeout(1000)
-        logged_in_page.get_by_role("button", name="Create Template").click()
-        name_input = logged_in_page.locator(".n-card input").first
+        self.open_prompt_templates(logged_in_page)
+        logged_in_page.get_by_test_id("prompt-template-create-button").click()
+        name_input = logged_in_page.get_by_test_id("prompt-template-name-input")
         name_input.fill("Test Template")
         expect(name_input).to_have_value("Test Template")
 
     def test_variable_editor_accepts_input(self, logged_in_page: Page, reset_database):
         """Test that the VariableEditor (CodeMirror) accepts input correctly."""
-        logged_in_page.goto("/config")
-        logged_in_page.wait_for_load_state("domcontentloaded")
-        logged_in_page.wait_for_timeout(1000)
-        prompt_tab = logged_in_page.locator(".n-tabs-tab").nth(6)
-        prompt_tab.scroll_into_view_if_needed()
-        prompt_tab.click()
-        logged_in_page.wait_for_timeout(1000)
-        logged_in_page.get_by_role("button", name="Create Template").click()
+        self.open_prompt_templates(logged_in_page)
+        logged_in_page.get_by_test_id("prompt-template-create-button").click()
         cm_content = logged_in_page.locator(".variable-editor .cm-content")
         expect(cm_content).to_be_visible()
         cm_content.click()
@@ -78,14 +65,8 @@ class TestPromptTemplates:
         )
         logged_in_page.on("pageerror", lambda error: page_errors.append(str(error)))
 
-        logged_in_page.goto("/config")
-        logged_in_page.wait_for_load_state("domcontentloaded")
-        logged_in_page.wait_for_timeout(1000)
-        prompt_tab = logged_in_page.locator(".n-tabs-tab").nth(6)
-        prompt_tab.scroll_into_view_if_needed()
-        prompt_tab.click()
-        logged_in_page.wait_for_timeout(1000)
-        logged_in_page.get_by_role("button", name="Create Template").click()
+        self.open_prompt_templates(logged_in_page)
+        logged_in_page.get_by_test_id("prompt-template-create-button").click()
 
         cm_content = logged_in_page.locator(".variable-editor .cm-content")
         expect(cm_content).to_be_visible()
@@ -99,14 +80,8 @@ class TestPromptTemplates:
 
     def test_validation_console_logs(self, logged_in_page: Page, reset_database):
         """Test that validation warnings appear in console when using invalid variable tips."""
-        logged_in_page.goto("/config")
-        logged_in_page.wait_for_load_state("domcontentloaded")
-        logged_in_page.wait_for_timeout(1000)
-        prompt_tab = logged_in_page.locator(".n-tabs-tab").nth(6)
-        prompt_tab.scroll_into_view_if_needed()
-        prompt_tab.click()
-        logged_in_page.wait_for_timeout(1000)
-        logged_in_page.get_by_role("button", name="Create Template").click()
+        self.open_prompt_templates(logged_in_page)
+        logged_in_page.get_by_test_id("prompt-template-create-button").click()
         cm_content = logged_in_page.locator(".variable-editor .cm-content")
         cm_content.click()
         cm_content.fill("Hello {{name}}, please review {{code}}")
@@ -117,20 +92,14 @@ class TestPromptTemplates:
 
     def test_save_prompt_template(self, logged_in_page: Page, reset_database):
         """Test that a prompt template can be saved successfully."""
-        logged_in_page.goto("/config")
-        logged_in_page.wait_for_load_state("domcontentloaded")
-        logged_in_page.wait_for_timeout(1000)
-        prompt_tab = logged_in_page.locator(".n-tabs-tab").nth(6)
-        prompt_tab.scroll_into_view_if_needed()
-        prompt_tab.click()
-        logged_in_page.wait_for_timeout(1000)
-        logged_in_page.get_by_role("button", name="Create Template").click()
-        name_input = logged_in_page.locator(".n-card input").first
+        self.open_prompt_templates(logged_in_page)
+        logged_in_page.get_by_test_id("prompt-template-create-button").click()
+        name_input = logged_in_page.get_by_test_id("prompt-template-name-input")
         name_input.fill("My Test Template")
         cm_content = logged_in_page.locator(".variable-editor .cm-content")
         cm_content.click()
         cm_content.fill("Please review the changes in {{files}}")
-        logged_in_page.get_by_role("button", name="Save").click()
+        logged_in_page.get_by_test_id("prompt-template-save-button").click()
         logged_in_page.wait_for_timeout(1000)
-        expect(logged_in_page.locator(".n-data-table")).to_be_visible()
+        expect(logged_in_page.get_by_test_id("prompt-template-table")).to_be_visible()
         expect(logged_in_page.get_by_text("My Test Template").first).to_be_visible()

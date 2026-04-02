@@ -73,7 +73,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   NAlert,
@@ -128,6 +128,15 @@ type ConfigTabKey = typeof configTabs[number]
 
 const notificationReloadKey = ref(0)
 
+async function fetchPromptTemplatesIfNeeded() {
+  if (activeConfigTab.value !== 'prompt-templates') {
+    return
+  }
+
+  await nextTick()
+  promptTemplatesPanelRef.value?.fetchPromptTemplates()
+}
+
 // Summary items
 const sharedPagesEnabledCount = computed(
   () =>
@@ -152,6 +161,7 @@ async function loadConfig() {
     syncForm(config)
     // Trigger webhook statuses fetch
     gitlabPanelRef.value?.fetchWebhookStatuses()
+    await fetchPromptTemplatesIfNeeded()
   } catch (error) {
     console.error('Failed to load config:', error)
   }

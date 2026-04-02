@@ -7,7 +7,12 @@
             <div class="config-card-header__title">{{ t('config.promptTemplates') }}</div>
             <div class="config-card-header__subtitle">{{ t('config.promptTemplatesSubtitle') }}</div>
           </div>
-          <n-button type="primary" @click="handleCreatePromptTemplate" size="small">
+          <n-button
+            type="primary"
+            size="small"
+            data-testid="prompt-template-create-button"
+            @click="handleCreatePromptTemplate"
+          >
             {{ t('config.createPromptTemplate') }}
           </n-button>
         </div>
@@ -25,10 +30,15 @@
 
         <n-form ref="promptTemplateFormRef" :model="promptTemplateForm" label-placement="top" class="config-section-form">
           <n-form-item :label="t('config.promptTemplateName')" path="name" required>
-            <n-input v-model:value="promptTemplateForm.name" :placeholder="t('config.promptTemplateNamePlaceholder')" />
+            <n-input
+              v-model:value="promptTemplateForm.name"
+              data-testid="prompt-template-name-input"
+              :placeholder="t('config.promptTemplateNamePlaceholder')"
+            />
           </n-form-item>
           <n-form-item :label="t('config.promptTemplateContent')" path="content" required>
             <VariableEditor
+              data-testid="prompt-template-content-editor"
               v-model="promptTemplateForm.content"
               :variable-tips="promptTemplateForm.variable_tips"
               editable
@@ -42,13 +52,18 @@
 
         <div class="config-card-actions prompt-template-editor__actions">
           <n-space justify="end">
-            <n-button @click="handleCancelPromptTemplateEditing">{{ t('common.cancel') }}</n-button>
-            <n-button type="primary" @click="handleSavePromptTemplate">{{ t('common.save') }}</n-button>
+            <n-button data-testid="prompt-template-cancel-button" @click="handleCancelPromptTemplateEditing">
+              {{ t('common.cancel') }}
+            </n-button>
+            <n-button type="primary" data-testid="prompt-template-save-button" @click="handleSavePromptTemplate">
+              {{ t('common.save') }}
+            </n-button>
           </n-space>
         </div>
       </div>
 
       <n-data-table
+        data-testid="prompt-template-table"
         :columns="promptTemplateColumns"
         :data="promptTemplates"
         :loading="promptTemplatesLoading"
