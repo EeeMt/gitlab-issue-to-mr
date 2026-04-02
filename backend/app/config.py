@@ -47,6 +47,7 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "auth_admin_usernames": str,
     "auth_admin_gitlab_groups": str,
     "worker_volume_mounts": str,  # JSON array of {host_path, container_path, mode}
+    "worker_ca_cert_host_path": str,  # Absolute path to CA cert on Docker host; auto-added to volume mounts
 }
 
 SECRET_CONFIG_KEYS = {
@@ -133,6 +134,9 @@ class Settings(BaseSettings):
     maven_settings_host_path: str = Field(default="")  # Host path to settings.xml; empty = disabled
     # JSON array of volume mounts: [{"host_path": "/path", "container_path": "/path", "mode": "ro"}]
     worker_volume_mounts: str = Field(default="")
+    # Shortcut: absolute path to CA cert on Docker host → automatically mounted into workers.
+    # Simpler alternative to encoding a full JSON entry in worker_volume_mounts.
+    worker_ca_cert_host_path: str = Field(default="")
 
     # Scheduler Configuration
     max_concurrency: int = Field(default=3)
@@ -177,16 +181,29 @@ class Settings(BaseSettings):
 
     @property
     def worker_volume_mounts_parsed(self) -> list[dict]:
-        """Parse worker_volume_mounts JSON string into a list of mount dicts."""
-        if not self.worker_volume_mounts:
-            return []
-        try:
-            mounts = json.loads(self.worker_volume_mounts)
-            if isinstance(mounts, list):
-                return mounts
-            return []
-        except json.JSONDecodeError:
-            return []
+        """Parse worker_volume_mounts JSON string into a list of mount dicts.
+
+        Also appends a CA cert mount when worker_ca_cert_host_path is set,
+        so callers don't need to encode the full JSON for the common case.
+        """
+        mounts: list[dict] = []
+        if self.worker_volume_mounts:
+            try:
+                parsed = json.loads(self.worker_volume_mounts)
+                if isinstance(parsed, list):
+                    mounts = parsed
+            except json.JSONDecodeError:
+                pass
+        if self.worker_ca_cert_host_path:
+            mounts = [m for m in mounts if m.get("container_path") != "/etc/ssl/certs/custom-ca.crt"]
+            mounts.append(
+                {
+                    "host_path": self.worker_ca_cert_host_path,
+                    "container_path": "/etc/ssl/certs/custom-ca.crt",
+                    "mode": "ro",
+                }
+            )
+        return mounts
 
 
 @lru_cache

@@ -74,9 +74,10 @@ services:
       # Custom CA certificate is mounted from local file (not baked into image).
       # CUSTOM_CA_BUNDLE tells the scheduler and worker entrypoints where to find it.
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
-      # WORKER_VOLUME_MOUNTS: pass CA cert into spawned worker containers.
-      # Set in .env.test as: WORKER_VOLUME_MOUNTS=[{"host_path":"/abs/path/to/ca.crt",...}]
-      # Use the absolute path of deploy/ca.crt on the Docker host.
+      # WORKER_CA_CERT_HOST_PATH: pass CA cert into spawned worker containers.
+      # Set in .env.test to the absolute path of deploy/ca.crt on the Docker host.
+      # Alternative: use WORKER_VOLUME_MOUNTS for a full JSON mount list.
+      - WORKER_CA_CERT_HOST_PATH=${WORKER_CA_CERT_HOST_PATH:-}
       - WORKER_VOLUME_MOUNTS=${WORKER_VOLUME_MOUNTS:-}
     depends_on:
       postgres:
