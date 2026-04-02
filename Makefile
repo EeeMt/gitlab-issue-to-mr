@@ -1,9 +1,9 @@
 # Makefile for GIMR development
 # Usage: make build | make up | make logs | make clean
 
-# Enable Docker BuildKit if available
-export DOCKER_BUILDKIT ?= 1
-export COMPOSE_DOCKER_CLI_BUILD ?= 1
+# Enable Docker BuildKit for faster builds
+export DOCKER_BUILDKIT := 1
+export COMPOSE_DOCKER_CLI_BUILD := 1
 
 .PHONY: build
 build:
