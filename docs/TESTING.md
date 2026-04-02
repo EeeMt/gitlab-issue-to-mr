@@ -2,15 +2,30 @@
 
 本文档介绍项目中所有类型测试的运行方法。
 
+## 快速开始
+
+所有测试命令统一通过 `make` 运行：
+
+```bash
+# 查看所有可用测试命令
+make help
+
+# 运行所有单元测试（推荐开发时使用）
+make test
+
+# 运行所有测试（包括 E2E）
+make test-all
+```
+
 ## 测试类型概览
 
-| 类型 | 位置 | 运行方式 | 依赖 |
-|------|------|----------|------|
-| 后端单元测试 | `backend/tests/unit/` | pytest | 无外部依赖 |
-| 前端单元测试 | `frontend/src/` | vitest | 无外部依赖 |
-| Mock E2E | `backend/tests/mock_e2e/` | pytest | 无外部依赖 |
-| Playwright E2E | `backend/tests/e2e/` | pytest + Playwright | Docker 服务 |
-| GitLab E2E | `backend/tests/gitlab_e2e/` | pytest + Python | 真实 GitLab |
+| 类型 | 命令 | 依赖 |
+|------|------|------|
+| 后端单元测试 | `make test-backend` | Python |
+| 前端单元测试 | `make test-frontend` | Node.js |
+| Mock E2E | `make test-mock-e2e` | Python |
+| GitLab E2E | `make test-gitlab-e2e` | Python + 真实 GitLab |
+| Playwright E2E | `make test-e2e` | Docker |
 
 ---
 
@@ -19,16 +34,14 @@
 ### 运行命令
 
 ```bash
-# 进入 backend 目录
+make test-backend
+```
+
+或直接使用 pytest：
+
+```bash
 cd backend
-
-# 如果没有虚拟环境，需要先创建并安装依赖
-python -m venv .venv
 source .venv/bin/activate  # Linux/Mac
-# 或: .\.venv\Scripts\Activate.ps1  # Windows
-pip install -r requirements.txt
-
-# 运行所有单元测试
 python -m pytest tests/unit/ -v
 
 # 运行特定测试文件
@@ -43,10 +56,6 @@ python -m pytest tests/unit/test_auth_session.py::AuthSessionTests -v
 - 大量使用 mock 避免外部依赖
 - 运行快速（通常 < 2 秒）
 
-### 依赖
-- Python 3.11+
-- 已安装 `requirements.txt` 中的所有依赖
-
 ---
 
 ## 2. 前端单元测试
@@ -54,16 +63,16 @@ python -m pytest tests/unit/test_auth_session.py::AuthSessionTests -v
 ### 运行命令
 
 ```bash
-# 进入 frontend 目录
+make test-frontend
+```
+
+或直接使用 vitest：
+
+```bash
 cd frontend
-
-# 安装依赖
-npm install
-
-# 运行所有前端测试
 npx vitest run
 
-# 运行测试（带 watch 模式）
+# 带 watch 模式
 npx vitest
 
 # 生成覆盖率报告
@@ -73,11 +82,6 @@ npx vitest run --coverage
 ### 特点
 - 使用 Vitest + Vue Test Utils
 - 测试文件命名：`*.spec.ts` 或 `*.test.ts`
-- 位于 `frontend/src/` 各模块目录下
-
-### 依赖
-- Node.js 18+
-- npm
 
 ---
 
@@ -86,14 +90,7 @@ npx vitest run --coverage
 ### 运行命令
 
 ```bash
-cd backend
-source .venv/bin/activate  # 或 .\venv\Scripts\Activate.ps1 (Windows)
-
-# 运行所有 Mock E2E 测试
-python -m pytest tests/mock_e2e/ -v
-
-# 运行特定测试文件
-python -m pytest tests/mock_e2e/test_manual_task.py -v
+make test-mock-e2e
 ```
 
 ### 特点
@@ -101,47 +98,30 @@ python -m pytest tests/mock_e2e/test_manual_task.py -v
 - 使用 mock 模拟 GitLab API 响应
 - 适合验证核心业务流程
 
-### 依赖
-- Python 3.11+
-- 已安装 `requirements.txt`
-
 ---
 
 ## 4. Playwright E2E 测试
 
-Playwright E2E 测试需要完整的 Docker 环境。
-
-### 快速开始
+### 运行命令
 
 ```bash
-# 1. 启动测试环境（仅启动 postgres、backend、nginx，不运行测试）
-cd deploy
-docker-compose -f docker-compose.e2e.yml up -d
+# 完整流程（启动环境 -> 运行测试 -> 清理）
+make test-e2e
 
-# 2. 运行所有 E2E 测试
-docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/ -v
-
-# 3. 清理环境（测试完成后）
-docker-compose -f docker-compose.e2e.yml down
+# 或分步执行
+make test-e2e-up      # 启动测试环境
+make test-e2e-run     # 运行测试
+make test-e2e-down    # 清理环境
 ```
-
-> **注意**：
-> - 测试环境使用 `18980` 端口，避免与开发环境 `8880` 冲突
-> - E2E 容器**不会**在 `up -d` 时自动运行测试，必须使用 `run --rm e2e` 明确运行测试
 
 ### 运行特定测试
 
 ```bash
 # 运行特定测试文件
-docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/test_dashboard.py::TestDashboardPage -v
-
-# 运行特定测试类
-docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/test_dashboard.py::TestDashboardPage -v
-
-# 运行特定测试方法
-docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/test_dashboard.py::TestDashboardPage::test_dashboard_page_loads -v
+make test-e2e-specific TEST_FILE=test_dashboard.py
 
 # 按标记运行（如只运行 dashboard 相关测试）
+# 需要手动进入容器执行
 docker-compose -f docker-compose.e2e.yml run --rm e2e pytest -m dashboard -v
 ```
 
@@ -149,91 +129,28 @@ docker-compose -f docker-compose.e2e.yml run --rm e2e pytest -m dashboard -v
 
 ```bash
 # 带可见浏览器运行
+make test-e2e-up
 docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/test_dashboard.py -v --headed
 
-# 生成 HTML 报告
-docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/ -v --html=report.html --self-contained-html
-
-# 复制报告到本地
-docker cp <container_id>:/app/report.html ./
+# 查看日志
+make test-e2e-logs
 ```
 
-### 环境变量
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `E2E_BASE_URL` | `http://nginx:80` | 前端 Nginx 地址 |
-| `E2E_BACKEND_URL` | `http://backend:8000` | 后端 API 地址 |
-| `E2E_GITLAB_URL` | `http://gitlab:8080` | GitLab 地址 |
-| `E2E_POSTGRES_URL` | `postgresql://...` | PostgreSQL 数据库地址 |
-
-### 端口映射
-
-| 服务 | 端口 | 说明 |
-|------|------|------|
-| nginx | `18980:80` | E2E 前端（避免与开发环境 8880 冲突） |
-| backend | 无 | 仅在内部网络访问 |
-| postgres | 无 | 仅在内部网络访问 |
-
-### 重建镜像
-
-代码修改后需要重建镜像（由于 docker-compose.e2e.yml 已指定 image 字段，镜像会自动 build）：
-
-```bash
-# 启动并构建所有镜像
-docker-compose -f docker-compose.e2e.yml up -d --build
-
-# 或单独重建特定镜像
-docker build -f deploy/Dockerfile.backend -t gimr-backend:latest ..
-docker build -f deploy/Dockerfile.frontend -t gimr-nginx:latest ..
-docker build -f deploy/Dockerfile.e2e -t gimr-e2e:latest ..
-
-# 重启服务
-docker-compose -f docker-compose.e2e.yml up -d backend nginx
-```
-
-### 本地运行（不使用 Docker）
-
-```bash
-# 1. 安装依赖
-cd backend
-pip install -r requirements.txt
-pip install -r tests/e2e/requirements-e2e.txt
-playwright install chromium
-
-# 2. 启动后端服务
-# （需要有 PostgreSQL 运行）
-
-# 3. 运行测试
-pytest tests/e2e/ -v
-```
-
-详细文档：[E2E_TESTS.md](./E2E_TESTS.md)
+### 环境说明
+- E2E 测试环境使用 `18980` 端口，避免与开发环境 `8880` 冲突
+- 使用独立的 PostgreSQL（tmpfs，无持久化）
 
 ---
 
 ## 5. GitLab E2E 测试
 
-GitLab E2E 测试需要真实的 GitLab 环境。
-
 ### 运行命令
 
 ```bash
-cd backend
-source .venv/bin/activate  # 或 .\venv\Scripts\Activate.ps1 (Windows)
-
-# 运行所有 GitLab E2E 测试
-python -m pytest tests/gitlab_e2e/ -v
-
-# 运行特定测试
-python -m pytest tests/gitlab_e2e/test_manual_task.py -v
-
-# 运行集成测试
-python tests/gitlab_e2e/test_integration.py --skip-startup
+make test-gitlab-e2e
 ```
 
 ### 环境要求
-
 - 可访问的 GitLab 实例
 - 有效的 `GITLAB_BOT_TOKEN`
 - 测试项目和配置（在 `deploy/.env.test` 中）
@@ -244,48 +161,16 @@ python tests/gitlab_e2e/test_integration.py --skip-startup
 
 - 测试可能创建任务、分支、MR、Issue 评论
 - 不要对着正式环境运行
-- 确保测试环境有适当的清理机制
-
-详细文档：[e2e-debugging.md](./e2e-debugging.md)
 
 ---
 
-## 快速参考
+## 重建镜像
 
-### 本地开发推荐流程
+代码修改后，E2E 环境会自动使用 `--build` 重建：
 
 ```bash
-# 1. 修改代码
-# ...
-
-# 2. 运行后端单元测试验证
-cd backend
-source .venv/bin/activate  # 或 .\venv\Scripts\Activate.ps1 (Windows)
-python -m pytest tests/unit/ -v
-
-# 3. 运行前端单元测试
-cd frontend && npx vitest run
-
-# 4. 如果需要，运行 Mock E2E
-cd backend && python -m pytest tests/mock_e2e/ -v
-
-# 5. 如果需要完整验证，运行 Playwright E2E
-cd deploy && docker-compose -f docker-compose.e2e.yml up -d
-docker-compose -f docker-compose.e2e.yml run --rm e2e
-docker-compose -f docker-compose.e2e.yml down  # 清理环境
+make test-e2e-up  # 会自动重建镜像
 ```
-
-### 常用测试命令速查
-
-| 命令 | 说明 |
-|------|------|
-| `cd backend && source .venv/bin/activate && python -m pytest tests/unit/ -v` | 后端单元测试 |
-| `cd frontend && npx vitest run` | 前端单元测试 |
-| `cd backend && source .venv/bin/activate && python -m pytest tests/mock_e2e/ -v` | Mock E2E |
-| `cd deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e` | Playwright E2E |
-| `cd backend && source .venv/bin/activate && python -m pytest tests/gitlab_e2e/ -v` | GitLab E2E |
-
-> **注意**：后端测试需要先激活虚拟环境 `source .venv/bin/activate`（或 Windows 上 `.\.venv\Scripts\Activate.ps1`）。
 
 ---
 
@@ -293,4 +178,3 @@ docker-compose -f docker-compose.e2e.yml down  # 清理环境
 
 - [E2E_TESTS.md](./E2E_TESTS.md) - Playwright E2E 测试详细指南
 - [e2e-debugging.md](./e2e-debugging.md) - E2E 测试调试指南
-- [DEVELOPMENT.md](./DEVELOPMENT.md) - 开发环境搭建
