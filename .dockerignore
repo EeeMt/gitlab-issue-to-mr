@@ -40,6 +40,9 @@ Dockerfile*
 docker-compose*.yml
 .dockerignore
 
+# Include deploy directory (required for worker image build)
+!deploy/
+
 # Misc
 *.log
 logs/

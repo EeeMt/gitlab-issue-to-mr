@@ -7,9 +7,10 @@ export COMPOSE_DOCKER_CLI_BUILD := 1
 
 # Development environment
 .PHONY: build
+PROJECT_ROOT := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 build:
-	cd deploy && docker-compose build
-	docker build -f deploy/Dockerfile.worker -t gimr-worker:latest ..
+	cd $(PROJECT_ROOT)/deploy && docker-compose build
+	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t gimr-worker:latest $(PROJECT_ROOT)
 
 .PHONY: up
 up:
