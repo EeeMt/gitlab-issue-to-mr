@@ -6,19 +6,12 @@ The VariableEditor component uses CodeMirror and does not have a placeholder att
 so tests should use CodeMirror selectors (e.g., .cm-content) instead of placeholder-based selectors.
 """
 
-import os
-
 import pytest
 from playwright.sync_api import Page, expect
 
-# These tests modify shared config state and require serial execution.
-# They are skipped when running with pytest-xdist (-n flag).
-# Run them separately with:
-#   pytest tests/e2e/tests/test_bootstrap.py tests/e2e/tests/test_prompt_template.py tests/e2e/tests/test_access_management.py
-pytestmark = pytest.mark.skipif(
-    bool(os.environ.get("PYTEST_XDIST_WORKER")),
-    reason="Requires serial execution (modifies shared DB state)",
-)
+# Modifies shared config state; requires serial execution.
+# Run with: make test-e2e-serial
+pytestmark = pytest.mark.serial
 
 
 
