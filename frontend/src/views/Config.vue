@@ -169,8 +169,8 @@ async function loadConfig() {
 
 // Watch for tab changes
 watch(activeConfigTab, (tab) => {
-  if (tab === 'prompt-templates' && promptTemplatesPanelRef.value) {
-    promptTemplatesPanelRef.value.fetchPromptTemplates()
+  if (tab === 'prompt-templates') {
+    void fetchPromptTemplatesIfNeeded()
   }
 })
 
