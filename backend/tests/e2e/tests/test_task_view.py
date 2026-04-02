@@ -8,9 +8,9 @@ Tests for the TaskView page functionality including:
 - Permission checks
 """
 
+import re
 import pytest
 from playwright.sync_api import Page, expect
-
 
 
 
@@ -197,3 +197,19 @@ class TestTaskViewPermissions:
         actions_intro = logged_in_page.locator(".task-actions__intro")
         if actions_intro.is_visible():
             expect(actions_intro).to_be_visible()
+
+
+@pytest.mark.task_view
+class TestTaskViewRefreshButton:
+    """Tests for the refresh button interaction on task view."""
+
+    def test_refresh_button_click_does_not_crash(self, logged_in_page: Page, reset_database):
+        """Test that clicking the refresh button doesn't crash the page."""
+        logged_in_page.goto("/tasks/1")
+        logged_in_page.wait_for_load_state("domcontentloaded")
+        logged_in_page.wait_for_timeout(500)
+        refresh_btn = logged_in_page.get_by_role("button", name=re.compile(r"refresh", re.IGNORECASE)).first
+        if refresh_btn.is_visible():
+            refresh_btn.click()
+            logged_in_page.wait_for_timeout(500)
+            expect(logged_in_page.locator(".task-view")).to_be_visible()

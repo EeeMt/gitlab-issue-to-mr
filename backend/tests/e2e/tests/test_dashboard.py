@@ -13,6 +13,8 @@ import pytest
 from playwright.sync_api import Page, expect
 
 
+
+
 @pytest.mark.dashboard
 class TestDashboardPage:
     """Tests for the dashboard page functionality."""
@@ -150,3 +152,38 @@ class TestDashboardNavigation:
         table_row = logged_in_page.locator(".n-data-table-tr").first
         if table_row.is_visible():
             expect(table_row).to_be_visible()
+
+
+@pytest.mark.dashboard
+class TestDashboardFilterInteractions:
+    """Tests for interactive filter behaviour on the dashboard."""
+
+    def test_status_filter_can_be_opened(self, logged_in_page: Page, reset_database):
+        """Test that the status filter dropdown can be opened."""
+        logged_in_page.goto("/dashboard")
+        logged_in_page.wait_for_selector("[data-testid='dashboard-header']")
+        # Click the inner selection trigger of the first n-select (status filter)
+        first_select = logged_in_page.locator(".n-select").first
+        first_select.locator(".n-base-selection").click()
+        # Verify dropdown opened
+        expect(logged_in_page.locator(".n-base-select-menu")).to_be_visible()
+
+    def test_status_filter_has_options(self, logged_in_page: Page, reset_database):
+        """Test that the status filter dropdown contains selectable options."""
+        logged_in_page.goto("/dashboard")
+        logged_in_page.wait_for_selector("[data-testid='dashboard-header']")
+        first_select = logged_in_page.locator(".n-select").first
+        first_select.locator(".n-base-selection").click()
+        expect(logged_in_page.locator(".n-base-select-menu")).to_be_visible()
+        options = logged_in_page.locator(".n-base-select-option")
+        expect(options.first).to_be_visible()
+
+    def test_status_filter_can_select_option(self, logged_in_page: Page, reset_database):
+        """Test that selecting an option from the status filter closes the dropdown."""
+        logged_in_page.goto("/dashboard")
+        logged_in_page.wait_for_selector("[data-testid='dashboard-header']")
+        first_select = logged_in_page.locator(".n-select").first
+        first_select.locator(".n-base-selection").click()
+        logged_in_page.locator(".n-base-select-option").first.click()
+        # After selecting, dropdown should close
+        expect(logged_in_page.locator(".n-base-select-menu")).not_to_be_visible()
