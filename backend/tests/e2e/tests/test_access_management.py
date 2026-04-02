@@ -18,7 +18,8 @@ class TestAccessManagement:
         """Test that updating a user's role shows success message."""
         logged_in_page.goto("/access-management")
         logged_in_page.wait_for_load_state("domcontentloaded")
-        logged_in_page.wait_for_timeout(2000)
+        # Wait for user data to load from API before checking Save Access buttons
+        logged_in_page.wait_for_selector(".user-management__card", state="visible", timeout=10000)
         expect(logged_in_page.get_by_test_id("access-management-page")).to_be_visible()
 
         save_buttons = logged_in_page.get_by_role("button", name="Save Access")

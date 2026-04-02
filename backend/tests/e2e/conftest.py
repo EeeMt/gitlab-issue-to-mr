@@ -8,6 +8,7 @@ Tests that need authentication should call login_as_admin() in their setup.
 import os
 import re
 import pytest
+import httpx as _httpx
 
 import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
@@ -133,18 +134,80 @@ def reset_database(db_cursor):
         _reset_db(db_cursor, clear_sessions=True)  # Reset after test
 
 
+def _api_login(backend_url: str, base_url_str: str) -> dict:
+    """
+    Fast API-based login — skips the browser UI bootstrap flow entirely.
+
+    After a DB reset the system is uninitialized, so we call the register
+    endpoint; if the system is already initialized we fall back to the
+    regular login endpoint.  The returned storage_state dict can be passed
+    directly to ``browser.new_context(storage_state=...)`` so the browser
+    context starts with an authenticated session cookie.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(base_url_str)
+    cookie_domain = parsed.hostname or "nginx"
+
+    # Try to register (works when system is uninitialized after a DB reset)
+    with _httpx.Client(timeout=10) as client:
+        resp = client.post(
+            f"{backend_url}/api/auth/local/register",
+            json={
+                "username": "test_admin",
+                "display_name": "Test Admin",
+                "email": "test_admin@example.com",
+                "password": "SecurePass123!",
+            },
+        )
+
+        if resp.status_code == 403:
+            # System already initialized — login instead
+            resp = client.post(
+                f"{backend_url}/api/auth/local/login",
+                json={"username": "test_admin", "password": "SecurePass123!"},
+            )
+
+    if resp.status_code not in (200, 201):
+        raise RuntimeError(f"API login failed: {resp.status_code} {resp.text[:200]}")
+
+    session_token = resp.cookies.get("gimr_session")
+    if not session_token:
+        raise RuntimeError(
+            f"No gimr_session cookie in API login response. "
+            f"Status: {resp.status_code}, Cookies: {dict(resp.cookies)}"
+        )
+
+    return {
+        "cookies": [
+            {
+                "name": "gimr_session",
+                "value": session_token,
+                "domain": cookie_domain,
+                "path": "/",
+                "httpOnly": True,
+                "secure": False,
+                "sameSite": "Lax",
+            }
+        ],
+        "origins": [],
+    }
+
+
 @pytest.fixture(scope="function")
-def logged_in_page(browser, base_url, db_cursor, reset_database):
+def logged_in_page(browser, base_url, backend_url, db_cursor, reset_database):
     """
-    Create a logged-in page for a test.
+    Create a logged-in page for a test using fast API-based authentication.
 
-    Each test gets a fresh authenticated page from a new browser context.
-    The reset_database fixture ensures a clean state before login.
+    Instead of driving the browser through the bootstrap/login UI (slow),
+    we call the backend auth API directly to obtain a session cookie and
+    inject it into a fresh browser context via Playwright's storage_state.
+    Each test still gets an isolated context; the DB is reset beforehand by
+    the reset_database dependency.
     """
-    context = browser.new_context(base_url=base_url)
+    storage_state = _api_login(backend_url, base_url)
+    context = browser.new_context(base_url=base_url, storage_state=storage_state)
     page = context.new_page()
-
-    _do_login(page)
 
     yield page
 
