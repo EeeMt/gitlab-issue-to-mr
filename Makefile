@@ -76,6 +76,20 @@ $(VENV)/.installed: $(PROJECT_ROOT)/backend/requirements.txt $(PROJECT_ROOT)/bac
 .PHONY: setup-venv
 setup-venv: $(VENV)/.installed ## Create/update backend virtualenv
 
+# Frontend node_modules
+NODE_MODULES := $(PROJECT_ROOT)/frontend/node_modules
+
+# Sentinel file: recreated whenever package.json or package-lock.json change
+$(NODE_MODULES)/.installed: $(PROJECT_ROOT)/frontend/package.json $(PROJECT_ROOT)/frontend/package-lock.json
+	cd $(PROJECT_ROOT)/frontend && npm install --prefer-offline --no-audit --no-fund
+	touch $(NODE_MODULES)/.installed
+
+.PHONY: setup-npm
+setup-npm: $(NODE_MODULES)/.installed ## Install frontend npm dependencies
+
+.PHONY: setup
+setup: setup-venv setup-npm ## Install all dependencies (backend venv + frontend npm)
+
 # Video recording option: set RECORD_VIDEO=1 to record .webm videos for each test
 # Example: make test-e2e-parallel RECORD_VIDEO=1
 RECORD_VIDEO ?= 0
@@ -98,7 +112,7 @@ test-backend: $(VENV)/.installed ## Run backend unit tests
 	cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/unit/ -v
 
 .PHONY: test-frontend
-test-frontend: ## Run frontend unit tests
+test-frontend: $(NODE_MODULES)/.installed ## Run frontend unit tests
 	cd $(PROJECT_ROOT)/frontend && npx vitest run
 
 .PHONY: test-mock-e2e
