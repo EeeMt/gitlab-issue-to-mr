@@ -348,7 +348,7 @@ body {
 }
 
 .app-shell__content-inner {
-  max-width: var(--app-page-max-width-wide);
+  max-width: var(--app-page-max-width);
   margin: 0 auto;
 }
 
@@ -366,7 +366,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  width: min(calc(100% - 40px), var(--app-page-max-width-wide));
+  width: min(calc(100% - 40px), var(--app-page-max-width));
   margin: 14px auto 0;
   box-sizing: border-box;
   padding: 12px 14px;
