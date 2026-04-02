@@ -256,5 +256,72 @@ class ConfigApiHelperTests(unittest.TestCase):
         self.assertEqual(error_response.status_detail, "forbidden")
 
 
+class ConfigSerializationTests(unittest.TestCase):
+    """Tests for _serialize_auth_config and OIDC serialization."""
+
+    def setUp(self) -> None:
+        self._original_config_encryption_key = os.environ.get("CONFIG_ENCRYPTION_KEY")
+        os.environ["CONFIG_ENCRYPTION_KEY"] = "unit-test-config-key"
+        get_settings.cache_clear()
+
+    def tearDown(self) -> None:
+        reset_runtime_config()
+        if self._original_config_encryption_key is None:
+            os.environ.pop("CONFIG_ENCRYPTION_KEY", None)
+        else:
+            os.environ["CONFIG_ENCRYPTION_KEY"] = self._original_config_encryption_key
+        get_settings.cache_clear()
+
+    def test_serialize_auth_config_redacts_oidc_secret(self) -> None:
+        """When oidc_client_secret is set, oidc_client_secret_configured should be True."""
+        from app.api.config import _serialize_auth_config
+
+        settings = get_settings().model_copy(update={"oidc_client_secret": "my-secret"})
+        auth_section = _serialize_auth_config(settings)
+
+        self.assertTrue(auth_section.oidc_client_secret_configured)
+        # The actual secret must NOT be present in the section
+        self.assertFalse(hasattr(auth_section, "oidc_client_secret"))
+
+    def test_serialize_auth_config_without_oidc_secret(self) -> None:
+        """When oidc_client_secret is empty, oidc_client_secret_configured should be False."""
+        from app.api.config import _serialize_auth_config
+
+        settings = get_settings().model_copy(update={"oidc_client_secret": ""})
+        auth_section = _serialize_auth_config(settings)
+
+        self.assertFalse(auth_section.oidc_client_secret_configured)
+
+    def test_validate_oidc_ready_raises_when_missing_fields(self) -> None:
+        """_validate_oidc_ready should raise HTTPException when required OIDC fields are missing."""
+        from app.api.config import _validate_oidc_ready
+
+        # Empty settings — all OIDC fields are blank
+        settings = get_settings().model_copy(update={
+            "oidc_issuer_url": "",
+            "oidc_client_id": "",
+            "oidc_redirect_uri": "",
+            "oidc_client_secret": "",
+        })
+
+        with self.assertRaises(HTTPException) as ctx:
+            _validate_oidc_ready(settings)
+
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_validate_oidc_ready_succeeds_when_all_fields_set(self) -> None:
+        """_validate_oidc_ready should not raise when all required OIDC fields are set."""
+        from app.api.config import _validate_oidc_ready
+
+        settings = get_settings().model_copy(update={
+            "oidc_issuer_url": "https://idp.example.com",
+            "oidc_client_id": "my-client-id",
+            "oidc_redirect_uri": "https://app.example.com/callback",
+            "oidc_client_secret": "my-secret",
+        })
+
+        _validate_oidc_ready(settings)  # should not raise
+
+
 if __name__ == "__main__":
     unittest.main()

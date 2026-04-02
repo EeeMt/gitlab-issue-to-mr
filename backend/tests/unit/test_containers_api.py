@@ -119,3 +119,156 @@ class TaskContainerLogsAPIHelperTests(unittest.TestCase):
         }
         for key in expected_keys:
             self.assertIn(key, response)
+
+
+# ---------------------------------------------------------------------------
+# Endpoint-level tests using FastAPI TestClient
+# ---------------------------------------------------------------------------
+
+def _make_auth_override():
+    """Create an async function that returns a mock admin auth context."""
+    from types import SimpleNamespace
+    from starlette.requests import Request
+
+    async def mock_auth_context(request: Request):
+        return SimpleNamespace(
+            user=SimpleNamespace(id=1, username="admin", platform_role="platform_admin"),
+            session=None,
+            gitlab_access_token=None,
+            gitlab_refresh_token=None,
+        )
+    return mock_auth_context
+
+
+class ListContainersEndpointTests(unittest.TestCase):
+    """Tests for GET /api/containers endpoint."""
+
+    def tearDown(self):
+        from app.main import app
+        app.dependency_overrides.clear()
+
+    def test_list_containers_returns_500_on_docker_error(self):
+        """If docker_client raises, endpoint should return 500."""
+        from app.main import app
+        from app.database import get_db
+        from app.dependencies.auth import require_authenticated_context
+        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+        mock_db = MagicMock()
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        with patch("app.api.containers.get_docker_client", side_effect=RuntimeError("docker down")):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/containers")
+
+        self.assertEqual(response.status_code, 500)
+
+    def test_list_containers_filters_non_worker_containers(self):
+        """Only containers matching WORKER_CONTAINER_PATTERN should appear in the response."""
+        from app.main import app
+        from app.database import get_db
+        from app.dependencies.auth import require_authenticated_context
+        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+        mock_db = MagicMock()
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        # Two containers: one worker, one non-worker
+        worker_container = MagicMock()
+        worker_container.name = "codify-5-p1-i10"
+        worker_container.id = "abc123"
+        worker_container.status = "running"
+        worker_container.attrs = {"Created": "2024-01-01T00:00:00Z"}
+
+        non_worker_container = MagicMock()
+        non_worker_container.name = "codify-postgres"
+        non_worker_container.id = "def456"
+        non_worker_container.status = "running"
+        non_worker_container.attrs = {"Created": "2024-01-01T00:00:00Z"}
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.list.return_value = [worker_container, non_worker_container]
+
+        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/containers")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["name"], "codify-5-p1-i10")
+
+
+class GetContainerLogsEndpointTests(unittest.TestCase):
+    """Tests for GET /api/tasks/{task_id}/container-logs endpoint."""
+
+    def tearDown(self):
+        from app.main import app
+        app.dependency_overrides.clear()
+
+    def test_get_task_container_logs_returns_404_for_missing_task(self):
+        """Should return 404 when task does not exist in DB."""
+        from app.main import app
+        from app.database import get_db
+        from app.dependencies.auth import require_authenticated_context
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/api/tasks/9999/container-logs")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_task_container_logs_returns_empty_when_no_container_id(self):
+        """Should return empty logs when task exists but has no container_id."""
+        from app.main import app
+        from app.database import get_db
+        from app.dependencies.auth import require_authenticated_context
+        from app.models import TaskStatus
+
+        task = MagicMock()
+        task.id = 1
+        task.container_id = None
+        task.status = TaskStatus.PENDING
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = task
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/api/tasks/1/container-logs")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIsNone(data["container_id"])
+        self.assertEqual(data["logs"], "")

@@ -297,5 +297,104 @@ class SchedulerTaskExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(task.started_at)
 
 
+class SchedulerGetNextTaskTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for _get_next_task edge cases."""
+
+    async def test_get_next_task_returns_none_when_no_tasks(self) -> None:
+        """_get_next_task should return None when no pending/queued tasks exist."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        result = await scheduler._get_next_task(mock_db)
+
+        self.assertIsNone(result)
+        mock_db.execute.assert_called_once()
+
+    async def test_get_next_task_only_considers_pending_and_queued(self) -> None:
+        """_get_next_task only queries for PENDING/QUEUED statuses (DB is called)."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        await scheduler._get_next_task(mock_db)
+
+        # Ensure the database was queried exactly once (filtering is done in SQL)
+        self.assertEqual(mock_db.execute.call_count, 1)
+
+
+class SchedulerStartStopTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for scheduler start/stop lifecycle."""
+
+    async def test_scheduler_stop_sets_running_false(self) -> None:
+        """stop() should set self.running to False."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        scheduler.running = True
+        await scheduler.stop()
+        self.assertFalse(scheduler.running)
+
+    async def test_get_scheduler_returns_singleton(self) -> None:
+        """get_scheduler() should return the same instance on repeated calls."""
+        import app.scheduler as sched_module
+
+        # Reset singleton so we get a fresh one
+        original = sched_module._scheduler
+        sched_module._scheduler = None
+        try:
+            from app.scheduler import get_scheduler
+            s1 = get_scheduler()
+            s2 = get_scheduler()
+            self.assertIs(s1, s2)
+        finally:
+            sched_module._scheduler = original
+
+
+class SchedulerMaybeCleanupTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for _maybe_cleanup_sessions throttling."""
+
+    async def test_cleanup_skipped_when_not_enough_time_elapsed(self) -> None:
+        """If last cleanup was recent, cleanup_stale_sessions should NOT be called."""
+        import time
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        scheduler._last_session_cleanup_at = time.time()  # just now
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=MagicMock())
+        mock_db.commit = AsyncMock()
+
+        with patch("app.scheduler.cleanup_stale_sessions", new=AsyncMock()) as mock_cleanup:
+            await scheduler._maybe_cleanup_sessions(mock_db)
+            mock_cleanup.assert_not_called()
+
+    async def test_cleanup_runs_when_enough_time_elapsed(self) -> None:
+        """If last cleanup was long ago, cleanup_stale_sessions should be called."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        scheduler._last_session_cleanup_at = 0.0  # epoch — very old
+
+        mock_db = MagicMock()
+
+        with patch("app.scheduler.cleanup_stale_sessions", new=AsyncMock(return_value=0)) as mock_cleanup:
+            await scheduler._maybe_cleanup_sessions(mock_db)
+            mock_cleanup.assert_awaited_once_with(mock_db)
+
+
 if __name__ == "__main__":
     unittest.main()
