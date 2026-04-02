@@ -363,16 +363,19 @@ watch(() => props.modelValue, (newVal) => {
 
 /* Global styles for CodeMirror variable highlighting */
 :deep(.cm-variable-highlight) {
-  background-color: #fef3c7 !important;
+  background-color: rgba(245, 158, 11, 0.18) !important;
   color: #92400e !important;
   padding: 1px 2px;
   border-radius: 3px;
 }
 
-/* When highlighted text is selected, keep the highlight background */
-:deep(.cm-selectionBackground),
-:deep(::selection) {
-  background-color: #fef3c7 !important;
+/* Keep variable highlighting visible while making text selection clearly distinct */
+:deep(.cm-editor .cm-selectionBackground) {
+  background-color: rgba(59, 130, 246, 0.28) !important;
+}
+
+:deep(.cm-editor .cm-content ::selection) {
+  background-color: rgba(59, 130, 246, 0.34) !important;
 }
 
 /* Tooltip styling */
