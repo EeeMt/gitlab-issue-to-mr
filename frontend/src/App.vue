@@ -368,6 +368,7 @@ body {
   gap: 12px;
   width: min(calc(100% - 40px), var(--app-page-max-width-wide));
   margin: 14px auto 0;
+  box-sizing: border-box;
   padding: 12px 14px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.72);
