@@ -41,7 +41,7 @@ clean: ## Remove containers and volumes
 restart: down up ## Restart development environment
 
 # ============================================
-# Rebuild specific service
+# Rebuild Services
 # ============================================
 
 .PHONY: rebuild-backend
@@ -62,8 +62,6 @@ rebuild-worker: ## Rebuild worker image
 # Testing
 # ============================================
 
-# --- Unit Tests ---
-
 .PHONY: test
 test: test-backend test-frontend test-mock-e2e ## Run all unit tests
 
@@ -83,35 +81,31 @@ test-mock-e2e: ## Run mock E2E tests
 test-gitlab-e2e: ## Run GitLab E2E tests (requires real GitLab)
 	cd $(PROJECT_ROOT)/backend && python -m pytest tests/gitlab_e2e/ -v
 
-# --- E2E Tests (requires Docker) ---
-
 .PHONY: test-e2e
-test-e2e: e2e-up e2e-test e2e-down ## Full E2E test: up -> test -> down
+test-e2e: test-e2e-up test-e2e-run test-e2e-down ## Run Playwright E2E tests (up -> run -> down)
 
-.PHONY: e2e-up
-e2e-up: ## Start E2E test environment
+.PHONY: test-e2e-up
+test-e2e-up: ## Start E2E test environment
 	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml up -d --build
 
-.PHONY: e2e-test
-e2e-test: ## Run Playwright E2E tests
+.PHONY: test-e2e-run
+test-e2e-run: ## Run Playwright E2E tests
 	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e
 
-.PHONY: e2e-test-specific
-e2e-test-specific: ## Run specific E2E test (Usage: make e2e-test-specific TEST_FILE=test_dashboard.py)
+.PHONY: test-e2e-specific
+test-e2e-specific: ## Run specific E2E test (Usage: make test-e2e-specific TEST_FILE=test_dashboard.py)
 	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e pytest tests/e2e/tests/$(TEST_FILE) -v
 
-.PHONY: e2e-down
-e2e-down: ## Stop E2E test environment
+.PHONY: test-e2e-down
+test-e2e-down: ## Stop E2E test environment
 	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml down
 
-.PHONY: e2e-logs
-e2e-logs: ## View E2E test logs
+.PHONY: test-e2e-logs
+test-e2e-logs: ## View E2E test logs
 	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml logs -f
 
-# --- All Tests ---
-
 .PHONY: test-all
-test-all: test test-gitlab-e2e test-e2e ## Run ALL tests
+test-all: test test-gitlab-e2e test-e2e ## Run ALL tests (unit + gitlab-e2e + playwright-e2e)
 
 # ============================================
 # Help
@@ -131,7 +125,7 @@ help:
 	@echo ""
 	@echo "Rebuild Services:"
 	@echo "  make rebuild-backend   Rebuild backend image and restart"
-	@echo "  make rebuild-nginx     Rebuild nginx image and restart"
+	@echo "  make rebuild-nginx    Rebuild nginx image and restart"
 	@echo "  make rebuild-worker   Rebuild worker image"
 	@echo ""
 	@echo "Unit Tests:"
@@ -141,12 +135,13 @@ help:
 	@echo "  make test-mock-e2e     Run mock E2E tests"
 	@echo "  make test-gitlab-e2e  Run GitLab E2E tests"
 	@echo ""
-	@echo "E2E Tests:"
-	@echo "  make test-e2e          Full E2E workflow (up -> test -> down)"
-	@echo "  make e2e-up           Start E2E environment"
-	@echo "  make e2e-test         Run Playwright E2E tests"
-	@echo "  make e2e-test-specific  Run specific E2E test"
-	@echo "  make e2e-down         Stop E2E environment"
+	@echo "Playwright E2E Tests:"
+	@echo "  make test-e2e          Full workflow: up -> run -> down"
+	@echo "  make test-e2e-up       Start E2E test environment"
+	@echo "  make test-e2e-run      Run Playwright E2E tests"
+	@echo "  make test-e2e-specific Run specific E2E test"
+	@echo "  make test-e2e-down      Stop E2E test environment"
+	@echo "  make test-e2e-logs     View E2E test logs"
 	@echo ""
 	@echo "All Tests:"
 	@echo "  make test-all          Run ALL tests (unit + gitlab-e2e + playwright-e2e)"
