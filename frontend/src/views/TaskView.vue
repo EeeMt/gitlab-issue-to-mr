@@ -319,6 +319,15 @@
           <n-card class="task-card" :bordered="false">
             <template #header-extra>
               <n-space align="center">
+                <n-radio-group
+                  v-if="hasStructuredLogs"
+                  v-model:value="logViewMode"
+                  size="small"
+                  name="log-view-mode"
+                >
+                  <n-radio-button value="timeline">{{ t('taskView.timelineView') }}</n-radio-button>
+                  <n-radio-button value="terminal">{{ t('taskView.terminalView') }}</n-radio-button>
+                </n-radio-group>
                 <n-tag v-if="task?.status === 'running'" type="warning" size="small" round>{{ t('taskView.realTime') }}</n-tag>
                 <n-button size="small" @click="refreshLogs">{{ t('common.refresh') }}</n-button>
               </n-space>
@@ -332,14 +341,24 @@
               </div>
             </template>
             <n-spin :show="logsLoading">
-              <!-- DB log entries are streamed every ~10s during execution,
-                   so the same <pre> works for both running and completed tasks. -->
-              <pre
-                class="log-content"
-                v-if="renderedLogs"
-                v-html="renderedLogs"
-              ></pre>
-              <pre class="log-content" v-else>{{ isActiveTaskStatus(task?.status) ? t('taskView.waitingForLogs') : t('taskView.noLogsAvailable') }}</pre>
+              <!-- Timeline (structured) view -->
+              <StructuredLogView
+                v-if="logViewMode === 'timeline' && hasStructuredLogs"
+                :tool-calls="toolCalls"
+                :input-tokens="task?.input_tokens ?? null"
+                :output-tokens="task?.output_tokens ?? null"
+              />
+              <!-- Terminal (raw) view -->
+              <template v-else>
+                <!-- DB log entries are streamed every ~10s during execution,
+                     so the same <pre> works for both running and completed tasks. -->
+                <pre
+                  class="log-content"
+                  v-if="renderedLogs"
+                  v-html="renderedLogs"
+                ></pre>
+                <pre class="log-content" v-else>{{ isActiveTaskStatus(task?.status) ? t('taskView.waitingForLogs') : t('taskView.noLogsAvailable') }}</pre>
+              </template>
             </n-spin>
           </n-card>
         </div>
@@ -351,13 +370,14 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { NButton, NSpace, NCard, NDescriptions, NDescriptionsItem, NTag, NGrid, NGi, NSpin, NAlert, NText, NDatePicker, NTooltip, useMessage, NIcon } from 'naive-ui'
+import { NButton, NSpace, NCard, NDescriptions, NDescriptionsItem, NTag, NGrid, NGi, NSpin, NAlert, NText, NDatePicker, NTooltip, useMessage, NIcon, NRadioGroup, NRadioButton } from 'naive-ui'
 import { PersonOutline, LogoGitlab } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
-import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, type Task } from '../api'
+import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, type Task, type TaskLog, type ToolCall } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
 import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
+import StructuredLogView from '../components/StructuredLogView.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8, parseUtcDate } from '../utils/datetime'
 import AnsiToHtml from 'ansi-to-html'
@@ -383,6 +403,9 @@ const taskRequestInFlight = ref(false)
 const containerRequestInFlight = ref(false)
 const rescheduleDatetime = ref<number | null>(null)
 const retryScheduleDatetime = ref<number | null>(null)
+const taskLogs = ref<TaskLog[]>([])
+const logViewMode = ref<'timeline' | 'terminal'>('terminal')
+const logViewModeSet = ref(false)
 let pollTimer: number | null = null
 let logEventSource: EventSource | null = null
 let logStreamContainerId: string | null = null
@@ -393,6 +416,14 @@ const renderedLogs = computed(() => {
   if (!text) return ''
   return ansiConverter.toHtml(text)
 })
+
+const toolCalls = computed<ToolCall[]>(() => {
+  const structuredEntry = taskLogs.value.find(l => l.log_type === 'tool_calls_json')
+  if (!structuredEntry?.metadata) return []
+  try { return JSON.parse(structuredEntry.metadata) } catch { return [] }
+})
+
+const hasStructuredLogs = computed(() => toolCalls.value.length > 0)
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
   pending: 'default',
@@ -565,7 +596,12 @@ async function fetchLogs() {
   logsLoading.value = true
   try {
     const logEntries = await getTaskLogs(taskId.value)
+    taskLogs.value = logEntries
     logs.value = logEntries.map(l => `[${l.created_at}] [${l.log_level}] ${l.message}`).join('\n')
+    if (!logViewModeSet.value && logEntries.some(l => l.log_type === 'tool_calls_json')) {
+      logViewMode.value = 'timeline'
+      logViewModeSet.value = true
+    }
   } catch (error) {
     logs.value = t('taskView.failedToFetchLogs')
   } finally {

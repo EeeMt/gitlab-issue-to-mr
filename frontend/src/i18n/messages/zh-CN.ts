@@ -204,7 +204,12 @@ const zhCN = {
     failedToRescheduleTask: '更新预约时间失败',
     rescheduleTimeFuture: '预约时间必须晚于当前时间',
     taskExecutionStarted: '任务开始执行',
-    failedToExecuteTask: '立即执行失败'
+    failedToExecuteTask: '立即执行失败',
+    timelineView: '时间线',
+    terminalView: '终端',
+    toolCallsCount: '{count} 次工具调用',
+    noToolCalls: '没有工具调用记录',
+    totalTokens: '合计'
   },
   createTask: {
     title: '创建手动任务',

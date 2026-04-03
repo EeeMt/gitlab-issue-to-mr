@@ -99,8 +99,17 @@ export interface TaskLog {
   id: number
   task_id: number
   log_level: string
+  log_type?: string | null
+  metadata?: string | null
   message: string
   created_at: string
+}
+
+export interface ToolCall {
+  name: string
+  input: Record<string, unknown>
+  output: string | null
+  error: boolean
 }
 
 export interface TaskStats {

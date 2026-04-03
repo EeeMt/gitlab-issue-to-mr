@@ -214,7 +214,12 @@ const en = {
     failedToRescheduleTask: 'Failed to update scheduled time',
     rescheduleTimeFuture: 'Scheduled time must be in the future',
     taskExecutionStarted: 'Task execution started',
-    failedToExecuteTask: 'Failed to execute task'
+    failedToExecuteTask: 'Failed to execute task',
+    timelineView: 'Timeline',
+    terminalView: 'Terminal',
+    toolCallsCount: '{count} tool calls',
+    noToolCalls: 'No tool calls recorded',
+    totalTokens: 'Total'
   },
   createTask: {
     title: 'Create Manual Task',
