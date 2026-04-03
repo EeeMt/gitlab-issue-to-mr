@@ -570,10 +570,10 @@ const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
     minWidth: 180,
     sorter: (a, b) => a.project_name.localeCompare(b.project_name),
     render: (row) =>
-      h('div', { class: 'analytics-table__primary' }, [
-        h('div', row.project_name),
+      h('div', [
+        h('div', { style: { fontWeight: 500 } }, row.project_name),
         row.project_path_with_namespace
-          ? h('div', { class: 'analytics-table__secondary' }, row.project_path_with_namespace)
+          ? h('div', { style: { fontSize: '11px', color: 'rgba(15,23,42,0.45)', marginTop: '2px', lineHeight: '1.4' } }, row.project_path_with_namespace)
           : null
       ])
   },
