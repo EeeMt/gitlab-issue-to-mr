@@ -236,13 +236,13 @@
                        />
 
 
-                       <!-- Heatmap reopen trigger -->
+                       <!-- Heatmap trigger: shown for both delay and scheduled modes -->
                        <n-button
-                         v-if="scheduleType === 'scheduled'"
+                         v-if="scheduleType === 'delay' || scheduleType === 'scheduled'"
                          size="small"
                          secondary
                          :loading="scheduledTasksLoading"
-                         @click="showScheduleDrawer = true"
+                         @click="openScheduleDrawer"
                        >
                          <template #icon><n-icon :component="CalendarOutline" /></template>
                          {{ t('createTask.viewScheduleHeatmap') }}
@@ -506,8 +506,23 @@ function isScheduledTimeDisabled(timestamp: number) {
   }
 }
 
+async function openScheduleDrawer() {
+  showScheduleDrawer.value = true
+  if (scheduledTasksForPreview.value.length === 0) {
+    scheduledTasksLoading.value = true
+    try {
+      scheduledTasksForPreview.value = await getScheduledTasks()
+    } catch {
+      scheduledTasksForPreview.value = []
+    } finally {
+      scheduledTasksLoading.value = false
+    }
+  }
+}
+
 function handleScheduleHeatmapCellClick(startMs: number) {
   scheduledDatetime.value = startMs
+  scheduleType.value = 'scheduled'
   showScheduleDrawer.value = false
 }
 
@@ -725,20 +740,8 @@ onMounted(() => {
   fetchPromptTemplates()
 })
 
-watch(scheduleType, async (newType) => {
-  if (newType === 'scheduled') {
-    showScheduleDrawer.value = true
-    if (scheduledTasksForPreview.value.length === 0) {
-      scheduledTasksLoading.value = true
-      try {
-        scheduledTasksForPreview.value = await getScheduledTasks()
-      } catch {
-        scheduledTasksForPreview.value = []
-      } finally {
-        scheduledTasksLoading.value = false
-      }
-    }
-  } else {
+watch(scheduleType, (newType) => {
+  if (newType !== 'scheduled') {
     scheduledDatetime.value = null
     showScheduleDrawer.value = false
   }
