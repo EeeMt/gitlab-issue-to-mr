@@ -214,6 +214,7 @@ const zhCN = {
     taskDetails: '任务详情',
     taskDetailsSubtitle: '配置源码来源、分支策略、优先级与执行时机',
     repositoryBranches: '仓库与分支',
+    mrSettings: 'MR 设置',
     project: '项目',
     selectProject: '选择项目',
     baseBranch: '基础分支',

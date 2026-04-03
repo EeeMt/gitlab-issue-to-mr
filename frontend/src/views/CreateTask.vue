@@ -82,6 +82,12 @@
                     </template>
                   </n-form-item>
                 </n-gi>
+              </n-grid>
+            </div>
+
+            <div class="create-task-form__section">
+              <div class="create-task-form__section-title">{{ t('createTask.mrSettings') }}</div>
+              <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                 <n-gi>
                   <n-form-item path="create_mr">
                     <template #label>

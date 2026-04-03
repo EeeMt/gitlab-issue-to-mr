@@ -225,6 +225,7 @@ const en = {
     taskDetails: 'Task Details',
     taskDetailsSubtitle: 'Configure source, branch strategy, priority, and execution timing',
     repositoryBranches: 'Repository & Branches',
+    mrSettings: 'MR Settings',
     project: 'Project',
     selectProject: 'Select a project',
     baseBranch: 'Base Branch',
