@@ -239,6 +239,8 @@ const zhCN = {
     noVariables: '未检测到变量',
     useTemplate: '使用模板',
     prioritySchedule: '优先级与调度',
+    schedulePreviewTitle: '近7日预约热力图',
+    schedulePreviewHint: '点击任意格子可将该时段设置为预约时间。',
     p0: 'P0（最高）',
     p1: 'P1（高）',
     p2: 'P2（普通）',

@@ -251,6 +251,8 @@ const en = {
     noVariables: 'No variables detected',
     useTemplate: 'Use Template',
     prioritySchedule: 'Priority & Schedule',
+    schedulePreviewTitle: 'Schedule Load (7 days)',
+    schedulePreviewHint: 'Click any cell to set that hour as your scheduled time.',
     p0: 'P0 (Highest)',
     p1: 'P1 (High)',
     p2: 'P2 (Normal)',

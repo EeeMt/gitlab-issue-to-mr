@@ -125,50 +125,15 @@
                   <div class="schedule-card__title">{{ t('scheduleOverview.heatmap') }}</div>
                   <div class="schedule-card__subtitle">{{ t('scheduleOverview.heatmapSubtitle') }}</div>
               </div>
-              <div class="heatmap-legend">
-                <span class="heatmap-legend__label">{{ t('scheduleOverview.light') }}</span>
-                <div class="heatmap-legend__scale">
-                  <span class="heatmap-legend__swatch heatmap-legend__swatch--1"></span>
-                  <span class="heatmap-legend__swatch heatmap-legend__swatch--2"></span>
-                  <span class="heatmap-legend__swatch heatmap-legend__swatch--3"></span>
-                  <span class="heatmap-legend__swatch heatmap-legend__swatch--4"></span>
-                </div>
-                <span class="heatmap-legend__label">{{ t('scheduleOverview.busy') }}</span>
-                <span class="schedule-chip schedule-chip--interactive">
-                  {{ t('scheduleOverview.clickableHint') }}
-                </span>
-              </div>
+
             </div>
           </template>
 
-          <div class="heatmap">
-            <div class="heatmap__header heatmap__header--spacer"></div>
-            <div
-              v-for="day in heatmapDays"
-              :key="day.dateKey"
-              class="heatmap__header"
-            >
-              {{ day.label }}
-            </div>
-
-            <template v-for="row in heatmapRows" :key="row.hour">
-              <div class="heatmap__hour">{{ row.label }}</div>
-                <div
-                  v-for="cell in row.cells"
-                  :key="cell.key"
-                  class="heatmap__cell"
-                  :class="{
-                    'heatmap__cell--clickable': cell.count > 0,
-                    'heatmap__cell--active': isSelectedWindow(cell.startMs, cell.endMs)
-                  }"
-                  :style="heatmapCellStyle(cell.count, heatmapMax)"
-                  :title="t('scheduleOverview.taskCountTitle', { label: cell.label, count: cell.count })"
-                  @click="handleHeatmapCellSelect(cell)"
-                >
-                  {{ cell.count > 0 ? cell.count : '' }}
-                </div>
-            </template>
-          </div>
+          <HeatmapChart
+            :tasks="tasks"
+            :selected-ms="selectedWindow?.startMs ?? null"
+            @cell-click="handleHeatmapCellClick"
+          />
           <div class="schedule-section-tip">
             {{ t('scheduleOverview.heatmapTip') }}
           </div>
@@ -322,7 +287,8 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { authState, isAdmin, initializeAuth } from '../auth'
 import { getScheduledTasks, rescheduleTask, type Task } from '../api'
-import { formatDateTimeUtc8Compact, formatMonthDayTimeUtc8, formatMonthDayWeekdayUtc8, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
+import { formatDateTimeUtc8Compact, formatMonthDayTimeUtc8, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
+import HeatmapChart from '../components/HeatmapChart.vue'
 
 type HourBucket = {
   key: string
@@ -333,30 +299,12 @@ type HourBucket = {
   startMs: number
 }
 
-type HeatmapDay = {
-  dateKey: string
-  label: string
-}
-
-type HeatmapCell = {
-  key: string
-  label: string
-  count: number
-  startMs: number
-  endMs: number
-}
 
 type SelectedWindow = {
   key: string
   label: string
   startMs: number
   endMs: number
-}
-
-type HeatmapRow = {
-  hour: number
-  label: string
-  cells: HeatmapCell[]
 }
 
 const message = useMessage()
@@ -389,15 +337,6 @@ const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 
   cancelled: 'default',
 }
 
-const shanghaiPartsFormatter = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'Asia/Shanghai',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  hour12: false,
-})
-
 function getProjectLabel(task: Task): string {
   return task.project_path_with_namespace || task.project_name || t('dashboard.projectFallback', { id: task.project_id })
 }
@@ -426,38 +365,6 @@ function formatShortDateTime(value?: string | null): string {
 function getScheduledTimestamp(value?: string | null): number | null {
   if (!value) return null
   return parseUtcDate(value).getTime()
-}
-
-function getShanghaiParts(date: Date): Record<string, string> {
-  return shanghaiPartsFormatter.formatToParts(date).reduce<Record<string, string>>((acc, part) => {
-    if (part.type !== 'literal') {
-      acc[part.type] = part.value
-    }
-    return acc
-  }, {})
-}
-
-function getShanghaiDateKey(date: Date): string {
-  const parts = getShanghaiParts(date)
-  return `${parts.year}-${parts.month}-${parts.day}`
-}
-
-function buildHeatmapDays(days: number): HeatmapDay[] {
-  const nowParts = getShanghaiParts(new Date())
-  const baseDate = new Date(
-    Date.UTC(Number(nowParts.year), Number(nowParts.month) - 1, Number(nowParts.day))
-  )
-
-  return Array.from({ length: days }, (_, index) => {
-    const date = new Date(baseDate.getTime() + index * 24 * 60 * 60 * 1000)
-    const year = date.getUTCFullYear()
-    const month = String(date.getUTCMonth() + 1).padStart(2, '0')
-    const day = String(date.getUTCDate()).padStart(2, '0')
-      return {
-        dateKey: `${year}-${month}-${day}`,
-        label: formatMonthDayWeekdayUtc8(date),
-      }
-    })
 }
 
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
@@ -549,63 +456,6 @@ const idleWindows = computed(() =>
     .slice(0, 5)
 )
 
-const heatmapDays = computed(() => buildHeatmapDays(7))
-
-const heatmapRows = computed<HeatmapRow[]>(() => {
-  const dayKeys = heatmapDays.value.map((day) => day.dateKey)
-  const counts = new Map<string, number>()
-
-  tasks.value.forEach((task) => {
-    if (!task.scheduled_at) return
-    const scheduledDate = parseUtcDate(task.scheduled_at)
-    const dateKey = getShanghaiDateKey(scheduledDate)
-    if (!dayKeys.includes(dateKey)) return
-
-    const parts = getShanghaiParts(scheduledDate)
-    const hour = Number(parts.hour)
-    const key = `${dateKey}-${hour}`
-    counts.set(key, (counts.get(key) || 0) + 1)
-  })
-
-  return Array.from({ length: 24 }, (_, hour) => ({
-    hour,
-    label: `${String(hour).padStart(2, '0')}:00`,
-    cells: heatmapDays.value.map((day) => {
-      const key = `${day.dateKey}-${hour}`
-      const startMs = new Date(`${day.dateKey}T${String(hour).padStart(2, '0')}:00:00+08:00`).getTime()
-      return {
-        key,
-        label: `${day.label} ${String(hour).padStart(2, '0')}:00`,
-        count: counts.get(key) || 0,
-        startMs,
-        endMs: startMs + 60 * 60 * 1000,
-      }
-    }),
-  }))
-})
-
-const heatmapMax = computed(() =>
-  heatmapRows.value.reduce((max, row) => {
-    return Math.max(max, ...row.cells.map((cell) => cell.count))
-  }, 0)
-)
-
-function heatmapCellStyle(count: number, maxCount: number) {
-  if (count === 0 || maxCount === 0) {
-    return {
-      background: 'rgba(148, 163, 184, 0.12)',
-      color: 'rgba(15, 23, 42, 0.45)',
-    }
-  }
-
-  const intensity = count / maxCount
-  const alpha = 0.18 + intensity * 0.52
-  return {
-    background: `rgba(32, 128, 240, ${alpha.toFixed(3)})`,
-    color: intensity > 0.58 ? '#fff' : '#0f172a',
-  }
-}
-
 function isSameLocalDay(left: Date, right: Date): boolean {
   return (
     left.getFullYear() === right.getFullYear()
@@ -680,13 +530,14 @@ function handleHourlyBucketSelect(bucket: HourBucket) {
   })
 }
 
-function handleHeatmapCellSelect(cell: HeatmapCell) {
-  if (cell.count === 0) return
+function handleHeatmapCellClick(startMs: number) {
+  const endMs = startMs + 60 * 60 * 1000
+  const label = formatMonthDayTimeUtc8(new Date(startMs))
   setSelectedWindow({
-    key: cell.key,
-    label: cell.label,
-    startMs: cell.startMs,
-    endMs: cell.endMs,
+    key: `heatmap-${startMs}`,
+    label,
+    startMs,
+    endMs,
   })
 }
 
@@ -1125,80 +976,6 @@ onBeforeUnmount(() => {
   color: rgba(15, 23, 42, 0.58);
 }
 
-.heatmap-legend {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.58);
-}
-
-.heatmap-legend__scale {
-  display: flex;
-  gap: 6px;
-}
-
-.heatmap-legend__swatch {
-  width: 16px;
-  height: 10px;
-  border-radius: 999px;
-}
-
-.heatmap-legend__swatch--1 { background: rgba(32, 128, 240, 0.2); }
-.heatmap-legend__swatch--2 { background: rgba(32, 128, 240, 0.34); }
-.heatmap-legend__swatch--3 { background: rgba(32, 128, 240, 0.5); }
-.heatmap-legend__swatch--4 { background: rgba(32, 128, 240, 0.68); }
-
-.heatmap {
-  display: grid;
-  grid-template-columns: 64px repeat(7, minmax(0, 1fr));
-  gap: 8px;
-  align-items: center;
-}
-
-.heatmap__header {
-  text-align: center;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.64);
-}
-
-.heatmap__header--spacer {
-  visibility: hidden;
-}
-
-.heatmap__hour {
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.58);
-}
-
-.heatmap__cell {
-  min-height: 30px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.heatmap__cell--clickable {
-  cursor: pointer;
-}
-
-.heatmap__cell--clickable:not(.heatmap__cell--active):hover {
-  transform: translateY(-1px);
-  box-shadow: inset 0 0 0 1px rgba(32, 128, 240, 0.22);
-}
-
-.heatmap__cell--active {
-  box-shadow: inset 0 0 0 2px rgba(15, 23, 42, 0.32), 0 0 0 2px rgba(24, 160, 88, 0.16);
-}
-
-.heatmap__cell--active:hover {
-  transform: none;
-  box-shadow: inset 0 0 0 2px rgba(15, 23, 42, 0.32), 0 0 0 2px rgba(24, 160, 88, 0.16);
-}
-
 .slot-detail {
   display: flex;
   flex-direction: column;
@@ -1344,17 +1121,6 @@ onBeforeUnmount(() => {
 
   .window-insights {
     grid-template-columns: 1fr;
-  }
-
-  .heatmap {
-    grid-template-columns: 54px repeat(7, minmax(44px, 1fr));
-    gap: 6px;
-    overflow-x: auto;
-  }
-
-  .heatmap__cell {
-    min-height: 28px;
-    font-size: 11px;
   }
 
   .slot-task-card {

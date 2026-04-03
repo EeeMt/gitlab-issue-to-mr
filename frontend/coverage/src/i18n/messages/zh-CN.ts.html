@@ -1,0 +1,2911 @@
+
+<!doctype html>
+<html lang="en">
+
+<head>
+    <title>Code coverage report for src/i18n/messages/zh-CN.ts</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../../../prettify.css" />
+    <link rel="stylesheet" href="../../../base.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="../../../favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style type='text/css'>
+        .coverage-summary .sorter {
+            background-image: url(../../../sort-arrow-sprite.png);
+        }
+    </style>
+</head>
+    
+<body>
+<div class='wrapper'>
+    <div class='pad1'>
+        <h1><a href="../../../index.html">All files</a> / <a href="index.html">src/i18n/messages</a> zh-CN.ts</h1>
+        <div class='clearfix'>
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">100% </span>
+                <span class="quiet">Statements</span>
+                <span class='fraction'>941/941</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">100% </span>
+                <span class="quiet">Branches</span>
+                <span class='fraction'>0/0</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">100% </span>
+                <span class="quiet">Functions</span>
+                <span class='fraction'>0/0</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">100% </span>
+                <span class="quiet">Lines</span>
+                <span class='fraction'>941/941</span>
+            </div>
+        
+            
+        </div>
+        <p class="quiet">
+            Press <em>n</em> or <em>j</em> to go to the next uncovered block, <em>b</em>, <em>p</em> or <em>k</em> for the previous block.
+        </p>
+        <template id="filterTemplate">
+            <div class="quiet">
+                Filter:
+                <input type="search" id="fileSearch">
+            </div>
+        </template>
+    </div>
+    <div class='status-line high'></div>
+    <pre><table class="coverage">
+<tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
+<a name='L2'></a><a href='#L2'>2</a>
+<a name='L3'></a><a href='#L3'>3</a>
+<a name='L4'></a><a href='#L4'>4</a>
+<a name='L5'></a><a href='#L5'>5</a>
+<a name='L6'></a><a href='#L6'>6</a>
+<a name='L7'></a><a href='#L7'>7</a>
+<a name='L8'></a><a href='#L8'>8</a>
+<a name='L9'></a><a href='#L9'>9</a>
+<a name='L10'></a><a href='#L10'>10</a>
+<a name='L11'></a><a href='#L11'>11</a>
+<a name='L12'></a><a href='#L12'>12</a>
+<a name='L13'></a><a href='#L13'>13</a>
+<a name='L14'></a><a href='#L14'>14</a>
+<a name='L15'></a><a href='#L15'>15</a>
+<a name='L16'></a><a href='#L16'>16</a>
+<a name='L17'></a><a href='#L17'>17</a>
+<a name='L18'></a><a href='#L18'>18</a>
+<a name='L19'></a><a href='#L19'>19</a>
+<a name='L20'></a><a href='#L20'>20</a>
+<a name='L21'></a><a href='#L21'>21</a>
+<a name='L22'></a><a href='#L22'>22</a>
+<a name='L23'></a><a href='#L23'>23</a>
+<a name='L24'></a><a href='#L24'>24</a>
+<a name='L25'></a><a href='#L25'>25</a>
+<a name='L26'></a><a href='#L26'>26</a>
+<a name='L27'></a><a href='#L27'>27</a>
+<a name='L28'></a><a href='#L28'>28</a>
+<a name='L29'></a><a href='#L29'>29</a>
+<a name='L30'></a><a href='#L30'>30</a>
+<a name='L31'></a><a href='#L31'>31</a>
+<a name='L32'></a><a href='#L32'>32</a>
+<a name='L33'></a><a href='#L33'>33</a>
+<a name='L34'></a><a href='#L34'>34</a>
+<a name='L35'></a><a href='#L35'>35</a>
+<a name='L36'></a><a href='#L36'>36</a>
+<a name='L37'></a><a href='#L37'>37</a>
+<a name='L38'></a><a href='#L38'>38</a>
+<a name='L39'></a><a href='#L39'>39</a>
+<a name='L40'></a><a href='#L40'>40</a>
+<a name='L41'></a><a href='#L41'>41</a>
+<a name='L42'></a><a href='#L42'>42</a>
+<a name='L43'></a><a href='#L43'>43</a>
+<a name='L44'></a><a href='#L44'>44</a>
+<a name='L45'></a><a href='#L45'>45</a>
+<a name='L46'></a><a href='#L46'>46</a>
+<a name='L47'></a><a href='#L47'>47</a>
+<a name='L48'></a><a href='#L48'>48</a>
+<a name='L49'></a><a href='#L49'>49</a>
+<a name='L50'></a><a href='#L50'>50</a>
+<a name='L51'></a><a href='#L51'>51</a>
+<a name='L52'></a><a href='#L52'>52</a>
+<a name='L53'></a><a href='#L53'>53</a>
+<a name='L54'></a><a href='#L54'>54</a>
+<a name='L55'></a><a href='#L55'>55</a>
+<a name='L56'></a><a href='#L56'>56</a>
+<a name='L57'></a><a href='#L57'>57</a>
+<a name='L58'></a><a href='#L58'>58</a>
+<a name='L59'></a><a href='#L59'>59</a>
+<a name='L60'></a><a href='#L60'>60</a>
+<a name='L61'></a><a href='#L61'>61</a>
+<a name='L62'></a><a href='#L62'>62</a>
+<a name='L63'></a><a href='#L63'>63</a>
+<a name='L64'></a><a href='#L64'>64</a>
+<a name='L65'></a><a href='#L65'>65</a>
+<a name='L66'></a><a href='#L66'>66</a>
+<a name='L67'></a><a href='#L67'>67</a>
+<a name='L68'></a><a href='#L68'>68</a>
+<a name='L69'></a><a href='#L69'>69</a>
+<a name='L70'></a><a href='#L70'>70</a>
+<a name='L71'></a><a href='#L71'>71</a>
+<a name='L72'></a><a href='#L72'>72</a>
+<a name='L73'></a><a href='#L73'>73</a>
+<a name='L74'></a><a href='#L74'>74</a>
+<a name='L75'></a><a href='#L75'>75</a>
+<a name='L76'></a><a href='#L76'>76</a>
+<a name='L77'></a><a href='#L77'>77</a>
+<a name='L78'></a><a href='#L78'>78</a>
+<a name='L79'></a><a href='#L79'>79</a>
+<a name='L80'></a><a href='#L80'>80</a>
+<a name='L81'></a><a href='#L81'>81</a>
+<a name='L82'></a><a href='#L82'>82</a>
+<a name='L83'></a><a href='#L83'>83</a>
+<a name='L84'></a><a href='#L84'>84</a>
+<a name='L85'></a><a href='#L85'>85</a>
+<a name='L86'></a><a href='#L86'>86</a>
+<a name='L87'></a><a href='#L87'>87</a>
+<a name='L88'></a><a href='#L88'>88</a>
+<a name='L89'></a><a href='#L89'>89</a>
+<a name='L90'></a><a href='#L90'>90</a>
+<a name='L91'></a><a href='#L91'>91</a>
+<a name='L92'></a><a href='#L92'>92</a>
+<a name='L93'></a><a href='#L93'>93</a>
+<a name='L94'></a><a href='#L94'>94</a>
+<a name='L95'></a><a href='#L95'>95</a>
+<a name='L96'></a><a href='#L96'>96</a>
+<a name='L97'></a><a href='#L97'>97</a>
+<a name='L98'></a><a href='#L98'>98</a>
+<a name='L99'></a><a href='#L99'>99</a>
+<a name='L100'></a><a href='#L100'>100</a>
+<a name='L101'></a><a href='#L101'>101</a>
+<a name='L102'></a><a href='#L102'>102</a>
+<a name='L103'></a><a href='#L103'>103</a>
+<a name='L104'></a><a href='#L104'>104</a>
+<a name='L105'></a><a href='#L105'>105</a>
+<a name='L106'></a><a href='#L106'>106</a>
+<a name='L107'></a><a href='#L107'>107</a>
+<a name='L108'></a><a href='#L108'>108</a>
+<a name='L109'></a><a href='#L109'>109</a>
+<a name='L110'></a><a href='#L110'>110</a>
+<a name='L111'></a><a href='#L111'>111</a>
+<a name='L112'></a><a href='#L112'>112</a>
+<a name='L113'></a><a href='#L113'>113</a>
+<a name='L114'></a><a href='#L114'>114</a>
+<a name='L115'></a><a href='#L115'>115</a>
+<a name='L116'></a><a href='#L116'>116</a>
+<a name='L117'></a><a href='#L117'>117</a>
+<a name='L118'></a><a href='#L118'>118</a>
+<a name='L119'></a><a href='#L119'>119</a>
+<a name='L120'></a><a href='#L120'>120</a>
+<a name='L121'></a><a href='#L121'>121</a>
+<a name='L122'></a><a href='#L122'>122</a>
+<a name='L123'></a><a href='#L123'>123</a>
+<a name='L124'></a><a href='#L124'>124</a>
+<a name='L125'></a><a href='#L125'>125</a>
+<a name='L126'></a><a href='#L126'>126</a>
+<a name='L127'></a><a href='#L127'>127</a>
+<a name='L128'></a><a href='#L128'>128</a>
+<a name='L129'></a><a href='#L129'>129</a>
+<a name='L130'></a><a href='#L130'>130</a>
+<a name='L131'></a><a href='#L131'>131</a>
+<a name='L132'></a><a href='#L132'>132</a>
+<a name='L133'></a><a href='#L133'>133</a>
+<a name='L134'></a><a href='#L134'>134</a>
+<a name='L135'></a><a href='#L135'>135</a>
+<a name='L136'></a><a href='#L136'>136</a>
+<a name='L137'></a><a href='#L137'>137</a>
+<a name='L138'></a><a href='#L138'>138</a>
+<a name='L139'></a><a href='#L139'>139</a>
+<a name='L140'></a><a href='#L140'>140</a>
+<a name='L141'></a><a href='#L141'>141</a>
+<a name='L142'></a><a href='#L142'>142</a>
+<a name='L143'></a><a href='#L143'>143</a>
+<a name='L144'></a><a href='#L144'>144</a>
+<a name='L145'></a><a href='#L145'>145</a>
+<a name='L146'></a><a href='#L146'>146</a>
+<a name='L147'></a><a href='#L147'>147</a>
+<a name='L148'></a><a href='#L148'>148</a>
+<a name='L149'></a><a href='#L149'>149</a>
+<a name='L150'></a><a href='#L150'>150</a>
+<a name='L151'></a><a href='#L151'>151</a>
+<a name='L152'></a><a href='#L152'>152</a>
+<a name='L153'></a><a href='#L153'>153</a>
+<a name='L154'></a><a href='#L154'>154</a>
+<a name='L155'></a><a href='#L155'>155</a>
+<a name='L156'></a><a href='#L156'>156</a>
+<a name='L157'></a><a href='#L157'>157</a>
+<a name='L158'></a><a href='#L158'>158</a>
+<a name='L159'></a><a href='#L159'>159</a>
+<a name='L160'></a><a href='#L160'>160</a>
+<a name='L161'></a><a href='#L161'>161</a>
+<a name='L162'></a><a href='#L162'>162</a>
+<a name='L163'></a><a href='#L163'>163</a>
+<a name='L164'></a><a href='#L164'>164</a>
+<a name='L165'></a><a href='#L165'>165</a>
+<a name='L166'></a><a href='#L166'>166</a>
+<a name='L167'></a><a href='#L167'>167</a>
+<a name='L168'></a><a href='#L168'>168</a>
+<a name='L169'></a><a href='#L169'>169</a>
+<a name='L170'></a><a href='#L170'>170</a>
+<a name='L171'></a><a href='#L171'>171</a>
+<a name='L172'></a><a href='#L172'>172</a>
+<a name='L173'></a><a href='#L173'>173</a>
+<a name='L174'></a><a href='#L174'>174</a>
+<a name='L175'></a><a href='#L175'>175</a>
+<a name='L176'></a><a href='#L176'>176</a>
+<a name='L177'></a><a href='#L177'>177</a>
+<a name='L178'></a><a href='#L178'>178</a>
+<a name='L179'></a><a href='#L179'>179</a>
+<a name='L180'></a><a href='#L180'>180</a>
+<a name='L181'></a><a href='#L181'>181</a>
+<a name='L182'></a><a href='#L182'>182</a>
+<a name='L183'></a><a href='#L183'>183</a>
+<a name='L184'></a><a href='#L184'>184</a>
+<a name='L185'></a><a href='#L185'>185</a>
+<a name='L186'></a><a href='#L186'>186</a>
+<a name='L187'></a><a href='#L187'>187</a>
+<a name='L188'></a><a href='#L188'>188</a>
+<a name='L189'></a><a href='#L189'>189</a>
+<a name='L190'></a><a href='#L190'>190</a>
+<a name='L191'></a><a href='#L191'>191</a>
+<a name='L192'></a><a href='#L192'>192</a>
+<a name='L193'></a><a href='#L193'>193</a>
+<a name='L194'></a><a href='#L194'>194</a>
+<a name='L195'></a><a href='#L195'>195</a>
+<a name='L196'></a><a href='#L196'>196</a>
+<a name='L197'></a><a href='#L197'>197</a>
+<a name='L198'></a><a href='#L198'>198</a>
+<a name='L199'></a><a href='#L199'>199</a>
+<a name='L200'></a><a href='#L200'>200</a>
+<a name='L201'></a><a href='#L201'>201</a>
+<a name='L202'></a><a href='#L202'>202</a>
+<a name='L203'></a><a href='#L203'>203</a>
+<a name='L204'></a><a href='#L204'>204</a>
+<a name='L205'></a><a href='#L205'>205</a>
+<a name='L206'></a><a href='#L206'>206</a>
+<a name='L207'></a><a href='#L207'>207</a>
+<a name='L208'></a><a href='#L208'>208</a>
+<a name='L209'></a><a href='#L209'>209</a>
+<a name='L210'></a><a href='#L210'>210</a>
+<a name='L211'></a><a href='#L211'>211</a>
+<a name='L212'></a><a href='#L212'>212</a>
+<a name='L213'></a><a href='#L213'>213</a>
+<a name='L214'></a><a href='#L214'>214</a>
+<a name='L215'></a><a href='#L215'>215</a>
+<a name='L216'></a><a href='#L216'>216</a>
+<a name='L217'></a><a href='#L217'>217</a>
+<a name='L218'></a><a href='#L218'>218</a>
+<a name='L219'></a><a href='#L219'>219</a>
+<a name='L220'></a><a href='#L220'>220</a>
+<a name='L221'></a><a href='#L221'>221</a>
+<a name='L222'></a><a href='#L222'>222</a>
+<a name='L223'></a><a href='#L223'>223</a>
+<a name='L224'></a><a href='#L224'>224</a>
+<a name='L225'></a><a href='#L225'>225</a>
+<a name='L226'></a><a href='#L226'>226</a>
+<a name='L227'></a><a href='#L227'>227</a>
+<a name='L228'></a><a href='#L228'>228</a>
+<a name='L229'></a><a href='#L229'>229</a>
+<a name='L230'></a><a href='#L230'>230</a>
+<a name='L231'></a><a href='#L231'>231</a>
+<a name='L232'></a><a href='#L232'>232</a>
+<a name='L233'></a><a href='#L233'>233</a>
+<a name='L234'></a><a href='#L234'>234</a>
+<a name='L235'></a><a href='#L235'>235</a>
+<a name='L236'></a><a href='#L236'>236</a>
+<a name='L237'></a><a href='#L237'>237</a>
+<a name='L238'></a><a href='#L238'>238</a>
+<a name='L239'></a><a href='#L239'>239</a>
+<a name='L240'></a><a href='#L240'>240</a>
+<a name='L241'></a><a href='#L241'>241</a>
+<a name='L242'></a><a href='#L242'>242</a>
+<a name='L243'></a><a href='#L243'>243</a>
+<a name='L244'></a><a href='#L244'>244</a>
+<a name='L245'></a><a href='#L245'>245</a>
+<a name='L246'></a><a href='#L246'>246</a>
+<a name='L247'></a><a href='#L247'>247</a>
+<a name='L248'></a><a href='#L248'>248</a>
+<a name='L249'></a><a href='#L249'>249</a>
+<a name='L250'></a><a href='#L250'>250</a>
+<a name='L251'></a><a href='#L251'>251</a>
+<a name='L252'></a><a href='#L252'>252</a>
+<a name='L253'></a><a href='#L253'>253</a>
+<a name='L254'></a><a href='#L254'>254</a>
+<a name='L255'></a><a href='#L255'>255</a>
+<a name='L256'></a><a href='#L256'>256</a>
+<a name='L257'></a><a href='#L257'>257</a>
+<a name='L258'></a><a href='#L258'>258</a>
+<a name='L259'></a><a href='#L259'>259</a>
+<a name='L260'></a><a href='#L260'>260</a>
+<a name='L261'></a><a href='#L261'>261</a>
+<a name='L262'></a><a href='#L262'>262</a>
+<a name='L263'></a><a href='#L263'>263</a>
+<a name='L264'></a><a href='#L264'>264</a>
+<a name='L265'></a><a href='#L265'>265</a>
+<a name='L266'></a><a href='#L266'>266</a>
+<a name='L267'></a><a href='#L267'>267</a>
+<a name='L268'></a><a href='#L268'>268</a>
+<a name='L269'></a><a href='#L269'>269</a>
+<a name='L270'></a><a href='#L270'>270</a>
+<a name='L271'></a><a href='#L271'>271</a>
+<a name='L272'></a><a href='#L272'>272</a>
+<a name='L273'></a><a href='#L273'>273</a>
+<a name='L274'></a><a href='#L274'>274</a>
+<a name='L275'></a><a href='#L275'>275</a>
+<a name='L276'></a><a href='#L276'>276</a>
+<a name='L277'></a><a href='#L277'>277</a>
+<a name='L278'></a><a href='#L278'>278</a>
+<a name='L279'></a><a href='#L279'>279</a>
+<a name='L280'></a><a href='#L280'>280</a>
+<a name='L281'></a><a href='#L281'>281</a>
+<a name='L282'></a><a href='#L282'>282</a>
+<a name='L283'></a><a href='#L283'>283</a>
+<a name='L284'></a><a href='#L284'>284</a>
+<a name='L285'></a><a href='#L285'>285</a>
+<a name='L286'></a><a href='#L286'>286</a>
+<a name='L287'></a><a href='#L287'>287</a>
+<a name='L288'></a><a href='#L288'>288</a>
+<a name='L289'></a><a href='#L289'>289</a>
+<a name='L290'></a><a href='#L290'>290</a>
+<a name='L291'></a><a href='#L291'>291</a>
+<a name='L292'></a><a href='#L292'>292</a>
+<a name='L293'></a><a href='#L293'>293</a>
+<a name='L294'></a><a href='#L294'>294</a>
+<a name='L295'></a><a href='#L295'>295</a>
+<a name='L296'></a><a href='#L296'>296</a>
+<a name='L297'></a><a href='#L297'>297</a>
+<a name='L298'></a><a href='#L298'>298</a>
+<a name='L299'></a><a href='#L299'>299</a>
+<a name='L300'></a><a href='#L300'>300</a>
+<a name='L301'></a><a href='#L301'>301</a>
+<a name='L302'></a><a href='#L302'>302</a>
+<a name='L303'></a><a href='#L303'>303</a>
+<a name='L304'></a><a href='#L304'>304</a>
+<a name='L305'></a><a href='#L305'>305</a>
+<a name='L306'></a><a href='#L306'>306</a>
+<a name='L307'></a><a href='#L307'>307</a>
+<a name='L308'></a><a href='#L308'>308</a>
+<a name='L309'></a><a href='#L309'>309</a>
+<a name='L310'></a><a href='#L310'>310</a>
+<a name='L311'></a><a href='#L311'>311</a>
+<a name='L312'></a><a href='#L312'>312</a>
+<a name='L313'></a><a href='#L313'>313</a>
+<a name='L314'></a><a href='#L314'>314</a>
+<a name='L315'></a><a href='#L315'>315</a>
+<a name='L316'></a><a href='#L316'>316</a>
+<a name='L317'></a><a href='#L317'>317</a>
+<a name='L318'></a><a href='#L318'>318</a>
+<a name='L319'></a><a href='#L319'>319</a>
+<a name='L320'></a><a href='#L320'>320</a>
+<a name='L321'></a><a href='#L321'>321</a>
+<a name='L322'></a><a href='#L322'>322</a>
+<a name='L323'></a><a href='#L323'>323</a>
+<a name='L324'></a><a href='#L324'>324</a>
+<a name='L325'></a><a href='#L325'>325</a>
+<a name='L326'></a><a href='#L326'>326</a>
+<a name='L327'></a><a href='#L327'>327</a>
+<a name='L328'></a><a href='#L328'>328</a>
+<a name='L329'></a><a href='#L329'>329</a>
+<a name='L330'></a><a href='#L330'>330</a>
+<a name='L331'></a><a href='#L331'>331</a>
+<a name='L332'></a><a href='#L332'>332</a>
+<a name='L333'></a><a href='#L333'>333</a>
+<a name='L334'></a><a href='#L334'>334</a>
+<a name='L335'></a><a href='#L335'>335</a>
+<a name='L336'></a><a href='#L336'>336</a>
+<a name='L337'></a><a href='#L337'>337</a>
+<a name='L338'></a><a href='#L338'>338</a>
+<a name='L339'></a><a href='#L339'>339</a>
+<a name='L340'></a><a href='#L340'>340</a>
+<a name='L341'></a><a href='#L341'>341</a>
+<a name='L342'></a><a href='#L342'>342</a>
+<a name='L343'></a><a href='#L343'>343</a>
+<a name='L344'></a><a href='#L344'>344</a>
+<a name='L345'></a><a href='#L345'>345</a>
+<a name='L346'></a><a href='#L346'>346</a>
+<a name='L347'></a><a href='#L347'>347</a>
+<a name='L348'></a><a href='#L348'>348</a>
+<a name='L349'></a><a href='#L349'>349</a>
+<a name='L350'></a><a href='#L350'>350</a>
+<a name='L351'></a><a href='#L351'>351</a>
+<a name='L352'></a><a href='#L352'>352</a>
+<a name='L353'></a><a href='#L353'>353</a>
+<a name='L354'></a><a href='#L354'>354</a>
+<a name='L355'></a><a href='#L355'>355</a>
+<a name='L356'></a><a href='#L356'>356</a>
+<a name='L357'></a><a href='#L357'>357</a>
+<a name='L358'></a><a href='#L358'>358</a>
+<a name='L359'></a><a href='#L359'>359</a>
+<a name='L360'></a><a href='#L360'>360</a>
+<a name='L361'></a><a href='#L361'>361</a>
+<a name='L362'></a><a href='#L362'>362</a>
+<a name='L363'></a><a href='#L363'>363</a>
+<a name='L364'></a><a href='#L364'>364</a>
+<a name='L365'></a><a href='#L365'>365</a>
+<a name='L366'></a><a href='#L366'>366</a>
+<a name='L367'></a><a href='#L367'>367</a>
+<a name='L368'></a><a href='#L368'>368</a>
+<a name='L369'></a><a href='#L369'>369</a>
+<a name='L370'></a><a href='#L370'>370</a>
+<a name='L371'></a><a href='#L371'>371</a>
+<a name='L372'></a><a href='#L372'>372</a>
+<a name='L373'></a><a href='#L373'>373</a>
+<a name='L374'></a><a href='#L374'>374</a>
+<a name='L375'></a><a href='#L375'>375</a>
+<a name='L376'></a><a href='#L376'>376</a>
+<a name='L377'></a><a href='#L377'>377</a>
+<a name='L378'></a><a href='#L378'>378</a>
+<a name='L379'></a><a href='#L379'>379</a>
+<a name='L380'></a><a href='#L380'>380</a>
+<a name='L381'></a><a href='#L381'>381</a>
+<a name='L382'></a><a href='#L382'>382</a>
+<a name='L383'></a><a href='#L383'>383</a>
+<a name='L384'></a><a href='#L384'>384</a>
+<a name='L385'></a><a href='#L385'>385</a>
+<a name='L386'></a><a href='#L386'>386</a>
+<a name='L387'></a><a href='#L387'>387</a>
+<a name='L388'></a><a href='#L388'>388</a>
+<a name='L389'></a><a href='#L389'>389</a>
+<a name='L390'></a><a href='#L390'>390</a>
+<a name='L391'></a><a href='#L391'>391</a>
+<a name='L392'></a><a href='#L392'>392</a>
+<a name='L393'></a><a href='#L393'>393</a>
+<a name='L394'></a><a href='#L394'>394</a>
+<a name='L395'></a><a href='#L395'>395</a>
+<a name='L396'></a><a href='#L396'>396</a>
+<a name='L397'></a><a href='#L397'>397</a>
+<a name='L398'></a><a href='#L398'>398</a>
+<a name='L399'></a><a href='#L399'>399</a>
+<a name='L400'></a><a href='#L400'>400</a>
+<a name='L401'></a><a href='#L401'>401</a>
+<a name='L402'></a><a href='#L402'>402</a>
+<a name='L403'></a><a href='#L403'>403</a>
+<a name='L404'></a><a href='#L404'>404</a>
+<a name='L405'></a><a href='#L405'>405</a>
+<a name='L406'></a><a href='#L406'>406</a>
+<a name='L407'></a><a href='#L407'>407</a>
+<a name='L408'></a><a href='#L408'>408</a>
+<a name='L409'></a><a href='#L409'>409</a>
+<a name='L410'></a><a href='#L410'>410</a>
+<a name='L411'></a><a href='#L411'>411</a>
+<a name='L412'></a><a href='#L412'>412</a>
+<a name='L413'></a><a href='#L413'>413</a>
+<a name='L414'></a><a href='#L414'>414</a>
+<a name='L415'></a><a href='#L415'>415</a>
+<a name='L416'></a><a href='#L416'>416</a>
+<a name='L417'></a><a href='#L417'>417</a>
+<a name='L418'></a><a href='#L418'>418</a>
+<a name='L419'></a><a href='#L419'>419</a>
+<a name='L420'></a><a href='#L420'>420</a>
+<a name='L421'></a><a href='#L421'>421</a>
+<a name='L422'></a><a href='#L422'>422</a>
+<a name='L423'></a><a href='#L423'>423</a>
+<a name='L424'></a><a href='#L424'>424</a>
+<a name='L425'></a><a href='#L425'>425</a>
+<a name='L426'></a><a href='#L426'>426</a>
+<a name='L427'></a><a href='#L427'>427</a>
+<a name='L428'></a><a href='#L428'>428</a>
+<a name='L429'></a><a href='#L429'>429</a>
+<a name='L430'></a><a href='#L430'>430</a>
+<a name='L431'></a><a href='#L431'>431</a>
+<a name='L432'></a><a href='#L432'>432</a>
+<a name='L433'></a><a href='#L433'>433</a>
+<a name='L434'></a><a href='#L434'>434</a>
+<a name='L435'></a><a href='#L435'>435</a>
+<a name='L436'></a><a href='#L436'>436</a>
+<a name='L437'></a><a href='#L437'>437</a>
+<a name='L438'></a><a href='#L438'>438</a>
+<a name='L439'></a><a href='#L439'>439</a>
+<a name='L440'></a><a href='#L440'>440</a>
+<a name='L441'></a><a href='#L441'>441</a>
+<a name='L442'></a><a href='#L442'>442</a>
+<a name='L443'></a><a href='#L443'>443</a>
+<a name='L444'></a><a href='#L444'>444</a>
+<a name='L445'></a><a href='#L445'>445</a>
+<a name='L446'></a><a href='#L446'>446</a>
+<a name='L447'></a><a href='#L447'>447</a>
+<a name='L448'></a><a href='#L448'>448</a>
+<a name='L449'></a><a href='#L449'>449</a>
+<a name='L450'></a><a href='#L450'>450</a>
+<a name='L451'></a><a href='#L451'>451</a>
+<a name='L452'></a><a href='#L452'>452</a>
+<a name='L453'></a><a href='#L453'>453</a>
+<a name='L454'></a><a href='#L454'>454</a>
+<a name='L455'></a><a href='#L455'>455</a>
+<a name='L456'></a><a href='#L456'>456</a>
+<a name='L457'></a><a href='#L457'>457</a>
+<a name='L458'></a><a href='#L458'>458</a>
+<a name='L459'></a><a href='#L459'>459</a>
+<a name='L460'></a><a href='#L460'>460</a>
+<a name='L461'></a><a href='#L461'>461</a>
+<a name='L462'></a><a href='#L462'>462</a>
+<a name='L463'></a><a href='#L463'>463</a>
+<a name='L464'></a><a href='#L464'>464</a>
+<a name='L465'></a><a href='#L465'>465</a>
+<a name='L466'></a><a href='#L466'>466</a>
+<a name='L467'></a><a href='#L467'>467</a>
+<a name='L468'></a><a href='#L468'>468</a>
+<a name='L469'></a><a href='#L469'>469</a>
+<a name='L470'></a><a href='#L470'>470</a>
+<a name='L471'></a><a href='#L471'>471</a>
+<a name='L472'></a><a href='#L472'>472</a>
+<a name='L473'></a><a href='#L473'>473</a>
+<a name='L474'></a><a href='#L474'>474</a>
+<a name='L475'></a><a href='#L475'>475</a>
+<a name='L476'></a><a href='#L476'>476</a>
+<a name='L477'></a><a href='#L477'>477</a>
+<a name='L478'></a><a href='#L478'>478</a>
+<a name='L479'></a><a href='#L479'>479</a>
+<a name='L480'></a><a href='#L480'>480</a>
+<a name='L481'></a><a href='#L481'>481</a>
+<a name='L482'></a><a href='#L482'>482</a>
+<a name='L483'></a><a href='#L483'>483</a>
+<a name='L484'></a><a href='#L484'>484</a>
+<a name='L485'></a><a href='#L485'>485</a>
+<a name='L486'></a><a href='#L486'>486</a>
+<a name='L487'></a><a href='#L487'>487</a>
+<a name='L488'></a><a href='#L488'>488</a>
+<a name='L489'></a><a href='#L489'>489</a>
+<a name='L490'></a><a href='#L490'>490</a>
+<a name='L491'></a><a href='#L491'>491</a>
+<a name='L492'></a><a href='#L492'>492</a>
+<a name='L493'></a><a href='#L493'>493</a>
+<a name='L494'></a><a href='#L494'>494</a>
+<a name='L495'></a><a href='#L495'>495</a>
+<a name='L496'></a><a href='#L496'>496</a>
+<a name='L497'></a><a href='#L497'>497</a>
+<a name='L498'></a><a href='#L498'>498</a>
+<a name='L499'></a><a href='#L499'>499</a>
+<a name='L500'></a><a href='#L500'>500</a>
+<a name='L501'></a><a href='#L501'>501</a>
+<a name='L502'></a><a href='#L502'>502</a>
+<a name='L503'></a><a href='#L503'>503</a>
+<a name='L504'></a><a href='#L504'>504</a>
+<a name='L505'></a><a href='#L505'>505</a>
+<a name='L506'></a><a href='#L506'>506</a>
+<a name='L507'></a><a href='#L507'>507</a>
+<a name='L508'></a><a href='#L508'>508</a>
+<a name='L509'></a><a href='#L509'>509</a>
+<a name='L510'></a><a href='#L510'>510</a>
+<a name='L511'></a><a href='#L511'>511</a>
+<a name='L512'></a><a href='#L512'>512</a>
+<a name='L513'></a><a href='#L513'>513</a>
+<a name='L514'></a><a href='#L514'>514</a>
+<a name='L515'></a><a href='#L515'>515</a>
+<a name='L516'></a><a href='#L516'>516</a>
+<a name='L517'></a><a href='#L517'>517</a>
+<a name='L518'></a><a href='#L518'>518</a>
+<a name='L519'></a><a href='#L519'>519</a>
+<a name='L520'></a><a href='#L520'>520</a>
+<a name='L521'></a><a href='#L521'>521</a>
+<a name='L522'></a><a href='#L522'>522</a>
+<a name='L523'></a><a href='#L523'>523</a>
+<a name='L524'></a><a href='#L524'>524</a>
+<a name='L525'></a><a href='#L525'>525</a>
+<a name='L526'></a><a href='#L526'>526</a>
+<a name='L527'></a><a href='#L527'>527</a>
+<a name='L528'></a><a href='#L528'>528</a>
+<a name='L529'></a><a href='#L529'>529</a>
+<a name='L530'></a><a href='#L530'>530</a>
+<a name='L531'></a><a href='#L531'>531</a>
+<a name='L532'></a><a href='#L532'>532</a>
+<a name='L533'></a><a href='#L533'>533</a>
+<a name='L534'></a><a href='#L534'>534</a>
+<a name='L535'></a><a href='#L535'>535</a>
+<a name='L536'></a><a href='#L536'>536</a>
+<a name='L537'></a><a href='#L537'>537</a>
+<a name='L538'></a><a href='#L538'>538</a>
+<a name='L539'></a><a href='#L539'>539</a>
+<a name='L540'></a><a href='#L540'>540</a>
+<a name='L541'></a><a href='#L541'>541</a>
+<a name='L542'></a><a href='#L542'>542</a>
+<a name='L543'></a><a href='#L543'>543</a>
+<a name='L544'></a><a href='#L544'>544</a>
+<a name='L545'></a><a href='#L545'>545</a>
+<a name='L546'></a><a href='#L546'>546</a>
+<a name='L547'></a><a href='#L547'>547</a>
+<a name='L548'></a><a href='#L548'>548</a>
+<a name='L549'></a><a href='#L549'>549</a>
+<a name='L550'></a><a href='#L550'>550</a>
+<a name='L551'></a><a href='#L551'>551</a>
+<a name='L552'></a><a href='#L552'>552</a>
+<a name='L553'></a><a href='#L553'>553</a>
+<a name='L554'></a><a href='#L554'>554</a>
+<a name='L555'></a><a href='#L555'>555</a>
+<a name='L556'></a><a href='#L556'>556</a>
+<a name='L557'></a><a href='#L557'>557</a>
+<a name='L558'></a><a href='#L558'>558</a>
+<a name='L559'></a><a href='#L559'>559</a>
+<a name='L560'></a><a href='#L560'>560</a>
+<a name='L561'></a><a href='#L561'>561</a>
+<a name='L562'></a><a href='#L562'>562</a>
+<a name='L563'></a><a href='#L563'>563</a>
+<a name='L564'></a><a href='#L564'>564</a>
+<a name='L565'></a><a href='#L565'>565</a>
+<a name='L566'></a><a href='#L566'>566</a>
+<a name='L567'></a><a href='#L567'>567</a>
+<a name='L568'></a><a href='#L568'>568</a>
+<a name='L569'></a><a href='#L569'>569</a>
+<a name='L570'></a><a href='#L570'>570</a>
+<a name='L571'></a><a href='#L571'>571</a>
+<a name='L572'></a><a href='#L572'>572</a>
+<a name='L573'></a><a href='#L573'>573</a>
+<a name='L574'></a><a href='#L574'>574</a>
+<a name='L575'></a><a href='#L575'>575</a>
+<a name='L576'></a><a href='#L576'>576</a>
+<a name='L577'></a><a href='#L577'>577</a>
+<a name='L578'></a><a href='#L578'>578</a>
+<a name='L579'></a><a href='#L579'>579</a>
+<a name='L580'></a><a href='#L580'>580</a>
+<a name='L581'></a><a href='#L581'>581</a>
+<a name='L582'></a><a href='#L582'>582</a>
+<a name='L583'></a><a href='#L583'>583</a>
+<a name='L584'></a><a href='#L584'>584</a>
+<a name='L585'></a><a href='#L585'>585</a>
+<a name='L586'></a><a href='#L586'>586</a>
+<a name='L587'></a><a href='#L587'>587</a>
+<a name='L588'></a><a href='#L588'>588</a>
+<a name='L589'></a><a href='#L589'>589</a>
+<a name='L590'></a><a href='#L590'>590</a>
+<a name='L591'></a><a href='#L591'>591</a>
+<a name='L592'></a><a href='#L592'>592</a>
+<a name='L593'></a><a href='#L593'>593</a>
+<a name='L594'></a><a href='#L594'>594</a>
+<a name='L595'></a><a href='#L595'>595</a>
+<a name='L596'></a><a href='#L596'>596</a>
+<a name='L597'></a><a href='#L597'>597</a>
+<a name='L598'></a><a href='#L598'>598</a>
+<a name='L599'></a><a href='#L599'>599</a>
+<a name='L600'></a><a href='#L600'>600</a>
+<a name='L601'></a><a href='#L601'>601</a>
+<a name='L602'></a><a href='#L602'>602</a>
+<a name='L603'></a><a href='#L603'>603</a>
+<a name='L604'></a><a href='#L604'>604</a>
+<a name='L605'></a><a href='#L605'>605</a>
+<a name='L606'></a><a href='#L606'>606</a>
+<a name='L607'></a><a href='#L607'>607</a>
+<a name='L608'></a><a href='#L608'>608</a>
+<a name='L609'></a><a href='#L609'>609</a>
+<a name='L610'></a><a href='#L610'>610</a>
+<a name='L611'></a><a href='#L611'>611</a>
+<a name='L612'></a><a href='#L612'>612</a>
+<a name='L613'></a><a href='#L613'>613</a>
+<a name='L614'></a><a href='#L614'>614</a>
+<a name='L615'></a><a href='#L615'>615</a>
+<a name='L616'></a><a href='#L616'>616</a>
+<a name='L617'></a><a href='#L617'>617</a>
+<a name='L618'></a><a href='#L618'>618</a>
+<a name='L619'></a><a href='#L619'>619</a>
+<a name='L620'></a><a href='#L620'>620</a>
+<a name='L621'></a><a href='#L621'>621</a>
+<a name='L622'></a><a href='#L622'>622</a>
+<a name='L623'></a><a href='#L623'>623</a>
+<a name='L624'></a><a href='#L624'>624</a>
+<a name='L625'></a><a href='#L625'>625</a>
+<a name='L626'></a><a href='#L626'>626</a>
+<a name='L627'></a><a href='#L627'>627</a>
+<a name='L628'></a><a href='#L628'>628</a>
+<a name='L629'></a><a href='#L629'>629</a>
+<a name='L630'></a><a href='#L630'>630</a>
+<a name='L631'></a><a href='#L631'>631</a>
+<a name='L632'></a><a href='#L632'>632</a>
+<a name='L633'></a><a href='#L633'>633</a>
+<a name='L634'></a><a href='#L634'>634</a>
+<a name='L635'></a><a href='#L635'>635</a>
+<a name='L636'></a><a href='#L636'>636</a>
+<a name='L637'></a><a href='#L637'>637</a>
+<a name='L638'></a><a href='#L638'>638</a>
+<a name='L639'></a><a href='#L639'>639</a>
+<a name='L640'></a><a href='#L640'>640</a>
+<a name='L641'></a><a href='#L641'>641</a>
+<a name='L642'></a><a href='#L642'>642</a>
+<a name='L643'></a><a href='#L643'>643</a>
+<a name='L644'></a><a href='#L644'>644</a>
+<a name='L645'></a><a href='#L645'>645</a>
+<a name='L646'></a><a href='#L646'>646</a>
+<a name='L647'></a><a href='#L647'>647</a>
+<a name='L648'></a><a href='#L648'>648</a>
+<a name='L649'></a><a href='#L649'>649</a>
+<a name='L650'></a><a href='#L650'>650</a>
+<a name='L651'></a><a href='#L651'>651</a>
+<a name='L652'></a><a href='#L652'>652</a>
+<a name='L653'></a><a href='#L653'>653</a>
+<a name='L654'></a><a href='#L654'>654</a>
+<a name='L655'></a><a href='#L655'>655</a>
+<a name='L656'></a><a href='#L656'>656</a>
+<a name='L657'></a><a href='#L657'>657</a>
+<a name='L658'></a><a href='#L658'>658</a>
+<a name='L659'></a><a href='#L659'>659</a>
+<a name='L660'></a><a href='#L660'>660</a>
+<a name='L661'></a><a href='#L661'>661</a>
+<a name='L662'></a><a href='#L662'>662</a>
+<a name='L663'></a><a href='#L663'>663</a>
+<a name='L664'></a><a href='#L664'>664</a>
+<a name='L665'></a><a href='#L665'>665</a>
+<a name='L666'></a><a href='#L666'>666</a>
+<a name='L667'></a><a href='#L667'>667</a>
+<a name='L668'></a><a href='#L668'>668</a>
+<a name='L669'></a><a href='#L669'>669</a>
+<a name='L670'></a><a href='#L670'>670</a>
+<a name='L671'></a><a href='#L671'>671</a>
+<a name='L672'></a><a href='#L672'>672</a>
+<a name='L673'></a><a href='#L673'>673</a>
+<a name='L674'></a><a href='#L674'>674</a>
+<a name='L675'></a><a href='#L675'>675</a>
+<a name='L676'></a><a href='#L676'>676</a>
+<a name='L677'></a><a href='#L677'>677</a>
+<a name='L678'></a><a href='#L678'>678</a>
+<a name='L679'></a><a href='#L679'>679</a>
+<a name='L680'></a><a href='#L680'>680</a>
+<a name='L681'></a><a href='#L681'>681</a>
+<a name='L682'></a><a href='#L682'>682</a>
+<a name='L683'></a><a href='#L683'>683</a>
+<a name='L684'></a><a href='#L684'>684</a>
+<a name='L685'></a><a href='#L685'>685</a>
+<a name='L686'></a><a href='#L686'>686</a>
+<a name='L687'></a><a href='#L687'>687</a>
+<a name='L688'></a><a href='#L688'>688</a>
+<a name='L689'></a><a href='#L689'>689</a>
+<a name='L690'></a><a href='#L690'>690</a>
+<a name='L691'></a><a href='#L691'>691</a>
+<a name='L692'></a><a href='#L692'>692</a>
+<a name='L693'></a><a href='#L693'>693</a>
+<a name='L694'></a><a href='#L694'>694</a>
+<a name='L695'></a><a href='#L695'>695</a>
+<a name='L696'></a><a href='#L696'>696</a>
+<a name='L697'></a><a href='#L697'>697</a>
+<a name='L698'></a><a href='#L698'>698</a>
+<a name='L699'></a><a href='#L699'>699</a>
+<a name='L700'></a><a href='#L700'>700</a>
+<a name='L701'></a><a href='#L701'>701</a>
+<a name='L702'></a><a href='#L702'>702</a>
+<a name='L703'></a><a href='#L703'>703</a>
+<a name='L704'></a><a href='#L704'>704</a>
+<a name='L705'></a><a href='#L705'>705</a>
+<a name='L706'></a><a href='#L706'>706</a>
+<a name='L707'></a><a href='#L707'>707</a>
+<a name='L708'></a><a href='#L708'>708</a>
+<a name='L709'></a><a href='#L709'>709</a>
+<a name='L710'></a><a href='#L710'>710</a>
+<a name='L711'></a><a href='#L711'>711</a>
+<a name='L712'></a><a href='#L712'>712</a>
+<a name='L713'></a><a href='#L713'>713</a>
+<a name='L714'></a><a href='#L714'>714</a>
+<a name='L715'></a><a href='#L715'>715</a>
+<a name='L716'></a><a href='#L716'>716</a>
+<a name='L717'></a><a href='#L717'>717</a>
+<a name='L718'></a><a href='#L718'>718</a>
+<a name='L719'></a><a href='#L719'>719</a>
+<a name='L720'></a><a href='#L720'>720</a>
+<a name='L721'></a><a href='#L721'>721</a>
+<a name='L722'></a><a href='#L722'>722</a>
+<a name='L723'></a><a href='#L723'>723</a>
+<a name='L724'></a><a href='#L724'>724</a>
+<a name='L725'></a><a href='#L725'>725</a>
+<a name='L726'></a><a href='#L726'>726</a>
+<a name='L727'></a><a href='#L727'>727</a>
+<a name='L728'></a><a href='#L728'>728</a>
+<a name='L729'></a><a href='#L729'>729</a>
+<a name='L730'></a><a href='#L730'>730</a>
+<a name='L731'></a><a href='#L731'>731</a>
+<a name='L732'></a><a href='#L732'>732</a>
+<a name='L733'></a><a href='#L733'>733</a>
+<a name='L734'></a><a href='#L734'>734</a>
+<a name='L735'></a><a href='#L735'>735</a>
+<a name='L736'></a><a href='#L736'>736</a>
+<a name='L737'></a><a href='#L737'>737</a>
+<a name='L738'></a><a href='#L738'>738</a>
+<a name='L739'></a><a href='#L739'>739</a>
+<a name='L740'></a><a href='#L740'>740</a>
+<a name='L741'></a><a href='#L741'>741</a>
+<a name='L742'></a><a href='#L742'>742</a>
+<a name='L743'></a><a href='#L743'>743</a>
+<a name='L744'></a><a href='#L744'>744</a>
+<a name='L745'></a><a href='#L745'>745</a>
+<a name='L746'></a><a href='#L746'>746</a>
+<a name='L747'></a><a href='#L747'>747</a>
+<a name='L748'></a><a href='#L748'>748</a>
+<a name='L749'></a><a href='#L749'>749</a>
+<a name='L750'></a><a href='#L750'>750</a>
+<a name='L751'></a><a href='#L751'>751</a>
+<a name='L752'></a><a href='#L752'>752</a>
+<a name='L753'></a><a href='#L753'>753</a>
+<a name='L754'></a><a href='#L754'>754</a>
+<a name='L755'></a><a href='#L755'>755</a>
+<a name='L756'></a><a href='#L756'>756</a>
+<a name='L757'></a><a href='#L757'>757</a>
+<a name='L758'></a><a href='#L758'>758</a>
+<a name='L759'></a><a href='#L759'>759</a>
+<a name='L760'></a><a href='#L760'>760</a>
+<a name='L761'></a><a href='#L761'>761</a>
+<a name='L762'></a><a href='#L762'>762</a>
+<a name='L763'></a><a href='#L763'>763</a>
+<a name='L764'></a><a href='#L764'>764</a>
+<a name='L765'></a><a href='#L765'>765</a>
+<a name='L766'></a><a href='#L766'>766</a>
+<a name='L767'></a><a href='#L767'>767</a>
+<a name='L768'></a><a href='#L768'>768</a>
+<a name='L769'></a><a href='#L769'>769</a>
+<a name='L770'></a><a href='#L770'>770</a>
+<a name='L771'></a><a href='#L771'>771</a>
+<a name='L772'></a><a href='#L772'>772</a>
+<a name='L773'></a><a href='#L773'>773</a>
+<a name='L774'></a><a href='#L774'>774</a>
+<a name='L775'></a><a href='#L775'>775</a>
+<a name='L776'></a><a href='#L776'>776</a>
+<a name='L777'></a><a href='#L777'>777</a>
+<a name='L778'></a><a href='#L778'>778</a>
+<a name='L779'></a><a href='#L779'>779</a>
+<a name='L780'></a><a href='#L780'>780</a>
+<a name='L781'></a><a href='#L781'>781</a>
+<a name='L782'></a><a href='#L782'>782</a>
+<a name='L783'></a><a href='#L783'>783</a>
+<a name='L784'></a><a href='#L784'>784</a>
+<a name='L785'></a><a href='#L785'>785</a>
+<a name='L786'></a><a href='#L786'>786</a>
+<a name='L787'></a><a href='#L787'>787</a>
+<a name='L788'></a><a href='#L788'>788</a>
+<a name='L789'></a><a href='#L789'>789</a>
+<a name='L790'></a><a href='#L790'>790</a>
+<a name='L791'></a><a href='#L791'>791</a>
+<a name='L792'></a><a href='#L792'>792</a>
+<a name='L793'></a><a href='#L793'>793</a>
+<a name='L794'></a><a href='#L794'>794</a>
+<a name='L795'></a><a href='#L795'>795</a>
+<a name='L796'></a><a href='#L796'>796</a>
+<a name='L797'></a><a href='#L797'>797</a>
+<a name='L798'></a><a href='#L798'>798</a>
+<a name='L799'></a><a href='#L799'>799</a>
+<a name='L800'></a><a href='#L800'>800</a>
+<a name='L801'></a><a href='#L801'>801</a>
+<a name='L802'></a><a href='#L802'>802</a>
+<a name='L803'></a><a href='#L803'>803</a>
+<a name='L804'></a><a href='#L804'>804</a>
+<a name='L805'></a><a href='#L805'>805</a>
+<a name='L806'></a><a href='#L806'>806</a>
+<a name='L807'></a><a href='#L807'>807</a>
+<a name='L808'></a><a href='#L808'>808</a>
+<a name='L809'></a><a href='#L809'>809</a>
+<a name='L810'></a><a href='#L810'>810</a>
+<a name='L811'></a><a href='#L811'>811</a>
+<a name='L812'></a><a href='#L812'>812</a>
+<a name='L813'></a><a href='#L813'>813</a>
+<a name='L814'></a><a href='#L814'>814</a>
+<a name='L815'></a><a href='#L815'>815</a>
+<a name='L816'></a><a href='#L816'>816</a>
+<a name='L817'></a><a href='#L817'>817</a>
+<a name='L818'></a><a href='#L818'>818</a>
+<a name='L819'></a><a href='#L819'>819</a>
+<a name='L820'></a><a href='#L820'>820</a>
+<a name='L821'></a><a href='#L821'>821</a>
+<a name='L822'></a><a href='#L822'>822</a>
+<a name='L823'></a><a href='#L823'>823</a>
+<a name='L824'></a><a href='#L824'>824</a>
+<a name='L825'></a><a href='#L825'>825</a>
+<a name='L826'></a><a href='#L826'>826</a>
+<a name='L827'></a><a href='#L827'>827</a>
+<a name='L828'></a><a href='#L828'>828</a>
+<a name='L829'></a><a href='#L829'>829</a>
+<a name='L830'></a><a href='#L830'>830</a>
+<a name='L831'></a><a href='#L831'>831</a>
+<a name='L832'></a><a href='#L832'>832</a>
+<a name='L833'></a><a href='#L833'>833</a>
+<a name='L834'></a><a href='#L834'>834</a>
+<a name='L835'></a><a href='#L835'>835</a>
+<a name='L836'></a><a href='#L836'>836</a>
+<a name='L837'></a><a href='#L837'>837</a>
+<a name='L838'></a><a href='#L838'>838</a>
+<a name='L839'></a><a href='#L839'>839</a>
+<a name='L840'></a><a href='#L840'>840</a>
+<a name='L841'></a><a href='#L841'>841</a>
+<a name='L842'></a><a href='#L842'>842</a>
+<a name='L843'></a><a href='#L843'>843</a>
+<a name='L844'></a><a href='#L844'>844</a>
+<a name='L845'></a><a href='#L845'>845</a>
+<a name='L846'></a><a href='#L846'>846</a>
+<a name='L847'></a><a href='#L847'>847</a>
+<a name='L848'></a><a href='#L848'>848</a>
+<a name='L849'></a><a href='#L849'>849</a>
+<a name='L850'></a><a href='#L850'>850</a>
+<a name='L851'></a><a href='#L851'>851</a>
+<a name='L852'></a><a href='#L852'>852</a>
+<a name='L853'></a><a href='#L853'>853</a>
+<a name='L854'></a><a href='#L854'>854</a>
+<a name='L855'></a><a href='#L855'>855</a>
+<a name='L856'></a><a href='#L856'>856</a>
+<a name='L857'></a><a href='#L857'>857</a>
+<a name='L858'></a><a href='#L858'>858</a>
+<a name='L859'></a><a href='#L859'>859</a>
+<a name='L860'></a><a href='#L860'>860</a>
+<a name='L861'></a><a href='#L861'>861</a>
+<a name='L862'></a><a href='#L862'>862</a>
+<a name='L863'></a><a href='#L863'>863</a>
+<a name='L864'></a><a href='#L864'>864</a>
+<a name='L865'></a><a href='#L865'>865</a>
+<a name='L866'></a><a href='#L866'>866</a>
+<a name='L867'></a><a href='#L867'>867</a>
+<a name='L868'></a><a href='#L868'>868</a>
+<a name='L869'></a><a href='#L869'>869</a>
+<a name='L870'></a><a href='#L870'>870</a>
+<a name='L871'></a><a href='#L871'>871</a>
+<a name='L872'></a><a href='#L872'>872</a>
+<a name='L873'></a><a href='#L873'>873</a>
+<a name='L874'></a><a href='#L874'>874</a>
+<a name='L875'></a><a href='#L875'>875</a>
+<a name='L876'></a><a href='#L876'>876</a>
+<a name='L877'></a><a href='#L877'>877</a>
+<a name='L878'></a><a href='#L878'>878</a>
+<a name='L879'></a><a href='#L879'>879</a>
+<a name='L880'></a><a href='#L880'>880</a>
+<a name='L881'></a><a href='#L881'>881</a>
+<a name='L882'></a><a href='#L882'>882</a>
+<a name='L883'></a><a href='#L883'>883</a>
+<a name='L884'></a><a href='#L884'>884</a>
+<a name='L885'></a><a href='#L885'>885</a>
+<a name='L886'></a><a href='#L886'>886</a>
+<a name='L887'></a><a href='#L887'>887</a>
+<a name='L888'></a><a href='#L888'>888</a>
+<a name='L889'></a><a href='#L889'>889</a>
+<a name='L890'></a><a href='#L890'>890</a>
+<a name='L891'></a><a href='#L891'>891</a>
+<a name='L892'></a><a href='#L892'>892</a>
+<a name='L893'></a><a href='#L893'>893</a>
+<a name='L894'></a><a href='#L894'>894</a>
+<a name='L895'></a><a href='#L895'>895</a>
+<a name='L896'></a><a href='#L896'>896</a>
+<a name='L897'></a><a href='#L897'>897</a>
+<a name='L898'></a><a href='#L898'>898</a>
+<a name='L899'></a><a href='#L899'>899</a>
+<a name='L900'></a><a href='#L900'>900</a>
+<a name='L901'></a><a href='#L901'>901</a>
+<a name='L902'></a><a href='#L902'>902</a>
+<a name='L903'></a><a href='#L903'>903</a>
+<a name='L904'></a><a href='#L904'>904</a>
+<a name='L905'></a><a href='#L905'>905</a>
+<a name='L906'></a><a href='#L906'>906</a>
+<a name='L907'></a><a href='#L907'>907</a>
+<a name='L908'></a><a href='#L908'>908</a>
+<a name='L909'></a><a href='#L909'>909</a>
+<a name='L910'></a><a href='#L910'>910</a>
+<a name='L911'></a><a href='#L911'>911</a>
+<a name='L912'></a><a href='#L912'>912</a>
+<a name='L913'></a><a href='#L913'>913</a>
+<a name='L914'></a><a href='#L914'>914</a>
+<a name='L915'></a><a href='#L915'>915</a>
+<a name='L916'></a><a href='#L916'>916</a>
+<a name='L917'></a><a href='#L917'>917</a>
+<a name='L918'></a><a href='#L918'>918</a>
+<a name='L919'></a><a href='#L919'>919</a>
+<a name='L920'></a><a href='#L920'>920</a>
+<a name='L921'></a><a href='#L921'>921</a>
+<a name='L922'></a><a href='#L922'>922</a>
+<a name='L923'></a><a href='#L923'>923</a>
+<a name='L924'></a><a href='#L924'>924</a>
+<a name='L925'></a><a href='#L925'>925</a>
+<a name='L926'></a><a href='#L926'>926</a>
+<a name='L927'></a><a href='#L927'>927</a>
+<a name='L928'></a><a href='#L928'>928</a>
+<a name='L929'></a><a href='#L929'>929</a>
+<a name='L930'></a><a href='#L930'>930</a>
+<a name='L931'></a><a href='#L931'>931</a>
+<a name='L932'></a><a href='#L932'>932</a>
+<a name='L933'></a><a href='#L933'>933</a>
+<a name='L934'></a><a href='#L934'>934</a>
+<a name='L935'></a><a href='#L935'>935</a>
+<a name='L936'></a><a href='#L936'>936</a>
+<a name='L937'></a><a href='#L937'>937</a>
+<a name='L938'></a><a href='#L938'>938</a>
+<a name='L939'></a><a href='#L939'>939</a>
+<a name='L940'></a><a href='#L940'>940</a>
+<a name='L941'></a><a href='#L941'>941</a>
+<a name='L942'></a><a href='#L942'>942</a>
+<a name='L943'></a><a href='#L943'>943</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">const zhCN = {
+  bootstrap: {
+    subtitle: '通过创建首个管理员账户来初始化系统。',
+    intro: '欢迎！首先创建初始管理员账户。此账户将拥有完整的平台管理权限。',
+    username: '用户名',
+    usernamePlaceholder: '输入管理员用户名',
+    displayName: '显示名称',
+    displayNamePlaceholder: '输入显示名称（可选）',
+    email: '邮箱',
+    emailPlaceholder: 'admin\\@example.com',
+    password: '密码',
+    passwordPlaceholder: '至少 8 个字符',
+    confirmPassword: '确认密码',
+    confirmPasswordPlaceholder: '再次输入密码',
+    createAdmin: '创建管理员账户',
+    hint: '此账户将用于本地认证和紧急访问。',
+    validation: {
+      usernameRequired: '用户名为必填项',
+      emailInvalid: '请输入有效的邮箱地址',
+      passwordMinLength: '密码必须至少 8 个字符',
+      confirmPasswordRequired: '请确认密码',
+      passwordMismatch: '两次输入的密码不一致'
+    },
+    registrationSuccess: '管理员账户创建成功！',
+    registrationFailed: '创建管理员账户失败'
+  },
+  app: {
+    brandTitle: 'Codify Admin',
+    brandSubtitle: '任务运营控制台',
+    navigation: '导航',
+    language: '语言'
+  },
+  locale: {
+    en: 'English',
+    zhCN: '简体中文'
+  },
+  nav: {
+    dashboard: '仪表盘',
+    createTask: '创建任务',
+    sessions: '会话',
+    monitor: '监控',
+    scheduleOverview: '调度总览',
+    analytics: '统计分析',
+    config: '系统配置',
+    accessManagement: '访问管理',
+    oidcDiagnostics: 'OIDC 诊断',
+    workspace: '工作区',
+    insights: '分析与运维',
+    administration: '管理'
+  },
+  shell: {
+    admin: '管理员',
+    gitlabUser: 'GitLab 用户',
+    signedInWithGitlab: '通过 GitLab 登录',
+    logout: '退出登录'
+  },
+  status: {
+    pending: '待处理',
+    queued: '已入队',
+    running: '执行中',
+    completed: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+    active: '有效',
+    expired: '已过期',
+    revoked: '已撤销',
+    disabled: '已禁用',
+    ok: '正常'
+  },
+  common: {
+    filter: '筛选',
+    all: '全部',
+    refresh: '刷新',
+    reload: '重新加载',
+    reset: '重置',
+    create: '创建',
+    createTask: '创建任务',
+    viewTask: '查看任务',
+    createAnother: '再建一个',
+    save: '保存',
+    edit: '编辑',
+    delete: '删除',
+    cancel: '取消',
+    retry: '重试',
+    execute: '立即执行',
+    revoke: '撤销',
+    created: '创建时间',
+    started: '开始时间',
+    completed: '完成时间',
+    scheduled: '调度时间',
+    status: '状态',
+    project: '项目',
+    issue: '议题',
+    mergeRequest: '合并请求',
+    priority: '优先级',
+    initiator: '发起人',
+    branch: '分支',
+    targetBranch: '目标分支',
+    changes: '变更',
+    loadingTasks: '正在加载任务...',
+    loadingSessions: '正在加载会话...',
+    enabled: '已启用',
+    disabled: '已禁用',
+    notAvailable: '暂无'
+  },
+  login: {
+    subtitle: '登录以访问控制台。',
+    oidcDisabled: 'OIDC 登录尚未启用，当前控制台认证处于绕过状态。',
+    breakGlassEnabled: '紧急管理员入口已启用。请仅在 OIDC 恢复或管理员被全部锁定时使用。',
+    continueWithGitlab: '使用 GitLab 继续',
+    or: '或',
+    usePasswordLogin: '使用密码登录',
+    useGitlabLogin: '使用 GitLab 登录',
+    localAuth: '本地认证',
+    oidcAuth: 'GitLab OIDC',
+    oidcNotConfigured: 'OIDC 尚未配置',
+    username: '用户名',
+    password: '密码',
+    signIn: '登录',
+    missingCredentials: '请输入用户名和密码',
+    loginFailed: '登录失败，请检查您的凭据。',
+    emergencyAccess: '紧急访问',
+    emergencyUsername: '紧急用户名',
+    emergencyPassword: '紧急密码',
+    emergencySignIn: '使用紧急访问登录',
+    emergencyHint: '该入口受环境变量控制，正常运行时应保持关闭。',
+    sessionHint: '系统通过安全的 Cookie 保存会话信息。',
+    missingEmergencyCredentials: '请输入紧急用户名和密码',
+    emergencyLoginFailed: '紧急登录失败'
+  },
+  dashboard: {
+    title: '任务仪表盘',
+    subtitle: '在一个视图中跟踪排队任务、运行中的任务和已完成的合并请求任务。',
+    visibleTasks: '可见任务',
+    running: '执行中',
+    pendingQueued: '待处理 / 已入队',
+    completed: '已完成',
+    failedToFetchTasks: '获取任务失败',
+    task: '任务',
+    id: 'ID',
+    project: '项目',
+    issue: '议题',
+    status: '状态',
+    priority: '优先级',
+    branch: '分支',
+    initiator: '发起人',
+    mergeRequest: 'MR',
+    changes: '变更',
+    scheduled: '调度时间',
+    open: '打开',
+    projectFallback: '项目 #{id}'
+  },
+  taskView: {
+    title: '任务 #{id}',
+    subtitle: '在一个页面中查看执行元数据、日志和任务控制操作。',
+    taskDetails: '任务详情',
+    taskDetailsSubtitle: '项目、分支、时间信息与合并请求元数据',
+    manualTask: '手动任务',
+    actions: '操作',
+    actionsSubtitle: '仅展示当前任务状态下可执行的操作',
+    actionsIntro: '请根据当前任务状态选择下一步。这里只会展示当前安全可用的操作。',
+    cancelTask: '取消任务',
+    cancelTaskDescription: '停止当前任务执行，同时保留最新状态和日志，便于后续排查。',
+    retryTask: '重试任务',
+    retryTaskDescription: '使用相同的提示词和分支配置将任务重新放回队列执行。',
+    retryWithSchedule: '预约重试',
+    retryWithScheduleDescription: '选择一个未来时间执行重试，而不是立即入队。',
+    scheduleRetry: '预约重试',
+    rescheduleTask: '修改预约时间',
+    rescheduleTaskDescription: '无需重新创建任务，直接更新一个待执行预约任务的执行时间。',
+    actionPermissionHint: '只有管理员或任务发起人才能操作该任务。其他用户可以查看详情，但不能执行这些操作。',
+    selectRescheduleTime: '选择新的预约时间',
+    saveScheduledTime: '保存预约时间',
+    executeNow: '立即执行',
+    executeNowDescription: '移除调度延迟，使任务在工作节点可用后尽快开始执行。',
+    noManualAction: '当前任务状态下没有可用的手动操作。',
+    error: '错误',
+    errorSubtitle: '任务执行器最近一次上报的失败信息',
+    userPrompt: '用户提示词',
+    userPromptSubtitle: '该任务记录下来的原始指令',
+    logs: '日志',
+    logsSubtitle: '运行中任务展示容器输出，其余状态展示已存储日志',
+    realTime: '实时',
+    containerId: '容器 ID',
+    mrUrl: 'MR 地址',
+    totalSuffix: '共 {total}',
+    mergeRequestCreated: '已创建',
+    mergeRequestPending: '待创建',
+    tokenUsage: 'Token 用量',
+    inputTokens: '输入',
+    outputTokens: '输出',
+    waitingForLogs: '等待日志中...',
+    noLogsAvailable: '暂无日志',
+    failedToFetchTask: '获取任务失败',
+    failedToFetchLogs: '获取日志失败',
+    failedToFetchContainerLogs: '获取容器日志失败',
+    taskCancelled: '任务已取消',
+    failedToCancelTask: '取消任务失败',
+    taskRetryScheduled: '任务已加入重试队列',
+    taskRetryRescheduled: '任务已预约重试',
+    failedToRetryTask: '重试任务失败',
+    taskRescheduled: '任务预约时间已更新',
+    failedToRescheduleTask: '更新预约时间失败',
+    rescheduleTimeFuture: '预约时间必须晚于当前时间',
+    taskExecutionStarted: '任务开始执行',
+    failedToExecuteTask: '立即执行失败'
+  },
+  createTask: {
+    title: '创建手动任务',
+    subtitle: '直接在控制台中选择仓库、分支、提示词、优先级和调度方式来发起任务。',
+    manualTrigger: '手动触发',
+    schedulerAware: '支持调度',
+    gitlabBranchWorkflow: 'GitLab 分支工作流',
+    taskDetails: '任务详情',
+    taskDetailsSubtitle: '配置源码来源、分支策略、优先级与执行时机',
+    repositoryBranches: '仓库与分支',
+    project: '项目',
+    selectProject: '选择项目',
+    baseBranch: '基础分支',
+    selectBaseBranch: '选择基础分支',
+    baseBranchHint: '作为变更起点的分支。',
+    newBranchName: '新分支名',
+    newBranchPlaceholder: '可选：feature/my-task',
+    newBranchHint: '留空则自动生成分支名称。',
+    targetBranch: '目标分支',
+    selectTargetBranch: '选择目标分支',
+    targetBranchHint: '用于合并变更的目标分支。',
+    branchConflict: '手动任务必须使用不同的源分支和目标分支，才能产出 Merge Request。',
+    implementationPrompt: '实现提示词',
+    prompt: '提示词',
+    promptPlaceholder: '描述你希望 AI 实现的内容...',
+    selectPromptTemplate: '选择提示词模板',
+    noPromptTemplates: '暂无可用模板',
+    confirmOverwritePrompt: '这将覆盖当前的提示词，是否继续？',
+    unreplacedVariablesHint: '请替换模板中的变量',
+    variableTips: '变量说明',
+    noTipAvailable: '无描述',
+    noVariables: '未检测到变量',
+    useTemplate: '使用模板',
+    prioritySchedule: '优先级与调度',
+    p0: 'P0（最高）',
+    p1: 'P1（高）',
+    p2: 'P2（普通）',
+    schedule: '调度',
+    executeNow: '立即执行',
+    delay: '延迟执行',
+    scheduleAt: '定时执行',
+    delaySeconds: '秒',
+    delayMinutes: '分钟',
+    delayHours: '小时',
+    selectDateTime: '选择日期和时间',
+    runsImmediately: '该任务会在创建后立即执行。',
+    delayGreaterThanZero: '创建任务前，请输入大于 0 的延迟时间。',
+    taskWillRunAfter: '该任务将在 {value} {unit} 后执行。',
+    selectFutureTime: '创建任务前，请选择未来的日期和时间。',
+    taskWillRunAt: '该任务将在 {time}（UTC+8）执行。',
+    successTitle: '任务已创建',
+    successMessage: '任务 #{id} 已成功创建！',
+    pleaseSelectProject: '请选择项目',
+    pleaseSelectBaseBranch: '请选择基础分支',
+    pleaseSelectTargetBranch: '请选择目标分支',
+    sourceTargetDifferent: '源分支和目标分支必须不同',
+    pleaseEnterPrompt: '请输入提示词',
+    failedToFetchProjects: '获取项目失败',
+    failedToFetchBranches: '获取分支失败',
+    invalidDelay: '请输入有效的延迟时间，且必须大于 0',
+    pleaseSelectScheduledTime: '请选择定时执行时间',
+    scheduledTimeFuture: '定时执行时间必须晚于当前时间',
+    manualTaskBranchConflict: '手动任务的源分支和目标分支必须不同',
+    failedToCreateTask: '创建任务失败'
+  },
+  sessions: {
+    title: '会话',
+    subtitle: '查看当前控制台会话、确认是否支持令牌刷新，并撤销不再信任的会话。',
+    reloadSessions: '重新加载会话',
+    refreshTokenInfo:
+      '如果某个会话没有 refresh token，即使控制台 Cookie 仍然存在，GitLab 访问令牌过期后也需要重新登录。',
+    knownSessions: '已知会话数',
+    activeSessions: '活跃会话数',
+    refreshCapable: '支持刷新',
+    currentSession: '当前会话',
+    currentBrowserSession: '当前浏览器会话',
+    savedSession: '已保存会话',
+    current: '当前',
+    ipUnavailable: 'IP 不可用',
+    created: '创建时间',
+    lastSeen: '最后访问',
+    expires: '过期时间',
+    refreshSupport: '刷新支持',
+    available: '可用',
+    unavailable: '不可用',
+    accessTokenStored: '已存储访问令牌',
+    accessTokenMissing: '缺少访问令牌',
+    refreshTokenStored: '已存储刷新令牌',
+    refreshTokenMissing: '缺少刷新令牌',
+    noSessions: '未找到控制台会话。',
+    failedToFetchSessions: '获取会话失败',
+    currentSessionRevoked: '当前会话已撤销，正在跳转到登录页。',
+    sessionRevoked: '会话已撤销',
+    failedToRevokeSession: '撤销会话失败'
+  },
+  monitor: {
+    title: '系统监控',
+    subtitle: '聚焦实时执行态、容器排障，以及当前系统健康信号。',
+    loading: '正在加载监控...',
+    dataSourceInfo: '基于当前可见任务样本、全局任务统计，以及后端可见的工作容器汇总展示。',
+    runtimeTab: '运行概览',
+    debugTab: '容器排障',
+    healthTab: '健康信号',
+    totalTasks: '任务总数',
+    pending: '待处理',
+    queued: '已入队',
+    running: '执行中',
+    pendingQueued: '待处理 / 已入队',
+    completed: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+    live: '实时',
+    clear: '清空',
+    gaps: '有缺口',
+    aligned: '已对齐',
+    healthy: '健康',
+    stable: '稳定',
+    watch: '关注中',
+    risky: '风险',
+    attention: '需关注',
+    needsReview: '需排查',
+    slow: '偏慢',
+    normal: '正常',
+    runningContainers: '运行中容器',
+    runningContainersSubtitle: '后端当前可见的实时工作容器',
+    containerId: '容器 ID',
+    name: '名称',
+    status: '状态',
+    taskId: '任务 ID',
+    task: '任务',
+    summary: '摘要',
+    duration: '耗时',
+    finishedAt: '完成时间',
+    age: '存活时长',
+    waitingOrRunning: '等待 / 运行时长',
+    failureReason: '失败原因',
+    noErrorMessage: '没有记录错误信息',
+    taskNotInSample: '最新样本中无该任务',
+    unmappedContainer: '未关联任务',
+    containerRelation: '对应关系',
+    unmapped: '未映射',
+    taskMissing: '任务缺失',
+    linked: '已关联',
+    outlivedTask: '容器晚于任务结束',
+    taskStillMarkedRunning: '任务仍标记为运行中',
+    historical: '历史记录',
+    runningForPrefix: '已运行',
+    waitingForPrefix: '已等待',
+    runningNowLabel: '当前运行中',
+    runningNowHelp: '当前可见 {containers} 个实时工作容器。',
+    backlogLabel: '队列压力',
+    backlogHelp: '{pending} 个待处理 + {queued} 个已入队任务正在等待执行。',
+    activeContainersLabel: '活跃容器',
+    activeContainersHelp: '{linked} 个运行中容器与实时任务成功对应。',
+    healthSummaryLabel: '系统健康度',
+    healthSummaryHelp: '综合队列压力、容器对齐情况、近期失败和长时间运行任务给出结论。',
+    healthHealthy: '整体健康',
+    healthWatch: '关注',
+    healthNeedsAttention: '需处理',
+    activeTasksMetric: '活跃任务',
+    activeTasksMetricHelp: '最新样本中的 pending、queued、running 任务。',
+    completed24hMetric: '24 小时完成',
+    completed24hMetricHelp: '最近一天创建且已完成的任务。',
+    failures24hMetric: '24 小时失败',
+    failures24hMetricHelp: '最近一天创建且失败或取消的任务。',
+    longRunningMetric: '长时间运行',
+    longRunningMetricHelp: '运行超过 30 分钟的任务。',
+    activeTasksTitle: '活跃任务队列',
+    activeTasksSubtitle: '展示最新的 pending、queued、running 任务，可点击进入详情。',
+    noActiveTasks: '当前没有活跃任务。',
+    recentActivityTitle: '最近完成活动',
+    recentActivitySubtitle: '最新样本中的 completed、failed、cancelled 任务。',
+    noRecentActivity: '最新样本中没有已结束任务。',
+    visibleContainersMetric: '可见容器',
+    visibleContainersMetricHelp: '后端返回的全部工作容器，包括非运行态。',
+    linkedContainersMetric: '已关联实时容器',
+    linkedContainersMetricHelp: '仍与运行中任务对应的运行态容器。',
+    missingContainersMetric: '任务/容器缺口',
+    missingContainersMetricHelp: '运行中任务当前没有看到对应运行中容器。',
+    orphanContainersMetric: '孤儿容器',
+    orphanContainersMetricHelp: '运行中容器当前没有对应运行中任务。',
+    runningTasksWithoutContainerTitle: '缺少容器的运行中任务',
+    noRunningTaskGaps: '所有运行中任务都能看到对应的运行中容器。',
+    orphanContainersTitle: '孤儿运行中容器',
+    noOrphanContainers: '未发现孤儿运行中容器。',
+    containersTitle: '工作容器清单',
+    containersSubtitle: '按最新时间展示，运行中容器置顶，方便直接排障。',
+    noContainers: '当前没有可见的工作容器。',
+    healthChecksTitle: '健康检查',
+    statusBreakdownTitle: '任务状态分布',
+    queueHealthLabel: '队列压力',
+    queueHealthHighDetail: '有 {backlog} 个任务在活跃执行能力之外等待。',
+    queueHealthNormalDetail: '当前队列里有 {backlog} 个等待任务。',
+    workerHealthLabel: '容器对齐情况',
+    workerHealthMismatchDetail: '{missing} 个运行任务缺容器，{orphaned} 个孤儿容器。',
+    workerHealthAlignedDetail: '运行中任务与实时容器保持一致。',
+    failureHealthLabel: '近期稳定性',
+    failureHealthDetail: '最近 24 小时创建的任务中有 {count} 个失败或取消。',
+    failureHealthCleanDetail: '最近 24 小时创建的任务中没有失败或取消。',
+    runtimeHealthLabel: '运行时长',
+    runtimeHealthSlowDetail: '有 {count} 个任务已运行超过 30 分钟。',
+    runtimeHealthNormalDetail: '未发现明显过长的运行中任务。',
+    recentFailuresTitle: '最近失败任务',
+    recentFailuresSubtitle: '展示最新失败/取消任务，并直接暴露首行错误，便于快速定位。',
+    noRecentFailures: '最新任务样本中没有失败记录。',
+    failedToFetchData: '获取监控数据失败'
+  },
+  scheduleOverview: {
+    title: '调度总览',
+    subtitle: '查看活跃的定时任务，理解小时级负载，并识别繁忙与空闲时间窗口。',
+    loading: '正在加载调度总览...',
+    statusPlaceholder: '状态',
+    searchPlaceholder: '搜索项目、分支、提示词',
+    next24Hours: '未来 24 小时',
+    next24HoursSubtitle: 'UTC+8 下每小时的定时任务数量',
+    busyIdleWindows: '繁忙与空闲窗口',
+    busyIdleWindowsSubtitle: '快速了解未来 24 小时',
+    busiestSlots: '最繁忙时段',
+    idleSlots: '空闲时段',
+    noScheduledWork24h: '未来 24 小时没有定时任务。',
+    everyHourBusy: '接下来的每个小时都已经有定时任务。',
+    idle: '空闲',
+    heatmap: '7 天热力图',
+    heatmapSubtitle: '颜色越深表示计划负载越高（UTC+8）',
+    light: '轻',
+    busy: '忙',
+    scheduledTasks: '定时任务',
+    scheduledTasksSubtitle: '仅包含活跃的定时任务：pending、queued、running',
+    scheduledQueue: '定时队列',
+    activeScheduledTasks: '活跃定时任务',
+    readyNow: '当前到期',
+    alreadyDue: '已经到达执行时间',
+    upcoming24h: '未来 24 小时',
+    upcomingScheduledWork: '即将到来的定时任务',
+    after24h: '24 小时之后',
+    laterBacklog: '后续积压',
+    queuedRunning: '已入队 / 执行中',
+    executionStateSplit: '执行状态拆分',
+    busiestHour: '最忙小时',
+    noScheduledWork: '暂无定时任务',
+    task: '任务',
+    id: 'ID',
+    prompt: '提示词',
+    failedToFetch: '获取定时任务失败',
+    activeScheduledTaskCount: '{count} 个活跃定时任务',
+    taskCountTitle: '{label}：{count} 个任务',
+    selectedWindow: '已选时间窗口',
+    selectedWindowSubtitle: '查看该时段内的任务，并逐个调整预约时间。',
+    clearSelectedWindow: '清除选择',
+    clickableHint: '可点击',
+    selectedHint: '已选中时段',
+    tapToInspectShort: '查看',
+    chartTip: '点击任意非空小时柱，即可查看该时段内的任务。',
+    heatmapTip: '点击任意有颜色的热力图格子，即可查看并调整该小时内的任务。',
+    adminOnlyEditing: '仅管理员可调整',
+    adminOnlyEditingDescription: '只有管理员可以在调度总览中调整任务时间。你仍然可以查看该时段内的任务。',
+    slotTaskCount: '该时段内有 {count} 个任务',
+    currentSchedule: '当前预约时间',
+    selectNewTime: '选择新的预约时间',
+    saveTime: '保存时间',
+    onlyPendingTasksEditable: '这里只能修改仍处于待执行状态的预约任务。',
+    noTasksInSelectedWindow: '该选中时段内已经没有任务了。',
+    rescheduleTimeFuture: '预约时间必须晚于当前时间。',
+    taskRescheduled: '任务预约时间已更新',
+    failedToRescheduleTask: '更新预约时间失败'
+  },
+  analytics: {
+    title: '任务统计分析',
+    subtitle: '跟踪近期窗口内的工作量、稳定性、执行速度、排队压力和失败模式。',
+    loading: '正在加载统计...',
+    projectInfo: '项目统计包含历史任务。发起人统计仅包含引入发起人追踪之后创建的任务。',
+    last7Days: '最近 7 天',
+    last30Days: '最近 30 天',
+    last90Days: '最近 90 天',
+    taskVolumeTrend: '任务量趋势',
+    taskVolumeTrendSubtitle: '所选时间窗口内每日任务数',
+    changedLinesTrend: '代码变更行数趋势',
+    changedLinesTrendSubtitle: '每日总变更行数（新增 + 删除）',
+    executionDurationTrend: '执行时长趋势',
+    executionDurationTrendSubtitle: '每日已结束任务的平均运行时长',
+    byProject: '按项目',
+    byProjectSubtitle: '每个项目的成功率与时延表现',
+    byInitiator: '按发起人',
+    byInitiatorSubtitle: '仅统计带有发起人追踪信息的任务',
+    queueWaitByPriority: '按优先级的排队等待',
+    queueWaitByPrioritySubtitle: '任务开始执行前的平均与最坏等待时间',
+    failureBreakdown: '失败分类',
+    failureBreakdownSubtitle: '按所选窗口内失败任务的错误信息进行分类',
+    tasks: '任务数',
+    dayWindow: '{days} 天窗口',
+    successRate: '成功率',
+    finishedBreakdown: '{completed} 完成 / {failed} 失败 / {cancelled} 取消',
+    noFinishedTasksYet: '暂无已结束任务',
+    avgDuration: '平均时长',
+    maxDuration: '最大 {value}',
+    noExecutionData: '暂无执行数据',
+    avgQueueWait: '平均排队等待',
+    maxQueueWait: '最大 {value}',
+    noQueueData: '暂无排队数据',
+    changedLines: '变更行数',
+    changeBreakdown: '+{additions} / -{deletions}',
+    totalTokens: '总 Token',
+    avgTokensPerTask: '单任务平均 Token',
+    tokens: 'Token',
+    tokenBreakdown: '输入 {input} / 输出 {output}',
+    trackedTokenTasks: '{count} 个任务有 Token 数据',
+    maxTokens: '最大 {value}',
+    noTokenData: '暂无 Token 数据',
+    tokenTrend: 'Token 趋势',
+    tokenTrendSubtitle: '每日总 Token 用量（输入 + 输出）',
+    projectFilterPlaceholder: '按项目筛选',
+    initiatorFilterPlaceholder: '按发起人筛选',
+    trackedInitiators: '已追踪发起人',
+    since: '自 {time} 起',
+    noTrackedInitiators: '暂无已追踪发起人数据',
+    success: '成功',
+    avgWait: '平均等待',
+    lastTask: '最近任务',
+    initiator: '发起人',
+    startedTasks: '已启动任务',
+    maxWait: '最大等待',
+    category: '类别',
+    failures: '失败数',
+    share: '占比',
+    example: '示例',
+    gitlabId: 'GitLab ID：{id}',
+    failedToLoad: '加载统计失败',
+    failedToLoadProjects: '加载项目筛选项失败'
+  },
+  config: {
+    title: '系统配置',
+    subtitle: '在一个页面中管理调度器行为和 GitLab OIDC 登录。保存后的值会覆盖环境变量配置，并在重启后保留。',
+    unsavedChanges: '有未保存修改',
+    inSync: '已同步',
+    dbOverride: '数据库覆盖',
+    envFallback: '环境变量回退',
+    defaultFallback: '默认值回退',
+    secretInfo: '敏感密钥仅存储在服务端，永远不会返回到浏览器。将密钥输入框留空即可保留当前已存储的值。',
+    runtimeTab: '运行与共享',
+    notificationsTab: '通知',
+    gitlabTab: 'GitLab',
+    authenticationTab: '认证与会话',
+    maintenanceTab: '维护操作',
+    runtimeSettings: '运行时设置',
+    runtimeSettingsSubtitle: '调度器与任务执行行为',
+    scheduler: '调度器',
+    maxConcurrency: '最大并发数',
+    maxConcurrencyHint: '同一时间允许运行的任务最大数量。',
+    schedulerInterval: '调度间隔（秒）',
+    schedulerIntervalHint: '调度器检查工作的频率。',
+    taskTimeout: '任务超时（秒）',
+    taskTimeoutHint: '任务被标记为失败前允许的最大执行时间。',
+    defaultTargetBranch: '默认目标分支',
+    defaultTargetBranchHint: '任务未指定目标分支时使用的默认分支。',
+    retryAndAlerts: '重试与告警',
+    maxRetries: '最大重试次数',
+    maxRetriesHint: '失败任务允许自动重新入队的最大次数。',
+    retryDelay: '重试延迟（秒）',
+    retryDelayHint: '失败任务再次入队前的等待时间。',
+    alertOnFailure: '失败时告警',
+    alertOnFailureHint: '任务失败时发送 Webhook 通知。',
+    alertWebhookStatus: '告警 Webhook 状态',
+    alertWebhookStatusHint: '已存储的 Webhook URL 不会返回到浏览器。',
+    alertWebhookUrl: '告警 Webhook URL',
+    enterAlertWebhookUrl: '输入 Webhook URL',
+    alertWebhookHint: '留空即可保持当前已存储的 Webhook URL 不变。',
+    mattermostIntegration: 'Mattermost 集成',
+    mattermostIntegrationSubtitle: '配置通知 profile 使用的 Mattermost 机器人连接。',
+    mattermostConnection: 'Mattermost 连接',
+    mattermostServerUrl: 'Mattermost 服务地址',
+    mattermostServerUrlHint: 'Mattermost 服务基础地址，例如 https://mattermost.example.com。',
+    enterMattermostServerUrl: '输入 Mattermost 服务地址',
+    mattermostBotToken: 'Mattermost Bot Token',
+    mattermostBotTokenStatus: 'Mattermost Bot Token 状态',
+    mattermostBotTokenStatusHint: '已存储的 Mattermost Bot Token 不会返回到浏览器。',
+    enterMattermostBotToken: '输入 Mattermost Bot Token',
+    mattermostBotTokenHint: '留空即可保持当前已存储的机器人令牌不变。',
+    notificationProfiles: '通知配置',
+    notificationProfilesSubtitle: '支持创建多条通知配置，例如一个发群组、一个发任务发起人的私聊。',
+    addNotificationProfile: '新增配置',
+    noNotificationProfiles: '还没有配置任何通知规则。',
+    notificationEvents: '通知事件',
+    notificationFields: '通知字段',
+    notificationProfileBasics: '配置基础信息',
+    profileName: '配置名称',
+    enterProfileName: '输入配置名称',
+    profileEnabled: '启用配置',
+    notificationTarget: '通知目标',
+    selectNotificationTarget: '选择通知目标',
+    notificationTargetChannel: 'Mattermost 群组频道',
+    notificationTargetChannelHint: '选择群组频道后，可在下方频道目标设置中开启“在群组里 @ 发起人”。',
+    notificationTargetInitiatorDm: '任务发起人私聊',
+    notificationTargetInitiatorDmHint: '当 GitLab 用户名能在 Mattermost 中匹配到用户名时，发送私聊给任务发起人。',
+    notificationChannelTarget: '频道目标',
+    mattermostTeamName: 'Team 名称',
+    enterMattermostTeamName: '输入 Mattermost Team 名称',
+    mattermostChannelName: '频道名称',
+    enterMattermostChannelName: '输入 Mattermost 频道名称',
+    mentionInitiatorInChannel: '在群组里 @ 发起人',
+    mentionInitiatorInChannelHint: '开启后，会在群组通知前缀中加上 @任务发起人用户名。',
+    mentionInitiatorInChannelDisabledHint: '只有通知目标为 Mattermost 群组频道时，才可以开启这个选项。',
+    notifyManualTasks: '通知手工任务',
+    skipManualTasks: '跳过手工任务',
+    createNotificationProfile: '创建通知配置',
+    editNotificationProfile: '编辑配置',
+    deleteNotificationProfile: '删除配置',
+    selectNotificationEvents: '请至少选择一个通知事件',
+    selectNotificationFields: '请至少选择一个通知字段',
+    notificationProfileCreated: '通知配置已创建',
+    notificationProfileUpdated: '通知配置已更新',
+    notificationProfileDeleted: '通知配置已删除',
+    failedToDeleteNotificationProfile: '删除通知配置失败',
+    testMattermostConnection: '测试 Mattermost 连接',
+    mattermostConnectionSucceeded: 'Mattermost 连接成功：{url}。当前机器人账号为 {username}。',
+    mattermostConnectionPassed: 'Mattermost 连接测试通过',
+    mattermostConnectionFailed: 'Mattermost 连接测试失败',
+    mattermostIntegrationSaved: 'Mattermost 集成配置已保存',
+    failedToFetchNotifications: '获取通知配置失败',
+    notificationEventTaskCompleted: '任务完成',
+    notificationEventTaskFailed: '任务失败',
+    notificationEventTaskRescheduled: '任务改期',
+    notificationEventTaskExecuteNow: '改为立即执行',
+    notificationEventTaskRetryScheduled: '已安排重试',
+    notificationEventTaskCancelled: '任务取消',
+    notificationFieldTaskId: '任务 ID',
+    notificationFieldProject: '项目',
+    notificationFieldIssue: 'Issue',
+    notificationFieldMergeRequest: 'Merge Request',
+    notificationFieldInitiator: '发起人',
+    notificationFieldStatus: '状态',
+    notificationFieldBranch: '分支',
+    notificationFieldTargetBranch: '目标分支',
+    notificationFieldScheduledAt: '预约时间',
+    notificationFieldScheduleChange: '时间变更',
+    notificationFieldError: '错误摘要',
+    notificationFieldTaskLink: '任务链接',
+    aiProvider: 'AI 提供方',
+    anthropicBaseUrl: 'Anthropic Base URL',
+    anthropicBaseUrlHint: '传给 Worker 新任务的 Claude 兼容 API 基础地址。',
+    anthropicApiKey: 'Anthropic API Key',
+    anthropicApiKeyStatus: 'Anthropic API Key 状态',
+    anthropicApiKeyStatusHint: '已存储的 API Key 不会返回到浏览器。',
+    enterAnthropicApiKey: '输入 Anthropic API Key',
+    anthropicApiKeyHint: '留空即可保持当前已存储的 API Key 不变。',
+    anthropicModel: 'Anthropic Model',
+    anthropicModelHint: '传给新 Worker 任务的模型标识。',
+    claudeMaxTurns: 'Claude 最大轮次',
+    claudeMaxTurnsHint: '每个任务最多允许的 Agent 轮次（1–1000），值越大可处理越复杂的任务。',
+    workerSettings: 'Worker 设置',
+    workerVolumeMounts: '存储卷挂载',
+    workerTab: 'Worker',
+    aiProviderSubtitle: '用于代码生成的 Claude CLI API 端点和模型设置',
+    workerSettingsSubtitle: 'Worker 容器的运行时配置',
+    addVolumeMount: '添加存储卷挂载',
+    volumeMounts: '存储卷挂载',
+    noVolumeMounts: '暂无存储卷挂载配置',
+    hostPath: '宿主机路径',
+    hostPathPlaceholder: '/etc/ssl/certs/custom-ca.crt',
+    containerPath: '容器内路径',
+    containerPathPlaceholder: '/etc/ssl/certs/custom-ca.crt',
+    mountMode: '挂载模式',
+    remove: '移除',
+    mavenSettings: 'Maven 设置',
+    mavenSettingsSubtitle: 'Maven 缓存和设置文件的宿主机路径',
+    mavenCachePath: '缓存目录',
+    mavenCachePathPlaceholder: '/data/maven/.m2/repository',
+    mavenCachePathHint: '宿主机上 .m2/repository 目录路径。留空则禁用。',
+    mavenSettingsPath: 'Settings 文件',
+    mavenSettingsPathPlaceholder: '/data/maven/.m2/settings.xml',
+    mavenSettingsPathHint: '宿主机上 settings.xml 文件路径。留空则禁用。',
+    gitlabIntegration: 'GitLab 集成',
+    gitlabIntegrationSubtitle: '任务执行使用的 GitLab API 地址与机器人凭据',
+    gitlabConnection: 'GitLab 连接',
+    gitlabUrl: 'GitLab URL',
+    gitlabUrlHint: '用于 API 调用、页面链接和仓库操作的 GitLab 基础地址。',
+    gitlabBotToken: 'GitLab Bot Token',
+    gitlabBotTokenStatus: 'GitLab Bot Token 状态',
+    gitlabBotTokenStatusHint: '已存储的 GitLab 机器人令牌不会返回到浏览器。',
+    enterGitlabBotToken: '输入 GitLab Bot Token',
+    gitlabBotTokenHint: '留空即可保持当前已存储的机器人令牌不变。',
+    webhookAutomation: 'Webhook 自动配置',
+    gitlabAdminToken: 'GitLab Admin Token',
+    gitlabAdminTokenStatus: 'GitLab Admin Token 状态',
+    gitlabAdminTokenStatusHint: '已存储的 GitLab 管理员令牌不会返回到浏览器。',
+    enterGitlabAdminToken: '输入 GitLab Admin Token',
+    gitlabAdminTokenHint: '仅用于项目 Webhook 管理。留空即可保持当前已存储的管理员令牌不变。',
+    gitlabWebhookSecret: '回退 Webhook Secret',
+    gitlabWebhookSecretStatus: '回退 Webhook Secret 状态',
+    gitlabWebhookSecretStatusHint: '这个全局/兼容密钥只会在项目没有自己的托管 webhook secret 时作为回退使用。',
+    enterGitlabWebhookSecret: '输入回退 Webhook Secret',
+    gitlabWebhookSecretHint: '用于兼容旧的或手工配置的 webhook。系统自动管理的项目 webhook 现在会使用每项目独立 secret。',
+    webhookOverview: 'Webhook 总览',
+    webhookOverviewSubtitle: '一眼查看所有可管理项目的 webhook 健康状态，并可直接逐行修复。',
+    webhookOverviewSearch: '筛选项目',
+    webhookOverviewSearchPlaceholder: '按项目路径、状态或 secret 模式搜索',
+    webhookOverviewHint: '下表展示的是当前 GitLab Admin Token 可见的所有项目状态。',
+    refreshWebhookStatuses: '刷新 Webhook 状态',
+    webhookProjectsTotal: '项目数',
+    webhookProjectsConfigured: '已配置',
+    webhookProjectsAttention: '需关注',
+    webhookProjectsMissing: '缺失 / 错误',
+    webhookProjectColumn: '项目',
+    webhookStatusColumn: '状态',
+    webhookSecretModeColumn: 'Secret 模式',
+    webhookChecksColumn: '检查项',
+    webhookStatusDetailColumn: '详情',
+    webhookHookIdShort: 'Hook',
+    webhookNoteEventsShort: 'Note',
+    webhookSslShort: 'SSL',
+    webhookStatusConfigured: '已配置',
+    webhookStatusNeedsAttention: '需关注',
+    webhookStatusMissing: '缺失',
+    webhookStatusError: '错误',
+    webhookProject: 'GitLab 项目',
+    selectGitlabProject: '选择一个 GitLab 项目',
+    webhookProjectHint: '选择单个项目后，可一键创建或更新指向本系统的 Webhook。',
+    viewProjectWebhookStatus: '查看项目 Webhook 状态',
+    setupProjectWebhook: '配置项目 Webhook',
+    noWebhookData: '未找到项目，请确认已配置 GitLab Admin Token。',
+    sharedPageAccess: '共享页面访问',
+    sharedPageAccessSubtitle: '选择哪些只读页面也可以向平台普通用户开放',
+    pagePermissions: '页面权限',
+    allowMonitor: '允许平台用户访问 Monitor',
+    allowMonitorHint: '非管理员用户可以打开 Monitor 页面，并查看其可访问项目范围内的统计和容器。',
+    allowScheduleOverview: '允许平台用户访问 Schedule Overview',
+    allowScheduleOverviewHint: '非管理员用户可以查看其可访问项目范围内的定时队列。',
+    allowAnalytics: '允许平台用户访问 Analytics',
+    allowAnalyticsHint: '非管理员用户可以打开 Analytics 页面，并且只看到其可访问项目的数据。',
+    allowOidcDiagnostics: '允许平台用户访问 OIDC Diagnostics',
+    allowOidcDiagnosticsHint: '非管理员用户可以打开诊断快照页面。',
+    gitlabOidc: 'GitLab OIDC',
+    gitlabOidcSubtitle: '身份提供方与回调配置',
+    providerBasics: '提供方基础信息',
+    enableOidcLogin: '启用 OIDC 登录',
+    enableOidcLoginHint: '启用后，控制台 API 将要求通过 GitLab 登录。',
+    clientSecretStatus: '客户端密钥状态',
+    configured: '已配置',
+    missing: '缺失',
+    clientSecretStatusHint: '真实密钥不会返回到浏览器。',
+    issuerUrl: 'Issuer URL',
+    clientId: 'Client ID',
+    clientSecret: 'Client Secret',
+    configuredEnterNew: '已配置。如需轮换，请输入新值。',
+    enterClientSecret: '输入客户端密钥',
+    clientSecretHint: '留空即可保持当前存储的密钥不变。',
+    redirectUri: '回调地址',
+    sessionAccess: '会话与访问',
+    sessionAccessSubtitle: 'Cookie 策略和管理员引导配置',
+    sessionPolicy: '会话策略',
+    sessionCookieName: 'Session Cookie 名称',
+    sessionTtl: 'Session TTL（秒）',
+    cookieSecure: 'Cookie Secure',
+    cookieSecureHint: 'HTTPS 部署时应保持启用。',
+    cookieSameSite: 'Cookie SameSite',
+    adminBootstrap: '管理员引导',
+    adminUsernames: '管理员用户名',
+    adminUsernamesPlaceholder: 'alice,bob',
+    adminUsernamesHint: '用逗号分隔的 GitLab 用户名，登录后会被引导为平台管理员。',
+    adminGitlabGroups: '管理员 GitLab 组',
+    adminGitlabGroupsPlaceholder: 'platform-team',
+    adminGitlabGroupsHint: '登录时可选检查的组名。',
+    actions: '操作',
+    actionsSubtitle: '重新加载当前配置，或将所有分区一起重置为环境变量/默认值。',
+    saveChanges: '保存修改',
+    revertChanges: '还原修改',
+    testOidcConnection: '测试 OIDC 连接',
+    openOidcDiagnostics: '打开 OIDC 诊断',
+    clearOidcSecret: '清除已存储 OIDC 密钥',
+    clearGitlabBotToken: '清除已存储 GitLab Bot Token',
+    clearGitlabAdminToken: '清除已存储 GitLab Admin Token',
+    clearGitlabWebhookSecret: '清除已存储 GitLab Webhook Secret',
+    invalidateProjectCache: '清除项目缓存',
+    projectCacheInvalidated: '项目缓存已清除',
+    projectCacheInvalidateFailed: '清除项目缓存失败',
+    promptTemplatesTab: '提示词模板',
+    promptTemplates: '提示词模板',
+    promptTemplatesSubtitle: '管理任务创建时可复用的提示词模板',
+    createPromptTemplate: '创建模板',
+    editPromptTemplate: '编辑模板',
+    promptTemplateName: '名称',
+    promptTemplateNamePlaceholder: '例如：代码审查',
+    promptTemplateContent: '模板内容',
+    promptTemplateContentPlaceholder: "输入提示词模板，可使用 {'{{variable}}'} 占位符",
+    promptTemplateVariableTips: '变量说明',
+    promptTemplateNoVariables: '模板内容中未检测到变量',
+    promptTemplateNoVariableTips: '暂无变量说明',
+    promptTemplateInvalidTips: '无效的变量说明（内容中未找到）：{variables}',
+    promptTemplateSelectVariable: '选择变量',
+    promptTemplateVariableName: '变量名',
+    promptTemplateTipPlaceholder: '变量描述',
+    promptTemplateActive: '启用',
+    promptTemplateEditorSection: '模板详情',
+    promptTemplateNameHint: '使用简短且可复用的名称，方便快速识别模板用途。',
+    promptTemplateContentHint: "在这里编写可复用的提示词正文，可通过 {'{{variable}}'} 占位符按任务注入变量值。",
+    promptTemplateActiveHint: '停用后的模板会继续保留，但不会出现在任务创建流程里。',
+    promptTemplateDeleteConfirm: '确定删除这个模板吗？此操作无法撤销。',
+    promptTemplateEmpty: '还没有创建任何提示词模板。',
+    promptTemplateUpdatedAt: '更新时间',
+    createPromptTemplateSuccess: '模板创建成功',
+    updatePromptTemplateSuccess: '模板更新成功',
+    deletePromptTemplateSuccess: '模板删除成功',
+    savePromptTemplateFailed: '保存模板失败',
+    deletePromptTemplateFailed: '删除模板失败',
+    fetchPromptTemplatesFailed: '获取模板列表失败',
+    clearAnthropicApiKey: '清除已存储 Anthropic API Key',
+    clearMattermostBotToken: '清除已存储 Mattermost Bot Token',
+    clearAlertWebhook: '清除已存储告警 Webhook',
+    resetEnvDefaults: '重置为环境变量/默认值',
+    sharedPages: '共享页面',
+    adminOnly: '仅管理员',
+    oidcLogin: 'OIDC 登录',
+    enterMaxConcurrency: '请输入最大并发数',
+    enterTaskTimeout: '请输入任务超时',
+    enterSchedulerInterval: '请输入调度间隔',
+    enterDefaultTargetBranch: '请输入默认目标分支',
+    enterMaxRetries: '请输入最大重试次数',
+    enterRetryDelay: '请输入重试延迟',
+    enterGitlabUrl: '请输入 GitLab URL',
+    enterAnthropicBaseUrl: '请输入 Anthropic Base URL',
+    enterAnthropicModel: '请输入 Anthropic Model',
+    enterClaudeMaxTurns: '请输入 Claude 最大轮次',
+    issuerRequired: 'Issuer URL 不能为空',
+    clientIdRequired: 'Client ID 不能为空',
+    redirectUriRequired: '回调地址不能为空',
+    enterSessionCookieName: '请输入 Session Cookie 名称',
+    enterSessionTtl: '请输入 Session TTL',
+    failedToFetchConfig: '获取配置失败',
+    configurationSaved: '配置已保存',
+    failedToSaveConfig: '保存配置失败',
+    oidcDiscoverySucceeded: 'OIDC 发现成功，issuer 为 {issuer}。所需 scopes：{scopes}。',
+    oidcConnectionPassed: 'OIDC 连接测试通过',
+    oidcConnectionFailed: 'OIDC 连接测试失败',
+    testGitlabConnection: '测试 GitLab 连接',
+    gitlabConnectionSucceeded:
+      'GitLab 连接成功：{url}。认证用户为 {username}。服务端版本：{version}。',
+    gitlabConnectionPassed: 'GitLab 连接测试通过',
+    gitlabConnectionFailed: 'GitLab 连接测试失败',
+    projectWebhookCreated: '已为 {project} 创建项目 Webhook（hook #{hookId}）。',
+    projectWebhookUpdated: '已为 {project} 更新项目 Webhook（hook #{hookId}）。',
+    projectWebhookMissing: '{project} 当前没有找到指向 {url} 的 webhook。本地 secret 模式：{secretMode}。',
+    projectWebhookStatusSummary:
+      '{project}：hook #{hookId}，URL 为 {url}，note 事件 {noteEvents}，SSL 校验 {ssl}，本地 secret 模式为 {secretMode}。',
+    projectWebhookSetupFailed: '配置项目 Webhook 失败',
+    projectWebhookStatusFailed: '获取项目 Webhook 状态失败',
+    webhookSecretModeProject: '项目独立托管 secret',
+    webhookSecretModeGlobalFallback: '全局回退 secret',
+    webhookSecretModeNone: '未配置本地 secret',
+    oidcSecretCleared: '已清除存储的 OIDC 客户端密钥',
+    gitlabBotTokenCleared: '已清除存储的 GitLab Bot Token',
+    gitlabAdminTokenCleared: '已清除存储的 GitLab Admin Token',
+    gitlabWebhookSecretCleared: '已清除存储的 GitLab Webhook Secret',
+    anthropicApiKeyCleared: '已清除存储的 Anthropic API Key',
+    mattermostBotTokenCleared: '已清除存储的 Mattermost Bot Token',
+    alertWebhookCleared: '已清除存储的告警 Webhook',
+    failedToClearSecret: '清除存储密钥失败',
+    resetToDefaults: '配置已重置为环境变量/默认值',
+    failedToResetConfig: '重置配置失败'
+  },
+  accessManagement: {
+    title: '访问管理',
+    subtitle: '在专用管理员页面中管理控制台用户、显式管理员覆盖、禁用账户和活跃会话。',
+    reloadUsers: '重新加载用户',
+    intro: '手动角色修改会覆盖该用户的引导用户名/组规则。禁用用户会立即撤销其活跃会话。',
+    searchPlaceholder: '按用户名、显示名或邮箱搜索',
+    filterByRole: '按角色筛选',
+    filterByState: '按状态筛选',
+    loading: '正在加载用户...',
+    currentUser: '当前用户',
+    activeSessions: '活跃会话',
+    lastSeen: '最近访问',
+    role: '角色',
+    state: '状态',
+    systemId: '系统ID：{id}',
+    gitlabId: 'GitLab ID：{id}',
+    saveAccess: '保存访问设置',
+    revokeSessions: '撤销会话',
+    selfReadonly: '为避免意外锁死，这里不允许修改你自己的角色和状态。',
+    noUsers: '当前没有匹配的控制台用户。',
+    knownUsers: '已知用户',
+    platformAdmins: '平台管理员',
+    disabledUsers: '已禁用用户',
+    platformAdmin: '平台管理员',
+    platformUser: '平台用户',
+    disabled: '已禁用',
+    manualOverride: '手动覆盖',
+    breakGlass: '紧急入口',
+    bootstrap: '引导规则',
+    lastLogin: '最近登录',
+    failedToFetchUsers: '获取用户失败',
+    updatedAccess: '已更新 \\@{username} 的访问设置',
+    failedToUpdateUser: '更新用户访问失败',
+    revokedSessions: '已为 \\@{username} 撤销 {count} 个活跃会话',
+    noActiveSessions: '\\@{username} 当前没有活跃会话',
+    failedToRevokeSessions: '撤销用户会话失败'
+  },
+  oidcDiagnostics: {
+    title: 'OIDC 诊断',
+    subtitle: '在一个仅管理员可见的页面中检查 issuer 发现、端点元数据、Cookie 策略、所需 scopes 以及当前认证模式。',
+    refreshDiagnostics: '刷新诊断',
+    operatorWarnings: '运维告警',
+    checks: '检查项',
+    checksSubtitle: '基于当前生效运行时配置的实时诊断',
+    authModeSummary: '认证模式概览',
+    authModeSummarySubtitle: '当前生效设置与安全姿态',
+    providerMetadata: '提供方元数据',
+    providerMetadataSubtitle: '当前生效的发现信息与端点值',
+    requiredScopes: '必需 scopes',
+    requiredScopesSubtitle: 'GitLab OAuth 应用应允许的 scopes',
+    oidcLogin: 'OIDC 登录',
+    breakGlass: '紧急入口',
+    clientId: 'Client ID',
+    clientSecret: '客户端密钥',
+    cookiePolicy: 'Cookie 策略',
+    secure: '安全',
+    insecure: '不安全',
+    sessionTtl: '会话 TTL',
+    issuerUrl: 'Issuer URL',
+    discoveryIssuer: '发现到的 issuer',
+    redirectUri: '回调地址',
+    authorizationEndpoint: '授权端点',
+    tokenEndpoint: '令牌端点',
+    userinfoEndpoint: '用户信息端点',
+    authorizationScopeString: '授权 scope 字符串',
+    authorizationUrlPreview: '授权 URL 预览',
+    oidcLoginSummary: 'OIDC 登录',
+    healthyChecks: '健康检查',
+    warning: '告警',
+    warnings: '告警',
+    errors: '错误',
+    ok: '正常',
+    error: '错误',
+    failedToFetch: '获取 OIDC 诊断失败'
+  }
+}
+&nbsp;
+export default zhCN
+&nbsp;</pre></td></tr></table></pre>
+
+                <div class='push'></div><!-- for sticky footer -->
+            </div><!-- /wrapper -->
+            <div class='footer quiet pad2 space-top1 center small'>
+                Code coverage generated by
+                <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
+                at 2026-04-02T22:11:15.237Z
+            </div>
+        <script src="../../../prettify.js"></script>
+        <script>
+            window.onload = function () {
+                prettyPrint();
+            };
+        </script>
+        <script src="../../../sorter.js"></script>
+        <script src="../../../block-navigation.js"></script>
+    </body>
+</html>
+    

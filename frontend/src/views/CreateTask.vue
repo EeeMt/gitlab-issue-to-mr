@@ -235,6 +235,25 @@
                           :is-time-disabled="isScheduledTimeDisabled"
                        />
 
+
+                       <!-- Schedule Heatmap Preview -->
+                       <div
+                         v-if="scheduleType === 'scheduled'"
+                         class="schedule-heatmap-preview"
+                         data-testid="schedule-heatmap-preview"
+                       >
+                         <div class="schedule-heatmap-preview__header">
+                           <span class="schedule-heatmap-preview__title">{{ t('createTask.schedulePreviewTitle') }}</span>
+                           <n-spin v-if="scheduledTasksLoading" :size="14" />
+                         </div>
+                         <HeatmapChart
+                           :tasks="scheduledTasksForPreview"
+                           :selected-ms="scheduledDatetime"
+                           @cell-click="handleScheduleHeatmapCellClick"
+                         />
+                         <div class="schedule-heatmap-preview__hint">{{ t('createTask.schedulePreviewHint') }}</div>
+                       </div>
+
                       <div class="create-task-form__hint">
                         {{ scheduleSummary }}
                       </div>
@@ -280,7 +299,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NCard, NForm, NFormItem, NSelect, NInput, NInputNumber,
@@ -289,11 +308,12 @@ import {
   useMessage, FormInst, FormRules
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getProjects, getBranches, createTask, getPromptTemplates, type Project, type Branch, type CreateTaskRequest, type PromptTemplate } from '../api'
+import { getProjects, getBranches, createTask, getPromptTemplates, getScheduledTasks, type Project, type Branch, type CreateTaskRequest, type PromptTemplate, type Task } from '../api'
 import { formatDateTimeUtc8 } from '../utils/datetime'
 import { DocumentTextOutline, WarningOutline, InformationCircleOutline } from '@vicons/ionicons5'
 import PageHeader from '../components/PageHeader.vue'
 import VariableEditor from '../components/VariableEditor.vue'
+import HeatmapChart from '../components/HeatmapChart.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 
 const router = useRouter()
@@ -349,6 +369,9 @@ const scheduleType = ref<'now' | 'delay' | 'scheduled'>('now')
 const delayValue = ref(5)
 const delayUnit = ref<'seconds' | 'minutes' | 'hours'>('minutes')
 const scheduledDatetime = ref<number | null>(null)
+
+const scheduledTasksForPreview = ref<Task[]>([])
+const scheduledTasksLoading = ref(false)
 
 // Create MR toggle
 const createMR = ref(true)
@@ -470,6 +493,10 @@ function isScheduledTimeDisabled(timestamp: number) {
       && second < currentSecond
     )
   }
+}
+
+function handleScheduleHeatmapCellClick(startMs: number) {
+  scheduledDatetime.value = startMs
 }
 
 // Validation rules
@@ -685,6 +712,23 @@ onMounted(() => {
   fetchProjects()
   fetchPromptTemplates()
 })
+
+watch(scheduleType, async (newType) => {
+  if (newType === 'scheduled') {
+    if (scheduledTasksForPreview.value.length === 0) {
+      scheduledTasksLoading.value = true
+      try {
+        scheduledTasksForPreview.value = await getScheduledTasks()
+      } catch {
+        scheduledTasksForPreview.value = []
+      } finally {
+        scheduledTasksLoading.value = false
+      }
+    }
+  } else {
+    scheduledDatetime.value = null
+  }
+})
 </script>
 
 <style scoped>
@@ -880,5 +924,33 @@ onMounted(() => {
 .create-task-form__toggle-label-icon {
   opacity: 0.55;
   vertical-align: middle;
+}
+
+.schedule-heatmap-preview {
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: rgba(148, 163, 184, 0.04);
+}
+
+.schedule-heatmap-preview__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.schedule-heatmap-preview__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.58);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.schedule-heatmap-preview__hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: rgba(15, 23, 42, 0.45);
 }
 </style>
