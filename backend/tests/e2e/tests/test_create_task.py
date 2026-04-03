@@ -198,3 +198,104 @@ class TestCreateTaskNavigation:
         logged_in_page.wait_for_load_state("domcontentloaded")
         tags = logged_in_page.locator(".create-task-page__hero .n-tag")
         expect(tags.first).to_be_visible()
+
+
+@pytest.mark.create_task
+class TestCreateTaskNoMRToggle:
+    """Tests for the 'Create MR' toggle on the CreateTask page.
+
+    The toggle (n-switch) controls whether an MR should be created.
+    When ON (default): target_branch field is visible.
+    When OFF: target_branch field is hidden and task is submitted with target_branch=null.
+
+    Note: Naive UI's n-switch renders as <div role="switch"> in the DOM.
+    The .n-switch CSS class selector is used for reliable element location.
+    """
+
+    def test_create_mr_toggle_visible_by_default(self, logged_in_page: Page, reset_database):
+        """Test that the Create MR toggle (n-switch) is visible on page load."""
+        logged_in_page.goto("/create-task")
+        logged_in_page.wait_for_load_state("domcontentloaded")
+        toggle = logged_in_page.locator(".create-task-form .n-switch")
+        expect(toggle).to_be_visible()
+
+    def test_target_branch_field_visible_when_create_mr_on(self, logged_in_page: Page, reset_database):
+        """Test that the target branch field is visible when Create MR toggle is ON (default state).
+
+        When the toggle is ON there should be 3 n-select elements inside the form:
+        project selector, base_branch selector, and target_branch selector.
+        """
+        logged_in_page.goto("/create-task")
+        logged_in_page.wait_for_load_state("domcontentloaded")
+
+        # With createMR=true (default), the target_branch n-select is rendered,
+        # so the form contains at least 3 .n-select elements.
+        selects = logged_in_page.locator(".create-task-form .n-select")
+        select_count = selects.count()
+        assert select_count >= 3, (
+            f"Expected at least 3 .n-select elements (project + base_branch + target_branch) "
+            f"when Create MR is ON, but found {select_count}"
+        )
+
+        # The third selector (target_branch) must be visible.
+        expect(selects.nth(2)).to_be_visible()
+
+    def test_toggle_off_hides_target_branch(self, logged_in_page: Page, reset_database):
+        """Test that clicking the Create MR toggle OFF hides the target branch field.
+
+        After toggling OFF the v-if="createMR" guard removes the target_branch
+        form item from the DOM entirely, so the number of visible .n-select
+        elements drops from 3 to 2.
+        """
+        logged_in_page.goto("/create-task")
+        logged_in_page.wait_for_load_state("domcontentloaded")
+
+        # Confirm initial state: toggle is ON, target_branch select is present.
+        selects_before = logged_in_page.locator(".create-task-form .n-select")
+        assert selects_before.count() >= 3, (
+            "Pre-condition failed: expected ≥3 selects (MR toggle ON) before clicking toggle"
+        )
+
+        # Click the toggle to turn it OFF.
+        toggle = logged_in_page.locator(".create-task-form .n-switch")
+        toggle.click()
+
+        # Wait for Vue to remove the target_branch form item from the DOM.
+        # The "Target Branch" label text should no longer be present.
+        target_branch_label = logged_in_page.get_by_text("Target Branch", exact=True)
+        expect(target_branch_label).not_to_be_visible()
+
+        # Also confirm only 2 selects remain (project + base_branch).
+        selects_after = logged_in_page.locator(".create-task-form .n-select")
+        assert selects_after.count() < 3, (
+            f"Expected fewer than 3 .n-select elements after toggling Create MR OFF, "
+            f"but found {selects_after.count()}"
+        )
+
+    def test_toggle_on_shows_target_branch_again(self, logged_in_page: Page, reset_database):
+        """Test that toggling Create MR OFF then ON again restores the target branch field.
+
+        This verifies that the v-if="createMR" reactive binding works in both
+        directions: the target_branch form item is re-mounted when the toggle
+        is turned back ON.
+        """
+        logged_in_page.goto("/create-task")
+        logged_in_page.wait_for_load_state("domcontentloaded")
+
+        toggle = logged_in_page.locator(".create-task-form .n-switch")
+
+        # Step 1: Toggle OFF — target_branch should disappear.
+        toggle.click()
+        target_branch_label = logged_in_page.get_by_text("Target Branch", exact=True)
+        expect(target_branch_label).not_to_be_visible()
+
+        # Step 2: Toggle ON again — target_branch should reappear.
+        toggle.click()
+        expect(target_branch_label).to_be_visible()
+
+        # Also verify the third n-select (target_branch) is back.
+        selects = logged_in_page.locator(".create-task-form .n-select")
+        assert selects.count() >= 3, (
+            f"Expected ≥3 .n-select elements after toggling Create MR back ON, "
+            f"but found {selects.count()}"
+        )
