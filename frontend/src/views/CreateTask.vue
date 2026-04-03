@@ -297,7 +297,7 @@
             <p class="schedule-drawer__hint">{{ t('createTask.schedulePreviewHint') }}</p>
             <HeatmapChart
               :tasks="scheduledTasksForPreview"
-              :selected-ms="scheduledDatetime"
+              :selected-ms="heatmapSelectedMs"
               @cell-click="handleScheduleHeatmapCellClick"
             />
           </template>
@@ -383,6 +383,18 @@ const scheduledDatetime = ref<number | null>(null)
 const scheduledTasksForPreview = ref<Task[]>([])
 const scheduledTasksLoading = ref(false)
 const showScheduleDrawer = ref(false)
+
+// Computed selected time for heatmap: works for both delay and scheduled modes
+const heatmapSelectedMs = computed<number | null>(() => {
+  if (scheduleType.value === 'scheduled') return scheduledDatetime.value
+  if (scheduleType.value === 'delay') {
+    const multiplier = delayUnit.value === 'seconds' ? 1000
+      : delayUnit.value === 'minutes' ? 60 * 1000
+      : 60 * 60 * 1000
+    return Date.now() + delayValue.value * multiplier
+  }
+  return null
+})
 
 // Create MR toggle
 const createMR = ref(true)
