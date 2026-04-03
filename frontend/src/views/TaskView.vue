@@ -85,7 +85,15 @@
                     <a v-if="task.target_branch && task.target_branch_url" :href="task.target_branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.target_branch }}</a>
                     <span v-else>{{ task.target_branch }}</span>
                   </n-descriptions-item>
-                  <n-descriptions-item :label="t('taskView.containerId')">{{ task.container_id || '-' }}</n-descriptions-item>
+                  <n-descriptions-item :label="t('taskView.containerId')">
+                    <n-tooltip v-if="task.container_id" trigger="hover" placement="top">
+                      <template #trigger>
+                        <code style="cursor: default; font-family: monospace; font-size: 12px;">{{ task.container_id.slice(0, 12) }}</code>
+                      </template>
+                      {{ task.container_id }}
+                    </n-tooltip>
+                    <span v-else>-</span>
+                  </n-descriptions-item>
                   <n-descriptions-item :label="t('taskView.mrUrl')">
                     <a v-if="task.merge_request_url" :href="task.merge_request_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.merge_request_url }}</a>
                     <n-tag v-else-if="task.target_branch === null" size="small" type="default" :bordered="false" style="color: #888; background: #f0f0f0;">
@@ -343,7 +351,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { NButton, NSpace, NCard, NDescriptions, NDescriptionsItem, NTag, NGrid, NGi, NSpin, NAlert, NText, NDatePicker, useMessage, NIcon } from 'naive-ui'
+import { NButton, NSpace, NCard, NDescriptions, NDescriptionsItem, NTag, NGrid, NGi, NSpin, NAlert, NText, NDatePicker, NTooltip, useMessage, NIcon } from 'naive-ui'
 import { PersonOutline, LogoGitlab } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, type Task } from '../api'
