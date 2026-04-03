@@ -132,6 +132,11 @@ class TaskLog(Base):
     log_level: Mapped[str] = mapped_column(String(20), nullable=False, default="INFO")
     message: Mapped[str] = mapped_column(Text, nullable=False)
 
+    # Structured log support: log_type distinguishes plain output from structured entries.
+    # 'tool_calls_json' entries store a JSON array of {name, input, output, error} in log_metadata.
+    log_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    log_metadata: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Timestamp
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow

@@ -212,6 +212,8 @@ async def get_task_logs(
             "id": log.id,
             "task_id": log.task_id,
             "log_level": log.log_level,
+            "log_type": log.log_type,
+            "metadata": log.log_metadata,
             "message": log.message,
             "created_at": log.created_at.isoformat(),
         }

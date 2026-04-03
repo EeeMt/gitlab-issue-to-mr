@@ -40,6 +40,8 @@ _ANSI_ESCAPE = re.compile(
 _CODIFY_STATS_RE = re.compile(r'^CODIFY_STATS:(.+)$', re.MULTILINE)
 # Emitted by entrypoint.sh; git-computed change stats (e.g. CODIFY_DIFF:+18-21).
 _CODIFY_DIFF_RE = re.compile(r'^CODIFY_DIFF:\+(\d+)-(\d+)$', re.MULTILINE)
+# Emitted by entrypoint.sh after Claude finishes; JSON array of tool call objects.
+_CODIFY_TOOL_CALLS_RE = re.compile(r'^CODIFY_TOOL_CALLS:(.+)$', re.MULTILINE)
 
 # Volume mount constants
 _MAVEN_CACHE_CONTAINER_PATH = "/home/codify/.m2/repository"
@@ -476,6 +478,26 @@ class WorkerExecutor:
                 )
             except Exception:
                 logger.debug(f"[Task {task.id}] Failed to parse CODIFY_STATS")
+
+        # Extract and store structured tool calls from CODIFY_TOOL_CALLS marker line.
+        # Stored as a separate TaskLog entry (log_type='tool_calls_json') so the frontend
+        # can render a timeline view without parsing the raw terminal output.
+        tool_calls_match = _CODIFY_TOOL_CALLS_RE.search(logs)
+        if tool_calls_match:
+            try:
+                tool_calls_json = tool_calls_match.group(1).strip()
+                _json.loads(tool_calls_json)  # validate JSON before storing
+                db.add(TaskLog(
+                    task_id=task.id,
+                    log_level="INFO",
+                    message="",
+                    log_type="tool_calls_json",
+                    log_metadata=tool_calls_json,
+                ))
+                await db.commit()
+                logger.info(f"[Task {task.id}] Stored structured tool calls log entry")
+            except Exception:
+                logger.debug(f"[Task {task.id}] Failed to parse CODIFY_TOOL_CALLS")
 
         if exit_code == 0:
             task.status = TaskStatus.COMPLETED

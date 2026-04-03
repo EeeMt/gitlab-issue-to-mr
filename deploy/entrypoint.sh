@@ -466,6 +466,14 @@ if [ -f /tmp/claude_result.json ] && [ -s /tmp/claude_result.json ]; then
     # Emit machine-parseable usage stats for backend collection
     USAGE_JSON=$(jq -c '.usage // {}' /tmp/claude_result.json 2>/dev/null || echo '{}')
     echo "CODIFY_STATS:${USAGE_JSON}"
+
+    # Emit structured tool calls for backend to store and frontend to render as timeline.
+    # Each tool output is truncated to 2000 chars to keep the payload manageable.
+    TOOL_CALLS_JSON=$(jq -c '[
+      .tool_calls[]? |
+      .output = ((.output // "") | if length > 2000 then .[:2000] + "…(truncated)" else . end)
+    ]' /tmp/claude_result.json 2>/dev/null || echo '[]')
+    echo "CODIFY_TOOL_CALLS:${TOOL_CALLS_JSON}"
 fi
 
 # Now commit and push the changes
