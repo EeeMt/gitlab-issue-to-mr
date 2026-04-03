@@ -236,23 +236,17 @@
                        />
 
 
-                       <!-- Schedule Heatmap Preview -->
-                       <div
+                       <!-- Heatmap reopen trigger -->
+                       <n-button
                          v-if="scheduleType === 'scheduled'"
-                         class="schedule-heatmap-preview"
-                         data-testid="schedule-heatmap-preview"
+                         size="small"
+                         secondary
+                         :loading="scheduledTasksLoading"
+                         @click="showScheduleDrawer = true"
                        >
-                         <div class="schedule-heatmap-preview__header">
-                           <span class="schedule-heatmap-preview__title">{{ t('createTask.schedulePreviewTitle') }}</span>
-                           <n-spin v-if="scheduledTasksLoading" :size="14" />
-                         </div>
-                         <HeatmapChart
-                           :tasks="scheduledTasksForPreview"
-                           :selected-ms="scheduledDatetime"
-                           @cell-click="handleScheduleHeatmapCellClick"
-                         />
-                         <div class="schedule-heatmap-preview__hint">{{ t('createTask.schedulePreviewHint') }}</div>
-                       </div>
+                         <template #icon><n-icon :component="CalendarOutline" /></template>
+                         {{ t('createTask.viewScheduleHeatmap') }}
+                       </n-button>
 
                       <div class="create-task-form__hint">
                         {{ scheduleSummary }}
@@ -294,6 +288,21 @@
           </n-space>
         </n-space>
       </n-modal>
+
+      <!-- Schedule Heatmap Drawer -->
+      <n-drawer v-model:show="showScheduleDrawer" :width="isMobile ? '100%' : 580" placement="right">
+        <n-drawer-content :title="t('createTask.schedulePreviewTitle')" closable>
+          <n-spin v-if="scheduledTasksLoading" :description="t('createTask.schedulePreviewLoading')" />
+          <template v-else>
+            <p class="schedule-drawer__hint">{{ t('createTask.schedulePreviewHint') }}</p>
+            <HeatmapChart
+              :tasks="scheduledTasksForPreview"
+              :selected-ms="scheduledDatetime"
+              @cell-click="handleScheduleHeatmapCellClick"
+            />
+          </template>
+        </n-drawer-content>
+      </n-drawer>
     </n-space>
   </div>
 </template>
@@ -305,12 +314,13 @@ import {
   NCard, NForm, NFormItem, NSelect, NInput, NInputNumber,
   NButton, NSpin, NSpace, NRadioGroup, NRadio, NModal,
   NDatePicker, NTag, NGrid, NGi, NPopover, NIcon, NSwitch, NTooltip,
+  NDrawer, NDrawerContent,
   useMessage, FormInst, FormRules
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { getProjects, getBranches, createTask, getPromptTemplates, getScheduledTasks, type Project, type Branch, type CreateTaskRequest, type PromptTemplate, type Task } from '../api'
 import { formatDateTimeUtc8 } from '../utils/datetime'
-import { DocumentTextOutline, WarningOutline, InformationCircleOutline } from '@vicons/ionicons5'
+import { DocumentTextOutline, WarningOutline, InformationCircleOutline, CalendarOutline } from '@vicons/ionicons5'
 import PageHeader from '../components/PageHeader.vue'
 import VariableEditor from '../components/VariableEditor.vue'
 import HeatmapChart from '../components/HeatmapChart.vue'
@@ -372,6 +382,7 @@ const scheduledDatetime = ref<number | null>(null)
 
 const scheduledTasksForPreview = ref<Task[]>([])
 const scheduledTasksLoading = ref(false)
+const showScheduleDrawer = ref(false)
 
 // Create MR toggle
 const createMR = ref(true)
@@ -497,6 +508,7 @@ function isScheduledTimeDisabled(timestamp: number) {
 
 function handleScheduleHeatmapCellClick(startMs: number) {
   scheduledDatetime.value = startMs
+  showScheduleDrawer.value = false
 }
 
 // Validation rules
@@ -715,6 +727,7 @@ onMounted(() => {
 
 watch(scheduleType, async (newType) => {
   if (newType === 'scheduled') {
+    showScheduleDrawer.value = true
     if (scheduledTasksForPreview.value.length === 0) {
       scheduledTasksLoading.value = true
       try {
@@ -727,6 +740,7 @@ watch(scheduleType, async (newType) => {
     }
   } else {
     scheduledDatetime.value = null
+    showScheduleDrawer.value = false
   }
 })
 </script>
@@ -926,31 +940,10 @@ watch(scheduleType, async (newType) => {
   vertical-align: middle;
 }
 
-.schedule-heatmap-preview {
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  border-radius: 10px;
-  padding: 12px 14px;
-  background: rgba(148, 163, 184, 0.04);
-}
-
-.schedule-heatmap-preview__header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.schedule-heatmap-preview__title {
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(15, 23, 42, 0.58);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-}
-
-.schedule-heatmap-preview__hint {
-  margin-top: 8px;
-  font-size: 11px;
-  color: rgba(15, 23, 42, 0.45);
+.schedule-drawer__hint {
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.55);
+  margin-bottom: 16px;
+  margin-top: 0;
 }
 </style>
