@@ -347,6 +347,7 @@
                 :tool-calls="toolCalls"
                 :input-tokens="task?.input_tokens ?? null"
                 :output-tokens="task?.output_tokens ?? null"
+                :is-active="isActiveTaskStatus(task?.status)"
               />
               <!-- Terminal (raw) view -->
               <template v-else>
@@ -418,9 +419,23 @@ const renderedLogs = computed(() => {
 })
 
 const toolCalls = computed<ToolCall[]>(() => {
-  const structuredEntry = taskLogs.value.find(l => l.log_type === 'tool_calls_json')
-  if (!structuredEntry?.metadata) return []
-  try { return JSON.parse(structuredEntry.metadata) } catch { return [] }
+  // Prefer individual tool_call entries written in real-time during execution.
+  // Each entry has its own created_at timestamp for the timeline display.
+  const individual = taskLogs.value.filter(l => l.log_type === 'tool_call')
+  if (individual.length > 0) {
+    return individual
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .flatMap(l => {
+        try {
+          const call = JSON.parse(l.metadata ?? '{}') as ToolCall
+          return [{ ...call, timestamp: l.created_at }]
+        } catch { return [] }
+      })
+  }
+  // Fallback: batch entry written after task completes (older tasks or on error)
+  const batch = taskLogs.value.find(l => l.log_type === 'tool_calls_json')
+  if (!batch?.metadata) return []
+  try { return JSON.parse(batch.metadata) } catch { return [] }
 })
 
 const hasStructuredLogs = computed(() => toolCalls.value.length > 0)
@@ -598,7 +613,7 @@ async function fetchLogs() {
     const logEntries = await getTaskLogs(taskId.value)
     taskLogs.value = logEntries
     logs.value = logEntries.map(l => `[${l.created_at}] [${l.log_level}] ${l.message}`).join('\n')
-    if (!logViewModeSet.value && logEntries.some(l => l.log_type === 'tool_calls_json')) {
+    if (!logViewModeSet.value && logEntries.some(l => l.log_type === 'tool_call' || l.log_type === 'tool_calls_json')) {
       logViewMode.value = 'timeline'
       logViewModeSet.value = true
     }

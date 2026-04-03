@@ -14,13 +14,13 @@
 
     <!-- Empty state -->
     <n-empty
-      v-if="toolCalls.length === 0"
+      v-if="toolCalls.length === 0 && !isActive"
       :description="t('taskView.noToolCalls')"
       class="structured-log-view__empty"
     />
 
     <!-- Tool call list -->
-    <div v-else class="structured-log-view__list">
+    <div class="structured-log-view__list">
       <div
         v-for="(call, index) in toolCalls"
         :key="index"
@@ -39,13 +39,22 @@
             <span v-if="getInputSummary(call)" class="tool-call-item__summary">{{ getInputSummary(call) }}</span>
           </div>
           <n-tag v-if="call.error" type="error" size="small" round>Error</n-tag>
+          <span v-if="call.timestamp" class="tool-call-item__ts">{{ formatTimestamp(call.timestamp) }}</span>
         </div>
 
-        <!-- Collapsible output -->
-        <n-collapse v-if="call.output" class="tool-call-item__collapse">
-          <n-collapse-item name="output">
+        <!-- Collapsible details: input + output -->
+        <n-collapse class="tool-call-item__collapse">
+          <!-- Full input parameters -->
+          <n-collapse-item v-if="hasDetailedInput(call)" name="input">
             <template #header>
-              <span class="tool-call-item__output-label">Output</span>
+              <span class="tool-call-item__detail-label">{{ t('taskView.toolInput') }}</span>
+            </template>
+            <pre class="tool-call-item__pre tool-call-item__pre--input">{{ formatInput(call) }}</pre>
+          </n-collapse-item>
+          <!-- Output -->
+          <n-collapse-item v-if="call.output" name="output">
+            <template #header>
+              <span class="tool-call-item__detail-label">{{ t('taskView.toolOutput') }}</span>
             </template>
             <pre
               class="tool-call-item__pre"
@@ -54,12 +63,18 @@
           </n-collapse-item>
         </n-collapse>
       </div>
+
+      <!-- Live indicator: task still running -->
+      <div v-if="isActive" class="tool-call-live">
+        <n-spin size="small" />
+        <span class="tool-call-live__label">{{ t('taskView.timelineRunning') }}</span>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { NIcon, NTag, NEmpty, NCollapse, NCollapseItem } from 'naive-ui'
+import { NIcon, NTag, NEmpty, NCollapse, NCollapseItem, NSpin } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
   TerminalOutline,
@@ -76,6 +91,7 @@ defineProps<{
   toolCalls: ToolCall[]
   inputTokens: number | null
   outputTokens: number | null
+  isActive?: boolean
 }>()
 
 const { t } = useI18n()
@@ -134,6 +150,51 @@ function getInputSummary(call: ToolCall): string {
       const firstStr = Object.values(input).find((v) => typeof v === 'string')
       return typeof firstStr === 'string' ? String(firstStr).slice(0, 80) : ''
     }
+  }
+}
+
+/** Returns true when the input has enough detail to warrant an expandable section. */
+function hasDetailedInput(call: ToolCall): boolean {
+  const input = call.input
+  if (Object.keys(input).length === 0) return false
+  // For file-path tools, only show input section when there's more than just the path
+  if (['Read', 'Glob', 'Grep'].includes(call.name) && Object.keys(input).length <= 2) return false
+  return true
+}
+
+/** Format the full input as readable text for the expanded section. */
+function formatInput(call: ToolCall): string {
+  const input = call.input
+  switch (call.name) {
+    case 'Bash':
+      return typeof input.command === 'string' ? input.command : JSON.stringify(input, null, 2)
+    case 'Write':
+    case 'MultiEdit':
+      // For file writes show path + content
+      return JSON.stringify(input, null, 2)
+    case 'Edit': {
+      // Show path, old_str, new_str clearly
+      const parts: string[] = []
+      if (input.file_path) parts.push(`file: ${input.file_path}`)
+      if (input.old_str) parts.push(`--- (old)\n${input.old_str}`)
+      if (input.new_str) parts.push(`+++ (new)\n${input.new_str}`)
+      return parts.length > 0 ? parts.join('\n\n') : JSON.stringify(input, null, 2)
+    }
+    default:
+      return JSON.stringify(input, null, 2)
+  }
+}
+
+/** Format ISO timestamp as HH:MM:SS. */
+function formatTimestamp(iso: string): string {
+  try {
+    const d = new Date(iso)
+    const hh = String(d.getHours()).padStart(2, '0')
+    const mm = String(d.getMinutes()).padStart(2, '0')
+    const ss = String(d.getSeconds()).padStart(2, '0')
+    return `${hh}:${mm}:${ss}`
+  } catch {
+    return ''
   }
 }
 </script>
@@ -215,12 +276,20 @@ function getInputSummary(call: ToolCall): string {
   font-family: var(--n-font-family-mono, 'JetBrains Mono', 'Fira Code', monospace);
 }
 
+.tool-call-item__ts {
+  font-size: 11px;
+  color: var(--n-text-color-3, #999);
+  flex-shrink: 0;
+  font-family: var(--n-font-family-mono, 'JetBrains Mono', 'Fira Code', monospace);
+  margin-left: auto;
+}
+
 .tool-call-item__collapse {
   margin-top: 4px;
   margin-left: 28px;
 }
 
-.tool-call-item__output-label {
+.tool-call-item__detail-label {
   font-size: 11px;
   color: var(--n-text-color-3, #999);
 }
@@ -230,7 +299,7 @@ function getInputSummary(call: ToolCall): string {
   padding: 8px;
   font-size: 11px;
   font-family: var(--n-font-family-mono, 'JetBrains Mono', 'Fira Code', monospace);
-  max-height: 200px;
+  max-height: 300px;
   overflow: auto;
   background: var(--n-color-embedded, rgba(128, 128, 128, 0.05));
   border-radius: 4px;
@@ -242,5 +311,22 @@ function getInputSummary(call: ToolCall): string {
 .tool-call-item__pre--error {
   background: rgba(239, 68, 68, 0.08);
   color: #ef4444;
+}
+
+.tool-call-item__pre--input {
+  background: var(--n-color-embedded, rgba(128, 128, 128, 0.05));
+  color: var(--n-text-color-2, #666);
+}
+
+.tool-call-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0 4px;
+  color: var(--n-text-color-3, #999);
+}
+
+.tool-call-live__label {
+  font-size: 12px;
 }
 </style>

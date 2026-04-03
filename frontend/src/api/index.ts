@@ -110,6 +110,8 @@ export interface ToolCall {
   input: Record<string, unknown>
   output: string | null
   error: boolean
+  /** ISO timestamp present on real-time individual log entries (log_type='tool_call'). */
+  timestamp?: string
 }
 
 export interface TaskStats {

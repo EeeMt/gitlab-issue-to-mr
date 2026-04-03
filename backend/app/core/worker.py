@@ -40,8 +40,10 @@ _ANSI_ESCAPE = re.compile(
 _CODIFY_STATS_RE = re.compile(r'^CODIFY_STATS:(.+)$', re.MULTILINE)
 # Emitted by entrypoint.sh; git-computed change stats (e.g. CODIFY_DIFF:+18-21).
 _CODIFY_DIFF_RE = re.compile(r'^CODIFY_DIFF:\+(\d+)-(\d+)$', re.MULTILINE)
-# Emitted by entrypoint.sh after Claude finishes; JSON array of tool call objects.
+# Emitted by entrypoint.sh after Claude finishes; JSON array of all tool call objects.
 _CODIFY_TOOL_CALLS_RE = re.compile(r'^CODIFY_TOOL_CALLS:(.+)$', re.MULTILINE)
+# Emitted by ci-claude.sh in real-time after EACH tool completes; single tool call object.
+_CODIFY_TOOL_CALL_RE = re.compile(r'^CODIFY_TOOL_CALL:(.+)$')
 
 # Volume mount constants
 _MAVEN_CACHE_CONTAINER_PATH = "/home/codify/.m2/repository"
@@ -246,6 +248,30 @@ class WorkerExecutor:
                 break
 
             line = item.decode("utf-8", errors="replace")
+
+            # Real-time tool call parsing: each CODIFY_TOOL_CALL: line emitted by
+            # ci-claude.sh marks one completed tool call. Write an individual TaskLog
+            # entry immediately so the frontend can show a live timeline without waiting
+            # for the full batch CODIFY_TOOL_CALLS: entry at the end of the run.
+            stripped = line.rstrip('\n\r')
+            if stripped.startswith('CODIFY_TOOL_CALL:'):
+                tc_match = _CODIFY_TOOL_CALL_RE.match(stripped)
+                if tc_match:
+                    try:
+                        json_str = tc_match.group(1)
+                        _json.loads(json_str)  # validate before storing
+                        db.add(TaskLog(
+                            task_id=task_id,
+                            log_level="INFO",
+                            message="",
+                            log_type="tool_call",
+                            log_metadata=json_str,
+                        ))
+                        await db.commit()
+                        logger.debug(f"[Task {task_id}] Stored real-time tool_call entry")
+                    except Exception as exc:
+                        logger.debug(f"[Task {task_id}] Failed to parse CODIFY_TOOL_CALL: {exc}")
+
             buffer.append(line)
             all_lines.append(line)
 

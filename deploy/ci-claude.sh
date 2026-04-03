@@ -220,13 +220,18 @@ process_stream() {
           _e "${CYAN}  ╰─ ✅ Output: ${DIM}%.400s${RESET}\n" "$output"
         fi
 
+        # Truncate output to 2000 chars to keep stored payloads manageable
+        local stored_out
+        stored_out="${output:0:2000}"
+        [[ ${#output} -gt 2000 ]] && stored_out+="…(truncated)"
+
         # Patch the last tool-call stub with its output and error flag
         if [[ -s "$TOOL_CALLS_FILE" ]]; then
           local total_lines last_line updated
           total_lines=$(wc -l < "$TOOL_CALLS_FILE")
           last_line=$(tail -1 "$TOOL_CALLS_FILE")
           updated=$(printf '%s' "$last_line" | jq -c \
-            --arg out "$output" \
+            --arg out "$stored_out" \
             --argjson err "$is_error" \
             '.output = $out | .error = $err')
           {
@@ -234,6 +239,9 @@ process_stream() {
             printf '%s\n' "$updated"
           } > "$TOOL_CALLS_FILE.tmp"
           mv "$TOOL_CALLS_FILE.tmp" "$TOOL_CALLS_FILE"
+          # Emit real-time per-call marker so backend can write individual timeline entries.
+          # Goes to stderr which flows into Docker container logs and is streamed to DB.
+          printf 'CODIFY_TOOL_CALL:%s\n' "$updated" >&2
         fi
         ;;
 

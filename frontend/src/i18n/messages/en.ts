@@ -219,7 +219,10 @@ const en = {
     terminalView: 'Terminal',
     toolCallsCount: '{count} tool calls',
     noToolCalls: 'No tool calls recorded',
-    totalTokens: 'Total'
+    totalTokens: 'Total',
+    toolInput: 'Input',
+    toolOutput: 'Output',
+    timelineRunning: 'Running…'
   },
   createTask: {
     title: 'Create Manual Task',

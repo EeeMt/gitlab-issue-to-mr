@@ -209,7 +209,10 @@ const zhCN = {
     terminalView: '终端',
     toolCallsCount: '{count} 次工具调用',
     noToolCalls: '没有工具调用记录',
-    totalTokens: '合计'
+    totalTokens: '合计',
+    toolInput: '输入',
+    toolOutput: '输出',
+    timelineRunning: '运行中…'
   },
   createTask: {
     title: '创建手动任务',
