@@ -613,15 +613,18 @@ const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
       ])
   },
   {
-    title: t('analytics.tokens'),
-    key: 'total_tokens',
-    width: 150,
-    sorter: (a, b) => a.total_tokens - b.total_tokens,
-    render: (row) =>
-      h('div', [
-        h('div', formatNumber(row.total_tokens)),
-        h('div', { style: secondaryTextStyle }, formatTokenBreakdown(row.input_tokens, row.output_tokens))
-      ])
+    title: t('analytics.inputTokens'),
+    key: 'input_tokens',
+    width: 120,
+    sorter: (a, b) => a.input_tokens - b.input_tokens,
+    render: (row) => formatNumber(row.input_tokens)
+  },
+  {
+    title: t('analytics.outputTokens'),
+    key: 'output_tokens',
+    width: 120,
+    sorter: (a, b) => a.output_tokens - b.output_tokens,
+    render: (row) => formatNumber(row.output_tokens)
   },
   {
     title: t('analytics.lastTask'),
@@ -680,15 +683,18 @@ const initiatorColumns = computed<DataTableColumns<AnalyticsInitiatorRow>>(() =>
       ])
   },
   {
-    title: t('analytics.tokens'),
-    key: 'total_tokens',
-    width: 150,
-    sorter: (a, b) => a.total_tokens - b.total_tokens,
-    render: (row) =>
-      h('div', [
-        h('div', formatNumber(row.total_tokens)),
-        h('div', { style: secondaryTextStyle }, formatTokenBreakdown(row.input_tokens, row.output_tokens))
-      ])
+    title: t('analytics.inputTokens'),
+    key: 'input_tokens',
+    width: 120,
+    sorter: (a, b) => a.input_tokens - b.input_tokens,
+    render: (row) => formatNumber(row.input_tokens)
+  },
+  {
+    title: t('analytics.outputTokens'),
+    key: 'output_tokens',
+    width: 120,
+    sorter: (a, b) => a.output_tokens - b.output_tokens,
+    render: (row) => formatNumber(row.output_tokens)
   },
   {
     title: t('analytics.lastTask'),

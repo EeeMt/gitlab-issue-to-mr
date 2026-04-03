@@ -541,6 +541,8 @@ const en = {
     totalTokens: 'Total Tokens',
     avgTokensPerTask: 'Avg Tokens / Task',
     tokens: 'Tokens',
+    inputTokens: 'Input Tokens',
+    outputTokens: 'Output Tokens',
     tokenBreakdown: 'In {input} / Out {output}',
     trackedTokenTasks: '{count} tasks with token data',
     maxTokens: 'Max {value}',

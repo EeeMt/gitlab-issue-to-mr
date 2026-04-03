@@ -523,6 +523,8 @@ const zhCN = {
     totalTokens: '总 Token',
     avgTokensPerTask: '单任务平均 Token',
     tokens: 'Token',
+    inputTokens: '输入 Token',
+    outputTokens: '输出 Token',
     tokenBreakdown: '输入 {input} / 输出 {output}',
     trackedTokenTasks: '{count} 个任务有 Token 数据',
     maxTokens: '最大 {value}',
