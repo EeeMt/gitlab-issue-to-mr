@@ -21,20 +21,11 @@
 
       <n-spin :show="initialLoading">
         <div class="task-view__content">
-          <!-- Metadata Panel -->
-          <TaskMetadataPanel v-if="task" :task="task" />
-
-          <!-- Process Panel -->
-          <TaskProcessPanel
-            :task-logs="taskLogs"
-            :input-tokens="task?.input_tokens ?? null"
-            :output-tokens="task?.output_tokens ?? null"
-            :is-active="isActiveTaskStatus(task?.status)"
-            :terminal-html="terminalLogHtml"
-          />
-
-          <!-- Actions grid -->
+          <!-- Top row: Metadata Panel + Actions side-by-side -->
           <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
+            <n-gi>
+              <TaskMetadataPanel v-if="task" :task="task" />
+            </n-gi>
             <n-gi>
               <n-card class="task-card" :bordered="false" data-testid="task-actions-card">
                 <template #header>
@@ -209,6 +200,15 @@
               </n-card>
             </n-gi>
           </n-grid>
+
+          <!-- Process Panel -->
+          <TaskProcessPanel
+            :task-logs="taskLogs"
+            :input-tokens="task?.input_tokens ?? null"
+            :output-tokens="task?.output_tokens ?? null"
+            :is-active="isActiveTaskStatus(task?.status)"
+            :terminal-html="terminalLogHtml"
+          />
 
           <!-- Result Panel (only for terminal tasks) -->
           <TaskResultPanel v-if="task && isTerminal" :task="task" />

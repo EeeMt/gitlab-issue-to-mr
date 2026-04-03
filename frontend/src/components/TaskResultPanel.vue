@@ -67,6 +67,10 @@
             <span class="summary-value">{{ task.output_tokens != null ? task.output_tokens.toLocaleString() : '-' }}</span>
           </div>
           <div class="summary-item">
+            <span class="summary-label">{{ t('taskView.totalTokens') }}</span>
+            <span class="summary-value">{{ totalTokens != null ? totalTokens.toLocaleString() : '-' }}</span>
+          </div>
+          <div class="summary-item">
             <span class="summary-label">{{ t('taskView.duration') }}</span>
             <span class="summary-value">{{ executionDuration }}</span>
           </div>
@@ -106,6 +110,13 @@ const executionDuration = computed(() => {
   } catch {
     return '-'
   }
+})
+
+const totalTokens = computed(() => {
+  const i = props.task.input_tokens
+  const o = props.task.output_tokens
+  if (i == null && o == null) return null
+  return (i ?? 0) + (o ?? 0)
 })
 </script>
 

@@ -265,7 +265,7 @@ process_stream() {
           cwd=$(printf '%s' "$line" | jq -r '.cwd // empty' 2>/dev/null)
           [[ -n "$model" ]] && log "Model : $model"
           [[ -n "$cwd" ]]   && log "CWD   : $cwd"
-          printf 'CODIFY_SYSTEM_INIT:%s\n' "$(jq -c -n --arg model "$model" --arg cwd "$cwd" '{model: $model, cwd: $cwd}')"
+          printf 'CODIFY_SYSTEM_INIT:%s\n' "$(jq -c -n --arg model "$model" --arg cwd "$cwd" '{model: $model, cwd: $cwd}')" >&2
         fi
         ;;
 
