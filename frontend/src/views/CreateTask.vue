@@ -184,10 +184,16 @@
                 <n-gi>
                   <n-form-item :label="t('common.priority')" path="priority">
                     <n-radio-group v-model:value="formValue.priority" data-testid="create-task-priority-group">
-                      <n-space vertical :size="8">
-                        <n-radio :value="0">{{ t('createTask.p0') }}</n-radio>
-                        <n-radio :value="1">{{ t('createTask.p1') }}</n-radio>
-                        <n-radio :value="2">{{ t('createTask.p2') }}</n-radio>
+                      <n-space :size="8">
+                        <n-radio-button :value="0" class="priority-btn priority-btn--p0">
+                          <span class="priority-btn__dot"></span>{{ t('createTask.p0') }}
+                        </n-radio-button>
+                        <n-radio-button :value="1" class="priority-btn priority-btn--p1">
+                          <span class="priority-btn__dot"></span>{{ t('createTask.p1') }}
+                        </n-radio-button>
+                        <n-radio-button :value="2" class="priority-btn priority-btn--p2">
+                          <span class="priority-btn__dot"></span>{{ t('createTask.p2') }}
+                        </n-radio-button>
                       </n-space>
                     </n-radio-group>
                   </n-form-item>
@@ -979,5 +985,27 @@ watch(scheduleType, (newType) => {
   font-size: 12px;
   color: #d03050;
   margin-top: 2px;
+}
+
+.priority-btn__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+  margin-top: -1px;
+}
+
+.priority-btn--p0 .priority-btn__dot {
+  background-color: #d03050;
+}
+
+.priority-btn--p1 .priority-btn__dot {
+  background-color: #f0a020;
+}
+
+.priority-btn--p2 .priority-btn__dot {
+  background-color: #18a058;
 }
 </style>
