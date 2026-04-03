@@ -280,7 +280,9 @@ const en = {
     scheduledTimeFuture: 'Scheduled time must be in the future',
     manualTaskBranchConflict:
       'Source branch and target branch must be different for manual tasks',
-    failedToCreateTask: 'Failed to create task'
+    failedToCreateTask: 'Failed to create task',
+    createMR: 'Create Merge Request',
+    createMRTooltip: 'When disabled, only pushes the branch without creating an MR'
   },
   sessions: {
     title: 'Sessions',

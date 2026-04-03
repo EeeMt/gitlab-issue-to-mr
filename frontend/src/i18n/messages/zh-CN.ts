@@ -267,7 +267,9 @@ const zhCN = {
     pleaseSelectScheduledTime: '请选择定时执行时间',
     scheduledTimeFuture: '定时执行时间必须晚于当前时间',
     manualTaskBranchConflict: '手动任务的源分支和目标分支必须不同',
-    failedToCreateTask: '创建任务失败'
+    failedToCreateTask: '创建任务失败',
+    createMR: '创建合并请求',
+    createMRTooltip: '禁用时仅推送分支，不创建 MR'
   },
   sessions: {
     title: '会话',

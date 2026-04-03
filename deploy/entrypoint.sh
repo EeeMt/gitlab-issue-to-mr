@@ -32,7 +32,7 @@ echo "MR IID:       ${MR_IID:-N/A}"
 echo "Task ID:      ${TASK_ID:-N/A}"
 echo "Branch:       ${BRANCH_NAME}"
 echo "Base Branch:  ${BASE_BRANCH:-${TARGET_BRANCH}}"
-echo "Target:       ${TARGET_BRANCH}"
+echo "Target:       ${TARGET_BRANCH:-N/A (no-MR mode)}"
 echo "----------------------------------------"
 echo "Anthropic URL:  ${ANTHROPIC_BASE_URL}"
 echo "Model:          ${ANTHROPIC_MODEL}"
@@ -41,9 +41,14 @@ echo "API Key set:    $([ -n "$ANTHROPIC_API_KEY" ] && echo 'yes' || echo 'no')"
 echo "GitLab Token:   $([ -n "$GITLAB_TOKEN" ] && echo 'set' || echo 'missing')"
 echo "========================================"
 
-# Set BASE_BRANCH to TARGET_BRANCH if not explicitly set
+# Set BASE_BRANCH: explicit > TARGET_BRANCH > project default branch
 if [ -z "${BASE_BRANCH}" ]; then
-    BASE_BRANCH="${TARGET_BRANCH}"
+    if [ -n "${TARGET_BRANCH}" ]; then
+        BASE_BRANCH="${TARGET_BRANCH}"
+    else
+        BASE_BRANCH="${DEFAULT_BRANCH:-main}"
+        echo "No TARGET_BRANCH set (no-MR mode); using default branch '${BASE_BRANCH}' as base"
+    fi
 fi
 
 # Extract hostname from GITLAB_URL for git operations
@@ -55,6 +60,7 @@ GITLAB_API_RESPONSE=$(curl -s -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
     "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}")
 GIT_REPO_URL=$(echo "${GITLAB_API_RESPONSE}" | grep -o '"http_url_to_repo":"[^"]*"' | cut -d'"' -f4)
 PROJECT_PATH=$(echo "${GITLAB_API_RESPONSE}" | grep -o '"path_with_namespace":"[^"]*"' | cut -d'"' -f4)
+DEFAULT_BRANCH=$(echo "${GITLAB_API_RESPONSE}" | grep -o '"default_branch":"[^"]*"' | cut -d'"' -f4)
 
 # Fallback to constructed URL if API fails
 if [ -z "${PROJECT_PATH}" ] && [ -n "${GIT_REPO_URL}" ]; then
@@ -588,10 +594,12 @@ AI-Generated: true"
     COMMIT_SHA=$(git rev-parse HEAD)
     echo "Committed: ${COMMIT_SHA}"
 
-    # MR was already created by backend before worker started
-    # Just get the MR info if MR_IID was provided
+    # MR was already created by backend before worker started.
+    # In no-MR mode (TARGET_BRANCH is empty), skip all MR operations.
     MR_WEB_URL=""
-    if [ -n "${MR_IID}" ]; then
+    if [ -z "${TARGET_BRANCH:-}" ]; then
+        echo "No-MR mode: skipping MR lookup and update"
+    elif [ -n "${MR_IID}" ]; then
         echo "Using existing MR: !${MR_IID}"
         MR_WEB_URL=$(curl -s -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
             "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests/${MR_IID}" | \
@@ -610,10 +618,14 @@ AI-Generated: true"
         fi
     fi
 
-    if [ -z "$MR_WEB_URL" ]; then
-        MR_WEB_URL=$(cat /workspace/mr_response.json | grep -o '"web_url":"[^"]*"' | cut -d'"' -f4)
+    if [ -z "${TARGET_BRANCH:-}" ]; then
+        echo "No-MR mode: branch pushed, no MR created"
+    else
+        if [ -z "$MR_WEB_URL" ]; then
+            MR_WEB_URL=$(cat /workspace/mr_response.json 2>/dev/null | grep -o '"web_url":"[^"]*"' | cut -d'"' -f4)
+        fi
+        echo "MR: ${MR_WEB_URL:-none}"
     fi
-    echo "MR created: ${MR_WEB_URL}"
 
     if [ -n "${MR_IID}" ]; then
         TITLE_PROMPT=$(build_mr_title_prompt "${CHANGED_FILES_TEXT}")

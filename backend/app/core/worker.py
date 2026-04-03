@@ -368,27 +368,29 @@ class WorkerExecutor:
         self,
         task: Task,
         mr_iid: Optional[int],
-        target_branch: str,
+        target_branch: Optional[str],
     ) -> dict[str, str]:
         """Build environment variables for the worker container.
 
         Args:
             task: Task object
             mr_iid: MR IID (if available)
-            target_branch: Target branch for the MR
+            target_branch: Target branch for the MR; None = no-MR mode (direct push only)
 
         Returns:
             Dict of environment variables for the container
         """
         settings = get_settings()
 
+        # In no-MR mode target_branch is None; pass empty string so entrypoint
+        # knows to skip MR creation and push the branch without opening an MR.
         environment = {
             "GITLAB_URL": settings.gitlab_url,
             "GITLAB_TOKEN": settings.gitlab_bot_token,
             "PROJECT_ID": str(task.project_id),
             "BRANCH_NAME": task.branch_name,
             "USER_PROMPT": task.user_prompt,
-            "TARGET_BRANCH": target_branch,
+            "TARGET_BRANCH": target_branch or "",
             "ANTHROPIC_BASE_URL": settings.anthropic_base_url,
             "ANTHROPIC_API_KEY": settings.anthropic_api_key,
             "ANTHROPIC_MODEL": settings.anthropic_model,
@@ -723,8 +725,9 @@ class WorkerExecutor:
             mr_iid = task.merge_request_iid
             mr_web_url = task.merge_request_url
 
-            # Create or reuse MR
-            mr_iid, mr_web_url = self._create_mr_if_needed(task, mr_iid, mr_web_url)
+            # Create or reuse MR (skip when target_branch is None — no-MR mode)
+            if task.target_branch:
+                mr_iid, mr_web_url = self._create_mr_if_needed(task, mr_iid, mr_web_url)
 
             # Update task with MR info if new MR was created
             if mr_iid and mr_iid != task.merge_request_iid:

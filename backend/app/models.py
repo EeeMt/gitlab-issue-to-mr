@@ -77,7 +77,8 @@ class Task(Base):
     container_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     # Branch configuration
-    target_branch: Mapped[str] = mapped_column(String(255), nullable=False, default="main")
+    # target_branch=None means the task should not create an MR (direct push only)
+    target_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, default=None)
 
     # Results
     commit_sha: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)

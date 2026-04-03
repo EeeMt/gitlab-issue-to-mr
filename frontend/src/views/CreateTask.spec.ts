@@ -211,6 +211,28 @@ vi.mock('naive-ui', () => ({
     },
     template: '<i class="n-icon"></i>'
   },
+  NSwitch: {
+    name: 'NSwitch',
+    props: ['value'],
+    emits: ['update:value'],
+    setup(props: any, { emit }: any) {
+      return () => h('button', {
+        class: 'n-switch',
+        role: 'switch',
+        'aria-checked': props.value,
+        onClick: () => emit('update:value', !props.value)
+      })
+    },
+    template: '<button class="n-switch" role="switch"></button>'
+  },
+  NTooltip: {
+    name: 'NTooltip',
+    props: ['placement'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-tooltip' }, slots.trigger?.())
+    },
+    template: '<div class="n-tooltip"><slot name="trigger" /></div>'
+  },
   NSpin: {
     name: 'NSpin',
     props: ['show'],

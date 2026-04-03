@@ -82,7 +82,27 @@
                     </template>
                   </n-form-item>
                 </n-gi>
-                <n-gi>
+                <n-gi :span="isMobile ? 1 : 2">
+                  <n-form-item path="create_mr">
+                    <template #label>
+                      <n-tooltip placement="top">
+                        <template #trigger>
+                          <span class="create-task-form__toggle-label">
+                            {{ t('createTask.createMR') }}
+                            <n-icon :component="InformationCircleOutline" size="14" class="create-task-form__toggle-label-icon" />
+                          </span>
+                        </template>
+                        {{ t('createTask.createMRTooltip') }}
+                      </n-tooltip>
+                    </template>
+                    <n-switch
+                      v-model:value="createMR"
+                      data-testid="create-task-create-mr-switch"
+                      @update:value="handleCreateMRChange"
+                    />
+                  </n-form-item>
+                </n-gi>
+                <n-gi v-if="createMR">
                   <n-form-item :label="t('createTask.targetBranch')" path="target_branch">
                       <n-select
                         data-testid="create-task-target-branch-select"
@@ -259,13 +279,13 @@ import { useRouter } from 'vue-router'
 import {
   NCard, NForm, NFormItem, NSelect, NInput, NInputNumber,
   NButton, NSpin, NSpace, NRadioGroup, NRadio, NModal,
-  NDatePicker, NTag, NGrid, NGi, NPopover, NIcon,
+  NDatePicker, NTag, NGrid, NGi, NPopover, NIcon, NSwitch, NTooltip,
   useMessage, FormInst, FormRules
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { getProjects, getBranches, createTask, getPromptTemplates, type Project, type Branch, type CreateTaskRequest, type PromptTemplate } from '../api'
 import { formatDateTimeUtc8 } from '../utils/datetime'
-import { DocumentTextOutline, WarningOutline } from '@vicons/ionicons5'
+import { DocumentTextOutline, WarningOutline, InformationCircleOutline } from '@vicons/ionicons5'
 import PageHeader from '../components/PageHeader.vue'
 import VariableEditor from '../components/VariableEditor.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
@@ -323,6 +343,9 @@ const scheduleType = ref<'now' | 'delay' | 'scheduled'>('now')
 const delayValue = ref(5)
 const delayUnit = ref<'seconds' | 'minutes' | 'hours'>('minutes')
 const scheduledDatetime = ref<number | null>(null)
+
+// Create MR toggle
+const createMR = ref(true)
 
 // Success modal
 const showSuccessModal = ref(false)
@@ -464,6 +487,7 @@ const rules: FormRules = {
   target_branch: {
     required: true,
     validator: () => {
+      if (!createMR.value) return true
       if (!formValue.value.target_branch) {
         return new Error(t('createTask.pleaseSelectTargetBranch'))
       }
@@ -533,15 +557,25 @@ function handleProjectChange(projectId: number) {
     fetchBranches(projectId)
     formValue.value.base_branch = undefined
     formValue.value.new_branch_name = ''
-    // Set target_branch to the project's default branch
-    const project = projects.value.find(p => p.id === projectId)
-    formValue.value.target_branch = project?.default_branch || 'main'
+    // Set target_branch to the project's default branch only when MR creation is enabled
+    if (createMR.value) {
+      const project = projects.value.find(p => p.id === projectId)
+      formValue.value.target_branch = project?.default_branch || 'main'
+    }
   }
 }
 
 function handleBaseBranchChange(_branch: string) {
   // Reset new branch name when base branch changes
   formValue.value.new_branch_name = ''
+}
+
+function handleCreateMRChange(value: boolean) {
+  if (value && formValue.value.project_id) {
+    // Restore project default branch when toggling MR creation back on
+    const project = projects.value.find(p => p.id === formValue.value.project_id)
+    formValue.value.target_branch = project?.default_branch || 'main'
+  }
 }
 
 async function handleReset() {
@@ -551,6 +585,7 @@ async function handleReset() {
   delayValue.value = 5
   delayUnit.value = 'minutes'
   scheduledDatetime.value = null
+  createMR.value = true
   createdTaskId.value = 0
   formResetKey.value += 1
 
@@ -612,7 +647,7 @@ async function handleSubmit() {
       project_id: formValue.value.project_id,
       branch_name: branchName,
       base_branch: formValue.value.base_branch || undefined,
-      target_branch: formValue.value.target_branch,
+      target_branch: createMR.value ? formValue.value.target_branch : null,
       user_prompt: formValue.value.user_prompt,
       priority: formValue.value.priority
     }
@@ -827,5 +862,17 @@ onMounted(() => {
   color: #d97706;
   font-size: 12px;
   margin-top: 4px;
+}
+
+.create-task-form__toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: default;
+}
+
+.create-task-form__toggle-label-icon {
+  opacity: 0.55;
+  vertical-align: middle;
 }
 </style>

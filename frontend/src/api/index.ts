@@ -84,7 +84,7 @@ export interface CreateTaskRequest {
   project_id?: number | null
   branch_name: string
   base_branch?: string
-  target_branch: string
+  target_branch?: string | null
   user_prompt: string
   priority?: number
   delay_seconds?: number

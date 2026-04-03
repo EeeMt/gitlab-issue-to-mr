@@ -37,7 +37,8 @@ class CreateTaskRequest(BaseModel):
     project_id: int
     branch_name: str
     base_branch: Optional[str] = None
-    target_branch: str = "main"
+    # None means the task will not create a Merge Request (direct push only).
+    target_branch: Optional[str] = None
     user_prompt: str
     priority: int = 0
     delay_seconds: Optional[int] = None
@@ -45,8 +46,8 @@ class CreateTaskRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_distinct_branches(self) -> "CreateTaskRequest":
-        """Manual tasks must use distinct source and target branches."""
-        if self.branch_name == self.target_branch:
+        """When a target branch is provided, it must differ from the source branch."""
+        if self.target_branch and self.branch_name == self.target_branch:
             raise ValueError("Source branch and target branch must be different for manual tasks")
         return self
 

@@ -68,13 +68,13 @@ class TestCreateTaskRequest:
         assert request.delay_seconds is None
 
     def test_task_default_values(self):
-        """Test default values."""
+        """Test default values: target_branch defaults to None (no-MR mode is the default for the schema)."""
         request = CreateTaskRequest(
             project_id=1,
             branch_name="feature/test",
             user_prompt="Test prompt",
         )
-        assert request.target_branch == "main"
+        assert request.target_branch is None
         assert request.priority == 0
 
     def test_same_source_and_target_branch_is_rejected(self):
