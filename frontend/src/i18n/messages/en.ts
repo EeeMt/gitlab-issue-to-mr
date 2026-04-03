@@ -196,6 +196,7 @@ const en = {
     totalSuffix: '{total} total',
     mergeRequestCreated: 'Created',
     mergeRequestPending: 'Pending',
+    noMrSkipped: 'No MR (skipped)',
     tokenUsage: 'Token Usage',
     inputTokens: 'Input',
     outputTokens: 'Output',

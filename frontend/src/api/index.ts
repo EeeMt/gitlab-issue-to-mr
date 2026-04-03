@@ -51,7 +51,7 @@ export interface Task {
   priority: number
   scheduled_at: string | null
   container_id: string | null
-  target_branch: string
+  target_branch: string | null
   target_branch_url?: string | null
   commit_sha: string | null
   error_message: string | null

@@ -88,6 +88,9 @@
                   <n-descriptions-item :label="t('taskView.containerId')">{{ task.container_id || '-' }}</n-descriptions-item>
                   <n-descriptions-item :label="t('taskView.mrUrl')">
                     <a v-if="task.merge_request_url" :href="task.merge_request_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.merge_request_url }}</a>
+                    <n-tag v-else-if="task.target_branch === null" size="small" type="default" :bordered="false" style="color: #888; background: #f0f0f0;">
+                      {{ t('taskView.noMrSkipped') }}
+                    </n-tag>
                     <span v-else>-</span>
                   </n-descriptions-item>
                   <n-descriptions-item :label="t('common.changes')">
@@ -410,7 +413,7 @@ const summaryItems = computed(() => {
   return [
     { label: t('common.priority'), value: formatPriority(task.value.priority) },
     { label: t('common.targetBranch'), value: task.value.target_branch || '-' },
-    { label: t('common.mergeRequest'), value: task.value.merge_request_url ? t('taskView.mergeRequestCreated') : t('taskView.mergeRequestPending') },
+    { label: t('common.mergeRequest'), value: task.value.merge_request_url ? t('taskView.mergeRequestCreated') : task.value.target_branch === null ? t('taskView.noMrSkipped') : t('taskView.mergeRequestPending') },
     { label: `${t('common.changes')} (+/-)`, value: changeValue }
   ]
 })

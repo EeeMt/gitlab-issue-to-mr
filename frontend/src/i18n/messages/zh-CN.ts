@@ -186,6 +186,7 @@ const zhCN = {
     totalSuffix: '共 {total}',
     mergeRequestCreated: '已创建',
     mergeRequestPending: '待创建',
+    noMrSkipped: '不创建 MR',
     tokenUsage: 'Token 用量',
     inputTokens: '输入',
     outputTokens: '输出',
