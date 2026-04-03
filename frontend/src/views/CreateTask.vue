@@ -183,18 +183,16 @@
               <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                 <n-gi>
                   <n-form-item :label="t('common.priority')" path="priority">
-                    <n-radio-group v-model:value="formValue.priority" data-testid="create-task-priority-group">
-                      <n-space :size="8">
-                        <n-radio-button :value="0" class="priority-btn priority-btn--p0">
-                          <span class="priority-btn__dot"></span>{{ t('createTask.p0') }}
-                        </n-radio-button>
-                        <n-radio-button :value="1" class="priority-btn priority-btn--p1">
-                          <span class="priority-btn__dot"></span>{{ t('createTask.p1') }}
-                        </n-radio-button>
-                        <n-radio-button :value="2" class="priority-btn priority-btn--p2">
-                          <span class="priority-btn__dot"></span>{{ t('createTask.p2') }}
-                        </n-radio-button>
-                      </n-space>
+                    <n-radio-group v-model:value="formValue.priority" data-testid="create-task-priority-group" style="display:flex; gap:8px;">
+                      <n-radio-button :value="0" class="priority-btn priority-btn--p0">
+                        <span class="priority-btn__dot"></span>{{ t('createTask.p0') }}
+                      </n-radio-button>
+                      <n-radio-button :value="1" class="priority-btn priority-btn--p1">
+                        <span class="priority-btn__dot"></span>{{ t('createTask.p1') }}
+                      </n-radio-button>
+                      <n-radio-button :value="2" class="priority-btn priority-btn--p2">
+                        <span class="priority-btn__dot"></span>{{ t('createTask.p2') }}
+                      </n-radio-button>
                     </n-radio-group>
                   </n-form-item>
                 </n-gi>
