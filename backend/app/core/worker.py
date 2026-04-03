@@ -398,6 +398,7 @@ class WorkerExecutor:
             "ANTHROPIC_MODEL": settings.anthropic_model,
             "CLAUDE_MAX_TURNS": str(settings.claude_max_turns),
             "TASK_ID": str(task.id),
+            "TASK_TIMEOUT": str(settings.task_timeout),
         }
 
         # Add optional fields for webhook-triggered tasks
