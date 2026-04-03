@@ -555,14 +555,26 @@ function handleScheduleHeatmapCellClick(startMs: number) {
   showScheduleDrawer.value = false
 }
 
-// Git branch name validation
+// Git branch name validation (based on git-check-ref-format rules)
 function validateBranchName(name: string): string | null {
   if (!name) return null
-  if (/[\s~^:?*[\\\x00-\x1f\x7f]/.test(name)) return t('createTask.branchNameInvalidChars')
-  if (name.startsWith('.') || name.startsWith('-')) return t('createTask.branchNameInvalidStart')
-  if (name.endsWith('.') || name.endsWith('/') || name.endsWith('.lock')) return t('createTask.branchNameInvalidEnd')
-  if (name.includes('..') || name.includes('@{') || name.includes('//')) return t('createTask.branchNameInvalidSequence')
+  // Single '@' is not allowed
   if (name === '@') return t('createTask.branchNameInvalidChars')
+  // Cannot contain ASCII control chars (0x00-0x1f, 0x7f), space, ~, ^, :, ?, *, [, \
+  if (/[\x00-\x20\x7f~^:?*\[\\]/.test(name)) return t('createTask.branchNameInvalidChars')
+  // Cannot start with . or -
+  if (name.startsWith('.') || name.startsWith('-')) return t('createTask.branchNameInvalidStart')
+  // Cannot start or end with /
+  if (name.startsWith('/') || name.endsWith('/')) return t('createTask.branchNameInvalidEnd')
+  // Cannot end with .
+  if (name.endsWith('.')) return t('createTask.branchNameInvalidEnd')
+  // Cannot contain .., @{, or //
+  if (name.includes('..') || name.includes('@{') || name.includes('//')) return t('createTask.branchNameInvalidSequence')
+  // Each path component cannot start with . or end with .lock
+  for (const component of name.split('/')) {
+    if (component.startsWith('.')) return t('createTask.branchNameInvalidComponent')
+    if (component.endsWith('.lock')) return t('createTask.branchNameInvalidEnd')
+  }
   return null
 }
 
