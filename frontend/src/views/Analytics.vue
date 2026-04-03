@@ -247,25 +247,51 @@
     </n-spin>
 
     <!-- By Project expanded modal -->
-    <n-modal v-model:show="showProjectModal" preset="card" :title="t('analytics.byProject')" style="width: 90vw; max-width: 1400px;">
-      <n-data-table
-        :columns="projectColumns"
-        :data="analytics?.projects || []"
-        :bordered="false"
-        :pagination="{ pageSize: 20 }"
-        :scroll-x="1130"
-      />
+    <n-modal v-model:show="showProjectModal" :mask-closable="true" style="width: 90vw; max-width: 1400px;">
+      <n-card class="analytics-card" :bordered="false">
+        <template #header>
+          <div class="analytics-card__header">
+            <div>
+              <div class="analytics-card__title">{{ t('analytics.byProject') }}</div>
+              <div class="analytics-card__subtitle">{{ t('analytics.byProjectSubtitle') }}</div>
+            </div>
+            <n-button text size="small" @click="showProjectModal = false">
+              <template #icon><n-icon :component="CloseOutline" /></template>
+            </n-button>
+          </div>
+        </template>
+        <n-data-table
+          :columns="projectColumns"
+          :data="analytics?.projects || []"
+          :bordered="false"
+          :pagination="{ pageSize: 20 }"
+          :scroll-x="1130"
+        />
+      </n-card>
     </n-modal>
 
     <!-- By Initiator expanded modal -->
-    <n-modal v-model:show="showInitiatorModal" preset="card" :title="t('analytics.byInitiator')" style="width: 90vw; max-width: 1400px;">
-      <n-data-table
-        :columns="initiatorColumns"
-        :data="analytics?.initiators || []"
-        :bordered="false"
-        :pagination="{ pageSize: 20 }"
-        :scroll-x="1050"
-      />
+    <n-modal v-model:show="showInitiatorModal" :mask-closable="true" style="width: 90vw; max-width: 1400px;">
+      <n-card class="analytics-card" :bordered="false">
+        <template #header>
+          <div class="analytics-card__header">
+            <div>
+              <div class="analytics-card__title">{{ t('analytics.byInitiator') }}</div>
+              <div class="analytics-card__subtitle">{{ t('analytics.byInitiatorSubtitle') }}</div>
+            </div>
+            <n-button text size="small" @click="showInitiatorModal = false">
+              <template #icon><n-icon :component="CloseOutline" /></template>
+            </n-button>
+          </div>
+        </template>
+        <n-data-table
+          :columns="initiatorColumns"
+          :data="analytics?.initiators || []"
+          :bordered="false"
+          :pagination="{ pageSize: 20 }"
+          :scroll-x="1050"
+        />
+      </n-card>
     </n-modal>
   </div>
 </template>
@@ -303,7 +329,7 @@ import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeLocal, formatMonthDayLocal } from '../utils/datetime'
-import { ExpandOutline } from '@vicons/ionicons5'
+import { ExpandOutline, CloseOutline } from '@vicons/ionicons5'
 
 type TrendBar = {
   key: string
