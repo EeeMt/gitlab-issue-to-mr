@@ -258,6 +258,7 @@ const zhCN = {
     delayGreaterThanZero: '创建任务前，请输入大于 0 的延迟时间。',
     taskWillRunAfter: '该任务将在 {value} {unit} 后执行。',
     selectFutureTime: '创建任务前，请选择未来的日期和时间。',
+    scheduledTimePast: '所选时间已过，请重新选择未来时间。',
     taskWillRunAt: '该任务将在 {time}（UTC+8）执行。',
     successTitle: '任务已创建',
     successMessage: '任务 #{id} 已成功创建！',

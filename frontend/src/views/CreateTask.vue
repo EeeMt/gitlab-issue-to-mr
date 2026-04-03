@@ -233,7 +233,11 @@
                           :placeholder="t('createTask.selectDateTime')"
                           :is-date-disabled="isScheduledDateDisabled"
                           :is-time-disabled="isScheduledTimeDisabled"
+                          :status="scheduledDatetimeError ? 'error' : undefined"
                        />
+                       <div v-if="scheduleType === 'scheduled' && scheduledDatetimeError" class="create-task-form__schedule-error">
+                         {{ scheduledDatetimeError }}
+                       </div>
 
 
                        <!-- Heatmap trigger: shown for both delay and scheduled modes -->
@@ -379,6 +383,15 @@ const scheduleType = ref<'now' | 'delay' | 'scheduled'>('now')
 const delayValue = ref(5)
 const delayUnit = ref<'seconds' | 'minutes' | 'hours'>('minutes')
 const scheduledDatetime = ref<number | null>(null)
+const scheduledDatetimeError = ref<string | null>(null)
+
+watch(scheduledDatetime, (val) => {
+  if (val !== null && val <= Date.now()) {
+    scheduledDatetimeError.value = t('createTask.scheduledTimePast')
+  } else {
+    scheduledDatetimeError.value = null
+  }
+})
 
 const scheduledTasksForPreview = ref<Task[]>([])
 const scheduledTasksLoading = ref(false)
@@ -960,5 +973,11 @@ watch(scheduleType, (newType) => {
   color: rgba(15, 23, 42, 0.55);
   margin-bottom: 16px;
   margin-top: 0;
+}
+
+.create-task-form__schedule-error {
+  font-size: 12px;
+  color: #d03050;
+  margin-top: 2px;
 }
 </style>

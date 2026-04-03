@@ -270,6 +270,7 @@ const en = {
     delayGreaterThanZero: 'Enter a delay greater than 0 before creating the task.',
     taskWillRunAfter: 'This task will run after {value} {unit}.',
     selectFutureTime: 'Select a future date and time before creating the task.',
+    scheduledTimePast: 'The selected time is in the past. Please choose a future time.',
     taskWillRunAt: 'This task will run at {time} (UTC+8).',
     successTitle: 'Task Created',
     successMessage: 'Task #{id} has been created successfully!',
