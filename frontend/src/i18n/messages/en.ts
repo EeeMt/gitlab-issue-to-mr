@@ -544,6 +544,8 @@ const en = {
     inputTokens: 'Input Tokens',
     outputTokens: 'Output Tokens',
     tokenBreakdown: 'In {input} / Out {output}',
+    tokenInputLine: 'In {value}',
+    tokenOutputLine: 'Out {value}',
     trackedTokenTasks: '{count} tasks with token data',
     maxTokens: 'Max {value}',
     noTokenData: 'No token data yet',

@@ -526,6 +526,8 @@ const zhCN = {
     inputTokens: '输入 Token',
     outputTokens: '输出 Token',
     tokenBreakdown: '输入 {input} / 输出 {output}',
+    tokenInputLine: '输入 {value}',
+    tokenOutputLine: '输出 {value}',
     trackedTokenTasks: '{count} 个任务有 Token 数据',
     maxTokens: '最大 {value}',
     noTokenData: '暂无 Token 数据',
