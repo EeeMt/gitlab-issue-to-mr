@@ -14,12 +14,12 @@ export COMPOSE_DOCKER_CLI_BUILD := 1
 
 .PHONY: build
 build: ## Build all images (backend, nginx, worker)
-	cd $(PROJECT_ROOT)/deploy && docker-compose build --pull=never
+	cd $(PROJECT_ROOT)/deploy && docker-compose build
 	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t codify-worker:latest $(PROJECT_ROOT)
 
 .PHONY: up
 up: ## Start development environment
-	cd $(PROJECT_ROOT)/deploy && docker-compose up -d --build --pull=never
+	cd $(PROJECT_ROOT)/deploy && docker-compose up -d --build
 
 .PHONY: down
 down: ## Stop development environment
@@ -46,17 +46,17 @@ restart: down up ## Restart development environment
 
 .PHONY: rebuild-backend
 rebuild-backend: ## Rebuild backend image and restart container
-	cd $(PROJECT_ROOT)/deploy && docker-compose build --pull=never backend
+	cd $(PROJECT_ROOT)/deploy && docker-compose build --pull=false backend
 	cd $(PROJECT_ROOT)/deploy && docker-compose up -d backend
 
 .PHONY: rebuild-scheduler
 rebuild-scheduler: ## Rebuild scheduler image and restart container
-	cd $(PROJECT_ROOT)/deploy && docker-compose build --pull=never scheduler
+	cd $(PROJECT_ROOT)/deploy && docker-compose build --pull=false scheduler
 	cd $(PROJECT_ROOT)/deploy && docker-compose up -d scheduler
 
 .PHONY: rebuild-nginx
 rebuild-nginx: ## Rebuild nginx image and restart container
-	cd $(PROJECT_ROOT)/deploy && docker-compose build --pull=never nginx
+	cd $(PROJECT_ROOT)/deploy && docker-compose build --pull=false nginx
 	cd $(PROJECT_ROOT)/deploy && docker-compose up -d nginx
 
 .PHONY: rebuild-worker

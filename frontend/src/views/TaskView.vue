@@ -21,114 +21,20 @@
 
       <n-spin :show="initialLoading">
         <div class="task-view__content">
-          <n-grid
-            :cols="isMobile ? 2 : 4"
-            :x-gap="16"
-            :y-gap="16"
-            class="task-view__summary"
-            data-testid="task-view-summary"
-            v-if="task"
-          >
-            <n-gi v-for="item in summaryItems" :key="item.label">
-              <SummaryCard
-                :label="item.label"
-                :value="item.value"
-                data-testid="task-view-summary-card"
-                card-class="task-summary-card"
-                label-class="task-summary-card__label"
-                value-class="task-summary-card__value"
-              />
-            </n-gi>
-          </n-grid>
+          <!-- Metadata Panel -->
+          <TaskMetadataPanel v-if="task" :task="task" />
 
+          <!-- Process Panel -->
+          <TaskProcessPanel
+            :task-logs="taskLogs"
+            :input-tokens="task?.input_tokens ?? null"
+            :output-tokens="task?.output_tokens ?? null"
+            :is-active="isActiveTaskStatus(task?.status)"
+            :terminal-html="terminalLogHtml"
+          />
+
+          <!-- Actions grid -->
           <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
-            <n-gi>
-              <n-card class="task-card" :bordered="false" data-testid="task-details-card">
-                <template #header>
-                  <div class="task-card__header">
-                    <div>
-                      <div class="task-card__title">{{ t('taskView.taskDetails') }}</div>
-                      <div class="task-card__subtitle">{{ t('taskView.taskDetailsSubtitle') }}</div>
-                    </div>
-                  </div>
-                </template>
-                <n-descriptions :column="1" label-placement="left" v-if="task">
-                  <n-descriptions-item :label="t('common.status')">
-                    <n-tag :type="statusColors[task.status]">{{ t(`status.${task.status}`) }}</n-tag>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('common.project')">
-                    <div>
-                      <a v-if="task.project_url" :href="task.project_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ projectDisplayName }}</a>
-                      <span v-else>{{ projectDisplayName }}</span>
-                    </div>
-                    <div style="font-size: 12px; color: #888">ID: {{ task.project_id }}</div>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('common.issue')">
-                    <a v-if="task.issue_iid && task.issue_url" :href="task.issue_url" target="_blank" rel="noopener noreferrer" class="app-link">!{{ task.issue_iid }}</a>
-                    <span v-else>{{ task.issue_iid ? `!${task.issue_iid}` : '-' }}</span>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('common.priority')">{{ formatPriority(task.priority) }}</n-descriptions-item>
-                  <n-descriptions-item :label="t('common.initiator')">
-                    <n-tag v-if="task.initiator_username" :type="task.is_manual ? 'info' : 'success'" size="small" round>
-                      <template #icon>
-                        <n-icon :component="task.is_manual ? PersonOutline : LogoGitlab" />
-                      </template>
-                      {{ task.initiator_username }}
-                    </n-tag>
-                    <span v-else>-</span>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('common.branch')">
-                    <a v-if="task.branch_name && task.branch_url" :href="task.branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.branch_name }}</a>
-                    <span v-else>{{ task.branch_name || '-' }}</span>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('common.targetBranch')">
-                    <a v-if="task.target_branch && task.target_branch_url" :href="task.target_branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.target_branch }}</a>
-                    <span v-else>{{ task.target_branch }}</span>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('taskView.containerId')">
-                    <n-tooltip v-if="task.container_id" trigger="hover" placement="top">
-                      <template #trigger>
-                        <code style="cursor: default; font-family: monospace; font-size: 12px;">{{ task.container_id.slice(0, 12) }}</code>
-                      </template>
-                      {{ task.container_id }}
-                    </n-tooltip>
-                    <span v-else>-</span>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('taskView.mrUrl')">
-                    <a v-if="task.merge_request_url" :href="task.merge_request_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.merge_request_url }}</a>
-                    <n-tag v-else-if="task.target_branch === null" size="small" type="default" :bordered="false" style="color: #888; background: #f0f0f0;">
-                      {{ t('taskView.noMrSkipped') }}
-                    </n-tag>
-                    <span v-else>-</span>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('common.changes')">
-                    <span v-if="task.additions !== undefined || task.deletions !== undefined">
-                      <span v-if="task.additions || task.deletions">
-                        <span style="color: #18a053">+{{ task.additions || 0 }}</span>
-                        <span style="color: #db3b21; margin-left: 8px">-{{ task.deletions || 0 }}</span>
-                        <span style="color: #888; margin-left: 8px">({{ t('taskView.totalSuffix', { total: task.total_changes || 0 }) }})</span>
-                      </span>
-                      <span v-else>-</span>
-                    </span>
-                    <span v-else>-</span>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('taskView.tokenUsage')">
-                    <span v-if="task.input_tokens != null || task.output_tokens != null">
-                      <span style="color: #888">{{ t('taskView.inputTokens') }}:</span>
-                      <span style="margin-left: 4px">{{ (task.input_tokens ?? 0).toLocaleString() }}</span>
-                      <span style="color: #888; margin-left: 12px">{{ t('taskView.outputTokens') }}:</span>
-                      <span style="margin-left: 4px">{{ (task.output_tokens ?? 0).toLocaleString() }}</span>
-                    </span>
-                    <span v-else>-</span>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('common.created')">{{ formatDate(task.created_at) }}</n-descriptions-item>
-                  <n-descriptions-item :label="t('common.scheduled')">{{ task.scheduled_at ? formatDate(task.scheduled_at) : '-' }}</n-descriptions-item>
-                  <n-descriptions-item :label="t('common.started')">{{ task.started_at ? formatDate(task.started_at) : '-' }}</n-descriptions-item>
-                  <n-descriptions-item :label="t('common.completed')">{{ task.completed_at ? formatDate(task.completed_at) : '-' }}</n-descriptions-item>
-                </n-descriptions>
-              </n-card>
-            </n-gi>
-
             <n-gi>
               <n-card class="task-card" :bordered="false" data-testid="task-actions-card">
                 <template #header>
@@ -294,74 +200,18 @@
                 <template #header>
                   <div class="task-card__header">
                     <div>
-                        <div class="task-card__title">{{ t('taskView.error') }}</div>
-                        <div class="task-card__subtitle">{{ t('taskView.errorSubtitle') }}</div>
-                      </div>
+                      <div class="task-card__title">{{ t('taskView.error') }}</div>
+                      <div class="task-card__subtitle">{{ t('taskView.errorSubtitle') }}</div>
                     </div>
+                  </div>
                 </template>
                 <n-alert type="error">{{ task.error_message }}</n-alert>
               </n-card>
             </n-gi>
           </n-grid>
 
-          <n-card class="task-card" :bordered="false" v-if="task">
-            <template #header>
-              <div class="task-card__header">
-                <div>
-                    <div class="task-card__title">{{ t('taskView.userPrompt') }}</div>
-                    <div class="task-card__subtitle">{{ t('taskView.userPromptSubtitle') }}</div>
-                  </div>
-                </div>
-            </template>
-            <n-text>{{ task.user_prompt }}</n-text>
-          </n-card>
-
-          <n-card class="task-card" :bordered="false">
-            <template #header-extra>
-              <n-space align="center">
-                <n-radio-group
-                  v-if="hasStructuredLogs"
-                  v-model:value="logViewMode"
-                  size="small"
-                  name="log-view-mode"
-                >
-                  <n-radio-button value="timeline">{{ t('taskView.timelineView') }}</n-radio-button>
-                  <n-radio-button value="terminal">{{ t('taskView.terminalView') }}</n-radio-button>
-                </n-radio-group>
-                <n-tag v-if="task?.status === 'running'" type="warning" size="small" round>{{ t('taskView.realTime') }}</n-tag>
-                <n-button size="small" @click="refreshLogs">{{ t('common.refresh') }}</n-button>
-              </n-space>
-            </template>
-            <template #header>
-              <div class="task-card__header">
-                <div>
-                  <div class="task-card__title">{{ t('taskView.logs') }}</div>
-                  <div class="task-card__subtitle">{{ t('taskView.logsSubtitle') }}</div>
-                </div>
-              </div>
-            </template>
-            <n-spin :show="logsLoading">
-              <!-- Timeline (structured) view -->
-              <StructuredLogView
-                v-if="logViewMode === 'timeline' && hasStructuredLogs"
-                :tool-calls="toolCalls"
-                :input-tokens="task?.input_tokens ?? null"
-                :output-tokens="task?.output_tokens ?? null"
-                :is-active="isActiveTaskStatus(task?.status)"
-              />
-              <!-- Terminal (raw) view -->
-              <template v-else>
-                <!-- DB log entries are streamed every ~10s during execution,
-                     so the same <pre> works for both running and completed tasks. -->
-                <pre
-                  class="log-content"
-                  v-if="renderedLogs"
-                  v-html="renderedLogs"
-                ></pre>
-                <pre class="log-content" v-else>{{ isActiveTaskStatus(task?.status) ? t('taskView.waitingForLogs') : t('taskView.noLogsAvailable') }}</pre>
-              </template>
-            </n-spin>
-          </n-card>
+          <!-- Result Panel (only for terminal tasks) -->
+          <TaskResultPanel v-if="task && isTerminal" :task="task" />
         </div>
       </n-spin>
     </n-space>
@@ -371,16 +221,16 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { NButton, NSpace, NCard, NDescriptions, NDescriptionsItem, NTag, NGrid, NGi, NSpin, NAlert, NText, NDatePicker, NTooltip, useMessage, NIcon, NRadioGroup, NRadioButton } from 'naive-ui'
-import { PersonOutline, LogoGitlab } from '@vicons/ionicons5'
+import { NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin, NAlert, NDatePicker, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, type Task, type TaskLog, type ToolCall } from '../api'
+import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, type Task, type TaskLog } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
 import PageHeader from '../components/PageHeader.vue'
-import SummaryCard from '../components/SummaryCard.vue'
-import StructuredLogView from '../components/StructuredLogView.vue'
+import TaskMetadataPanel from '../components/TaskMetadataPanel.vue'
+import TaskProcessPanel from '../components/TaskProcessPanel.vue'
+import TaskResultPanel from '../components/TaskResultPanel.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
-import { formatDateTimeUtc8, parseUtcDate } from '../utils/datetime'
+import { parseUtcDate } from '../utils/datetime'
 import AnsiToHtml from 'ansi-to-html'
 
 const ansiConverter = new AnsiToHtml({ escapeXML: true })
@@ -405,40 +255,20 @@ const containerRequestInFlight = ref(false)
 const rescheduleDatetime = ref<number | null>(null)
 const retryScheduleDatetime = ref<number | null>(null)
 const taskLogs = ref<TaskLog[]>([])
-const logViewMode = ref<'timeline' | 'terminal'>('terminal')
-const logViewModeSet = ref(false)
 let pollTimer: number | null = null
 let logEventSource: EventSource | null = null
 let logStreamContainerId: string | null = null
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
-const renderedLogs = computed(() => {
+const terminalLogHtml = computed(() => {
   const text = logs.value
   if (!text) return ''
   return ansiConverter.toHtml(text)
 })
 
-const toolCalls = computed<ToolCall[]>(() => {
-  // Prefer individual tool_call entries written in real-time during execution.
-  // Each entry has its own created_at timestamp for the timeline display.
-  const individual = taskLogs.value.filter(l => l.log_type === 'tool_call')
-  if (individual.length > 0) {
-    return individual
-      .sort((a, b) => a.created_at.localeCompare(b.created_at))
-      .flatMap(l => {
-        try {
-          const call = JSON.parse(l.metadata ?? '{}') as ToolCall
-          return [{ ...call, timestamp: l.created_at }]
-        } catch { return [] }
-      })
-  }
-  // Fallback: batch entry written after task completes (older tasks or on error)
-  const batch = taskLogs.value.find(l => l.log_type === 'tool_calls_json')
-  if (!batch?.metadata) return []
-  try { return JSON.parse(batch.metadata) } catch { return [] }
-})
-
-const hasStructuredLogs = computed(() => toolCalls.value.length > 0)
+const isTerminal = computed(() =>
+  task.value?.status === 'completed' || task.value?.status === 'failed'
+)
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
   pending: 'default',
@@ -448,29 +278,6 @@ const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 
   failed: 'error',
   cancelled: 'default'
 }
-
-const projectDisplayName = computed(() => {
-  if (!task.value) return '-'
-  return task.value.project_path_with_namespace || task.value.project_name || t('dashboard.projectFallback', { id: task.value.project_id })
-})
-
-const summaryItems = computed(() => {
-  if (!task.value) {
-    return []
-  }
-
-  const changeValue =
-    task.value.additions !== undefined || task.value.deletions !== undefined
-      ? `${task.value.additions || 0} / ${task.value.deletions || 0}`
-      : '-'
-
-  return [
-    { label: t('common.priority'), value: formatPriority(task.value.priority) },
-    { label: t('common.targetBranch'), value: task.value.target_branch || '-' },
-    { label: t('common.mergeRequest'), value: task.value.merge_request_url ? t('taskView.mergeRequestCreated') : task.value.target_branch === null ? t('taskView.noMrSkipped') : t('taskView.mergeRequestPending') },
-    { label: `${t('common.changes')} (+/-)`, value: changeValue }
-  ]
-})
 
 const hasActions = computed(() => {
   if (!task.value) return false
@@ -492,24 +299,6 @@ const canManageTask = computed(() => {
     )
   )
 })
-
-function formatDate(dateStr: string): string {
-  return formatDateTimeUtc8(dateStr)
-}
-
-function formatPriority(priority?: string | number | null): string {
-  if (priority === null || priority === undefined || priority === '') {
-    return '-'
-  }
-
-  const normalized = String(priority).toLowerCase().trim()
-
-  if (normalized === '0' || normalized === 'p0') return 'P0'
-  if (normalized === '1' || normalized === 'p1') return 'P1'
-  if (normalized === '2' || normalized === 'p2') return 'P2'
-
-  return String(priority)
-}
 
 function syncRescheduleDatetime() {
   rescheduleDatetime.value = task.value?.scheduled_at ? parseUtcDate(task.value.scheduled_at).getTime() : null
@@ -571,8 +360,6 @@ function connectLogStream() {
 
   logEventSource.onerror = () => {
     containerLogsLoading.value = false
-    // If we never received data, this is likely an auth failure (403) — close
-    // the stream to avoid infinite reconnect loops for non-admin users.
     const likelyAuthFailure = !receivedFirstMessage
     if (likelyAuthFailure || !isActiveTaskStatus(task.value?.status) || task.value?.container_id !== logStreamContainerId) {
       closeLogStream()
@@ -588,8 +375,6 @@ async function fetchTask() {
     const previousStatus = task.value?.status
     const previousScheduledAt = task.value?.scheduled_at
     task.value = await getTask(taskId.value)
-    // Only sync the date picker when loading for the first time or when scheduled_at
-    // changed externally (not during user editing).
     if (!hasLoadedOnce.value || task.value?.scheduled_at !== previousScheduledAt) {
       syncRescheduleDatetime()
     }
@@ -613,10 +398,6 @@ async function fetchLogs() {
     const logEntries = await getTaskLogs(taskId.value)
     taskLogs.value = logEntries
     logs.value = logEntries.map(l => `[${l.created_at}] [${l.log_level}] ${l.message}`).join('\n')
-    if (!logViewModeSet.value && logEntries.some(l => l.log_type === 'tool_call' || l.log_type === 'tool_calls_json')) {
-      logViewMode.value = 'timeline'
-      logViewModeSet.value = true
-    }
   } catch (error) {
     logs.value = t('taskView.failedToFetchLogs')
   } finally {
@@ -649,14 +430,6 @@ async function fetchContainerLogs() {
 
 async function refreshTask() {
   await fetchTask()
-  if (isActiveTaskStatus(task.value?.status)) {
-    await fetchContainerLogs()
-    return
-  }
-  await fetchLogs()
-}
-
-async function refreshLogs() {
   if (isActiveTaskStatus(task.value?.status)) {
     await fetchContainerLogs()
     return
@@ -757,16 +530,15 @@ onMounted(async () => {
     await fetchContainerLogs()
   }
   await fetchLogs()
-  // Auto-refresh for active tasks; skip when tab is not visible.
   pollTimer = window.setInterval(() => {
     if (document.visibilityState !== 'visible') return
- 
+
     if (isActiveTaskStatus(task.value?.status)) {
       fetchTask()
       if (!logEventSource) {
         fetchContainerLogs()
       }
-      fetchLogs()  // Poll DB logs so non-admin users see streaming chunks
+      fetchLogs()
     } else {
       closeLogStream()
     }
@@ -795,6 +567,7 @@ onBeforeUnmount(() => {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
 .task-view {
   max-width: var(--app-page-max-width);
 }
@@ -812,25 +585,10 @@ onBeforeUnmount(() => {
   gap: 20px;
 }
 
-
 .task-view__title {
   margin: 0;
   font-size: var(--app-page-title-size);
   line-height: 1.2;
-}
-
-/* Summary cards are rendered inside SummaryCard's scope; use :deep() to cross the boundary */
-:deep(.task-summary-card) {
-  min-height: 100%;
-}
-
-:deep(.task-summary-card__label) {
-  text-align: center;
-}
-
-:deep(.task-summary-card__value) {
-  text-align: center;
-  word-break: break-word;
 }
 
 .task-card {

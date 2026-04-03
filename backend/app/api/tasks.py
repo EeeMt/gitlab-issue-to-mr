@@ -1,12 +1,14 @@
 """Task management API endpoints."""
 
 import asyncio
+import json as _json
 import logging
 import time
 from datetime import UTC, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select, false
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -219,6 +221,96 @@ async def get_task_logs(
         }
         for log in logs
     ]
+
+
+@router.get("/tasks/{task_id}/log-stream")
+async def stream_task_logs(
+    task_id: int,
+    since_id: int = 0,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Stream task log entries as Server-Sent Events.
+
+    Polls the database for new TaskLog entries every 1.5 seconds and streams
+    them to the client as SSE events. Stops automatically once the task reaches
+    a terminal state (completed/failed/cancelled) and all pending logs are sent.
+
+    Args:
+        task_id: Task ID to stream logs for
+        since_id: Only return log entries with id > since_id (for resuming)
+        db: Database session
+        access_scope: Project access scope for authorization
+
+    Returns:
+        StreamingResponse with text/event-stream media type
+    """
+    # Validate task exists and user has access before starting the stream
+    result = await db.execute(select(Task).where(Task.id == task_id))
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task {task_id} not found",
+        )
+    require_project_access(task.project_id, access_scope)
+
+    _TERMINAL_STATUSES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
+
+    async def generate_log_events():
+        cursor = since_id
+        try:
+            while True:
+                # Fetch next batch of log entries after cursor
+                log_result = await db.execute(
+                    select(TaskLog)
+                    .where(TaskLog.task_id == task_id, TaskLog.id > cursor)
+                    .order_by(TaskLog.id.asc())
+                    .limit(100)
+                )
+                new_logs = log_result.scalars().all()
+
+                for log in new_logs:
+                    event_data = {
+                        "id": log.id,
+                        "log_type": log.log_type,
+                        "metadata": log.log_metadata,
+                        "message": log.message,
+                        "created_at": log.created_at.isoformat(),
+                    }
+                    yield f"data: {_json.dumps(event_data)}\n\n"
+                    cursor = log.id
+
+                # Check current task status (re-query to get fresh state)
+                task_result = await db.execute(
+                    select(Task.status).where(Task.id == task_id)
+                )
+                current_status = task_result.scalar_one_or_none()
+
+                if current_status in _TERMINAL_STATUSES and not new_logs:
+                    # Task is done and no new logs — signal completion and stop
+                    yield "event: done\ndata: {}\n\n"
+                    break
+
+                # Wait before polling again
+                await asyncio.sleep(1.5)
+
+        except asyncio.CancelledError:
+            # Client disconnected
+            pass
+        except Exception as exc:
+            logger.error(f"[Task {task_id}] log-stream error: {exc}")
+            yield f"data: {_json.dumps({'error': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        generate_log_events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/tasks/{task_id}/stats")

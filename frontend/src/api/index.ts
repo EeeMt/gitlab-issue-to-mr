@@ -60,6 +60,9 @@ export interface Task {
   total_changes: number
   input_tokens: number | null
   output_tokens: number | null
+  model_name?: string | null
+  merge_request_title?: string | null
+  base_branch?: string | null
   is_manual: boolean
   created_at: string
   updated_at: string
@@ -586,6 +589,49 @@ export async function getTask(id: number): Promise<Task> {
 export async function getTaskLogs(id: number): Promise<TaskLog[]> {
   const response = await api.get(`/tasks/${id}/logs`)
   return response.data
+}
+
+/**
+ * Open an SSE connection to stream task log entries in real-time.
+ *
+ * @param id - Task ID
+ * @param sinceId - Only receive entries with id > sinceId (for resuming a stream)
+ * @param onLog - Callback invoked for each new log entry
+ * @param onDone - Callback invoked when the task reaches a terminal state
+ * @returns EventSource instance (call .close() to stop streaming)
+ */
+export function streamTaskLogs(
+  id: number,
+  sinceId: number,
+  onLog: (log: TaskLog) => void,
+  onDone?: () => void,
+): EventSource {
+  const url = `/api/tasks/${id}/log-stream?since_id=${sinceId}`
+  const source = new EventSource(url)
+
+  source.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      if (data.error) {
+        console.error(`[streamTaskLogs] server error: ${data.error}`)
+      } else {
+        onLog(data as TaskLog)
+      }
+    } catch (e) {
+      console.warn('[streamTaskLogs] failed to parse SSE message', e)
+    }
+  }
+
+  source.addEventListener('done', () => {
+    source.close()
+    onDone?.()
+  })
+
+  source.onerror = (e) => {
+    console.warn('[streamTaskLogs] SSE connection error', e)
+  }
+
+  return source
 }
 
 export async function getTaskContainerLogs(id: number): Promise<{

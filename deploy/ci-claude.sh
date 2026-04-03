@@ -119,6 +119,8 @@ process_stream() {
   local prev_block=""
   local cur_tool_name=""
   local cur_tool_input=""
+  local cur_thinking_buf=""
+  local cur_text_buf=""
 
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
@@ -142,6 +144,7 @@ process_stream() {
             prev_block="$block_type"
             case "$block_type" in
               thinking)
+                cur_thinking_buf=""
                 _e "\n${DIM}${CYAN}╔═ 🧠 Thinking ════════════════════════════════${RESET}\n"
                 ;;
               tool_use)
@@ -151,6 +154,7 @@ process_stream() {
                 _e "${YELLOW}│  Input: ${DIM}"
                 ;;
               text)
+                cur_text_buf=""
                 _e "\n${GREEN}${BOLD}── Response ───────────────────────────────────${RESET}\n"
                 ;;
             esac
@@ -163,11 +167,13 @@ process_stream() {
               text_delta)
                 local text
                 text=$(printf '%s' "$line" | jq -rj '.event.delta.text // empty' 2>/dev/null)
+                cur_text_buf+="$text"
                 _e '%s' "$text"
                 ;;
               thinking_delta)
                 local thinking
                 thinking=$(printf '%s' "$line" | jq -rj '.event.delta.thinking // empty' 2>/dev/null)
+                cur_thinking_buf+="$thinking"
                 _e "${DIM}%s${RESET}" "$thinking"
                 ;;
               input_json_delta)
@@ -183,6 +189,8 @@ process_stream() {
             case "$prev_block" in
               thinking)
                 _e "\n${DIM}${CYAN}╚══════════════════════════════════════════════${RESET}\n"
+                printf 'CODIFY_THINKING:%s\n' "$(jq -c -n --arg text "$cur_thinking_buf" '{text: $text}')" >&2
+                cur_thinking_buf=""
                 ;;
               tool_use)
                 _e "${RESET}\n${YELLOW}└──────────────────────────────────────────────${RESET}\n"
@@ -198,6 +206,8 @@ process_stream() {
                 ;;
               text)
                 _e "\n"
+                printf 'CODIFY_ASSISTANT_TEXT:%s\n' "$(jq -c -n --arg text "$cur_text_buf" '{text: $text}')" >&2
+                cur_text_buf=""
                 ;;
             esac
             prev_block=""
@@ -255,6 +265,7 @@ process_stream() {
           cwd=$(printf '%s' "$line" | jq -r '.cwd // empty' 2>/dev/null)
           [[ -n "$model" ]] && log "Model : $model"
           [[ -n "$cwd" ]]   && log "CWD   : $cwd"
+          printf 'CODIFY_SYSTEM_INIT:%s\n' "$(jq -c -n --arg model "$model" --arg cwd "$cwd" '{model: $model, cwd: $cwd}')"
         fi
         ;;
 

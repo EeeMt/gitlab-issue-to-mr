@@ -101,7 +101,9 @@ const en = {
     loadingSessions: 'Loading sessions...',
     enabled: 'Enabled',
     disabled: 'Disabled',
-    notAvailable: 'N/A'
+    notAvailable: 'N/A',
+    source: 'Source',
+    timeline: 'Timeline'
   },
   login: {
     subtitle: 'Sign in to access the dashboard.',
@@ -222,7 +224,21 @@ const en = {
     totalTokens: 'Total',
     toolInput: 'Input',
     toolOutput: 'Output',
-    timelineRunning: 'Running…'
+    timelineRunning: 'Running…',
+    taskMetadata: 'Task Metadata',
+    taskProcess: 'Task Process',
+    taskResult: 'Task Result',
+    branchFlow: 'Branch Config',
+    directPush: 'Direct Push',
+    manualCreation: 'Manual',
+    modelName: 'Model',
+    duration: 'Duration',
+    mrTitle: 'MR Title',
+    rawLogs: 'Raw Logs',
+    thinkingLabel: 'Thinking',
+    assistantLabel: 'Claude',
+    executionSummary: 'Execution Summary',
+    mergeRequest: 'Merge Request'
   },
   createTask: {
     title: 'Create Manual Task',

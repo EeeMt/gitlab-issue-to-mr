@@ -101,7 +101,9 @@ const zhCN = {
     loadingSessions: '正在加载会话...',
     enabled: '已启用',
     disabled: '已禁用',
-    notAvailable: '暂无'
+    notAvailable: '暂无',
+    source: '来源',
+    timeline: '时间轴'
   },
   login: {
     subtitle: '登录以访问控制台。',
@@ -212,7 +214,21 @@ const zhCN = {
     totalTokens: '合计',
     toolInput: '输入',
     toolOutput: '输出',
-    timelineRunning: '运行中…'
+    timelineRunning: '运行中…',
+    taskMetadata: '任务元数据',
+    taskProcess: '任务进程',
+    taskResult: '任务结果',
+    branchFlow: '分支配置',
+    directPush: '直接推送',
+    manualCreation: '手动创建',
+    modelName: '执行模型',
+    duration: '执行时长',
+    mrTitle: 'MR 标题',
+    rawLogs: '原始日志',
+    thinkingLabel: '思考',
+    assistantLabel: 'Claude',
+    executionSummary: '执行摘要',
+    mergeRequest: '合并请求'
   },
   createTask: {
     title: '创建手动任务',

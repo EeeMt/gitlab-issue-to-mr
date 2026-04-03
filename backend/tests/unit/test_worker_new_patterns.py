@@ -1,0 +1,429 @@
+#!/usr/bin/env python3
+"""
+Test: New CODIFY marker parsing features in the worker.
+
+Covers:
+- CODIFY_SYSTEM_INIT  → task.model_name  (parsed in _parse_task_result)
+- CODIFY_MR_TITLE     → task.merge_request_title  (parsed in _parse_task_result)
+- CODIFY_THINKING     → TaskLog(log_type='thinking')  (parsed in _stream_logs_to_db)
+- CODIFY_ASSISTANT_TEXT → TaskLog(log_type='assistant_text')  (parsed in _stream_logs_to_db)
+- model_name / merge_request_title included in _serialize_task output
+"""
+
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import asyncio
+import unittest
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared across all test classes
+# ---------------------------------------------------------------------------
+
+def _make_mock_settings():
+    """Return a fully-populated mock settings object."""
+    s = MagicMock()
+    s.gitlab_url = "http://gitlab.example.com"
+    s.gitlab_bot_token = "test-token"
+    s.worker_image = "test-worker:latest"
+    s.task_timeout = 1800
+    s.anthropic_base_url = "http://localhost:11434/v1"
+    s.anthropic_api_key = "test-key"
+    s.anthropic_model = "claude-sonnet-4-20250514"
+    s.default_target_branch = "main"
+    s.max_retries = 0
+    s.backend_url = "http://localhost:8000"
+    return s
+
+
+def create_mock_db(task):
+    """Create a properly configured mock database session."""
+    mock_db = MagicMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = task
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_db.commit = AsyncMock()
+    mock_db.add = MagicMock()
+    return mock_db
+
+
+def _make_worker():
+    """Instantiate WorkerExecutor with mock docker/gitlab clients."""
+    mock_gitlab = MagicMock()
+    mock_docker = MagicMock()
+    mock_docker.create_container.return_value = MagicMock(id="mock-container-id")
+
+    from app.core.worker import WorkerExecutor
+    return WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
+
+
+def _make_task(**kwargs):
+    """Return a minimal Task instance."""
+    from app.models import Task, TaskStatus
+    defaults = dict(
+        id=1,
+        project_id=123,
+        issue_iid=456,
+        note_id=100,
+        user_prompt="Test prompt",
+        branch_name="test-branch",
+        target_branch="main",
+        priority=0,
+        status=TaskStatus.PENDING,
+        additions=0,
+        deletions=0,
+        total_changes=0,
+    )
+    defaults.update(kwargs)
+    return Task(**defaults)
+
+
+# ---------------------------------------------------------------------------
+# TestCodifySystemInitParsing
+# ---------------------------------------------------------------------------
+
+class TestCodifySystemInitParsing(unittest.TestCase):
+    """Tests for CODIFY_SYSTEM_INIT parsing inside _parse_task_result."""
+
+    def setUp(self):
+        self.mock_settings = _make_mock_settings()
+        self.patcher = patch('app.core.worker.get_settings', return_value=self.mock_settings)
+        self.patcher.start()
+        self.worker = _make_worker()
+
+    def tearDown(self):
+        self.patcher.stop()
+
+    def _run_parse(self, task, logs, exit_code=0):
+        async def run():
+            with patch.object(self.worker, '_parse_mr_from_logs', new=AsyncMock()):
+                with patch.object(self.worker, '_update_task_stats_from_logs_or_api', new=AsyncMock()):
+                    mock_db = create_mock_db(task)
+                    await self.worker._parse_task_result(task, logs, mock_db, exit_code=exit_code)
+        asyncio.run(run())
+
+    def test_updates_model_name_from_valid_system_init(self):
+        """CODIFY_SYSTEM_INIT with a model key sets task.model_name."""
+        task = _make_task()
+        logs = 'Starting...\nCODIFY_SYSTEM_INIT:{"model":"claude-sonnet-4-20250514","cwd":"/workspace"}\nDone\n'
+        self._run_parse(task, logs)
+        self.assertEqual(task.model_name, "claude-sonnet-4-20250514")
+
+    def test_does_not_update_model_name_when_model_is_empty(self):
+        """CODIFY_SYSTEM_INIT with empty model string leaves task.model_name as None."""
+        task = _make_task()
+        logs = 'CODIFY_SYSTEM_INIT:{"model":"","cwd":"/workspace"}\n'
+        self._run_parse(task, logs)
+        self.assertIsNone(task.model_name)
+
+    def test_does_not_update_model_name_when_model_missing_from_json(self):
+        """CODIFY_SYSTEM_INIT JSON without 'model' key leaves task.model_name as None."""
+        task = _make_task()
+        logs = 'CODIFY_SYSTEM_INIT:{"cwd":"/workspace"}\n'
+        self._run_parse(task, logs)
+        self.assertIsNone(task.model_name)
+
+    def test_ignores_invalid_json_in_system_init(self):
+        """CODIFY_SYSTEM_INIT with invalid JSON does not crash and leaves model_name None."""
+        task = _make_task()
+        logs = 'CODIFY_SYSTEM_INIT:not-valid-json\n'
+        # Should not raise
+        self._run_parse(task, logs)
+        self.assertIsNone(task.model_name)
+
+
+# ---------------------------------------------------------------------------
+# TestCodifyMrTitleParsing
+# ---------------------------------------------------------------------------
+
+class TestCodifyMrTitleParsing(unittest.TestCase):
+    """Tests for CODIFY_MR_TITLE parsing inside _parse_task_result."""
+
+    def setUp(self):
+        self.mock_settings = _make_mock_settings()
+        self.patcher = patch('app.core.worker.get_settings', return_value=self.mock_settings)
+        self.patcher.start()
+        self.worker = _make_worker()
+
+    def tearDown(self):
+        self.patcher.stop()
+
+    def _run_parse(self, task, logs, exit_code=0):
+        async def run():
+            with patch.object(self.worker, '_parse_mr_from_logs', new=AsyncMock()):
+                with patch.object(self.worker, '_update_task_stats_from_logs_or_api', new=AsyncMock()):
+                    mock_db = create_mock_db(task)
+                    await self.worker._parse_task_result(task, logs, mock_db, exit_code=exit_code)
+        asyncio.run(run())
+
+    def test_updates_merge_request_title_from_codify_mr_title(self):
+        """CODIFY_MR_TITLE line sets task.merge_request_title."""
+        task = _make_task()
+        logs = 'Some output\nCODIFY_MR_TITLE:Fix the login bug\nMore output\n'
+        self._run_parse(task, logs)
+        self.assertEqual(task.merge_request_title, "Fix the login bug")
+
+    def test_ignores_empty_title(self):
+        """CODIFY_MR_TITLE with only whitespace leaves merge_request_title as None."""
+        task = _make_task()
+        logs = 'CODIFY_MR_TITLE:   \n'
+        self._run_parse(task, logs)
+        self.assertIsNone(task.merge_request_title)
+
+    def test_truncates_title_to_512_characters(self):
+        """CODIFY_MR_TITLE with a very long title is truncated to 512 characters."""
+        task = _make_task()
+        long_title = "A" * 600
+        logs = f'CODIFY_MR_TITLE:{long_title}\n'
+        self._run_parse(task, logs)
+        self.assertIsNotNone(task.merge_request_title)
+        self.assertLessEqual(len(task.merge_request_title), 512)
+        # First 512 characters of the title should be stored
+        self.assertTrue(task.merge_request_title.startswith("A" * 10))
+
+    def test_sanitizes_gitlab_token_from_title(self):
+        """CODIFY_MR_TITLE containing a GitLab token has it redacted."""
+        task = _make_task()
+        logs = 'CODIFY_MR_TITLE:Fix auth glpat-abcdefghijklmnopqrst issue\n'
+        self._run_parse(task, logs)
+        self.assertIsNotNone(task.merge_request_title)
+        self.assertNotIn("glpat-abcdefghijklmnopqrst", task.merge_request_title)
+        self.assertIn("[GITLAB_TOKEN]", task.merge_request_title)
+
+
+# ---------------------------------------------------------------------------
+# TestCodifyThinkingRealTimeParsing
+# ---------------------------------------------------------------------------
+
+class TestCodifyThinkingRealTimeParsing(unittest.TestCase):
+    """Tests for CODIFY_THINKING real-time parsing inside _stream_logs_to_db."""
+
+    _SHORT_TIMEOUT = 5  # seconds — prevents slow tests
+
+    def setUp(self):
+        self.mock_settings = _make_mock_settings()
+        self.patcher = patch('app.core.worker.get_settings', return_value=self.mock_settings)
+        self.patcher.start()
+        self.worker = _make_worker()
+
+    def tearDown(self):
+        self.patcher.stop()
+
+    def _run_stream(self, log_lines):
+        """Run _stream_logs_to_db with a mock container that emits log_lines."""
+        from app.models import Task, TaskStatus
+        task = _make_task()
+        mock_db = create_mock_db(task)
+
+        mock_container = MagicMock()
+        mock_container.logs.return_value = iter(log_lines)
+        mock_container.wait.return_value = {"StatusCode": 0}
+
+        async def run():
+            return await self.worker._stream_logs_to_db(
+                mock_container, task.id, mock_db, timeout=self._SHORT_TIMEOUT
+            )
+
+        asyncio.run(run())
+        return mock_db
+
+    def test_writes_thinking_task_log_for_valid_json(self):
+        """CODIFY_THINKING with valid JSON creates a TaskLog with log_type='thinking'."""
+        from app.models import TaskLog
+        mock_db = self._run_stream([
+            b'Normal log line\n',
+            b'CODIFY_THINKING:{"text":"I need to think"}\n',
+        ])
+        added_objects = [c[0][0] for c in mock_db.add.call_args_list]
+        thinking_logs = [
+            o for o in added_objects
+            if isinstance(o, TaskLog) and o.log_type == 'thinking'
+        ]
+        self.assertEqual(len(thinking_logs), 1)
+        self.assertEqual(thinking_logs[0].log_metadata, '{"text":"I need to think"}')
+
+    def test_does_not_write_thinking_log_for_invalid_json(self):
+        """CODIFY_THINKING with invalid JSON is silently skipped — no thinking TaskLog added."""
+        from app.models import TaskLog
+        mock_db = self._run_stream([
+            b'CODIFY_THINKING:not-json\n',
+        ])
+        added_objects = [c[0][0] for c in mock_db.add.call_args_list]
+        thinking_logs = [
+            o for o in added_objects
+            if isinstance(o, TaskLog) and o.log_type == 'thinking'
+        ]
+        self.assertEqual(len(thinking_logs), 0)
+
+    def test_thinking_log_message_is_empty_string(self):
+        """TaskLog created for CODIFY_THINKING has message==''."""
+        from app.models import TaskLog
+        mock_db = self._run_stream([
+            b'CODIFY_THINKING:{"text":"some thought"}\n',
+        ])
+        added_objects = [c[0][0] for c in mock_db.add.call_args_list]
+        thinking_logs = [
+            o for o in added_objects
+            if isinstance(o, TaskLog) and o.log_type == 'thinking'
+        ]
+        self.assertEqual(len(thinking_logs), 1)
+        self.assertEqual(thinking_logs[0].message, "")
+
+
+# ---------------------------------------------------------------------------
+# TestCodifyAssistantTextRealTimeParsing
+# ---------------------------------------------------------------------------
+
+class TestCodifyAssistantTextRealTimeParsing(unittest.TestCase):
+    """Tests for CODIFY_ASSISTANT_TEXT real-time parsing inside _stream_logs_to_db."""
+
+    _SHORT_TIMEOUT = 5  # seconds — prevents slow tests
+
+    def setUp(self):
+        self.mock_settings = _make_mock_settings()
+        self.patcher = patch('app.core.worker.get_settings', return_value=self.mock_settings)
+        self.patcher.start()
+        self.worker = _make_worker()
+
+    def tearDown(self):
+        self.patcher.stop()
+
+    def _run_stream(self, log_lines):
+        """Run _stream_logs_to_db with a mock container that emits log_lines."""
+        task = _make_task()
+        mock_db = create_mock_db(task)
+
+        mock_container = MagicMock()
+        mock_container.logs.return_value = iter(log_lines)
+        mock_container.wait.return_value = {"StatusCode": 0}
+
+        async def run():
+            return await self.worker._stream_logs_to_db(
+                mock_container, task.id, mock_db, timeout=self._SHORT_TIMEOUT
+            )
+
+        asyncio.run(run())
+        return mock_db
+
+    def test_writes_assistant_text_task_log_for_valid_json(self):
+        """CODIFY_ASSISTANT_TEXT with valid JSON creates a TaskLog with log_type='assistant_text'."""
+        from app.models import TaskLog
+        mock_db = self._run_stream([
+            b'Normal log line\n',
+            b'CODIFY_ASSISTANT_TEXT:{"text":"Here is my response"}\n',
+        ])
+        added_objects = [c[0][0] for c in mock_db.add.call_args_list]
+        at_logs = [
+            o for o in added_objects
+            if isinstance(o, TaskLog) and o.log_type == 'assistant_text'
+        ]
+        self.assertEqual(len(at_logs), 1)
+        self.assertEqual(at_logs[0].log_metadata, '{"text":"Here is my response"}')
+
+    def test_does_not_write_assistant_text_log_for_invalid_json(self):
+        """CODIFY_ASSISTANT_TEXT with invalid JSON is silently skipped."""
+        from app.models import TaskLog
+        mock_db = self._run_stream([
+            b'CODIFY_ASSISTANT_TEXT:not-valid-json\n',
+        ])
+        added_objects = [c[0][0] for c in mock_db.add.call_args_list]
+        at_logs = [
+            o for o in added_objects
+            if isinstance(o, TaskLog) and o.log_type == 'assistant_text'
+        ]
+        self.assertEqual(len(at_logs), 0)
+
+    def test_assistant_text_log_message_is_empty_string(self):
+        """TaskLog created for CODIFY_ASSISTANT_TEXT has message==''."""
+        from app.models import TaskLog
+        mock_db = self._run_stream([
+            b'CODIFY_ASSISTANT_TEXT:{"text":"hello"}\n',
+        ])
+        added_objects = [c[0][0] for c in mock_db.add.call_args_list]
+        at_logs = [
+            o for o in added_objects
+            if isinstance(o, TaskLog) and o.log_type == 'assistant_text'
+        ]
+        self.assertEqual(len(at_logs), 1)
+        self.assertEqual(at_logs[0].message, "")
+
+
+# ---------------------------------------------------------------------------
+# TestSerializeTaskNewFields
+# ---------------------------------------------------------------------------
+
+class TestSerializeTaskNewFields(unittest.TestCase):
+    """Tests verifying model_name and merge_request_title appear in _serialize_task output."""
+
+    def setUp(self):
+        self.mock_settings = _make_mock_settings()
+        self.patcher_worker = patch('app.core.worker.get_settings', return_value=self.mock_settings)
+        self.patcher_config = patch('app.config.get_effective_settings', return_value=self.mock_settings)
+        self.patcher_worker.start()
+        self.patcher_config.start()
+
+    def tearDown(self):
+        self.patcher_worker.stop()
+        self.patcher_config.stop()
+
+    def _make_full_task(self, **kwargs):
+        """Return a Task with all fields required by _serialize_task."""
+        from app.models import Task, TaskStatus
+        defaults = dict(
+            id=1,
+            project_id=1,
+            user_prompt="test",
+            status=TaskStatus.PENDING,
+            is_manual=False,
+            additions=0,
+            deletions=0,
+            total_changes=0,
+            created_at=datetime(2024, 1, 1),
+            updated_at=datetime(2024, 1, 1),
+        )
+        defaults.update(kwargs)
+        return Task(**defaults)
+
+    def test_model_name_included_in_serialized_task(self):
+        """_serialize_task includes model_name when it is set."""
+        from app.core.task_helpers import _serialize_task
+        task = self._make_full_task(model_name="claude-3-5-sonnet")
+        result = _serialize_task(task)
+        self.assertIn("model_name", result)
+        self.assertEqual(result["model_name"], "claude-3-5-sonnet")
+
+    def test_merge_request_title_included_in_serialized_task(self):
+        """_serialize_task includes merge_request_title when it is set."""
+        from app.core.task_helpers import _serialize_task
+        task = self._make_full_task(merge_request_title="Fix login bug")
+        result = _serialize_task(task)
+        self.assertIn("merge_request_title", result)
+        self.assertEqual(result["merge_request_title"], "Fix login bug")
+
+    def test_model_name_is_none_when_not_set(self):
+        """_serialize_task returns None for model_name when it is not set."""
+        from app.core.task_helpers import _serialize_task
+        task = self._make_full_task(model_name=None)
+        result = _serialize_task(task)
+        self.assertIn("model_name", result)
+        self.assertIsNone(result["model_name"])
+
+    def test_merge_request_title_is_none_when_not_set(self):
+        """_serialize_task returns None for merge_request_title when it is not set."""
+        from app.core.task_helpers import _serialize_task
+        task = self._make_full_task(merge_request_title=None)
+        result = _serialize_task(task)
+        self.assertIn("merge_request_title", result)
+        self.assertIsNone(result["merge_request_title"])
+
+
+# ---------------------------------------------------------------------------
+# Entry point for direct execution
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

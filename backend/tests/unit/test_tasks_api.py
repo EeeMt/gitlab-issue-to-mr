@@ -273,6 +273,8 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.total_changes = 0
     task.input_tokens = 0
     task.output_tokens = 0
+    task.model_name = None
+    task.merge_request_title = None
     task.is_manual = False
     now = datetime(2024, 1, 1, 12, 0, 0)
     task.created_at = now
@@ -379,6 +381,184 @@ class GetTaskLogsAPITests(unittest.TestCase):
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 404)
+
+    def test_get_task_logs_returns_log_type_field(self):
+        """GET /api/tasks/{id}/logs response includes log_type field for each entry."""
+        task = _make_serializable_task()
+
+        log1 = MagicMock()
+        log1.id = 1
+        log1.task_id = 1
+        log1.log_level = "INFO"
+        log1.log_type = None
+        log1.log_metadata = None
+        log1.message = "Plain log line"
+        log1.created_at = datetime(2024, 1, 1, 12, 0, 0)
+
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+
+        logs_result = MagicMock()
+        logs_result.scalars.return_value.all.return_value = [log1]
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[task_result, logs_result])
+
+        client, app = _make_app_client_with_db(mock_db)
+        response = client.get("/api/tasks/1/logs")
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("log_type", data[0])
+        self.assertIsNone(data[0]["log_type"])
+
+    def test_get_task_logs_returns_thinking_log_type(self):
+        """GET /api/tasks/{id}/logs should return thinking log entries with log_type='thinking'."""
+        task = _make_serializable_task()
+
+        thinking_log = MagicMock()
+        thinking_log.id = 2
+        thinking_log.task_id = 1
+        thinking_log.log_level = "INFO"
+        thinking_log.log_type = "thinking"
+        thinking_log.log_metadata = '{"text":"I need to think about this problem"}'
+        thinking_log.message = ""
+        thinking_log.created_at = datetime(2024, 1, 1, 12, 0, 1)
+
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+
+        logs_result = MagicMock()
+        logs_result.scalars.return_value.all.return_value = [thinking_log]
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[task_result, logs_result])
+
+        client, app = _make_app_client_with_db(mock_db)
+        response = client.get("/api/tasks/1/logs")
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["log_type"], "thinking")
+        self.assertEqual(data[0]["metadata"], '{"text":"I need to think about this problem"}')
+        self.assertEqual(data[0]["message"], "")
+
+    def test_get_task_logs_returns_assistant_text_log_type(self):
+        """GET /api/tasks/{id}/logs should return assistant_text log entries."""
+        task = _make_serializable_task()
+
+        assistant_log = MagicMock()
+        assistant_log.id = 3
+        assistant_log.task_id = 1
+        assistant_log.log_level = "INFO"
+        assistant_log.log_type = "assistant_text"
+        assistant_log.log_metadata = '{"text":"Here is my response to your request"}'
+        assistant_log.message = ""
+        assistant_log.created_at = datetime(2024, 1, 1, 12, 0, 2)
+
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+
+        logs_result = MagicMock()
+        logs_result.scalars.return_value.all.return_value = [assistant_log]
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[task_result, logs_result])
+
+        client, app = _make_app_client_with_db(mock_db)
+        response = client.get("/api/tasks/1/logs")
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["log_type"], "assistant_text")
+        self.assertEqual(data[0]["metadata"], '{"text":"Here is my response to your request"}')
+
+    def test_get_task_logs_returns_tool_call_log_type(self):
+        """GET /api/tasks/{id}/logs should return tool_call log entries with log_type='tool_call'."""
+        task = _make_serializable_task()
+
+        tool_log = MagicMock()
+        tool_log.id = 4
+        tool_log.task_id = 1
+        tool_log.log_level = "INFO"
+        tool_log.log_type = "tool_call"
+        tool_log.log_metadata = '{"name":"bash","input":{"command":"ls"},"output":"file1.py"}'
+        tool_log.message = ""
+        tool_log.created_at = datetime(2024, 1, 1, 12, 0, 3)
+
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+
+        logs_result = MagicMock()
+        logs_result.scalars.return_value.all.return_value = [tool_log]
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[task_result, logs_result])
+
+        client, app = _make_app_client_with_db(mock_db)
+        response = client.get("/api/tasks/1/logs")
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["log_type"], "tool_call")
+
+    def test_get_task_logs_returns_mixed_log_types(self):
+        """GET /api/tasks/{id}/logs should return multiple log entries with different log_types."""
+        task = _make_serializable_task()
+
+        plain_log = MagicMock()
+        plain_log.id = 1
+        plain_log.task_id = 1
+        plain_log.log_level = "INFO"
+        plain_log.log_type = None
+        plain_log.log_metadata = None
+        plain_log.message = "Starting container"
+        plain_log.created_at = datetime(2024, 1, 1, 12, 0, 0)
+
+        thinking_log = MagicMock()
+        thinking_log.id = 2
+        thinking_log.task_id = 1
+        thinking_log.log_level = "INFO"
+        thinking_log.log_type = "thinking"
+        thinking_log.log_metadata = '{"text":"Let me analyze"}'
+        thinking_log.message = ""
+        thinking_log.created_at = datetime(2024, 1, 1, 12, 0, 1)
+
+        assistant_log = MagicMock()
+        assistant_log.id = 3
+        assistant_log.task_id = 1
+        assistant_log.log_level = "INFO"
+        assistant_log.log_type = "assistant_text"
+        assistant_log.log_metadata = '{"text":"I will fix the bug"}'
+        assistant_log.message = ""
+        assistant_log.created_at = datetime(2024, 1, 1, 12, 0, 2)
+
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+
+        logs_result = MagicMock()
+        logs_result.scalars.return_value.all.return_value = [plain_log, thinking_log, assistant_log]
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[task_result, logs_result])
+
+        client, app = _make_app_client_with_db(mock_db)
+        response = client.get("/api/tasks/1/logs")
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data), 3)
+        self.assertIsNone(data[0]["log_type"])
+        self.assertEqual(data[1]["log_type"], "thinking")
+        self.assertEqual(data[2]["log_type"], "assistant_text")
 
 
 # ---------------------------------------------------------------------------
@@ -766,6 +946,50 @@ class GetTaskEndpointTests(unittest.TestCase):
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 404)
+
+    def test_get_task_response_includes_model_name_field(self):
+        """GET /api/tasks/{id} response should include model_name field (None when not set)."""
+        task = _make_serializable_task(task_status=TaskStatus.COMPLETED, task_id=55)
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = task
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        client, app = _make_app_client_with_db(mock_db)
+
+        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+            response = client.get("/api/tasks/55")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("model_name", data)
+        self.assertIsNone(data["model_name"])
+
+    def test_get_task_response_includes_merge_request_title_field(self):
+        """GET /api/tasks/{id} response should include merge_request_title field (None when not set)."""
+        task = _make_serializable_task(task_status=TaskStatus.COMPLETED, task_id=56)
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = task
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        client, app = _make_app_client_with_db(mock_db)
+
+        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+            response = client.get("/api/tasks/56")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("merge_request_title", data)
+        self.assertIsNone(data["merge_request_title"])
 
 
 # ---------------------------------------------------------------------------

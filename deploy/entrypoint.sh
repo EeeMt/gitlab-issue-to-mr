@@ -657,6 +657,8 @@ AI-Generated: true"
             FINAL_MR_TITLE="AI: ${USER_PROMPT:0:60}"
         fi
 
+        echo "CODIFY_MR_TITLE:${FINAL_MR_TITLE}"
+
         if [ -n "${FINAL_SUMMARY_CONTENT}" ]; then
             update_mr "${FINAL_MR_TITLE}" "$(build_completed_mr_description "${FINAL_SUMMARY_CONTENT}" "${FINAL_CHANGED_FILES_TEXT}")" || true
         else

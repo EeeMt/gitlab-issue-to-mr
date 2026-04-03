@@ -44,6 +44,14 @@ _CODIFY_DIFF_RE = re.compile(r'^CODIFY_DIFF:\+(\d+)-(\d+)$', re.MULTILINE)
 _CODIFY_TOOL_CALLS_RE = re.compile(r'^CODIFY_TOOL_CALLS:(.+)$', re.MULTILINE)
 # Emitted by ci-claude.sh in real-time after EACH tool completes; single tool call object.
 _CODIFY_TOOL_CALL_RE = re.compile(r'^CODIFY_TOOL_CALL:(.+)$')
+# Emitted by ci-claude.sh on system init; contains model name and cwd as JSON.
+_CODIFY_SYSTEM_INIT_RE = re.compile(r'^CODIFY_SYSTEM_INIT:(.+)$', re.MULTILINE)
+# Emitted by entrypoint.sh after AI-generated MR title is determined; plain string.
+_CODIFY_MR_TITLE_RE = re.compile(r'^CODIFY_MR_TITLE:(.+)$', re.MULTILINE)
+# Emitted by ci-claude.sh in real-time when a thinking block completes; JSON with text.
+_CODIFY_THINKING_RE = re.compile(r'^CODIFY_THINKING:(.+)$')
+# Emitted by ci-claude.sh in real-time when a text (assistant response) block completes.
+_CODIFY_ASSISTANT_TEXT_RE = re.compile(r'^CODIFY_ASSISTANT_TEXT:(.+)$')
 
 # Volume mount constants
 _MAVEN_CACHE_CONTAINER_PATH = "/home/codify/.m2/repository"
@@ -271,6 +279,42 @@ class WorkerExecutor:
                         logger.debug(f"[Task {task_id}] Stored real-time tool_call entry")
                     except Exception as exc:
                         logger.debug(f"[Task {task_id}] Failed to parse CODIFY_TOOL_CALL: {exc}")
+
+            elif stripped.startswith('CODIFY_THINKING:'):
+                th_match = _CODIFY_THINKING_RE.match(stripped)
+                if th_match:
+                    try:
+                        json_str = th_match.group(1)
+                        _json.loads(json_str)  # validate before storing
+                        db.add(TaskLog(
+                            task_id=task_id,
+                            log_level="INFO",
+                            message="",
+                            log_type="thinking",
+                            log_metadata=json_str,
+                        ))
+                        await db.commit()
+                        logger.debug(f"[Task {task_id}] Stored real-time thinking entry")
+                    except Exception as exc:
+                        logger.debug(f"[Task {task_id}] Failed to parse CODIFY_THINKING: {exc}")
+
+            elif stripped.startswith('CODIFY_ASSISTANT_TEXT:'):
+                at_match = _CODIFY_ASSISTANT_TEXT_RE.match(stripped)
+                if at_match:
+                    try:
+                        json_str = at_match.group(1)
+                        _json.loads(json_str)  # validate before storing
+                        db.add(TaskLog(
+                            task_id=task_id,
+                            log_level="INFO",
+                            message="",
+                            log_type="assistant_text",
+                            log_metadata=json_str,
+                        ))
+                        await db.commit()
+                        logger.debug(f"[Task {task_id}] Stored real-time assistant_text entry")
+                    except Exception as exc:
+                        logger.debug(f"[Task {task_id}] Failed to parse CODIFY_ASSISTANT_TEXT: {exc}")
 
             buffer.append(line)
             all_lines.append(line)
@@ -505,6 +549,29 @@ class WorkerExecutor:
                 )
             except Exception:
                 logger.debug(f"[Task {task.id}] Failed to parse CODIFY_STATS")
+
+        # Extract model name from CODIFY_SYSTEM_INIT marker line
+        system_init_match = _CODIFY_SYSTEM_INIT_RE.search(logs)
+        if system_init_match:
+            try:
+                init_data = _json.loads(system_init_match.group(1).strip())
+                model = init_data.get('model', '').strip()
+                if model:
+                    task.model_name = model
+                    logger.info(f"[Task {task.id}] Model: {model}")
+            except Exception:
+                logger.debug(f"[Task {task.id}] Failed to parse CODIFY_SYSTEM_INIT")
+
+        # Extract AI-generated MR title from CODIFY_MR_TITLE marker line
+        mr_title_match = _CODIFY_MR_TITLE_RE.search(logs)
+        if mr_title_match:
+            try:
+                title = mr_title_match.group(1).strip()
+                if title:
+                    task.merge_request_title = sanitize_sensitive_data(title)[:512]
+                    logger.info(f"[Task {task.id}] MR title: {task.merge_request_title}")
+            except Exception:
+                logger.debug(f"[Task {task.id}] Failed to parse CODIFY_MR_TITLE")
 
         # Extract and store structured tool calls from CODIFY_TOOL_CALLS marker line.
         # Stored as a separate TaskLog entry (log_type='tool_calls_json') so the frontend
