@@ -344,6 +344,47 @@ def logged_in_page(request, browser, base_url, backend_url, db_cursor, reset_dat
         context.close()
 
 
+@pytest.fixture(scope="module")
+def class_page(browser, base_url, backend_url, worker_admin_setup):
+    """
+    Module-scoped authenticated page for read-only E2E tests.
+
+    Creates one browser context per test module (file) with a pre-authenticated
+    session. Reused across ALL test classes and functions in the module to
+    eliminate per-test login and context creation overhead.
+
+    Tests must call page.goto(url) themselves. No DB reset is performed
+    between tests — suitable only for read-only tests that don't create
+    or modify application data, and that don't leave persistent browser
+    state (e.g. changed viewport size) without resetting it.
+
+    Use this instead of ``logged_in_page`` + ``reset_database`` for tests
+    that only navigate and assert UI structure.
+    """
+    storage_state = _api_login(backend_url, base_url)
+    context = browser.new_context(base_url=base_url, storage_state=storage_state)
+    page = context.new_page()
+    yield page
+    context.close()
+
+
+@pytest.fixture(scope="function")
+def fresh_page(browser, base_url, backend_url, worker_admin_setup):
+    """
+    Function-scoped authenticated page WITHOUT database reset.
+
+    Creates a fresh browser context with API-based login for each test,
+    but does NOT call reset_database. Use for destructive tests (e.g. logout)
+    that must not invalidate the module-scoped ``class_page`` session shared
+    by other tests in the same file.
+    """
+    storage_state = _api_login(backend_url, base_url)
+    context = browser.new_context(base_url=base_url, storage_state=storage_state)
+    page = context.new_page()
+    yield page
+    context.close()
+
+
 def _do_login(page):
     """
     Internal helper to perform login via bootstrap or existing admin.

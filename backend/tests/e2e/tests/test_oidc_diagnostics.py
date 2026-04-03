@@ -25,30 +25,30 @@ def _wait_for_oidc_diagnostics(page: Page):
 class TestOidcDiagnosticsPage:
     """Tests for the OIDC Diagnostics panel within Config > Auth tab."""
 
-    def test_oidc_diagnostics_page_loads(self, logged_in_page: Page, reset_database):
+    def test_oidc_diagnostics_page_loads(self, class_page: Page):
         """Test that navigating via /oidc-diagnostics redirect lands on the config auth tab."""
-        logged_in_page.goto("/oidc-diagnostics")
+        class_page.goto("/oidc-diagnostics")
         # Route redirects to /configuration?tab=auth
-        logged_in_page.wait_for_selector(".diagnostics-card", timeout=10000)
-        outer = logged_in_page.locator(".diagnostics-card")
+        class_page.wait_for_selector(".diagnostics-card", timeout=10000)
+        outer = class_page.locator(".diagnostics-card")
         expect(outer.first).to_be_visible()
 
-    def test_diagnostics_card_header_is_visible(self, logged_in_page: Page, reset_database):
+    def test_diagnostics_card_header_is_visible(self, class_page: Page):
         """Test that the diagnostics card header section is visible."""
-        _wait_for_oidc_diagnostics(logged_in_page)
-        header = logged_in_page.locator(".diagnostics-card__header").first
+        _wait_for_oidc_diagnostics(class_page)
+        header = class_page.locator(".diagnostics-card__header").first
         expect(header).to_be_visible()
 
-    def test_diagnostics_card_title_is_visible(self, logged_in_page: Page, reset_database):
+    def test_diagnostics_card_title_is_visible(self, class_page: Page):
         """Test that the diagnostics card title is visible."""
-        _wait_for_oidc_diagnostics(logged_in_page)
-        title = logged_in_page.locator(".diagnostics-card__title").first
+        _wait_for_oidc_diagnostics(class_page)
+        title = class_page.locator(".diagnostics-card__title").first
         expect(title).to_be_visible()
 
-    def test_fetch_diagnostics_button_is_visible(self, logged_in_page: Page, reset_database):
+    def test_fetch_diagnostics_button_is_visible(self, class_page: Page):
         """Test that the Fetch Diagnostics button is visible within the diagnostics card."""
-        _wait_for_oidc_diagnostics(logged_in_page)
+        _wait_for_oidc_diagnostics(class_page)
         # The button is in the first diagnostics-card header
-        fetch_button = logged_in_page.locator(".diagnostics-card").first.get_by_role("button").first
+        fetch_button = class_page.locator(".diagnostics-card").first.get_by_role("button").first
         expect(fetch_button).to_be_visible()
 
