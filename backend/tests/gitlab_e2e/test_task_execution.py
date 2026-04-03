@@ -2,18 +2,22 @@
 """
 Integration tests for manual task creation and execution.
 
-These tests require:
-  - A running backend at BACKEND_URL
-  - A running scheduler (will execute tasks via Docker)
-  - A real GitLab instance at GITLAB_URL
-  - Valid ANTHROPIC_* credentials (Claude CLI will run inside worker containers)
+These tests are designed to run against a clean Codify backend (the E2E Docker
+environment is ideal: ``make test-e2e-up`` → then override BACKEND_URL).
+
+  TestTaskAPIIntegrity   — fast API-level checks; run against the E2E env (18980)
+  TestManualTaskExecution — full worker execution; requires real GitLab + Claude CLI
+  TestScheduledTaskExecution — scheduler behaviour; requires real GitLab + Claude CLI
 
 Run with:
-    cd backend && python3 -m pytest tests/gitlab_e2e/test_task_execution.py -v -s
-    # or individually:
-    cd backend && python3 -m pytest tests/gitlab_e2e/test_task_execution.py::TestManualTaskExecution::test_with_mr -v -s
+    # API integrity only (works against E2E env at 18980):
+    cd backend && BACKEND_URL=http://192.168.50.129:18980 \\
+        python3 -m pytest tests/gitlab_e2e/test_task_execution.py::TestTaskAPIIntegrity -v -s
 
-All tests are skipped when the backend or GitLab is unreachable.
+    # Full execution tests (requires real GitLab + Claude CLI):
+    cd backend && python3 -m pytest tests/gitlab_e2e/test_task_execution.py::TestManualTaskExecution -v -s
+
+All tests skip when the backend, GitLab, or required configuration is missing.
 """
 
 import os
@@ -45,11 +49,12 @@ GITLAB_URL = os.getenv("GITLAB_URL", "http://192.168.50.129:8080")
 GITLAB_TOKEN = os.getenv("GITLAB_BOT_TOKEN", "")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
-# Credentials for Codify backend local-auth login.
-# Default "SecurePass123!" matches the E2E Docker environment's auto-bootstrapped admin.
-# Override with INT_TEST_USERNAME / INT_TEST_PASSWORD for other deployments.
-INT_TEST_USERNAME = os.getenv("INT_TEST_USERNAME", "admin")
-INT_TEST_PASSWORD = os.getenv("INT_TEST_PASSWORD", "SecurePass123!")
+# Credentials follow the same convention as the Playwright E2E conftest:
+# hardcoded "SecurePass123!" for the auto-bootstrapped E2E environment.
+# Register is attempted first (succeeds on a fresh/uninitialized system); falls
+# back to login on an already-initialized system with the same password.
+_TEST_USERNAME = "test_admin_gitlab_e2e"
+_TEST_PASSWORD = "SecurePass123!"
 
 # Project used for all tests — must exist in GitLab and be accessible to the bot token.
 TEST_PROJECT_ID = int(os.getenv("TEST_PROJECT_ID", "1"))
@@ -111,17 +116,17 @@ def _get_be_session() -> requests.Session:
 
     session = requests.Session()
 
-    # Try to register first (succeeds only when system is uninitialized)
+    # Try to register first (succeeds only when system is uninitialized — e.g. fresh E2E env).
     try:
         bootstrap = requests.get(f"{BACKEND_URL}/api/auth/bootstrap-status", timeout=10).json()
         if not bootstrap.get("initialized"):
             session.post(
                 f"{BACKEND_URL}/api/auth/local/register",
                 json={
-                    "username": INT_TEST_USERNAME,
-                    "display_name": "Integration Test Admin",
-                    "email": f"{INT_TEST_USERNAME}@test.example.com",
-                    "password": INT_TEST_PASSWORD,
+                    "username": _TEST_USERNAME,
+                    "display_name": "GitLab E2E Test Admin",
+                    "email": f"{_TEST_USERNAME}@test.example.com",
+                    "password": _TEST_PASSWORD,
                 },
                 timeout=10,
             )
@@ -132,7 +137,7 @@ def _get_be_session() -> requests.Session:
     try:
         resp = session.post(
             f"{BACKEND_URL}/api/auth/local/login",
-            json={"username": INT_TEST_USERNAME, "password": INT_TEST_PASSWORD},
+            json={"username": _TEST_USERNAME, "password": _TEST_PASSWORD},
             timeout=10,
         )
     except Exception as exc:
@@ -140,12 +145,12 @@ def _get_be_session() -> requests.Session:
 
     if resp.status_code != 200:
         pytest.skip(
-            f"Backend login failed ({resp.status_code}) — "
-            f"set INT_TEST_USERNAME / INT_TEST_PASSWORD to valid local-auth credentials. "
-            f"Response: {resp.text[:200]}"
+            f"Backend login failed ({resp.status_code}). "
+            f"For API tests, run against the E2E environment: "
+            f"BACKEND_URL=http://192.168.50.129:18980 make test-gitlab-e2e"
         )
 
-    log.info(f"Authenticated as {INT_TEST_USERNAME!r} at {BACKEND_URL}")
+    log.info(f"Authenticated as {_TEST_USERNAME!r} at {BACKEND_URL}")
     _be_session = session
     return session
 

@@ -52,9 +52,9 @@ python -m pytest tests/unit/test_auth_session.py::AuthSessionTests -v
 ```
 
 ### 特点
-- 使用 `unittest.IsolatedAsyncioTestCase` 异步测试
+- 使用 `pytest` + `asyncio_mode = "auto"` 异步测试
 - 大量使用 mock 避免外部依赖
-- 运行快速（通常 < 2 秒）
+- 运行快速（通常 < 30 秒，约 408 个测试）
 
 ---
 
@@ -313,8 +313,47 @@ test_dashboard_page_loads_chromium_gw0.webm
 make test-gitlab-e2e
 ```
 
+### 测试文件
+
+| 文件 | 说明 | 依赖 |
+|------|------|------|
+| `test_manual_task.py` | 手动任务创建 (GitLab API) | 真实 GitLab |
+| `test_integration.py` | Webhook 集成流程 | 真实 GitLab |
+| `test_task_execution.py` | 任务创建 API + 执行完整流程 | 见下表 |
+
+#### `test_task_execution.py` 各测试类依赖
+
+| 测试类 | 说明 | 运行环境 |
+|--------|------|---------|
+| `TestTaskAPIIntegrity` | 快速 API 完整性检查（6个，< 3s）| E2E 环境（18980）|
+| `TestManualTaskExecution` | 完整 worker 执行（需 Claude CLI）| 真实部署（有 GitLab + Claude） |
+| `TestScheduledTaskExecution` | 调度行为验证（需 Claude CLI）| 真实部署（有 GitLab + Claude） |
+
+#### 运行 TestTaskAPIIntegrity（推荐使用 E2E 环境）
+
+```bash
+# 先启动 E2E 环境
+make test-e2e-up
+
+# 指定 BACKEND_URL 为 E2E 环境端口（18980）
+cd backend && BACKEND_URL=http://192.168.50.129:18980 \
+    .venv/bin/python3 -m pytest tests/gitlab_e2e/test_task_execution.py::TestTaskAPIIntegrity -v -s
+```
+
+> **认证说明**：`test_task_execution.py` 自动处理认证：
+> - 系统未初始化时（E2E 新鲜环境）：自动注册 `test_admin_gitlab_e2e` 用户（密码 `SecurePass123!`）
+> - 系统已初始化时（dev 环境）：尝试登录，若失败则 skip（不报错）
+
+#### 运行完整执行测试（需真实 GitLab + Claude CLI）
+
+```bash
+# 确保 deploy/.env.test 中已配置：
+# GITLAB_URL, GITLAB_BOT_TOKEN, ANTHROPIC_API_KEY, ANTHROPIC_MODEL 等
+make test-gitlab-e2e
+```
+
 ### 环境要求
-- 可访问的 GitLab 实例
+- 可访问的 GitLab 实例（`test_task_execution.py::TestTaskAPIIntegrity` 不需要）
 - 有效的 `GITLAB_BOT_TOKEN`
 - 测试项目和配置（在 `deploy/.env.test` 中）
 
