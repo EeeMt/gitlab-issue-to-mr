@@ -555,6 +555,17 @@ function handleScheduleHeatmapCellClick(startMs: number) {
   showScheduleDrawer.value = false
 }
 
+// Git branch name validation
+function validateBranchName(name: string): string | null {
+  if (!name) return null
+  if (/[\s~^:?*[\\\x00-\x1f\x7f]/.test(name)) return t('createTask.branchNameInvalidChars')
+  if (name.startsWith('.') || name.startsWith('-')) return t('createTask.branchNameInvalidStart')
+  if (name.endsWith('.') || name.endsWith('/') || name.endsWith('.lock')) return t('createTask.branchNameInvalidEnd')
+  if (name.includes('..') || name.includes('@{') || name.includes('//')) return t('createTask.branchNameInvalidSequence')
+  if (name === '@') return t('createTask.branchNameInvalidChars')
+  return null
+}
+
 // Validation rules
 const rules: FormRules = {
   project_id: {
@@ -569,8 +580,14 @@ const rules: FormRules = {
     trigger: 'change'
   },
   new_branch_name: {
-    validator: () =>
-      !sameBranchConflict.value || new Error(t('createTask.sourceTargetDifferent')),
+    validator: () => {
+      const name = (formValue.value.new_branch_name || '').trim()
+      if (name) {
+        const branchError = validateBranchName(name)
+        if (branchError) return new Error(branchError)
+      }
+      return !sameBranchConflict.value || new Error(t('createTask.sourceTargetDifferent'))
+    },
     trigger: ['blur', 'input', 'change']
   },
   target_branch: {
