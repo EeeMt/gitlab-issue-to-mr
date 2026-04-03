@@ -194,7 +194,7 @@ process_stream() {
                 ;;
               tool_use)
                 _e "${RESET}\n${YELLOW}└──────────────────────────────────────────────${RESET}\n"
-                # Persist tool call stub; output filled in below by tool_result
+                # Persist tool call stub; output filled in below by user message tool_result
                 local safe_input
                 safe_input=$(printf '%s' "${cur_tool_input:-{\}}" | jq -c '.' 2>/dev/null || echo '{}')
                 jq -nc \
@@ -215,44 +215,47 @@ process_stream() {
         esac
         ;;
 
-      # ── Tool execution result ───────────────────────────────────────────────
-      tool_result)
-        local output is_error
-        output=$(printf '%s' "$line" | jq -r '
-          if (.content | type) == "array" then .content[0].text
-          elif (.content | type) == "string" then .content
-          else "" end' 2>/dev/null)
-        is_error=$(printf '%s' "$line" | jq -r '.is_error // false' 2>/dev/null)
+      # ── Tool execution results (delivered in user messages after each assistant turn)
+      user)
+        local count
+        count=$(printf '%s' "$line" | jq '[.content[]? | select(.type == "tool_result")] | length' 2>/dev/null || echo 0)
+        local i
+        for (( i=0; i<count; i++ )); do
+          local output is_error stored_out
+          output=$(printf '%s' "$line" | jq -r --argjson i "$i" '
+            .content[$i] |
+            if (.content | type) == "array" then (.content | map(.text // "") | join(""))
+            elif (.content | type) == "string" then .content
+            else "" end' 2>/dev/null)
+          is_error=$(printf '%s' "$line" | jq -r --argjson i "$i" '.content[$i].is_error // false' 2>/dev/null)
 
-        if [[ "$is_error" == "true" ]]; then
-          _e "${RED}  ╰─ ❌ Error:  ${DIM}%.400s${RESET}\n" "$output"
-        else
-          _e "${CYAN}  ╰─ ✅ Output: ${DIM}%.400s${RESET}\n" "$output"
-        fi
+          if [[ "$is_error" == "true" ]]; then
+            _e "${RED}  ╰─ ❌ Error:  ${DIM}%.400s${RESET}\n" "$output"
+          else
+            _e "${CYAN}  ╰─ ✅ Output: ${DIM}%.400s${RESET}\n" "$output"
+          fi
 
-        # Truncate output to 2000 chars to keep stored payloads manageable
-        local stored_out
-        stored_out="${output:0:2000}"
-        [[ ${#output} -gt 2000 ]] && stored_out+="…(truncated)"
-
-        # Patch the last tool-call stub with its output and error flag
-        if [[ -s "$TOOL_CALLS_FILE" ]]; then
-          local total_lines last_line updated
-          total_lines=$(wc -l < "$TOOL_CALLS_FILE")
-          last_line=$(tail -1 "$TOOL_CALLS_FILE")
-          updated=$(printf '%s' "$last_line" | jq -c \
-            --arg out "$stored_out" \
-            --argjson err "$is_error" \
-            '.output = $out | .error = $err')
-          {
-            head -n $(( total_lines - 1 )) "$TOOL_CALLS_FILE" 2>/dev/null || true
-            printf '%s\n' "$updated"
-          } > "$TOOL_CALLS_FILE.tmp"
-          mv "$TOOL_CALLS_FILE.tmp" "$TOOL_CALLS_FILE"
-          # Emit real-time per-call marker so backend can write individual timeline entries.
-          # Goes to stderr which flows into Docker container logs and is streamed to DB.
-          printf 'CODIFY_TOOL_CALL:%s\n' "$updated" >&2
-        fi
+          if [[ -s "$TOOL_CALLS_FILE" ]]; then
+            stored_out="${output:0:2000}"
+            [[ ${#output} -gt 2000 ]] && stored_out+="…(truncated)"
+            # Fill the first unfilled stub (output == null) in order
+            local stub_line updated
+            stub_line=$(grep -nm 1 '"output":null' "$TOOL_CALLS_FILE" | cut -d: -f1)
+            if [[ -n "$stub_line" ]]; then
+              updated=$(sed -n "${stub_line}p" "$TOOL_CALLS_FILE" | jq -c \
+                --arg out "$stored_out" \
+                --argjson err "$is_error" \
+                '.output = $out | .error = $err')
+              {
+                head -n $(( stub_line - 1 )) "$TOOL_CALLS_FILE" 2>/dev/null || true
+                printf '%s\n' "$updated"
+                tail -n +$(( stub_line + 1 )) "$TOOL_CALLS_FILE" 2>/dev/null || true
+              } > "$TOOL_CALLS_FILE.tmp"
+              mv "$TOOL_CALLS_FILE.tmp" "$TOOL_CALLS_FILE"
+              printf 'CODIFY_TOOL_CALL:%s\n' "$updated" >&2
+            fi
+          fi
+        done
         ;;
 
       # ── System init ─────────────────────────────────────────────────────────
@@ -290,6 +293,9 @@ process_stream() {
         else
           fail "Task failed: $subtype"
         fi
+        ;;
+
+      *)
         ;;
     esac
   done

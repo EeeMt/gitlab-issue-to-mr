@@ -237,6 +237,7 @@ const en = {
     rawLogs: 'Raw Logs',
     thinkingLabel: 'Thinking',
     assistantLabel: 'Claude',
+    fullText: 'Full text',
     executionSummary: 'Execution Summary',
     mergeRequest: 'Merge Request'
   },

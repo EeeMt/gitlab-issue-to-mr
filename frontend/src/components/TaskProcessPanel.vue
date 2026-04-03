@@ -36,52 +36,70 @@
         <template v-for="(event, index) in sortedEvents" :key="index">
           <!-- thinking entry -->
           <div v-if="event.log_type === 'thinking'" class="event-item event-item--thinking">
-            <n-collapse>
-              <n-collapse-item name="thinking">
+            <div class="event-header">
+              <div class="event-icon" style="color: #888">
+                <n-icon size="15"><BulbOutline /></n-icon>
+              </div>
+              <div class="event-info">
+                <span class="event-name">{{ t('taskView.thinkingLabel') }}</span>
+                <span v-if="parseTextMeta(event.metadata)" class="event-preview">
+                  {{ parseTextMeta(event.metadata).slice(0, 120) }}
+                </span>
+              </div>
+              <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
+            </div>
+            <n-collapse class="event-collapse">
+              <n-collapse-item name="detail">
                 <template #header>
-                  <span class="event-collapse-header event-collapse-header--thinking">
-                    💭 {{ t('taskView.thinkingLabel') }}
-                    <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
-                  </span>
+                  <span class="tool-detail-label">{{ t('taskView.fullText') }}</span>
                 </template>
-                <div class="event-text event-text--thinking">{{ parseTextMeta(event.metadata) }}</div>
+                <pre class="event-content event-content--thinking">{{ parseTextMeta(event.metadata) }}</pre>
               </n-collapse-item>
             </n-collapse>
           </div>
 
           <!-- assistant_text entry -->
           <div v-else-if="event.log_type === 'assistant_text'" class="event-item event-item--assistant">
-            <n-collapse>
-              <n-collapse-item name="assistant">
+            <div class="event-header">
+              <div class="event-icon" style="color: #0284c7">
+                <n-icon size="15"><ChatboxOutline /></n-icon>
+              </div>
+              <div class="event-info">
+                <span class="event-name">{{ t('taskView.assistantLabel') }}</span>
+                <span v-if="parseTextMeta(event.metadata)" class="event-preview">
+                  {{ parseTextMeta(event.metadata).slice(0, 120) }}
+                </span>
+              </div>
+              <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
+            </div>
+            <n-collapse class="event-collapse">
+              <n-collapse-item name="detail">
                 <template #header>
-                  <span class="event-collapse-header event-collapse-header--assistant">
-                    💬 {{ t('taskView.assistantLabel') }}
-                    <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
-                  </span>
+                  <span class="tool-detail-label">{{ t('taskView.fullText') }}</span>
                 </template>
-                <div class="event-text">{{ parseTextMeta(event.metadata) }}</div>
+                <pre class="event-content">{{ parseTextMeta(event.metadata) }}</pre>
               </n-collapse-item>
             </n-collapse>
           </div>
 
           <!-- tool_call entry -->
           <div v-else-if="event.log_type === 'tool_call'" class="event-item event-item--tool">
-            <div class="tool-call-header">
-              <div class="tool-call-icon" :style="{ color: getToolColor(parsedToolCall(event).name) }">
+            <div class="event-header">
+              <div class="event-icon" :style="{ color: getToolColor(parsedToolCall(event).name) }">
                 <n-icon size="15">
                   <component :is="getToolIcon(parsedToolCall(event).name)" />
                 </n-icon>
               </div>
-              <div class="tool-call-info">
-                <span class="tool-call-name">{{ parsedToolCall(event).name }}</span>
-                <span v-if="getInputSummary(parsedToolCall(event))" class="tool-call-summary">
+              <div class="event-info">
+                <span class="event-name">{{ parsedToolCall(event).name }}</span>
+                <span v-if="getInputSummary(parsedToolCall(event))" class="event-preview">
                   {{ getInputSummary(parsedToolCall(event)) }}
                 </span>
               </div>
               <n-tag v-if="parsedToolCall(event).error" type="error" size="small" round>Error</n-tag>
-              <span class="tool-call-ts">{{ formatTimestamp(event.created_at) }}</span>
+              <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
             </div>
-            <n-collapse class="tool-call-collapse">
+            <n-collapse class="event-collapse">
               <n-collapse-item v-if="hasDetailedInput(parsedToolCall(event))" name="input">
                 <template #header>
                   <span class="tool-detail-label">{{ t('taskView.toolInput') }}</span>
@@ -126,7 +144,9 @@ import {
   PencilOutline,
   SearchOutline,
   ExtensionPuzzleOutline,
-  ServerOutline
+  ServerOutline,
+  BulbOutline,
+  ChatboxOutline
 } from '@vicons/ionicons5'
 import type { Component } from 'vue'
 import type { TaskLog, ToolCall } from '../api'
@@ -390,84 +410,45 @@ const hasStructuredContent = computed(() =>
   border-bottom: none;
 }
 
-.event-collapse-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-}
-
-.event-collapse-header--thinking {
-  color: var(--n-text-color-3, #888);
-  font-style: italic;
-}
-
-.event-collapse-header--assistant {
-  color: var(--n-text-color-2, #555);
-}
-
-.event-ts {
-  font-size: 11px;
-  color: var(--n-text-color-3, #999);
-  margin-left: auto;
-  font-family: var(--n-font-family-mono, monospace);
-  font-style: normal;
-}
-
-.event-text {
-  font-size: 13px;
-  line-height: 1.65;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--n-text-color-2);
-  padding: 4px 0;
-}
-
-.event-text--thinking {
-  color: var(--n-text-color-3, #888);
-  font-style: italic;
-}
-
-/* Tool call row */
-.tool-call-header {
+/* Unified event row */
+.event-header {
   display: flex;
   align-items: center;
   gap: 8px;
   min-height: 30px;
 }
 
-.tool-call-icon {
+.event-icon {
   display: flex;
   align-items: center;
   flex-shrink: 0;
   width: 20px;
 }
 
-.tool-call-info {
+.event-info {
   flex: 1;
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
   overflow: hidden;
 }
 
-.tool-call-name {
-  font-weight: 600;
-  font-size: 12px;
+.event-name {
+  font-weight: 500;
+  font-size: 13px;
   flex-shrink: 0;
-  font-family: var(--n-font-family-mono, monospace);
 }
 
-.tool-call-summary {
-  font-size: 11px;
+.event-preview {
+  font-size: 12px;
   color: var(--n-text-color-3, #999);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--n-font-family-mono, monospace);
 }
 
-.tool-call-ts {
+.event-ts {
   font-size: 11px;
   color: var(--n-text-color-3, #999);
   flex-shrink: 0;
@@ -475,9 +456,27 @@ const hasStructuredContent = computed(() =>
   margin-left: auto;
 }
 
-.tool-call-collapse {
+.event-collapse {
   margin-top: 4px;
   margin-left: 28px;
+}
+
+/* Expandable content bodies */
+.event-content {
+  margin: 0;
+  padding: 4px 0;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--n-text-color-2);
+  font-family: inherit;
+}
+
+.event-content--thinking {
+  font-size: 12px;
+  color: var(--n-text-color-3, #888);
+  font-style: italic;
 }
 
 .tool-detail-label {

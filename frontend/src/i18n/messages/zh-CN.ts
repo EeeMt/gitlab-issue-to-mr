@@ -227,6 +227,7 @@ const zhCN = {
     rawLogs: '原始日志',
     thinkingLabel: '思考',
     assistantLabel: 'Claude',
+    fullText: '完整内容',
     executionSummary: '执行摘要',
     mergeRequest: '合并请求'
   },
