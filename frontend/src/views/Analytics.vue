@@ -447,6 +447,8 @@ function formatTokenBreakdown(inputTokens: number, outputTokens: number) {
   })
 }
 
+const secondaryTextStyle = { fontSize: '11px', color: 'rgba(15,23,42,0.45)', marginTop: '2px', lineHeight: '1.4' }
+
 function buildTrendBars(values: { key: string; label: string; value: number; displayValue?: string }[]) {
   const max = Math.max(...values.map((item) => item.value), 1)
   return values.map<TrendBar>((item) => ({
@@ -605,9 +607,9 @@ const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
     width: 110,
     sorter: (a, b) => a.total_changes - b.total_changes,
     render: (row) =>
-      h('div', { class: 'analytics-table__primary' }, [
+      h('div', [
         h('div', String(row.total_changes)),
-        h('div', { class: 'analytics-table__secondary' }, t('analytics.changeBreakdown', { additions: row.additions, deletions: row.deletions }))
+        h('div', { style: secondaryTextStyle }, t('analytics.changeBreakdown', { additions: row.additions, deletions: row.deletions }))
       ])
   },
   {
@@ -616,9 +618,9 @@ const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
     width: 150,
     sorter: (a, b) => a.total_tokens - b.total_tokens,
     render: (row) =>
-      h('div', { class: 'analytics-table__primary' }, [
+      h('div', [
         h('div', formatNumber(row.total_tokens)),
-        h('div', { class: 'analytics-table__secondary' }, formatTokenBreakdown(row.input_tokens, row.output_tokens))
+        h('div', { style: secondaryTextStyle }, formatTokenBreakdown(row.input_tokens, row.output_tokens))
       ])
   },
   {
@@ -637,10 +639,10 @@ const initiatorColumns = computed<DataTableColumns<AnalyticsInitiatorRow>>(() =>
     minWidth: 160,
     sorter: (a, b) => a.initiator_username.localeCompare(b.initiator_username),
     render: (row) =>
-      h('div', { class: 'analytics-table__primary' }, [
-        h('div', row.initiator_username),
+      h('div', [
+        h('div', { style: { fontWeight: 500 } }, row.initiator_username),
         row.initiator_gitlab_user_id !== null
-          ? h('div', { class: 'analytics-table__secondary' }, t('analytics.gitlabId', { id: row.initiator_gitlab_user_id }))
+          ? h('div', { style: secondaryTextStyle }, t('analytics.gitlabId', { id: row.initiator_gitlab_user_id }))
           : null
       ])
   },
@@ -672,9 +674,9 @@ const initiatorColumns = computed<DataTableColumns<AnalyticsInitiatorRow>>(() =>
     width: 110,
     sorter: (a, b) => a.total_changes - b.total_changes,
     render: (row) =>
-      h('div', { class: 'analytics-table__primary' }, [
+      h('div', [
         h('div', String(row.total_changes)),
-        h('div', { class: 'analytics-table__secondary' }, t('analytics.changeBreakdown', { additions: row.additions, deletions: row.deletions }))
+        h('div', { style: secondaryTextStyle }, t('analytics.changeBreakdown', { additions: row.additions, deletions: row.deletions }))
       ])
   },
   {
@@ -683,9 +685,9 @@ const initiatorColumns = computed<DataTableColumns<AnalyticsInitiatorRow>>(() =>
     width: 150,
     sorter: (a, b) => a.total_tokens - b.total_tokens,
     render: (row) =>
-      h('div', { class: 'analytics-table__primary' }, [
+      h('div', [
         h('div', formatNumber(row.total_tokens)),
-        h('div', { class: 'analytics-table__secondary' }, formatTokenBreakdown(row.input_tokens, row.output_tokens))
+        h('div', { style: secondaryTextStyle }, formatTokenBreakdown(row.input_tokens, row.output_tokens))
       ])
   },
   {
