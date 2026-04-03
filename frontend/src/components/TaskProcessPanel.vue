@@ -26,7 +26,8 @@
 
     <!-- No structured logs fallback: show raw logs directly -->
     <template v-if="!hasStructuredContent">
-      <pre v-if="terminalHtml" class="log-content" v-html="terminalHtml"></pre>
+      <n-empty v-if="taskStatus === 'pending' || taskStatus === 'queued'" :description="t('taskView.taskNotStarted')" class="empty-state" />
+      <pre v-else-if="terminalHtml" class="log-content" v-html="terminalHtml"></pre>
       <n-empty v-else-if="!isActive" :description="t('taskView.noLogsAvailable')" class="empty-state" />
     </template>
 
@@ -157,6 +158,7 @@ const props = defineProps<{
   outputTokens: number | null
   isActive: boolean
   terminalHtml: string
+  taskStatus: string
 }>()
 
 const { t } = useI18n()
@@ -343,6 +345,8 @@ const hasStructuredContent = computed(() =>
 <style scoped>
 .task-process-panel {
   border-radius: var(--app-card-radius);
+  overflow: hidden;
+  min-width: 0;
 }
 
 .panel-title {
@@ -399,6 +403,11 @@ const hasStructuredContent = computed(() =>
 .event-stream {
   display: flex;
   flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  min-width: 0;
+  max-height: 600px;
+  padding-right: 4px;
 }
 
 .event-item {
@@ -446,6 +455,8 @@ const hasStructuredContent = computed(() =>
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  word-break: break-all;
+  max-width: 100%;
 }
 
 .event-ts {

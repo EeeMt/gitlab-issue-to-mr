@@ -219,15 +219,23 @@ process_stream() {
       user)
         local count
         count=$(printf '%s' "$line" | jq '[.content[]? | select(.type == "tool_result")] | length' 2>/dev/null || echo 0)
+        # DEBUG: log count and first item structure
+        local _dbg_first
+        _dbg_first=$(printf '%s' "$line" | jq -c '.content[0] | {type,keys}' 2>/dev/null || echo "jq_fail")
+        log "DEBUG user msg: count=$count first=$_dbg_first"
         local i
         for (( i=0; i<count; i++ )); do
           local output is_error stored_out
+          # Extract output: index into filtered tool_result array, not raw array
           output=$(printf '%s' "$line" | jq -r --argjson i "$i" '
-            .content[$i] |
+            [.content[]? | select(.type == "tool_result")][$i] |
             if (.content | type) == "array" then (.content | map(.text // "") | join(""))
             elif (.content | type) == "string" then .content
-            else "" end' 2>/dev/null)
-          is_error=$(printf '%s' "$line" | jq -r --argjson i "$i" '.content[$i].is_error // false' 2>/dev/null)
+            else (.output // "") end' 2>/dev/null)
+          is_error=$(printf '%s' "$line" | jq -r --argjson i "$i" \
+            '[.content[]? | select(.type == "tool_result")][$i].is_error // false' 2>/dev/null)
+          is_error=$(printf '%s' "$line" | jq -r --argjson i "$i" \
+            '[.content[]? | select(.type == "tool_result")][$i].is_error // false' 2>/dev/null)
 
           if [[ "$is_error" == "true" ]]; then
             _e "${RED}  ╰─ ❌ Error:  ${DIM}%.400s${RESET}\n" "$output"

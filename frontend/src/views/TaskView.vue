@@ -208,6 +208,7 @@
             :output-tokens="task?.output_tokens ?? null"
             :is-active="isActiveTaskStatus(task?.status)"
             :terminal-html="terminalLogHtml"
+            :task-status="task?.status ?? ''"
           />
 
           <!-- Result Panel (only for terminal tasks) -->

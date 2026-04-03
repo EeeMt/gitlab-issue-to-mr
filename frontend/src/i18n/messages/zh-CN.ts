@@ -229,7 +229,9 @@ const zhCN = {
     assistantLabel: 'Claude',
     fullText: '完整内容',
     executionSummary: '执行摘要',
-    mergeRequest: '合并请求'
+    mergeRequest: '合并请求',
+    taskNotStarted: '任务未开始',
+    tokenBreakdown: '输入: {input} · 输出: {output}'
   },
   createTask: {
     title: '创建手动任务',

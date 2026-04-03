@@ -65,7 +65,7 @@
       </div>
 
       <!-- User prompt -->
-      <div class="metadata-row metadata-row--prompt">
+      <div class="metadata-row">
         <span class="metadata-label">{{ t('taskView.userPrompt') }}</span>
         <pre class="metadata-prompt">{{ task.user_prompt }}</pre>
       </div>
@@ -174,11 +174,6 @@ function formatPriority(priority?: string | number | null): string {
   align-items: baseline;
 }
 
-.metadata-row--prompt {
-  flex-direction: column;
-  gap: 6px;
-}
-
 .metadata-label {
   font-size: 13px;
   color: var(--n-text-color-3, #999);
@@ -257,6 +252,8 @@ function formatPriority(priority?: string | number | null): string {
   overflow-y: auto;
   border: 1px solid rgba(128, 128, 128, 0.12);
   color: var(--n-text-color-2);
+  flex: 1;
+  min-width: 0;
 }
 
 .time-axis {

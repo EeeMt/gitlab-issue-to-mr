@@ -239,7 +239,9 @@ const en = {
     assistantLabel: 'Claude',
     fullText: 'Full text',
     executionSummary: 'Execution Summary',
-    mergeRequest: 'Merge Request'
+    mergeRequest: 'Merge Request',
+    taskNotStarted: 'Task not started',
+    tokenBreakdown: 'Input: {input} · Output: {output}'
   },
   createTask: {
     title: 'Create Manual Task',

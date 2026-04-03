@@ -59,16 +59,11 @@
             <span class="summary-value">{{ task.model_name || '-' }}</span>
           </div>
           <div class="summary-item">
-            <span class="summary-label">{{ t('taskView.inputTokens') }}</span>
-            <span class="summary-value">{{ task.input_tokens != null ? task.input_tokens.toLocaleString() : '-' }}</span>
-          </div>
-          <div class="summary-item">
-            <span class="summary-label">{{ t('taskView.outputTokens') }}</span>
-            <span class="summary-value">{{ task.output_tokens != null ? task.output_tokens.toLocaleString() : '-' }}</span>
-          </div>
-          <div class="summary-item">
             <span class="summary-label">{{ t('taskView.totalTokens') }}</span>
             <span class="summary-value">{{ totalTokens != null ? totalTokens.toLocaleString() : '-' }}</span>
+            <span v-if="task.input_tokens != null && task.output_tokens != null" class="summary-item__sub">
+              {{ t('taskView.tokenBreakdown', { input: task.input_tokens.toLocaleString(), output: task.output_tokens.toLocaleString() }) }}
+            </span>
           </div>
           <div class="summary-item">
             <span class="summary-label">{{ t('taskView.duration') }}</span>
@@ -277,6 +272,12 @@ const totalTokens = computed(() => {
   font-weight: 500;
   color: var(--n-text-color-1);
   word-break: break-word;
+}
+
+.summary-item__sub {
+  font-size: 12px;
+  color: var(--n-text-color-3, #999);
+  margin-top: 2px;
 }
 
 .app-link {
