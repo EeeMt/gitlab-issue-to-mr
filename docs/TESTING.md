@@ -102,7 +102,7 @@ make test-mock-e2e
 
 ## 4. Playwright E2E 测试
 
-Playwright E2E 测试需要完整的 Docker 环境。测试套件使用 **pytest-xdist 并行执行**，运行时间约 44 秒（状态无关测试并行）+ 42 秒（状态相关测试串行）。
+Playwright E2E 测试需要完整的 Docker 环境。测试套件使用 **pytest-xdist 并行执行**，运行时间约 73 秒（状态无关测试并行）+ 39 秒（状态相关测试串行）。
 
 ### 运行命令
 
@@ -110,10 +110,10 @@ Playwright E2E 测试需要完整的 Docker 环境。测试套件使用 **pytest
 # 完整流程（启动环境 → 并行 + 串行 → 关闭环境）
 make test-e2e
 
-# 仅并行测试（116 个，~44s）
+# 仅并行测试（214 个，~73s）
 make test-e2e-parallel
 
-# 仅串行测试（bootstrap/prompt_template/access_management，~42s）
+# 仅串行测试（bootstrap/prompt_template/access_management，~39s）
 make test-e2e-serial
 
 # 运行特定测试文件
@@ -130,8 +130,8 @@ make test-e2e-down    # 关闭测试环境
 
 | 分组 | 文件 | 测试数 | 运行方式 |
 |------|------|--------|---------|
-| 并行（无状态） | `test_create_task`, `test_dashboard`, `test_manual_task`, `test_navigation`, `test_task_details`, `test_task_queue`, `test_task_view` | 116 | `make test-e2e-run` |
-| 串行（有状态） | `test_bootstrap`, `test_prompt_template`, `test_access_management` | 18+2 | `--override-ini` 串行运行 |
+| 并行（无状态） | `test_create_task`, `test_dashboard`, `test_manual_task`, `test_navigation`, `test_task_details`, `test_task_queue`, `test_task_view`, `test_task_view`, `test_shell`, `test_monitor`, `test_analytics`, `test_config_tabs`, `test_sessions`, `test_schedule_overview`, `test_oidc_diagnostics` | 214 | `make test-e2e-parallel` |
+| 串行（有状态） | `test_bootstrap`, `test_prompt_template`, `test_access_management` | 20 | `--override-ini` 串行运行 |
 
 ### 并行架构设计
 
