@@ -449,11 +449,8 @@ echo "Claude CLI exited with code: ${SCRIPT_RESULT}"
 
 RESULT=${SCRIPT_RESULT}
 
-if [ $RESULT -ne 0 ]; then
-    echo "Claude execution failed with exit code: ${RESULT}"
-    exit $RESULT
-fi
-
+# Always emit structured tool calls if the JSON file exists, even on failure.
+# This lets the frontend show a timeline of what was attempted before the failure.
 if [ -f /tmp/claude_result.json ] && [ -s /tmp/claude_result.json ]; then
     SUMMARY_CONTENT=$(jq -r '.result // ""' /tmp/claude_result.json 2>/dev/null || true)
     if [ ${#SUMMARY_CONTENT} -gt 45000 ]; then
@@ -474,6 +471,11 @@ if [ -f /tmp/claude_result.json ] && [ -s /tmp/claude_result.json ]; then
       .output = ((.output // "") | if length > 2000 then .[:2000] + "…(truncated)" else . end)
     ]' /tmp/claude_result.json 2>/dev/null || echo '[]')
     echo "CODIFY_TOOL_CALLS:${TOOL_CALLS_JSON}"
+fi
+
+if [ $RESULT -ne 0 ]; then
+    echo "Claude execution failed with exit code: ${RESULT}"
+    exit $RESULT
 fi
 
 # Now commit and push the changes
