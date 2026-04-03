@@ -82,7 +82,7 @@
                     </template>
                   </n-form-item>
                 </n-gi>
-                <n-gi :span="isMobile ? 1 : 2">
+                <n-gi>
                   <n-form-item path="create_mr">
                     <template #label>
                       <n-tooltip placement="top">
