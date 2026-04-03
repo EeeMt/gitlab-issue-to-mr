@@ -318,8 +318,8 @@
 
           <n-card class="task-card" :bordered="false">
             <template #header-extra>
-              <n-space>
-                <n-tag v-if="task?.status === 'running'" type="warning" size="small">{{ t('taskView.realTime') }}</n-tag>
+              <n-space align="center">
+                <n-tag v-if="task?.status === 'running'" type="warning" size="small" round>{{ t('taskView.realTime') }}</n-tag>
                 <n-button size="small" @click="refreshLogs">{{ t('common.refresh') }}</n-button>
               </n-space>
             </template>
