@@ -520,6 +520,7 @@ const en = {
     byProjectSubtitle: 'Success rate and timing performance per project',
     byInitiator: 'By Initiator',
     byInitiatorSubtitle: 'Only tasks with tracked initiator metadata are included',
+    expand: 'Expand table',
     queueWaitByPriority: 'Queue Wait by Priority',
     queueWaitByPrioritySubtitle: 'Average and worst-case wait before execution starts',
     failureBreakdown: 'Failure Breakdown',

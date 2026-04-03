@@ -160,6 +160,9 @@
                       <div class="analytics-card__title">{{ t('analytics.byProject') }}</div>
                       <div class="analytics-card__subtitle">{{ t('analytics.byProjectSubtitle') }}</div>
                   </div>
+                  <n-button text size="small" @click="showProjectModal = true" class="analytics-card__expand-btn" :title="t('analytics.expand')">
+                    <template #icon><n-icon :component="ExpandOutline" /></template>
+                  </n-button>
                 </div>
               </template>
 
@@ -181,6 +184,9 @@
                       <div class="analytics-card__title">{{ t('analytics.byInitiator') }}</div>
                       <div class="analytics-card__subtitle">{{ t('analytics.byInitiatorSubtitle') }}</div>
                   </div>
+                  <n-button text size="small" @click="showInitiatorModal = true" class="analytics-card__expand-btn" :title="t('analytics.expand')">
+                    <template #icon><n-icon :component="ExpandOutline" /></template>
+                  </n-button>
                 </div>
               </template>
 
@@ -239,6 +245,28 @@
         </n-grid>
       </n-space>
     </n-spin>
+
+    <!-- By Project expanded modal -->
+    <n-modal v-model:show="showProjectModal" preset="card" :title="t('analytics.byProject')" style="width: 90vw; max-width: 1400px;">
+      <n-data-table
+        :columns="projectColumns"
+        :data="analytics?.projects || []"
+        :bordered="false"
+        :pagination="{ pageSize: 20 }"
+        :scroll-x="1130"
+      />
+    </n-modal>
+
+    <!-- By Initiator expanded modal -->
+    <n-modal v-model:show="showInitiatorModal" preset="card" :title="t('analytics.byInitiator')" style="width: 90vw; max-width: 1400px;">
+      <n-data-table
+        :columns="initiatorColumns"
+        :data="analytics?.initiators || []"
+        :bordered="false"
+        :pagination="{ pageSize: 20 }"
+        :scroll-x="1050"
+      />
+    </n-modal>
   </div>
 </template>
 
@@ -251,9 +279,11 @@ import {
   NDataTable,
   NGi,
   NGrid,
+  NModal,
   NSelect,
   NSpace,
   NSpin,
+  NIcon,
   useMessage,
   type DataTableColumns
 } from 'naive-ui'
@@ -273,6 +303,7 @@ import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeLocal, formatMonthDayLocal } from '../utils/datetime'
+import { ExpandOutline } from '@vicons/ionicons5'
 
 type TrendBar = {
   key: string
@@ -298,6 +329,8 @@ const taskChartRef = ref<HTMLElement | null>(null)
 const changeChartRef = ref<HTMLElement | null>(null)
 const durationChartRef = ref<HTMLElement | null>(null)
 const tokenChartRef = ref<HTMLElement | null>(null)
+const showProjectModal = ref(false)
+const showInitiatorModal = ref(false)
 
 const windowOptions = computed(() => [
   { label: t('analytics.last7Days'), value: 7 },
@@ -509,6 +542,7 @@ const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
     title: t('common.project'),
     key: 'project_name',
     minWidth: 180,
+    sorter: (a, b) => a.project_name.localeCompare(b.project_name),
     render: (row) =>
       h('div', { class: 'analytics-table__primary' }, [
         h('div', row.project_name),
@@ -517,29 +551,33 @@ const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
           : null
       ])
   },
-  { title: t('analytics.tasks'), key: 'task_count', width: 80 },
+  { title: t('analytics.tasks'), key: 'task_count', width: 80, sorter: (a, b) => a.task_count - b.task_count },
   {
     title: t('analytics.success'),
     key: 'success_rate',
     width: 110,
+    sorter: (a, b) => (a.success_rate ?? -1) - (b.success_rate ?? -1),
     render: (row) => formatPercentage(row.success_rate)
   },
   {
     title: t('analytics.avgDuration'),
     key: 'avg_execution_seconds',
     width: 120,
+    sorter: (a, b) => (a.avg_execution_seconds ?? -1) - (b.avg_execution_seconds ?? -1),
     render: (row) => formatDuration(row.avg_execution_seconds)
   },
   {
     title: t('analytics.avgWait'),
     key: 'avg_queue_wait_seconds',
     width: 120,
+    sorter: (a, b) => (a.avg_queue_wait_seconds ?? -1) - (b.avg_queue_wait_seconds ?? -1),
     render: (row) => formatDuration(row.avg_queue_wait_seconds)
   },
   {
     title: t('common.changes'),
     key: 'total_changes',
     width: 110,
+    sorter: (a, b) => a.total_changes - b.total_changes,
     render: (row) =>
       h('div', { class: 'analytics-table__primary' }, [
         h('div', String(row.total_changes)),
@@ -550,6 +588,7 @@ const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
     title: t('analytics.tokens'),
     key: 'total_tokens',
     width: 150,
+    sorter: (a, b) => a.total_tokens - b.total_tokens,
     render: (row) =>
       h('div', { class: 'analytics-table__primary' }, [
         h('div', formatNumber(row.total_tokens)),
@@ -560,6 +599,7 @@ const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
     title: t('analytics.lastTask'),
     key: 'last_task_at',
     width: 150,
+    sorter: (a, b) => (a.last_task_at ?? '').localeCompare(b.last_task_at ?? ''),
     render: (row) => formatDateTime(row.last_task_at)
   }
 ])
@@ -569,6 +609,7 @@ const initiatorColumns = computed<DataTableColumns<AnalyticsInitiatorRow>>(() =>
     title: t('analytics.initiator'),
     key: 'initiator_username',
     minWidth: 160,
+    sorter: (a, b) => a.initiator_username.localeCompare(b.initiator_username),
     render: (row) =>
       h('div', { class: 'analytics-table__primary' }, [
         h('div', row.initiator_username),
@@ -577,29 +618,33 @@ const initiatorColumns = computed<DataTableColumns<AnalyticsInitiatorRow>>(() =>
           : null
       ])
   },
-  { title: t('analytics.tasks'), key: 'task_count', width: 80 },
+  { title: t('analytics.tasks'), key: 'task_count', width: 80, sorter: (a, b) => a.task_count - b.task_count },
   {
     title: t('analytics.success'),
     key: 'success_rate',
     width: 110,
+    sorter: (a, b) => (a.success_rate ?? -1) - (b.success_rate ?? -1),
     render: (row) => formatPercentage(row.success_rate)
   },
   {
     title: t('analytics.avgDuration'),
     key: 'avg_execution_seconds',
     width: 120,
+    sorter: (a, b) => (a.avg_execution_seconds ?? -1) - (b.avg_execution_seconds ?? -1),
     render: (row) => formatDuration(row.avg_execution_seconds)
   },
   {
     title: t('analytics.avgWait'),
     key: 'avg_queue_wait_seconds',
     width: 120,
+    sorter: (a, b) => (a.avg_queue_wait_seconds ?? -1) - (b.avg_queue_wait_seconds ?? -1),
     render: (row) => formatDuration(row.avg_queue_wait_seconds)
   },
   {
     title: t('common.changes'),
     key: 'total_changes',
     width: 110,
+    sorter: (a, b) => a.total_changes - b.total_changes,
     render: (row) =>
       h('div', { class: 'analytics-table__primary' }, [
         h('div', String(row.total_changes)),
@@ -610,6 +655,7 @@ const initiatorColumns = computed<DataTableColumns<AnalyticsInitiatorRow>>(() =>
     title: t('analytics.tokens'),
     key: 'total_tokens',
     width: 150,
+    sorter: (a, b) => a.total_tokens - b.total_tokens,
     render: (row) =>
       h('div', { class: 'analytics-table__primary' }, [
         h('div', formatNumber(row.total_tokens)),
@@ -620,6 +666,7 @@ const initiatorColumns = computed<DataTableColumns<AnalyticsInitiatorRow>>(() =>
     title: t('analytics.lastTask'),
     key: 'last_task_at',
     width: 150,
+    sorter: (a, b) => (a.last_task_at ?? '').localeCompare(b.last_task_at ?? ''),
     render: (row) => formatDateTime(row.last_task_at)
   }
 ])
@@ -766,9 +813,19 @@ onMounted(() => {
 
 .analytics-card__header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.analytics-card__expand-btn {
+  flex-shrink: 0;
+  color: rgba(15, 23, 42, 0.45);
+  font-size: 16px;
+}
+
+.analytics-card__expand-btn:hover {
+  color: rgba(15, 23, 42, 0.8);
 }
 
 .analytics-card__title {

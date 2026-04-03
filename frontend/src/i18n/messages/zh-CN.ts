@@ -502,6 +502,7 @@ const zhCN = {
     byProjectSubtitle: '每个项目的成功率与时延表现',
     byInitiator: '按发起人',
     byInitiatorSubtitle: '仅统计带有发起人追踪信息的任务',
+    expand: '放大查看',
     queueWaitByPriority: '按优先级的排队等待',
     queueWaitByPrioritySubtitle: '任务开始执行前的平均与最坏等待时间',
     failureBreakdown: '失败分类',
