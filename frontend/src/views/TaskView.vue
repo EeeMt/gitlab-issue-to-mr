@@ -186,26 +186,12 @@
                   </div>
                 </div>
               </n-card>
-
-              <n-card class="task-card task-card--spaced" :bordered="false" v-if="task?.error_message">
-                <template #header>
-                  <div class="task-card__header">
-                    <div>
-                      <div class="task-card__title">{{ t('taskView.error') }}</div>
-                      <div class="task-card__subtitle">{{ t('taskView.errorSubtitle') }}</div>
-                    </div>
-                  </div>
-                </template>
-                <n-alert type="error">{{ task.error_message }}</n-alert>
-              </n-card>
             </n-gi>
           </n-grid>
 
           <!-- Process Panel -->
           <TaskProcessPanel
             :task-logs="taskLogs"
-            :input-tokens="task?.input_tokens ?? null"
-            :output-tokens="task?.output_tokens ?? null"
             :is-active="isActiveTaskStatus(task?.status)"
             :terminal-html="terminalLogHtml"
             :task-status="task?.status ?? ''"
@@ -222,7 +208,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin, NAlert, NDatePicker, useMessage } from 'naive-ui'
+import { NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin, NDatePicker, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, streamTaskLogs, type Task, type TaskLog } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'

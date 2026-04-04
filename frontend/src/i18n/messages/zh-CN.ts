@@ -211,7 +211,7 @@ const zhCN = {
     terminalView: '终端',
     toolCallsCount: '{count} 次工具调用',
     noToolCalls: '没有工具调用记录',
-    totalTokens: '合计',
+    totalTokens: 'Token 消耗',
     toolInput: '输入',
     toolOutput: '输出',
     timelineRunning: '运行中…',
@@ -231,6 +231,9 @@ const zhCN = {
     executionSummary: '执行摘要',
     mergeRequest: '合并请求',
     taskNotStarted: '任务未开始',
+    noProcessYet: '暂无进程',
+    scheduledAt: '定时时间',
+    completedAt: '完成时间',
     tokenBreakdown: '输入: {input} · 输出: {output}'
   },
   createTask: {
@@ -271,6 +274,7 @@ const zhCN = {
     noTipAvailable: '无描述',
     noVariables: '未检测到变量',
     useTemplate: '使用模板',
+    selectTemplate: '选择模板',
     prioritySchedule: '优先级与调度',
     schedulePreviewTitle: '近7日预约热力图',
     schedulePreviewHint: '点击任意格子可将该时段设置为预约时间，颜色越深表示该时段任务越多。',

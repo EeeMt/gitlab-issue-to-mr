@@ -54,7 +54,7 @@
               <a v-if="task.branch_url" :href="task.branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.branch_name }}</a>
               <span v-else>{{ task.branch_name }}</span>
             </span>
-            <span class="branch-arrow">➜</span>
+            <span v-if="task.branch_name" class="branch-arrow">➜</span>
             <span v-if="task.target_branch" class="branch-item branch-item--target">
               <a v-if="task.target_branch_url" :href="task.target_branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.target_branch }}</a>
               <span v-else>{{ task.target_branch }}</span>
@@ -78,10 +78,10 @@
             <span class="time-point__label">{{ t('common.created') }}</span>
             <span class="time-point__value">{{ formatDate(task.created_at) }}</span>
           </div>
-          <template v-if="task.scheduled_at">
+          <template v-if="task.scheduled_at && isSignificantSchedule(task.scheduled_at, task.created_at)">
             <div class="time-axis__sep">→</div>
             <div class="time-point">
-              <span class="time-point__label">{{ t('common.scheduled') }}</span>
+              <span class="time-point__label">{{ t('taskView.scheduledAt') }}</span>
               <span class="time-point__value">{{ formatDate(task.scheduled_at) }}</span>
             </div>
           </template>
@@ -90,6 +90,13 @@
             <div class="time-point">
               <span class="time-point__label">{{ t('common.started') }}</span>
               <span class="time-point__value">{{ formatDate(task.started_at) }}</span>
+            </div>
+          </template>
+          <template v-if="task.completed_at">
+            <div class="time-axis__sep">→</div>
+            <div class="time-point">
+              <span class="time-point__label">{{ t('taskView.completedAt') }}</span>
+              <span class="time-point__value">{{ formatDate(task.completed_at) }}</span>
             </div>
           </template>
         </div>
@@ -128,6 +135,15 @@ const projectDisplayName = computed(() => {
 
 function formatDate(dateStr: string): string {
   return formatDateTimeUtc8(dateStr)
+}
+
+function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean {
+  try {
+    const diff = Math.abs(new Date(scheduledAt).getTime() - new Date(createdAt).getTime())
+    return diff > 60 * 1000 // more than 60 seconds difference
+  } catch {
+    return false
+  }
 }
 
 function formatPriority(priority?: string | number | null): string {

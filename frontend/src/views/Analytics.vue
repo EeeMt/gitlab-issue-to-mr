@@ -888,6 +888,8 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   gap: 8px;
+  flex: 0 0 auto;
+  min-width: 36px;
 }
 
 .trend-chart__count {
@@ -929,6 +931,8 @@ onMounted(() => {
   color: rgba(15, 23, 42, 0.62);
   writing-mode: vertical-rl;
   transform: rotate(180deg);
+  font-variant-numeric: tabular-nums;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
 }
 
 .analytics-table__primary {
@@ -954,6 +958,8 @@ onMounted(() => {
   .trend-chart__label {
     writing-mode: horizontal-tb;
     transform: none;
+    font-variant-numeric: tabular-nums;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
   }
 }
 </style>

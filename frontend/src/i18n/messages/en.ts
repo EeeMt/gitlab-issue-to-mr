@@ -221,7 +221,7 @@ const en = {
     terminalView: 'Terminal',
     toolCallsCount: '{count} tool calls',
     noToolCalls: 'No tool calls recorded',
-    totalTokens: 'Total',
+    totalTokens: 'Token Usage',
     toolInput: 'Input',
     toolOutput: 'Output',
     timelineRunning: 'Running…',
@@ -241,6 +241,9 @@ const en = {
     executionSummary: 'Execution Summary',
     mergeRequest: 'Merge Request',
     taskNotStarted: 'Task not started',
+    noProcessYet: 'No events yet',
+    scheduledAt: 'Scheduled At',
+    completedAt: 'Completed At',
     tokenBreakdown: 'Input: {input} · Output: {output}'
   },
   createTask: {
@@ -283,6 +286,7 @@ const en = {
     noTipAvailable: 'No description available',
     noVariables: 'No variables detected',
     useTemplate: 'Use Template',
+    selectTemplate: 'Select Template',
     prioritySchedule: 'Priority & Schedule',
     schedulePreviewTitle: 'Schedule Load (7 days)',
     schedulePreviewHint: 'Click any cell to set that hour as your scheduled time. Darker = more tasks scheduled.',

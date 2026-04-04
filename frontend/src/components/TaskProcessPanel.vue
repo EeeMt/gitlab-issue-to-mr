@@ -4,17 +4,8 @@
       <span class="panel-title">{{ t('taskView.taskProcess') }}</span>
     </template>
     <template #header-extra>
-      <n-tag v-if="isActive" type="warning" size="small" round>{{ t('taskView.realTime') }}</n-tag>
+      <n-tag v-if="isActive" type="warning" size="small" round :class="{ 'live-badge--pulse': isActive }">{{ t('taskView.realTime') }}</n-tag>
     </template>
-
-    <!-- Token summary -->
-    <div v-if="inputTokens !== null || outputTokens !== null" class="tokens-row">
-      <span>{{ t('taskView.inputTokens') }}: {{ (inputTokens ?? 0).toLocaleString() }}</span>
-      <span class="tokens-sep">/</span>
-      <span>{{ t('taskView.outputTokens') }}: {{ (outputTokens ?? 0).toLocaleString() }}</span>
-      <span class="tokens-sep">/</span>
-      <span>{{ t('taskView.totalTokens') }}: {{ ((inputTokens ?? 0) + (outputTokens ?? 0)).toLocaleString() }}</span>
-    </div>
 
     <!-- system_init banner -->
     <div v-if="systemInitEntry" class="system-init-banner">
@@ -29,6 +20,7 @@
       <n-empty v-if="taskStatus === 'pending' || taskStatus === 'queued'" :description="t('taskView.taskNotStarted')" class="empty-state" />
       <pre v-else-if="terminalHtml" class="log-content" v-html="terminalHtml"></pre>
       <n-empty v-else-if="!isActive" :description="t('taskView.noLogsAvailable')" class="empty-state" />
+      <n-empty v-else :description="t('taskView.noProcessYet')" class="empty-state" />
     </template>
 
     <!-- Structured event stream -->
@@ -117,11 +109,7 @@
           </div>
         </template>
 
-        <!-- Live indicator -->
-        <div v-if="isActive" class="live-indicator">
-          <n-spin size="small" />
-          <span class="live-indicator__label">{{ t('taskView.timelineRunning') }}</span>
-        </div>
+        <!-- Live indicator removed: pulsing badge in header is used instead -->
       </div>
 
       <!-- Raw logs fallback section -->
@@ -136,7 +124,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NCard, NCollapse, NCollapseItem, NIcon, NTag, NSpin, NEmpty } from 'naive-ui'
+import { NCard, NCollapse, NCollapseItem, NIcon, NTag, NEmpty } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
   TerminalOutline,
@@ -154,8 +142,6 @@ import type { TaskLog, ToolCall } from '../api'
 
 const props = defineProps<{
   taskLogs: TaskLog[]
-  inputTokens: number | null
-  outputTokens: number | null
   isActive: boolean
   terminalHtml: string
   taskStatus: string
@@ -354,22 +340,6 @@ const hasStructuredContent = computed(() =>
   font-weight: 600;
 }
 
-.tokens-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  margin-bottom: 12px;
-  background: var(--n-color-embedded, rgba(128, 128, 128, 0.06));
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--n-text-color-3, #999);
-}
-
-.tokens-sep {
-  opacity: 0.4;
-}
-
 .system-init-banner {
   display: flex;
   align-items: center;
@@ -518,16 +488,13 @@ const hasStructuredContent = computed(() =>
   color: #ef4444;
 }
 
-.live-indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 0 4px;
-  color: var(--n-text-color-3, #999);
+.live-badge--pulse {
+  animation: pulse-badge 2s ease-in-out infinite;
 }
 
-.live-indicator__label {
-  font-size: 12px;
+@keyframes pulse-badge {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 .raw-logs-collapse {

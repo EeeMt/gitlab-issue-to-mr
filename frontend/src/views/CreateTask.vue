@@ -132,36 +132,18 @@
               <div class="create-task-form__section-title">{{ t('createTask.implementationPrompt') }}</div>
               <div class="prompt-label-row">
                 <span class="prompt-label">{{ t('createTask.prompt') }}<span class="prompt-label__required">*</span></span>
-                <n-popover trigger="click" placement="bottom-end" :width="300" :keep-alive-on-hover="false">
-                  <template #trigger>
-                    <n-button
+                <n-button
                       size="small"
                       :disabled="promptTemplatesLoading || promptTemplates.length === 0"
                       :loading="promptTemplatesLoading"
                       type="default"
+                      @click="showTemplateDrawer = true"
                     >
                       <template #icon>
                         <n-icon :component="DocumentTextOutline" />
                       </template>
                       {{ t('createTask.useTemplate') }}
                     </n-button>
-                  </template>
-                  <div class="prompt-template-dropdown">
-                    <div class="prompt-template-dropdown__header">{{ t('createTask.selectPromptTemplate') }}</div>
-                    <div v-if="promptTemplates.length === 0" class="prompt-template-dropdown__empty">
-                      {{ t('createTask.noPromptTemplates') }}
-                    </div>
-                    <div
-                      v-for="tmpl in promptTemplates"
-                      :key="tmpl.id"
-                      class="prompt-template-dropdown__item"
-                      @click="applyPromptTemplate(tmpl)"
-                    >
-                      <div class="prompt-template-dropdown__item-name">{{ tmpl.name }}</div>
-                      <div class="prompt-template-dropdown__item-preview">{{ tmpl.content.substring(0, 50) }}...</div>
-                    </div>
-                  </div>
-                </n-popover>
               </div>
               <n-form-item path="user_prompt" :show-label="false">
                 <VariableEditor
@@ -311,6 +293,26 @@
           </template>
         </n-drawer-content>
       </n-drawer>
+
+      <!-- Template Picker Drawer -->
+      <n-drawer v-model:show="showTemplateDrawer" :width="isMobile ? '100%' : 480" placement="right">
+        <n-drawer-content :title="t('createTask.selectTemplate')" closable>
+          <div style="overflow-y: auto;">
+            <div v-if="promptTemplates.length === 0" class="prompt-template-dropdown__empty">
+              {{ t('createTask.noPromptTemplates') }}
+            </div>
+            <div
+              v-for="tmpl in promptTemplates"
+              :key="tmpl.id"
+              class="prompt-template-dropdown__item"
+              @click="applyPromptTemplate(tmpl); showTemplateDrawer = false"
+            >
+              <div class="prompt-template-dropdown__item-name">{{ tmpl.name }}</div>
+              <div class="prompt-template-dropdown__item-preview">{{ tmpl.content.substring(0, 80) }}...</div>
+            </div>
+          </div>
+        </n-drawer-content>
+      </n-drawer>
     </n-space>
   </div>
 </template>
@@ -321,7 +323,7 @@ import { useRouter } from 'vue-router'
 import {
   NCard, NForm, NFormItem, NSelect, NInput, NInputNumber,
   NButton, NSpin, NSpace, NRadioGroup, NRadio, NRadioButton, NModal,
-  NDatePicker, NTag, NGrid, NGi, NPopover, NIcon, NSwitch, NTooltip,
+  NDatePicker, NTag, NGrid, NGi, NIcon, NSwitch, NTooltip,
   NDrawer, NDrawerContent,
   useMessage, FormInst, FormRules
 } from 'naive-ui'
@@ -400,6 +402,7 @@ watch(scheduledDatetime, (val) => {
 const scheduledTasksForPreview = ref<Task[]>([])
 const scheduledTasksLoading = ref(false)
 const showScheduleDrawer = ref(false)
+const showTemplateDrawer = ref(false)
 
 // Computed selected time for heatmap: works for both delay and scheduled modes
 const heatmapSelectedMs = computed<number | null>(() => {
@@ -663,6 +666,12 @@ async function fetchBranches(projectId: number) {
     branches.value = await getBranches(projectId)
     // Reset branch selection
     formValue.value.branch_name = ''
+    // Auto-set base_branch to the project's default branch
+    const project = projects.value.find(p => p.id === projectId)
+    const defaultBranch = project?.default_branch
+    if (defaultBranch && branches.value.some(b => b.name === defaultBranch)) {
+      formValue.value.base_branch = defaultBranch
+    }
   } catch (error) {
     message.error(t('createTask.failedToFetchBranches'))
   } finally {
