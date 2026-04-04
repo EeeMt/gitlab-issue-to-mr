@@ -196,6 +196,8 @@
             :is-active="isActiveTaskStatus(task?.status)"
             :terminal-html="terminalLogHtml"
             :task-status="task?.status ?? ''"
+            @raw-tab-open="onRawTabOpen"
+            @raw-tab-close="onRawTabClose"
           />
 
           <!-- Result Panel (only for terminal tasks) -->
@@ -458,11 +460,24 @@ async function fetchContainerLogs() {
 
 async function refreshTask() {
   await fetchTask()
-  if (isActiveTaskStatus(task.value?.status)) {
-    await fetchContainerLogs()
-    return
+  if (!isActiveTaskStatus(task.value?.status)) {
+    await fetchLogs()
   }
-  await fetchLogs()
+}
+
+async function onRawTabOpen() {
+  if (isActiveTaskStatus(task.value?.status)) {
+    // Connect SSE stream for live container logs
+    connectLogStream()
+  } else {
+    // Fetch once for completed tasks
+    await fetchContainerLogs()
+  }
+}
+
+function onRawTabClose() {
+  // Close SSE when leaving raw tab to free the backend thread
+  closeLogStream()
 }
 
 async function handleCancel() {
@@ -564,9 +579,6 @@ async function handleReschedule() {
 onMounted(async () => {
   await initializeAuth()
   await fetchTask()
-  if (isActiveTaskStatus(task.value?.status)) {
-    await fetchContainerLogs()
-  }
   await fetchLogs()
   if (isActiveTaskStatus(task.value?.status)) {
     connectStructuredLogStream()
@@ -576,9 +588,6 @@ onMounted(async () => {
 
     if (isActiveTaskStatus(task.value?.status)) {
       fetchTask()
-      if (!logEventSource) {
-        fetchContainerLogs()
-      }
       if (!structuredLogSse) connectStructuredLogStream() // reconnect if disconnected
     } else {
       closeLogStream()

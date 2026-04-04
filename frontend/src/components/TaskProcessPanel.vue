@@ -179,6 +179,11 @@ const props = defineProps<{
   taskStatus: string
 }>()
 
+const emit = defineEmits<{
+  (e: 'raw-tab-open'): void
+  (e: 'raw-tab-close'): void
+}>()
+
 const { t } = useI18n()
 
 // ── Tool helpers ──────────────────────────────────────────────────────────────
@@ -419,6 +424,13 @@ const sortedEvents = computed<TaskLog[]>(() => {
 const hasStructuredContent = computed(() =>
   sortedEvents.value.length > 0 || systemInitEntry.value !== null
 )
+
+// ── Raw-tab open/close events ─────────────────────────────────────────────────
+
+watch(activeTab, (val) => {
+  if (val === 'raw') emit('raw-tab-open')
+  else emit('raw-tab-close')
+})
 
 // ── Auto-scroll watch (after sortedEvents is defined) ─────────────────────────
 
