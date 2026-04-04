@@ -22,7 +22,7 @@
           <n-empty v-else :description="t('taskView.noProcessYet')" class="empty-state" />
         </n-tab-pane>
         <n-tab-pane name="raw" :tab="t('taskView.rawLogsTab')" :disabled="!terminalHtml && !props.task?.container_id">
-          <pre v-if="terminalHtml" class="log-content" v-html="terminalHtml"></pre>
+          <pre v-if="terminalHtml" ref="logContentRef" class="log-content" v-html="terminalHtml"></pre>
           <n-empty v-else :description="t('taskView.noLogsAvailable')" class="empty-state" />
         </n-tab-pane>
       </n-tabs>
@@ -144,7 +144,7 @@
           </div>
         </n-tab-pane>
         <n-tab-pane name="raw" :tab="t('taskView.rawLogsTab')" :disabled="!terminalHtml && !props.task?.container_id">
-          <pre v-if="terminalHtml" class="log-content" v-html="terminalHtml"></pre>
+          <pre v-if="terminalHtml" ref="logContentRef" class="log-content" v-html="terminalHtml"></pre>
           <n-empty v-else :description="t('taskView.noLogsAvailable')" class="empty-state" />
         </n-tab-pane>
       </n-tabs>
@@ -314,6 +314,7 @@ function parsedToolCall(log: TaskLog): ToolCall {
 // ── Auto-scroll ref ───────────────────────────────────────────────────────────
 
 const eventStreamRef = ref<HTMLElement | null>(null)
+const logContentRef = ref<HTMLElement | null>(null)
 const activeTab = ref<'events' | 'raw'>('events')
 const collapseRefs = ref<(HTMLElement | null)[]>([])
 
@@ -439,6 +440,14 @@ watch(sortedEvents, async () => {
   await nextTick()
   if (eventStreamRef.value) {
     eventStreamRef.value.scrollTo({ top: eventStreamRef.value.scrollHeight, behavior: 'smooth' })
+  }
+})
+
+watch(() => props.terminalHtml, async () => {
+  if (!props.isActive) return
+  await nextTick()
+  if (logContentRef.value) {
+    logContentRef.value.scrollTo({ top: logContentRef.value.scrollHeight, behavior: 'smooth' })
   }
 })
 </script>
