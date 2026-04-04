@@ -224,7 +224,7 @@ import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin, NAlert, NDatePicker, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, type Task, type TaskLog } from '../api'
+import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, streamTaskLogs, type Task, type TaskLog } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
 import PageHeader from '../components/PageHeader.vue'
 import TaskMetadataPanel from '../components/TaskMetadataPanel.vue'
@@ -259,6 +259,7 @@ const taskLogs = ref<TaskLog[]>([])
 let pollTimer: number | null = null
 let logEventSource: EventSource | null = null
 let logStreamContainerId: string | null = null
+let structuredLogSse: EventSource | null = null
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
 const terminalLogHtml = computed(() => {
@@ -330,6 +331,45 @@ function closeLogStream() {
     logEventSource = null
   }
   logStreamContainerId = null
+}
+
+function closeStructuredLogStream() {
+  if (structuredLogSse) {
+    structuredLogSse.close()
+    structuredLogSse = null
+  }
+}
+
+function connectStructuredLogStream() {
+  if (typeof EventSource === 'undefined') return
+  if (!isActiveTaskStatus(task.value?.status)) return
+  if (structuredLogSse) return // already connected
+
+  const sinceId = taskLogs.value.length > 0
+    ? Math.max(...taskLogs.value.map(l => l.id ?? 0))
+    : 0
+
+  structuredLogSse = streamTaskLogs(
+    taskId.value,
+    sinceId,
+    (log) => {
+      // Avoid duplicates (safety check)
+      if (!taskLogs.value.some(l => l.id === log.id)) {
+        taskLogs.value = [...taskLogs.value, log]
+      }
+    },
+    () => {
+      // SSE signaled task is done
+      closeStructuredLogStream()
+      fetchTask()
+      fetchLogs()
+    },
+  )
+
+  structuredLogSse.onerror = () => {
+    // Don't auto-reconnect — the poll timer will call connectStructuredLogStream() again in 5s
+    closeStructuredLogStream()
+  }
 }
 
 function connectLogStream() {
@@ -531,6 +571,9 @@ onMounted(async () => {
     await fetchContainerLogs()
   }
   await fetchLogs()
+  if (isActiveTaskStatus(task.value?.status)) {
+    connectStructuredLogStream()
+  }
   pollTimer = window.setInterval(() => {
     if (document.visibilityState !== 'visible') return
 
@@ -539,15 +582,17 @@ onMounted(async () => {
       if (!logEventSource) {
         fetchContainerLogs()
       }
-      fetchLogs()
+      if (!structuredLogSse) connectStructuredLogStream() // reconnect if disconnected
     } else {
       closeLogStream()
+      closeStructuredLogStream()
     }
   }, 5000)
 })
 
 onBeforeUnmount(() => {
   closeLogStream()
+  closeStructuredLogStream()
   if (pollTimer !== null) {
     clearInterval(pollTimer)
     pollTimer = null
