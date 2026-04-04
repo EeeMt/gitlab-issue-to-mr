@@ -45,6 +45,7 @@ def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = Non
         "initiator_gitlab_user_id": task.initiator_gitlab_user_id,
         "initiator_username": task.initiator_username,
         "branch_name": task.branch_name,
+        "base_branch": task.base_branch,
         "branch_url": branch_url,
         "merge_request_iid": task.merge_request_iid,
         "merge_request_url": task.merge_request_url,

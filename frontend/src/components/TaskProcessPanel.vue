@@ -13,116 +13,122 @@
       <span v-if="systemInitEntry.cwd">CWD: <code class="system-init-banner__cwd">{{ systemInitEntry.cwd }}</code></span>
     </div>
 
-    <!-- No structured logs fallback: show raw logs directly -->
+    <!-- No structured logs: show tabs with empty events + optional raw -->
     <template v-if="!hasStructuredContent">
-      <n-empty v-if="taskStatus === 'pending' || taskStatus === 'queued'" :description="t('taskView.taskNotStarted')" class="empty-state" />
-      <pre v-else-if="terminalHtml" class="log-content" v-html="terminalHtml"></pre>
-      <n-empty v-else-if="!isActive" :description="t('taskView.noLogsAvailable')" class="empty-state" />
-      <n-empty v-else :description="t('taskView.noProcessYet')" class="empty-state" />
+      <n-tabs v-model:value="activeTab" type="line" size="small" class="process-tabs">
+        <n-tab-pane name="events" :tab="t('taskView.eventsTab')">
+          <n-empty v-if="taskStatus === 'pending' || taskStatus === 'queued'" :description="t('taskView.taskNotStarted')" class="empty-state" />
+          <n-empty v-else-if="!isActive && !terminalHtml" :description="t('taskView.noLogsAvailable')" class="empty-state" />
+          <n-empty v-else :description="t('taskView.noProcessYet')" class="empty-state" />
+        </n-tab-pane>
+        <n-tab-pane name="raw" :tab="t('taskView.rawLogsTab')" :disabled="!terminalHtml">
+          <pre v-if="terminalHtml" class="log-content" v-html="terminalHtml"></pre>
+          <n-empty v-else description="暂无原始日志" />
+        </n-tab-pane>
+      </n-tabs>
     </template>
 
-    <!-- Structured event stream -->
+    <!-- Structured event stream with tabs -->
     <template v-else>
-      <div class="event-stream" ref="eventStreamRef">
-        <template v-for="(event, index) in sortedEvents" :key="index">
-          <!-- thinking entry -->
-          <div v-if="event.log_type === 'thinking'" class="event-item event-item--thinking">
-            <div class="event-header">
-              <div class="event-icon" style="color: #888">
-                <n-icon size="15"><BulbOutline /></n-icon>
+      <n-tabs v-model:value="activeTab" type="line" size="small" class="process-tabs">
+        <n-tab-pane name="events" :tab="t('taskView.eventsTab')">
+          <div class="event-stream" ref="eventStreamRef">
+            <template v-for="(event, index) in sortedEvents" :key="index">
+              <!-- thinking entry -->
+              <div v-if="event.log_type === 'thinking'" class="event-item event-item--thinking">
+                <div class="event-header">
+                  <div class="event-icon" style="color: #888">
+                    <n-icon size="15"><BulbOutline /></n-icon>
+                  </div>
+                  <div class="event-info">
+                    <span class="event-name">{{ t('taskView.thinkingLabel') }}</span>
+                    <span v-if="parseTextMeta(event.metadata)" class="event-preview">
+                      {{ parseTextMeta(event.metadata).slice(0, 120) }}
+                    </span>
+                  </div>
+                  <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
+                </div>
+                <n-collapse class="event-collapse">
+                  <n-collapse-item name="detail">
+                    <template #header>
+                      <span class="tool-detail-label">{{ t('taskView.fullText') }}</span>
+                    </template>
+                    <div class="event-content event-content--thinking markdown-content" v-html="renderMarkdown(parseTextMeta(event.metadata))"></div>
+                  </n-collapse-item>
+                </n-collapse>
               </div>
-              <div class="event-info">
-                <span class="event-name">{{ t('taskView.thinkingLabel') }}</span>
-                <span v-if="parseTextMeta(event.metadata)" class="event-preview">
-                  {{ parseTextMeta(event.metadata).slice(0, 120) }}
-                </span>
+
+              <!-- assistant_text entry -->
+              <div v-else-if="event.log_type === 'assistant_text'" class="event-item event-item--assistant">
+                <div class="event-header">
+                  <div class="event-icon" style="color: #0284c7">
+                    <n-icon size="15"><ChatboxOutline /></n-icon>
+                  </div>
+                  <div class="event-info">
+                    <span class="event-name">{{ t('taskView.assistantLabel') }}</span>
+                    <span v-if="parseTextMeta(event.metadata)" class="event-preview">
+                      {{ parseTextMeta(event.metadata).slice(0, 120) }}
+                    </span>
+                  </div>
+                  <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
+                </div>
+                <n-collapse class="event-collapse">
+                  <n-collapse-item name="detail">
+                    <template #header>
+                      <span class="tool-detail-label">{{ t('taskView.fullText') }}</span>
+                    </template>
+                    <div class="event-content markdown-content" v-html="renderMarkdown(parseTextMeta(event.metadata))"></div>
+                  </n-collapse-item>
+                </n-collapse>
               </div>
-              <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
-            </div>
-            <n-collapse class="event-collapse">
-              <n-collapse-item name="detail">
-                <template #header>
-                  <span class="tool-detail-label">{{ t('taskView.fullText') }}</span>
-                </template>
-                <div class="event-content event-content--thinking markdown-content" v-html="renderMarkdown(parseTextMeta(event.metadata))"></div>
-              </n-collapse-item>
-            </n-collapse>
+
+              <!-- tool_call entry -->
+              <div v-else-if="event.log_type === 'tool_call'" class="event-item event-item--tool">
+                <div class="event-header">
+                  <div class="event-icon" :style="{ color: getToolColor(parsedToolCall(event).name) }">
+                    <n-icon size="15">
+                      <component :is="getToolIcon(parsedToolCall(event).name)" />
+                    </n-icon>
+                  </div>
+                  <div class="event-info">
+                    <span class="event-name">{{ parsedToolCall(event).name }}</span>
+                    <span v-if="getInputSummary(parsedToolCall(event))" class="event-preview">
+                      {{ getInputSummary(parsedToolCall(event)) }}
+                    </span>
+                  </div>
+                  <n-tag v-if="parsedToolCall(event).error" type="error" size="small" round>Error</n-tag>
+                  <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
+                </div>
+                <n-collapse class="event-collapse">
+                  <n-collapse-item v-if="hasDetailedInput(parsedToolCall(event))" name="input">
+                    <template #header>
+                      <span class="tool-detail-label">{{ t('taskView.toolInput') }}</span>
+                    </template>
+                    <pre class="tool-pre tool-pre--input">{{ formatInput(parsedToolCall(event)) }}</pre>
+                  </n-collapse-item>
+                  <n-collapse-item v-if="parsedToolCall(event).output" name="output">
+                    <template #header>
+                      <span class="tool-detail-label">{{ t('taskView.toolOutput') }}</span>
+                    </template>
+                    <pre class="tool-pre" :class="{ 'tool-pre--error': parsedToolCall(event).error }">{{ parsedToolCall(event).output }}</pre>
+                  </n-collapse-item>
+                </n-collapse>
+              </div>
+            </template>
           </div>
-
-          <!-- assistant_text entry -->
-          <div v-else-if="event.log_type === 'assistant_text'" class="event-item event-item--assistant">
-            <div class="event-header">
-              <div class="event-icon" style="color: #0284c7">
-                <n-icon size="15"><ChatboxOutline /></n-icon>
-              </div>
-              <div class="event-info">
-                <span class="event-name">{{ t('taskView.assistantLabel') }}</span>
-                <span v-if="parseTextMeta(event.metadata)" class="event-preview">
-                  {{ parseTextMeta(event.metadata).slice(0, 120) }}
-                </span>
-              </div>
-              <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
-            </div>
-            <n-collapse class="event-collapse">
-              <n-collapse-item name="detail">
-                <template #header>
-                  <span class="tool-detail-label">{{ t('taskView.fullText') }}</span>
-                </template>
-                <div class="event-content markdown-content" v-html="renderMarkdown(parseTextMeta(event.metadata))"></div>
-              </n-collapse-item>
-            </n-collapse>
-          </div>
-
-          <!-- tool_call entry -->
-          <div v-else-if="event.log_type === 'tool_call'" class="event-item event-item--tool">
-            <div class="event-header">
-              <div class="event-icon" :style="{ color: getToolColor(parsedToolCall(event).name) }">
-                <n-icon size="15">
-                  <component :is="getToolIcon(parsedToolCall(event).name)" />
-                </n-icon>
-              </div>
-              <div class="event-info">
-                <span class="event-name">{{ parsedToolCall(event).name }}</span>
-                <span v-if="getInputSummary(parsedToolCall(event))" class="event-preview">
-                  {{ getInputSummary(parsedToolCall(event)) }}
-                </span>
-              </div>
-              <n-tag v-if="parsedToolCall(event).error" type="error" size="small" round>Error</n-tag>
-              <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
-            </div>
-            <n-collapse class="event-collapse">
-              <n-collapse-item v-if="hasDetailedInput(parsedToolCall(event))" name="input">
-                <template #header>
-                  <span class="tool-detail-label">{{ t('taskView.toolInput') }}</span>
-                </template>
-                <pre class="tool-pre tool-pre--input">{{ formatInput(parsedToolCall(event)) }}</pre>
-              </n-collapse-item>
-              <n-collapse-item v-if="parsedToolCall(event).output" name="output">
-                <template #header>
-                  <span class="tool-detail-label">{{ t('taskView.toolOutput') }}</span>
-                </template>
-                <pre class="tool-pre" :class="{ 'tool-pre--error': parsedToolCall(event).error }">{{ parsedToolCall(event).output }}</pre>
-              </n-collapse-item>
-            </n-collapse>
-          </div>
-        </template>
-
-        <!-- Live indicator removed: pulsing badge in header is used instead -->
-      </div>
-
-      <!-- Raw logs fallback section -->
-      <n-collapse class="raw-logs-collapse" v-if="terminalHtml">
-        <n-collapse-item :title="t('taskView.rawLogs')" name="raw">
-          <pre class="log-content" v-html="terminalHtml"></pre>
-        </n-collapse-item>
-      </n-collapse>
+        </n-tab-pane>
+        <n-tab-pane name="raw" :tab="t('taskView.rawLogsTab')" :disabled="!terminalHtml">
+          <pre v-if="terminalHtml" class="log-content" v-html="terminalHtml"></pre>
+          <n-empty v-else description="暂无原始日志" />
+        </n-tab-pane>
+      </n-tabs>
     </template>
   </n-card>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch, nextTick } from 'vue'
-import { NCard, NCollapse, NCollapseItem, NIcon, NTag, NEmpty } from 'naive-ui'
+import { NCard, NCollapse, NCollapseItem, NIcon, NTag, NEmpty, NTabs, NTabPane } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
   TerminalOutline,
@@ -269,6 +275,7 @@ function parsedToolCall(log: TaskLog): ToolCall {
 // ── Auto-scroll ref ───────────────────────────────────────────────────────────
 
 const eventStreamRef = ref<HTMLElement | null>(null)
+const activeTab = ref<'events' | 'raw'>('events')
 
 // ── Markdown renderer ─────────────────────────────────────────────────────────
 
@@ -376,7 +383,7 @@ watch(sortedEvents, async () => {
   if (!props.isActive) return
   await nextTick()
   if (eventStreamRef.value) {
-    eventStreamRef.value.scrollTop = eventStreamRef.value.scrollHeight
+    eventStreamRef.value.scrollTo({ top: eventStreamRef.value.scrollHeight, behavior: 'smooth' })
   }
 })
 </script>
@@ -596,8 +603,8 @@ watch(sortedEvents, async () => {
   50% { opacity: 0.4; }
 }
 
-.raw-logs-collapse {
-  margin-top: 16px;
+.process-tabs {
+  margin-top: 0;
 }
 
 .log-content {

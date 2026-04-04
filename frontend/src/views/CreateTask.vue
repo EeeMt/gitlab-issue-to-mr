@@ -82,25 +82,6 @@
                     </template>
                   </n-form-item>
                 </n-gi>
-                <n-gi>
-                  <n-form-item path="new_branch_name">
-                    <template #label>
-                      <n-tooltip placement="top">
-                        <template #trigger>
-                          <span class="create-task-form__toggle-label">
-                            {{ t('createTask.skipMR') }}
-                            <n-icon :component="InformationCircleOutline" size="14" class="create-task-form__toggle-label-icon" />
-                          </span>
-                        </template>
-                        {{ t('createTask.skipMRTip') }}
-                      </n-tooltip>
-                    </template>
-                    <n-switch
-                      v-model:value="skipMR"
-                      data-testid="create-task-skip-mr-switch"
-                    />
-                  </n-form-item>
-                </n-gi>
               </n-grid>
             </div>
 
@@ -437,21 +418,6 @@ const heatmapSelectedMs = computed<number | null>(() => {
 
 // Create MR toggle
 const createMR = ref(true)
-
-// Skip MR toggle (inverse of createMR, shown in branch section for quick access)
-const skipMR = computed({
-  get: () => !createMR.value,
-  set: (val: boolean) => {
-    createMR.value = !val
-    if (val) {
-      formValue.value.target_branch = null
-    } else if (formValue.value.project_id) {
-      // Restore default branch when re-enabling MR creation
-      const project = projects.value.find(p => p.id === formValue.value.project_id)
-      formValue.value.target_branch = project?.default_branch || 'main'
-    }
-  }
-})
 
 // Success modal
 const showSuccessModal = ref(false)
