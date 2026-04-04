@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select, false
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.docker_client import get_docker_client
 from app.core.projects import build_project_lookup, get_project_metadata
 from app.core.scheduling import resolve_scheduled_at
 from app.core.task_helpers import _serialize_task
@@ -428,6 +429,17 @@ async def cancel_task(
     task.error_message = "Cancelled by user"
     await db.commit()
     await db.refresh(task)
+
+    # Kill the running container (if any) to free the thread pool slot immediately
+    issue_suffix = f"i{task.issue_iid}" if task.issue_iid else "manual"
+    container_name = f"codify-{task_id}-p{task.project_id}-{issue_suffix}"
+    try:
+        docker = get_docker_client()
+        container = await asyncio.to_thread(docker.client.containers.get, container_name)
+        await asyncio.to_thread(container.stop, timeout=5)
+        logger.info(f"Stopped container {container_name} for cancelled task {task_id}")
+    except Exception:
+        pass  # Container may not exist or already stopped
 
     await notify_task_cancelled(task)
     logger.info(f"Task {task_id} cancelled via API")
