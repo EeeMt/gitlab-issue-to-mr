@@ -252,7 +252,9 @@ let structuredLogSse: EventSource | null = null
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
 const terminalLogHtml = computed(() => {
-  const text = logs.value
+  // For completed/failed tasks: use structured logs formatted as text
+  // For active tasks: use live container logs streamed via SSE
+  const text = containerLogs.value || logs.value
   if (!text) return ''
   return ansiConverter.toHtml(text)
 })

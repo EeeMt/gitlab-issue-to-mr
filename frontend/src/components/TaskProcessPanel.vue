@@ -21,9 +21,9 @@
           <n-empty v-else-if="!isActive && !terminalHtml" :description="t('taskView.noLogsAvailable')" class="empty-state" />
           <n-empty v-else :description="t('taskView.noProcessYet')" class="empty-state" />
         </n-tab-pane>
-        <n-tab-pane name="raw" :tab="t('taskView.rawLogsTab')" :disabled="!terminalHtml">
+        <n-tab-pane name="raw" :tab="t('taskView.rawLogsTab')" :disabled="!terminalHtml && !props.task?.container_id">
           <pre v-if="terminalHtml" class="log-content" v-html="terminalHtml"></pre>
-          <n-empty v-else description="暂无原始日志" />
+          <n-empty v-else :description="t('taskView.noLogsAvailable')" class="empty-state" />
         </n-tab-pane>
       </n-tabs>
     </template>
@@ -143,9 +143,9 @@
             </template>
           </div>
         </n-tab-pane>
-        <n-tab-pane name="raw" :tab="t('taskView.rawLogsTab')" :disabled="!terminalHtml">
+        <n-tab-pane name="raw" :tab="t('taskView.rawLogsTab')" :disabled="!terminalHtml && !props.task?.container_id">
           <pre v-if="terminalHtml" class="log-content" v-html="terminalHtml"></pre>
-          <n-empty v-else description="暂无原始日志" />
+          <n-empty v-else :description="t('taskView.noLogsAvailable')" class="empty-state" />
         </n-tab-pane>
       </n-tabs>
     </template>
