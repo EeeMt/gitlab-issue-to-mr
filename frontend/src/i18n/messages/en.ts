@@ -248,6 +248,7 @@ const en = {
     mergeRequest: 'Merge Request',
     taskNotStarted: 'Task not started',
     noProcessYet: 'No events yet',
+    scrollToLatest: 'Jump to latest',
     scheduledAt: 'Scheduled At',
     completedAt: 'Completed At',
     tokenBreakdown: 'Input: {input} · Output: {output}'

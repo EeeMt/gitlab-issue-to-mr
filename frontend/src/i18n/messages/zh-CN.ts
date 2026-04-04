@@ -238,6 +238,7 @@ const zhCN = {
     mergeRequest: '合并请求',
     taskNotStarted: '任务未开始',
     noProcessYet: '暂无进程',
+    scrollToLatest: '跳转到最新',
     scheduledAt: '定时时间',
     completedAt: '完成时间',
     tokenBreakdown: '输入: {input} · 输出: {output}'

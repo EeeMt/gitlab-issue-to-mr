@@ -1,5 +1,5 @@
 <template>
-  <n-card class="task-process-panel" :bordered="false">
+  <n-card class="task-process-panel" :bordered="false" style="position: relative">
     <template #header>
       <span class="panel-title">{{ t('taskView.taskProcess') }}</span>
       <n-tag v-if="isActive" type="success" size="small" round :class="{ 'live-badge--pulse': isActive }" style="margin-left: 8px">{{ t('taskView.realTime') }}</n-tag>
@@ -149,12 +149,20 @@
         </n-tab-pane>
       </n-tabs>
     </template>
+
+    <!-- Scroll-lock: jump to latest button -->
+    <div v-if="!autoScroll && isActive" class="scroll-to-latest">
+      <n-button size="small" type="primary" @click="scrollToLatest">
+        <template #icon><n-icon><ArrowDownCircleOutline /></n-icon></template>
+        {{ t('taskView.scrollToLatest') }}
+      </n-button>
+    </div>
   </n-card>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue'
-import { NCard, NCollapse, NCollapseItem, NIcon, NTag, NEmpty, NTabs, NTabPane } from 'naive-ui'
+import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
+import { NCard, NCollapse, NCollapseItem, NIcon, NTag, NEmpty, NTabs, NTabPane, NButton } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
   TerminalOutline,
@@ -166,7 +174,8 @@ import {
   ServerOutline,
   BulbOutline,
   ChatboxOutline,
-  CubeOutline
+  CubeOutline,
+  ArrowDownCircleOutline
 } from '@vicons/ionicons5'
 import type { Component } from 'vue'
 import type { TaskLog, ToolCall, Task } from '../api'
@@ -429,14 +438,56 @@ const hasStructuredContent = computed(() =>
 // ── Raw-tab open/close events ─────────────────────────────────────────────────
 
 watch(activeTab, (val) => {
+  autoScroll.value = true
   if (val === 'raw') emit('raw-tab-open')
   else emit('raw-tab-close')
 })
 
+// ── Scroll-lock state ─────────────────────────────────────────────────────────
+
+const autoScroll = ref(true)
+
+function onEventStreamScroll() {
+  if (!eventStreamRef.value) return
+  const el = eventStreamRef.value
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 50
+  autoScroll.value = atBottom
+}
+
+function onLogContentScroll() {
+  if (!logContentRef.value) return
+  const el = logContentRef.value
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 50
+  autoScroll.value = atBottom
+}
+
+// Attach/detach listeners when refs become available (elements use v-if)
+watch(eventStreamRef, (el, oldEl) => {
+  oldEl?.removeEventListener('scroll', onEventStreamScroll)
+  el?.addEventListener('scroll', onEventStreamScroll)
+})
+watch(logContentRef, (el, oldEl) => {
+  oldEl?.removeEventListener('scroll', onLogContentScroll)
+  el?.addEventListener('scroll', onLogContentScroll)
+})
+
+onBeforeUnmount(() => {
+  eventStreamRef.value?.removeEventListener('scroll', onEventStreamScroll)
+  logContentRef.value?.removeEventListener('scroll', onLogContentScroll)
+})
+
+function scrollToLatest() {
+  autoScroll.value = true
+  nextTick(() => {
+    eventStreamRef.value?.scrollTo({ top: eventStreamRef.value.scrollHeight, behavior: 'smooth' })
+    logContentRef.value?.scrollTo({ top: logContentRef.value.scrollHeight, behavior: 'smooth' })
+  })
+}
+
 // ── Auto-scroll watch (after sortedEvents is defined) ─────────────────────────
 
 watch(sortedEvents, async () => {
-  if (!props.isActive) return
+  if (!props.isActive || !autoScroll.value) return
   await nextTick()
   if (eventStreamRef.value) {
     eventStreamRef.value.scrollTo({ top: eventStreamRef.value.scrollHeight, behavior: 'smooth' })
@@ -444,7 +495,7 @@ watch(sortedEvents, async () => {
 })
 
 watch(() => props.terminalHtml, async () => {
-  if (!props.isActive) return
+  if (!props.isActive || !autoScroll.value) return
   await nextTick()
   if (logContentRef.value) {
     logContentRef.value.scrollTo({ top: logContentRef.value.scrollHeight, behavior: 'smooth' })
@@ -709,5 +760,12 @@ watch(() => props.terminalHtml, async () => {
   background: rgba(128, 128, 128, 0.08);
   padding: 1px 6px;
   border-radius: 4px;
+}
+
+.scroll-to-latest {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  z-index: 10;
 }
 </style>
