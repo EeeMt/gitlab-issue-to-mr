@@ -145,8 +145,8 @@ class TestTaskViewLogs:
         """Test that the log content area exists."""
         class_page.goto("/tasks/1")
         class_page.wait_for_load_state("domcontentloaded")
-        log_content = class_page.locator(".log-content")
-        expect(log_content).to_be_attached()
+        log_area = class_page.locator(".task-process-panel")
+        expect(log_area).to_be_attached()
 
     def test_log_section_has_refresh_button(self, class_page: Page):
         """Test that logs section has a refresh button."""
