@@ -885,7 +885,7 @@ class WorkerExecutor:
                 task.merge_request_url = mr_web_url
                 await db.commit()
 
-            target_branch = task.target_branch or settings.default_target_branch
+            target_branch = task.target_branch  # None = no-MR mode; entrypoint sees TARGET_BRANCH=""
 
             # Build environment and volumes
             environment = self._build_container_env(task, mr_iid, target_branch)
