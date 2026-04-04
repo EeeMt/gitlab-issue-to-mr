@@ -446,16 +446,24 @@ watch(activeTab, (val) => {
 // ── Scroll-lock state ─────────────────────────────────────────────────────────
 
 const autoScroll = ref(true)
+let programmaticScrollTimer: ReturnType<typeof setTimeout> | null = null
+let isProgrammaticScroll = false
+
+function setProgrammaticScroll() {
+  isProgrammaticScroll = true
+  if (programmaticScrollTimer) clearTimeout(programmaticScrollTimer)
+  programmaticScrollTimer = setTimeout(() => { isProgrammaticScroll = false }, 300)
+}
 
 function onEventStreamScroll() {
-  if (!eventStreamRef.value) return
+  if (isProgrammaticScroll || !eventStreamRef.value) return
   const el = eventStreamRef.value
   const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 50
   autoScroll.value = atBottom
 }
 
 function onLogContentScroll() {
-  if (!logContentRef.value) return
+  if (isProgrammaticScroll || !logContentRef.value) return
   const el = logContentRef.value
   const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 50
   autoScroll.value = atBottom
@@ -474,10 +482,12 @@ watch(logContentRef, (el, oldEl) => {
 onBeforeUnmount(() => {
   eventStreamRef.value?.removeEventListener('scroll', onEventStreamScroll)
   logContentRef.value?.removeEventListener('scroll', onLogContentScroll)
+  if (programmaticScrollTimer) clearTimeout(programmaticScrollTimer)
 })
 
 function scrollToLatest() {
   autoScroll.value = true
+  setProgrammaticScroll()
   nextTick(() => {
     eventStreamRef.value?.scrollTo({ top: eventStreamRef.value.scrollHeight, behavior: 'smooth' })
     logContentRef.value?.scrollTo({ top: logContentRef.value.scrollHeight, behavior: 'smooth' })
@@ -490,6 +500,7 @@ watch(sortedEvents, async () => {
   if (!props.isActive || !autoScroll.value) return
   await nextTick()
   if (eventStreamRef.value) {
+    setProgrammaticScroll()
     eventStreamRef.value.scrollTo({ top: eventStreamRef.value.scrollHeight, behavior: 'smooth' })
   }
 })
@@ -498,6 +509,7 @@ watch(() => props.terminalHtml, async () => {
   if (!props.isActive || !autoScroll.value) return
   await nextTick()
   if (logContentRef.value) {
+    setProgrammaticScroll()
     logContentRef.value.scrollTo({ top: logContentRef.value.scrollHeight, behavior: 'smooth' })
   }
 })

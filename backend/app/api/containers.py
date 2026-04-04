@@ -130,8 +130,7 @@ async def get_container_logs(
                         break
 
                 if not container:
-                    yield f"data: {('Container not found: ' + container_id)}\n\n"
-                    return
+                    return  # Container is gone; close stream silently
 
             t_got = time.time()
             if t_got - t_get > 2.0:

@@ -376,8 +376,12 @@ function connectLogStream() {
     return
   }
 
+  const previousContainerId = logStreamContainerId
   closeLogStream()
-  containerLogs.value = ''
+  // Only clear logs when connecting to a different container (not a reconnect to the same)
+  if (previousContainerId !== containerId) {
+    containerLogs.value = ''
+  }
   containerLogsLoading.value = true
   logStreamContainerId = containerId
   let receivedFirstMessage = false
