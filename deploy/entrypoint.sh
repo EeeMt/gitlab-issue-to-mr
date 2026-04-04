@@ -16,7 +16,7 @@ USER_PROMPT="${USER_PROMPT:?Missing USER_PROMPT}"
 ISSUE_IID="${ISSUE_IID:-}"
 # BASE_BRANCH - base branch to create new branch from (defaults to TARGET_BRANCH if not set)
 BASE_BRANCH="${BASE_BRANCH:-}"
-TARGET_BRANCH="${TARGET_BRANCH:-main}"
+TARGET_BRANCH="${TARGET_BRANCH:-}"
 
 ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-http://localhost:11434/v1}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
@@ -41,16 +41,6 @@ echo "API Key set:    $([ -n "$ANTHROPIC_API_KEY" ] && echo 'yes' || echo 'no')"
 echo "GitLab Token:   $([ -n "$GITLAB_TOKEN" ] && echo 'set' || echo 'missing')"
 echo "========================================"
 
-# Set BASE_BRANCH: explicit > TARGET_BRANCH > project default branch
-if [ -z "${BASE_BRANCH}" ]; then
-    if [ -n "${TARGET_BRANCH}" ]; then
-        BASE_BRANCH="${TARGET_BRANCH}"
-    else
-        BASE_BRANCH="${DEFAULT_BRANCH:-main}"
-        echo "No TARGET_BRANCH set (no-MR mode); using default branch '${BASE_BRANCH}' as base"
-    fi
-fi
-
 # Extract hostname from GITLAB_URL for git operations
 GITLAB_HOST=$(echo "${GITLAB_URL}" | sed 's|https://||' | sed 's|http://||')
 
@@ -61,6 +51,16 @@ GITLAB_API_RESPONSE=$(curl -s -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
 GIT_REPO_URL=$(echo "${GITLAB_API_RESPONSE}" | grep -o '"http_url_to_repo":"[^"]*"' | cut -d'"' -f4)
 PROJECT_PATH=$(echo "${GITLAB_API_RESPONSE}" | grep -o '"path_with_namespace":"[^"]*"' | cut -d'"' -f4)
 DEFAULT_BRANCH=$(echo "${GITLAB_API_RESPONSE}" | grep -o '"default_branch":"[^"]*"' | cut -d'"' -f4)
+
+# Set BASE_BRANCH: explicit > TARGET_BRANCH > project default branch (now that DEFAULT_BRANCH is known)
+if [ -z "${BASE_BRANCH}" ]; then
+    if [ -n "${TARGET_BRANCH}" ]; then
+        BASE_BRANCH="${TARGET_BRANCH}"
+    else
+        BASE_BRANCH="${DEFAULT_BRANCH:-main}"
+        echo "No TARGET_BRANCH set (no-MR mode); using default branch '${BASE_BRANCH}' as base"
+    fi
+fi
 
 # Fallback to constructed URL if API fails
 if [ -z "${PROJECT_PATH}" ] && [ -n "${GIT_REPO_URL}" ]; then
