@@ -223,6 +223,10 @@ process_stream() {
         ;;
 
       # ── Tool execution results (delivered in user messages after each assistant turn)
+      # NOTE: This handler fires only when the API emits user-turn events in stream-json.
+      # Tested with MiniMax-M2.5 (minimaxi.com Anthropic API): user-turn events are NOT
+      # emitted, so CODIFY_TOOL_RESULT is never sent and tool outputs remain null.
+      # If a future API/model supports it, this handler will work as intended.
       user)
         local count
         count=$(printf '%s' "$line" | jq '[.content[]? | select(.type == "tool_result")] | length' 2>/dev/null || echo 0)
