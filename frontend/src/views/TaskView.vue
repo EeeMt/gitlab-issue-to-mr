@@ -468,10 +468,18 @@ async function refreshTask() {
 
 async function onRawTabOpen() {
   if (isActiveTaskStatus(task.value?.status)) {
-    // Connect SSE stream for live container logs
+    // Fetch stored DB chunks first to show historical content, then connect live SSE
+    if (!containerLogs.value && task.value?.container_id) {
+      try {
+        const result = await getTaskContainerLogs(taskId.value, 'db')
+        if (result.logs) containerLogs.value = result.logs
+      } catch {
+        // Ignore — live SSE will fill content
+      }
+    }
     connectLogStream()
   } else {
-    // Fetch once for completed tasks
+    // Fetch once for completed tasks (DB fallback handles gone containers)
     await fetchContainerLogs()
   }
 }

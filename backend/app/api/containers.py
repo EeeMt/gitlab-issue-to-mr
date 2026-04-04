@@ -183,6 +183,7 @@ async def get_container_logs(
 @router.get("/tasks/{task_id}/container-logs")
 async def get_task_container_logs(
     task_id: int,
+    source: str = "auto",
     db: AsyncSession = Depends(get_db),
     _current_user=Depends(require_admin_user),
 ):
@@ -190,6 +191,7 @@ async def get_task_container_logs(
 
     Args:
         task_id: Task ID
+        source: 'auto' (try Docker, fall back to DB) or 'db' (always use DB chunks)
         db: Database session
 
     Returns:
@@ -212,6 +214,24 @@ async def get_task_container_logs(
             "status": task.status,
         }
 
+    async def _fetch_db_chunks() -> str:
+        log_result = await db.execute(
+            select(TaskLog)
+            .where(TaskLog.task_id == task_id, TaskLog.log_type.is_(None))
+            .order_by(TaskLog.id.asc())
+        )
+        chunks = log_result.scalars().all()
+        return "".join(c.message or "" for c in chunks)
+
+    if source == "db":
+        logs = await _fetch_db_chunks()
+        return {
+            "container_id": task.container_id,
+            "logs": logs,
+            "status": task.status,
+            "source": "db",
+        }
+
     try:
         docker = get_docker_client()
         container = await asyncio.to_thread(docker.client.containers.get, task.container_id)
@@ -225,14 +245,8 @@ async def get_task_container_logs(
         }
     except Exception as e:
         # Container is gone (completed/removed) — fall back to DB-stored raw log chunks
-        log_result = await db.execute(
-            select(TaskLog)
-            .where(TaskLog.task_id == task_id, TaskLog.log_type.is_(None))
-            .order_by(TaskLog.id.asc())
-        )
-        chunks = log_result.scalars().all()
-        if chunks:
-            logs = "".join(c.message or "" for c in chunks)
+        logs = await _fetch_db_chunks()
+        if logs:
             return {
                 "container_id": task.container_id,
                 "logs": logs,
