@@ -191,7 +191,9 @@ process_stream() {
             case "$prev_block" in
               thinking)
                 _e "\n${DIM}${CYAN}╚══════════════════════════════════════════════${RESET}\n"
-                printf 'CODIFY_THINKING:%s\n' "$(jq -c -n --arg text "$cur_thinking_buf" '{text: $text}')" >&2
+                local stripped_thinking
+                stripped_thinking=$(printf '%s' "$cur_thinking_buf" | sed '/./,$!d')
+                printf 'CODIFY_THINKING:%s\n' "$(jq -c -n --arg text "$stripped_thinking" '{text: $text}')" >&2
                 cur_thinking_buf=""
                 ;;
               tool_use)
@@ -213,7 +215,10 @@ process_stream() {
                 ;;
               text)
                 _e "\n"
-                printf 'CODIFY_ASSISTANT_TEXT:%s\n' "$(jq -c -n --arg text "$cur_text_buf" '{text: $text}')" >&2
+                # Strip leading newlines from text before emitting
+                local stripped_text
+                stripped_text=$(printf '%s' "$cur_text_buf" | sed '/./,$!d')
+                printf 'CODIFY_ASSISTANT_TEXT:%s\n' "$(jq -c -n --arg text "$stripped_text" '{text: $text}')" >&2
                 cur_text_buf=""
                 ;;
             esac
