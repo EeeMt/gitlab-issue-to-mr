@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 router = APIRouter()
 
-WORKER_CONTAINER_PATTERN = re.compile(r"^codify-\d+-p\d+-i\d+$")
+WORKER_CONTAINER_PATTERN = re.compile(r"^codify-\d+-p\d+-(i\d+|manual)$")
 
 
 @router.get("/containers")
@@ -54,17 +54,21 @@ async def list_containers(
             if not WORKER_CONTAINER_PATTERN.match(container.name):
                 continue
 
-            # Try to extract task_id from container name (format: codify-{task_id}-p{project_id}-i{issue_iid})
+            # Try to extract task_id from container name
+            # Formats: codify-{task_id}-p{project_id}-i{issue_iid}
+            #          codify-{task_id}-p{project_id}-manual
             task_id = None
             project_id = None
             issue_iid = None
 
             try:
                 parts = container.name.split("-")
-                if len(parts) >= 5 and parts[0] == "codify":
+                if len(parts) >= 4 and parts[0] == "codify":
                     task_id = int(parts[1])
                     project_id = int(parts[2].replace("p", ""))
-                    issue_iid = int(parts[3].replace("i", ""))
+                    if parts[3].startswith("i"):
+                        issue_iid = int(parts[3][1:])
+                    # 'manual' suffix: issue_iid stays None
             except (ValueError, IndexError):
                 pass
 

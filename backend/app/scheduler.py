@@ -27,7 +27,7 @@ _SESSION_CLEANUP_INTERVAL_SECONDS = 3600
 _worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-")
 
 
-WORKER_CONTAINER_PATTERN = re.compile(r"^codify-\d+-p\d+-i\d+$")
+WORKER_CONTAINER_PATTERN = re.compile(r"^codify-\d+-p\d+-(i\d+|manual)$")
 
 
 class Scheduler:
@@ -84,11 +84,15 @@ class Scheduler:
                 logger.debug("No tasks available")
                 return
 
-            # Check issue mutex
-            issue_key = f"{task.project_id}:{task.issue_iid}"
-            if issue_key in self._running_issues:
-                logger.debug(f"Issue {issue_key} already running, skipping")
-                return
+            # Check issue mutex — prevents duplicate processing of the same issue.
+            # Manual tasks (issue_iid=None) are independent and skip the shared mutex.
+            if task.issue_iid is not None:
+                issue_key = f"{task.project_id}:{task.issue_iid}"
+                if issue_key in self._running_issues:
+                    logger.debug(f"Issue {issue_key} already running, skipping")
+                    return
+            else:
+                issue_key = f"manual:{task.id}"
 
             # Execute task
             await self._execute_task(db, task, issue_key)
@@ -191,7 +195,10 @@ class Scheduler:
                     )
                     task = result.scalar_one_or_none()
                     if task:
-                        issue_key = f"{task.project_id}:{task.issue_iid}"
+                        if task.issue_iid is not None:
+                            issue_key = f"{task.project_id}:{task.issue_iid}"
+                        else:
+                            issue_key = f"manual:{task_id}"
                         self._running_issues.discard(issue_key)
             except Exception:
                 pass
@@ -220,6 +227,7 @@ class Scheduler:
 
                 for container in all_containers:
                     # Only manage worker containers: codify-{task_id}-p{project_id}-i{issue_iid}
+                    # or codify-{task_id}-p{project_id}-manual (for manual tasks without an issue).
                     # Avoid touching compose-managed service containers like codify-backend/codify-postgres.
                     if not WORKER_CONTAINER_PATTERN.match(container.name):
                         continue
