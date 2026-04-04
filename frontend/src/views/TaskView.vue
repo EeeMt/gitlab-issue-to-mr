@@ -191,6 +191,7 @@
 
           <!-- Process Panel -->
           <TaskProcessPanel
+            :task="task ?? null"
             :task-logs="taskLogs"
             :is-active="isActiveTaskStatus(task?.status)"
             :terminal-html="terminalLogHtml"

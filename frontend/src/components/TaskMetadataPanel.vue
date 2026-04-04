@@ -15,7 +15,10 @@
     <div class="metadata-body">
       <!-- Project -->
       <div class="metadata-row">
-        <span class="metadata-label">{{ t('common.project') }}</span>
+        <span class="metadata-label">
+          <n-icon size="14" class="metadata-label-icon"><FolderOpenOutline /></n-icon>
+          {{ t('common.project') }}
+        </span>
         <span class="metadata-value">
           <a v-if="task.project_url" :href="task.project_url" target="_blank" rel="noopener noreferrer" class="app-link">
             {{ projectDisplayName }}
@@ -26,7 +29,13 @@
 
       <!-- Source -->
       <div class="metadata-row">
-        <span class="metadata-label">{{ t('common.source') }}</span>
+        <span class="metadata-label">
+          <n-icon size="14" class="metadata-label-icon">
+            <GitMergeOutline v-if="task.issue_iid" />
+            <PersonOutline v-else />
+          </n-icon>
+          {{ t('common.source') }}
+        </span>
         <span class="metadata-value">
           <template v-if="task.issue_iid && task.issue_url">
             <a :href="task.issue_url" target="_blank" rel="noopener noreferrer" class="app-link">
@@ -45,7 +54,10 @@
 
       <!-- Branch flow -->
       <div class="metadata-row">
-        <span class="metadata-label">{{ t('taskView.branchFlow') }}</span>
+        <span class="metadata-label">
+          <n-icon size="14" class="metadata-label-icon"><GitBranchOutline /></n-icon>
+          {{ t('taskView.branchFlow') }}
+        </span>
         <span class="metadata-value">
           <span class="branch-flow">
             <span v-if="task.base_branch" class="branch-item branch-item--base">{{ task.base_branch }}</span>
@@ -64,27 +76,21 @@
         </span>
       </div>
 
-      <!-- Container -->
-      <div v-if="task.container_id" class="metadata-row">
-        <span class="metadata-label">
-          <n-icon size="14" class="metadata-label-icon"><CubeOutline /></n-icon>
-          {{ t('taskView.container') }}
-        </span>
-        <span class="metadata-value container-info">
-          <span class="container-name">{{ task.container_name ?? '—' }}</span>
-          <span class="container-id-short">{{ task.container_id.slice(0, 12) }}</span>
-        </span>
-      </div>
-
       <!-- User prompt -->
       <div class="metadata-row">
-        <span class="metadata-label">{{ t('taskView.userPrompt') }}</span>
+        <span class="metadata-label">
+          <n-icon size="14" class="metadata-label-icon"><ChatbubbleOutline /></n-icon>
+          {{ t('taskView.userPrompt') }}
+        </span>
         <pre class="metadata-prompt">{{ task.user_prompt }}</pre>
       </div>
 
       <!-- Time axis -->
       <div class="metadata-row">
-        <span class="metadata-label">{{ t('common.timeline') }}</span>
+        <span class="metadata-label">
+          <n-icon size="14" class="metadata-label-icon"><TimeOutline /></n-icon>
+          {{ t('common.timeline') }}
+        </span>
         <div class="time-axis">
           <div class="time-point">
             <span class="time-point__label">{{ t('common.created') }}</span>
@@ -120,7 +126,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NCard, NTag, NIcon } from 'naive-ui'
-import { CubeOutline } from '@vicons/ionicons5'
+import {
+  FolderOpenOutline,
+  GitMergeOutline,
+  PersonOutline,
+  GitBranchOutline,
+  ChatbubbleOutline,
+  TimeOutline
+} from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import type { Task } from '../api'
 import { formatDateTimeUtc8 } from '../utils/datetime'
@@ -343,27 +356,5 @@ function formatPriority(priority?: string | number | null): string {
   vertical-align: middle;
   margin-right: 3px;
   opacity: 0.65;
-}
-
-.container-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.container-name {
-  font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
-  font-size: 13px;
-  color: var(--n-text-color-1);
-}
-
-.container-id-short {
-  font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
-  font-size: 11px;
-  color: var(--n-text-color-3, #999);
-  background: rgba(128, 128, 128, 0.08);
-  padding: 1px 6px;
-  border-radius: 4px;
 }
 </style>

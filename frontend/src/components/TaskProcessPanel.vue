@@ -33,6 +33,29 @@
       <n-tabs v-model:value="activeTab" type="line" size="small" class="process-tabs">
         <n-tab-pane name="events" :tab="t('taskView.eventsTab')">
           <div class="event-stream" ref="eventStreamRef">
+            <!-- Container assigned (first step) -->
+            <div v-if="props.task?.container_id" class="event-item event-item--container">
+              <div class="event-header">
+                <div class="event-icon" style="color: #059669">
+                  <n-icon size="15"><CubeOutline /></n-icon>
+                </div>
+                <div class="event-info">
+                  <span class="event-name">{{ t('taskView.container') }}</span>
+                </div>
+              </div>
+              <n-collapse class="event-collapse">
+                <n-collapse-item name="detail">
+                  <template #header>
+                    <span class="tool-detail-label">{{ t('taskView.container') }}</span>
+                  </template>
+                  <div class="container-detail">
+                    <span class="container-name">{{ props.task.container_name ?? '—' }}</span>
+                    <span class="container-id-short">{{ props.task.container_id.slice(0, 12) }}</span>
+                  </div>
+                </n-collapse-item>
+              </n-collapse>
+            </div>
+
             <template v-for="(event, index) in sortedEvents" :key="index">
               <!-- thinking entry -->
               <div v-if="event.log_type === 'thinking'" class="event-item event-item--thinking"
@@ -142,12 +165,14 @@ import {
   ExtensionPuzzleOutline,
   ServerOutline,
   BulbOutline,
-  ChatboxOutline
+  ChatboxOutline,
+  CubeOutline
 } from '@vicons/ionicons5'
 import type { Component } from 'vue'
-import type { TaskLog, ToolCall } from '../api'
+import type { TaskLog, ToolCall, Task } from '../api'
 
 const props = defineProps<{
+  task: Task | null
   taskLogs: TaskLog[]
   isActive: boolean
   terminalHtml: string
@@ -641,5 +666,27 @@ watch(sortedEvents, async () => {
 
 .empty-state {
   padding: 24px 0;
+}
+
+.container-detail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.container-name {
+  font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
+  font-size: 13px;
+  color: var(--n-text-color-1);
+}
+
+.container-id-short {
+  font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
+  font-size: 11px;
+  color: var(--n-text-color-3, #999);
+  background: rgba(128, 128, 128, 0.08);
+  padding: 1px 6px;
+  border-radius: 4px;
 }
 </style>
