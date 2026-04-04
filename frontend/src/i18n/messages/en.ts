@@ -232,6 +232,8 @@ const en = {
     taskResult: 'Task Result',
     branchFlow: 'Branch Config',
     directPush: 'Direct Push',
+    mrWillBeCreated: 'Will create MR',
+    mrNotCreated: 'No MR',
     manualCreation: 'Manual',
     modelName: 'Model',
     duration: 'Duration',

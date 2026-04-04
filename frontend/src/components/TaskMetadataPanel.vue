@@ -76,6 +76,30 @@
         </span>
       </div>
 
+      <!-- Merge Request -->
+      <div class="metadata-row">
+        <span class="metadata-label">
+          <n-icon size="14" class="metadata-label-icon"><GitPullRequest /></n-icon>
+          {{ t('taskView.mergeRequest') }}
+        </span>
+        <span class="metadata-value">
+          <!-- Completed with MR -->
+          <template v-if="task.merge_request_url">
+            <a :href="task.merge_request_url" target="_blank" rel="noopener noreferrer" class="app-link mr-link">
+              {{ task.merge_request_title || `MR !${task.merge_request_iid}` }}
+            </a>
+          </template>
+          <!-- Will create MR (target branch set, not yet done) -->
+          <template v-else-if="task.target_branch">
+            <span class="mr-pending">{{ t('taskView.mrWillBeCreated') }} → <span class="branch-item branch-item--target" style="display:inline">{{ task.target_branch }}</span></span>
+          </template>
+          <!-- No MR -->
+          <template v-else>
+            <span class="mr-none">{{ t('taskView.mrNotCreated') }}</span>
+          </template>
+        </span>
+      </div>
+
       <!-- User prompt -->
       <div class="metadata-row">
         <span class="metadata-label">
@@ -132,7 +156,8 @@ import {
   PersonOutline,
   GitBranchOutline,
   ChatbubbleOutline,
-  TimeOutline
+  TimeOutline,
+  GitPullRequest
 } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import type { Task } from '../api'
@@ -356,5 +381,20 @@ function formatPriority(priority?: string | number | null): string {
   vertical-align: middle;
   margin-right: 3px;
   opacity: 0.65;
+}
+
+.mr-link {
+  font-size: 14px;
+}
+
+.mr-pending {
+  font-size: 13px;
+  color: var(--n-text-color-2);
+}
+
+.mr-none {
+  font-size: 13px;
+  color: var(--n-text-color-3, #999);
+  font-style: italic;
 }
 </style>

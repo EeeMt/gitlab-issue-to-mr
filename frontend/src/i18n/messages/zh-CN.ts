@@ -222,6 +222,8 @@ const zhCN = {
     taskResult: '任务结果',
     branchFlow: '分支配置',
     directPush: '直接推送',
+    mrWillBeCreated: '将创建 MR',
+    mrNotCreated: '不创建 MR',
     manualCreation: '手动创建',
     modelName: '执行模型',
     duration: '执行时长',
