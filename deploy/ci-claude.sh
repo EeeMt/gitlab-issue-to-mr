@@ -118,6 +118,7 @@ touch "$TOOL_CALLS_FILE" "$RESULT_FILE"
 process_stream() {
   local prev_block=""
   local cur_tool_name=""
+  local cur_tool_id=""
   local cur_tool_input=""
   local cur_thinking_buf=""
   local cur_text_buf=""
@@ -149,6 +150,7 @@ process_stream() {
                 ;;
               tool_use)
                 cur_tool_name=$(printf '%s' "$line" | jq -r '.event.content_block.name // empty' 2>/dev/null)
+                cur_tool_id=$(printf '%s' "$line" | jq -r '.event.content_block.id // empty' 2>/dev/null)
                 cur_tool_input=""
                 _e "\n${YELLOW}┌─ ⚡ Tool: ${BOLD}${cur_tool_name}${RESET}\n"
                 _e "${YELLOW}│  Input: ${DIM}"
@@ -194,7 +196,7 @@ process_stream() {
                 ;;
               tool_use)
                 _e "${RESET}\n${YELLOW}└──────────────────────────────────────────────${RESET}\n"
-                # Persist tool call stub; output filled in below by user message tool_result
+                # Persist tool call stub for the final batch JSON (entrypoint.sh reads this)
                 local safe_input
                 safe_input=$(printf '%s' "${cur_tool_input:-{\}}" | jq -c '.' 2>/dev/null || echo '{}')
                 jq -nc \
@@ -202,7 +204,12 @@ process_stream() {
                   --argjson input "$safe_input" \
                   '{name: $name, input: $input, output: null, error: false}' \
                   >> "$TOOL_CALLS_FILE"
+                # Emit structured tool-use event to stderr for worker.py Python parsing
+                printf 'CODIFY_TOOL_USE_START:%s\n' \
+                  "$(jq -c -n --arg id "$cur_tool_id" --arg name "$cur_tool_name" --argjson input "$safe_input" \
+                     '{id: $id, name: $name, input: $input}')" >&2
                 cur_tool_input=""
+                cur_tool_id=""
                 ;;
               text)
                 _e "\n"
@@ -219,21 +226,17 @@ process_stream() {
       user)
         local count
         count=$(printf '%s' "$line" | jq '[.content[]? | select(.type == "tool_result")] | length' 2>/dev/null || echo 0)
-        # DEBUG: log count and first item structure
-        local _dbg_first
-        _dbg_first=$(printf '%s' "$line" | jq -c '.content[0] | {type,keys}' 2>/dev/null || echo "jq_fail")
-        log "DEBUG user msg: count=$count first=$_dbg_first"
         local i
         for (( i=0; i<count; i++ )); do
-          local output is_error stored_out
-          # Extract output: index into filtered tool_result array, not raw array
-          output=$(printf '%s' "$line" | jq -r --argjson i "$i" '
-            [.content[]? | select(.type == "tool_result")][$i] |
+          local tool_use_id output is_error stored_out
+          # Use filtered-array indexing to avoid off-by-one if content has mixed types
+          tool_use_id=$(printf '%s' "$line" | jq -r --argjson i "$i" \
+            '[.content[]? | select(.type == "tool_result")][$i].tool_use_id // ""' 2>/dev/null)
+          output=$(printf '%s' "$line" | jq -r --argjson i "$i" \
+            '[.content[]? | select(.type == "tool_result")][$i] |
             if (.content | type) == "array" then (.content | map(.text // "") | join(""))
             elif (.content | type) == "string" then .content
             else (.output // "") end' 2>/dev/null)
-          is_error=$(printf '%s' "$line" | jq -r --argjson i "$i" \
-            '[.content[]? | select(.type == "tool_result")][$i].is_error // false' 2>/dev/null)
           is_error=$(printf '%s' "$line" | jq -r --argjson i "$i" \
             '[.content[]? | select(.type == "tool_result")][$i].is_error // false' 2>/dev/null)
 
@@ -243,10 +246,15 @@ process_stream() {
             _e "${CYAN}  ╰─ ✅ Output: ${DIM}%.400s${RESET}\n" "$output"
           fi
 
+          # Emit tool result to stderr for worker.py to correlate with CODIFY_TOOL_USE_START
+          stored_out="${output:0:2000}"
+          [[ ${#output} -gt 2000 ]] && stored_out+="…(truncated)"
+          printf 'CODIFY_TOOL_RESULT:%s\n' \
+            "$(jq -c -n --arg id "$tool_use_id" --arg out "$stored_out" --argjson err "$is_error" \
+               '{id: $id, output: $out, error: $err}')" >&2
+
+          # Also update TOOL_CALLS_FILE stub (for backward-compat batch in entrypoint.sh)
           if [[ -s "$TOOL_CALLS_FILE" ]]; then
-            stored_out="${output:0:2000}"
-            [[ ${#output} -gt 2000 ]] && stored_out+="…(truncated)"
-            # Fill the first unfilled stub (output == null) in order
             local stub_line updated
             stub_line=$(grep -nm 1 '"output":null' "$TOOL_CALLS_FILE" | cut -d: -f1)
             if [[ -n "$stub_line" ]]; then
@@ -260,7 +268,6 @@ process_stream() {
                 tail -n +$(( stub_line + 1 )) "$TOOL_CALLS_FILE" 2>/dev/null || true
               } > "$TOOL_CALLS_FILE.tmp"
               mv "$TOOL_CALLS_FILE.tmp" "$TOOL_CALLS_FILE"
-              printf 'CODIFY_TOOL_CALL:%s\n' "$updated" >&2
             fi
           fi
         done

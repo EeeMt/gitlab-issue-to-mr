@@ -52,6 +52,10 @@ _CODIFY_MR_TITLE_RE = re.compile(r'^CODIFY_MR_TITLE:(.+)$', re.MULTILINE)
 _CODIFY_THINKING_RE = re.compile(r'^CODIFY_THINKING:(.+)$')
 # Emitted by ci-claude.sh in real-time when a text (assistant response) block completes.
 _CODIFY_ASSISTANT_TEXT_RE = re.compile(r'^CODIFY_ASSISTANT_TEXT:(.+)$')
+# Emitted by ci-claude.sh when a tool_use block completes (name + input); id for correlation.
+_CODIFY_TOOL_USE_START_RE = re.compile(r'^CODIFY_TOOL_USE_START:(.+)$')
+# Emitted by ci-claude.sh when a tool_result arrives in a user message; correlates via id.
+_CODIFY_TOOL_RESULT_RE = re.compile(r'^CODIFY_TOOL_RESULT:(.+)$')
 
 # Volume mount constants
 _MAVEN_CACHE_CONTAINER_PATH = "/home/codify/.m2/repository"
@@ -228,6 +232,8 @@ class WorkerExecutor:
         last_flush = time.monotonic()
         chunk_index = 0
         deadline = time.monotonic() + timeout
+        # Maps tool_use id → TaskLog.id for correlating tool results with their calls
+        pending_tool_uses: dict[str, int] = {}
 
         while True:
             remaining = deadline - time.monotonic()
@@ -257,28 +263,56 @@ class WorkerExecutor:
 
             line = item.decode("utf-8", errors="replace")
 
-            # Real-time tool call parsing: each CODIFY_TOOL_CALL: line emitted by
-            # ci-claude.sh marks one completed tool call. Write an individual TaskLog
-            # entry immediately so the frontend can show a live timeline without waiting
-            # for the full batch CODIFY_TOOL_CALLS: entry at the end of the run.
             stripped = line.rstrip('\n\r')
-            if stripped.startswith('CODIFY_TOOL_CALL:'):
-                tc_match = _CODIFY_TOOL_CALL_RE.match(stripped)
-                if tc_match:
+
+            # CODIFY_TOOL_USE_START: tool_use block completed → create a tool_call log entry
+            # immediately so the frontend sees it in real-time (output populated later).
+            if stripped.startswith('CODIFY_TOOL_USE_START:'):
+                match = _CODIFY_TOOL_USE_START_RE.match(stripped)
+                if match:
                     try:
-                        json_str = tc_match.group(1)
-                        _json.loads(json_str)  # validate before storing
-                        db.add(TaskLog(
+                        data = _json.loads(match.group(1))
+                        tool_use_id = data.get('id', '')
+                        log_entry = TaskLog(
                             task_id=task_id,
                             log_level="INFO",
                             message="",
                             log_type="tool_call",
-                            log_metadata=json_str,
-                        ))
+                            log_metadata=_json.dumps({
+                                "name": data.get("name", ""),
+                                "input": data.get("input", {}),
+                                "output": None,
+                                "error": False,
+                            }),
+                        )
+                        db.add(log_entry)
+                        await db.flush()   # get auto-assigned ID
+                        if tool_use_id and log_entry.id:
+                            pending_tool_uses[tool_use_id] = log_entry.id
                         await db.commit()
-                        logger.debug(f"[Task {task_id}] Stored real-time tool_call entry")
+                        logger.debug(f"[Task {task_id}] Tool use start: {data.get('name')} (id={tool_use_id})")
                     except Exception as exc:
-                        logger.debug(f"[Task {task_id}] Failed to parse CODIFY_TOOL_CALL: {exc}")
+                        logger.debug(f"[Task {task_id}] Failed to parse CODIFY_TOOL_USE_START: {exc}")
+
+            # CODIFY_TOOL_RESULT: tool result arrived → update the matching log entry with output.
+            elif stripped.startswith('CODIFY_TOOL_RESULT:'):
+                match = _CODIFY_TOOL_RESULT_RE.match(stripped)
+                if match:
+                    try:
+                        data = _json.loads(match.group(1))
+                        tool_use_id = data.get('id', '')
+                        log_id = pending_tool_uses.pop(tool_use_id, None)
+                        if log_id:
+                            log_entry = await db.get(TaskLog, log_id)
+                            if log_entry and log_entry.log_metadata:
+                                existing = _json.loads(log_entry.log_metadata)
+                                existing['output'] = data.get('output', '')
+                                existing['error'] = data.get('error', False)
+                                log_entry.log_metadata = _json.dumps(existing)
+                                await db.commit()
+                                logger.debug(f"[Task {task_id}] Tool result stored (id={tool_use_id})")
+                    except Exception as exc:
+                        logger.debug(f"[Task {task_id}] Failed to parse CODIFY_TOOL_RESULT: {exc}")
 
             elif stripped.startswith('CODIFY_THINKING:'):
                 th_match = _CODIFY_THINKING_RE.match(stripped)
