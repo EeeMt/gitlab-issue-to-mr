@@ -9,7 +9,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, false
+from sqlalchemy import delete, select, false
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.docker_client import get_docker_client
@@ -478,7 +478,12 @@ async def retry_task(
     task.additions = 0
     task.deletions = 0
     task.total_changes = 0
+    task.model_name = None
     task.scheduled_at = scheduled_at
+
+    # Clear logs from previous execution so the event stream starts fresh
+    await db.execute(delete(TaskLog).where(TaskLog.task_id == task_id))
+
     await db.commit()
     await db.refresh(task)
 
