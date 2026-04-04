@@ -408,7 +408,6 @@ async function fetchTask() {
     if (!hasLoadedOnce.value || task.value?.scheduled_at !== previousScheduledAt) {
       syncRescheduleDatetime()
     }
-    connectLogStream()
 
     if (isActiveTaskStatus(previousStatus) && !isActiveTaskStatus(task.value.status)) {
       await fetchLogs()
