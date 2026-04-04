@@ -318,6 +318,8 @@ const en = {
     pleaseEnterPrompt: 'Please enter a prompt',
     failedToFetchProjects: 'Failed to fetch projects',
     failedToFetchBranches: 'Failed to fetch branches',
+    skipMR: 'Skip MR Creation',
+    skipMRTip: 'Push code without creating a merge request',
     invalidDelay: 'Please enter a valid delay greater than 0',
     pleaseSelectScheduledTime: 'Please select a scheduled date and time',
     scheduledTimeFuture: 'Scheduled time must be in the future',

@@ -2,9 +2,7 @@
   <n-card class="task-process-panel" :bordered="false">
     <template #header>
       <span class="panel-title">{{ t('taskView.taskProcess') }}</span>
-    </template>
-    <template #header-extra>
-      <n-tag v-if="isActive" type="warning" size="small" round :class="{ 'live-badge--pulse': isActive }">{{ t('taskView.realTime') }}</n-tag>
+      <n-tag v-if="isActive" type="success" size="small" round :class="{ 'live-badge--pulse': isActive }" style="margin-left: 8px">{{ t('taskView.realTime') }}</n-tag>
     </template>
 
     <!-- system_init banner -->
@@ -25,7 +23,7 @@
 
     <!-- Structured event stream -->
     <template v-else>
-      <div class="event-stream">
+      <div class="event-stream" ref="eventStreamRef">
         <template v-for="(event, index) in sortedEvents" :key="index">
           <!-- thinking entry -->
           <div v-if="event.log_type === 'thinking'" class="event-item event-item--thinking">
@@ -46,7 +44,7 @@
                 <template #header>
                   <span class="tool-detail-label">{{ t('taskView.fullText') }}</span>
                 </template>
-                <pre class="event-content event-content--thinking">{{ parseTextMeta(event.metadata) }}</pre>
+                <div class="event-content event-content--thinking markdown-content" v-html="renderMarkdown(parseTextMeta(event.metadata))"></div>
               </n-collapse-item>
             </n-collapse>
           </div>
@@ -70,7 +68,7 @@
                 <template #header>
                   <span class="tool-detail-label">{{ t('taskView.fullText') }}</span>
                 </template>
-                <pre class="event-content">{{ parseTextMeta(event.metadata) }}</pre>
+                <div class="event-content markdown-content" v-html="renderMarkdown(parseTextMeta(event.metadata))"></div>
               </n-collapse-item>
             </n-collapse>
           </div>
@@ -123,7 +121,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import { NCard, NCollapse, NCollapseItem, NIcon, NTag, NEmpty } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
@@ -268,6 +266,51 @@ function parsedToolCall(log: TaskLog): ToolCall {
   }
 }
 
+// ── Auto-scroll ref ───────────────────────────────────────────────────────────
+
+const eventStreamRef = ref<HTMLElement | null>(null)
+
+// ── Markdown renderer ─────────────────────────────────────────────────────────
+
+function renderMarkdown(text: string): string {
+  if (!text) return ''
+  // Escape HTML entities first
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+  // Code blocks (``` ... ```)
+  html = html.replace(/```[\w]*\n?([\s\S]*?)```/g, (_, code) =>
+    `<pre class="md-code-block"><code>${code}</code></pre>`
+  )
+
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
+
+  // Headers
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>')
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>')
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>')
+
+  // Bold
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  html = html.replace(/__(.+?)__/g, '<strong>$1</strong>')
+
+  // Italic
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
+  html = html.replace(/_(.+?)_/g, '<em>$1</em>')
+
+  // Unordered lists (lines starting with - or *)
+  html = html.replace(/^[*-] (.+)$/gm, '<li>$1</li>')
+  html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
+
+  // Line breaks (preserve newlines)
+  html = html.replace(/\n/g, '<br>')
+
+  return html
+}
+
 // ── system_init ───────────────────────────────────────────────────────────────
 
 const systemInitEntry = computed(() => {
@@ -326,6 +369,16 @@ const sortedEvents = computed<TaskLog[]>(() => {
 const hasStructuredContent = computed(() =>
   sortedEvents.value.length > 0 || systemInitEntry.value !== null
 )
+
+// ── Auto-scroll watch (after sortedEvents is defined) ─────────────────────────
+
+watch(sortedEvents, async () => {
+  if (!props.isActive) return
+  await nextTick()
+  if (eventStreamRef.value) {
+    eventStreamRef.value.scrollTop = eventStreamRef.value.scrollHeight
+  }
+})
 </script>
 
 <style scoped>
@@ -452,6 +505,52 @@ const hasStructuredContent = computed(() =>
   word-break: break-word;
   color: var(--n-text-color-2);
   font-family: inherit;
+}
+
+.markdown-content {
+  white-space: normal;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3 {
+  font-weight: 600;
+  margin: 8px 0 4px;
+  line-height: 1.4;
+}
+
+.markdown-content h1 { font-size: 16px; }
+.markdown-content h2 { font-size: 14px; }
+.markdown-content h3 { font-size: 13px; }
+
+.markdown-content strong { font-weight: 600; }
+.markdown-content em { font-style: italic; }
+
+.markdown-content ul {
+  padding-left: 18px;
+  margin: 4px 0;
+  list-style: disc;
+}
+
+.markdown-content li { margin: 2px 0; }
+
+.markdown-content :deep(.md-code-block) {
+  margin: 6px 0;
+  padding: 8px;
+  font-size: 11px;
+  font-family: var(--n-font-family-mono, monospace);
+  background: var(--n-color-embedded, rgba(128, 128, 128, 0.08));
+  border-radius: 4px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.markdown-content :deep(.md-inline-code) {
+  font-family: var(--n-font-family-mono, monospace);
+  font-size: 12px;
+  background: rgba(128, 128, 128, 0.1);
+  padding: 1px 4px;
+  border-radius: 3px;
 }
 
 .event-content--thinking {

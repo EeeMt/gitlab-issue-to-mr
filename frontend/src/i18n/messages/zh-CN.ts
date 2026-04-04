@@ -306,6 +306,8 @@ const zhCN = {
     pleaseEnterPrompt: '请输入提示词',
     failedToFetchProjects: '获取项目失败',
     failedToFetchBranches: '获取分支失败',
+    skipMR: '不创建 MR',
+    skipMRTip: '任务完成后不创建合并请求，仅推送代码',
     invalidDelay: '请输入有效的延迟时间，且必须大于 0',
     pleaseSelectScheduledTime: '请选择定时执行时间',
     scheduledTimeFuture: '定时执行时间必须晚于当前时间',

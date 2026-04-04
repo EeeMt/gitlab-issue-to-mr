@@ -277,17 +277,21 @@ function formatPriority(priority?: string | number | null): string {
   align-items: flex-start;
   gap: 8px;
   flex-wrap: wrap;
+  gap: 6px 8px;
 }
 
 .time-axis__sep {
   color: var(--n-text-color-3, #999);
   margin-top: 2px;
+  flex-shrink: 0;
 }
 
 .time-point {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .time-point__label {
@@ -300,6 +304,18 @@ function formatPriority(priority?: string | number | null): string {
 .time-point__value {
   font-size: 13px;
   color: var(--n-text-color-2);
+}
+
+@media (max-width: 600px) {
+  .time-point__value {
+    font-size: 11px;
+  }
+  .time-point {
+    padding: 2px 0;
+  }
+  .time-axis__sep {
+    display: none;
+  }
 }
 
 .app-link {
