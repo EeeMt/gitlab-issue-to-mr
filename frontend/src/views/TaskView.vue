@@ -477,10 +477,19 @@ async function handleCancel() {
   }
 }
 
+function resetLogsState() {
+  taskLogs.value = []
+  logs.value = ''
+  containerLogs.value = ''
+  closeStructuredLogStream()
+  closeLogStream()
+}
+
 async function handleRetry() {
   actionLoading.value = true
   try {
     await retryTask(taskId.value)
+    resetLogsState()
     message.success(t('taskView.taskRetryScheduled'))
     refreshTask()
   } catch (error) {
@@ -503,6 +512,7 @@ async function handleRetryWithSchedule() {
   try {
     await retryTask(taskId.value, new Date(retryScheduleDatetime.value).toISOString())
     retryScheduleDatetime.value = null
+    resetLogsState()
     message.success(t('taskView.taskRetryRescheduled'))
     refreshTask()
   } catch (error) {
