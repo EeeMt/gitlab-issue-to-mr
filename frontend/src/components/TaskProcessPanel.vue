@@ -35,7 +35,8 @@
           <div class="event-stream" ref="eventStreamRef">
             <template v-for="(event, index) in sortedEvents" :key="index">
               <!-- thinking entry -->
-              <div v-if="event.log_type === 'thinking'" class="event-item event-item--thinking">
+              <div v-if="event.log_type === 'thinking'" class="event-item event-item--thinking"
+                :ref="(el) => { collapseRefs[index] = el as HTMLElement }">
                 <div class="event-header">
                   <div class="event-icon" style="color: #888">
                     <n-icon size="15"><BulbOutline /></n-icon>
@@ -48,7 +49,7 @@
                   </div>
                   <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
                 </div>
-                <n-collapse class="event-collapse">
+                <n-collapse class="event-collapse" @update:expanded-names="(names) => onCollapseChange(names, index)">
                   <n-collapse-item name="detail">
                     <template #header>
                       <span class="tool-detail-label">{{ t('taskView.fullText') }}</span>
@@ -59,7 +60,8 @@
               </div>
 
               <!-- assistant_text entry -->
-              <div v-else-if="event.log_type === 'assistant_text'" class="event-item event-item--assistant">
+              <div v-else-if="event.log_type === 'assistant_text'" class="event-item event-item--assistant"
+                :ref="(el) => { collapseRefs[index] = el as HTMLElement }">
                 <div class="event-header">
                   <div class="event-icon" style="color: #0284c7">
                     <n-icon size="15"><ChatboxOutline /></n-icon>
@@ -72,7 +74,7 @@
                   </div>
                   <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
                 </div>
-                <n-collapse class="event-collapse">
+                <n-collapse class="event-collapse" @update:expanded-names="(names) => onCollapseChange(names, index)">
                   <n-collapse-item name="detail">
                     <template #header>
                       <span class="tool-detail-label">{{ t('taskView.fullText') }}</span>
@@ -83,7 +85,8 @@
               </div>
 
               <!-- tool_call entry -->
-              <div v-else-if="event.log_type === 'tool_call'" class="event-item event-item--tool">
+              <div v-else-if="event.log_type === 'tool_call'" class="event-item event-item--tool"
+                :ref="(el) => { collapseRefs[index] = el as HTMLElement }">
                 <div class="event-header">
                   <div class="event-icon" :style="{ color: getToolColor(parsedToolCall(event).name) }">
                     <n-icon size="15">
@@ -99,7 +102,7 @@
                   <n-tag v-if="parsedToolCall(event).error" type="error" size="small" round>Error</n-tag>
                   <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
                 </div>
-                <n-collapse class="event-collapse">
+                <n-collapse class="event-collapse" @update:expanded-names="(names) => onCollapseChange(names, index)">
                   <n-collapse-item v-if="hasDetailedInput(parsedToolCall(event))" name="input">
                     <template #header>
                       <span class="tool-detail-label">{{ t('taskView.toolInput') }}</span>
@@ -241,11 +244,17 @@ function formatInput(call: ToolCall): string {
 
 function formatTimestamp(iso: string): string {
   try {
-    const d = new Date(iso)
-    const hh = String(d.getHours()).padStart(2, '0')
-    const mm = String(d.getMinutes()).padStart(2, '0')
-    const ss = String(d.getSeconds()).padStart(2, '0')
-    return `${hh}:${mm}:${ss}`
+    // Timestamps from API are UTC but lack 'Z' suffix — append it
+    const isoUtc = iso.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(iso) ? iso : iso + 'Z'
+    const d = new Date(isoUtc)
+    // Display in UTC+8 (Asia/Shanghai)
+    return d.toLocaleTimeString('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    })
   } catch {
     return ''
   }
@@ -276,6 +285,15 @@ function parsedToolCall(log: TaskLog): ToolCall {
 
 const eventStreamRef = ref<HTMLElement | null>(null)
 const activeTab = ref<'events' | 'raw'>('events')
+const collapseRefs = ref<(HTMLElement | null)[]>([])
+
+function onCollapseChange(expandedNames: (string | number)[], index: number) {
+  if (expandedNames.length > 0) {
+    nextTick(() => {
+      collapseRefs.value[index]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
+  }
+}
 
 // ── Markdown renderer ─────────────────────────────────────────────────────────
 

@@ -53,6 +53,12 @@ def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = Non
         "priority": task.priority,
         "scheduled_at": task.scheduled_at.isoformat() if task.scheduled_at else None,
         "container_id": task.container_id,
+        "container_name": (
+            f"codify-{task.id}-p{task.project_id}-"
+            + (f"i{task.issue_iid}" if task.issue_iid else "manual")
+            if task.container_id
+            else None
+        ),
         "target_branch": task.target_branch,
         "target_branch_url": target_branch_url,
         "commit_sha": task.commit_sha,

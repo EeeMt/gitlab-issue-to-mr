@@ -195,6 +195,7 @@ const en = {
     logsSubtitle: 'Streaming container output for active tasks and stored logs otherwise',
     realTime: 'Real-time',
     containerId: 'Container ID',
+    container: 'Container',
     mrUrl: 'MR URL',
     totalSuffix: '{total} total',
     mergeRequestCreated: 'Created',

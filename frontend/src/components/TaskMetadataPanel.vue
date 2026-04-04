@@ -64,6 +64,18 @@
         </span>
       </div>
 
+      <!-- Container -->
+      <div v-if="task.container_id" class="metadata-row">
+        <span class="metadata-label">
+          <n-icon size="14" class="metadata-label-icon"><CubeOutline /></n-icon>
+          {{ t('taskView.container') }}
+        </span>
+        <span class="metadata-value container-info">
+          <span class="container-name">{{ task.container_name ?? '—' }}</span>
+          <span class="container-id-short">{{ task.container_id.slice(0, 12) }}</span>
+        </span>
+      </div>
+
       <!-- User prompt -->
       <div class="metadata-row">
         <span class="metadata-label">{{ t('taskView.userPrompt') }}</span>
@@ -107,7 +119,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NCard, NTag } from 'naive-ui'
+import { NCard, NTag, NIcon } from 'naive-ui'
+import { CubeOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import type { Task } from '../api'
 import { formatDateTimeUtc8 } from '../utils/datetime'
@@ -324,5 +337,33 @@ function formatPriority(priority?: string | number | null): string {
 }
 .app-link:hover {
   text-decoration: underline;
+}
+
+.metadata-label-icon {
+  vertical-align: middle;
+  margin-right: 3px;
+  opacity: 0.65;
+}
+
+.container-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.container-name {
+  font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
+  font-size: 13px;
+  color: var(--n-text-color-1);
+}
+
+.container-id-short {
+  font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
+  font-size: 11px;
+  color: var(--n-text-color-3, #999);
+  background: rgba(128, 128, 128, 0.08);
+  padding: 1px 6px;
+  border-radius: 4px;
 }
 </style>

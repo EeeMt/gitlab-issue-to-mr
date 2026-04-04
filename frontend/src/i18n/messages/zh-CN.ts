@@ -185,6 +185,7 @@ const zhCN = {
     logsSubtitle: '运行中任务展示容器输出，其余状态展示已存储日志',
     realTime: '实时',
     containerId: '容器 ID',
+    container: '容器',
     mrUrl: 'MR 地址',
     totalSuffix: '共 {total}',
     mergeRequestCreated: '已创建',
