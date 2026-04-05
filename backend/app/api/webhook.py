@@ -459,6 +459,23 @@ async def _handle_generate_command(
         command.delay_seconds,
     )
 
+    # Check slot capacity for scheduled webhook tasks
+    if scheduled_at is not None:
+        from app.core.slot_capacity import check_slot_capacity, format_slot_rejection_message
+        slot_info = await check_slot_capacity(db, scheduled_at)
+        if slot_info.is_full and slot_info.enforce:
+            rejection_msg = format_slot_rejection_message(slot_info)
+            try:
+                _gl = get_gitlab_client()
+                _gl.post_issue_comment(project_id, issue_iid, rejection_msg)
+            except Exception as e:
+                logger.warning(f"Failed to post slot rejection comment: {e}")
+            return {
+                "status": "rejected",
+                "message": "Slot at full capacity",
+                "detail": rejection_msg,
+            }
+
     # Determine target branch
     settings = get_effective_settings()
     if command.target_branch:
@@ -639,6 +656,23 @@ async def _handle_mr_comment(
         command.scheduled_datetime,
         command.delay_seconds,
     )
+
+    # Check slot capacity for scheduled MR tasks
+    if scheduled_at is not None:
+        from app.core.slot_capacity import check_slot_capacity, format_slot_rejection_message
+        slot_info = await check_slot_capacity(db, scheduled_at)
+        if slot_info.is_full and slot_info.enforce:
+            rejection_msg = format_slot_rejection_message(slot_info)
+            try:
+                gitlab_client = get_gitlab_client()
+                gitlab_client.create_mr_note(project_id, mr_iid, rejection_msg)
+            except Exception as e:
+                logger.warning(f"Failed to post slot rejection MR comment: {e}")
+            return {
+                "status": "rejected",
+                "message": "Slot at full capacity",
+                "detail": rejection_msg,
+            }
 
     # Create new task - continue on existing branch
     task = Task(

@@ -141,6 +141,26 @@ async def list_scheduled_tasks(
     ]
 
 
+@router.get("/tasks/slot-capacity")
+async def get_slot_capacity(
+    scheduled_at: datetime,
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(get_optional_current_user),
+):
+    """Check slot capacity for a given scheduled time."""
+    from app.core.slot_capacity import check_slot_capacity
+
+    info = await check_slot_capacity(db, scheduled_at)
+    return {
+        "hour_start": info.hour_start.isoformat(),
+        "hour_end": info.hour_end.isoformat(),
+        "count": info.count,
+        "max": info.max,
+        "is_full": info.is_full,
+        "enforce": info.enforce,
+    }
+
+
 @router.get("/tasks/{task_id}")
 async def get_task(
     task_id: int,
@@ -468,6 +488,20 @@ async def retry_task(
     if request and request.scheduled_datetime is not None:
         scheduled_at = validate_scheduled_datetime_in_future(request.scheduled_datetime)
 
+    # Check slot capacity for scheduled retries
+    if scheduled_at is not None:
+        from app.core.slot_capacity import check_slot_capacity
+        slot_info = await check_slot_capacity(db, scheduled_at, exclude_task_id=task_id)
+        if slot_info.is_full and slot_info.enforce:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Time slot {slot_info.hour_start.strftime('%Y-%m-%d %H:%M')}"
+                    f"–{slot_info.hour_end.strftime('%H:%M')} is at full capacity "
+                    f"({slot_info.count}/{slot_info.max} tasks)"
+                ),
+            )
+
     previous_scheduled_at = task.scheduled_at
     task.status = TaskStatus.PENDING
     task.error_message = None
@@ -530,6 +564,19 @@ async def reschedule_task(
 
     normalized_scheduled = validate_scheduled_datetime_in_future(request.scheduled_datetime)
 
+    # Check slot capacity for the new time slot
+    from app.core.slot_capacity import check_slot_capacity
+    slot_info = await check_slot_capacity(db, normalized_scheduled, exclude_task_id=task_id)
+    if slot_info.is_full and slot_info.enforce:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Time slot {slot_info.hour_start.strftime('%Y-%m-%d %H:%M')}"
+                f"–{slot_info.hour_end.strftime('%H:%M')} is at full capacity "
+                f"({slot_info.count}/{slot_info.max} tasks)"
+            ),
+        )
+
     previous_scheduled_at = task.scheduled_at
     task.scheduled_at = normalized_scheduled
     await db.commit()
@@ -563,6 +610,27 @@ async def create_task(
     )
     require_project_access(request.project_id, access_scope)
 
+    # Check slot capacity for scheduled tasks
+    slot_warning = None
+    if scheduled_at is not None:
+        from app.core.slot_capacity import check_slot_capacity
+        slot_info = await check_slot_capacity(db, scheduled_at)
+        if slot_info.is_full:
+            if slot_info.enforce:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Time slot {slot_info.hour_start.strftime('%Y-%m-%d %H:%M')}"
+                        f"–{slot_info.hour_end.strftime('%H:%M')} is at full capacity "
+                        f"({slot_info.count}/{slot_info.max} tasks)"
+                    ),
+                )
+            slot_warning = (
+                f"Time slot {slot_info.hour_start.strftime('%Y-%m-%d %H:%M')}"
+                f"–{slot_info.hour_end.strftime('%H:%M')} is near/at capacity "
+                f"({slot_info.count}/{slot_info.max} tasks)"
+            )
+
     # Create task
     task = Task(
         project_id=request.project_id,
@@ -591,7 +659,7 @@ async def create_task(
         f"priority={request.priority}, delay={request.delay_seconds}"
     )
 
-    return {
+    response = {
         "id": task.id,
         "project_id": task.project_id,
         "user_prompt": task.user_prompt,
@@ -603,3 +671,6 @@ async def create_task(
         "is_manual": task.is_manual,
         "created_at": task.created_at.isoformat(),
     }
+    if slot_warning:
+        response["slot_warning"] = slot_warning
+    return response

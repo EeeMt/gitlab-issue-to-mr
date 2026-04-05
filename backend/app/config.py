@@ -48,6 +48,8 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "auth_admin_gitlab_groups": str,
     "worker_volume_mounts": str,  # JSON array of {host_path, container_path, mode}
     "worker_ca_cert_host_path": str,  # Absolute path to CA cert on Docker host; auto-added to volume mounts
+    "slot_max_tasks": int,  # Max tasks per 1-hour slot (0 = unlimited)
+    "slot_max_tasks_enforce": bool,  # Enforce slot limit (True = hard reject, False = soft warning)
 }
 
 SECRET_CONFIG_KEYS = {
@@ -157,6 +159,10 @@ class Settings(BaseSettings):
     # Retry Configuration
     max_retries: int = Field(default=0)  # Max retry attempts for failed tasks
     retry_delay: int = Field(default=60)  # Delay between retries in seconds
+
+    # Slot Capacity Configuration
+    slot_max_tasks: int = Field(default=0)  # Max tasks per 1-hour slot (0 = unlimited)
+    slot_max_tasks_enforce: bool = Field(default=False)  # True = hard reject, False = soft warning
 
     @property
     def project_root(self) -> Path:

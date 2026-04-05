@@ -46,6 +46,8 @@ class RuntimeConfigSection(BaseModel):
     worker_volume_mounts: str
     maven_cache_host_path: str
     maven_settings_host_path: str
+    slot_max_tasks: int
+    slot_max_tasks_enforce: bool
 
 
 class RuntimeConfigUpdate(BaseModel):
@@ -71,6 +73,8 @@ class RuntimeConfigUpdate(BaseModel):
     worker_volume_mounts: Optional[str] = None
     maven_cache_host_path: Optional[str] = None
     maven_settings_host_path: Optional[str] = None
+    slot_max_tasks: Optional[int] = None
+    slot_max_tasks_enforce: Optional[bool] = None
 
 
 def _serialize_runtime_config(settings: Settings) -> RuntimeConfigSection:
@@ -94,6 +98,8 @@ def _serialize_runtime_config(settings: Settings) -> RuntimeConfigSection:
         worker_volume_mounts=settings.worker_volume_mounts,
         maven_cache_host_path=settings.maven_cache_host_path,
         maven_settings_host_path=settings.maven_settings_host_path,
+        slot_max_tasks=settings.slot_max_tasks,
+        slot_max_tasks_enforce=settings.slot_max_tasks_enforce,
     )
 
 
@@ -158,6 +164,14 @@ def _validate_config_value(key: str, value: object) -> object:
             )
         return value
 
+    if key == "slot_max_tasks":
+        if not isinstance(value, int) or value < 0 or value > 100:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="slot_max_tasks must be between 0 and 100",
+            )
+        return value
+
     if key in {"anthropic_base_url", "alert_webhook_url"}:
         if not isinstance(value, str) or not value.strip() or not _is_valid_http_url(value.strip()):
             raise HTTPException(
@@ -196,6 +210,7 @@ def _validate_config_value(key: str, value: object) -> object:
         "allow_schedule_overview_for_users",
         "allow_analytics_for_users",
         "allow_oidc_diagnostics_for_users",
+        "slot_max_tasks_enforce",
     }:
         if not isinstance(value, bool):
             raise HTTPException(
