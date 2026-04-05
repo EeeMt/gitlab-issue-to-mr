@@ -111,17 +111,15 @@ services:
       dockerfile: deploy/Dockerfile.e2e
     container_name: codify-e2e-tester
     # Note: Do NOT add default command here. Use: docker-compose run --rm e2e pytest ...
+    env_file:
+      - .env.test
     environment:
       - E2E_BASE_URL=http://nginx:80
       - E2E_BACKEND_URL=http://backend:8000
       - E2E_GITLAB_URL=http://gitlab:8080
       - E2E_POSTGRES_URL=postgresql://codify:codify_password@postgres:5432/codify
       - E2E_RECORD_VIDEO=${E2E_RECORD_VIDEO:-}
-      # GitLab E2E credentials (loaded from deploy/.env.test via run-tests.sh)
       - BACKEND_URL=http://backend:8000
-      - GITLAB_URL=${GITLAB_URL:-}
-      - GITLAB_BOT_TOKEN=${GITLAB_BOT_TOKEN:-}
-      - GITLAB_WEBHOOK_SECRET=${GITLAB_WEBHOOK_SECRET:-}
     depends_on:
       nginx:
         condition: service_healthy

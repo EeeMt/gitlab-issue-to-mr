@@ -109,8 +109,8 @@ _E2E_RUN  = cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.ym
 _E2E_POST =
 endif
 
-.PHONY: test
-test: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run all unit tests with coverage summary
+.PHONY: test-unit
+test-unit: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run all unit tests with coverage summary
 	@_d=$$(mktemp -d); \
 	printf "\n\033[1m━━━ Backend unit tests ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n"; \
 	_t0=$$(date +%s); \
@@ -174,22 +174,66 @@ test-frontend: $(NODE_MODULES)/.installed ## Run frontend unit tests
 test-mock-e2e: $(VENV)/.installed ## Run mock E2E tests
 	cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/mock_e2e/ -v
 
-.PHONY: test-gitlab-e2e
-test-gitlab-e2e: $(VENV)/.installed ## Run GitLab E2E tests (loads GITLAB_* creds from deploy/.env.test if present)
-	@if [ -f $(PROJECT_ROOT)/deploy/.env.test ]; then \
-	  export GITLAB_URL=$$(grep '^GITLAB_URL=' $(PROJECT_ROOT)/deploy/.env.test | cut -d= -f2-); \
-	  export GITLAB_BOT_TOKEN=$$(grep '^GITLAB_BOT_TOKEN=' $(PROJECT_ROOT)/deploy/.env.test | cut -d= -f2-); \
-	  export GITLAB_WEBHOOK_SECRET=$$(grep '^GITLAB_WEBHOOK_SECRET=' $(PROJECT_ROOT)/deploy/.env.test | cut -d= -f2-); \
-	fi; \
-	cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/gitlab_e2e/ -v
+.PHONY: test-e2e-gitlab
+test-e2e-gitlab: ## Run GitLab E2E tests inside Docker (auto-skips if no GITLAB_BOT_TOKEN)
+	$(_E2E_RUN) pytest tests/gitlab_e2e/ -v
 
-.PHONY: test-e2e
-test-e2e: test-e2e-up ## Run ALL Playwright E2E tests: parallel + serial [RECORD_VIDEO=1 for video]
+.PHONY: test-e2e-ui
+test-e2e-ui: ## Run Playwright UI tests only: parallel + serial [RECORD_VIDEO=1 for video]
 	$(_E2E_PRE) $(_E2E_RUN) pytest tests/e2e/tests/ -m "not serial" $(_E2E_POST)
 	$(_E2E_PRE) $(_E2E_RUN) \
 	  pytest tests/e2e/tests/ -m serial \
 	  --override-ini="addopts=-v --tb=short --strict-markers --disable-warnings" $(_E2E_POST)
-	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml down
+
+.PHONY: test-e2e
+test-e2e: test-e2e-up ## Run ALL E2E tests: UI parallel + UI serial + GitLab [RECORD_VIDEO=1 for video]
+	@_d=$$(mktemp -d); \
+	printf "\n\033[1m━━━ E2E: Playwright parallel ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n"; \
+	_t0=$$(date +%s); \
+	($(_E2E_PRE) $(_E2E_RUN) pytest tests/e2e/tests/ -m "not serial" $(_E2E_POST); \
+	  echo $$? > "$$_d/par.rc") 2>&1 | tee "$$_d/par.log"; \
+	echo $$(( $$(date +%s) - $$_t0 )) > "$$_d/par.time"; \
+	printf "\n\033[1m━━━ E2E: Playwright serial ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n"; \
+	_t0=$$(date +%s); \
+	($(_E2E_PRE) $(_E2E_RUN) \
+	  pytest tests/e2e/tests/ -m serial \
+	  --override-ini="addopts=-v --tb=short --strict-markers --disable-warnings" $(_E2E_POST); \
+	  echo $$? > "$$_d/ser.rc") 2>&1 | tee "$$_d/ser.log"; \
+	echo $$(( $$(date +%s) - $$_t0 )) > "$$_d/ser.time"; \
+	printf "\n\033[1m━━━ E2E: GitLab integration ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n"; \
+	_t0=$$(date +%s); \
+	($(_E2E_RUN) pytest tests/gitlab_e2e/ -v; \
+	  echo $$? > "$$_d/gl.rc") 2>&1 | tee "$$_d/gl.log"; \
+	echo $$(( $$(date +%s) - $$_t0 )) > "$$_d/gl.time"; \
+	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml down; \
+	r_par=$$(cat "$$_d/par.rc"); r_ser=$$(cat "$$_d/ser.rc"); r_gl=$$(cat "$$_d/gl.rc"); \
+	t_par=$$(cat "$$_d/par.time"); t_ser=$$(cat "$$_d/ser.time"); t_gl=$$(cat "$$_d/gl.time"); \
+	perl -pe 's/\e\[[\d;]*m//g' "$$_d/par.log" > "$$_d/par.c"; \
+	perl -pe 's/\e\[[\d;]*m//g' "$$_d/ser.log" > "$$_d/ser.c"; \
+	perl -pe 's/\e\[[\d;]*m//g' "$$_d/gl.log"  > "$$_d/gl.c"; \
+	par_info=$$(grep -E '^=.*(passed|failed)' "$$_d/par.c" | tail -1 | sed 's/^[= ]*//;s/[= ]*$$//'); \
+	ser_info=$$(grep -E '^=.*(passed|failed)' "$$_d/ser.c" | tail -1 | sed 's/^[= ]*//;s/[= ]*$$//'); \
+	gl_info=$$(grep -E '^=.*(passed|failed|skipped|no tests)' "$$_d/gl.c" | tail -1 | sed 's/^[= ]*//;s/[= ]*$$//'); \
+	[ -z "$$gl_info" ] && gl_info="no output (check logs)"; \
+	echo ""; \
+	printf "\033[1m══════════════════════════════════════════════════════════════════════════\033[0m\n"; \
+	printf "\033[1m                          E2E Test Summary                               \033[0m\n"; \
+	printf "\033[1m══════════════════════════════════════════════════════════════════════════\033[0m\n"; \
+	if [ "$$r_par" = "0" ]; then _i="✅"; else _i="❌"; fi; \
+	printf "  %s  \033[1mPlaywright parallel\033[0m  %-40s  %ss\n" "$$_i" "$$par_info" "$$t_par"; \
+	if [ "$$r_ser" = "0" ]; then _i="✅"; else _i="❌"; fi; \
+	printf "  %s  \033[1mPlaywright serial\033[0m    %-40s  %ss\n" "$$_i" "$$ser_info" "$$t_ser"; \
+	if [ "$$r_gl" = "0" ]; then _i="✅"; else _i="❌"; fi; \
+	printf "  %s  \033[1mGitLab integration\033[0m   %-40s  %ss\n" "$$_i" "$$gl_info" "$$t_gl"; \
+	printf "\033[1m══════════════════════════════════════════════════════════════════════════\033[0m\n"; \
+	_ok=0; [ "$$r_par" = "0" ] && _ok=$$(( $$_ok + 1 )); \
+	[ "$$r_ser" = "0" ] && _ok=$$(( $$_ok + 1 )); \
+	[ "$$r_gl" = "0" ] && _ok=$$(( $$_ok + 1 )); \
+	if [ $$_ok -eq 3 ]; then printf "  ✅  \033[32mALL 3 E2E SUITES PASSED\033[0m\n"; \
+	else printf "  ❌  \033[31m$$_ok/3 E2E SUITES PASSED\033[0m\n"; fi; \
+	printf "\033[1m══════════════════════════════════════════════════════════════════════════\033[0m\n"; \
+	rm -rf "$$_d"; \
+	[ $$_ok -eq 3 ]
 
 .PHONY: test-e2e-parallel
 test-e2e-parallel: ## Run parallel E2E tests only (116 tests, ~44s) [RECORD_VIDEO=1 for video]
@@ -218,23 +262,30 @@ test-e2e-logs: ## View E2E test logs
 	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml logs -f
 
 .PHONY: test-all
-test-all: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run ALL tests (continues on failure, prints summary)
-	@r_unit=0; r_gl=0; r_e2e=0; \
-	$(MAKE) --no-print-directory test       || r_unit=1; \
-	$(MAKE) --no-print-directory test-gitlab-e2e || r_gl=1; \
-	$(MAKE) --no-print-directory test-e2e   || r_e2e=1; \
+test-all: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run ALL tests: unit + E2E (with overall summary)
+	@r_unit=0; r_e2e=0; \
+	_t0=$$(date +%s); \
+	$(MAKE) --no-print-directory test-unit || r_unit=1; \
+	t_unit=$$(( $$(date +%s) - $$_t0 )); \
+	_t0=$$(date +%s); \
+	$(MAKE) --no-print-directory test-e2e  || r_e2e=1; \
+	t_e2e=$$(( $$(date +%s) - $$_t0 )); \
+	t_total=$$(( $$t_unit + $$t_e2e )); \
 	echo ""; \
-	echo "══════════════════════════════════════════════"; \
-	echo "           Full Test Suite Summary            "; \
-	echo "══════════════════════════════════════════════"; \
-	if [ $$r_unit -eq 0 ]; then printf "  ✅  Unit tests (backend + frontend + mock-e2e)\n"; else printf "  ❌  Unit tests\n";    fi; \
-	if [ $$r_gl   -eq 0 ]; then printf "  ✅  GitLab E2E\n";     else printf "  ❌  GitLab E2E\n";    fi; \
-	if [ $$r_e2e  -eq 0 ]; then printf "  ✅  Playwright E2E\n"; else printf "  ❌  Playwright E2E\n"; fi; \
-	echo "══════════════════════════════════════════════"; \
-	total=$$((r_unit + r_gl + r_e2e)); \
-	if [ $$total -eq 0 ]; then echo "  ✅  ALL PASSED"; else echo "  ❌  $$total SUITE(S) FAILED"; fi; \
-	echo "══════════════════════════════════════════════"; \
-	[ $$total -eq 0 ]
+	printf "\033[1m══════════════════════════════════════════════════════════════════════════\033[0m\n"; \
+	printf "\033[1m                         Full Test Suite Summary                         \033[0m\n"; \
+	printf "\033[1m══════════════════════════════════════════════════════════════════════════\033[0m\n"; \
+	if [ "$$r_unit" = "0" ]; then _i="✅"; else _i="❌"; fi; \
+	printf "  %s  \033[1mUnit tests\033[0m   (backend + frontend + mock-e2e)  %ss\n" "$$_i" "$$t_unit"; \
+	if [ "$$r_e2e" = "0" ]; then _i="✅"; else _i="❌"; fi; \
+	printf "  %s  \033[1mE2E tests\033[0m    (playwright + gitlab)            %ss\n" "$$_i" "$$t_e2e"; \
+	printf "\033[1m══════════════════════════════════════════════════════════════════════════\033[0m\n"; \
+	_ok=0; [ "$$r_unit" = "0" ] && _ok=$$(( $$_ok + 1 )); \
+	[ "$$r_e2e" = "0" ] && _ok=$$(( $$_ok + 1 )); \
+	if [ $$_ok -eq 2 ]; then printf "  ✅  \033[32mALL PASSED\033[0m  (total %ss)\n" "$$t_total"; \
+	else printf "  ❌  \033[31m$$_ok/2 GROUPS PASSED\033[0m  (total %ss)\n" "$$t_total"; fi; \
+	printf "\033[1m══════════════════════════════════════════════════════════════════════════\033[0m\n"; \
+	[ $$_ok -eq 2 ]
 
 # ============================================
 # Help
@@ -264,27 +315,26 @@ help:
 	@echo "  make rebuild-worker   Rebuild worker image"
 	@echo ""
 	@echo "Unit Tests:"
-	@echo "  make test              Run all unit tests"
+	@echo "  make test-unit         Run all unit tests (backend + frontend + mock-e2e) with coverage"
 	@echo "  make test-backend      Run backend unit tests"
 	@echo "  make test-frontend     Run frontend unit tests"
 	@echo "  make test-mock-e2e     Run mock E2E tests"
-	@echo "  make test-gitlab-e2e  Run GitLab E2E tests"
 	@echo ""
-	@echo "Playwright E2E Tests:"
-	@echo "  make test-e2e                        Run ALL E2E tests (parallel + serial + down)"
-	@echo "  make test-e2e RECORD_VIDEO=1               Run ALL E2E tests with video recording"
-	@echo "  make test-e2e-parallel               Run parallel tests only (116 tests, ~44s)"
-	@echo "  make test-e2e-parallel RECORD_VIDEO=1      Run parallel tests with video recording"
-	@echo "  make test-e2e-serial                 Run serial tests only (18 tests, ~42s)"
-	@echo "  make test-e2e-serial RECORD_VIDEO=1        Run serial tests with video recording"
+	@echo "E2E Tests:"
+	@echo "  make test-e2e                        Run ALL E2E: parallel + serial + gitlab + cleanup"
+	@echo "  make test-e2e RECORD_VIDEO=1               Run ALL E2E with video recording"
+	@echo "  make test-e2e-ui                     Run Playwright UI tests only (parallel + serial)"
+	@echo "  make test-e2e-gitlab                 Run GitLab integration tests only"
+	@echo "  make test-e2e-parallel               Run parallel Playwright tests only (~44s)"
+	@echo "  make test-e2e-serial                 Run serial Playwright tests only (~42s)"
 	@echo "  make test-e2e-specific TEST_FILE=..  Run specific test file"
 	@echo "  make test-e2e-up                     Start E2E environment"
 	@echo "  make test-e2e-down                   Stop E2E environment"
 	@echo "  make test-e2e-logs                   View E2E logs"
-	@echo "  Videos are saved to deploy/e2e-videos/ (RECORD_VIDEO=1 only)"
+	@echo "  Videos saved to deploy/e2e-videos/ (RECORD_VIDEO=1 only)"
 	@echo ""
 	@echo "All Tests:"
-	@echo "  make test-all          Run ALL tests (unit + gitlab-e2e + playwright-e2e)"
+	@echo "  make test-all          Run ALL tests (unit + E2E) with overall summary"
 	@echo ""
 
 .DEFAULT_GOAL := help
