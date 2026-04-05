@@ -375,6 +375,13 @@ async function handleBreakGlassLogin() {
   margin-top: 20px;
 }
 
+.login-card__alert :deep(.n-alert__icon) {
+  top: 50%;
+  transform: translateY(-50%);
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
 .login-alert-enter-active {
   transition: all 0.3s ease-out;
 }
