@@ -131,7 +131,14 @@ const en = {
       'This path is environment-controlled and should stay disabled during normal operation.',
     sessionHint: 'The system stores session information in a secure cookie.',
     missingEmergencyCredentials: 'Enter the emergency username and password',
-    emergencyLoginFailed: 'Emergency login failed'
+    emergencyLoginFailed: 'Emergency login failed',
+    redirectReasons: {
+      authRequired: 'Your session has expired or you are not logged in. Please sign in to continue.',
+      sessionExpired: 'Your session has expired. Please sign in again.',
+      sessionRevoked: 'Your session has been revoked. Please sign in again.',
+      accessDenied: 'Access denied. Please sign in with appropriate permissions.',
+      default: 'Please sign in to continue.',
+    },
   },
   dashboard: {
     title: 'Task Dashboard',

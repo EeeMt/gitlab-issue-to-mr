@@ -218,10 +218,18 @@ describe('Login', () => {
   })
 
   // -------------------------------------------------------------------------
-  it('shows warning alert when loginReason is provided', () => {
+  it('shows localized warning when reason matches a known pattern', () => {
     mockRoute.query = { next: '/dashboard', reason: 'Session expired' }
     wrapper = mountLogin()
-    expect(wrapper.text()).toContain('Session expired')
+    // "expired" maps to the sessionExpired i18n key; the mock t() returns the key itself
+    expect(wrapper.text()).toContain('login.redirectReasons.sessionExpired')
+  })
+
+  it('shows raw reason string when it does not match any known pattern', () => {
+    mockRoute.query = { next: '/dashboard', reason: 'Some unusual error' }
+    wrapper = mountLogin()
+    // Unknown reasons pass through as-is
+    expect(wrapper.text()).toContain('Some unusual error')
   })
 
   // -------------------------------------------------------------------------

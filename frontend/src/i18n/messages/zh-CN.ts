@@ -129,7 +129,14 @@ const zhCN = {
     emergencyHint: '该入口受环境变量控制，正常运行时应保持关闭。',
     sessionHint: '系统通过安全的 Cookie 保存会话信息。',
     missingEmergencyCredentials: '请输入紧急用户名和密码',
-    emergencyLoginFailed: '紧急登录失败'
+    emergencyLoginFailed: '紧急登录失败',
+    redirectReasons: {
+      authRequired: '您的会话已过期或尚未登录，请重新登录以继续。',
+      sessionExpired: '会话已过期，请重新登录。',
+      sessionRevoked: '会话已被撤销，请重新登录。',
+      accessDenied: '访问被拒绝，请使用有权限的账号登录。',
+      default: '请登录以继续。',
+    },
   },
   dashboard: {
     title: '任务仪表盘',

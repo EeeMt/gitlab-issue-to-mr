@@ -18,9 +18,11 @@
         </template>
       </PageHeader>
 
-      <n-alert v-if="loginReason" type="warning" :show-icon="false" class="login-card__alert">
-        {{ loginReason }}
-      </n-alert>
+      <Transition name="login-alert">
+        <n-alert v-if="loginReason" type="warning" class="login-card__alert" data-testid="login-reason-alert">
+          {{ loginReason }}
+        </n-alert>
+      </Transition>
 
       <n-alert v-if="authState.breakGlassEnabled" type="info" :show-icon="false" class="login-card__alert">
         {{ t('login.breakGlassEnabled') }}
@@ -200,7 +202,23 @@ const nextTarget = computed(() => {
 })
 const loginReason = computed(() => {
   const reason = route.query.reason
-  return typeof reason === 'string' ? reason : ''
+  if (typeof reason !== 'string' || !reason) return ''
+
+  const reasonLower = reason.toLowerCase()
+  if (reasonLower.includes('authentication required') || reasonLower.includes('not authenticated') || reasonLower.includes('could not validate')) {
+    return t('login.redirectReasons.authRequired')
+  }
+  if (reasonLower.includes('expired')) {
+    return t('login.redirectReasons.sessionExpired')
+  }
+  if (reasonLower.includes('revoked')) {
+    return t('login.redirectReasons.sessionRevoked')
+  }
+  if (reasonLower.includes('denied') || reasonLower.includes('forbidden') || reasonLower.includes('not authorized')) {
+    return t('login.redirectReasons.accessDenied')
+  }
+  // Unknown reason — show the raw string
+  return reason
 })
 
 const localUsername = ref('')
@@ -358,9 +376,26 @@ async function handleBreakGlassLogin() {
 .login-card__alert {
   border-radius: 12px;
   font-size: 13px;
-  padding: 10px 14px;
-  text-align: center;
+  line-height: 1.6;
   margin-top: 16px;
+}
+
+.login-alert-enter-active {
+  transition: all 0.3s ease-out;
+}
+
+.login-alert-leave-active {
+  transition: all 0.2s ease-in;
+}
+
+.login-alert-enter-from {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+.login-alert-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 .login-card__break-glass {
