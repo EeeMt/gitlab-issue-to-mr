@@ -196,7 +196,11 @@ async def _upsert_user(db: AsyncSession, claims: dict[str, Any], userinfo: dict[
             detail="OIDC sub is not a valid GitLab user ID",
         ) from exc
 
-    result = await db.execute(select(User).where(User.oidc_sub == oidc_sub))
+    result = await db.execute(
+        select(User).where(
+            (User.oidc_sub == oidc_sub) | (User.gitlab_user_id == gitlab_user_id)
+        )
+    )
     user = result.scalar_one_or_none()
     if user is None:
         user = User(
@@ -205,6 +209,12 @@ async def _upsert_user(db: AsyncSession, claims: dict[str, Any], userinfo: dict[
             username=username,
         )
         db.add(user)
+    else:
+        # Backfill identity fields for users created before oidc_sub was populated
+        if not user.oidc_sub:
+            user.oidc_sub = oidc_sub
+        if not user.gitlab_user_id:
+            user.gitlab_user_id = gitlab_user_id
 
     display_name = userinfo.get("name") or claims.get("name") or username
     email = userinfo.get("email") or claims.get("email")
@@ -213,6 +223,7 @@ async def _upsert_user(db: AsyncSession, claims: dict[str, Any], userinfo: dict[
     user.display_name = display_name
     user.email = email
     user.avatar_url = avatar_url
+    user.auth_provider = "gitlab_oidc"
     user.last_login_at = datetime.now(UTC).replace(tzinfo=None)
 
     settings = get_effective_settings()
