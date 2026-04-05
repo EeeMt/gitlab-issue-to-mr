@@ -45,11 +45,63 @@ WEBHOOK_SECRET = os.getenv("GITLAB_WEBHOOK_SECRET", "test_webhook_secret")
 TEST_PROJECT_ID = 1  # root/codify_test
 TEST_PROJECT_NAME = "codify_test"
 
+_TEST_USERNAME = "test_admin_gitlab_e2e"
+_TEST_PASSWORD = "SecurePass123!"
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+# ─── Authenticated backend session ─────────────────────────────────────────────
+
+_be_session: Optional[requests.Session] = None
+
+
+def _get_be_session() -> requests.Session:
+    """Return a persistent requests.Session authenticated with the Codify backend."""
+    global _be_session
+    if _be_session is not None:
+        return _be_session
+
+    session = requests.Session()
+    try:
+        bootstrap = requests.get(f"{BACKEND_URL}/api/auth/bootstrap-status", timeout=10).json()
+        if not bootstrap.get("initialized"):
+            session.post(
+                f"{BACKEND_URL}/api/auth/local/register",
+                json={
+                    "username": _TEST_USERNAME,
+                    "display_name": "Scheduled At E2E Admin",
+                    "email": f"{_TEST_USERNAME}@test.example.com",
+                    "password": _TEST_PASSWORD,
+                },
+                timeout=10,
+            )
+    except Exception as exc:
+        pytest.skip(f"Cannot reach backend: {exc}")
+
+    try:
+        resp = session.post(
+            f"{BACKEND_URL}/api/auth/local/login",
+            json={"username": _TEST_USERNAME, "password": _TEST_PASSWORD},
+            timeout=10,
+        )
+    except Exception as exc:
+        pytest.skip(f"Cannot reach backend for login: {exc}")
+
+    if resp.status_code != 200:
+        pytest.skip(f"Backend login failed ({resp.status_code}) — run against E2E environment")
+
+    _be_session = session
+    return session
+
+
+def _be(method: str, path: str, **kwargs) -> requests.Response:
+    """Execute a backend API call with session auth."""
+    return _get_be_session().request(method, f"{BACKEND_URL}{path}", timeout=30, **kwargs)
 
 
 def run_command(cmd: list, check=True, capture_output=True):
@@ -106,16 +158,17 @@ def trigger_webhook(note_id: int, comment_body: str, issue_iid: int, issue_id: i
             "path_with_namespace": TEST_PROJECT_NAME,
             "web_url": f"{GITLAB_URL}/{TEST_PROJECT_NAME}"
         },
+        "object_attributes": {
+            "id": note_id,
+            "note": comment_body,
+            "noteable_type": "Issue",
+            "action": "create",
+        },
         "issue": {
             "id": issue_id,
             "iid": issue_iid,
             "title": "Test Issue",
             "web_url": f"{GITLAB_URL}/{TEST_PROJECT_NAME}/-/issues/{issue_iid}"
-        },
-        "note": {
-            "id": note_id,
-            "body": comment_body,
-            "noteable_type": "Issue"
         },
         "user": {
             "id": 1,
@@ -134,10 +187,7 @@ def trigger_webhook(note_id: int, comment_body: str, issue_iid: int, issue_id: i
 
 def get_task_by_issue_iid(issue_iid: int) -> Optional[dict]:
     """Get task from backend by issue_iid."""
-    url = f"{BACKEND_URL}/api/tasks"
-    params = {"project_id": TEST_PROJECT_ID}
-
-    response = requests.get(url, params=params)
+    response = _be("GET", "/api/tasks", params={"project_id": TEST_PROJECT_ID})
     if response.status_code != 200:
         return None
 
@@ -150,8 +200,7 @@ def get_task_by_issue_iid(issue_iid: int) -> Optional[dict]:
 
 def get_task(task_id: int) -> Optional[dict]:
     """Get task by ID."""
-    url = f"{BACKEND_URL}/api/tasks/{task_id}"
-    response = requests.get(url)
+    response = _be("GET", f"/api/tasks/{task_id}")
     if response.status_code != 200:
         return None
     return response.json()
@@ -170,8 +219,7 @@ def wait_for_task_status(task_id: int, expected_status: str, timeout: int = 60) 
 
 def execute_task_now(task_id: int) -> bool:
     """Trigger immediate execution of a task."""
-    url = f"{BACKEND_URL}/api/tasks/{task_id}/execute"
-    response = requests.post(url)
+    response = _be("POST", f"/api/tasks/{task_id}/execute")
     if response.status_code != 200:
         logger.error(f"Failed to execute task: {response.text}")
         return False
@@ -317,6 +365,8 @@ def test_scheduled_at():
                 scheduled_at = task.get("scheduled_at")
                 if scheduled_at:
                     scheduled_time = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+                    if scheduled_time.tzinfo is None:
+                        scheduled_time = scheduled_time.replace(tzinfo=UTC)
                     now = datetime.now(UTC)
                     diff = (scheduled_time - now).total_seconds()
                     if 0 <= diff <= 120:  # Within 2 minutes

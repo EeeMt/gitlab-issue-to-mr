@@ -603,6 +603,7 @@ AI-Generated: true"
     # Get commit SHA
     COMMIT_SHA=$(git rev-parse HEAD)
     echo "Committed: ${COMMIT_SHA}"
+    echo "CODIFY_COMMIT_SHA:${COMMIT_SHA}"
 
     # MR was already created by backend before worker started.
     # In no-MR mode (TARGET_BRANCH is empty), skip all MR operations.

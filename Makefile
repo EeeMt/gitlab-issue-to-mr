@@ -158,7 +158,7 @@ test-e2e-specific: ## Run specific E2E test file [TEST_FILE=test_dashboard.py] [
 
 .PHONY: test-e2e-up
 test-e2e-up: ## Start E2E test environment (builds images if changed)
-	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml up -d --build --wait postgres backend nginx
+	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml up -d --build --wait postgres backend nginx scheduler
 
 .PHONY: test-e2e-down
 test-e2e-down: ## Stop E2E test environment

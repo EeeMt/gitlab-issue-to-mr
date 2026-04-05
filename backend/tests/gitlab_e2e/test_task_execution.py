@@ -375,11 +375,10 @@ class TestManualTaskExecution:
         cancel_r = _be("POST", f"/api/tasks/{task_id}/cancel")
         if cancel_r.status_code == 200:
             log.info(f"Cancelled task {task_id}")
-            # Retry it
+            # Retry it (retry resets the same task in place, no new task ID)
             retry_r = _be("POST", f"/api/tasks/{task_id}/retry")
             assert retry_r.status_code == 200, f"Retry failed: {retry_r.text}"
-            task_id = retry_r.json()["id"]
-            log.info(f"Retried as task {task_id}")
+            log.info(f"Retried task {task_id}")
         else:
             # Already moved to RUNNING — can't cancel; just wait for original
             log.info(f"Task already past pending, continuing with original task_id={task_id}")

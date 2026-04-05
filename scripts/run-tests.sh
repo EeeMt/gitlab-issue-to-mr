@@ -80,8 +80,20 @@ run_suite "Mock E2E" \
   "cd '$PROJECT_ROOT/backend' && '$VENV_PYTHON' -m pytest tests/mock_e2e/ -q --tb=short"
 
 if $ALL_SUITES; then
+  # Export GitLab creds so docker-compose can pass them into the e2e container
+  export GITLAB_URL="$GITLAB_URL_FROM_ENV"
+  export GITLAB_BOT_TOKEN="$GITLAB_BOT_TOKEN_FROM_ENV"
+  export GITLAB_WEBHOOK_SECRET="$GITLAB_WEBHOOK_SECRET_FROM_ENV"
+
+  # Start the shared E2E environment (backend + postgres + nginx + scheduler in Docker network)
+  echo ""
+  echo -e "${BOLD}━━━ Starting E2E environment ━━━━━━━━━━━━━━━━━━━━━${RESET}"
+  (cd "$PROJECT_ROOT/deploy" && docker-compose -f docker-compose.e2e.yml up -d --build --wait postgres backend nginx scheduler)
+
+  _E2E_RUN="cd '$PROJECT_ROOT/deploy' && docker-compose -f docker-compose.e2e.yml run --rm e2e"
+
   run_suite "GitLab E2E" \
-    "cd '$PROJECT_ROOT/backend' && GITLAB_URL='$GITLAB_URL_FROM_ENV' GITLAB_BOT_TOKEN='$GITLAB_BOT_TOKEN_FROM_ENV' GITLAB_WEBHOOK_SECRET='$GITLAB_WEBHOOK_SECRET_FROM_ENV' '$VENV_PYTHON' -m pytest tests/gitlab_e2e/ -q --tb=short"
+    "$_E2E_RUN pytest tests/gitlab_e2e/ -q --tb=short"
 
   echo ""
   echo -e "${BOLD}━━━ Playwright E2E ━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
@@ -89,13 +101,11 @@ if $ALL_SUITES; then
   set +e
   (
     cd "$PROJECT_ROOT/deploy"
-    docker-compose -f docker-compose.e2e.yml up -d --build --wait postgres backend nginx 2>&1
     docker-compose -f docker-compose.e2e.yml run --rm e2e \
       pytest tests/e2e/tests/ -m "not serial" -q --tb=short 2>&1
     docker-compose -f docker-compose.e2e.yml run --rm e2e \
       pytest tests/e2e/tests/ -m serial -q --tb=short \
       --override-ini="addopts=-q --tb=short --strict-markers --disable-warnings" 2>&1
-    docker-compose -f docker-compose.e2e.yml down 2>&1
   ) | tee "$tmpout"
   e2e_rc=${PIPESTATUS[0]}
   set -e
@@ -103,6 +113,10 @@ if $ALL_SUITES; then
   e2e_status="ok"; [[ $e2e_rc -ne 0 ]] && e2e_status="fail"
   rm -f "$tmpout"
   add_result "Playwright E2E" "$e2e_summary" "$e2e_status"
+
+  echo ""
+  echo -e "${BOLD}━━━ Stopping E2E environment ━━━━━━━━━━━━━━━━━━━━━${RESET}"
+  (cd "$PROJECT_ROOT/deploy" && docker-compose -f docker-compose.e2e.yml down)
 fi
 
 # ── print summary ──────────────────────────────────────────────────────────────

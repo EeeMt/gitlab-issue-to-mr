@@ -38,10 +38,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy requirements first for better caching
 COPY backend/requirements.txt /tmp/requirements.txt
 COPY backend/tests/e2e/requirements-e2e.txt /tmp/requirements-e2e.txt
+COPY backend/requirements-test.txt /tmp/requirements-test.txt
 
 # Install Python dependencies (without playwright - install separately for deps)
 RUN pip install --no-cache-dir -r /tmp/requirements.txt \
-    && pip install --no-cache-dir -r /tmp/requirements-e2e.txt
+    && pip install --no-cache-dir -r /tmp/requirements-e2e.txt \
+    && pip install --no-cache-dir -r /tmp/requirements-test.txt
 
 # Install Playwright with browser
 # playwright install-deps fails on some systems, but the base deps we installed earlier should be enough
@@ -50,6 +52,8 @@ RUN pip install --no-cache-dir playwright==1.52.0 \
 
 # Copy test files
 COPY backend/tests/e2e /app/tests/e2e
+COPY backend/tests/gitlab_e2e /app/tests/gitlab_e2e
+COPY backend/pyproject.toml /app/pyproject.toml
 
 # Default command: run all E2E tests
 CMD ["pytest", "tests/e2e/", "-v"]

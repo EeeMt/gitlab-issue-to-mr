@@ -38,6 +38,7 @@ _ANSI_ESCAPE = re.compile(
 
 # Emitted by entrypoint.sh after Claude finishes; contains token usage JSON.
 _CODIFY_STATS_RE = re.compile(r'^CODIFY_STATS:(.+)$', re.MULTILINE)
+_CODIFY_COMMIT_SHA_RE = re.compile(r'^CODIFY_COMMIT_SHA:([a-f0-9]{40})$', re.MULTILINE)
 # Emitted by entrypoint.sh; git-computed change stats (e.g. CODIFY_DIFF:+18-21).
 _CODIFY_DIFF_RE = re.compile(r'^CODIFY_DIFF:\+(\d+)-(\d+)$', re.MULTILINE)
 # Emitted by entrypoint.sh after Claude finishes; JSON array of all tool call objects.
@@ -595,6 +596,12 @@ class WorkerExecutor:
                     logger.info(f"[Task {task.id}] Model: {model}")
             except Exception:
                 logger.debug(f"[Task {task.id}] Failed to parse CODIFY_SYSTEM_INIT")
+
+        # Extract commit SHA from CODIFY_COMMIT_SHA marker line
+        commit_sha_match = _CODIFY_COMMIT_SHA_RE.search(logs)
+        if commit_sha_match:
+            task.commit_sha = commit_sha_match.group(1).strip()
+            logger.info(f"[Task {task.id}] Commit SHA: {task.commit_sha}")
 
         # Extract AI-generated MR title from CODIFY_MR_TITLE marker line
         mr_title_match = _CODIFY_MR_TITLE_RE.search(logs)
