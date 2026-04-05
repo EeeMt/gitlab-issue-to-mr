@@ -110,8 +110,7 @@ _E2E_POST =
 endif
 
 .PHONY: test
-test: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run all unit tests with aggregated summary
-	@$(PROJECT_ROOT)/scripts/run-tests.sh
+test: test-backend test-frontend test-mock-e2e ## Run all unit tests
 
 .PHONY: test-backend
 test-backend: $(VENV)/.installed ## Run backend unit tests
@@ -169,8 +168,7 @@ test-e2e-logs: ## View E2E test logs
 	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml logs -f
 
 .PHONY: test-all
-test-all: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run ALL tests (unit + gitlab-e2e + playwright-e2e) with aggregated summary
-	@$(PROJECT_ROOT)/scripts/run-tests.sh --all
+test-all: test test-gitlab-e2e test-e2e ## Run ALL tests (unit + gitlab-e2e + playwright-e2e)
 
 # ============================================
 # Help
