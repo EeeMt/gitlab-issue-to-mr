@@ -110,23 +110,57 @@ _E2E_POST =
 endif
 
 .PHONY: test
-test: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run all unit tests (continues on failure, prints summary)
-	@r_be=0; r_fe=0; r_me=0; \
-	$(MAKE) --no-print-directory test-backend   || r_be=1; \
-	$(MAKE) --no-print-directory test-frontend  || r_fe=1; \
-	$(MAKE) --no-print-directory test-mock-e2e  || r_me=1; \
+test: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run all unit tests with coverage summary
+	@_d=$$(mktemp -d); \
+	printf "\n\033[1m━━━ Backend unit tests ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n"; \
+	_t0=$$(date +%s); \
+	(cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/unit/ -v --color=yes \
+	  --cov=app --cov-report=term-missing:skip-covered; \
+	  echo $$? > "$$_d/be.rc") 2>&1 | tee "$$_d/be.log"; \
+	echo $$(( $$(date +%s) - $$_t0 )) > "$$_d/be.time"; \
+	printf "\n\033[1m━━━ Frontend unit tests ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n"; \
+	_t0=$$(date +%s); \
+	(cd $(PROJECT_ROOT)/frontend && FORCE_COLOR=1 npx vitest run --coverage; \
+	  echo $$? > "$$_d/fe.rc") 2>&1 | tee "$$_d/fe.log"; \
+	echo $$(( $$(date +%s) - $$_t0 )) > "$$_d/fe.time"; \
+	printf "\n\033[1m━━━ Mock E2E tests ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n"; \
+	_t0=$$(date +%s); \
+	(cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/mock_e2e/ -v --color=yes; \
+	  echo $$? > "$$_d/me.rc") 2>&1 | tee "$$_d/me.log"; \
+	echo $$(( $$(date +%s) - $$_t0 )) > "$$_d/me.time"; \
+	r_be=$$(cat "$$_d/be.rc"); r_fe=$$(cat "$$_d/fe.rc"); r_me=$$(cat "$$_d/me.rc"); \
+	t_be=$$(cat "$$_d/be.time"); t_fe=$$(cat "$$_d/fe.time"); t_me=$$(cat "$$_d/me.time"); \
+	perl -pe 's/\e\[[\d;]*m//g' "$$_d/be.log" > "$$_d/be.c"; \
+	perl -pe 's/\e\[[\d;]*m//g' "$$_d/fe.log" > "$$_d/fe.c"; \
+	perl -pe 's/\e\[[\d;]*m//g' "$$_d/me.log" > "$$_d/me.c"; \
+	be_info=$$(grep -E '^=.*passed' "$$_d/be.c" | tail -1 | sed 's/^[= ]*//;s/[= ]*$$//'); \
+	be_cov=$$(grep '^TOTAL' "$$_d/be.c" | awk '{print $$NF}'); \
+	[ -z "$$be_cov" ] && be_cov="—"; \
+	fe_tests=$$(grep -E 'Tests[[:space:]]+[0-9]' "$$_d/fe.c" | tail -1 | sed 's/^ *//'); \
+	fe_dur=$$(grep -E 'Duration[[:space:]]+[0-9]' "$$_d/fe.c" | tail -1 | sed 's/^ *//;s/ (.*//' ); \
+	fe_info="$$fe_tests  $$fe_dur"; \
+	fe_cov=$$(grep 'All files' "$$_d/fe.c" | head -1 | awk -F'|' '{gsub(/ /,"",$$2); print $$2"%"}'); \
+	[ -z "$$fe_cov" ] && fe_cov="—"; \
+	me_info=$$(grep -E '^=.*passed' "$$_d/me.c" | tail -1 | sed 's/^[= ]*//;s/[= ]*$$//'); \
 	echo ""; \
-	echo "══════════════════════════════════════════════"; \
-	echo "             Test Suite Summary               "; \
-	echo "══════════════════════════════════════════════"; \
-	if [ $$r_be -eq 0 ]; then printf "  ✅  Backend unit\n";  else printf "  ❌  Backend unit\n";  fi; \
-	if [ $$r_fe -eq 0 ]; then printf "  ✅  Frontend unit\n"; else printf "  ❌  Frontend unit\n"; fi; \
-	if [ $$r_me -eq 0 ]; then printf "  ✅  Mock E2E\n";      else printf "  ❌  Mock E2E\n";      fi; \
-	echo "══════════════════════════════════════════════"; \
-	total=$$((r_be + r_fe + r_me)); \
-	if [ $$total -eq 0 ]; then echo "  ✅  ALL PASSED"; else echo "  ❌  $$total SUITE(S) FAILED"; fi; \
-	echo "══════════════════════════════════════════════"; \
-	[ $$total -eq 0 ]
+	printf "\033[1m══════════════════════════════════════════════════════════════════════════\033[0m\n"; \
+	printf "\033[1m                          Test Suite Summary                             \033[0m\n"; \
+	printf "\033[1m══════════════════════════════════════════════════════════════════════════\033[0m\n"; \
+	if [ "$$r_be" = "0" ]; then _i="✅"; else _i="❌"; fi; \
+	printf "  %s  \033[1mBackend unit\033[0m   %-42s  \033[36m[%s]\033[0m  %ss\n" "$$_i" "$$be_info" "$$be_cov" "$$t_be"; \
+	if [ "$$r_fe" = "0" ]; then _i="✅"; else _i="❌"; fi; \
+	printf "  %s  \033[1mFrontend unit\033[0m  %-42s  \033[36m[%s]\033[0m  %ss\n" "$$_i" "$$fe_info" "$$fe_cov" "$$t_fe"; \
+	if [ "$$r_me" = "0" ]; then _i="✅"; else _i="❌"; fi; \
+	printf "  %s  \033[1mMock E2E\033[0m       %-42s  %ss\n" "$$_i" "$$me_info" "$$t_me"; \
+	printf "\033[1m══════════════════════════════════════════════════════════════════════════\033[0m\n"; \
+	_ok=0; [ "$$r_be" = "0" ] && _ok=$$(( $$_ok + 1 )); \
+	[ "$$r_fe" = "0" ] && _ok=$$(( $$_ok + 1 )); \
+	[ "$$r_me" = "0" ] && _ok=$$(( $$_ok + 1 )); \
+	if [ $$_ok -eq 3 ]; then printf "  ✅  \033[32mALL 3 SUITES PASSED\033[0m\n"; \
+	else printf "  ❌  \033[31m$$_ok/3 SUITES PASSED\033[0m\n"; fi; \
+	printf "\033[1m══════════════════════════════════════════════════════════════════════════\033[0m\n"; \
+	rm -rf "$$_d"; \
+	[ $$_ok -eq 3 ]
 
 .PHONY: test-backend
 test-backend: $(VENV)/.installed ## Run backend unit tests
