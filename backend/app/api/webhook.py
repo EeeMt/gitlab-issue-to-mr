@@ -459,10 +459,10 @@ async def _handle_generate_command(
         command.delay_seconds,
     )
 
-    # Check slot capacity for scheduled webhook tasks
+    # Slot capacity only applies to scheduled tasks; immediate tasks bypass capacity checks
     if scheduled_at is not None:
         from app.core.slot_capacity import check_slot_capacity, format_slot_rejection_message
-        slot_info = await check_slot_capacity(db, scheduled_at)
+        slot_info = await check_slot_capacity(db, scheduled_at, acquire_lock=True)
         if slot_info.is_full and slot_info.enforce:
             rejection_msg = format_slot_rejection_message(slot_info)
             try:
@@ -657,10 +657,10 @@ async def _handle_mr_comment(
         command.delay_seconds,
     )
 
-    # Check slot capacity for scheduled MR tasks
+    # Slot capacity only applies to scheduled tasks; immediate tasks bypass capacity checks
     if scheduled_at is not None:
         from app.core.slot_capacity import check_slot_capacity, format_slot_rejection_message
-        slot_info = await check_slot_capacity(db, scheduled_at)
+        slot_info = await check_slot_capacity(db, scheduled_at, acquire_lock=True)
         if slot_info.is_full and slot_info.enforce:
             rejection_msg = format_slot_rejection_message(slot_info)
             try:

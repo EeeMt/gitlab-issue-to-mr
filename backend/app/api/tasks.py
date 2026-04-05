@@ -489,17 +489,14 @@ async def retry_task(
         scheduled_at = validate_scheduled_datetime_in_future(request.scheduled_datetime)
 
     # Check slot capacity for scheduled retries
+    # exclude_task_id: no-op here (task is FAILED/CANCELLED), but needed for reschedule
     if scheduled_at is not None:
-        from app.core.slot_capacity import check_slot_capacity
-        slot_info = await check_slot_capacity(db, scheduled_at, exclude_task_id=task_id)
+        from app.core.slot_capacity import check_slot_capacity, format_slot_full_detail
+        slot_info = await check_slot_capacity(db, scheduled_at, exclude_task_id=task_id, acquire_lock=True)
         if slot_info.is_full and slot_info.enforce:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    f"Time slot {slot_info.hour_start.strftime('%Y-%m-%d %H:%M')}"
-                    f"–{slot_info.hour_end.strftime('%H:%M')} is at full capacity "
-                    f"({slot_info.count}/{slot_info.max} tasks)"
-                ),
+                detail=format_slot_full_detail(slot_info),
             )
 
     previous_scheduled_at = task.scheduled_at
@@ -565,16 +562,12 @@ async def reschedule_task(
     normalized_scheduled = validate_scheduled_datetime_in_future(request.scheduled_datetime)
 
     # Check slot capacity for the new time slot
-    from app.core.slot_capacity import check_slot_capacity
-    slot_info = await check_slot_capacity(db, normalized_scheduled, exclude_task_id=task_id)
+    from app.core.slot_capacity import check_slot_capacity, format_slot_full_detail
+    slot_info = await check_slot_capacity(db, normalized_scheduled, exclude_task_id=task_id, acquire_lock=True)
     if slot_info.is_full and slot_info.enforce:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Time slot {slot_info.hour_start.strftime('%Y-%m-%d %H:%M')}"
-                f"–{slot_info.hour_end.strftime('%H:%M')} is at full capacity "
-                f"({slot_info.count}/{slot_info.max} tasks)"
-            ),
+            detail=format_slot_full_detail(slot_info),
         )
 
     previous_scheduled_at = task.scheduled_at
@@ -610,20 +603,16 @@ async def create_task(
     )
     require_project_access(request.project_id, access_scope)
 
-    # Check slot capacity for scheduled tasks
+    # Slot capacity only applies to scheduled tasks; immediate tasks bypass capacity checks
     slot_warning = None
     if scheduled_at is not None:
-        from app.core.slot_capacity import check_slot_capacity
-        slot_info = await check_slot_capacity(db, scheduled_at)
+        from app.core.slot_capacity import check_slot_capacity, format_slot_full_detail
+        slot_info = await check_slot_capacity(db, scheduled_at, acquire_lock=True)
         if slot_info.is_full:
             if slot_info.enforce:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail=(
-                        f"Time slot {slot_info.hour_start.strftime('%Y-%m-%d %H:%M')}"
-                        f"–{slot_info.hour_end.strftime('%H:%M')} is at full capacity "
-                        f"({slot_info.count}/{slot_info.max} tasks)"
-                    ),
+                    detail=format_slot_full_detail(slot_info),
                 )
             slot_warning = (
                 f"Time slot {slot_info.hour_start.strftime('%Y-%m-%d %H:%M')}"
