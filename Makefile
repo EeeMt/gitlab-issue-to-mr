@@ -101,11 +101,11 @@ RECORD_VIDEO ?= 0
 
 ifeq ($(RECORD_VIDEO),1)
 _E2E_PRE  = docker rm -f codify-e2e-recorder 2>/dev/null || true && mkdir -p $(PROJECT_ROOT)/deploy/e2e-videos &&
-_E2E_RUN  = cd $(PROJECT_ROOT)/deploy && E2E_RECORD_VIDEO=1 docker-compose -f docker-compose.e2e.yml run --name codify-e2e-recorder e2e
+_E2E_RUN  = cd $(PROJECT_ROOT)/deploy && E2E_RECORD_VIDEO=1 docker-compose -f docker-compose.e2e.yml run --name codify-e2e-recorder -e FORCE_COLOR=1 -e PY_COLORS=1 e2e
 _E2E_POST = ; E2E_EXIT=$$?; docker cp codify-e2e-recorder:/videos/. $(PROJECT_ROOT)/deploy/e2e-videos/ 2>/dev/null || true; docker rm -f codify-e2e-recorder 2>/dev/null || true; echo "Videos → deploy/e2e-videos/"; exit $$E2E_EXIT
 else
 _E2E_PRE  =
-_E2E_RUN  = cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml run --rm e2e
+_E2E_RUN  = cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml run --rm -e FORCE_COLOR=1 -e PY_COLORS=1 e2e
 _E2E_POST =
 endif
 
@@ -202,10 +202,57 @@ test-e2e-gitlab: ## Run GitLab E2E tests inside Docker (auto-skips if no GITLAB_
 
 .PHONY: test-e2e-ui
 test-e2e-ui: ## Run Playwright UI tests only: parallel + serial [RECORD_VIDEO=1 for video]
-	$(_E2E_PRE) $(_E2E_RUN) pytest tests/e2e/tests/ -m "not serial" $(_E2E_POST)
-	$(_E2E_PRE) $(_E2E_RUN) \
+	@_d=$$(mktemp -d); \
+	printf "\n\033[1m━━━ UI E2E: parallel ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n"; \
+	_t0=$$(date +%s); \
+	($(_E2E_PRE) $(_E2E_RUN) pytest tests/e2e/tests/ -m "not serial" $(_E2E_POST); \
+	  echo $$? > "$$_d/par.rc") 2>&1 | tee "$$_d/par.log"; \
+	echo $$(( $$(date +%s) - $$_t0 )) > "$$_d/par.time"; \
+	printf "\n\033[1m━━━ UI E2E: serial ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n"; \
+	_t0=$$(date +%s); \
+	($(_E2E_PRE) $(_E2E_RUN) \
 	  pytest tests/e2e/tests/ -m serial \
-	  --override-ini="addopts=-v --tb=short --strict-markers --disable-warnings" $(_E2E_POST)
+	  --override-ini="addopts=-v --tb=short --strict-markers --disable-warnings" $(_E2E_POST); \
+	  echo $$? > "$$_d/ser.rc") 2>&1 | sed 's/[0-9]* deselected, //g; s/, [0-9]* deselected//g' | tee "$$_d/ser.log"; \
+	echo $$(( $$(date +%s) - $$_t0 )) > "$$_d/ser.time"; \
+	r_par=$$(cat "$$_d/par.rc"); r_ser=$$(cat "$$_d/ser.rc"); \
+	t_par=$$(cat "$$_d/par.time"); t_ser=$$(cat "$$_d/ser.time"); \
+	perl -pe 's/\e\[[\d;]*m//g' "$$_d/par.log" > "$$_d/par.c"; \
+	perl -pe 's/\e\[[\d;]*m//g' "$$_d/ser.log" > "$$_d/ser.c"; \
+	_pl=$$(grep -E '^=.*(passed|failed)' "$$_d/par.c" | tail -1); \
+	par_p=$$(echo "$$_pl" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+'); \
+	par_f=$$(echo "$$_pl" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+'); \
+	par_s=$$(echo "$$_pl" | grep -oE '[0-9]+ skipped' | grep -oE '[0-9]+'); \
+	[ -z "$$par_p" ] && par_p=0; [ -z "$$par_f" ] && par_f=0; [ -z "$$par_s" ] && par_s=0; \
+	_sl=$$(grep -E '^=.*(passed|failed)' "$$_d/ser.c" | tail -1); \
+	ser_p=$$(echo "$$_sl" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+'); \
+	ser_f=$$(echo "$$_sl" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+'); \
+	ser_s=$$(echo "$$_sl" | grep -oE '[0-9]+ skipped' | grep -oE '[0-9]+'); \
+	[ -z "$$ser_p" ] && ser_p=0; [ -z "$$ser_f" ] && ser_f=0; [ -z "$$ser_s" ] && ser_s=0; \
+	tot_p=$$(( $$par_p + $$ser_p )); \
+	tot_f=$$(( $$par_f + $$ser_f )); \
+	tot_s=$$(( $$par_s + $$ser_s )); \
+	tot_t=$$(( $$t_par + $$t_ser )); \
+	echo ""; \
+	printf "\033[1m══════════════════════════════════════════════════════════════════════════\033[0m\n"; \
+	printf "\033[1m                       UI E2E Test Summary                               \033[0m\n"; \
+	printf "\033[1m══════════════════════════════════════════════════════════════════════════\033[0m\n"; \
+	printf "  \033[1m%-20s %6s  %6s  %7s  %5s\033[0m\n" "Suite" "Passed" "Failed" "Skipped" "Time"; \
+	printf "  %-20s %6s  %6s  %7s  %5s\n" "────────────────────" "──────" "──────" "───────" "─────"; \
+	if [ "$$r_par" = "0" ]; then _i="✅"; else _i="❌"; fi; \
+	printf "  %s %-18s %6s  %6s  %7s  %4ss\n" "$$_i" "Parallel" "$$par_p" "$$par_f" "$$par_s" "$$t_par"; \
+	if [ "$$r_ser" = "0" ]; then _i="✅"; else _i="❌"; fi; \
+	printf "  %s %-18s %6s  %6s  %7s  %4ss\n" "$$_i" "Serial" "$$ser_p" "$$ser_f" "$$ser_s" "$$t_ser"; \
+	printf "  %-20s %6s  %6s  %7s  %5s\n" "────────────────────" "──────" "──────" "───────" "─────"; \
+	printf "  \033[1m%-20s %6s  %6s  %7s  %4ss\033[0m\n" "Total" "$$tot_p" "$$tot_f" "$$tot_s" "$$tot_t"; \
+	printf "\033[1m══════════════════════════════════════════════════════════════════════════\033[0m\n"; \
+	_ok=0; [ "$$r_par" = "0" ] && _ok=$$(( $$_ok + 1 )); \
+	[ "$$r_ser" = "0" ] && _ok=$$(( $$_ok + 1 )); \
+	if [ $$_ok -eq 2 ]; then printf "  ✅  \033[32mALL 2 UI E2E SUITES PASSED\033[0m\n"; \
+	else printf "  ❌  \033[31m$$_ok/2 UI E2E SUITES PASSED\033[0m\n"; fi; \
+	printf "\033[1m══════════════════════════════════════════════════════════════════════════\033[0m\n"; \
+	rm -rf "$$_d"; \
+	[ $$_ok -eq 2 ]
 
 .PHONY: test-e2e
 test-e2e: test-e2e-up ## Run ALL E2E tests: UI parallel + UI serial + GitLab [RECORD_VIDEO=1 for video]
@@ -220,7 +267,7 @@ test-e2e: test-e2e-up ## Run ALL E2E tests: UI parallel + UI serial + GitLab [RE
 	($(_E2E_PRE) $(_E2E_RUN) \
 	  pytest tests/e2e/tests/ -m serial \
 	  --override-ini="addopts=-v --tb=short --strict-markers --disable-warnings" $(_E2E_POST); \
-	  echo $$? > "$$_d/ser.rc") 2>&1 | tee "$$_d/ser.log"; \
+	  echo $$? > "$$_d/ser.rc") 2>&1 | sed 's/[0-9]* deselected, //g; s/, [0-9]* deselected//g' | tee "$$_d/ser.log"; \
 	echo $$(( $$(date +%s) - $$_t0 )) > "$$_d/ser.time"; \
 	printf "\n\033[1m━━━ E2E: GitLab integration ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n"; \
 	_t0=$$(date +%s); \
@@ -289,7 +336,8 @@ test-e2e-parallel: ## Run parallel E2E tests only (116 tests, ~44s) [RECORD_VIDE
 test-e2e-serial: ## Run serial E2E tests only: bootstrap/prompt_template/access_management (~42s) [RECORD_VIDEO=1]
 	$(_E2E_PRE) $(_E2E_RUN) \
 	  pytest tests/e2e/tests/ -m serial \
-	  --override-ini="addopts=-v --tb=short --strict-markers --disable-warnings" $(_E2E_POST)
+	  --override-ini="addopts=-v --tb=short --strict-markers --disable-warnings" $(_E2E_POST) \
+	  2>&1 | sed 's/[0-9]* deselected, //g; s/, [0-9]* deselected//g'
 
 .PHONY: test-e2e-specific
 test-e2e-specific: ## Run specific E2E test file [TEST_FILE=test_dashboard.py] [RECORD_VIDEO=1]
