@@ -7,7 +7,6 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
 from datetime import datetime
@@ -28,81 +27,6 @@ def create_mock_db(task):
     mock_db.commit = AsyncMock()
     mock_db.add = MagicMock()
     return mock_db
-
-
-@pytest.mark.skip(reason="Requires complex mocking of GitLabClient internals")
-def test_gitlab_get_mr_stats_with_changes_count():
-    """Test that GitLab client correctly parses changes_count from MR."""
-    print("\n" + "=" * 60)
-    print("Testing: GitLab client get_merge_request_stats with changes_count")
-    print("=" * 60)
-
-    # This test requires complex mocking - skipped for now
-    pass
-
-
-@pytest.mark.skip(reason="Requires complex mocking of GitLabClient internals")
-def test_gitlab_get_mr_stats_from_diff():
-    """Test that GitLab client calculates stats from diff when changes_count not available."""
-    print("\n" + "=" * 60)
-    print("Testing: GitLab client get_merge_request_stats from diff")
-    print("=" * 60)
-
-    mock_settings = MagicMock()
-    mock_settings.gitlab_url = "http://gitlab.example.com"
-    mock_settings.gitlab_bot_token = "test-token"
-    mock_settings.worker_image = "test-worker:latest"
-    mock_settings.task_timeout = 1800
-    mock_settings.anthropic_base_url = "http://localhost:11434/v1"
-    mock_settings.anthropic_api_key = "test-key"
-    mock_settings.anthropic_model = "claude-sonnet-4-20250514"
-    mock_settings.default_target_branch = "main"
-    mock_settings.max_retries = 0
-    mock_settings.backend_url = "http://localhost:8000"
-
-    with patch('app.config.get_settings', return_value=mock_settings):
-        from app.core.gitlab_client import GitLabClient
-
-        mock_gitlab = MagicMock()
-        client = GitLabClient()
-        client.gl = mock_gitlab
-
-        # Mock project and MR with changes from diff
-        mock_project = MagicMock()
-        mock_mr = MagicMock()
-        mock_mr.changes_count = None  # No changes_count available
-        mock_mr.changes = {
-            'changes': [
-                {
-                    'new_path': 'file1.py',
-                    'diff': '''--- a/file1.py
-+++ b/file1.py
-@@ -1,3 +1,4 @@
-+added line
- unchanged line
--removed line
-+modified line
-'''
-                }
-            ]
-        }
-        mock_project.mergerequests.get.return_value = mock_mr
-
-        mock_gitlab.projects.get.return_value = mock_project
-
-        # Call the method
-        result = client.get_merge_request_stats(123, 42)
-
-        # Verify result - should count from diff
-        assert result is not None, "Result should not be None"
-        # +added line, +modified line = 2 additions
-        # -removed line = 1 deletion
-        assert result["additions"] >= 0, "Additions should be >= 0"
-        assert result["deletions"] >= 0, "Deletions should be >= 0"
-
-        print("✓ GitLab client calculates stats from diff")
-        print(f"  - Additions: +{result['additions']}")
-        print(f"  - Deletions: -{result['deletions']}")
 
 
 def test_worker_saves_mr_stats_after_completion():
