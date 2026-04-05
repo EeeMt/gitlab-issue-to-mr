@@ -110,7 +110,8 @@ _E2E_POST =
 endif
 
 .PHONY: test
-test: test-backend test-frontend test-mock-e2e ## Run all unit tests
+test: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run all unit tests with aggregated summary
+	@$(PROJECT_ROOT)/scripts/run-tests.sh
 
 .PHONY: test-backend
 test-backend: $(VENV)/.installed ## Run backend unit tests
@@ -125,7 +126,12 @@ test-mock-e2e: $(VENV)/.installed ## Run mock E2E tests
 	cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/mock_e2e/ -v
 
 .PHONY: test-gitlab-e2e
-test-gitlab-e2e: $(VENV)/.installed ## Run GitLab E2E tests (requires real GitLab)
+test-gitlab-e2e: $(VENV)/.installed ## Run GitLab E2E tests (loads GITLAB_* creds from deploy/.env.test if present)
+	@if [ -f $(PROJECT_ROOT)/deploy/.env.test ]; then \
+	  export GITLAB_URL=$$(grep '^GITLAB_URL=' $(PROJECT_ROOT)/deploy/.env.test | cut -d= -f2-); \
+	  export GITLAB_BOT_TOKEN=$$(grep '^GITLAB_BOT_TOKEN=' $(PROJECT_ROOT)/deploy/.env.test | cut -d= -f2-); \
+	  export GITLAB_WEBHOOK_SECRET=$$(grep '^GITLAB_WEBHOOK_SECRET=' $(PROJECT_ROOT)/deploy/.env.test | cut -d= -f2-); \
+	fi; \
 	cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/gitlab_e2e/ -v
 
 .PHONY: test-e2e
@@ -163,7 +169,8 @@ test-e2e-logs: ## View E2E test logs
 	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml logs -f
 
 .PHONY: test-all
-test-all: test test-gitlab-e2e test-e2e ## Run ALL tests (unit + gitlab-e2e + playwright-e2e)
+test-all: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run ALL tests (unit + gitlab-e2e + playwright-e2e) with aggregated summary
+	@$(PROJECT_ROOT)/scripts/run-tests.sh --all
 
 # ============================================
 # Help
