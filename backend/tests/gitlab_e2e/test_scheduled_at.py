@@ -216,11 +216,20 @@ def _gitlab_available() -> bool:
         return False
 
 
+def _backend_available() -> bool:
+    try:
+        r = requests.get(f"{BACKEND_URL}/api/stats", timeout=5)
+        return r.status_code in (200, 401)
+    except Exception:
+        return False
+
+
 _gitlab_up = _gitlab_available()
+_backend_up = _backend_available()
 
 skip_if_unavailable = pytest.mark.skipif(
-    not _gitlab_up,
-    reason="GitLab not reachable or token not set — skipping scheduled_at test",
+    not (_gitlab_up and _backend_up),
+    reason="GitLab or backend not reachable — skipping scheduled_at test",
 )
 
 
@@ -362,7 +371,7 @@ def test_scheduled_at():
     logger.info(f"E2E Test Summary: {passed} passed, {failed} failed")
     logger.info("=" * 60)
 
-    return failed == 0
+    assert failed == 0, f"{failed} test case(s) failed — see logs above"
 
 
 def main():

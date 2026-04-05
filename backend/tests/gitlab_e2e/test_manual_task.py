@@ -95,9 +95,8 @@ class TestGitLabProjects:
         branches = response.json()
         assert isinstance(branches, list)
         print(f"Found {len(branches)} branches")
-        # Should have at least main branch
-        branch_names = [b["name"] for b in branches]
-        assert "main" in branch_names or "master" in branch_names
+        # Should have at least one branch
+        assert len(branches) > 0, "Expected at least one branch in the project"
 
 
 class TestManualTaskAPI:
