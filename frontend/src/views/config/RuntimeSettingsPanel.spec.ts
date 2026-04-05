@@ -144,7 +144,9 @@ const mockConfigForm = {
     allow_monitor_for_users: true,
     allow_schedule_overview_for_users: false,
     allow_analytics_for_users: false,
-    allow_oidc_diagnostics_for_users: false
+    allow_oidc_diagnostics_for_users: false,
+    slot_max_tasks: 0,
+    slot_max_tasks_enforce: false
   }),
   sectionSaving: {
     runtime: false,
@@ -218,5 +220,20 @@ describe('RuntimeSettingsPanel', () => {
   it('should render max_concurrency input', () => {
     const wrapper = mountComponent()
     expect(wrapper.find('.n-input-number').exists()).toBe(true)
+  })
+
+  it('should render slot capacity section', () => {
+    const wrapper = mountComponent()
+    const sectionTitles = wrapper.findAll('.config-form__section-title')
+    expect(sectionTitles.some(el => el.text() === 'config.slotCapacity')).toBe(true)
+  })
+
+  it('should render slot_max_tasks input and enforce switch', () => {
+    const wrapper = mountComponent()
+    // slot_max_tasks input is an n-input-number, slot_max_tasks_enforce is an n-switch
+    const inputs = wrapper.findAll('.n-input-number')
+    const switches = wrapper.findAll('.n-switch')
+    expect(inputs.length).toBeGreaterThanOrEqual(1)
+    expect(switches.length).toBeGreaterThanOrEqual(1)
   })
 })

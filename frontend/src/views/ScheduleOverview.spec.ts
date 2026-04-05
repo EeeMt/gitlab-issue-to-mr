@@ -10,7 +10,8 @@ import { createMockTask } from '../test/mocks/api'
 const { mockApi, mockMessage, resetMockApi } = vi.hoisted(() => {
   const api = {
     getScheduledTasks: vi.fn(),
-    rescheduleTask: vi.fn()
+    rescheduleTask: vi.fn(),
+    getConfig: vi.fn()
   }
   const msg = {
     error: vi.fn(),
@@ -27,7 +28,8 @@ const { mockApi, mockMessage, resetMockApi } = vi.hoisted(() => {
 // ---------------------------------------------------------------------------
 vi.mock('../api', () => ({
   getScheduledTasks: mockApi.getScheduledTasks,
-  rescheduleTask: mockApi.rescheduleTask
+  rescheduleTask: mockApi.rescheduleTask,
+  getConfig: mockApi.getConfig
 }))
 
 vi.mock('../auth', () => ({
@@ -200,6 +202,7 @@ describe('ScheduleOverview', () => {
   beforeEach(() => {
     resetMockApi()
     ;(mockApi.getScheduledTasks as Mock).mockResolvedValue(mockScheduledTasks)
+    ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 0 } })
     vi.spyOn(window, 'setInterval').mockImplementation(() => 1 as any)
     vi.spyOn(window, 'clearInterval').mockImplementation(() => undefined)
   })
@@ -347,5 +350,58 @@ describe('ScheduleOverview', () => {
 
     expect(mockApi.rescheduleTask).not.toHaveBeenCalled()
     expect(mockMessage.error).toHaveBeenCalled()
+  })
+
+  // -------------------------------------------------------------------------
+  // Slot capacity integration
+  // -------------------------------------------------------------------------
+  it('sets slotMaxTasks from config on load', async () => {
+    ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 8 } })
+
+    wrapper = mountComponent()
+    await flushPromises()
+
+    expect(wrapper.vm.slotMaxTasks).toBe(8)
+  })
+
+  it('defaults slotMaxTasks to 0 when config has no slot_max_tasks', async () => {
+    ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: {} })
+
+    wrapper = mountComponent()
+    await flushPromises()
+
+    expect(wrapper.vm.slotMaxTasks).toBe(0)
+  })
+
+  it('defaults slotMaxTasks to 0 when getConfig fails', async () => {
+    ;(mockApi.getConfig as Mock).mockRejectedValue(new Error('config error'))
+
+    wrapper = mountComponent()
+    await flushPromises()
+
+    expect(wrapper.vm.slotMaxTasks).toBe(0)
+  })
+
+  it('includes slot capacity in summaryItems when slotMaxTasks > 0', async () => {
+    ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 5 } })
+
+    wrapper = mountComponent()
+    await flushPromises()
+
+    const items = wrapper.vm.summaryItems as any[]
+    const slotCapItem = items.find((i: any) => i.label === 'scheduleOverview.slotCapacity')
+    const fullSlotsItem = items.find((i: any) => i.label === 'scheduleOverview.fullSlots')
+    expect(slotCapItem).toBeTruthy()
+    expect(slotCapItem.value).toBe('5')
+    expect(fullSlotsItem).toBeTruthy()
+  })
+
+  it('excludes slot capacity from summaryItems when slotMaxTasks = 0', async () => {
+    wrapper = mountComponent()
+    await flushPromises()
+
+    const items = wrapper.vm.summaryItems as any[]
+    const slotCapItem = items.find((i: any) => i.label === 'scheduleOverview.slotCapacity')
+    expect(slotCapItem).toBeUndefined()
   })
 })

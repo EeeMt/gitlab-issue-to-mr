@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
 import { mount, type VueWrapper, flushPromises } from '@vue/test-utils'
-import { h, ref } from 'vue'
+import { h, ref, nextTick } from 'vue'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import CreateTask from './CreateTask.vue'
 import VariableEditor from '../components/VariableEditor.vue'
@@ -12,7 +12,10 @@ const { mockApi, resetMockApi } = vi.hoisted(() => {
     getProjects: vi.fn<() => Promise<any[]>>(),
     getBranches: vi.fn<() => Promise<any[]>>(),
     createTask: vi.fn<() => Promise<any>>(),
-    getPromptTemplates: vi.fn<() => Promise<any[]>>()
+    getPromptTemplates: vi.fn<() => Promise<any[]>>(),
+    getScheduledTasks: vi.fn<() => Promise<any[]>>(),
+    getSlotCapacity: vi.fn<() => Promise<any>>(),
+    getConfig: vi.fn<() => Promise<any>>()
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => {
@@ -39,7 +42,10 @@ vi.mock('../api', () => ({
   getProjects: mockApi.getProjects,
   getBranches: mockApi.getBranches,
   createTask: mockApi.createTask,
-  getPromptTemplates: mockApi.getPromptTemplates
+  getPromptTemplates: mockApi.getPromptTemplates,
+  getScheduledTasks: mockApi.getScheduledTasks,
+  getSlotCapacity: mockApi.getSlotCapacity,
+  getConfig: mockApi.getConfig
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -61,11 +67,10 @@ vi.mock('naive-ui', () => ({
   NForm: {
     name: 'NForm',
     props: ['model', 'rules', 'label-placement'],
-    setup(_props: any, { expose }: any) {
+    setup(_props: any, { slots, expose }: any) {
       expose({ validate: vi.fn(), restoreValidation: vi.fn() })
-      return () => h('form', {}, h('div', {}, 'form content'))
-    },
-    template: '<form><slot /></form>'
+      return () => h('form', {}, slots.default?.())
+    }
   },
   NFormItem: {
     name: 'NFormItem',
@@ -268,6 +273,20 @@ vi.mock('naive-ui', () => ({
     setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-drawer-content' }, slots.default?.())
     }
+  },
+  NAlert: {
+    name: 'NAlert',
+    props: ['type', 'showIcon'],
+    setup(props: any, { slots }: any) {
+      return () => h('div', { class: 'n-alert', 'data-type': props.type }, slots.default?.())
+    }
+  },
+  NRadioButton: {
+    name: 'NRadioButton',
+    props: ['value'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-radio-button' }, slots.default?.())
+    }
   }
 }))
 
@@ -288,7 +307,8 @@ vi.mock('../components/VariableEditor.vue', () => ({
 vi.mock('@vicons/ionicons5', () => ({
   DocumentTextOutline: { name: 'DocumentTextOutline' },
   WarningOutline: { name: 'WarningOutline' },
-  InformationCircleOutline: { name: 'InformationCircleOutline' }
+  InformationCircleOutline: { name: 'InformationCircleOutline' },
+  CalendarOutline: { name: 'CalendarOutline' }
 }))
 
 // Mock router
@@ -338,6 +358,9 @@ describe('CreateTask', () => {
     ;(mockApi.getBranches as Mock).mockResolvedValue(mockBranches)
     ;(mockApi.getPromptTemplates as Mock).mockResolvedValue(mockTemplates)
     ;(mockApi.createTask as Mock).mockResolvedValue(createMockTask({ id: 123 }))
+    ;(mockApi.getScheduledTasks as Mock).mockResolvedValue([])
+    ;(mockApi.getSlotCapacity as Mock).mockResolvedValue({ is_full: false, enforce: false, count: 0, max: 0, hour_start: '', hour_end: '' })
+    ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 0 } })
 
     wrapper = mount(CreateTask, {
       global: {
@@ -761,6 +784,129 @@ describe('CreateTask', () => {
       await wrapper.vm.handleReset()
       // If we get here without error, the test passes
       expect(true).toBe(true)
+    })
+  })
+
+  describe('slot capacity', () => {
+    const fullSlotCapacity = {
+      is_full: true,
+      enforce: true,
+      count: 5,
+      max: 5,
+      hour_start: '2026-04-01T10:00:00Z',
+      hour_end: '2026-04-01T11:00:00Z'
+    }
+
+    const warningSlotCapacity = {
+      is_full: true,
+      enforce: false,
+      count: 5,
+      max: 5,
+      hour_start: '2026-04-01T10:00:00Z',
+      hour_end: '2026-04-01T11:00:00Z'
+    }
+
+    const availableSlotCapacity = {
+      is_full: false,
+      enforce: false,
+      count: 2,
+      max: 5,
+      hour_start: '2026-04-01T10:00:00Z',
+      hour_end: '2026-04-01T11:00:00Z'
+    }
+
+    it('submit button is disabled when slotCapacity.is_full && enforce', async () => {
+      await mountComponent()
+
+      wrapper.vm.slotCapacity = fullSlotCapacity
+      await nextTick()
+
+      const submitBtn = wrapper.findAll('button.n-button').find(
+        (b: any) => b.text().includes('common.createTask')
+      )
+      expect(submitBtn).toBeTruthy()
+      expect(submitBtn!.element.disabled).toBe(true)
+    })
+
+    it('submit button is enabled when slot is not full', async () => {
+      await mountComponent()
+
+      wrapper.vm.slotCapacity = availableSlotCapacity
+      await nextTick()
+
+      const submitBtn = wrapper.findAll('button.n-button').find(
+        (b: any) => b.text().includes('common.createTask')
+      )
+      expect(submitBtn).toBeTruthy()
+      expect(submitBtn!.element.disabled).toBe(false)
+    })
+
+    it('submit button is enabled when enforce is false even if full', async () => {
+      await mountComponent()
+
+      wrapper.vm.slotCapacity = warningSlotCapacity
+      await nextTick()
+
+      const submitBtn = wrapper.findAll('button.n-button').find(
+        (b: any) => b.text().includes('common.createTask')
+      )
+      expect(submitBtn).toBeTruthy()
+      expect(submitBtn!.element.disabled).toBe(false)
+    })
+
+    it('alert shows with type "error" when enforce mode', async () => {
+      await mountComponent()
+
+      wrapper.vm.slotCapacity = fullSlotCapacity
+      await nextTick()
+
+      const alert = wrapper.find('.n-alert')
+      expect(alert.exists()).toBe(true)
+      expect(alert.attributes('data-type')).toBe('error')
+    })
+
+    it('alert shows with type "warning" when soft mode', async () => {
+      await mountComponent()
+
+      wrapper.vm.slotCapacity = warningSlotCapacity
+      await nextTick()
+
+      const alert = wrapper.find('.n-alert')
+      expect(alert.exists()).toBe(true)
+      expect(alert.attributes('data-type')).toBe('warning')
+    })
+
+    it('no alert when slot is not full', async () => {
+      await mountComponent()
+
+      wrapper.vm.slotCapacity = availableSlotCapacity
+      await nextTick()
+
+      const alert = wrapper.find('.n-alert')
+      expect(alert.exists()).toBe(false)
+    })
+
+    it('no alert when slotCapacity is null', async () => {
+      await mountComponent()
+
+      wrapper.vm.slotCapacity = null
+      await nextTick()
+
+      const alert = wrapper.find('.n-alert')
+      expect(alert.exists()).toBe(false)
+    })
+
+    it('submit button is disabled when slotCapacityLoading is true', async () => {
+      await mountComponent()
+
+      wrapper.vm.slotCapacityLoading = true
+      await nextTick()
+
+      const submitBtn = wrapper.findAll('button.n-button').find(
+        (b: any) => b.text().includes('common.createTask')
+      )
+      expect(submitBtn).toBeTruthy()
+      expect(submitBtn!.element.disabled).toBe(true)
     })
   })
 
