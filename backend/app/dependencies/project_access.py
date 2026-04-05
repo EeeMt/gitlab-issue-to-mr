@@ -145,10 +145,11 @@ async def require_project_access_scope(
                         status_code=status.HTTP_401_UNAUTHORIZED,
                         detail="GitLab login expired and refresh is unavailable. Please sign in again.",
                     ) from exc
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Failed to resolve GitLab project access for the current user.",
-            ) from exc
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Failed to resolve GitLab project access for the current user.",
+                ) from exc
         except httpx.HTTPError as exc:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,

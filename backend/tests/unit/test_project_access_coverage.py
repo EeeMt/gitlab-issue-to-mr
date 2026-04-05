@@ -274,12 +274,11 @@ class TestRequireProjectAccessScopeErrorPaths(unittest.IsolatedAsyncioTestCase):
         _project_access_cache.clear()
         _project_access_refresh_tasks.clear()
 
-    async def test_cold_cache_401_triggers_refresh_and_retry_succeeds_but_falls_through(self) -> None:
-        """Lines 118-127, 148: Cold cache → 401 → refresh succeeds → retry fetch succeeds →
-        falls through to line 148 which raises 502 (the retry success path sets `projects`
-        but the outer except block unconditionally raises at line 148 after the if block).
+    async def test_cold_cache_401_triggers_refresh_and_retry_succeeds(self) -> None:
+        """Lines 118-127: Cold cache → 401 → refresh succeeds → retry fetch succeeds →
+        returns valid ProjectAccessScope with the retried projects.
 
-        This covers lines 122-127 (the inner try) and line 148 (the fall-through raise).
+        This covers lines 122-127 (the inner try block with successful retry).
         """
         ctx = _make_auth_context(session_id="sess-retry-ok", refresh_token="rt")
         projects = [{"id": 50}]
@@ -299,11 +298,10 @@ class TestRequireProjectAccessScopeErrorPaths(unittest.IsolatedAsyncioTestCase):
                  "access_token": "new-token", "refresh_token": "new-rt", "expires_in": "3600",
              })), \
              patch(_PATCH_UPDATE_SESSION, AsyncMock()):
-            with self.assertRaises(HTTPException) as exc_ctx:
-                await require_project_access_scope(ctx, db=AsyncMock())
+            scope = await require_project_access_scope(ctx, db=AsyncMock())
 
-        # Line 148 falls through after the successful retry and raises 502.
-        self.assertEqual(exc_ctx.exception.status_code, 502)
+        self.assertFalse(scope.is_unrestricted)
+        self.assertEqual(scope.accessible_projects, projects)
 
     async def test_cold_cache_403_retry_fails_401_raises_unauthorized(self) -> None:
         """Lines 128-133: Cold cache → 403 → refresh → retry → 401 → 401 HTTPException."""
