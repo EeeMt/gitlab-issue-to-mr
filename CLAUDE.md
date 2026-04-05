@@ -29,13 +29,14 @@ make rebuild-nginx           # 重建前端镜像并重启
 make rebuild-worker          # 重建 worker 镜像
 
 # 测试
-make test                   # 运行所有单元测试
+make test-unit              # 运行所有单元测试（带覆盖率）
 make test-backend           # 后端单元测试
 make test-frontend          # 前端单元测试
 make test-mock-e2e         # Mock E2E 测试
-make test-gitlab-e2e        # GitLab E2E 测试
-make test-e2e               # Playwright E2E 测试
-make test-all               # 运行所有测试
+make test-e2e               # 全部 E2E 测试（Playwright + GitLab）
+make test-e2e-ui            # 仅 Playwright UI 测试
+make test-e2e-gitlab        # 仅 GitLab 集成测试
+make test-all               # 运行所有测试（unit + E2E）
 
 # Playwright E2E 分步执行
 make test-e2e-up            # 启动 E2E 测试环境

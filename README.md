@@ -115,9 +115,9 @@ make logs                   # View logs
 make ps                     # Show running containers
 
 # Testing
-make test                   # Run unit tests
-make test-all               # Run all tests (including E2E)
-make test-e2e              # Run Playwright E2E tests
+make test-unit              # Run unit tests (with coverage)
+make test-all               # Run all tests (unit + E2E)
+make test-e2e              # Run all E2E tests (Playwright + GitLab)
 
 # Rebuild specific service
 make rebuild-backend        # Rebuild backend image

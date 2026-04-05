@@ -11,7 +11,7 @@
 make help
 
 # 运行所有单元测试（推荐开发时使用）
-make test
+make test-unit
 
 # 运行所有测试（包括 E2E）
 make test-all
@@ -24,8 +24,9 @@ make test-all
 | 后端单元测试 | `make test-backend` | Python |
 | 前端单元测试 | `make test-frontend` | Node.js |
 | Mock E2E | `make test-mock-e2e` | Python |
-| GitLab E2E | `make test-gitlab-e2e` | Python + 真实 GitLab |
-| Playwright E2E | `make test-e2e` | Docker |
+| Playwright E2E | `make test-e2e-ui` | Docker |
+| GitLab E2E | `make test-e2e-gitlab` | Docker + 真实 GitLab |
+| 全部 E2E | `make test-e2e` | Docker（含 GitLab） |
 
 ---
 
@@ -310,7 +311,11 @@ test_dashboard_page_loads_chromium_gw0.webm
 ### 运行命令
 
 ```bash
-make test-gitlab-e2e
+# 需先启动 E2E 环境
+make test-e2e-up
+
+# 运行 GitLab E2E 测试（在 Docker 容器内执行）
+make test-e2e-gitlab
 ```
 
 ### 测试文件
@@ -325,7 +330,7 @@ make test-gitlab-e2e
 
 | 测试类 | 说明 | 运行环境 |
 |--------|------|---------|
-| `TestTaskAPIIntegrity` | 快速 API 完整性检查（6个，< 3s）| E2E 环境（18980）|
+| `TestTaskAPIIntegrity` | 快速 API 完整性检查（6个，< 3s）| E2E 环境 |
 | `TestManualTaskExecution` | 完整 worker 执行（需 Claude CLI）| 真实部署（有 GitLab + Claude） |
 | `TestScheduledTaskExecution` | 调度行为验证（需 Claude CLI）| 真实部署（有 GitLab + Claude） |
 
@@ -335,9 +340,8 @@ make test-gitlab-e2e
 # 先启动 E2E 环境
 make test-e2e-up
 
-# 指定 BACKEND_URL 为 E2E 环境端口（18980）
-cd backend && BACKEND_URL=http://192.168.50.129:18980 \
-    .venv/bin/python3 -m pytest tests/gitlab_e2e/test_task_execution.py::TestTaskAPIIntegrity -v -s
+# 在 Docker 容器内运行特定测试
+make test-e2e-specific TEST_FILE=../gitlab_e2e/test_task_execution.py::TestTaskAPIIntegrity
 ```
 
 > **认证说明**：`test_task_execution.py` 自动处理认证：
@@ -349,7 +353,8 @@ cd backend && BACKEND_URL=http://192.168.50.129:18980 \
 ```bash
 # 确保 deploy/.env.test 中已配置：
 # GITLAB_URL, GITLAB_BOT_TOKEN, ANTHROPIC_API_KEY, ANTHROPIC_MODEL 等
-make test-gitlab-e2e
+make test-e2e-up
+make test-e2e-gitlab
 ```
 
 ### 环境要求
