@@ -419,3 +419,435 @@ class ListContainersAccessScopeFilterTests(unittest.TestCase):
         names = {c["name"] for c in data}
         self.assertIn("codify-10-p1-i5", names)
         self.assertIn("codify-20-p2-i8", names)
+
+
+# ---------------------------------------------------------------------------
+# Manual container name pattern tests
+# ---------------------------------------------------------------------------
+
+
+class ManualContainerPatternTests(unittest.TestCase):
+    """Test pattern matching and parsing for manual containers (codify-X-pY-manual)."""
+
+    def test_manual_container_matches_pattern(self):
+        """The 'manual' suffix pattern should match the worker regex."""
+        self.assertTrue(WORKER_CONTAINER_PATTERN.match("codify-1-p123-manual"))
+        self.assertTrue(WORKER_CONTAINER_PATTERN.match("codify-999-p1-manual"))
+
+    def test_manual_container_parsing_extracts_ids(self):
+        """Manual container name should yield correct task_id/project_id and None issue_iid."""
+        name = "codify-42-p99-manual"
+        parts = name.split("-")
+        task_id = int(parts[1])
+        project_id = int(parts[2].replace("p", ""))
+        self.assertEqual(task_id, 42)
+        self.assertEqual(project_id, 99)
+        # Manual suffix: no issue_iid
+        self.assertFalse(parts[3].startswith("i"))
+
+    def test_list_containers_returns_manual_container_with_null_issue_iid(self):
+        """Manual containers should appear in list_containers with issue_iid=None."""
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+        mock_db = MagicMock()
+
+        async def override_db():
+            yield mock_db
+
+        manual_container = MagicMock()
+        manual_container.name = "codify-7-p50-manual"
+        manual_container.id = "manual123"
+        manual_container.status = "running"
+        manual_container.attrs = {"Created": "2024-06-01T00:00:00Z"}
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.list.return_value = [manual_container]
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/containers")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["name"], "codify-7-p50-manual")
+        self.assertEqual(data[0]["task_id"], 7)
+        self.assertEqual(data[0]["project_id"], 50)
+        self.assertIsNone(data[0]["issue_iid"])
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# Restricted access scope filtering for list_containers
+# ---------------------------------------------------------------------------
+
+
+class ListContainersRestrictedAccessTests(unittest.TestCase):
+    """Tests that list_containers respects restricted project access scope."""
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+
+    def test_restricted_scope_filters_inaccessible_projects(self):
+        """Containers from inaccessible projects should be hidden."""
+        # Restricted scope: only project 1 accessible
+        access_scope = ProjectAccessScope(
+            is_unrestricted=False,
+            accessible_projects=[{"id": 1}],
+        )
+        mock_db = MagicMock()
+
+        async def override_db():
+            yield mock_db
+
+        # Container A: project_id=1 (accessible)
+        container_a = MagicMock()
+        container_a.name = "codify-10-p1-i5"
+        container_a.id = "aaa"
+        container_a.status = "running"
+        container_a.attrs = {"Created": "2024-01-01T00:00:00Z"}
+
+        # Container B: project_id=2 (NOT accessible)
+        container_b = MagicMock()
+        container_b.name = "codify-20-p2-i8"
+        container_b.id = "bbb"
+        container_b.status = "running"
+        container_b.attrs = {"Created": "2024-01-02T00:00:00Z"}
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.list.return_value = [container_a, container_b]
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/containers")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["name"], "codify-10-p1-i5")
+        self.assertEqual(data[0]["project_id"], 1)
+
+    def test_restricted_scope_shows_nothing_when_no_projects_accessible(self):
+        """When no projects are accessible, no containers should appear."""
+        access_scope = ProjectAccessScope(
+            is_unrestricted=False,
+            accessible_projects=[],  # No projects accessible
+        )
+        mock_db = MagicMock()
+
+        async def override_db():
+            yield mock_db
+
+        container_a = MagicMock()
+        container_a.name = "codify-10-p1-i5"
+        container_a.id = "aaa"
+        container_a.status = "running"
+        container_a.attrs = {"Created": "2024-01-01T00:00:00Z"}
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.list.return_value = [container_a]
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/containers")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data), 0)
+
+
+# ---------------------------------------------------------------------------
+# SSE streaming logs endpoint: GET /api/containers/{container_id}/logs
+# ---------------------------------------------------------------------------
+
+
+class ContainerLogsSSEEndpointTests(unittest.TestCase):
+    """Tests for GET /api/containers/{container_id}/logs SSE streaming endpoint."""
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+
+    def _setup_sse_overrides(self):
+        """Common dependency overrides for SSE endpoint tests."""
+        from app.dependencies.auth import require_admin_user
+
+        mock_db = MagicMock()
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
+
+    def test_sse_streams_container_logs_success(self):
+        """Successful log streaming should return SSE-formatted log lines."""
+        self._setup_sse_overrides()
+
+        mock_container = MagicMock()
+        mock_container.logs.return_value = iter([b"line1\n", b"line2\n"])
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.get.return_value = mock_container
+
+        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/containers/abc123/logs")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/event-stream", response.headers.get("content-type", ""))
+        self.assertIn("data: line1", response.text)
+        self.assertIn("data: line2", response.text)
+
+    def test_sse_fallback_to_partial_id_match(self):
+        """When exact ID lookup fails, should find container by partial ID match."""
+        self._setup_sse_overrides()
+
+        matching_container = MagicMock()
+        matching_container.id = "abc123def456"
+        matching_container.logs.return_value = iter([b"found by partial\n"])
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.get.side_effect = Exception("not found")
+        mock_docker.client.containers.list.return_value = [matching_container]
+
+        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/containers/abc123/logs")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("data: found by partial", response.text)
+
+    def test_sse_empty_stream_when_container_not_found(self):
+        """When container is not found anywhere, stream should close silently (empty body)."""
+        self._setup_sse_overrides()
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.get.side_effect = Exception("not found")
+        mock_docker.client.containers.list.return_value = []
+
+        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/containers/abc123/logs")
+
+        self.assertEqual(response.status_code, 200)
+        # Generator returned without yielding — empty body
+        self.assertEqual(response.text.strip(), "")
+
+    def test_sse_error_when_docker_client_fails(self):
+        """When Docker client init fails, should yield an SSE error event."""
+        self._setup_sse_overrides()
+
+        with patch("app.api.containers.get_docker_client", side_effect=RuntimeError("Docker daemon not running")):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/containers/abc123/logs")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("data: Error:", response.text)
+        self.assertIn("Docker daemon not running", response.text)
+
+    def test_sse_partial_id_no_match_among_listed_containers(self):
+        """When exact ID fails and partial match finds nothing, stream is empty."""
+        self._setup_sse_overrides()
+
+        non_matching = MagicMock()
+        non_matching.id = "zzz999"
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.get.side_effect = Exception("not found")
+        mock_docker.client.containers.list.return_value = [non_matching]
+
+        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/containers/abc123/logs")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.text.strip(), "")
+
+
+# ---------------------------------------------------------------------------
+# source=db for task container logs
+# ---------------------------------------------------------------------------
+
+
+class TaskContainerLogsSourceDbTests(unittest.TestCase):
+    """Tests for GET /api/tasks/{task_id}/container-logs with source=db."""
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+
+    def test_source_db_returns_db_chunks_directly(self):
+        """When source=db, should fetch logs from DB without trying Docker."""
+        from app.dependencies.auth import require_admin_user, require_authenticated_user
+        from app.models import TaskStatus
+
+        task = MagicMock()
+        task.id = 1
+        task.container_id = "abc123"
+        task.status = TaskStatus.RUNNING
+
+        mock_task_result = MagicMock()
+        mock_task_result.scalar_one_or_none.return_value = task
+
+        mock_chunk = MagicMock()
+        mock_chunk.message = "log line from db\n"
+        mock_log_result = MagicMock()
+        mock_log_result.scalars.return_value.all.return_value = [mock_chunk]
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_log_result])
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/api/tasks/1/container-logs?source=db")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["container_id"], "abc123")
+        self.assertEqual(data["source"], "db")
+        self.assertIn("log line from db", data["logs"])
+
+    def test_source_db_returns_empty_when_no_chunks(self):
+        """When source=db and no log chunks exist, should return empty logs."""
+        from app.dependencies.auth import require_admin_user, require_authenticated_user
+        from app.models import TaskStatus
+
+        task = MagicMock()
+        task.id = 1
+        task.container_id = "abc123"
+        task.status = TaskStatus.COMPLETED
+
+        mock_task_result = MagicMock()
+        mock_task_result.scalar_one_or_none.return_value = task
+
+        mock_log_result = MagicMock()
+        mock_log_result.scalars.return_value.all.return_value = []
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_log_result])
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/api/tasks/1/container-logs?source=db")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["logs"], "")
+        self.assertEqual(data["source"], "db")
+
+    def test_source_db_multiple_chunks_concatenated(self):
+        """Multiple DB log chunks should be concatenated."""
+        from app.dependencies.auth import require_admin_user, require_authenticated_user
+        from app.models import TaskStatus
+
+        task = MagicMock()
+        task.id = 2
+        task.container_id = "xyz789"
+        task.status = TaskStatus.COMPLETED
+
+        mock_task_result = MagicMock()
+        mock_task_result.scalar_one_or_none.return_value = task
+
+        chunk1 = MagicMock()
+        chunk1.message = "Step 1\n"
+        chunk2 = MagicMock()
+        chunk2.message = "Step 2\n"
+        chunk3 = MagicMock()
+        chunk3.message = None  # Some chunks may have None message
+        mock_log_result = MagicMock()
+        mock_log_result.scalars.return_value.all.return_value = [chunk1, chunk2, chunk3]
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_log_result])
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/api/tasks/2/container-logs?source=db")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["logs"], "Step 1\nStep 2\n")
+
+
+# ---------------------------------------------------------------------------
+# Docker failure with DB chunk fallback
+# ---------------------------------------------------------------------------
+
+
+class TaskContainerLogsDockerFailDbFallbackTests(unittest.TestCase):
+    """Tests for Docker failure with non-empty DB chunk fallback."""
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+
+    def test_docker_fail_with_db_chunks_returns_db_data(self):
+        """When Docker fails but DB has log chunks, should return DB data with source=db."""
+        from app.dependencies.auth import require_admin_user, require_authenticated_user
+        from app.models import TaskStatus
+
+        task = MagicMock()
+        task.id = 15
+        task.container_id = "container-gone"
+        task.status = TaskStatus.COMPLETED
+
+        mock_task_result = MagicMock()
+        mock_task_result.scalar_one_or_none.return_value = task
+
+        mock_chunk_1 = MagicMock()
+        mock_chunk_1.message = "Step 1 completed\n"
+        mock_chunk_2 = MagicMock()
+        mock_chunk_2.message = "Step 2 completed\n"
+        mock_log_result = MagicMock()
+        mock_log_result.scalars.return_value.all.return_value = [mock_chunk_1, mock_chunk_2]
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_log_result])
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+
+        with patch("app.api.containers.get_docker_client", side_effect=RuntimeError("docker is gone")):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/tasks/15/container-logs")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["container_id"], "container-gone")
+        self.assertIn("Step 1 completed", data["logs"])
+        self.assertIn("Step 2 completed", data["logs"])
+        self.assertEqual(data["source"], "db")
