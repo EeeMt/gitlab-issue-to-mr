@@ -69,6 +69,33 @@
         </div>
 
         <div class="config-form__section">
+          <div class="config-form__section-title">{{ t('config.slotCapacity') }}</div>
+          <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+            <n-gi>
+              <n-form-item :label="t('config.slotMaxTasks')" path="slot_max_tasks">
+                <n-input-number
+                  v-model:value="formValue.slot_max_tasks"
+                  :min="0"
+                  :max="100"
+                  class="config-form__input"
+                />
+                <template #feedback>
+                  {{ t('config.slotMaxTasksHint') }}
+                </template>
+              </n-form-item>
+            </n-gi>
+            <n-gi>
+              <n-form-item :label="t('config.slotMaxTasksEnforce')" path="slot_max_tasks_enforce">
+                <n-switch v-model:value="formValue.slot_max_tasks_enforce" />
+                <template #feedback>
+                  {{ t('config.slotMaxTasksEnforceHint') }}
+                </template>
+              </n-form-item>
+            </n-gi>
+          </n-grid>
+        </div>
+
+        <div class="config-form__section">
           <div class="config-form__section-title">{{ t('config.retryAndAlerts') }}</div>
           <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
             <n-gi>
@@ -295,6 +322,12 @@ const runtimeRules: FormRules = {
     required: true,
     type: 'number',
     message: t('config.enterRetryDelay'),
+    trigger: 'blur'
+  },
+  slot_max_tasks: {
+    required: true,
+    type: 'number',
+    message: t('config.slotMaxTasksHint'),
     trigger: 'blur'
   }
 }

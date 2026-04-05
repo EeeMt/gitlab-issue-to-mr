@@ -282,6 +282,8 @@ export interface RuntimeConfig {
   worker_volume_mounts: string
   maven_cache_host_path: string
   maven_settings_host_path: string
+  slot_max_tasks: number
+  slot_max_tasks_enforce: boolean
 }
 
 export interface AuthConfig {
@@ -579,6 +581,20 @@ export async function getTasks(params?: {
 
 export async function getScheduledTasks(params?: { project_id?: number }): Promise<Task[]> {
   const response = await api.get('/tasks/scheduled', { params })
+  return response.data
+}
+
+export interface SlotCapacityInfo {
+  hour_start: string
+  hour_end: string
+  count: number
+  max: number
+  is_full: boolean
+  enforce: boolean
+}
+
+export async function getSlotCapacity(scheduledAt: string): Promise<SlotCapacityInfo> {
+  const response = await api.get('/tasks/slot-capacity', { params: { scheduled_at: scheduledAt } })
   return response.data
 }
 

@@ -61,6 +61,8 @@ export type ConfigForm = {
   auth_admin_gitlab_groups: string
   oidc_client_secret_configured: boolean
   oidc_client_secret_input: string
+  slot_max_tasks: number
+  slot_max_tasks_enforce: boolean
 }
 
 export type ConfigSectionKey = 'runtime' | 'sharedPages' | 'gitlab' | 'oidc' | 'session'
@@ -77,7 +79,9 @@ export const runtimeSectionFields: readonly (keyof ConfigForm)[] = [
   'max_retries',
   'retry_delay',
   'alert_on_failure',
-  'alert_webhook_url_input'
+  'alert_webhook_url_input',
+  'slot_max_tasks',
+  'slot_max_tasks_enforce'
 ]
 
 export const sharedPagesSectionFields: readonly (keyof ConfigForm)[] = [
@@ -164,7 +168,9 @@ function createDefaultFormValue(): ConfigForm {
     auth_admin_usernames: '',
     auth_admin_gitlab_groups: '',
     oidc_client_secret_configured: false,
-    oidc_client_secret_input: ''
+    oidc_client_secret_input: '',
+    slot_max_tasks: 0,
+    slot_max_tasks_enforce: false
   }
 }
 
@@ -295,7 +301,9 @@ function createConfigForm(): UseConfigFormReturn {
       auth_admin_usernames: config.auth.auth_admin_usernames,
       auth_admin_gitlab_groups: config.auth.auth_admin_gitlab_groups,
       oidc_client_secret_configured: config.auth.oidc_client_secret_configured,
-      oidc_client_secret_input: ''
+      oidc_client_secret_input: '',
+      slot_max_tasks: config.runtime.slot_max_tasks,
+      slot_max_tasks_enforce: config.runtime.slot_max_tasks_enforce
     }
     lastLoadedValue.value = { ...formValue.value }
   }
@@ -322,7 +330,9 @@ function createConfigForm(): UseConfigFormReturn {
       default_target_branch: formValue.value.default_target_branch.trim(),
       max_retries: formValue.value.max_retries,
       retry_delay: formValue.value.retry_delay,
-      alert_on_failure: formValue.value.alert_on_failure
+      alert_on_failure: formValue.value.alert_on_failure,
+      slot_max_tasks: formValue.value.slot_max_tasks,
+      slot_max_tasks_enforce: formValue.value.slot_max_tasks_enforce
     }
 
     if (formValue.value.alert_webhook_url_input.trim()) {

@@ -132,6 +132,7 @@
           <HeatmapChart
             :tasks="tasks"
             :selected-ms="selectedWindow?.startMs ?? null"
+            :max-per-slot="slotMaxTasks"
             @cell-click="handleHeatmapCellClick"
           />
           <div class="schedule-section-tip">
@@ -286,7 +287,7 @@ import { useWindowSize } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { authState, isAdmin, initializeAuth } from '../auth'
-import { getScheduledTasks, rescheduleTask, type Task } from '../api'
+import { getScheduledTasks, rescheduleTask, getConfig, type Task } from '../api'
 import { formatDateTimeUtc8Compact, formatMonthDayTimeUtc8, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
 import HeatmapChart from '../components/HeatmapChart.vue'
 
@@ -316,6 +317,7 @@ const isMobile = computed(() => width.value < 768)
 const tasks = ref<Task[]>([])
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
+const slotMaxTasks = ref(0)
 const selectedWindow = ref<SelectedWindow | null>(null)
 const scheduleDrafts = ref<Record<number, number | null>>({})
 const savingTaskId = ref<number | null>(null)
@@ -370,6 +372,11 @@ function getScheduledTimestamp(value?: string | null): number | null {
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 
+const fullSlotCount = computed(() => {
+  if (slotMaxTasks.value <= 0) return 0
+  return hourlyBuckets.value.filter((bucket) => bucket.count >= slotMaxTasks.value).length
+})
+
 const summaryItems = computed(() => {
   const now = Date.now()
   const next24Hours = now + 24 * 60 * 60 * 1000
@@ -392,7 +399,7 @@ const summaryItems = computed(() => {
   const runningCount = tasks.value.filter((task) => task.status === 'running').length
   const busiest = [...hourlyBuckets.value].sort((left, right) => right.count - left.count)[0]
 
-  return [
+  const baseItems = [
     { label: t('scheduleOverview.scheduledQueue'), value: String(tasks.value.length), note: t('scheduleOverview.activeScheduledTasks') },
     { label: t('scheduleOverview.readyNow'), value: String(readyNow), note: t('scheduleOverview.alreadyDue') },
     { label: t('scheduleOverview.upcoming24h'), value: String(next24HoursCount), note: t('scheduleOverview.upcomingScheduledWork') },
@@ -404,6 +411,23 @@ const summaryItems = computed(() => {
       note: busiest && busiest.count > 0 ? busiest.label : t('scheduleOverview.noScheduledWork'),
     },
   ]
+
+  if (slotMaxTasks.value > 0) {
+    baseItems.push({
+      label: t('scheduleOverview.slotCapacity'),
+      value: String(slotMaxTasks.value),
+      note: t('scheduleOverview.maxTasksPerSlot'),
+    })
+    baseItems.push({
+      label: t('scheduleOverview.fullSlots'),
+      value: String(fullSlotCount.value),
+      note: fullSlotCount.value > 0
+        ? t('scheduleOverview.slotsAtCapacity')
+        : t('scheduleOverview.noSlotsAtCapacity'),
+    })
+  }
+
+  return baseItems
 })
 
 const hourlyBuckets = computed<HourBucket[]>(() => {
@@ -669,9 +693,16 @@ async function fetchData() {
   if (loading.value) return
   loading.value = true
   try {
-    tasks.value = await getScheduledTasks()
-    syncScheduleDrafts()
-    hasLoadedOnce.value = true
+    const [, config] = await Promise.all([
+      getScheduledTasks().then(result => {
+        tasks.value = result
+        syncScheduleDrafts()
+      }),
+      getConfig().catch(() => null),
+    ])
+    if (config) {
+      slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
+    }
   } catch (error) {
     message.error(t('scheduleOverview.failedToFetch'))
   } finally {

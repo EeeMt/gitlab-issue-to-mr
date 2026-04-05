@@ -547,7 +547,12 @@ const en = {
     noTasksInSelectedWindow: 'No tasks remain in the selected window.',
     rescheduleTimeFuture: 'Scheduled time must be in the future.',
     taskRescheduled: 'Task schedule updated',
-    failedToRescheduleTask: 'Failed to update scheduled time'
+    failedToRescheduleTask: 'Failed to update scheduled time',
+    slotCapacity: 'Slot Capacity',
+    maxTasksPerSlot: 'Max tasks per hour slot',
+    fullSlots: 'Full Slots',
+    slotsAtCapacity: 'Hour slots at capacity (next 24h)',
+    noSlotsAtCapacity: 'No slots at capacity',
   },
   analytics: {
     title: 'Task Analytics',

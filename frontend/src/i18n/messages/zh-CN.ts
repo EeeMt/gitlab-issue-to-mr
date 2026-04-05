@@ -531,7 +531,12 @@ const zhCN = {
     noTasksInSelectedWindow: '该选中时段内已经没有任务了。',
     rescheduleTimeFuture: '预约时间必须晚于当前时间。',
     taskRescheduled: '任务预约时间已更新',
-    failedToRescheduleTask: '更新预约时间失败'
+    failedToRescheduleTask: '更新预约时间失败',
+    slotCapacity: '时段容量',
+    maxTasksPerSlot: '每小时时段最大任务数',
+    fullSlots: '满载时段',
+    slotsAtCapacity: '达到容量上限的时段（未来24小时）',
+    noSlotsAtCapacity: '暂无满载时段',
   },
   analytics: {
     title: '任务统计分析',

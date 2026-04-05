@@ -10,6 +10,8 @@
         <span class="heatmap-chart__legend-swatch heatmap-chart__legend-swatch--4"></span>
       </div>
       <span class="heatmap-chart__legend-label">Busy</span>
+      <span v-if="maxPerSlot > 0" class="heatmap-chart__legend-swatch heatmap-chart__legend-swatch--full"></span>
+      <span v-if="maxPerSlot > 0" class="heatmap-chart__legend-label">Full</span>
       <span class="heatmap-chart__legend-hint">Click to select</span>
     </div>
 
@@ -30,10 +32,10 @@
           class="heatmap-chart__cell heatmap-chart__cell--clickable"
           :class="{ 'heatmap-chart__cell--active': isCellActive(cell) }"
           :style="heatmapCellStyle(cell.count, heatmapMax)"
-          :title="`${cell.label}: ${cell.count} task${cell.count !== 1 ? 's' : ''}`"
+          :title="cellTooltip(cell)"
           @click="emit('cellClick', cell.startMs)"
         >
-          {{ cell.count > 0 ? cell.count : '' }}
+          {{ cellDisplayText(cell.count) }}
         </div>
       </template>
     </div>
@@ -49,11 +51,13 @@ interface Props {
   tasks: Task[]
   selectedMs?: number | null
   days?: number
+  maxPerSlot?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
   selectedMs: null,
   days: 7,
+  maxPerSlot: 0,
 })
 
 const emit = defineEmits<{
@@ -144,12 +148,29 @@ function heatmapCellStyle(count: number, maxCount: number) {
   if (count === 0 || maxCount === 0) {
     return { background: 'rgba(148, 163, 184, 0.12)', color: 'rgba(15, 23, 42, 0.45)' }
   }
+  // Full slot → red
+  if (props.maxPerSlot > 0 && count >= props.maxPerSlot) {
+    return { background: 'rgba(220, 38, 38, 0.65)', color: '#fff' }
+  }
   const intensity = count / maxCount
   const alpha = 0.18 + intensity * 0.52
   return {
     background: `rgba(32, 128, 240, ${alpha.toFixed(3)})`,
     color: intensity > 0.58 ? '#fff' : '#0f172a',
   }
+}
+
+function cellDisplayText(count: number): string {
+  if (count === 0) return ''
+  if (props.maxPerSlot > 0) return `${count}/${props.maxPerSlot}`
+  return String(count)
+}
+
+function cellTooltip(cell: HeatmapCell): string {
+  const countText = props.maxPerSlot > 0
+    ? `${cell.count}/${props.maxPerSlot}`
+    : `${cell.count}`
+  return `${cell.label}: ${countText} task${cell.count !== 1 ? 's' : ''}`
 }
 
 function isCellActive(cell: HeatmapCell): boolean {
@@ -188,6 +209,7 @@ function isCellActive(cell: HeatmapCell): boolean {
 .heatmap-chart__legend-swatch--2 { background: rgba(32, 128, 240, 0.34); }
 .heatmap-chart__legend-swatch--3 { background: rgba(32, 128, 240, 0.5); }
 .heatmap-chart__legend-swatch--4 { background: rgba(32, 128, 240, 0.68); }
+.heatmap-chart__legend-swatch--full { background: rgba(220, 38, 38, 0.65); }
 
 .heatmap-chart__legend-hint {
   font-size: 11px;

@@ -238,6 +238,28 @@
                          {{ t('createTask.viewScheduleHeatmap') }}
                        </n-button>
 
+                       <n-alert
+                         v-if="slotCapacity?.is_full"
+                         :type="slotCapacity.enforce ? 'error' : 'warning'"
+                         class="slot-warning"
+                         style="margin-top: 8px;"
+                       >
+                         {{ slotCapacity.enforce
+                           ? t('createTask.slotFullError', {
+                               start: slotCapacity.hour_start.substring(11, 16),
+                               end: slotCapacity.hour_end.substring(11, 16),
+                               count: slotCapacity.count,
+                               max: slotCapacity.max
+                             })
+                           : t('createTask.slotFullWarning', {
+                               start: slotCapacity.hour_start.substring(11, 16),
+                               end: slotCapacity.hour_end.substring(11, 16),
+                               count: slotCapacity.count,
+                               max: slotCapacity.max
+                             })
+                         }}
+                       </n-alert>
+
                       <div class="create-task-form__hint">
                         {{ scheduleSummary }}
                       </div>
@@ -259,6 +281,7 @@
                    data-testid="create-task-submit-button"
                    @click="handleSubmit"
                    :loading="submitting"
+                   :disabled="submitting || slotCapacityLoading || (slotCapacity?.is_full && slotCapacity?.enforce)"
                  >
                    {{ t('common.createTask') }}
                  </n-button>
@@ -288,6 +311,7 @@
             <HeatmapChart
               :tasks="scheduledTasksForPreview"
               :selected-ms="heatmapSelectedMs"
+              :max-per-slot="slotMaxTasks"
               @cell-click="handleScheduleHeatmapCellClick"
             />
           </template>
@@ -318,17 +342,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NCard, NForm, NFormItem, NSelect, NInput, NInputNumber,
   NButton, NSpin, NSpace, NRadioGroup, NRadio, NRadioButton, NModal,
   NDatePicker, NTag, NGrid, NGi, NIcon, NSwitch, NTooltip,
-  NDrawer, NDrawerContent,
+  NDrawer, NDrawerContent, NAlert,
   useMessage, FormInst, FormRules
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getProjects, getBranches, createTask, getPromptTemplates, getScheduledTasks, type Project, type Branch, type CreateTaskRequest, type PromptTemplate, type Task } from '../api'
+import { getProjects, getBranches, createTask, getPromptTemplates, getScheduledTasks, getSlotCapacity, getConfig, type Project, type Branch, type CreateTaskRequest, type PromptTemplate, type Task, type SlotCapacityInfo } from '../api'
 import { formatDateTimeUtc8 } from '../utils/datetime'
 import { DocumentTextOutline, WarningOutline, InformationCircleOutline, CalendarOutline } from '@vicons/ionicons5'
 import PageHeader from '../components/PageHeader.vue'
@@ -402,6 +426,46 @@ watch(scheduledDatetime, (val) => {
 const scheduledTasksForPreview = ref<Task[]>([])
 const scheduledTasksLoading = ref(false)
 const showScheduleDrawer = ref(false)
+
+// Slot capacity
+const slotCapacity = ref<SlotCapacityInfo | null>(null)
+const slotCapacityLoading = ref(false)
+const slotMaxTasks = ref(0)
+let slotCheckTimeout: ReturnType<typeof setTimeout> | undefined
+let slotCheckGeneration = 0
+
+function checkSlotCapacity() {
+  slotCapacity.value = null
+  if (slotCheckTimeout) clearTimeout(slotCheckTimeout)
+  slotCheckGeneration++
+
+  const ms = heatmapSelectedMs.value
+  if (!ms) return
+
+  const currentGeneration = slotCheckGeneration
+  slotCheckTimeout = setTimeout(async () => {
+    slotCapacityLoading.value = true
+    try {
+      const scheduledAt = new Date(ms).toISOString()
+      const result = await getSlotCapacity(scheduledAt)
+      if (currentGeneration !== slotCheckGeneration) return
+      slotCapacity.value = result
+    } catch {
+      if (currentGeneration !== slotCheckGeneration) return
+      slotCapacity.value = null
+    } finally {
+      if (currentGeneration === slotCheckGeneration) {
+        slotCapacityLoading.value = false
+      }
+    }
+  }, 300)
+}
+
+onUnmounted(() => {
+  if (slotCheckTimeout) clearTimeout(slotCheckTimeout)
+  slotCheckGeneration++
+})
+
 const showTemplateDrawer = ref(false)
 
 // Computed selected time for heatmap: works for both delay and scheduled modes
@@ -415,6 +479,8 @@ const heatmapSelectedMs = computed<number | null>(() => {
   }
   return null
 })
+
+watch(heatmapSelectedMs, () => checkSlotCapacity())
 
 // Create MR toggle
 const createMR = ref(true)
@@ -550,6 +616,11 @@ async function openScheduleDrawer() {
       scheduledTasksLoading.value = false
     }
   }
+  // Fetch slot_max_tasks config for heatmap display
+  try {
+    const config = await getConfig()
+    slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
+  } catch { /* ignore */ }
 }
 
 function handleScheduleHeatmapCellClick(startMs: number) {
