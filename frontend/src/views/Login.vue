@@ -75,7 +75,7 @@
             >
               {{ t('login.continueWithGitlab') }}
             </n-button>
-            <n-text v-else depth="3" style="text-align: center; display: block;">
+            <n-text v-else depth="3" style="display: block;">
               {{ t('login.oidcNotConfigured') }}
             </n-text>
           </n-space>
@@ -405,11 +405,9 @@ async function handleBreakGlassLogin() {
 .login-card__hint {
   display: block;
   line-height: 1.5;
-  text-align: center;
 }
 
 .login-card__password-toggle {
-  text-align: center;
 }
 
 @media (max-width: 767px) {
