@@ -290,6 +290,7 @@ def cleanup_issue(issue_iid: int):
 
 
 @skip_if_unavailable
+@pytest.mark.timeout(300)
 def test_scheduled_at():
     """Test scheduled_at feature with at= parameter."""
     logger.info("=" * 60)
@@ -388,7 +389,7 @@ def test_scheduled_at():
                     logger.info(f"Task status after execute-now: {task['status']}")
 
                     # Wait for MR
-                    mr = wait_for_mr(issue_iid, timeout=180)
+                    mr = wait_for_mr(issue_iid, timeout=120)
                     if mr:
                         logger.info(f"✅ PASS: MR created - {mr['url']}")
                         passed += 1

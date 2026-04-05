@@ -315,6 +315,7 @@ describe('Monitor', () => {
 
   // -------------------------------------------------------------------------
   it('handles fetch error gracefully — hasLoadedOnce becomes true', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     ;(mockApi.getTasks as Mock).mockRejectedValue(new Error('Network error'))
     ;(mockApi.getStats as Mock).mockRejectedValue(new Error('Network error'))
     ;(mockApi.getContainers as Mock).mockRejectedValue(new Error('Network error'))
@@ -324,6 +325,7 @@ describe('Monitor', () => {
 
     // loading should reset even on error
     expect(wrapper.vm.loading).toBe(false)
+    consoleSpy.mockRestore()
   })
 
   // -------------------------------------------------------------------------

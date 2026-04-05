@@ -707,7 +707,7 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
         mock_db = MagicMock()
         mock_db.commit = AsyncMock()
 
-        with patch.object(scheduler, "_run_task_background", new=AsyncMock()) as mock_bg:
+        with patch.object(scheduler, "_run_task_background", new=MagicMock()) as mock_bg:
             with patch("app.scheduler.asyncio.create_task") as mock_create_task:
                 await scheduler._execute_task(mock_db, task, "10:20")
 
