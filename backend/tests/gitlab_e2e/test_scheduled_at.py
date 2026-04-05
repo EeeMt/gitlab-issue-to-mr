@@ -31,6 +31,7 @@ import logging
 import subprocess
 import requests
 import argparse
+import pytest
 from datetime import UTC, datetime, timedelta
 from typing import Optional
 
@@ -201,6 +202,28 @@ def wait_for_mr(issue_iid: int, timeout: int = 300) -> Optional[dict]:
     return None
 
 
+def _gitlab_available() -> bool:
+    if not GITLAB_TOKEN:
+        return False
+    try:
+        r = requests.get(
+            f"{GITLAB_URL}/api/v4/version",
+            headers={"PRIVATE-TOKEN": GITLAB_TOKEN},
+            timeout=5,
+        )
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+_gitlab_up = _gitlab_available()
+
+skip_if_unavailable = pytest.mark.skipif(
+    not _gitlab_up,
+    reason="GitLab not reachable or token not set — skipping scheduled_at test",
+)
+
+
 def cleanup_issue(issue_iid: int):
     """Close and delete test issue."""
     url = f"{GITLAB_URL}/api/v4/projects/{TEST_PROJECT_ID}/issues/{issue_iid}"
@@ -209,6 +232,7 @@ def cleanup_issue(issue_iid: int):
     logger.info(f"Closed issue #{issue_iid}")
 
 
+@skip_if_unavailable
 def test_scheduled_at():
     """Test scheduled_at feature with at= parameter."""
     logger.info("=" * 60)

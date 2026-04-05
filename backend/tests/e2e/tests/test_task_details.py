@@ -57,10 +57,10 @@ class TestTaskDetailView:
         expect(refresh_button).to_be_visible()
 
     def test_task_view_has_log_section(self, class_page: Page):
-        """Test that task view has a logs section."""
+        """Test that task view has a logs/process section."""
         class_page.goto("/tasks/1")
         class_page.wait_for_selector(".task-view", state="visible", timeout=5000)
-        log_section = class_page.locator(".log-content")
+        log_section = class_page.locator(".task-process-panel")
         expect(log_section).to_be_attached()
 
     def test_task_view_back_to_dashboard(self, class_page: Page):
@@ -118,10 +118,10 @@ class TestTaskLogs:
     """Tests for task log display."""
 
     def test_log_content_area_exists(self, class_page: Page):
-        """Test that the log content area exists."""
+        """Test that the task process panel exists."""
         class_page.goto("/tasks/1")
         class_page.wait_for_selector(".task-view", state="visible", timeout=5000)
-        log_content = class_page.locator(".log-content")
+        log_content = class_page.locator(".task-process-panel")
         expect(log_content).to_be_attached()
 
     def test_logs_refresh_button_exists(self, class_page: Page):
