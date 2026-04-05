@@ -110,7 +110,23 @@ _E2E_POST =
 endif
 
 .PHONY: test
-test: test-backend test-frontend test-mock-e2e ## Run all unit tests
+test: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run all unit tests (continues on failure, prints summary)
+	@r_be=0; r_fe=0; r_me=0; \
+	$(MAKE) --no-print-directory test-backend   || r_be=1; \
+	$(MAKE) --no-print-directory test-frontend  || r_fe=1; \
+	$(MAKE) --no-print-directory test-mock-e2e  || r_me=1; \
+	echo ""; \
+	echo "══════════════════════════════════════════════"; \
+	echo "             Test Suite Summary               "; \
+	echo "══════════════════════════════════════════════"; \
+	if [ $$r_be -eq 0 ]; then printf "  ✅  Backend unit\n";  else printf "  ❌  Backend unit\n";  fi; \
+	if [ $$r_fe -eq 0 ]; then printf "  ✅  Frontend unit\n"; else printf "  ❌  Frontend unit\n"; fi; \
+	if [ $$r_me -eq 0 ]; then printf "  ✅  Mock E2E\n";      else printf "  ❌  Mock E2E\n";      fi; \
+	echo "══════════════════════════════════════════════"; \
+	total=$$((r_be + r_fe + r_me)); \
+	if [ $$total -eq 0 ]; then echo "  ✅  ALL PASSED"; else echo "  ❌  $$total SUITE(S) FAILED"; fi; \
+	echo "══════════════════════════════════════════════"; \
+	[ $$total -eq 0 ]
 
 .PHONY: test-backend
 test-backend: $(VENV)/.installed ## Run backend unit tests
@@ -168,7 +184,23 @@ test-e2e-logs: ## View E2E test logs
 	cd $(PROJECT_ROOT)/deploy && docker-compose -f docker-compose.e2e.yml logs -f
 
 .PHONY: test-all
-test-all: test test-gitlab-e2e test-e2e ## Run ALL tests (unit + gitlab-e2e + playwright-e2e)
+test-all: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run ALL tests (continues on failure, prints summary)
+	@r_unit=0; r_gl=0; r_e2e=0; \
+	$(MAKE) --no-print-directory test       || r_unit=1; \
+	$(MAKE) --no-print-directory test-gitlab-e2e || r_gl=1; \
+	$(MAKE) --no-print-directory test-e2e   || r_e2e=1; \
+	echo ""; \
+	echo "══════════════════════════════════════════════"; \
+	echo "           Full Test Suite Summary            "; \
+	echo "══════════════════════════════════════════════"; \
+	if [ $$r_unit -eq 0 ]; then printf "  ✅  Unit tests (backend + frontend + mock-e2e)\n"; else printf "  ❌  Unit tests\n";    fi; \
+	if [ $$r_gl   -eq 0 ]; then printf "  ✅  GitLab E2E\n";     else printf "  ❌  GitLab E2E\n";    fi; \
+	if [ $$r_e2e  -eq 0 ]; then printf "  ✅  Playwright E2E\n"; else printf "  ❌  Playwright E2E\n"; fi; \
+	echo "══════════════════════════════════════════════"; \
+	total=$$((r_unit + r_gl + r_e2e)); \
+	if [ $$total -eq 0 ]; then echo "  ✅  ALL PASSED"; else echo "  ❌  $$total SUITE(S) FAILED"; fi; \
+	echo "══════════════════════════════════════════════"; \
+	[ $$total -eq 0 ]
 
 # ============================================
 # Help
