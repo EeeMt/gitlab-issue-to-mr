@@ -1,22 +1,16 @@
 <template>
   <div class="login-page" data-testid="login-page">
     <n-card class="login-card" :bordered="false" data-testid="login-card">
-      <PageHeader data-testid="login-header" root-class="login-card__header">
-        <template #title>
-          <div class="login-card__brand">
-            <div class="login-card__mark">
-              <n-icon :size="isCompact ? 22 : 26" :component="RocketOutline" />
-            </div>
-            <div>
-              <h1 class="login-card__title">{{ t('app.brandTitle') }}</h1>
-              <p class="login-card__subtitle">{{ t('login.subtitle') }}</p>
-            </div>
+      <div class="login-card__header" data-testid="login-header">
+        <LanguageToggle size="small" class="login-card__lang" />
+        <div class="login-card__brand">
+          <div class="login-card__mark">
+            <n-icon :size="24" :component="RocketOutline" />
           </div>
-        </template>
-        <template #actions>
-          <LanguageToggle size="small" class="login-card__language-switcher" />
-        </template>
-      </PageHeader>
+          <h1 class="login-card__title">{{ t('app.brandTitle') }}</h1>
+          <p class="login-card__subtitle">{{ t('login.subtitle') }}</p>
+        </div>
+      </div>
 
       <Transition name="login-alert">
         <n-alert v-if="loginReason" type="warning" class="login-card__alert" data-testid="login-reason-alert">
@@ -89,14 +83,13 @@
           type="primary"
           size="large"
           block
-          class="login-card__gitlab-btn"
           @click="handleLogin"
         >
           {{ t('login.continueWithGitlab') }}
         </n-button>
 
         <!-- Password Login Toggle -->
-        <div class="login-card__password-toggle">
+        <div class="login-card__toggle">
           <n-button
             quaternary
             @click="showPasswordLogin = !showPasswordLogin"
@@ -189,13 +182,10 @@ import { useRoute } from 'vue-router'
 import { authState, startLogin } from '../auth'
 import { breakGlassLogin } from '../api'
 import LanguageToggle from '../components/LanguageToggle.vue'
-import PageHeader from '../components/PageHeader.vue'
-import { useBreakpoints } from '../composables/useBreakpoints'
 
 const route = useRoute()
 const message = useMessage()
 const { t } = useI18n()
-const { isCompact } = useBreakpoints()
 const nextTarget = computed(() => {
   const next = route.query.next
   return typeof next === 'string' ? next : '/dashboard'
@@ -301,7 +291,6 @@ async function handleBreakGlassLogin() {
 .login-page {
   min-height: 100dvh;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
   width: 100%;
@@ -315,7 +304,7 @@ async function handleBreakGlassLogin() {
 }
 
 .login-card {
-  width: min(480px, 100%);
+  width: min(420px, 100%);
   margin: 0 auto;
   border-radius: var(--app-card-radius, 18px);
   background: rgba(255, 255, 255, 0.88);
@@ -324,21 +313,24 @@ async function handleBreakGlassLogin() {
   border: 1px solid rgba(148, 163, 184, 0.14);
 }
 
-/* login-card__header is now PageHeader's root (via root-class). PageHeader provides the
-   flex layout; we only need to override its 767 px column-stack because the card is
-   narrow and should stack only at the compact (480 px) breakpoint. */
+/* ─── Header ─── */
+.login-card__header {
+  position: relative;
+  padding-top: 4px;
+}
+
+.login-card__lang {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
 
 .login-card__brand {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 16px;
-  min-width: 0;
-  flex: 1;
-}
-
-.login-card__language-switcher {
-  flex-shrink: 0;
-  margin-top: 2px;
+  text-align: center;
+  gap: 0;
 }
 
 .login-card__mark {
@@ -351,33 +343,36 @@ async function handleBreakGlassLogin() {
   background: linear-gradient(135deg, #2080f0, #36ad6a);
   color: #fff;
   box-shadow: 0 12px 24px rgba(32, 128, 240, 0.24);
-  flex-shrink: 0;
+  margin-bottom: 16px;
 }
 
 .login-card__title {
   margin: 0;
-  font-size: 28px;
+  font-size: 26px;
+  font-weight: 700;
   line-height: 1.2;
 }
 
 .login-card__subtitle {
-  margin: 8px 0 0;
-  color: var(--app-page-subtitle-color, rgba(15, 23, 42, 0.66));
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--app-page-subtitle-color, rgba(15, 23, 42, 0.55));
 }
 
+/* ─── Content ─── */
 .login-card__body {
-  margin-top: 20px;
+  margin-top: 24px;
 }
 
-.login-card__gitlab-btn {
-  margin-top: 16px;
+.login-card__tabs {
+  margin-top: 24px;
 }
 
 .login-card__alert {
   border-radius: 12px;
   font-size: 13px;
   line-height: 1.6;
-  margin-top: 16px;
+  margin-top: 20px;
 }
 
 .login-alert-enter-active {
@@ -398,50 +393,31 @@ async function handleBreakGlassLogin() {
   transform: translateY(-4px);
 }
 
-.login-card__break-glass {
-  width: 100%;
+/* ─── Actions ─── */
+.login-card__toggle {
+  text-align: center;
 }
 
 .login-card__hint {
   display: block;
+  text-align: center;
   line-height: 1.5;
+  font-size: 13px;
 }
 
-.login-card__password-toggle {
+.login-card__break-glass {
+  width: 100%;
 }
 
-@media (max-width: 767px) {
+/* ─── Responsive ─── */
+@media (max-width: 480px) {
   .login-page {
     padding-left: 16px;
     padding-right: 16px;
   }
 
-  /* Keep header horizontal until the compact breakpoint */
-  .login-card :deep(.page-header) {
-    flex-direction: row;
-    align-items: flex-start;
-    gap: 12px;
-  }
-
-  .login-card :deep(.page-header__actions) {
-    width: auto;
-    justify-content: flex-end;
-  }
-
-  .login-card__brand {
-    gap: 14px;
-  }
-}
-
-@media (max-width: 480px) {
-  /* Stack header at compact size */
-  .login-card :deep(.page-header) {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .login-card :deep(.page-header__actions) {
-    justify-content: flex-end;
+  .login-card__title {
+    font-size: 22px;
   }
 }
 </style>
