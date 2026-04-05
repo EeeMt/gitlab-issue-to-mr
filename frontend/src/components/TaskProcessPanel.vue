@@ -180,13 +180,15 @@ import {
 import type { Component } from 'vue'
 import type { TaskLog, ToolCall, Task } from '../api'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   task: Task | null
   taskLogs: TaskLog[]
   isActive: boolean
   terminalHtml: string
   taskStatus: string
-}>()
+}>(), {
+  taskLogs: () => []
+})
 
 const emit = defineEmits<{
   (e: 'raw-tab-open'): void
@@ -489,8 +491,8 @@ function scrollToLatest() {
   autoScroll.value = true
   setProgrammaticScroll()
   nextTick(() => {
-    eventStreamRef.value?.scrollTo({ top: eventStreamRef.value.scrollHeight, behavior: 'smooth' })
-    logContentRef.value?.scrollTo({ top: logContentRef.value.scrollHeight, behavior: 'smooth' })
+    eventStreamRef.value?.scrollTo?.({ top: eventStreamRef.value.scrollHeight, behavior: 'smooth' })
+    logContentRef.value?.scrollTo?.({ top: logContentRef.value.scrollHeight, behavior: 'smooth' })
   })
 }
 
@@ -501,7 +503,7 @@ watch(sortedEvents, async () => {
   await nextTick()
   if (eventStreamRef.value) {
     setProgrammaticScroll()
-    eventStreamRef.value.scrollTo({ top: eventStreamRef.value.scrollHeight, behavior: 'smooth' })
+    eventStreamRef.value.scrollTo?.({ top: eventStreamRef.value.scrollHeight, behavior: 'smooth' })
   }
 })
 
@@ -510,7 +512,7 @@ watch(() => props.terminalHtml, async () => {
   await nextTick()
   if (logContentRef.value) {
     setProgrammaticScroll()
-    logContentRef.value.scrollTo({ top: logContentRef.value.scrollHeight, behavior: 'smooth' })
+    logContentRef.value.scrollTo?.({ top: logContentRef.value.scrollHeight, behavior: 'smooth' })
   }
 })
 </script>

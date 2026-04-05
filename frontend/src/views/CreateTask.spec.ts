@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { mount, type VueWrapper, flushPromises } from '@vue/test-utils'
 import { h, ref } from 'vue'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import CreateTask from './CreateTask.vue'
@@ -254,7 +254,21 @@ vi.mock('naive-ui', () => ({
     success: vi.fn(),
     warning: vi.fn(),
     info: vi.fn()
-  })
+  }),
+  NDrawer: {
+    name: 'NDrawer',
+    props: ['show', 'width', 'placement'],
+    setup(props: any, { slots }: any) {
+      return () => props.show ? h('div', { class: 'n-drawer' }, slots.default?.()) : h('div')
+    }
+  },
+  NDrawerContent: {
+    name: 'NDrawerContent',
+    props: ['title', 'closable'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-drawer-content' }, slots.default?.())
+    }
+  }
 }))
 
 // Mock VariableEditor component
@@ -405,17 +419,19 @@ describe('CreateTask', () => {
     it('should reset branch selection when project changes', async () => {
       await mountComponent()
 
-      // Set some initial values
+      // Select project 1 first; wait for branches + auto-set base_branch
       await wrapper.vm.handleProjectChange(1)
       await vi.waitFor(() => {
         return (mockApi.getBranches as Mock).mock.calls.length > 0
       })
+      await flushPromises()
 
-      // Change project
+      // Change project; auto-set logic will pick project 2's default branch
       await wrapper.vm.handleProjectChange(2)
+      await flushPromises()
 
-      // Base branch should be reset
-      expect(wrapper.vm.formValue.base_branch).toBeUndefined()
+      // Base branch should be auto-set to project 2's default branch ('develop')
+      expect(wrapper.vm.formValue.base_branch).toBe('develop')
     })
 
     it('should set target branch to project default', async () => {

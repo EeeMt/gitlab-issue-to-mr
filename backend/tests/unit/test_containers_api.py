@@ -327,7 +327,7 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
         self.assertIn("Starting task", data["logs"])
 
     def test_get_task_container_logs_returns_error_when_docker_fails(self):
-        """Should return error info when docker raises an exception."""
+        """When Docker fails, falls back to DB-stored log chunks (returns 200 with available data)."""
         from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_admin_user, require_authenticated_user
@@ -340,6 +340,8 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = task
+        # scalars().all() used for DB chunk fallback — return empty list
+        mock_result.scalars.return_value.all.return_value = []
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=mock_result)
 
@@ -357,8 +359,8 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["container_id"], "xyz789")
-        self.assertIn("error", data)
-        self.assertIn("Error", data["logs"])
+        self.assertIn("logs", data)
+        self.assertIn("status", data)
 
 
 # ---------------------------------------------------------------------------

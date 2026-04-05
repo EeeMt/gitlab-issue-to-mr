@@ -16,7 +16,8 @@ const { mockApi, resetMockApi } = vi.hoisted(() => {
     retryTask: vi.fn<() => Promise<void>>(),
     executeTask: vi.fn<() => Promise<void>>(),
     rescheduleTask: vi.fn<() => Promise<any>>(),
-    getAuthStatus: vi.fn<() => Promise<any>>()
+    getAuthStatus: vi.fn<() => Promise<any>>(),
+    streamTaskLogs: vi.fn<() => any>()
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => {
@@ -63,7 +64,8 @@ vi.mock('../api', () => ({
   retryTask: mockApi.retryTask,
   executeTask: mockApi.executeTask,
   rescheduleTask: mockApi.rescheduleTask,
-  getAuthStatus: mockApi.getAuthStatus
+  getAuthStatus: mockApi.getAuthStatus,
+  streamTaskLogs: mockApi.streamTaskLogs
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -294,13 +296,65 @@ vi.mock('naive-ui', () => ({
     success: vi.fn(),
     warning: vi.fn(),
     info: vi.fn()
-  })
+  }),
+  NTabs: {
+    name: 'NTabs',
+    props: ['value', 'type', 'size'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-tabs' }, slots.default?.())
+    }
+  },
+  NTabPane: {
+    name: 'NTabPane',
+    props: ['name', 'tab', 'disabled'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-tab-pane' }, slots.default?.())
+    }
+  },
+  NCollapse: {
+    name: 'NCollapse',
+    props: ['default-expanded-names'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-collapse' }, slots.default?.())
+    }
+  },
+  NCollapseItem: {
+    name: 'NCollapseItem',
+    props: ['title', 'name'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-collapse-item' }, slots.default?.())
+    }
+  },
+  NEmpty: {
+    name: 'NEmpty',
+    props: ['description'],
+    setup(props: any) {
+      return () => h('div', { class: 'n-empty' }, props.description)
+    }
+  }
 }))
 
 // Mock @vicons/ionicons5
 vi.mock('@vicons/ionicons5', () => ({
   PersonOutline: { name: 'PersonOutline' },
-  LogoGitlab: { name: 'LogoGitlab' }
+  LogoGitlab: { name: 'LogoGitlab' },
+  FolderOpenOutline: { name: 'FolderOpenOutline' },
+  GitMergeOutline: { name: 'GitMergeOutline' },
+  GitBranchOutline: { name: 'GitBranchOutline' },
+  ChatbubbleOutline: { name: 'ChatbubbleOutline' },
+  TimeOutline: { name: 'TimeOutline' },
+  GitPullRequest: { name: 'GitPullRequest' },
+  CubeOutline: { name: 'CubeOutline' },
+  ArrowDownCircleOutline: { name: 'ArrowDownCircleOutline' },
+  AlertCircleOutline: { name: 'AlertCircleOutline' },
+  CodeOutline: { name: 'CodeOutline' },
+  TerminalOutline: { name: 'TerminalOutline' },
+  CheckmarkCircleOutline: { name: 'CheckmarkCircleOutline' },
+  CloseCircleOutline: { name: 'CloseCircleOutline' },
+  DocumentTextOutline: { name: 'DocumentTextOutline' },
+  CreateOutline: { name: 'CreateOutline' },
+  BulbOutline: { name: 'BulbOutline' },
+  SearchOutline: { name: 'SearchOutline' }
 }))
 
 // Mock ansi-to-html
@@ -350,6 +404,8 @@ describe('TaskView', () => {
     vi.clearAllMocks()
     resetMockApi()
     mockEventSourceInstance.close.mockClear()
+    mockEventSourceInstance.onerror = null
+    ;(mockApi.streamTaskLogs as Mock).mockReturnValue(mockEventSourceInstance)
     router.push('/tasks/1')
     await router.isReady()
     vi.useFakeTimers()
@@ -410,10 +466,13 @@ describe('TaskView', () => {
       await mountComponent()
 
       await vi.waitFor(() => {
-        return wrapper.find('.task-summary-card').exists()
+        return wrapper.find('[data-testid="task-actions-card"]').exists()
       })
 
-      expect(wrapper.findAll('.task-summary-card').length).toBe(4)
+      // New layout: TaskMetadataPanel + actions card in top row, TaskProcessPanel below
+      expect(wrapper.find('.task-metadata-panel').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="task-actions-card"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="task-actions"]').exists()).toBe(true)
     })
 
     it('should display error message for failed tasks', async () => {
@@ -423,10 +482,10 @@ describe('TaskView', () => {
       })
 
       await vi.waitFor(() => {
-        return wrapper.find('.n-alert').exists()
+        return wrapper.find('.error-message').exists()
       })
 
-      expect(wrapper.find('.n-alert').text()).toContain('Task failed due to network error')
+      expect(wrapper.find('.error-message').text()).toContain('Task failed due to network error')
     })
   })
 
@@ -736,15 +795,16 @@ describe('TaskView', () => {
     it('should close log stream on unmount', async () => {
       await mountComponent({ status: 'running', container_id: 'container-123' })
 
-      await vi.waitFor(() => {
-        return (mockApi.getTask as Mock).mock.calls.length > 0
-      })
+      // Simulate the user opening the raw-log tab which calls connectLogStream()
+      // → connectLogStream creates a new EventSource → logEventSource = mockEventSourceInstance
+      await wrapper.vm.onRawTabOpen()
 
-      // Verify logEventSource was created
-      expect(wrapper.vm.logEventSource).not.toBeNull()
+      // Verify the EventSource was opened (via the stubbed EventSource constructor)
+      expect(mockEventSourceInstance.close).not.toHaveBeenCalled()
 
       wrapper.unmount()
 
+      // onBeforeUnmount must call closeLogStream() which closes the EventSource
       expect(mockEventSourceInstance.close).toHaveBeenCalled()
     })
   })
@@ -845,29 +905,33 @@ describe('TaskView', () => {
   })
 
   describe('computed properties', () => {
-    it('should format priority correctly', async () => {
-      await mountComponent({ priority: 0 })
-      expect(wrapper.vm.formatPriority(0)).toBe('P0')
+    it('should compute isTerminal for terminal statuses', async () => {
+      await mountComponent({ status: 'completed' })
+      expect(wrapper.vm.isTerminal).toBe(true)
 
-      await mountComponent({ priority: 1 })
-      expect(wrapper.vm.formatPriority(1)).toBe('P1')
-
-      await mountComponent({ priority: 2 })
-      expect(wrapper.vm.formatPriority(2)).toBe('P2')
+      await mountComponent({ status: 'failed' })
+      expect(wrapper.vm.isTerminal).toBe(true)
     })
 
-    it('should handle priority string formats', async () => {
-      await mountComponent()
-      expect(wrapper.vm.formatPriority('p0')).toBe('P0')
-      expect(wrapper.vm.formatPriority('P1')).toBe('P1')
-      expect(wrapper.vm.formatPriority('2')).toBe('P2')
+    it('should compute isTerminal for non-terminal statuses', async () => {
+      await mountComponent({ status: 'pending' })
+      expect(wrapper.vm.isTerminal).toBe(false)
+
+      await mountComponent({ status: 'running' })
+      expect(wrapper.vm.isTerminal).toBe(false)
+
+      await mountComponent({ status: 'queued' })
+      expect(wrapper.vm.isTerminal).toBe(false)
     })
 
-    it('should return dash for invalid priority', async () => {
-      await mountComponent()
-      expect(wrapper.vm.formatPriority(null)).toBe('-')
-      expect(wrapper.vm.formatPriority(undefined)).toBe('-')
-      expect(wrapper.vm.formatPriority('')).toBe('-')
+    it('should disable past dates for scheduling', async () => {
+      await mountComponent({ status: 'pending' })
+
+      const yesterday = Date.now() - 24 * 60 * 60 * 1000
+      const tomorrow = Date.now() + 24 * 60 * 60 * 1000
+
+      expect(wrapper.vm.isScheduledDateDisabled(yesterday)).toBe(true)
+      expect(wrapper.vm.isScheduledDateDisabled(tomorrow)).toBe(false)
     })
 
     it('should check active task status correctly', async () => {

@@ -115,7 +115,21 @@ vi.mock('naive-ui', () => ({
     success: vi.fn(),
     warning: vi.fn(),
     info: vi.fn()
-  })
+  }),
+  NModal: {
+    name: 'NModal',
+    props: ['preset', 'title', 'show'],
+    setup(props: any, { slots }: any) {
+      return () => props.show ? h('div', { class: 'n-modal' }, slots.default?.()) : h('div')
+    }
+  },
+  NIcon: {
+    name: 'NIcon',
+    props: ['component'],
+    setup(_props: any) {
+      return () => h('i', { class: 'n-icon' })
+    }
+  }
 }))
 
 // ---------------------------------------------------------------------------
