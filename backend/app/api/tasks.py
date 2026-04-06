@@ -115,7 +115,7 @@ async def list_scheduled_tasks(
                 TaskStatus.RUNNING,
             ]),
         )
-        .order_by(Task.scheduled_at.asc(), Task.priority.desc(), Task.created_at.asc())
+        .order_by(Task.scheduled_at.asc(), Task.priority.asc(), Task.created_at.asc())
     )
 
     if project_id:

@@ -361,7 +361,7 @@ class TestTaskCreationSlotEnforcement:
             resp = await self._create_task(client, scheduled_datetime=dt)
 
         assert resp.status_code == 409
-        assert "full capacity" in resp.json()["detail"]
+        assert resp.json()["detail"]["code"] == "SLOT_FULL"
 
     async def test_soft_warning_when_full_and_not_enforced(self, client, db_session):
         """200 OK with ``slot_warning`` when enforce=False."""
@@ -374,7 +374,7 @@ class TestTaskCreationSlotEnforcement:
         assert resp.status_code == 200
         data = resp.json()
         assert "slot_warning" in data
-        assert "capacity" in data["slot_warning"]
+        assert data["slot_warning"]["code"] == "SLOT_FULL"
         # Task should still be created
         assert "id" in data
         assert data["status"] == "pending"
@@ -454,7 +454,7 @@ class TestRetrySlotEnforcement:
             )
 
         assert resp.status_code == 409
-        assert "full capacity" in resp.json()["detail"]
+        assert resp.json()["detail"]["code"] == "SLOT_FULL"
 
     async def test_retry_succeeds_when_not_enforced(self, client, db_session):
         """Retry into a full slot with enforce=False should succeed."""

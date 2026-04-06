@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Set
 
-from sqlalchemy import select, func
+from sqlalchemy import case, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings as get_settings
@@ -117,20 +117,29 @@ class Scheduler:
         return result.scalar() or 0
 
     async def _get_next_task(self, db: AsyncSession) -> Task | None:
-        """Get the next task to execute based on priority and scheduled time."""
+        """Get the next task to execute based on priority and scheduled time.
+
+        Ordering:
+        1. priority ASC — P0(0) runs before P1(1) before P2(2)
+        2. scheduled tasks before immediate — users who booked a slot
+           have a reasonable expectation their task runs on time
+        3. scheduled_at ASC — earlier due times first
+        4. created_at ASC — FIFO tiebreaker
+        """
         now = datetime.now(UTC).replace(tzinfo=None)
 
-        # Query for next task:
-        # - status in (PENDING, QUEUED)
-        # - scheduled_at <= now (or null)
-        # - order by priority DESC, scheduled_at ASC, created_at ASC
         result = await db.execute(
             select(Task)
             .where(
                 Task.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED]),
                 (Task.scheduled_at == None) | (Task.scheduled_at <= now)
             )
-            .order_by(Task.priority.desc(), Task.scheduled_at.asc(), Task.created_at.asc())
+            .order_by(
+                Task.priority.asc(),
+                case((Task.scheduled_at.is_not(None), 0), else_=1),
+                Task.scheduled_at.asc(),
+                Task.created_at.asc(),
+            )
             .limit(1)
         )
         return result.scalar_one_or_none()
