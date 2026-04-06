@@ -4,6 +4,7 @@
 import os
 import sys
 import unittest
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from starlette.requests import Request
@@ -308,3 +309,251 @@ class StatsTimeWindowTests(unittest.TestCase):
         self.assertEqual(data["completed_24h"], 0)
         self.assertEqual(data["failed_cancelled_24h"], 0)
         self.assertEqual(data["running_long_30min"], 0)
+
+
+class ScheduledStatsTests(unittest.TestCase):
+    """Tests for the GET /api/stats/scheduled endpoint."""
+
+    def _build_summary_row(
+        self,
+        total=0,
+        ready_now=0,
+        next_24h=0,
+        later=0,
+        queued_count=0,
+        running_count=0,
+    ):
+        """Create a mock Row-like object returned by summary_result.one()."""
+        return SimpleNamespace(
+            total=total,
+            ready_now=ready_now,
+            next_24h=next_24h,
+            later=later,
+            queued_count=queued_count,
+            running_count=running_count,
+        )
+
+    def _build_hourly_rows(self, entries=None):
+        """Create a list of mock Row-like objects for the hourly distribution query.
+
+        Each entry is (hour_start_datetime, count).
+        """
+        if entries is None:
+            entries = []
+        return [
+            SimpleNamespace(hour_start=hour_start, count=count)
+            for hour_start, count in entries
+        ]
+
+    def _build_side_effects(self, summary_attrs=None, hourly_entries=None):
+        """Return a list of two mock db.execute results for the scheduled stats endpoint.
+
+        Call order:
+          1. summary_result  → .one() returns named fields
+          2. hourly_result   → .all() returns list of (hour_start, count) rows
+        """
+        summary_row = self._build_summary_row(**(summary_attrs or {}))
+        summary_mock = MagicMock()
+        summary_mock.one = MagicMock(return_value=summary_row)
+
+        hourly_rows = self._build_hourly_rows(hourly_entries)
+        hourly_mock = MagicMock()
+        hourly_mock.all = MagicMock(return_value=hourly_rows)
+
+        return [summary_mock, hourly_mock]
+
+    def setUp(self):
+        self.mock_db = MagicMock()
+        self.mock_db.execute = AsyncMock(
+            side_effect=self._build_side_effects()
+        )
+        app.dependency_overrides[get_db] = lambda: self.mock_db
+
+        async def mock_auth_context(request: Request, auth_context=None):
+            return SimpleNamespace(
+                user=SimpleNamespace(id=1, username="admin", platform_role="platform_admin"),
+                session=None,
+                gitlab_access_token=None,
+                gitlab_refresh_token=None,
+            )
+
+        app.dependency_overrides[require_authenticated_context] = mock_auth_context
+        app.dependency_overrides[require_project_access_scope] = lambda: ProjectAccessScope(
+            is_unrestricted=True,
+            accessible_projects=[],
+        )
+
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+
+    def test_scheduled_stats_returns_summary_fields(self):
+        """GET /api/stats/scheduled response includes summary, hourly_distribution, and max_count keys."""
+        response = self.client.get("/api/stats/scheduled")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("summary", data)
+        self.assertIn("hourly_distribution", data)
+        self.assertIn("max_count", data)
+
+    def test_scheduled_stats_summary_has_required_fields(self):
+        """The summary object has all required fields: total, ready_now, next_24h, later, queued_count, running_count, busiest_hour_count, busiest_hour_label."""
+        self.mock_db.execute = AsyncMock(
+            side_effect=self._build_side_effects(
+                summary_attrs=dict(
+                    total=145, ready_now=12, next_24h=89, later=44,
+                    queued_count=5, running_count=2,
+                ),
+            )
+        )
+        response = self.client.get("/api/stats/scheduled")
+        self.assertEqual(response.status_code, 200)
+        summary = response.json()["summary"]
+        expected_keys = {
+            "total", "ready_now", "next_24h", "later",
+            "queued_count", "running_count",
+            "busiest_hour_count", "busiest_hour_label",
+        }
+        self.assertEqual(set(summary.keys()), expected_keys)
+        # Verify values from the summary query match
+        self.assertEqual(summary["total"], 145)
+        self.assertEqual(summary["ready_now"], 12)
+        self.assertEqual(summary["next_24h"], 89)
+        self.assertEqual(summary["later"], 44)
+        self.assertEqual(summary["queued_count"], 5)
+        self.assertEqual(summary["running_count"], 2)
+
+    def test_scheduled_stats_hourly_distribution_has_24_items(self):
+        """hourly_distribution array has exactly 24 items (one per hour bucket)."""
+        response = self.client.get("/api/stats/scheduled")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data["hourly_distribution"]), 24)
+
+    def test_scheduled_stats_hourly_items_have_correct_shape(self):
+        """Each item in hourly_distribution has 'hour_start' (string) and 'count' (int) keys."""
+        response = self.client.get("/api/stats/scheduled")
+        self.assertEqual(response.status_code, 200)
+        for item in response.json()["hourly_distribution"]:
+            self.assertIn("hour_start", item)
+            self.assertIn("count", item)
+            self.assertIsInstance(item["hour_start"], str)
+            self.assertIsInstance(item["count"], int)
+
+    def test_scheduled_stats_max_count_matches_distribution(self):
+        """max_count equals the largest count in hourly_distribution."""
+        now = datetime.now(UTC).replace(tzinfo=None)
+        now_hour = now.replace(minute=0, second=0, microsecond=0)
+        # Simulate some tasks in two hourly buckets
+        hourly_entries = [
+            (now_hour + timedelta(hours=1), 5),
+            (now_hour + timedelta(hours=3), 18),
+        ]
+        self.mock_db.execute = AsyncMock(
+            side_effect=self._build_side_effects(
+                summary_attrs=dict(total=23, ready_now=0, next_24h=23, later=0,
+                                   queued_count=0, running_count=0),
+                hourly_entries=hourly_entries,
+            )
+        )
+        response = self.client.get("/api/stats/scheduled")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["max_count"], 18)
+        # Verify the busiest hour in summary
+        self.assertEqual(data["summary"]["busiest_hour_count"], 18)
+
+    def test_scheduled_stats_empty_db_returns_zero_counts(self):
+        """With no scheduled tasks, all summary counts are 0 and hourly_distribution is all zeros."""
+        self.mock_db.execute = AsyncMock(
+            side_effect=self._build_side_effects(
+                summary_attrs=dict(total=0, ready_now=0, next_24h=0, later=0,
+                                   queued_count=0, running_count=0),
+                hourly_entries=[],
+            )
+        )
+        response = self.client.get("/api/stats/scheduled")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["summary"]["total"], 0)
+        self.assertEqual(data["max_count"], 0)
+        self.assertTrue(all(item["count"] == 0 for item in data["hourly_distribution"]))
+
+    def test_scheduled_stats_accepts_project_id(self):
+        """GET /api/stats/scheduled?project_id=42 returns 200 with valid response."""
+        self.mock_db.execute = AsyncMock(
+            side_effect=self._build_side_effects()
+        )
+        response = self.client.get("/api/stats/scheduled?project_id=42")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("summary", data)
+        self.assertEqual(len(data["hourly_distribution"]), 24)
+
+
+class ScheduledTasksHourFilterTests(unittest.TestCase):
+    """Tests for the hour_start query parameter on GET /api/tasks/scheduled."""
+
+    def setUp(self):
+        self.mock_db = MagicMock()
+        # Default: db.execute returns result.scalars().all() → empty list
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        self.mock_db.execute = AsyncMock(return_value=mock_result)
+
+        app.dependency_overrides[get_db] = lambda: self.mock_db
+
+        async def mock_auth_context(request: Request, auth_context=None):
+            return SimpleNamespace(
+                user=SimpleNamespace(id=1, username="admin", platform_role="platform_admin"),
+                session=None,
+                gitlab_access_token=None,
+                gitlab_refresh_token=None,
+            )
+
+        app.dependency_overrides[require_authenticated_context] = mock_auth_context
+        app.dependency_overrides[require_project_access_scope] = lambda: ProjectAccessScope(
+            is_unrestricted=True,
+            accessible_projects=[],
+        )
+
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+
+    @patch("app.api.tasks.build_project_lookup", new_callable=AsyncMock, return_value={})
+    def test_scheduled_tasks_with_hour_start_returns_200(self, _mock_lookup):
+        """GET /api/tasks/scheduled?hour_start=<valid ISO> returns 200."""
+        response = self.client.get("/api/tasks/scheduled?hour_start=2024-12-25T15:00:00")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsInstance(response.json(), list)
+
+    @patch("app.api.tasks.build_project_lookup", new_callable=AsyncMock, return_value={})
+    def test_scheduled_tasks_invalid_hour_start_returns_400(self, _mock_lookup):
+        """GET /api/tasks/scheduled?hour_start=not-a-date returns 400."""
+        response = self.client.get("/api/tasks/scheduled?hour_start=not-a-date")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid hour_start format", response.json()["detail"])
+
+    @patch("app.api.tasks.build_project_lookup", new_callable=AsyncMock, return_value={})
+    def test_scheduled_tasks_without_hour_start_returns_200(self, _mock_lookup):
+        """GET /api/tasks/scheduled without hour_start still returns 200 (parameter is optional)."""
+        response = self.client.get("/api/tasks/scheduled")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsInstance(response.json(), list)
+
+    @patch("app.api.tasks.build_project_lookup", new_callable=AsyncMock, return_value={})
+    def test_scheduled_tasks_hour_start_with_timezone_returns_200(self, _mock_lookup):
+        """GET /api/tasks/scheduled?hour_start=<ISO with Z> returns 200 (timezone stripped)."""
+        response = self.client.get("/api/tasks/scheduled?hour_start=2024-12-25T15:00:00Z")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsInstance(response.json(), list)
+
+    @patch("app.api.tasks.build_project_lookup", new_callable=AsyncMock, return_value={})
+    def test_scheduled_tasks_hour_start_empty_string_returns_200(self, _mock_lookup):
+        """GET /api/tasks/scheduled?hour_start= (empty) is treated as no filter → 200."""
+        response = self.client.get("/api/tasks/scheduled?hour_start=")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsInstance(response.json(), list)
