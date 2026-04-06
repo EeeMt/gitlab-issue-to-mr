@@ -123,7 +123,7 @@
           <template v-if="task.scheduled_at && isSignificantSchedule(task.scheduled_at, task.created_at)">
             <div class="time-axis__sep">→</div>
             <div class="time-point">
-              <span class="time-point__label">{{ t('taskView.scheduledAt') }}</span>
+              <span class="time-point__label">{{ t('common.scheduledAt') }}</span>
               <span class="time-point__value">{{ formatDate(task.scheduled_at) }}</span>
             </div>
           </template>

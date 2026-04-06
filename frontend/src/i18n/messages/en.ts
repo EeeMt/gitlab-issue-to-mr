@@ -104,7 +104,8 @@ const en = {
     disabled: 'Disabled',
     notAvailable: 'N/A',
     source: 'Source',
-    timeline: 'Timeline'
+    timeline: 'Timeline',
+    scheduledAt: 'Scheduled At'
   },
   login: {
     subtitle: 'Sign in to access the dashboard.',
@@ -259,7 +260,6 @@ const en = {
     taskNotStarted: 'Task not started',
     noProcessYet: 'No events yet',
     scrollToLatest: 'Jump to latest',
-    scheduledAt: 'Scheduled At',
     completedAt: 'Completed At',
     tokenBreakdown: 'Input: {input} · Output: {output}'
   },
@@ -450,8 +450,9 @@ const en = {
     longRunningMetric: 'Long-running',
     longRunningMetricHelp: 'Running longer than 30 minutes.',
     activeTasksTitle: 'Active Task Queue',
-    activeTasksSubtitle: 'Latest pending, queued, and running tasks. Click a row to open details.',
+    activeTasksSubtitle: 'Sorted by: Running first → Priority (P0 first) → Scheduled before immediate tasks → Earlier schedule first → FIFO. Click a row to open details.',
     noActiveTasks: 'No active tasks right now.',
+    immediateTask: 'Immediate',
     recentActivityTitle: 'Recent Finished Activity',
     recentActivitySubtitle: 'Most recent completed, failed, and cancelled tasks from the latest sample.',
     noRecentActivity: 'No finished tasks in the latest sample.',

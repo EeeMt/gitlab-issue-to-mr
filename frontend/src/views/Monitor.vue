@@ -316,7 +316,24 @@ const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 const tasksById = computed(() => new Map(tasks.value.map((task) => [task.id, task])))
 
 const activeTasks = computed(() =>
-  tasks.value.filter((task) => ACTIVE_STATUSES.includes(task.status))
+  tasks.value
+    .filter((task) => ACTIVE_STATUSES.includes(task.status))
+    .sort((a, b) => {
+      // Running tasks always come first
+      const aRunning = a.status === 'running' ? 0 : 1
+      const bRunning = b.status === 'running' ? 0 : 1
+      if (aRunning !== bRunning) return aRunning - bRunning
+      // Within same group: scheduler ordering — priority ASC → scheduled before immediate → scheduled_at ASC → created_at ASC
+      if (a.priority !== b.priority) return a.priority - b.priority
+      const aScheduled = a.scheduled_at ? 0 : 1
+      const bScheduled = b.scheduled_at ? 0 : 1
+      if (aScheduled !== bScheduled) return aScheduled - bScheduled
+      if (a.scheduled_at && b.scheduled_at) {
+        const diff = new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
+        if (diff !== 0) return diff
+      }
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    })
 )
 
 const runningTasks = computed(() =>
@@ -598,6 +615,12 @@ const activeTaskColumns = computed<DataTableColumns<Task>>(() => [
     key: 'priority',
     width: 90,
     render: (task) => formatPriority(task.priority)
+  },
+  {
+    title: t('common.scheduledAt'),
+    key: 'scheduled_at',
+    width: 160,
+    render: (task) => task.scheduled_at ? formatTimestamp(task.scheduled_at) : t('monitor.immediateTask')
   },
   {
     title: t('monitor.waitingOrRunning'),

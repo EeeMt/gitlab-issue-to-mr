@@ -104,7 +104,8 @@ const zhCN = {
     disabled: '已禁用',
     notAvailable: '暂无',
     source: '来源',
-    timeline: '时间轴'
+    timeline: '时间轴',
+    scheduledAt: '预约时间'
   },
   login: {
     subtitle: '登录以访问控制台。',
@@ -249,7 +250,6 @@ const zhCN = {
     taskNotStarted: '任务未开始',
     noProcessYet: '暂无进程',
     scrollToLatest: '跳转到最新',
-    scheduledAt: '定时时间',
     completedAt: '完成时间',
     tokenBreakdown: '输入: {input} · 输出: {output}'
   },
@@ -436,8 +436,9 @@ const zhCN = {
     longRunningMetric: '长时间运行',
     longRunningMetricHelp: '运行超过 30 分钟的任务。',
     activeTasksTitle: '活跃任务队列',
-    activeTasksSubtitle: '展示最新的 pending、queued、running 任务，可点击进入详情。',
+    activeTasksSubtitle: '排序规则：正在执行的排最前 → 队列内按优先级（P0 优先）→ 预约任务优先于立即执行任务 → 预约时间越早越靠前 → 先创建先执行。点击可查看详情。',
     noActiveTasks: '当前没有活跃任务。',
+    immediateTask: '立即执行',
     recentActivityTitle: '最近完成活动',
     recentActivitySubtitle: '最新样本中的 completed、failed、cancelled 任务。',
     noRecentActivity: '最新样本中没有已结束任务。',
