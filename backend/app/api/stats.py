@@ -76,7 +76,7 @@ async def get_stats(
         status_counts[status_value.value] = result.scalar() or 0
 
     # Time-windowed counts for Monitor dashboard
-    now = datetime.now(UTC)
+    now = datetime.now(UTC).replace(tzinfo=None)
     cutoff_24h = now - timedelta(hours=24)
 
     completed_24h_result = await db.execute(
@@ -661,13 +661,19 @@ async def get_scheduled_stats(
     next_24h = now + timedelta(hours=24)
     end_24h_bucket = now_hour + timedelta(hours=24)
 
-    base = select(Task).where(
+    # Build shared WHERE conditions (avoiding subquery to preserve column refs)
+    base_conditions = [
         Task.scheduled_at.isnot(None),
         Task.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING]),
-    )
-    base = _apply_project_scope(base, access_scope)
+    ]
+    if not access_scope.is_unrestricted:
+        allowed_project_ids = access_scope.accessible_project_ids
+        if not allowed_project_ids:
+            base_conditions.append(false())
+        else:
+            base_conditions.append(Task.project_id.in_(allowed_project_ids))
     if project_id is not None:
-        base = base.where(Task.project_id == project_id)
+        base_conditions.append(Task.project_id == project_id)
 
     # Summary counts in a single query using conditional aggregation
     summary_q = select(
@@ -679,22 +685,22 @@ async def get_scheduled_stats(
         func.count(case((Task.scheduled_at > next_24h, 1))).label("later"),
         func.count(case((Task.status == TaskStatus.QUEUED, 1))).label("queued_count"),
         func.count(case((Task.status == TaskStatus.RUNNING, 1))).label("running_count"),
-    ).select_from(base.subquery())
+    ).where(*base_conditions)
 
     summary_result = await db.execute(summary_q)
     s = summary_result.one()
 
     # Hourly distribution: count tasks bucketed by hour for next 24 hours
-    hourly_base = base.where(
-        Task.scheduled_at >= now_hour,
-        Task.scheduled_at < end_24h_bucket,
-    )
     hourly_q = (
         select(
             func.date_trunc("hour", Task.scheduled_at).label("hour_start"),
             func.count().label("count"),
         )
-        .select_from(hourly_base.subquery())
+        .where(
+            *base_conditions,
+            Task.scheduled_at >= now_hour,
+            Task.scheduled_at < end_24h_bucket,
+        )
         .group_by(func.date_trunc("hour", Task.scheduled_at))
         .order_by(func.date_trunc("hour", Task.scheduled_at))
     )
