@@ -558,8 +558,13 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         self.assertIn("container not found", task_without_container.error_message)
         self.assertIsNotNone(task_without_container.completed_at)
 
-    async def test_crash_recovery_stopped_container_with_running_task(self) -> None:
-        """An exited container for a RUNNING task should be removed, task marked failed."""
+    async def test_crash_recovery_exited_container_with_running_task(self) -> None:
+        """An exited container for a RUNNING task should be RESUMED (not removed).
+
+        The worker's resume_task handles exited containers by collecting logs
+        and processing results, so crash recovery should resume them just like
+        running containers.
+        """
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
@@ -582,12 +587,47 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_docker.client.containers.list.return_value = [exited_container]
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
+             patch("app.scheduler.get_docker_client", return_value=mock_docker), \
+             patch("asyncio.create_task") as mock_create_task:
+            await scheduler._crash_recovery()
+
+        # Container should NOT be removed — it's being resumed
+        exited_container.remove.assert_not_called()
+        # Task should be tracked for resume, NOT marked failed
+        self.assertIn(50, scheduler._running_tasks)
+        self.assertIn("300:1", scheduler._running_issues)
+        # asyncio.create_task should have been called to resume
+        mock_create_task.assert_called_once()
+
+    async def test_crash_recovery_dead_container_with_running_task(self) -> None:
+        """A 'dead' container for a RUNNING task should be removed and task marked failed."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+
+        stuck_task = _make_mock_task(task_id=60, project_id=400, issue_iid=2, status="running")
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [stuck_task]
+
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.commit = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        dead_container = self._make_container("codify-60-p400-i2", status="dead")
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.list.return_value = [dead_container]
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
              patch("app.scheduler.get_docker_client", return_value=mock_docker):
             await scheduler._crash_recovery()
 
-        # Exited container should be cleaned up
-        exited_container.remove.assert_called_once_with(force=False)
-        # Task should be marked failed (not resumed — container was not running)
+        # Dead container should be force-removed
+        dead_container.remove.assert_called_once_with(force=True)
+        # Task should be marked failed (no resume for dead containers)
         self.assertEqual(stuck_task.status, TaskStatus.FAILED)
         self.assertIn("container not found", stuck_task.error_message)
 

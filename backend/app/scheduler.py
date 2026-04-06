@@ -220,7 +220,14 @@ class Scheduler:
                 pass
 
     async def _crash_recovery(self) -> None:
-        """Recover from crashes: clean up orphan containers, resume legitimate ones."""
+        """Recover from crashes: clean up orphan containers, resume legitimate ones.
+
+        Handles several scenarios:
+        - Container running + task RUNNING → resume monitoring
+        - Container exited + task RUNNING → resume (collects logs/results from exited container)
+        - Container running/exited + no matching task → remove (true orphan)
+        - Task RUNNING + no container → mark FAILED
+        """
         logger.info("Running crash recovery...")
 
         async with AsyncSessionLocal() as db:
@@ -248,37 +255,45 @@ class Scheduler:
                         continue
 
                     task_id = _extract_task_id(container.name)
+                    c_status = container.status
 
-                    if (
-                        container.status == "running"
-                        and task_id is not None
-                        and task_id in running_task_map
-                    ):
-                        # Legitimate running worker — keep container and resume monitoring
-                        task = running_task_map[task_id]
-                        issue_key = (
-                            f"{task.project_id}:{task.issue_iid}"
-                            if task.issue_iid is not None
-                            else f"manual:{task.id}"
-                        )
-                        logger.info(
-                            f"Resuming task {task_id} (container {container.name}, "
-                            f"issue_key={issue_key})"
-                        )
-                        self._running_tasks.add(task_id)
-                        self._running_issues.add(issue_key)
-                        resumed_task_ids.add(task_id)
-                        asyncio.create_task(
-                            self._resume_task_background(task_id, container.name)
-                        )
+                    if task_id is not None and task_id in running_task_map:
+                        if c_status in ("running", "exited"):
+                            # Legitimate worker (running or just finished) — resume monitoring.
+                            # For exited containers, resume_task collects output and processes results.
+                            task = running_task_map[task_id]
+                            issue_key = (
+                                f"{task.project_id}:{task.issue_iid}"
+                                if task.issue_iid is not None
+                                else f"manual:{task.id}"
+                            )
+                            logger.info(
+                                f"Resuming task {task_id} (container {container.name}, "
+                                f"status={c_status}, issue_key={issue_key})"
+                            )
+                            self._running_tasks.add(task_id)
+                            self._running_issues.add(issue_key)
+                            resumed_task_ids.add(task_id)
+                            asyncio.create_task(
+                                self._resume_task_background(task_id, container.name)
+                            )
+                        else:
+                            # Container in weird state (created, dead, etc.) — remove and let task fail
+                            logger.warning(
+                                f"Removing {c_status} container for task {task_id}: {container.name}"
+                            )
+                            try:
+                                container.remove(force=True)
+                            except Exception as e:
+                                logger.warning(f"Failed to remove container {container.name}: {e}")
                     else:
-                        # Orphan or stopped container — clean up
-                        status = container.status
+                        # No matching RUNNING task — true orphan
                         logger.warning(
-                            f"Removing {status} orphan container: {container.name}"
+                            f"Removing {c_status} orphan container: {container.name} "
+                            f"(task_id={task_id}, in_db={task_id in running_task_map if task_id else 'N/A'})"
                         )
                         try:
-                            container.remove(force=(status == "running"))
+                            container.remove(force=(c_status == "running"))
                         except Exception as e:
                             logger.warning(
                                 f"Failed to remove container {container.name}: {e}"
