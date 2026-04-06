@@ -315,26 +315,42 @@ const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 
 const tasksById = computed(() => new Map(tasks.value.map((task) => [task.id, task])))
 
-const activeTasks = computed(() =>
-  tasks.value
+const activeTasks = computed(() => {
+  const now = Date.now()
+  return tasks.value
     .filter((task) => ACTIVE_STATUSES.includes(task.status))
     .sort((a, b) => {
-      // Running tasks always come first
+      // 1. Running tasks always first
       const aRunning = a.status === 'running' ? 0 : 1
       const bRunning = b.status === 'running' ? 0 : 1
       if (aRunning !== bRunning) return aRunning - bRunning
-      // Within same group: scheduler ordering — priority ASC → scheduled before immediate → scheduled_at ASC → created_at ASC
-      if (a.priority !== b.priority) return a.priority - b.priority
-      const aScheduled = a.scheduled_at ? 0 : 1
-      const bScheduled = b.scheduled_at ? 0 : 1
-      if (aScheduled !== bScheduled) return aScheduled - bScheduled
-      if (a.scheduled_at && b.scheduled_at) {
-        const diff = new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
-        if (diff !== 0) return diff
+
+      // 2. Ready (due now or immediate) before Waiting (future scheduled)
+      const aReady = !a.scheduled_at || new Date(a.scheduled_at).getTime() <= now ? 0 : 1
+      const bReady = !b.scheduled_at || new Date(b.scheduled_at).getTime() <= now ? 0 : 1
+      if (aReady !== bReady) return aReady - bReady
+
+      // Within Ready group: scheduler ordering
+      if (aReady === 0 && bReady === 0) {
+        if (a.priority !== b.priority) return a.priority - b.priority
+        // Due scheduled > immediate
+        const aDue = a.scheduled_at ? 0 : 1
+        const bDue = b.scheduled_at ? 0 : 1
+        if (aDue !== bDue) return aDue - bDue
+        if (a.scheduled_at && b.scheduled_at) {
+          const diff = new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
+          if (diff !== 0) return diff
+        }
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
       }
-      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+
+      // Within Waiting group: earliest scheduled_at first
+      if (a.scheduled_at && b.scheduled_at) {
+        return new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
+      }
+      return 0
     })
-)
+})
 
 const runningTasks = computed(() =>
   activeTasks.value.filter((task) => task.status === 'running')

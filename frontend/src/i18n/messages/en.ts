@@ -450,7 +450,7 @@ const en = {
     longRunningMetric: 'Long-running',
     longRunningMetricHelp: 'Running longer than 30 minutes.',
     activeTasksTitle: 'Active Task Queue',
-    activeTasksSubtitle: 'Sorted by: Running first → Priority (P0 first) → Scheduled before immediate tasks → Earlier schedule first → FIFO. Click a row to open details.',
+    activeTasksSubtitle: 'Sorted by: Running → Ready (Priority P0 first → Due scheduled before immediate → Earlier schedule first → FIFO) → Waiting (by scheduled time). Click a row to open details.',
     noActiveTasks: 'No active tasks right now.',
     immediateTask: 'Immediate',
     recentActivityTitle: 'Recent Finished Activity',

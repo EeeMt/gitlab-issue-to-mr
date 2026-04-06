@@ -436,7 +436,7 @@ const zhCN = {
     longRunningMetric: '长时间运行',
     longRunningMetricHelp: '运行超过 30 分钟的任务。',
     activeTasksTitle: '活跃任务队列',
-    activeTasksSubtitle: '排序规则：正在执行的排最前 → 队列内按优先级（P0 优先）→ 预约任务优先于立即执行任务 → 预约时间越早越靠前 → 先创建先执行。点击可查看详情。',
+    activeTasksSubtitle: '排序规则：正在执行 → 可调度（优先级 P0 优先 → 已到期预约优先于立即执行 → 预约时间越早越靠前 → 先创建先执行）→ 等待中（按预约时间排序）。点击可查看详情。',
     noActiveTasks: '当前没有活跃任务。',
     immediateTask: '立即执行',
     recentActivityTitle: '最近完成活动',

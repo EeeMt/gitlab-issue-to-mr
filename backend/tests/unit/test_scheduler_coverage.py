@@ -312,7 +312,7 @@ class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
             await scheduler._crash_recovery()
 
         running_worker.remove.assert_called_once_with(force=True)
-        exited_worker.remove.assert_called_once_with()
+        exited_worker.remove.assert_called_once_with(force=False)
 
     async def test_crash_recovery_skips_non_worker_containers(self) -> None:
         """Line 232-233: containers that don't match WORKER_CONTAINER_PATTERN are skipped."""
@@ -344,7 +344,7 @@ class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
 
         backend.remove.assert_not_called()
         postgres.remove.assert_not_called()
-        worker.remove.assert_called_once_with()  # exited → normal remove
+        worker.remove.assert_called_once_with(force=False)  # exited → normal remove
 
     async def test_crash_recovery_marks_stuck_tasks_as_failed(self) -> None:
         """Stuck RUNNING tasks should be marked FAILED with an error message."""
@@ -371,7 +371,7 @@ class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
             await scheduler._crash_recovery()
 
         self.assertEqual(stuck_task.status, TaskStatus.FAILED)
-        self.assertIn("crashed", stuck_task.error_message)
+        self.assertIn("container not found", stuck_task.error_message)
         self.assertIsNotNone(stuck_task.completed_at)
         mock_db.commit.assert_awaited_once()
 
@@ -399,6 +399,231 @@ class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
         # Stuck tasks should still be marked as failed
         self.assertEqual(stuck_task.status, TaskStatus.FAILED)
         mock_db.commit.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# _crash_recovery — smart recovery (resume / orphan cleanup / _extract_task_id)
+# ---------------------------------------------------------------------------
+
+class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
+    """Tests for the smart crash recovery behaviour (resume vs kill)."""
+
+    def _make_container(self, name: str, status: str = "exited") -> MagicMock:
+        c = MagicMock()
+        c.name = name
+        c.status = status
+        c.remove = MagicMock()
+        return c
+
+    async def test_crash_recovery_resumes_legitimate_running_tasks(self) -> None:
+        """A RUNNING task whose container is still running should be resumed, not failed."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+
+        # RUNNING task id=42 in DB
+        stuck_task = _make_mock_task(task_id=42, project_id=100, issue_iid=10, status="running")
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [stuck_task]
+
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.commit = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        # Running container whose name maps to task 42
+        running_container = self._make_container("codify-42-p100-i10", status="running")
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.list.return_value = [running_container]
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
+             patch("app.scheduler.get_docker_client", return_value=mock_docker), \
+             patch.object(scheduler, "_resume_task_background", new=MagicMock()) as mock_resume, \
+             patch("app.scheduler.asyncio.create_task") as mock_create_task:
+            await scheduler._crash_recovery()
+
+        # Task should NOT be marked failed
+        self.assertNotEqual(stuck_task.status, TaskStatus.FAILED)
+        # Container should NOT be removed
+        running_container.remove.assert_not_called()
+        # _resume_task_background should have been called with the task/container
+        mock_resume.assert_called_once_with(42, "codify-42-p100-i10")
+        # asyncio.create_task should have been called to schedule the resume
+        mock_create_task.assert_called_once()
+        # Task should be tracked as running
+        self.assertIn(42, scheduler._running_tasks)
+        self.assertIn("100:10", scheduler._running_issues)
+
+    async def test_crash_recovery_resumes_manual_task(self) -> None:
+        """A RUNNING manual task (issue_iid=None) should use 'manual:{id}' as issue_key."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+
+        stuck_task = _make_mock_task(task_id=7, project_id=200, issue_iid=None, status="running")
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [stuck_task]
+
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.commit = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        container = self._make_container("codify-7-p200-manual", status="running")
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.list.return_value = [container]
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
+             patch("app.scheduler.get_docker_client", return_value=mock_docker), \
+             patch.object(scheduler, "_resume_task_background", new=MagicMock()), \
+             patch("app.scheduler.asyncio.create_task"):
+            await scheduler._crash_recovery()
+
+        self.assertNotEqual(stuck_task.status, TaskStatus.FAILED)
+        container.remove.assert_not_called()
+        self.assertIn(7, scheduler._running_tasks)
+        self.assertIn("manual:7", scheduler._running_issues)
+
+    async def test_crash_recovery_kills_orphan_running_containers(self) -> None:
+        """A running container with no matching RUNNING task should be force-removed."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+
+        # No stuck tasks in DB
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.commit = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        # Orphan running container (task_id=99 not in DB)
+        orphan = self._make_container("codify-99-p100-i10", status="running")
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.list.return_value = [orphan]
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
+             patch("app.scheduler.get_docker_client", return_value=mock_docker):
+            await scheduler._crash_recovery()
+
+        orphan.remove.assert_called_once_with(force=True)
+
+    async def test_crash_recovery_mixed_resume_and_fail(self) -> None:
+        """Tasks with containers are resumed; tasks without containers are failed."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+
+        task_with_container = _make_mock_task(task_id=10, project_id=100, issue_iid=5, status="running")
+        task_without_container = _make_mock_task(task_id=20, project_id=200, issue_iid=15, status="running")
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [task_with_container, task_without_container]
+
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.commit = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        # Only task 10 has a running container
+        container_10 = self._make_container("codify-10-p100-i5", status="running")
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.list.return_value = [container_10]
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
+             patch("app.scheduler.get_docker_client", return_value=mock_docker), \
+             patch.object(scheduler, "_resume_task_background", new=MagicMock()), \
+             patch("app.scheduler.asyncio.create_task"):
+            await scheduler._crash_recovery()
+
+        # Task 10 should be resumed, not failed
+        self.assertNotEqual(task_with_container.status, TaskStatus.FAILED)
+        container_10.remove.assert_not_called()
+        self.assertIn(10, scheduler._running_tasks)
+
+        # Task 20 should be failed (no container)
+        self.assertEqual(task_without_container.status, TaskStatus.FAILED)
+        self.assertIn("container not found", task_without_container.error_message)
+        self.assertIsNotNone(task_without_container.completed_at)
+
+    async def test_crash_recovery_stopped_container_with_running_task(self) -> None:
+        """An exited container for a RUNNING task should be removed, task marked failed."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+
+        stuck_task = _make_mock_task(task_id=50, project_id=300, issue_iid=1, status="running")
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [stuck_task]
+
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.commit = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        # Container for task 50 exists but is exited
+        exited_container = self._make_container("codify-50-p300-i1", status="exited")
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.list.return_value = [exited_container]
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
+             patch("app.scheduler.get_docker_client", return_value=mock_docker):
+            await scheduler._crash_recovery()
+
+        # Exited container should be cleaned up
+        exited_container.remove.assert_called_once_with(force=False)
+        # Task should be marked failed (not resumed — container was not running)
+        self.assertEqual(stuck_task.status, TaskStatus.FAILED)
+        self.assertIn("container not found", stuck_task.error_message)
+
+
+class TestExtractTaskId(unittest.TestCase):
+    """Tests for the _extract_task_id() helper function."""
+
+    def test_standard_issue_container(self) -> None:
+        """codify-123-p456-i789 → 123."""
+        from app.scheduler import _extract_task_id
+        self.assertEqual(_extract_task_id("codify-123-p456-i789"), 123)
+
+    def test_manual_container(self) -> None:
+        """codify-1-p2-manual → 1."""
+        from app.scheduler import _extract_task_id
+        self.assertEqual(_extract_task_id("codify-1-p2-manual"), 1)
+
+    def test_service_container_returns_none(self) -> None:
+        """codify-backend → None (not a worker container)."""
+        from app.scheduler import _extract_task_id
+        self.assertIsNone(_extract_task_id("codify-backend"))
+
+    def test_invalid_name_returns_none(self) -> None:
+        """Completely unrelated name → None."""
+        from app.scheduler import _extract_task_id
+        self.assertIsNone(_extract_task_id("invalid"))
+
+    def test_partial_match_returns_none(self) -> None:
+        """codify-1-p100-other → None (invalid suffix)."""
+        from app.scheduler import _extract_task_id
+        self.assertIsNone(_extract_task_id("codify-1-p100-other"))
+
+    def test_large_ids(self) -> None:
+        """Large numeric IDs should be extracted correctly."""
+        from app.scheduler import _extract_task_id
+        self.assertEqual(_extract_task_id("codify-99999-p88888-i77777"), 99999)
 
 
 # ---------------------------------------------------------------------------

@@ -1008,6 +1008,116 @@ class WorkerExecutor:
 
             return False
 
+    async def resume_task(self, db: AsyncSession, task_id: int, container_name: str) -> bool:
+        """Resume monitoring a task whose container survived a scheduler restart.
+
+        Unlike execute_task(), this does NOT create a new container. Instead it
+        attaches to the existing running container, streams remaining logs,
+        and performs the same post-processing (parse results, update status,
+        notifications, cleanup).
+
+        Args:
+            db: Database session
+            task_id: Task ID to resume
+            container_name: Name of the running Docker container
+
+        Returns:
+            True if the task completed successfully, False otherwise
+        """
+        settings = get_settings()
+
+        # Fetch task
+        result = await db.execute(select(Task).where(Task.id == task_id))
+        task = result.scalar_one_or_none()
+
+        if not task:
+            logger.error(f"[Task {task_id}] Resume: task not found in database")
+            return False
+
+        logger.info(
+            f"[Task {task_id}] Resuming monitoring for container {container_name} "
+            f"(project={task.project_id} issue_iid={task.issue_iid})"
+        )
+        had_existing_mr = task.merge_request_iid is not None
+
+        # Find the running container
+        try:
+            container = self.docker.client.containers.get(container_name)
+        except Exception as e:
+            logger.error(f"[Task {task_id}] Resume: container {container_name} not found: {e}")
+            task.status = TaskStatus.FAILED
+            task.error_message = f"Container disappeared during resume: {e}"
+            task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+            await db.commit()
+            return False
+
+        try:
+            # Stream remaining logs (follow=True will wait for container to finish)
+            exit_code, logs, log_chunks_saved = await self._stream_logs_to_db(
+                container, task.id, db, settings.task_timeout
+            )
+
+            # Parse results and update task
+            await self._parse_task_result(task, logs, db, exit_code)
+
+            if exit_code == 0:
+                logger.info(f"[Task {task_id}] Resume: completed successfully")
+                if task.merge_request_iid:
+                    try:
+                        self._remove_mr_draft_status(task)
+                    except Exception as e:
+                        logger.warning(f"[Task {task_id}] Resume: failed to update MR draft status: {e}")
+                await self._send_notifications(task, success=True, had_existing_mr=had_existing_mr, logs=logs)
+            else:
+                logger.error(f"[Task {task_id}] Resume: failed with exit code {exit_code}")
+                if settings.max_retries > 0 and task.retry_count < settings.max_retries:
+                    task.retry_count += 1
+                    task.status = TaskStatus.PENDING
+                    task.scheduled_at = datetime.now(UTC).replace(tzinfo=None)
+                    logger.info(f"[Task {task_id}] Resume: scheduling retry {task.retry_count}/{settings.max_retries}")
+                await self._send_failure_notifications(task, success=False, had_existing_mr=had_existing_mr)
+
+            scrubbed_logs = scrub_sensitive_data(logs)
+            if exit_code != 0:
+                task.error_message = sanitize_sensitive_data(logs)[-1000:]
+                db.add(TaskLog(task_id=task.id, log_level="ERROR",
+                               message=f"[Exit code: {exit_code}]\n{scrubbed_logs[-2000:]}"))
+            elif log_chunks_saved == 0:
+                db.add(TaskLog(task_id=task.id, log_level="INFO",
+                               message=scrubbed_logs[-4000:] or "[No output]"))
+
+            await db.commit()
+
+            try:
+                self.docker.remove_container(container, force=True)
+            except Exception as e:
+                logger.warning(f"[Task {task_id}] Resume: failed to remove container: {e}")
+
+            return exit_code == 0
+
+        except Exception as e:
+            logger.exception(f"[Task {task_id}] Resume failed with exception: {e}")
+            task.status = TaskStatus.FAILED
+            task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+            task.error_message = sanitize_sensitive_data(str(e))[:1000]
+            await db.commit()
+
+            try:
+                self.docker.remove_container(container, force=True)
+            except Exception as cleanup_error:
+                logger.warning(f"[Task {task_id}] Resume: failed to cleanup container: {cleanup_error}")
+
+            try:
+                await self._notify_task_completed(task, success=False, notify_target="mr" if had_existing_mr else "issue")
+            except Exception:
+                pass
+            try:
+                await notify_task_event(task, MATTERMOST_EVENT_TASK_FAILED)
+            except Exception:
+                pass
+
+            return False
+
     def _notify_task_started(self, task: Task) -> None:
         """Send notification when task starts execution.
 

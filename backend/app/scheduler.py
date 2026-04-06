@@ -30,6 +30,12 @@ _worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-
 WORKER_CONTAINER_PATTERN = re.compile(r"^codify-\d+-p\d+-(i\d+|manual)$")
 
 
+def _extract_task_id(container_name: str) -> int | None:
+    """Extract task_id from a worker container name like codify-123-p456-i789."""
+    m = re.match(r"^codify-(\d+)-p\d+-(i\d+|manual)$", container_name)
+    return int(m.group(1)) if m else None
+
+
 class Scheduler:
     """Task scheduler with priority queue and concurrency control."""
 
@@ -213,20 +219,22 @@ class Scheduler:
                 pass
 
     async def _crash_recovery(self) -> None:
-        """Recover from crashes: clean up stuck tasks and containers."""
+        """Recover from crashes: clean up orphan containers, resume legitimate ones."""
         logger.info("Running crash recovery...")
 
         async with AsyncSessionLocal() as db:
-            # Find stuck running tasks (started but not completed)
+            # Find all tasks that are still marked RUNNING in the DB
             result = await db.execute(
                 select(Task).where(Task.status == TaskStatus.RUNNING)
             )
             stuck_tasks = result.scalars().all()
+            running_task_map = {t.id: t for t in stuck_tasks}
 
             if stuck_tasks:
-                logger.warning(f"Found {len(stuck_tasks)} stuck running tasks")
+                logger.warning(f"Found {len(stuck_tasks)} tasks in RUNNING status")
 
-            # Clean up containers
+            # Discover worker containers and cross-reference with DB
+            resumed_task_ids: set[int] = set()
             try:
                 docker = get_docker_client()
                 all_containers = docker.client.containers.list(
@@ -235,34 +243,97 @@ class Scheduler:
                 )
 
                 for container in all_containers:
-                    # Only manage worker containers: codify-{task_id}-p{project_id}-i{issue_iid}
-                    # or codify-{task_id}-p{project_id}-manual (for manual tasks without an issue).
-                    # Avoid touching compose-managed service containers like codify-backend/codify-postgres.
                     if not WORKER_CONTAINER_PATTERN.match(container.name):
                         continue
 
-                    # Skip containers that are supposed to be running
-                    if container.status == "running":
-                        logger.warning(f"Removing running container: {container.name}")
-                        container.remove(force=True)
-                    elif container.status == "exited":
-                        container.remove()
+                    task_id = _extract_task_id(container.name)
 
-                logger.info(f"Cleaned up {len(all_containers)} containers")
+                    if (
+                        container.status == "running"
+                        and task_id is not None
+                        and task_id in running_task_map
+                    ):
+                        # Legitimate running worker — keep container and resume monitoring
+                        task = running_task_map[task_id]
+                        issue_key = (
+                            f"{task.project_id}:{task.issue_iid}"
+                            if task.issue_iid is not None
+                            else f"manual:{task.id}"
+                        )
+                        logger.info(
+                            f"Resuming task {task_id} (container {container.name}, "
+                            f"issue_key={issue_key})"
+                        )
+                        self._running_tasks.add(task_id)
+                        self._running_issues.add(issue_key)
+                        resumed_task_ids.add(task_id)
+                        asyncio.create_task(
+                            self._resume_task_background(task_id, container.name)
+                        )
+                    else:
+                        # Orphan or stopped container — clean up
+                        status = container.status
+                        logger.warning(
+                            f"Removing {status} orphan container: {container.name}"
+                        )
+                        try:
+                            container.remove(force=(status == "running"))
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to remove container {container.name}: {e}"
+                            )
 
             except Exception as e:
-                logger.warning(f"Failed to clean up containers: {e}")
+                logger.warning(f"Failed to enumerate containers: {e}")
 
-            # Mark stuck tasks as failed
+            # Mark truly stuck tasks as failed (RUNNING in DB but no container)
             for task in stuck_tasks:
+                if task.id in resumed_task_ids:
+                    continue
                 task.status = TaskStatus.FAILED
-                task.error_message = "Task was running when service crashed"
+                task.error_message = "Task was running when scheduler restarted (container not found)"
                 task.completed_at = datetime.now(UTC).replace(tzinfo=None)
-                logger.warning(f"Marked task {task.id} as failed")
+                logger.warning(f"Marked task {task.id} as failed (no running container)")
 
             await db.commit()
 
-        logger.info("Crash recovery complete")
+        logger.info(
+            f"Crash recovery complete: {len(resumed_task_ids)} resumed, "
+            f"{len(stuck_tasks) - len(resumed_task_ids)} marked failed"
+        )
+
+    async def _resume_task_background(self, task_id: int, container_name: str) -> None:
+        """Resume monitoring a task in the background thread pool."""
+        try:
+            loop = asyncio.get_event_loop()
+            success = await loop.run_in_executor(
+                _worker_executor,
+                _run_worker_resume_task,
+                task_id,
+                container_name,
+            )
+            if success:
+                logger.info(f"Resumed task {task_id} completed successfully")
+            else:
+                logger.error(f"Resumed task {task_id} failed")
+        except Exception as e:
+            logger.exception(f"Resumed task {task_id} failed with exception: {e}")
+        finally:
+            self._running_tasks.discard(task_id)
+            try:
+                async with AsyncSessionLocal() as db:
+                    result = await db.execute(
+                        select(Task).where(Task.id == task_id)
+                    )
+                    task = result.scalar_one_or_none()
+                    if task:
+                        if task.issue_iid is not None:
+                            issue_key = f"{task.project_id}:{task.issue_iid}"
+                        else:
+                            issue_key = f"manual:{task_id}"
+                        self._running_issues.discard(issue_key)
+            except Exception:
+                pass
 
 
 # Singleton scheduler instance
@@ -332,6 +403,50 @@ def _run_worker_task(task_id: int) -> bool:
             return await worker.execute_task(db, task_id)
 
     # Create new event loop for this thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    try:
+        return loop.run_until_complete(run_task())
+    finally:
+        try:
+            loop.run_until_complete(engine.dispose())
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+
+def _run_worker_resume_task(task_id: int, container_name: str) -> bool:
+    """Resume monitoring a worker task in a separate thread with its own event loop.
+
+    Similar to _run_worker_task but calls WorkerExecutor.resume_task()
+    which attaches to an existing container instead of creating a new one.
+    """
+    import asyncio
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+    from app.database import _database_url
+
+    engine = create_async_engine(
+        _database_url,
+        pool_pre_ping=True,
+        pool_size=2,
+        max_overflow=2,
+    )
+
+    ThreadSessionLocal = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    from app.core.worker import WorkerExecutor
+
+    async def run_task():
+        async with ThreadSessionLocal() as db:
+            worker = WorkerExecutor()
+            return await worker.resume_task(db, task_id, container_name)
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 

@@ -223,13 +223,13 @@ class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         stuck_task.id = 1
         stuck_task.status = TaskStatus.RUNNING
 
-        # Simulate what crash recovery does
+        # Simulate what crash recovery does (container not found scenario)
         stuck_task.status = TaskStatus.FAILED
-        stuck_task.error_message = "Task was running when service crashed"
+        stuck_task.error_message = "Task was running when scheduler restarted (container not found)"
         stuck_task.completed_at = datetime.now(UTC)
 
         self.assertEqual(stuck_task.status, TaskStatus.FAILED)
-        self.assertIn("crashed", stuck_task.error_message.lower())
+        self.assertIn("container not found", stuck_task.error_message.lower())
 
     async def test_worker_container_pattern_matching(self) -> None:
         """Worker containers should match the naming pattern."""
@@ -478,7 +478,7 @@ class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 await scheduler._crash_recovery()
 
         self.assertEqual(stuck_task.status, TaskStatus.FAILED)
-        self.assertIn("crashed", stuck_task.error_message)
+        self.assertIn("container not found", stuck_task.error_message)
         mock_db.commit.assert_awaited_once()
 
     async def test_crash_recovery_handles_docker_error_gracefully(self) -> None:
