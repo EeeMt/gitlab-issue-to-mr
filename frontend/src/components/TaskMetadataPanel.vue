@@ -41,9 +41,11 @@
             <a :href="task.issue_url" target="_blank" rel="noopener noreferrer" class="app-link">
               #{{ task.issue_iid }}
             </a>
+            <span v-if="task.initiator_username" class="metadata-initiator"> · {{ task.initiator_username }}</span>
           </template>
           <template v-else-if="task.issue_iid">
             #{{ task.issue_iid }}
+            <span v-if="task.initiator_username" class="metadata-initiator"> · {{ task.initiator_username }}</span>
           </template>
           <template v-else>
             <span class="metadata-manual">{{ t('taskView.manualCreation') }}</span>

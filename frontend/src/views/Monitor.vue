@@ -196,7 +196,7 @@
 
                 <!-- Timeline View -->
                 <div v-else-if="queueViewMode === 'timeline'" class="queue-timeline">
-                  <div class="queue-timeline__container">
+                  <div class="queue-timeline__container" :style="{ minWidth: timelineContainerMinWidth }">
                     <!-- Time axis -->
                     <div class="queue-timeline__axis">
                       <span
@@ -1317,6 +1317,10 @@ const timelineTicks = computed(() => {
   return ticks
 })
 
+const timelineContainerMinWidth = computed(() => {
+  return Math.max(600, timelineTicks.value.length * 90) + 'px'
+})
+
 async function fetchData(options: { silent?: boolean } = {}) {
   const silent = options.silent ?? false
 
@@ -1681,7 +1685,6 @@ onBeforeUnmount(() => {
 
 .queue-timeline__container {
   position: relative;
-  min-width: 600px;
   min-height: 160px;
   padding: 0 24px;
 }
