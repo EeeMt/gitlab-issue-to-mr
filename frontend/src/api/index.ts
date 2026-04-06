@@ -579,6 +579,24 @@ export async function getTasks(params?: {
   return response.data
 }
 
+export interface PaginatedResponse<T> {
+  items: T[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export async function getTasksPaginated(params: {
+  page: number
+  page_size?: number
+  status?: string
+  project_id?: number
+  initiator_username?: string
+}): Promise<PaginatedResponse<Task>> {
+  const response = await api.get('/tasks', { params })
+  return response.data
+}
+
 export async function getScheduledTasks(params?: { project_id?: number }): Promise<Task[]> {
   const response = await api.get('/tasks/scheduled', { params })
   return response.data

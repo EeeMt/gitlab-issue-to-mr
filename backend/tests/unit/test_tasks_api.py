@@ -1159,3 +1159,151 @@ class ListTasksRestrictedScopeTests(unittest.TestCase):
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
+
+
+# ---------------------------------------------------------------------------
+# GET /tasks — pagination support
+# ---------------------------------------------------------------------------
+
+class PaginationTests(unittest.TestCase):
+    """Tests for GET /api/tasks hybrid pagination (legacy array vs paginated dict)."""
+
+    def tearDown(self):
+        from app.main import app
+        app.dependency_overrides.clear()
+
+    def _setup_paginated_client(self, tasks_list, total_count=None):
+        """Build a TestClient with mocked DB supporting pagination.
+
+        When *total_count* is provided the mock handles the two ``db.execute``
+        calls made in paginated mode (COUNT then data).  When *total_count* is
+        ``None`` only a single data result is returned (legacy mode).
+        """
+        from app.main import app
+        from app.database import get_db
+        from app.dependencies.auth import get_optional_current_user, require_authenticated_user
+        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        mock_data_result = MagicMock()
+        mock_data_result.scalars.return_value.all.return_value = tasks_list
+
+        mock_db = MagicMock()
+
+        if total_count is not None:
+            # Paginated mode: first execute → count, second execute → data
+            mock_count_result = MagicMock()
+            mock_count_result.scalar.return_value = total_count
+            mock_db.execute = AsyncMock(side_effect=[mock_count_result, mock_data_result])
+        else:
+            # Legacy mode: single execute → data
+            mock_db.execute = AsyncMock(return_value=mock_data_result)
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[get_optional_current_user] = lambda: None
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        return TestClient(app, raise_server_exceptions=False), app
+
+    # -- Test cases ----------------------------------------------------------
+
+    def test_list_tasks_without_page_returns_array(self):
+        """GET /api/tasks without page param returns a plain list (backward compat)."""
+        task = _make_serializable_task(project_id=1)
+        client, app = self._setup_paginated_client([task])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            response = client.get("/api/tasks")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIsInstance(data, list)
+        self.assertEqual(len(data), 1)
+
+    def test_list_tasks_with_page_returns_paginated_response(self):
+        """GET /api/tasks?page=1 returns dict with items, total, page, page_size."""
+        task = _make_serializable_task(project_id=1)
+        client, app = self._setup_paginated_client([task], total_count=1)
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            response = client.get("/api/tasks?page=1")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIsInstance(data, dict)
+        self.assertIn("items", data)
+        self.assertIn("total", data)
+        self.assertIn("page", data)
+        self.assertIn("page_size", data)
+        self.assertEqual(len(data["items"]), 1)
+        self.assertEqual(data["total"], 1)
+
+    def test_list_tasks_pagination_defaults(self):
+        """GET /api/tasks?page=1 defaults to page_size=20."""
+        client, app = self._setup_paginated_client([], total_count=0)
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            response = client.get("/api/tasks?page=1")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["page"], 1)
+        self.assertEqual(data["page_size"], 20)
+        self.assertEqual(data["total"], 0)
+        self.assertEqual(data["items"], [])
+
+    def test_list_tasks_custom_page_size(self):
+        """GET /api/tasks?page=1&page_size=50 uses the requested page_size."""
+        client, app = self._setup_paginated_client([], total_count=0)
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            response = client.get("/api/tasks?page=1&page_size=50")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["page_size"], 50)
+
+    def test_list_tasks_page_size_clamped_to_100(self):
+        """GET /api/tasks?page=1&page_size=200 clamps page_size to 100."""
+        client, app = self._setup_paginated_client([], total_count=0)
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            response = client.get("/api/tasks?page=1&page_size=200")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["page_size"], 100)
+
+    def test_list_tasks_page_min_1(self):
+        """GET /api/tasks?page=0 or page=-1 gets clamped to page 1."""
+        for page_val in [0, -1]:
+            client, app = self._setup_paginated_client([], total_count=0)
+
+            with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+                response = client.get(f"/api/tasks?page={page_val}")
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["page"], 1, f"page={page_val} should be clamped to 1")
+
+            app.dependency_overrides.clear()
+
+    def test_list_tasks_pagination_with_filters(self):
+        """GET /api/tasks?page=1&status=pending applies both pagination and filter."""
+        task = _make_serializable_task(task_status=TaskStatus.PENDING, project_id=1)
+        client, app = self._setup_paginated_client([task], total_count=1)
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            response = client.get("/api/tasks?page=1&status=pending")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIsInstance(data, dict)
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(len(data["items"]), 1)
+        self.assertEqual(data["page"], 1)

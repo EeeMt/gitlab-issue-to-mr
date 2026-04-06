@@ -9,7 +9,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import delete, select, false
+from sqlalchemy import delete, func, select, false
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.docker_client import get_docker_client
@@ -48,19 +48,15 @@ async def list_tasks(
     status: Optional[str] = None,
     project_id: Optional[int] = None,
     initiator_username: Optional[str] = None,
+    page: Optional[int] = None,
+    page_size: int = 20,
     db: AsyncSession = Depends(get_db),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
-    """List tasks with optional filtering.
+    """List tasks with optional filtering and pagination.
 
-    Args:
-        status: Filter by task status
-        project_id: Filter by project ID
-        initiator_username: Filter by initiator username
-        db: Database session
-
-    Returns:
-        List of tasks
+    When ``page`` is provided, returns ``{items, total, page, page_size}``.
+    Without ``page``, returns a plain ``Task[]`` array (legacy behaviour).
     """
     query = select(Task).order_by(Task.created_at.desc())
 
@@ -84,12 +80,38 @@ async def list_tasks(
     if initiator_username:
         query = query.where(Task.initiator_username == initiator_username)
 
-    result = await db.execute(query.limit(100))
-    tasks = result.scalars().all()
     project_lookup = await build_project_lookup(
         accessible_projects=access_scope.accessible_projects,
         is_unrestricted=access_scope.is_unrestricted,
     )
+
+    # Paginated mode: return { items, total, page, page_size }
+    if page is not None:
+        page = max(1, page)
+        page_size = max(1, min(100, page_size))
+        offset = (page - 1) * page_size
+
+        count_result = await db.execute(
+            select(func.count()).select_from(query.subquery())
+        )
+        total = count_result.scalar() or 0
+
+        result = await db.execute(query.limit(page_size).offset(offset))
+        tasks = result.scalars().all()
+
+        return {
+            "items": [
+                _serialize_task(task, project_lookup.get(task.project_id))
+                for task in tasks
+            ],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    # Legacy mode: return Task[] (max 100)
+    result = await db.execute(query.limit(100))
+    tasks = result.scalars().all()
 
     return [
         _serialize_task(task, project_lookup.get(task.project_id))

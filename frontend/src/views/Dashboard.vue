@@ -83,7 +83,7 @@ import { ref, onMounted, onBeforeUnmount, h, watch, computed } from 'vue'
 import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getProjects, getTasks, type Project, type Task } from '../api'
+import { getProjects, getTasksPaginated, getStats, type Project, type Task } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
@@ -103,10 +103,31 @@ const projectFilter = ref<number | null>(null)
 const initiatorFilter = ref<string | null>(null)
 let pollTimer: number | null = null
 
-const pagination = {
-  pageSize: 20,
-  responsive: true
-}
+const currentPage = ref(1)
+const pageSize = ref(20)
+const totalTasks = ref(0)
+
+const statsTotal = ref(0)
+const statsRunning = ref(0)
+const statsCompleted = ref(0)
+const statsPending = ref(0)
+
+const pagination = computed(() => ({
+  page: currentPage.value,
+  pageSize: pageSize.value,
+  itemCount: totalTasks.value,
+  showSizePicker: true,
+  pageSizes: [20, 50, 100],
+  onChange: (page: number) => {
+    currentPage.value = page
+    fetchTasks()
+  },
+  onUpdatePageSize: (size: number) => {
+    pageSize.value = size
+    currentPage.value = 1
+    fetchTasks()
+  },
+}))
 
 const statusOptions = computed(() => [
   { label: t('status.pending'), value: 'pending' },
@@ -348,32 +369,27 @@ const columns = computed<DataTableColumns<Task>>(() => {
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 
-const summaryItems = computed(() => {
-  const summary = tasks.value.reduce(
-    (acc, task) => {
-      acc.total += 1
-      if (task.status === 'running') acc.running += 1
-      if (task.status === 'completed') acc.completed += 1
-      if (task.status === 'pending' || task.status === 'queued') acc.pending += 1
-      if (task.status === 'failed') acc.failed += 1
-      return acc
-    },
-    { total: 0, running: 0, completed: 0, pending: 0, failed: 0 }
-  )
-
-  return [
-    { label: t('dashboard.visibleTasks'), value: String(summary.total) },
-    { label: t('dashboard.running'), value: String(summary.running) },
-    { label: t('dashboard.pendingQueued'), value: String(summary.pending) },
-    { label: t('dashboard.completed'), value: String(summary.completed) }
-  ]
-})
+const summaryItems = computed(() => [
+  { label: t('dashboard.visibleTasks'), value: String(statsTotal.value) },
+  { label: t('dashboard.running'), value: String(statsRunning.value) },
+  { label: t('dashboard.pendingQueued'), value: String(statsPending.value) },
+  { label: t('dashboard.completed'), value: String(statsCompleted.value) },
+])
 
 async function fetchTasks() {
   if (loading.value) return
   loading.value = true
   try {
-    const params: { status?: string; project_id?: number; initiator_username?: string } = {}
+    const params: {
+      page: number
+      page_size: number
+      status?: string
+      project_id?: number
+      initiator_username?: string
+    } = {
+      page: currentPage.value,
+      page_size: pageSize.value,
+    }
     if (statusFilter.value) {
       params.status = statusFilter.value
     }
@@ -383,12 +399,26 @@ async function fetchTasks() {
     if (initiatorFilter.value) {
       params.initiator_username = initiatorFilter.value
     }
-    tasks.value = await getTasks(params)
+    const result = await getTasksPaginated(params)
+    tasks.value = result.items
+    totalTasks.value = result.total
   } catch (error) {
     message.error(t('dashboard.failedToFetchTasks'))
   } finally {
     hasLoadedOnce.value = true
     loading.value = false
+  }
+}
+
+async function fetchStats() {
+  try {
+    const stats = await getStats()
+    statsTotal.value = stats.total
+    statsRunning.value = stats.running
+    statsCompleted.value = stats.completed
+    statsPending.value = stats.pending + stats.queued
+  } catch {
+    // Stats are supplementary; don't block UI
   }
 }
 
@@ -402,19 +432,23 @@ async function fetchProjects() {
 
 function refreshTasks() {
   fetchTasks()
+  fetchStats()
 }
 
 watch([statusFilter, projectFilter, initiatorFilter], () => {
+  currentPage.value = 1
   fetchTasks()
 })
 
 onMounted(() => {
   fetchProjects()
+  fetchStats()
   fetchTasks()
   // Auto-refresh every 15 seconds and skip when tab is not visible
   pollTimer = window.setInterval(() => {
     if (document.visibilityState !== 'visible') return
     fetchTasks()
+    fetchStats()
   }, 15000)
 })
 
