@@ -244,44 +244,44 @@
                         <span class="queue-timeline__bar-label">#{{ task.id }} P{{ task.priority }}</span>
                       </div>
 
-                      <!-- Ready tasks: solid dots -->
+                      <!-- Ready tasks: solid bars -->
                       <div
                         v-for="(task, idx) in readyTasks"
                         :key="'rdy-' + task.id"
-                        class="queue-timeline__task-dot queue-timeline__task-dot--ready queue-timeline__has-tooltip"
+                        class="queue-timeline__task-bar queue-timeline__task-bar--ready queue-timeline__has-tooltip"
                         role="button"
                         tabindex="0"
                         :style="{
                           left: timelinePct(task.scheduled_at ? Math.min(parseUtcDate(task.scheduled_at).getTime(), nowMs) : nowMs) + '%',
                           top: (runningTasks.length + idx) * 36 + 'px',
-                          background: priorityColor(task.priority),
+                          '--bar-color': priorityColor(task.priority),
                         }"
                         :data-tooltip="`#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineReady')}${task.scheduled_at ? ' · ' + formatTimeUtc8(task.scheduled_at) : ''}${task.initiator_username ? '\n@' + task.initiator_username : ''}`"
                         @click="goToTask(task.id)"
                         @keydown.enter="goToTask(task.id)"
                         @keydown.space.prevent="goToTask(task.id)"
                       >
-                        <span class="queue-timeline__dot-label">#{{ task.id }} P{{ task.priority }} {{ t('monitor.timelineReady') }}</span>
+                        <span class="queue-timeline__bar-label">#{{ task.id }} P{{ task.priority }} {{ t('monitor.timelineReady') }}</span>
                       </div>
 
-                      <!-- Waiting tasks: hollow dots -->
+                      <!-- Waiting tasks: dashed bars -->
                       <div
                         v-for="(task, idx) in waitingTasks"
                         :key="'wait-' + task.id"
-                        class="queue-timeline__task-dot queue-timeline__task-dot--waiting queue-timeline__has-tooltip"
+                        class="queue-timeline__task-bar queue-timeline__task-bar--waiting queue-timeline__has-tooltip"
                         role="button"
                         tabindex="0"
                         :style="{
                           left: timelinePct(parseUtcDate(task.scheduled_at!).getTime()) + '%',
                           top: (runningTasks.length + readyTasks.length + idx) * 36 + 'px',
-                          borderColor: priorityColor(task.priority),
+                          '--bar-color': priorityColor(task.priority),
                         }"
                         :data-tooltip="`#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineWaiting')}: ${formatTimeUtc8(task.scheduled_at!)} (${t('monitor.kanbanIn', { duration: formatRelativeFuture(task.scheduled_at!) })})${task.initiator_username ? '\n@' + task.initiator_username : ''}`"
                         @click="goToTask(task.id)"
                         @keydown.enter="goToTask(task.id)"
                         @keydown.space.prevent="goToTask(task.id)"
                       >
-                        <span class="queue-timeline__dot-label">#{{ task.id }} P{{ task.priority }} {{ formatTimeUtc8(task.scheduled_at!) }}</span>
+                        <span class="queue-timeline__bar-label">#{{ task.id }} P{{ task.priority }} {{ formatTimeUtc8(task.scheduled_at!) }}</span>
                       </div>
                     </div>
                   </div>
@@ -535,6 +535,7 @@ const stats = ref<Stats>({
 })
 const containers = ref<Container[]>([])
 const tasks = ref<Task[]>([])
+const finishedTasks = ref<Task[]>([])
 let pendingSilentRefresh = false
 let pendingVisibleRefresh = false
 let refreshTimer: number | null = null
@@ -649,23 +650,23 @@ const orphanContainers = computed(() =>
 )
 
 const recentFinishedTasks = computed(() =>
-  tasks.value
+  finishedTasks.value
     .filter((task) => FINISHED_STATUSES.includes(task.status))
     .slice(0, 10)
 )
 
 const recentFailures = computed(() =>
-  tasks.value
+  finishedTasks.value
     .filter((task) => task.status === 'failed' || task.status === 'cancelled')
     .slice(0, 10)
 )
 
 const recentFinishedCount24h = computed(() =>
-  recentTasksInHours(24).filter((task) => task.status === 'completed').length
+  recentFinishedInHours(24).filter((task) => task.status === 'completed').length
 )
 
 const recentFailureCount24h = computed(() =>
-  recentTasksInHours(24).filter((task) => task.status === 'failed' || task.status === 'cancelled').length
+  recentFinishedInHours(24).filter((task) => task.status === 'failed' || task.status === 'cancelled').length
 )
 
 const longRunningTasks = computed(() =>
@@ -1051,9 +1052,9 @@ const containerColumns = computed<DataTableColumns<Container>>(() => [
   }
 ])
 
-function recentTasksInHours(hours: number): Task[] {
+function recentFinishedInHours(hours: number): Task[] {
   const cutoff = Date.now() - hours * 60 * 60 * 1000
-  return tasks.value.filter((task) => parseTimestamp(task.created_at) >= cutoff)
+  return finishedTasks.value.filter((task) => parseTimestamp(task.created_at) >= cutoff)
 }
 
 function parseTimestamp(value?: string | null): number {
@@ -1346,15 +1347,17 @@ async function fetchData(options: { silent?: boolean } = {}) {
   }
 
   try {
-    const [statsData, containersData, tasksData] = await Promise.all([
+    const [statsData, containersData, tasksData, finishedData] = await Promise.all([
       getStats(),
       getContainers(),
-      getTasks()
+      getTasks({ status: 'running,pending,queued' }),
+      getTasks({ status: 'completed,failed,cancelled' }),
     ])
 
     stats.value = statsData
     containers.value = containersData
     tasks.value = tasksData
+    finishedTasks.value = finishedData
     hasLoadedOnce.value = true
   } catch (error) {
     console.error(error)
@@ -1805,6 +1808,33 @@ onBeforeUnmount(() => {
   transform: translateY(-1px);
 }
 
+/* Ready tasks: solid bar with left accent, slightly transparent */
+.queue-timeline__task-bar--ready {
+  background: var(--bar-color) !important;
+  opacity: 0.8;
+  border-left: 4px solid rgba(255, 255, 255, 0.5);
+  min-width: 120px;
+  width: 15%;
+}
+
+.queue-timeline__task-bar--ready:hover {
+  opacity: 1;
+}
+
+/* Waiting tasks: dashed left border, light fill */
+.queue-timeline__task-bar--waiting {
+  background: color-mix(in srgb, var(--bar-color) 18%, transparent) !important;
+  border-left: 4px dashed var(--bar-color);
+  opacity: 0.9;
+  min-width: 120px;
+  width: 15%;
+}
+
+.queue-timeline__task-bar--waiting .queue-timeline__bar-label {
+  color: #0f172a;
+  text-shadow: none;
+}
+
 .queue-timeline__bar-label {
   font-weight: 600;
   overflow: hidden;
@@ -1812,61 +1842,15 @@ onBeforeUnmount(() => {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
-.queue-timeline__task-dot {
-  position: absolute;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  padding-left: 4px;
-  transition: transform 0.15s;
-}
-
-.queue-timeline__task-dot:hover {
-  transform: translateY(-1px);
-}
-
-.queue-timeline__task-dot::before {
-  content: '';
-  flex-shrink: 0;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-}
-
-.queue-timeline__task-dot--ready::before {
-  background: currentColor;
-  /* Color set via inline style on parent background */
-}
-
-.queue-timeline__task-dot--ready {
-  color: inherit;
-}
-
-.queue-timeline__task-dot--ready::before {
-  background: inherit;
-}
-
-.queue-timeline__task-dot--waiting::before {
-  background: transparent;
-  border: 2px solid;
-  border-color: inherit;
-  width: 8px;
-  height: 8px;
-}
-
-.queue-timeline__dot-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: #0f172a;
-  white-space: nowrap;
-}
+/* (dot styles removed — ready/waiting now use task-bar with modifiers) */
 
 /* ----- Timeline CSS Tooltip ----- */
 .queue-timeline__has-tooltip {
   position: absolute;
+}
+
+.queue-timeline__has-tooltip:hover {
+  z-index: 50;
 }
 
 .queue-timeline__has-tooltip::after {
@@ -1886,7 +1870,7 @@ onBeforeUnmount(() => {
   opacity: 0;
   transform: translateY(-4px);
   transition: opacity 0.15s, transform 0.15s;
-  z-index: 100;
+  z-index: 1000;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
   max-width: 280px;
 }

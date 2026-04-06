@@ -61,11 +61,18 @@ async def list_tasks(
     query = select(Task).order_by(Task.created_at.desc())
 
     if status:
-        try:
-            task_status = TaskStatus(status)
-            query = query.where(Task.status == task_status)
-        except ValueError:
-            pass
+        # Support comma-separated status values: ?status=running,pending,queued
+        status_parts = [s.strip() for s in status.split(",") if s.strip()]
+        valid_statuses = []
+        for part in status_parts:
+            try:
+                valid_statuses.append(TaskStatus(part))
+            except ValueError:
+                pass
+        if len(valid_statuses) == 1:
+            query = query.where(Task.status == valid_statuses[0])
+        elif valid_statuses:
+            query = query.where(Task.status.in_(valid_statuses))
 
     if project_id:
         require_project_access(project_id, access_scope)
