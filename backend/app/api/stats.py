@@ -75,6 +75,43 @@ async def get_stats(
         )
         status_counts[status_value.value] = result.scalar() or 0
 
+    # Time-windowed counts for Monitor dashboard
+    now = datetime.now(UTC)
+    cutoff_24h = now - timedelta(hours=24)
+
+    completed_24h_result = await db.execute(
+        select(func.count()).select_from(
+            base_query.where(
+                Task.status == TaskStatus.COMPLETED,
+                Task.created_at >= cutoff_24h,
+            ).subquery()
+        )
+    )
+    completed_24h = completed_24h_result.scalar() or 0
+
+    failed_cancelled_24h_result = await db.execute(
+        select(func.count()).select_from(
+            base_query.where(
+                Task.status.in_([TaskStatus.FAILED, TaskStatus.CANCELLED]),
+                Task.created_at >= cutoff_24h,
+            ).subquery()
+        )
+    )
+    failed_cancelled_24h = failed_cancelled_24h_result.scalar() or 0
+
+    # Long-running: running tasks started more than 30 minutes ago
+    cutoff_30min = now - timedelta(minutes=30)
+    running_long_result = await db.execute(
+        select(func.count()).select_from(
+            base_query.where(
+                Task.status == TaskStatus.RUNNING,
+                Task.started_at.isnot(None),
+                Task.started_at < cutoff_30min,
+            ).subquery()
+        )
+    )
+    running_long_30min = running_long_result.scalar() or 0
+
     return {
         "total": total,
         "pending": status_counts.get("pending", 0),
@@ -83,6 +120,9 @@ async def get_stats(
         "completed": status_counts.get("completed", 0),
         "failed": status_counts.get("failed", 0),
         "cancelled": status_counts.get("cancelled", 0),
+        "completed_24h": completed_24h,
+        "failed_cancelled_24h": failed_cancelled_24h,
+        "running_long_30min": running_long_30min,
     }
 
 

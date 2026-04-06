@@ -498,7 +498,7 @@ import {
   useMessage
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getContainers, getStats, getTasks, type Container, type Stats, type Task } from '../api'
+import { getContainers, getStats, getTasks, getTasksPaginated, type Container, type Stats, type Task } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
 import { formatDateTimeUtc8Compact, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
@@ -524,7 +524,6 @@ type HealthCheck = {
 }
 
 const ACTIVE_STATUSES = ['pending', 'queued', 'running']
-const FINISHED_STATUSES = ['completed', 'failed', 'cancelled']
 
 const router = useRouter()
 const message = useMessage()
@@ -541,11 +540,15 @@ const stats = ref<Stats>({
   running: 0,
   completed: 0,
   failed: 0,
-  cancelled: 0
+  cancelled: 0,
+  completed_24h: 0,
+  failed_cancelled_24h: 0,
+  running_long_30min: 0,
 })
 const containers = ref<Container[]>([])
 const tasks = ref<Task[]>([])
-const finishedTasks = ref<Task[]>([])
+const recentFinishedList = ref<Task[]>([])
+const recentFailureList = ref<Task[]>([])
 let pendingSilentRefresh = false
 let pendingVisibleRefresh = false
 let refreshTimer: number | null = null
@@ -690,25 +693,13 @@ const orphanContainers = computed(() =>
   })
 )
 
-const recentFinishedTasks = computed(() =>
-  finishedTasks.value
-    .filter((task) => FINISHED_STATUSES.includes(task.status))
-    .slice(0, 10)
-)
+const recentFinishedTasks = computed(() => recentFinishedList.value)
 
-const recentFailures = computed(() =>
-  finishedTasks.value
-    .filter((task) => task.status === 'failed' || task.status === 'cancelled')
-    .slice(0, 10)
-)
+const recentFailures = computed(() => recentFailureList.value)
 
-const recentFinishedCount24h = computed(() =>
-  recentFinishedInHours(24).filter((task) => task.status === 'completed').length
-)
+const recentFinishedCount24h = computed(() => stats.value.completed_24h)
 
-const recentFailureCount24h = computed(() =>
-  recentFinishedInHours(24).filter((task) => task.status === 'failed' || task.status === 'cancelled').length
-)
+const recentFailureCount24h = computed(() => stats.value.failed_cancelled_24h)
 
 const longRunningTasks = computed(() =>
   runningTasks.value.filter((task) => {
@@ -1093,11 +1084,6 @@ const containerColumns = computed<DataTableColumns<Container>>(() => [
   }
 ])
 
-function recentFinishedInHours(hours: number): Task[] {
-  const cutoff = Date.now() - hours * 60 * 60 * 1000
-  return finishedTasks.value.filter((task) => parseTimestamp(task.created_at) >= cutoff)
-}
-
 function parseTimestamp(value?: string | null): number {
   if (!value) return 0
   const parsed = parseUtcDate(value).getTime()
@@ -1388,17 +1374,19 @@ async function fetchData(options: { silent?: boolean } = {}) {
   }
 
   try {
-    const [statsData, containersData, tasksData, finishedData] = await Promise.all([
+    const [statsData, containersData, tasksData, finishedResult, failedResult] = await Promise.all([
       getStats(),
       getContainers(),
       getTasks({ status: 'running,pending,queued' }),
-      getTasks({ status: 'completed,failed,cancelled' }),
+      getTasksPaginated({ status: 'completed,failed,cancelled', page: 1, page_size: 10 }),
+      getTasksPaginated({ status: 'failed,cancelled', page: 1, page_size: 10 }),
     ])
 
     stats.value = statsData
     containers.value = containersData
     tasks.value = tasksData
-    finishedTasks.value = finishedData
+    recentFinishedList.value = finishedResult.items
+    recentFailureList.value = failedResult.items
     hasLoadedOnce.value = true
   } catch (error) {
     console.error(error)

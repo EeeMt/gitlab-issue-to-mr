@@ -178,3 +178,133 @@ class StatsAPIHelpersTests(unittest.TestCase):
 
         result = _summarize_error_message("   \n   \n   ")
         self.assertIsNone(result)
+
+
+class StatsTimeWindowTests(unittest.TestCase):
+    """Test the time-windowed fields (completed_24h, failed_cancelled_24h, running_long_30min) in GET /api/stats."""
+
+    def _make_scalar_result(self, value):
+        """Create a mock execute result whose .scalar() returns *value*."""
+        result = MagicMock()
+        result.scalar = MagicMock(return_value=value)
+        return result
+
+    def _build_side_effects(
+        self,
+        total=0,
+        pending=0,
+        queued=0,
+        running=0,
+        completed=0,
+        failed=0,
+        cancelled=0,
+        completed_24h=0,
+        failed_cancelled_24h=0,
+        running_long_30min=0,
+    ):
+        """Return a list of 10 mock results matching the db.execute call order in get_stats."""
+        return [
+            self._make_scalar_result(total),            # 1. total
+            self._make_scalar_result(pending),           # 2. pending
+            self._make_scalar_result(queued),            # 3. queued
+            self._make_scalar_result(running),           # 4. running
+            self._make_scalar_result(completed),         # 5. completed
+            self._make_scalar_result(failed),            # 6. failed
+            self._make_scalar_result(cancelled),         # 7. cancelled
+            self._make_scalar_result(completed_24h),     # 8. completed_24h
+            self._make_scalar_result(failed_cancelled_24h),  # 9. failed_cancelled_24h
+            self._make_scalar_result(running_long_30min),    # 10. running_long_30min
+        ]
+
+    def setUp(self):
+        self.mock_db = MagicMock()
+        self.mock_db.execute = AsyncMock(
+            side_effect=self._build_side_effects()
+        )
+        app.dependency_overrides[get_db] = lambda: self.mock_db
+
+        async def mock_auth_context(request: Request, auth_context=None):
+            return SimpleNamespace(
+                user=SimpleNamespace(id=1, username="admin", platform_role="platform_admin"),
+                session=None,
+                gitlab_access_token=None,
+                gitlab_refresh_token=None,
+            )
+
+        app.dependency_overrides[require_authenticated_context] = mock_auth_context
+        app.dependency_overrides[require_project_access_scope] = lambda: ProjectAccessScope(
+            is_unrestricted=True,
+            accessible_projects=[],
+        )
+
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+
+    # ---- Test 1: keys are present ----
+    def test_stats_includes_24h_fields(self):
+        """GET /api/stats response includes completed_24h, failed_cancelled_24h, and running_long_30min keys."""
+        response = self.client.get("/api/stats")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("completed_24h", data)
+        self.assertIn("failed_cancelled_24h", data)
+        self.assertIn("running_long_30min", data)
+
+    # ---- Test 2: completed_24h value ----
+    def test_stats_24h_completed_count(self):
+        """GET /api/stats returns the correct completed_24h count from the database."""
+        self.mock_db.execute = AsyncMock(
+            side_effect=self._build_side_effects(
+                total=50, completed=30, completed_24h=12,
+            )
+        )
+        response = self.client.get("/api/stats")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["completed_24h"], 12)
+
+    # ---- Test 3: failed_cancelled_24h value ----
+    def test_stats_24h_failed_cancelled_count(self):
+        """GET /api/stats returns the correct failed_cancelled_24h count from the database."""
+        self.mock_db.execute = AsyncMock(
+            side_effect=self._build_side_effects(
+                total=100, failed=20, cancelled=5, failed_cancelled_24h=7,
+            )
+        )
+        response = self.client.get("/api/stats")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["failed_cancelled_24h"], 7)
+
+    # ---- Test 4: running_long_30min value ----
+    def test_stats_running_long_30min(self):
+        """GET /api/stats returns the correct running_long_30min count from the database."""
+        self.mock_db.execute = AsyncMock(
+            side_effect=self._build_side_effects(
+                total=40, running=10, running_long_30min=3,
+            )
+        )
+        response = self.client.get("/api/stats")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["running_long_30min"], 3)
+
+    # ---- Test 5: zero when no matching tasks ----
+    def test_stats_24h_fields_zero_when_empty(self):
+        """All three time-windowed fields default to 0 when no matching tasks exist."""
+        self.mock_db.execute = AsyncMock(
+            side_effect=self._build_side_effects(
+                total=0,
+                completed_24h=0,
+                failed_cancelled_24h=0,
+                running_long_30min=0,
+            )
+        )
+        response = self.client.get("/api/stats")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["completed_24h"], 0)
+        self.assertEqual(data["failed_cancelled_24h"], 0)
+        self.assertEqual(data["running_long_30min"], 0)

@@ -142,6 +142,9 @@ export interface Stats {
   completed: number
   failed: number
   cancelled: number
+  completed_24h: number
+  failed_cancelled_24h: number
+  running_long_30min: number
 }
 
 export interface AnalyticsSummary {
