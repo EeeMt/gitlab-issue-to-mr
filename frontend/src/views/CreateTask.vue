@@ -402,7 +402,7 @@ function createInitialFormValue(): CreateTaskRequest & { base_branch?: string; n
     branch_name: '',
     target_branch: 'main',
     user_prompt: '',
-    priority: 0,
+    priority: 1,
     delay_seconds: undefined,
     scheduled_datetime: undefined
   }
@@ -873,6 +873,7 @@ function viewTask() {
 
 function createAnother() {
   showSuccessModal.value = false
+  scheduledTasksForPreview.value = []
   void handleReset()
 }
 
@@ -1109,13 +1110,16 @@ watch(scheduleType, (newType) => {
 
 .priority-btn--p0 .priority-btn__dot {
   background-color: #d03050;
+  box-shadow: 0 0 0 2px rgba(208, 48, 80, 0.18);
 }
 
 .priority-btn--p1 .priority-btn__dot {
   background-color: #f0a020;
+  box-shadow: 0 0 0 2px rgba(240, 160, 32, 0.18);
 }
 
 .priority-btn--p2 .priority-btn__dot {
   background-color: #18a058;
+  box-shadow: 0 0 0 2px rgba(24, 160, 88, 0.18);
 }
 </style>

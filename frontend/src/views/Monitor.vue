@@ -76,10 +76,11 @@
                   <!-- Running Column -->
                   <div class="queue-kanban__column queue-kanban__column--running">
                     <div class="queue-kanban__column-header">
-                      <span class="queue-kanban__column-icon">🟢</span>
+                      <span class="queue-kanban__column-icon queue-kanban__column-icon--running"></span>
                       <span>{{ t('monitor.kanbanRunning') }}</span>
                       <n-tag size="tiny" round :bordered="false">{{ runningTasks.length }}</n-tag>
                     </div>
+                    <div class="queue-kanban__column-cards">
                     <div
                       v-for="task in runningTasks"
                       :key="task.id"
@@ -109,15 +110,17 @@
                       size="small"
                       style="padding: 16px 0"
                     />
+                    </div>
                   </div>
 
                   <!-- Ready Column -->
                   <div class="queue-kanban__column queue-kanban__column--ready">
                     <div class="queue-kanban__column-header">
-                      <span class="queue-kanban__column-icon">🔵</span>
+                      <span class="queue-kanban__column-icon queue-kanban__column-icon--ready"></span>
                       <span>{{ t('monitor.kanbanReady') }}</span>
                       <n-tag size="tiny" round :bordered="false">{{ readyTasks.length }}</n-tag>
                     </div>
+                    <div class="queue-kanban__column-cards">
                     <div
                       v-for="task in readyTasks"
                       :key="task.id"
@@ -152,15 +155,17 @@
                       size="small"
                       style="padding: 16px 0"
                     />
+                    </div>
                   </div>
 
                   <!-- Waiting Column -->
                   <div class="queue-kanban__column queue-kanban__column--waiting">
                     <div class="queue-kanban__column-header">
-                      <span class="queue-kanban__column-icon">⏳</span>
+                      <span class="queue-kanban__column-icon queue-kanban__column-icon--waiting"></span>
                       <span>{{ t('monitor.kanbanWaiting') }}</span>
                       <n-tag size="tiny" round :bordered="false">{{ waitingTasks.length }}</n-tag>
                     </div>
+                    <div class="queue-kanban__column-cards">
                     <div
                       v-for="task in waitingTasks"
                       :key="task.id"
@@ -191,6 +196,7 @@
                       size="small"
                       style="padding: 16px 0"
                     />
+                    </div>
                   </div>
                 </div>
 
@@ -221,7 +227,7 @@
                       <div
                         v-for="(task, idx) in runningTasks"
                         :key="'run-' + task.id"
-                        class="queue-timeline__task-bar"
+                        class="queue-timeline__task-bar queue-timeline__has-tooltip"
                         role="button"
                         tabindex="0"
                         :style="{
@@ -230,7 +236,7 @@
                           top: idx * 36 + 'px',
                           background: priorityColor(task.priority),
                         }"
-                        :title="`#${task.id} P${task.priority} ${t('monitor.kanbanRunning')}`"
+                        :data-tooltip="`#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.kanbanElapsed', { duration: task.started_at ? formatElapsedCompact(task.started_at) : '—' })}`"
                         @click="goToTask(task.id)"
                         @keydown.enter="goToTask(task.id)"
                         @keydown.space.prevent="goToTask(task.id)"
@@ -242,7 +248,7 @@
                       <div
                         v-for="(task, idx) in readyTasks"
                         :key="'rdy-' + task.id"
-                        class="queue-timeline__task-dot queue-timeline__task-dot--ready"
+                        class="queue-timeline__task-dot queue-timeline__task-dot--ready queue-timeline__has-tooltip"
                         role="button"
                         tabindex="0"
                         :style="{
@@ -250,7 +256,7 @@
                           top: (runningTasks.length + idx) * 36 + 'px',
                           background: priorityColor(task.priority),
                         }"
-                        :title="`#${task.id} P${task.priority} ${t('monitor.timelineReady')}`"
+                        :data-tooltip="`#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineReady')}${task.scheduled_at ? ' · ' + formatTimeUtc8(task.scheduled_at) : ''}`"
                         @click="goToTask(task.id)"
                         @keydown.enter="goToTask(task.id)"
                         @keydown.space.prevent="goToTask(task.id)"
@@ -262,7 +268,7 @@
                       <div
                         v-for="(task, idx) in waitingTasks"
                         :key="'wait-' + task.id"
-                        class="queue-timeline__task-dot queue-timeline__task-dot--waiting"
+                        class="queue-timeline__task-dot queue-timeline__task-dot--waiting queue-timeline__has-tooltip"
                         role="button"
                         tabindex="0"
                         :style="{
@@ -270,7 +276,7 @@
                           top: (runningTasks.length + readyTasks.length + idx) * 36 + 'px',
                           borderColor: priorityColor(task.priority),
                         }"
-                        :title="`#${task.id} P${task.priority} ${t('monitor.timelineWaiting')}: ${formatTimeUtc8(task.scheduled_at!)}`"
+                        :data-tooltip="`#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineWaiting')}: ${formatTimeUtc8(task.scheduled_at!)} (${t('monitor.kanbanIn', { duration: formatRelativeFuture(task.scheduled_at!) })})`"
                         @click="goToTask(task.id)"
                         @keydown.enter="goToTask(task.id)"
                         @keydown.space.prevent="goToTask(task.id)"
@@ -291,6 +297,7 @@
                   :row-props="activeTaskRowProps"
                   size="small"
                   scroll-x="960"
+                  :max-height="400"
                 />
               </n-card>
 
@@ -1598,6 +1605,9 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   padding: 12px;
   min-height: 180px;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
 }
 
 .queue-kanban__column-header {
@@ -1608,11 +1618,36 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   color: #0f172a;
+  flex-shrink: 0;
+}
+
+.queue-kanban__column-cards {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .queue-kanban__column-icon {
-  font-size: 14px;
-  line-height: 1;
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.queue-kanban__column-icon--running {
+  background-color: #18a058;
+  box-shadow: 0 0 0 3px rgba(24, 160, 88, 0.18);
+}
+
+.queue-kanban__column-icon--ready {
+  background-color: #2080f0;
+  box-shadow: 0 0 0 3px rgba(32, 128, 240, 0.18);
+}
+
+.queue-kanban__column-icon--waiting {
+  background-color: #f0a020;
+  box-shadow: 0 0 0 3px rgba(240, 160, 32, 0.18);
 }
 
 .queue-kanban__card {
@@ -1760,11 +1795,14 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   min-width: 60px;
   opacity: 0.9;
-  transition: opacity 0.15s;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+  transition: opacity 0.15s, box-shadow 0.15s, transform 0.15s;
 }
 
 .queue-timeline__task-bar:hover {
   opacity: 1;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.22);
+  transform: translateY(-1px);
 }
 
 .queue-timeline__bar-label {
@@ -1782,6 +1820,11 @@ onBeforeUnmount(() => {
   gap: 6px;
   cursor: pointer;
   padding-left: 4px;
+  transition: transform 0.15s;
+}
+
+.queue-timeline__task-dot:hover {
+  transform: translateY(-1px);
 }
 
 .queue-timeline__task-dot::before {
@@ -1790,6 +1833,7 @@ onBeforeUnmount(() => {
   width: 10px;
   height: 10px;
   border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 
 .queue-timeline__task-dot--ready::before {
@@ -1818,6 +1862,38 @@ onBeforeUnmount(() => {
   font-weight: 500;
   color: #0f172a;
   white-space: nowrap;
+}
+
+/* ----- Timeline CSS Tooltip ----- */
+.queue-timeline__has-tooltip {
+  position: absolute;
+}
+
+.queue-timeline__has-tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  background: #1e293b;
+  color: #f8fafc;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  padding: 6px 10px;
+  border-radius: 6px;
+  white-space: pre-line;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.15s, transform 0.15s;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  max-width: 280px;
+}
+
+.queue-timeline__has-tooltip:hover::after {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 @media (max-width: 768px) {
