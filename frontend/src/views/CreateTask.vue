@@ -165,16 +165,21 @@
               <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                 <n-gi>
                   <n-form-item :label="t('common.priority')" path="priority">
-                    <n-radio-group v-model:value="formValue.priority" data-testid="create-task-priority-group">
-                      <n-radio-button :value="0" class="priority-btn priority-btn--p0">
-                        <span class="priority-btn__dot"></span>{{ t('createTask.p0') }}
-                      </n-radio-button>
-                      <n-radio-button :value="1" class="priority-btn priority-btn--p1">
-                        <span class="priority-btn__dot"></span>{{ t('createTask.p1') }}
-                      </n-radio-button>
-                      <n-radio-button :value="2" class="priority-btn priority-btn--p2">
-                        <span class="priority-btn__dot"></span>{{ t('createTask.p2') }}
-                      </n-radio-button>
+                    <n-radio-group v-model:value="formValue.priority" class="priority-selector" data-testid="create-task-priority-group">
+                      <div
+                        v-for="opt in priorityOptions"
+                        :key="opt.value"
+                        class="priority-card"
+                        :class="[`priority-card--p${opt.value}`, { 'priority-card--active': formValue.priority === opt.value }]"
+                        @click="formValue.priority = opt.value"
+                      >
+                        <n-radio :value="opt.value" class="priority-card__radio" />
+                        <span class="priority-card__dot"></span>
+                        <div class="priority-card__text">
+                          <div class="priority-card__label">{{ opt.label }}</div>
+                          <div class="priority-card__desc">{{ opt.desc }}</div>
+                        </div>
+                      </div>
                     </n-radio-group>
                   </n-form-item>
                 </n-gi>
@@ -347,7 +352,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NCard, NForm, NFormItem, NSelect, NInput, NInputNumber,
-  NButton, NSpin, NSpace, NRadioGroup, NRadio, NRadioButton, NModal,
+  NButton, NSpin, NSpace, NRadioGroup, NRadio, NModal,
   NDatePicker, NTag, NGrid, NGi, NIcon, NSwitch, NTooltip,
   NDrawer, NDrawerContent, NAlert,
   useMessage, FormInst, FormRules
@@ -389,6 +394,12 @@ const unreplacedVariables = computed(() => {
   if (!matches) return []
   return matches.map(m => m.replace(/\{\{|\}\}/g, ''))
 })
+
+const priorityOptions = computed(() => [
+  { value: 0, label: t('createTask.p0'), desc: t('createTask.p0Desc') },
+  { value: 1, label: t('createTask.p1'), desc: t('createTask.p1Desc') },
+  { value: 2, label: t('createTask.p2'), desc: t('createTask.p2Desc') },
+])
 
 // Form state
 const formRef = ref<FormInst | null>(null)
@@ -1098,28 +1109,85 @@ watch(scheduleType, (newType) => {
   margin-top: 2px;
 }
 
-.priority-btn__dot {
+.priority-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.priority-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1.5px solid rgba(148, 163, 184, 0.22);
+  background: rgba(248, 250, 252, 0.5);
+  cursor: pointer;
+  transition: border-color 0.18s, background 0.18s, box-shadow 0.18s;
+}
+
+.priority-card:hover {
+  border-color: rgba(148, 163, 184, 0.38);
+  background: rgba(248, 250, 252, 0.85);
+}
+
+.priority-card--active {
+  border-color: rgba(32, 128, 240, 0.45);
+  background: rgba(32, 128, 240, 0.04);
+  box-shadow: 0 0 0 2px rgba(32, 128, 240, 0.12);
+}
+
+.priority-card--active:hover {
+  border-color: rgba(32, 128, 240, 0.55);
+  background: rgba(32, 128, 240, 0.06);
+}
+
+.priority-card__radio {
+  flex-shrink: 0;
+}
+
+.priority-card__dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  margin-right: 6px;
-  vertical-align: middle;
-  margin-top: -1px;
+  flex-shrink: 0;
 }
 
-.priority-btn--p0 .priority-btn__dot {
+.priority-card--p0 .priority-card__dot {
   background-color: #d03050;
-  box-shadow: 0 0 0 2px rgba(208, 48, 80, 0.18);
+  box-shadow: 0 0 0 3px rgba(208, 48, 80, 0.15);
 }
 
-.priority-btn--p1 .priority-btn__dot {
+.priority-card--p1 .priority-card__dot {
   background-color: #f0a020;
-  box-shadow: 0 0 0 2px rgba(240, 160, 32, 0.18);
+  box-shadow: 0 0 0 3px rgba(240, 160, 32, 0.15);
 }
 
-.priority-btn--p2 .priority-btn__dot {
+.priority-card--p2 .priority-card__dot {
   background-color: #18a058;
-  box-shadow: 0 0 0 2px rgba(24, 160, 88, 0.18);
+  box-shadow: 0 0 0 3px rgba(24, 160, 88, 0.15);
+}
+
+.priority-card__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.priority-card__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.3;
+}
+
+.priority-card__desc {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.52);
+  line-height: 1.35;
 }
 </style>

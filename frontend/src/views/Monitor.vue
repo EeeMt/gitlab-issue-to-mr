@@ -236,7 +236,7 @@
                           top: idx * 36 + 'px',
                           background: priorityColor(task.priority),
                         }"
-                        :data-tooltip="`#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.kanbanElapsed', { duration: task.started_at ? formatElapsedCompact(task.started_at) : '—' })}`"
+                        :data-tooltip="`#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.kanbanElapsed', { duration: task.started_at ? formatElapsedCompact(task.started_at) : '—' })}${task.initiator_username ? '\n@' + task.initiator_username : ''}`"
                         @click="goToTask(task.id)"
                         @keydown.enter="goToTask(task.id)"
                         @keydown.space.prevent="goToTask(task.id)"
@@ -256,7 +256,7 @@
                           top: (runningTasks.length + idx) * 36 + 'px',
                           background: priorityColor(task.priority),
                         }"
-                        :data-tooltip="`#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineReady')}${task.scheduled_at ? ' · ' + formatTimeUtc8(task.scheduled_at) : ''}`"
+                        :data-tooltip="`#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineReady')}${task.scheduled_at ? ' · ' + formatTimeUtc8(task.scheduled_at) : ''}${task.initiator_username ? '\n@' + task.initiator_username : ''}`"
                         @click="goToTask(task.id)"
                         @keydown.enter="goToTask(task.id)"
                         @keydown.space.prevent="goToTask(task.id)"
@@ -276,7 +276,7 @@
                           top: (runningTasks.length + readyTasks.length + idx) * 36 + 'px',
                           borderColor: priorityColor(task.priority),
                         }"
-                        :data-tooltip="`#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineWaiting')}: ${formatTimeUtc8(task.scheduled_at!)} (${t('monitor.kanbanIn', { duration: formatRelativeFuture(task.scheduled_at!) })})`"
+                        :data-tooltip="`#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineWaiting')}: ${formatTimeUtc8(task.scheduled_at!)} (${t('monitor.kanbanIn', { duration: formatRelativeFuture(task.scheduled_at!) })})${task.initiator_username ? '\n@' + task.initiator_username : ''}`"
                         @click="goToTask(task.id)"
                         @keydown.enter="goToTask(task.id)"
                         @keydown.space.prevent="goToTask(task.id)"
@@ -1872,7 +1872,7 @@ onBeforeUnmount(() => {
 .queue-timeline__has-tooltip::after {
   content: attr(data-tooltip);
   position: absolute;
-  bottom: calc(100% + 6px);
+  top: calc(100% + 6px);
   left: 0;
   background: #1e293b;
   color: #f8fafc;
@@ -1884,7 +1884,7 @@ onBeforeUnmount(() => {
   white-space: pre-line;
   pointer-events: none;
   opacity: 0;
-  transform: translateY(4px);
+  transform: translateY(-4px);
   transition: opacity 0.15s, transform 0.15s;
   z-index: 100;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);

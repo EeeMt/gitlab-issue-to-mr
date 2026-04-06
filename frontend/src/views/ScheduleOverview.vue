@@ -468,7 +468,7 @@ const hourlyBuckets = computed<HourBucket[]>(() => {
   const maxCount = Math.max(...buckets.map((bucket) => bucket.count), 0)
   return buckets.map((bucket) => ({
     ...bucket,
-    heightPercent: maxCount > 0 ? Math.max((bucket.count / maxCount) * 100, bucket.count > 0 ? 10 : 0) : 0,
+    heightPercent: maxCount > 0 ? (bucket.count > 0 ? Math.max((bucket.count / maxCount) * 100, 2) : 0) : 0,
   }))
 })
 
@@ -960,7 +960,7 @@ onBeforeUnmount(() => {
 
 .hourly-chart__bar {
   width: 100%;
-  min-height: 0;
+  min-height: 2px;
   border-radius: 999px;
   background: linear-gradient(180deg, rgba(32, 128, 240, 0.95), rgba(54, 173, 106, 0.78));
 }
