@@ -1109,12 +1109,12 @@ class WorkerExecutor:
 
             try:
                 await self._notify_task_completed(task, success=False, notify_target="mr" if had_existing_mr else "issue")
-            except Exception:
-                pass
+            except Exception as notify_error:
+                logger.warning(f"[Task {task_id}] Resume: failed to send failure notification: {notify_error}")
             try:
                 await notify_task_event(task, MATTERMOST_EVENT_TASK_FAILED)
-            except Exception:
-                pass
+            except Exception as notify_error:
+                logger.warning(f"[Task {task_id}] Resume: failed to send Mattermost notification: {notify_error}")
 
             return False
 

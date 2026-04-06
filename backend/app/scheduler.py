@@ -27,12 +27,12 @@ _SESSION_CLEANUP_INTERVAL_SECONDS = 3600
 _worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-")
 
 
-WORKER_CONTAINER_PATTERN = re.compile(r"^codify-\d+-p\d+-(i\d+|manual)$")
+WORKER_CONTAINER_PATTERN = re.compile(r"^codify-(\d+)-p\d+-(i\d+|manual)$")
 
 
 def _extract_task_id(container_name: str) -> int | None:
     """Extract task_id from a worker container name like codify-123-p456-i789."""
-    m = re.match(r"^codify-(\d+)-p\d+-(i\d+|manual)$", container_name)
+    m = WORKER_CONTAINER_PATTERN.match(container_name)
     return int(m.group(1)) if m else None
 
 

@@ -57,10 +57,231 @@
                       <div class="monitor-card__title">{{ t('monitor.activeTasksTitle') }}</div>
                       <div class="monitor-card__subtitle">{{ t('monitor.activeTasksSubtitle') }}</div>
                     </div>
+                    <n-button-group size="small">
+                      <n-button
+                        v-for="opt in queueViewOptions"
+                        :key="opt.value"
+                        :type="queueViewMode === opt.value ? 'primary' : 'default'"
+                        :ghost="queueViewMode === opt.value"
+                        @click="queueViewMode = opt.value"
+                      >{{ opt.label }}</n-button>
+                    </n-button-group>
                   </div>
                 </template>
 
                 <n-empty v-if="!tableLoading && activeTasks.length === 0" :description="t('monitor.noActiveTasks')" />
+
+                <!-- Kanban View -->
+                <div v-else-if="queueViewMode === 'kanban'" class="queue-kanban">
+                  <!-- Running Column -->
+                  <div class="queue-kanban__column queue-kanban__column--running">
+                    <div class="queue-kanban__column-header">
+                      <span class="queue-kanban__column-icon">🟢</span>
+                      <span>{{ t('monitor.kanbanRunning') }}</span>
+                      <n-tag size="tiny" round :bordered="false">{{ runningTasks.length }}</n-tag>
+                    </div>
+                    <div
+                      v-for="task in runningTasks"
+                      :key="task.id"
+                      class="queue-kanban__card"
+                      role="button"
+                      tabindex="0"
+                      @click="goToTask(task.id)"
+                      @keydown.enter="goToTask(task.id)"
+                      @keydown.space.prevent="goToTask(task.id)"
+                    >
+                      <div class="queue-kanban__card-top">
+                        <span
+                          class="queue-kanban__priority-badge"
+                          :style="{ background: priorityColor(task.priority) }"
+                        >P{{ task.priority }}</span>
+                        <span class="queue-kanban__task-id">#{{ task.id }}</span>
+                      </div>
+                      <div class="queue-kanban__card-project">{{ kanbanProjectLabel(task) }} {{ kanbanIssueLabel(task) }}</div>
+                      <div class="queue-kanban__card-meta">
+                        ⏱ {{ t('monitor.kanbanElapsed', { duration: task.started_at ? formatElapsedCompact(task.started_at) : '—' }) }}
+                      </div>
+                    </div>
+                    <n-empty
+                      v-if="runningTasks.length === 0"
+                      :description="'—'"
+                      :show-icon="false"
+                      size="small"
+                      style="padding: 16px 0"
+                    />
+                  </div>
+
+                  <!-- Ready Column -->
+                  <div class="queue-kanban__column queue-kanban__column--ready">
+                    <div class="queue-kanban__column-header">
+                      <span class="queue-kanban__column-icon">🔵</span>
+                      <span>{{ t('monitor.kanbanReady') }}</span>
+                      <n-tag size="tiny" round :bordered="false">{{ readyTasks.length }}</n-tag>
+                    </div>
+                    <div
+                      v-for="task in readyTasks"
+                      :key="task.id"
+                      class="queue-kanban__card"
+                      role="button"
+                      tabindex="0"
+                      @click="goToTask(task.id)"
+                      @keydown.enter="goToTask(task.id)"
+                      @keydown.space.prevent="goToTask(task.id)"
+                    >
+                      <div class="queue-kanban__card-top">
+                        <span
+                          class="queue-kanban__priority-badge"
+                          :style="{ background: priorityColor(task.priority) }"
+                        >P{{ task.priority }}</span>
+                        <span class="queue-kanban__task-id">#{{ task.id }}</span>
+                      </div>
+                      <div class="queue-kanban__card-project">{{ kanbanProjectLabel(task) }} {{ kanbanIssueLabel(task) }}</div>
+                      <div class="queue-kanban__card-meta">
+                        <template v-if="task.scheduled_at">
+                          🕐 {{ t('monitor.kanbanDue', { time: formatTimeUtc8(task.scheduled_at) }) }}
+                        </template>
+                        <template v-else>
+                          {{ t('monitor.kanbanImmediate') }}
+                        </template>
+                      </div>
+                    </div>
+                    <n-empty
+                      v-if="readyTasks.length === 0"
+                      :description="'—'"
+                      :show-icon="false"
+                      size="small"
+                      style="padding: 16px 0"
+                    />
+                  </div>
+
+                  <!-- Waiting Column -->
+                  <div class="queue-kanban__column queue-kanban__column--waiting">
+                    <div class="queue-kanban__column-header">
+                      <span class="queue-kanban__column-icon">⏳</span>
+                      <span>{{ t('monitor.kanbanWaiting') }}</span>
+                      <n-tag size="tiny" round :bordered="false">{{ waitingTasks.length }}</n-tag>
+                    </div>
+                    <div
+                      v-for="task in waitingTasks"
+                      :key="task.id"
+                      class="queue-kanban__card"
+                      role="button"
+                      tabindex="0"
+                      @click="goToTask(task.id)"
+                      @keydown.enter="goToTask(task.id)"
+                      @keydown.space.prevent="goToTask(task.id)"
+                    >
+                      <div class="queue-kanban__card-top">
+                        <span
+                          class="queue-kanban__priority-badge"
+                          :style="{ background: priorityColor(task.priority) }"
+                        >P{{ task.priority }}</span>
+                        <span class="queue-kanban__task-id">#{{ task.id }}</span>
+                      </div>
+                      <div class="queue-kanban__card-project">{{ kanbanProjectLabel(task) }}</div>
+                      <div class="queue-kanban__card-meta">
+                        🕐 {{ formatTimeUtc8(task.scheduled_at!) }}
+                        <span class="queue-kanban__relative-time">({{ t('monitor.kanbanIn', { duration: formatRelativeFuture(task.scheduled_at!) }) }})</span>
+                      </div>
+                    </div>
+                    <n-empty
+                      v-if="waitingTasks.length === 0"
+                      :description="'—'"
+                      :show-icon="false"
+                      size="small"
+                      style="padding: 16px 0"
+                    />
+                  </div>
+                </div>
+
+                <!-- Timeline View -->
+                <div v-else-if="queueViewMode === 'timeline'" class="queue-timeline">
+                  <div class="queue-timeline__container">
+                    <!-- Time axis -->
+                    <div class="queue-timeline__axis">
+                      <span
+                        v-for="tick in timelineTicks"
+                        :key="tick.time"
+                        class="queue-timeline__tick"
+                        :style="{ left: tick.pct + '%' }"
+                      >{{ tick.label }}</span>
+                    </div>
+
+                    <!-- Now marker -->
+                    <div
+                      class="queue-timeline__now-marker"
+                      :style="{ left: timelinePct(nowMs) + '%' }"
+                    >
+                      <span class="queue-timeline__now-label">{{ t('monitor.timelineNow') }}</span>
+                    </div>
+
+                    <!-- Track area -->
+                    <div class="queue-timeline__tracks" :style="{ height: timelineTracksHeight + 'px' }">
+                      <!-- Running tasks: bars from started_at to now -->
+                      <div
+                        v-for="(task, idx) in runningTasks"
+                        :key="'run-' + task.id"
+                        class="queue-timeline__task-bar"
+                        role="button"
+                        tabindex="0"
+                        :style="{
+                          left: timelinePct(task.started_at ? parseUtcDate(task.started_at).getTime() : nowMs) + '%',
+                          width: Math.max(2, timelinePct(nowMs) - timelinePct(task.started_at ? parseUtcDate(task.started_at).getTime() : nowMs)) + '%',
+                          top: idx * 36 + 'px',
+                          background: priorityColor(task.priority),
+                        }"
+                        :title="`#${task.id} P${task.priority} ${t('monitor.kanbanRunning')}`"
+                        @click="goToTask(task.id)"
+                        @keydown.enter="goToTask(task.id)"
+                        @keydown.space.prevent="goToTask(task.id)"
+                      >
+                        <span class="queue-timeline__bar-label">#{{ task.id }} P{{ task.priority }}</span>
+                      </div>
+
+                      <!-- Ready tasks: solid dots -->
+                      <div
+                        v-for="(task, idx) in readyTasks"
+                        :key="'rdy-' + task.id"
+                        class="queue-timeline__task-dot queue-timeline__task-dot--ready"
+                        role="button"
+                        tabindex="0"
+                        :style="{
+                          left: timelinePct(task.scheduled_at ? Math.min(parseUtcDate(task.scheduled_at).getTime(), nowMs) : nowMs) + '%',
+                          top: (runningTasks.length + idx) * 36 + 'px',
+                          background: priorityColor(task.priority),
+                        }"
+                        :title="`#${task.id} P${task.priority} ${t('monitor.timelineReady')}`"
+                        @click="goToTask(task.id)"
+                        @keydown.enter="goToTask(task.id)"
+                        @keydown.space.prevent="goToTask(task.id)"
+                      >
+                        <span class="queue-timeline__dot-label">#{{ task.id }} P{{ task.priority }} {{ t('monitor.timelineReady') }}</span>
+                      </div>
+
+                      <!-- Waiting tasks: hollow dots -->
+                      <div
+                        v-for="(task, idx) in waitingTasks"
+                        :key="'wait-' + task.id"
+                        class="queue-timeline__task-dot queue-timeline__task-dot--waiting"
+                        role="button"
+                        tabindex="0"
+                        :style="{
+                          left: timelinePct(parseUtcDate(task.scheduled_at!).getTime()) + '%',
+                          top: (runningTasks.length + readyTasks.length + idx) * 36 + 'px',
+                          borderColor: priorityColor(task.priority),
+                        }"
+                        :title="`#${task.id} P${task.priority} ${t('monitor.timelineWaiting')}: ${formatTimeUtc8(task.scheduled_at!)}`"
+                        @click="goToTask(task.id)"
+                        @keydown.enter="goToTask(task.id)"
+                        @keydown.space.prevent="goToTask(task.id)"
+                      >
+                        <span class="queue-timeline__dot-label">#{{ task.id }} P{{ task.priority }} {{ formatTimeUtc8(task.scheduled_at!) }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Table View (existing) -->
                 <n-data-table
                   v-else
                   :columns="activeTaskColumns"
@@ -245,6 +466,7 @@ import { useRouter } from 'vue-router'
 import {
   NAlert,
   NButton,
+  NButtonGroup,
   NCard,
   NDataTable,
   NEmpty,
@@ -262,7 +484,7 @@ import { useI18n } from 'vue-i18n'
 import { getContainers, getStats, getTasks, type Container, type Stats, type Task } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
-import { formatDateTimeUtc8Compact, parseUtcDate } from '../utils/datetime'
+import { formatDateTimeUtc8Compact, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
 
 type CardTagType = 'default' | 'info' | 'success' | 'warning' | 'error'
 type CheckType = 'default' | 'info' | 'success' | 'warning' | 'error'
@@ -309,6 +531,16 @@ const tasks = ref<Task[]>([])
 let pendingSilentRefresh = false
 let pendingVisibleRefresh = false
 let refreshTimer: number | null = null
+let elapsedTimer: ReturnType<typeof setInterval> | null = null
+
+const queueViewMode = ref<'kanban' | 'timeline' | 'table'>('kanban')
+const nowMs = ref(Date.now())
+
+const queueViewOptions = computed(() => [
+  { label: t('monitor.viewKanban'), value: 'kanban' as const },
+  { label: t('monitor.viewTimeline'), value: 'timeline' as const },
+  { label: t('monitor.viewTable'), value: 'table' as const },
+])
 
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
@@ -316,7 +548,7 @@ const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 const tasksById = computed(() => new Map(tasks.value.map((task) => [task.id, task])))
 
 const activeTasks = computed(() => {
-  const now = Date.now()
+  const now = nowMs.value
   return tasks.value
     .filter((task) => ACTIVE_STATUSES.includes(task.status))
     .sort((a, b) => {
@@ -326,8 +558,8 @@ const activeTasks = computed(() => {
       if (aRunning !== bRunning) return aRunning - bRunning
 
       // 2. Ready (due now or immediate) before Waiting (future scheduled)
-      const aReady = !a.scheduled_at || new Date(a.scheduled_at).getTime() <= now ? 0 : 1
-      const bReady = !b.scheduled_at || new Date(b.scheduled_at).getTime() <= now ? 0 : 1
+      const aReady = !a.scheduled_at || parseUtcDate(a.scheduled_at).getTime() <= now ? 0 : 1
+      const bReady = !b.scheduled_at || parseUtcDate(b.scheduled_at).getTime() <= now ? 0 : 1
       if (aReady !== bReady) return aReady - bReady
 
       // Within Ready group: scheduler ordering
@@ -338,15 +570,15 @@ const activeTasks = computed(() => {
         const bDue = b.scheduled_at ? 0 : 1
         if (aDue !== bDue) return aDue - bDue
         if (a.scheduled_at && b.scheduled_at) {
-          const diff = new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
+          const diff = parseUtcDate(a.scheduled_at).getTime() - parseUtcDate(b.scheduled_at).getTime()
           if (diff !== 0) return diff
         }
-        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        return parseUtcDate(a.created_at).getTime() - parseUtcDate(b.created_at).getTime()
       }
 
       // Within Waiting group: earliest scheduled_at first
       if (a.scheduled_at && b.scheduled_at) {
-        return new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
+        return parseUtcDate(a.scheduled_at).getTime() - parseUtcDate(b.scheduled_at).getTime()
       }
       return 0
     })
@@ -359,6 +591,25 @@ const runningTasks = computed(() =>
 const pendingQueuedTasks = computed(() =>
   activeTasks.value.filter((task) => task.status === 'pending' || task.status === 'queued')
 )
+
+const readyTasks = computed(() => {
+  const now = nowMs.value
+  return pendingQueuedTasks.value.filter(
+    (t) => !t.scheduled_at || parseUtcDate(t.scheduled_at).getTime() <= now
+  )
+})
+
+const waitingTasks = computed(() => {
+  const now = nowMs.value
+  return pendingQueuedTasks.value.filter(
+    (t) => t.scheduled_at != null && parseUtcDate(t.scheduled_at).getTime() > now
+  )
+})
+
+const timelineTracksHeight = computed(() => {
+  const totalTasks = runningTasks.value.length + readyTasks.value.length + waitingTasks.value.length
+  return Math.max(36, totalTasks * 36)
+})
 
 const runningContainers = computed(() =>
   containers.value.filter((container) => container.status === 'running')
@@ -969,6 +1220,103 @@ function goToTask(taskId: number) {
   router.push(`/tasks/${taskId}`)
 }
 
+const PRIORITY_COLORS: Record<number, string> = {
+  0: '#E53E3E',
+  1: '#DD6B20',
+  2: '#38A169',
+}
+
+function priorityColor(priority: number): string {
+  return PRIORITY_COLORS[priority] ?? '#718096'
+}
+
+function formatElapsedCompact(startedAt: string): string {
+  const ms = Math.max(0, nowMs.value - parseUtcDate(startedAt).getTime())
+  const totalSec = Math.floor(ms / 1000)
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  const s = totalSec % 60
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m ${s}s`
+}
+
+function formatRelativeFuture(scheduledAt: string): string {
+  const ms = Math.max(0, parseUtcDate(scheduledAt).getTime() - nowMs.value)
+  const totalMin = Math.floor(ms / 60000)
+  const h = Math.floor(totalMin / 60)
+  const m = totalMin % 60
+  if (h > 0 && m > 0) return `${h}h ${m}m`
+  if (h > 0) return `${h}h`
+  if (m > 0) return `${m}m`
+  return '<1m'
+}
+
+function kanbanProjectLabel(task: Task): string {
+  return task.project_name || task.project_path_with_namespace || '—'
+}
+
+function kanbanIssueLabel(task: Task): string {
+  if (task.issue_iid) return `#${task.issue_iid}`
+  return t('monitor.kanbanManual')
+}
+
+/* ----- Timeline computed helpers ----- */
+
+const timelineRange = computed(() => {
+  const now = nowMs.value
+  let minTime = now - 60 * 60 * 1000 // now - 1h
+  let maxTime = now + 4 * 60 * 60 * 1000 // now + 4h
+
+  for (const task of activeTasks.value) {
+    if (task.started_at) {
+      minTime = Math.min(minTime, parseUtcDate(task.started_at).getTime())
+    }
+    if (task.scheduled_at) {
+      const st = parseUtcDate(task.scheduled_at).getTime()
+      minTime = Math.min(minTime, st)
+      maxTime = Math.max(maxTime, st + 30 * 60 * 1000)
+    }
+  }
+
+  // Add 10% padding on each side
+  const span = maxTime - minTime
+  const pad = span * 0.05
+  return { start: minTime - pad, end: maxTime + pad }
+})
+
+function timelinePct(timeMs: number): number {
+  const { start, end } = timelineRange.value
+  const span = end - start
+  if (span <= 0) return 0
+  return Math.max(0, Math.min(100, ((timeMs - start) / span) * 100))
+}
+
+const timelineTicks = computed(() => {
+  const { start, end } = timelineRange.value
+  const span = end - start
+  // Choose an interval: 15min, 30min, 1h, 2h, 4h — keep max ~8 ticks
+  const intervals = [15, 30, 60, 120, 240]
+  let intervalMin = 60
+  for (const iv of intervals) {
+    if (span / (iv * 60 * 1000) <= 8) {
+      intervalMin = iv
+      break
+    }
+  }
+  const intervalMs = intervalMin * 60 * 1000
+
+  const firstTick = Math.ceil(start / intervalMs) * intervalMs
+  const ticks: { time: number; pct: number; label: string }[] = []
+  for (let t = firstTick; t <= end; t += intervalMs) {
+    ticks.push({
+      time: t,
+      pct: timelinePct(t),
+      label: formatTimeUtc8(new Date(t)),
+    })
+  }
+  return ticks
+})
+
 async function fetchData(options: { silent?: boolean } = {}) {
   const silent = options.silent ?? false
 
@@ -1032,10 +1380,15 @@ function stopAutoRefresh() {
 onMounted(async () => {
   await fetchData()
   startAutoRefresh()
+  elapsedTimer = setInterval(() => { nowMs.value = Date.now() }, 1000)
 })
 
 onBeforeUnmount(() => {
   stopAutoRefresh()
+  if (elapsedTimer) {
+    clearInterval(elapsedTimer)
+    elapsedTimer = null
+  }
 })
 </script>
 
@@ -1228,7 +1581,247 @@ onBeforeUnmount(() => {
   background: linear-gradient(90deg, #2563eb, #60a5fa);
 }
 
+/* ----- Kanban View ----- */
+.queue-kanban {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  min-height: 200px;
+}
+
+.queue-kanban__column {
+  background: rgba(248, 250, 252, 0.72);
+  border-radius: 8px;
+  padding: 12px;
+  min-height: 180px;
+}
+
+.queue-kanban__column-header {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #0f172a;
+}
+
+.queue-kanban__column-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.queue-kanban__card {
+  background: var(--card-color, #fff);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.queue-kanban__card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  border-color: rgba(15, 23, 42, 0.16);
+}
+
+.queue-kanban__card:last-child {
+  margin-bottom: 0;
+}
+
+.queue-kanban__card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.queue-kanban__priority-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  line-height: 1.5;
+}
+
+.queue-kanban__task-id {
+  font-weight: 600;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.queue-kanban__card-project {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.68);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-kanban__card-meta {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.56);
+}
+
+.queue-kanban__relative-time {
+  opacity: 0.8;
+}
+
+/* ----- Timeline View ----- */
+.queue-timeline {
+  position: relative;
+  overflow-x: auto;
+  padding: 8px 0 12px;
+  min-height: 200px;
+}
+
+.queue-timeline__container {
+  position: relative;
+  min-width: 600px;
+  min-height: 160px;
+  padding: 0 24px;
+}
+
+.queue-timeline__axis {
+  position: relative;
+  height: 36px;
+  border-bottom: 2px solid rgba(15, 23, 42, 0.12);
+}
+
+.queue-timeline__tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: rgba(15, 23, 42, 0.56);
+  white-space: nowrap;
+  line-height: 1;
+  padding-bottom: 8px;
+}
+
+.queue-timeline__tick::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  height: 6px;
+  background: rgba(15, 23, 42, 0.2);
+  transform: translateX(-50%);
+}
+
+.queue-timeline__now-marker {
+  position: absolute;
+  top: 28px;
+  bottom: 0;
+  width: 2px;
+  background: #E53E3E;
+  z-index: 10;
+  transform: translateX(-50%);
+}
+
+.queue-timeline__now-label {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-weight: 600;
+  color: #E53E3E;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.queue-timeline__tracks {
+  position: relative;
+  padding-top: 12px;
+  min-height: 80px;
+}
+
+.queue-timeline__task-bar {
+  position: absolute;
+  height: 28px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 12px;
+  color: white;
+  white-space: nowrap;
+  min-width: 60px;
+  opacity: 0.9;
+  transition: opacity 0.15s;
+}
+
+.queue-timeline__task-bar:hover {
+  opacity: 1;
+}
+
+.queue-timeline__bar-label {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.queue-timeline__task-dot {
+  position: absolute;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding-left: 4px;
+}
+
+.queue-timeline__task-dot::before {
+  content: '';
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.queue-timeline__task-dot--ready::before {
+  background: currentColor;
+  /* Color set via inline style on parent background */
+}
+
+.queue-timeline__task-dot--ready {
+  color: inherit;
+}
+
+.queue-timeline__task-dot--ready::before {
+  background: inherit;
+}
+
+.queue-timeline__task-dot--waiting::before {
+  background: transparent;
+  border: 2px solid;
+  border-color: inherit;
+  width: 8px;
+  height: 8px;
+}
+
+.queue-timeline__dot-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #0f172a;
+  white-space: nowrap;
+}
+
 @media (max-width: 768px) {
+  .queue-kanban {
+    grid-template-columns: 1fr;
+  }
+
   .monitor-card__header {
     flex-direction: column;
     align-items: flex-start;
