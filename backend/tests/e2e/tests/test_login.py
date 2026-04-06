@@ -8,39 +8,68 @@ Tests for the Login page functionality including:
 - Error handling for invalid credentials
 """
 
+import httpx
 import pytest
 from playwright.sync_api import Page, expect
+
+
+@pytest.fixture(scope="module")
+def initialized_system(backend_url):
+    """
+    Ensure the system is initialized (has at least one admin user).
+
+    The login page is only accessible when the system is initialized;
+    otherwise the Vue router guard redirects to /bootstrap.  This fixture
+    registers an admin via the backend API if the system hasn't been
+    initialized yet.  A 403 response means another worker already
+    initialized it — that's fine.
+    """
+    with httpx.Client(timeout=15) as client:
+        resp = client.post(
+            f"{backend_url}/api/auth/local/register",
+            json={
+                "username": "login_test_admin",
+                "display_name": "Login Test Admin",
+                "email": "login_test_admin@test.example.com",
+                "password": "SecurePass123!",
+            },
+        )
+        if resp.status_code not in (200, 201, 403):
+            raise RuntimeError(
+                f"Failed to initialize system for login tests: "
+                f"{resp.status_code} {resp.text[:200]}"
+            )
 
 
 @pytest.mark.login
 class TestLoginPage:
     """Tests for the login page structure and basic rendering."""
 
-    def test_login_page_loads(self, page: Page, reset_database):
+    def test_login_page_loads(self, page: Page, initialized_system):
         """Test that the login page loads and the outer container is visible."""
         page.goto("/login")
         page.wait_for_load_state("domcontentloaded")
         expect(page.get_by_test_id("login-page")).to_be_visible()
 
-    def test_login_card_is_visible(self, page: Page, reset_database):
+    def test_login_card_is_visible(self, page: Page, initialized_system):
         """Test that the login card is rendered."""
         page.goto("/login")
         page.wait_for_load_state("domcontentloaded")
         expect(page.get_by_test_id("login-card")).to_be_visible()
 
-    def test_login_card_css_class(self, page: Page, reset_database):
+    def test_login_card_css_class(self, page: Page, initialized_system):
         """Test that the login card has the expected CSS class."""
         page.goto("/login")
         page.wait_for_load_state("domcontentloaded")
         expect(page.locator(".login-card")).to_be_visible()
 
-    def test_login_header_is_visible(self, page: Page, reset_database):
+    def test_login_header_is_visible(self, page: Page, initialized_system):
         """Test that the page header section is rendered."""
         page.goto("/login")
         page.wait_for_load_state("domcontentloaded")
         expect(page.get_by_test_id("login-header")).to_be_visible()
 
-    def test_login_page_has_authentication_ui(self, page: Page, reset_database):
+    def test_login_page_has_authentication_ui(self, page: Page, initialized_system):
         """
         Test that the page shows some kind of authentication UI.
 
@@ -56,28 +85,28 @@ class TestLoginPage:
         # Some child content must exist
         expect(card.locator("button, input").first).to_be_attached()
 
-    def test_login_page_has_no_sidebar(self, page: Page, reset_database):
+    def test_login_page_has_no_sidebar(self, page: Page, initialized_system):
         """Test that the sidebar is not visible on the login page."""
         page.goto("/login")
         page.wait_for_load_state("domcontentloaded")
         sidebar = page.locator(".app-shell__sider")
         expect(sidebar).not_to_be_visible()
 
-    def test_login_page_has_no_topbar(self, page: Page, reset_database):
+    def test_login_page_has_no_topbar(self, page: Page, initialized_system):
         """Test that the topbar is not visible on the login page."""
         page.goto("/login")
         page.wait_for_load_state("domcontentloaded")
         topbar = page.locator(".app-shell__topbar")
         expect(topbar).not_to_be_visible()
 
-    def test_login_page_title_in_card(self, page: Page, reset_database):
+    def test_login_page_title_in_card(self, page: Page, initialized_system):
         """Test that the login card contains a title element."""
         page.goto("/login")
         page.wait_for_load_state("domcontentloaded")
         title = page.locator(".login-card__title")
         expect(title).to_be_visible()
 
-    def test_login_tabs_or_password_toggle_present(self, page: Page, reset_database):
+    def test_login_tabs_or_password_toggle_present(self, page: Page, initialized_system):
         """
         Test that either bootstrap-style login tabs or the initialized
         password-toggle form is present.
@@ -85,12 +114,12 @@ class TestLoginPage:
         page.goto("/login")
         page.wait_for_load_state("domcontentloaded")
         tabs = page.get_by_test_id("login-tabs")
-        toggle = page.locator(".login-card__password-toggle")
+        toggle = page.locator(".login-card__toggle")
         # One or the other must be present in the DOM
         tabs_attached = tabs.count() > 0
         toggle_attached = toggle.count() > 0
         assert tabs_attached or toggle_attached, (
-            "Expected either login-tabs or login-card__password-toggle to be in the DOM"
+            "Expected either login-tabs or login-card__toggle to be in the DOM"
         )
 
 
@@ -113,7 +142,7 @@ class TestLoginErrors:
             return  # form elements are already accessible via login-username-input
 
         # Case 2: system initialized — toggle the password form open
-        toggle_btn = page.locator(".login-card__password-toggle button")
+        toggle_btn = page.locator(".login-card__toggle button")
         if toggle_btn.count() > 0 and toggle_btn.first.is_visible(timeout=2000):
             toggle_btn.first.click()
             # Wait for the password form to expand
@@ -123,7 +152,7 @@ class TestLoginErrors:
                 timeout=5000,
             )
 
-    def test_invalid_credentials_show_error(self, page: Page, reset_database):
+    def test_invalid_credentials_show_error(self, page: Page, initialized_system):
         """
         Test that submitting wrong credentials displays an error message.
         The error surfaces as an n-message toast from NaiveUI.
@@ -155,7 +184,7 @@ class TestLoginErrors:
         error_message = page.locator(".n-message")
         expect(error_message).to_be_visible(timeout=8000)
 
-    def test_empty_credentials_show_error(self, page: Page, reset_database):
+    def test_empty_credentials_show_error(self, page: Page, initialized_system):
         """
         Test that submitting empty credentials shows an error or validation message.
         """
