@@ -4,10 +4,10 @@ import asyncio
 import json as _json
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, func, select, false
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -129,11 +129,15 @@ async def list_tasks(
 @router.get("/tasks/scheduled")
 async def list_scheduled_tasks(
     project_id: Optional[int] = None,
+    hour_start: Optional[str] = Query(None, description="ISO datetime; filter tasks in this 1-hour window"),
     db: AsyncSession = Depends(get_db),
     _current_user=Depends(require_page_access("schedule_overview")),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
-    """List active scheduled tasks for queue analytics views."""
+    """List active scheduled tasks for queue analytics views.
+
+    When hour_start is provided, returns only tasks within that 1-hour window.
+    """
     query = (
         select(Task)
         .where(
@@ -146,6 +150,16 @@ async def list_scheduled_tasks(
         )
         .order_by(Task.scheduled_at.asc(), Task.priority.asc(), Task.created_at.asc())
     )
+
+    if hour_start:
+        try:
+            window_start = datetime.fromisoformat(hour_start.replace("Z", "+00:00"))
+            if window_start.tzinfo:
+                window_start = window_start.replace(tzinfo=None)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid hour_start format")
+        window_end = window_start + timedelta(hours=1)
+        query = query.where(Task.scheduled_at >= window_start, Task.scheduled_at < window_end)
 
     if project_id:
         require_project_access(project_id, access_scope)

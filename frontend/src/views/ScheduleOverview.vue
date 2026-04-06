@@ -289,7 +289,7 @@ import { useWindowSize } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { authState, isAdmin, initializeAuth } from '../auth'
-import { getScheduledTasks, rescheduleTask, getConfig, type Task } from '../api'
+import { getScheduledTasks, getScheduledStats, rescheduleTask, getConfig, type Task, type ScheduledStatsResponse } from '../api'
 import { formatDateTimeUtc8Compact, formatMonthDayTimeUtc8, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
 import { extractSlotErrorMessage } from '../utils/slotError'
 import HeatmapChart from '../components/HeatmapChart.vue'
@@ -318,6 +318,7 @@ const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
 const tasks = ref<Task[]>([])
+const scheduledStats = ref<ScheduledStatsResponse | null>(null)
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
 const slotMaxTasks = ref(0)
@@ -383,37 +384,19 @@ const fullSlotCount = computed(() => {
 })
 
 const summaryItems = computed(() => {
-  const now = Date.now()
-  const next24Hours = now + 24 * 60 * 60 * 1000
-  const readyNow = tasks.value.filter((task) => {
-    const scheduledMs = getScheduledTimestamp(task.scheduled_at)
-    if (scheduledMs === null) return false
-    return scheduledMs <= now
-  }).length
-  const next24HoursCount = tasks.value.filter((task) => {
-    const scheduledMs = getScheduledTimestamp(task.scheduled_at)
-    if (scheduledMs === null) return false
-    return scheduledMs > now && scheduledMs <= next24Hours
-  }).length
-  const laterCount = tasks.value.filter((task) => {
-    const scheduledMs = getScheduledTimestamp(task.scheduled_at)
-    if (scheduledMs === null) return false
-    return scheduledMs > next24Hours
-  }).length
-  const queuedCount = tasks.value.filter((task) => task.status === 'queued').length
-  const runningCount = tasks.value.filter((task) => task.status === 'running').length
-  const busiest = [...hourlyBuckets.value].sort((left, right) => right.count - left.count)[0]
+  const s = scheduledStats.value?.summary
+  if (!s) return []
 
   const baseItems = [
-    { label: t('scheduleOverview.scheduledQueue'), value: String(tasks.value.length), note: t('scheduleOverview.activeScheduledTasks') },
-    { label: t('scheduleOverview.readyNow'), value: String(readyNow), note: t('scheduleOverview.alreadyDue') },
-    { label: t('scheduleOverview.upcoming24h'), value: String(next24HoursCount), note: t('scheduleOverview.upcomingScheduledWork') },
-    { label: t('scheduleOverview.after24h'), value: String(laterCount), note: t('scheduleOverview.laterBacklog') },
-    { label: t('scheduleOverview.queuedRunning'), value: `${queuedCount} / ${runningCount}`, note: t('scheduleOverview.executionStateSplit') },
+    { label: t('scheduleOverview.scheduledQueue'), value: String(s.total), note: t('scheduleOverview.activeScheduledTasks') },
+    { label: t('scheduleOverview.readyNow'), value: String(s.ready_now), note: t('scheduleOverview.alreadyDue') },
+    { label: t('scheduleOverview.upcoming24h'), value: String(s.next_24h), note: t('scheduleOverview.upcomingScheduledWork') },
+    { label: t('scheduleOverview.after24h'), value: String(s.later), note: t('scheduleOverview.laterBacklog') },
+    { label: t('scheduleOverview.queuedRunning'), value: `${s.queued_count} / ${s.running_count}`, note: t('scheduleOverview.executionStateSplit') },
     {
       label: t('scheduleOverview.busiestHour'),
-      value: busiest && busiest.count > 0 ? String(busiest.count) : '0',
-      note: busiest && busiest.count > 0 ? busiest.label : t('scheduleOverview.noScheduledWork'),
+      value: s.busiest_hour_count > 0 ? String(s.busiest_hour_count) : '0',
+      note: s.busiest_hour_count > 0 ? formatMonthDayTimeUtc8(parseUtcDate(s.busiest_hour_label)) : t('scheduleOverview.noScheduledWork'),
     },
   ]
 
@@ -436,12 +419,14 @@ const summaryItems = computed(() => {
 })
 
 const hourlyBuckets = computed<HourBucket[]>(() => {
-  const start = new Date()
-  start.setMinutes(0, 0, 0)
-  const startMs = start.getTime()
-  const buckets = Array.from({ length: 24 }, (_, index) => {
-    const bucketStartMs = startMs + index * 60 * 60 * 1000
-    const bucketDate = new Date(bucketStartMs)
+  const dist = scheduledStats.value?.hourly_distribution
+  if (!dist || dist.length === 0) {
+    // Fallback: generate empty 24 buckets
+    const start = new Date()
+    start.setMinutes(0, 0, 0)
+    return Array.from({ length: 24 }, (_, index) => {
+      const bucketStartMs = start.getTime() + index * 60 * 60 * 1000
+      const bucketDate = new Date(bucketStartMs)
       return {
         key: `${bucketStartMs}`,
         label: formatMonthDayTimeUtc8(bucketDate),
@@ -449,27 +434,23 @@ const hourlyBuckets = computed<HourBucket[]>(() => {
         count: 0,
         heightPercent: 0,
         startMs: bucketStartMs,
+      }
+    })
+  }
+
+  const maxCount = scheduledStats.value?.max_count ?? 0
+  return dist.map((bucket) => {
+    const bucketDate = parseUtcDate(bucket.hour_start)
+    const bucketStartMs = bucketDate.getTime()
+    return {
+      key: `${bucketStartMs}`,
+      label: formatMonthDayTimeUtc8(bucketDate),
+      shortLabel: formatTimeUtc8(bucketDate),
+      count: bucket.count,
+      heightPercent: maxCount > 0 ? (bucket.count > 0 ? Math.max((bucket.count / maxCount) * 100, 2) : 0) : 0,
+      startMs: bucketStartMs,
     }
   })
-
-  tasks.value.forEach((task) => {
-    const scheduledMs = getScheduledTimestamp(task.scheduled_at)
-    if (scheduledMs === null) return
-    if (scheduledMs < startMs || scheduledMs >= startMs + 24 * 60 * 60 * 1000) {
-      return
-    }
-
-    const bucketIndex = Math.floor((scheduledMs - startMs) / (60 * 60 * 1000))
-    if (bucketIndex >= 0 && bucketIndex < buckets.length) {
-      buckets[bucketIndex].count += 1
-    }
-  })
-
-  const maxCount = Math.max(...buckets.map((bucket) => bucket.count), 0)
-  return buckets.map((bucket) => ({
-    ...bucket,
-    heightPercent: maxCount > 0 ? (bucket.count > 0 ? Math.max((bucket.count / maxCount) * 100, 2) : 0) : 0,
-  }))
 })
 
 const busyWindows = computed(() =>
@@ -534,11 +515,12 @@ function isScheduledTimeDisabled(timestamp: number) {
 
 function setSelectedWindow(nextWindow: SelectedWindow) {
   selectedWindow.value = nextWindow
-  syncScheduleDrafts()
+  fetchWindowTasks(nextWindow)
 }
 
 function clearSelectedWindow() {
   selectedWindow.value = null
+  tasks.value = []
   scheduleDrafts.value = {}
   dirtyDraftIds.value.clear()
 }
@@ -708,16 +690,18 @@ async function fetchData() {
   if (loading.value) return
   loading.value = true
   try {
-    const [, config] = await Promise.all([
-      getScheduledTasks().then(result => {
-        tasks.value = result
-        syncScheduleDrafts()
-      }),
+    const [statsData, config] = await Promise.all([
+      getScheduledStats(),
       getConfig().catch(() => null),
     ])
+    scheduledStats.value = statsData
     if (config) {
       slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
       slotEnforce.value = config.runtime?.slot_max_tasks_enforce ?? false
+    }
+    // If a window is selected, refresh its task data
+    if (selectedWindow.value) {
+      await fetchWindowTasks(selectedWindow.value)
     }
   } catch (error) {
     message.error(t('scheduleOverview.failedToFetch'))
@@ -725,6 +709,13 @@ async function fetchData() {
     hasLoadedOnce.value = true
     loading.value = false
   }
+}
+
+async function fetchWindowTasks(window: SelectedWindow) {
+  const hourStart = new Date(window.startMs).toISOString()
+  const result = await getScheduledTasks({ hour_start: hourStart })
+  tasks.value = result
+  syncScheduleDrafts()
 }
 
 function refresh() {

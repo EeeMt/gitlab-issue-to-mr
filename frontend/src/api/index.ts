@@ -600,8 +600,35 @@ export async function getTasksPaginated(params: {
   return response.data
 }
 
-export async function getScheduledTasks(params?: { project_id?: number }): Promise<Task[]> {
+export async function getScheduledTasks(params?: { project_id?: number; hour_start?: string }): Promise<Task[]> {
   const response = await api.get('/tasks/scheduled', { params })
+  return response.data
+}
+
+export interface ScheduledStatsSummary {
+  total: number
+  ready_now: number
+  next_24h: number
+  later: number
+  queued_count: number
+  running_count: number
+  busiest_hour_count: number
+  busiest_hour_label: string
+}
+
+export interface HourlyBucket {
+  hour_start: string
+  count: number
+}
+
+export interface ScheduledStatsResponse {
+  summary: ScheduledStatsSummary
+  hourly_distribution: HourlyBucket[]
+  max_count: number
+}
+
+export async function getScheduledStats(params?: { project_id?: number }): Promise<ScheduledStatsResponse> {
+  const response = await api.get('/stats/scheduled', { params })
   return response.data
 }
 

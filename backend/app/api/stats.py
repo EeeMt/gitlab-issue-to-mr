@@ -642,3 +642,93 @@ async def get_analytics(
         ],
         "error_breakdown": error_breakdown,
     }
+
+
+@router.get("/stats/scheduled")
+async def get_scheduled_stats(
+    project_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_page_access("schedule_overview")),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Get aggregated statistics for scheduled tasks.
+
+    Returns summary counts and 24-hour hourly distribution without
+    fetching individual task objects — designed for ScheduleOverview polling.
+    """
+    now = datetime.now(UTC).replace(tzinfo=None)
+    now_hour = now.replace(minute=0, second=0, microsecond=0)
+    next_24h = now + timedelta(hours=24)
+    end_24h_bucket = now_hour + timedelta(hours=24)
+
+    base = select(Task).where(
+        Task.scheduled_at.isnot(None),
+        Task.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING]),
+    )
+    base = _apply_project_scope(base, access_scope)
+    if project_id is not None:
+        base = base.where(Task.project_id == project_id)
+
+    # Summary counts in a single query using conditional aggregation
+    summary_q = select(
+        func.count().label("total"),
+        func.count(case((Task.scheduled_at <= now, 1))).label("ready_now"),
+        func.count(
+            case(((Task.scheduled_at > now) & (Task.scheduled_at <= next_24h), 1))
+        ).label("next_24h"),
+        func.count(case((Task.scheduled_at > next_24h, 1))).label("later"),
+        func.count(case((Task.status == TaskStatus.QUEUED, 1))).label("queued_count"),
+        func.count(case((Task.status == TaskStatus.RUNNING, 1))).label("running_count"),
+    ).select_from(base.subquery())
+
+    summary_result = await db.execute(summary_q)
+    s = summary_result.one()
+
+    # Hourly distribution: count tasks bucketed by hour for next 24 hours
+    hourly_base = base.where(
+        Task.scheduled_at >= now_hour,
+        Task.scheduled_at < end_24h_bucket,
+    )
+    hourly_q = (
+        select(
+            func.date_trunc("hour", Task.scheduled_at).label("hour_start"),
+            func.count().label("count"),
+        )
+        .select_from(hourly_base.subquery())
+        .group_by(func.date_trunc("hour", Task.scheduled_at))
+        .order_by(func.date_trunc("hour", Task.scheduled_at))
+    )
+    hourly_result = await db.execute(hourly_q)
+    hourly_rows = hourly_result.all()
+
+    # Build 24 buckets, filling in zeros for empty hours
+    hourly_map = {row.hour_start: row.count for row in hourly_rows}
+    hourly_distribution = []
+    max_count = 0
+    for i in range(24):
+        bucket_start = now_hour + timedelta(hours=i)
+        count = hourly_map.get(bucket_start, 0)
+        if count > max_count:
+            max_count = count
+        hourly_distribution.append({
+            "hour_start": bucket_start.isoformat(),
+            "count": count,
+        })
+
+    # Find busiest hour
+    busiest = max(hourly_distribution, key=lambda b: b["count"])
+
+    return {
+        "summary": {
+            "total": s.total,
+            "ready_now": s.ready_now,
+            "next_24h": s.next_24h,
+            "later": s.later,
+            "queued_count": s.queued_count,
+            "running_count": s.running_count,
+            "busiest_hour_count": busiest["count"],
+            "busiest_hour_label": busiest["hour_start"],
+        },
+        "hourly_distribution": hourly_distribution,
+        "max_count": max_count,
+    }
