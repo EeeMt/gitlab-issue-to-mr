@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 import httpx
@@ -19,6 +19,7 @@ from app.config import get_effective_settings
 from app.core.bootstrap import get_bootstrap_state, initialize_system
 from app.core.break_glass import get_break_glass_identity, verify_break_glass_password
 from app.core.local_auth import hash_password, verify_password
+from app.core.utcnow import utcnow
 from app.core.oidc import (
     OIDCConfigurationError,
     build_authorization_url,
@@ -169,7 +170,7 @@ async def _get_or_create_break_glass_user(db: AsyncSession, username: str) -> Us
     user.platform_role = "platform_admin"
     user.platform_role_source = ROLE_SOURCE_BREAK_GLASS
     user.state = "active"
-    user.last_login_at = datetime.now(UTC).replace(tzinfo=None)
+    user.last_login_at = utcnow()
     await db.flush()
     return user
 
@@ -224,7 +225,7 @@ async def _upsert_user(db: AsyncSession, claims: dict[str, Any], userinfo: dict[
     user.email = email
     user.avatar_url = avatar_url
     user.auth_provider = "gitlab_oidc"
-    user.last_login_at = datetime.now(UTC).replace(tzinfo=None)
+    user.last_login_at = utcnow()
 
     settings = get_effective_settings()
     groups = set()
@@ -633,7 +634,7 @@ async def callback(
         gitlab_access_token=tokens.get("access_token"),
         gitlab_refresh_token=tokens.get("refresh_token"),
         max_expires_at=(
-            datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=int(tokens["expires_in"]))
+            utcnow() + timedelta(seconds=int(tokens["expires_in"]))
             if tokens.get("expires_in")
             else None
         ),
@@ -678,7 +679,7 @@ async def list_sessions(
         .where(UserSession.user_id == auth_context.user.id)
         .order_by(UserSession.created_at.desc())
     )
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = utcnow()
     sessions = result.scalars().all()
     return [
         SessionInfoResponse(

@@ -4,7 +4,7 @@ import asyncio
 import json as _json
 import logging
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,6 +16,7 @@ from app.core.docker_client import get_docker_client
 from app.core.projects import build_project_lookup, get_project_metadata
 from app.core.scheduling import resolve_scheduled_at
 from app.core.task_helpers import _serialize_task
+from app.core.utcnow import utcnow
 from app.database import get_db
 from app.dependencies.auth import get_optional_current_user, require_page_access
 from app.dependencies.project_access import (
@@ -488,7 +489,7 @@ async def cancel_task(
     validate_task_status_for_cancel(task)
 
     task.status = TaskStatus.CANCELLED
-    task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+    task.completed_at = utcnow()
     task.error_message = "Cancelled by user"
     await db.commit()
     await db.refresh(task)

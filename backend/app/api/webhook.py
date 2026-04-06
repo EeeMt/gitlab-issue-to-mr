@@ -3,7 +3,7 @@
 import logging
 import re
 import secrets
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -14,6 +14,7 @@ from app.config import get_effective_settings
 from app.core.gitlab_client import get_gitlab_client
 from app.core.parser import BotCommand, build_enhanced_prompt, build_prompt_with_issue_context, parse_ai_bot_command
 from app.core.scheduling import resolve_scheduled_at
+from app.core.utcnow import utcnow
 from app.database import get_db
 from app.models import Task, TaskStatus, User
 from app.project_webhook_config import get_project_webhook_secret
@@ -313,7 +314,7 @@ async def _handle_cancel_command(
 
     if task:
         task.status = TaskStatus.CANCELLED
-        task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+        task.completed_at = utcnow()
         task.error_message = "Cancelled by user"
         await db.commit()
 
@@ -338,7 +339,7 @@ async def _handle_cancel_command(
     if pending_tasks:
         for task in pending_tasks:
             task.status = TaskStatus.CANCELLED
-            task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+            task.completed_at = utcnow()
         await db.commit()
         return {
             "status": "success",

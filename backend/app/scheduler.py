@@ -6,7 +6,7 @@ import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Set
 
 from sqlalchemy import case, select, func
@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_effective_settings as get_settings
 from app.core.docker_client import get_docker_client
 from app.core.session import cleanup_stale_sessions
+from app.core.utcnow import utcnow
 from app.core.worker import WorkerExecutor
 from app.database import AsyncSessionLocal
 from app.models import Task, TaskStatus
@@ -132,7 +133,7 @@ class Scheduler:
         3. scheduled_at ASC — earlier due times first
         4. created_at ASC — FIFO tiebreaker
         """
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = utcnow()
 
         result = await db.execute(
             select(Task)
@@ -161,7 +162,7 @@ class Scheduler:
         try:
             # Update status to RUNNING
             task.status = TaskStatus.RUNNING
-            task.started_at = datetime.now(UTC).replace(tzinfo=None)
+            task.started_at = utcnow()
             await db.commit()
 
             # Execute via worker in a thread pool WITHOUT waiting
@@ -173,7 +174,7 @@ class Scheduler:
             logger.exception(f"Task {task.id} failed with exception")
             task.status = TaskStatus.FAILED
             task.error_message = str(e)[:500]
-            task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+            task.completed_at = utcnow()
             await db.commit()
 
             # Clean up tracking
@@ -292,7 +293,7 @@ class Scheduler:
                     continue
                 task.status = TaskStatus.FAILED
                 task.error_message = "Task was running when scheduler restarted (container not found)"
-                task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+                task.completed_at = utcnow()
                 logger.warning(f"Marked task {task.id} as failed (no running container)")
 
             await db.commit()

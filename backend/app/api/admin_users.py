@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -11,6 +11,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.session import revoke_user_sessions
+from app.core.utcnow import utcnow
 from app.core.user_roles import (
     PLATFORM_ROLE_ADMIN,
     ROLE_SOURCE_MANUAL,
@@ -94,7 +95,7 @@ async def list_admin_users(
     db: AsyncSession = Depends(get_db),
 ):
     """List dashboard users with their current access state and session summary."""
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = utcnow()
     active_sessions = (
         select(
             UserSession.user_id.label("user_id"),
@@ -203,7 +204,7 @@ async def update_admin_user(
         ).where(
             UserSession.user_id == user.id,
             UserSession.revoked_at.is_(None),
-            UserSession.expires_at > datetime.now(UTC).replace(tzinfo=None),
+            UserSession.expires_at > utcnow(),
         )
     )
     active_session_count, last_session_seen_at = active_count_result.one()

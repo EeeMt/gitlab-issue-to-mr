@@ -7,7 +7,7 @@ import secrets
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from hashlib import sha256
 
 from sqlalchemy import delete, func, select
@@ -15,19 +15,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings, get_settings
 from app.core.config_crypto import decrypt_config_secret, encrypt_config_secret
+from app.core.utcnow import utcnow
 from app.models import User, UserSession
 
 SESSION_RETENTION_DAYS = 30
+
+# Backward-compatible alias for tests that import the old private helper.
+_utcnow = utcnow
 
 # Throttle last_seen_at writes: only update in DB once per this many seconds per session.
 # This prevents the SSE log stream (which keeps a DB session open for its lifetime)
 # from holding a row-level lock on user_sessions indefinitely.
 _LAST_SEEN_WRITE_INTERVAL_SECONDS = 60
 _last_seen_written_at: dict[str, float] = {}
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
 
 
 @dataclass
@@ -61,7 +61,7 @@ async def create_user_session(
     """Create a new session row and return the raw session token."""
     settings = get_effective_settings()
     raw_token = generate_session_token()
-    expires_at = _utcnow() + timedelta(seconds=settings.session_ttl_seconds)
+    expires_at = utcnow() + timedelta(seconds=settings.session_ttl_seconds)
     if max_expires_at is not None and max_expires_at < expires_at:
         expires_at = max_expires_at
     session = UserSession(
@@ -75,7 +75,7 @@ async def create_user_session(
             encrypt_config_secret(gitlab_refresh_token) if gitlab_refresh_token else None
         ),
         expires_at=expires_at,
-        last_seen_at=_utcnow(),
+        last_seen_at=utcnow(),
         ip_address=ip_address,
         user_agent=user_agent,
     )
@@ -109,7 +109,7 @@ async def resolve_session_authentication(
         )
 
     user, session = row
-    now = _utcnow()
+    now = utcnow()
     if session.expires_at <= now:
         session.revoked_at = now
         await db.flush()
@@ -187,7 +187,7 @@ async def update_session_gitlab_tokens(
         )
     if max_expires_at is not None and max_expires_at < session.expires_at:
         session.expires_at = max_expires_at
-    session.last_seen_at = _utcnow()
+    session.last_seen_at = utcnow()
     await db.flush()
 
 
@@ -202,7 +202,7 @@ async def revoke_session_token(db: AsyncSession, token: str | None) -> None:
     )
     session = result.scalar_one_or_none()
     if session and session.revoked_at is None:
-        session.revoked_at = _utcnow()
+        session.revoked_at = utcnow()
         await db.flush()
 
 
@@ -215,7 +215,7 @@ async def revoke_user_sessions(db: AsyncSession, user_id: int) -> int:
         )
     )
     sessions = list(result.scalars().all())
-    now = _utcnow()
+    now = utcnow()
     revoked_count = 0
     for session in sessions:
         session.revoked_at = now
@@ -231,7 +231,7 @@ async def revoke_session_by_id(db: AsyncSession, session_id: str) -> bool:
     session = result.scalar_one_or_none()
     if session is None or session.revoked_at is not None:
         return False
-    session.revoked_at = _utcnow()
+    session.revoked_at = utcnow()
     await db.flush()
     return True
 
@@ -242,7 +242,7 @@ async def cleanup_stale_sessions(
     retention_days: int = SESSION_RETENTION_DAYS,
 ) -> int:
     """Delete sessions that expired or were revoked before the retention cutoff."""
-    cutoff = _utcnow() - timedelta(days=retention_days)
+    cutoff = utcnow() - timedelta(days=retention_days)
     result = await db.execute(
         delete(UserSession).where(
             func.coalesce(UserSession.revoked_at, UserSession.expires_at) < cutoff

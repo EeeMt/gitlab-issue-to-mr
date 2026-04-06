@@ -1,11 +1,12 @@
 """Pydantic schemas for Task API request/response models."""
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, model_validator
 
 from app.core.scheduling import normalize_scheduled_datetime
+from app.core.utcnow import utcnow
 
 
 class RetryTaskRequest(BaseModel):
@@ -26,7 +27,7 @@ class RescheduleTaskRequest(BaseModel):
     @model_validator(mode="after")
     def validate_schedule_is_future(self) -> "RescheduleTaskRequest":
         normalized_scheduled = normalize_scheduled_datetime(self.scheduled_datetime)
-        if normalized_scheduled is None or normalized_scheduled <= datetime.now(UTC).replace(tzinfo=None):
+        if normalized_scheduled is None or normalized_scheduled <= utcnow():
             raise ValueError("Scheduled datetime must be in the future for manual tasks")
         return self
 
@@ -61,7 +62,7 @@ class CreateTaskRequest(BaseModel):
             return self
 
         normalized_scheduled = normalize_scheduled_datetime(self.scheduled_datetime)
-        if normalized_scheduled is not None and normalized_scheduled <= datetime.now(UTC).replace(tzinfo=None):
+        if normalized_scheduled is not None and normalized_scheduled <= utcnow():
             raise ValueError("Scheduled datetime must be in the future for manual tasks")
 
         return self

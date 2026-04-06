@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
+
+from app.core.utcnow import utcnow
 from typing import Optional
 
 from sqlalchemy import select
@@ -66,7 +68,7 @@ async def initialize_system(
     bootstrap = await get_bootstrap_state(db)
     bootstrap.initialized = True
     bootstrap.initial_admin_user_id = admin_user.id
-    bootstrap.initialized_at = datetime.now(UTC).replace(tzinfo=None)
+    bootstrap.initialized_at = utcnow()
     
     await db.flush()
     return bootstrap

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -17,6 +17,7 @@ from app.config import get_effective_settings
 from app.core.gitlab_client import get_accessible_projects_for_oauth_token
 from app.core.oidc import exchange_refresh_token
 from app.core.session import update_session_gitlab_tokens
+from app.core.utcnow import utcnow
 from app.database import get_db
 from app.dependencies.auth import AuthContext, require_authenticated_context
 
@@ -197,7 +198,7 @@ async def _refresh_auth_context_tokens(auth_context: AuthContext, db: AsyncSessi
                 auth_context.user.id,
                 exc.response.status_code,
             )
-            auth_context.session.revoked_at = datetime.now(UTC).replace(tzinfo=None)
+            auth_context.session.revoked_at = utcnow()
             await db.flush()
             _project_access_cache.pop(auth_context.session.id, None)
             return False
@@ -223,14 +224,14 @@ async def _refresh_auth_context_tokens(auth_context: AuthContext, db: AsyncSessi
             auth_context.session.id,
             auth_context.user.id,
         )
-        auth_context.session.revoked_at = datetime.now(UTC).replace(tzinfo=None)
+        auth_context.session.revoked_at = utcnow()
         await db.flush()
         _project_access_cache.pop(auth_context.session.id, None)
         return False
 
     refresh_token = tokens.get("refresh_token") or auth_context.gitlab_refresh_token
     max_expires_at = (
-        datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=int(tokens["expires_in"]))
+        utcnow() + timedelta(seconds=int(tokens["expires_in"]))
         if tokens.get("expires_in")
         else None
     )

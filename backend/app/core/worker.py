@@ -6,7 +6,7 @@ import logging
 import re
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Optional
 
 import httpx
@@ -17,6 +17,7 @@ from app.config import get_effective_settings as get_settings
 from app.core.docker_client import DockerClientWrapper, get_docker_client
 from app.core.gitlab_client import GitLabClient, get_gitlab_client
 from app.core.ssl_utils import get_ssl_verify
+from app.core.utcnow import utcnow
 from app.core.mattermost_notifications import (
     MATTERMOST_EVENT_TASK_COMPLETED,
     MATTERMOST_EVENT_TASK_FAILED,
@@ -636,12 +637,12 @@ class WorkerExecutor:
 
         if exit_code == 0:
             task.status = TaskStatus.COMPLETED
-            task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+            task.completed_at = utcnow()
             await self._parse_mr_from_logs(task, logs)
             await self._update_task_stats_from_logs_or_api(task, logs)
         else:
             task.status = TaskStatus.FAILED
-            task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+            task.completed_at = utcnow()
             task.error_message = sanitize_sensitive_data(logs)[-1000:]
 
     async def _parse_mr_from_logs(self, task: Task, logs: str) -> None:
@@ -860,7 +861,7 @@ class WorkerExecutor:
 
         # Update task status to running
         task.status = TaskStatus.RUNNING
-        task.started_at = datetime.now(UTC).replace(tzinfo=None)
+        task.started_at = utcnow()
         await db.commit()
 
         # Send "starting" notification to issue
@@ -944,7 +945,7 @@ class WorkerExecutor:
                     previous_scheduled_at = task.scheduled_at
                     task.retry_count += 1
                     task.status = TaskStatus.PENDING
-                    task.scheduled_at = datetime.now(UTC).replace(tzinfo=None)
+                    task.scheduled_at = utcnow()
                     logger.info(f"[Task {task_id}] Scheduling retry {task.retry_count}/{settings.max_retries}")
 
                 # Send failure notifications
@@ -983,7 +984,7 @@ class WorkerExecutor:
         except Exception as e:
             logger.exception(f"Task {task_id} failed with exception: {e}")
             task.status = TaskStatus.FAILED
-            task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+            task.completed_at = utcnow()
             # Sanitize error message
             task.error_message = sanitize_sensitive_data(str(e))[:1000]
             await db.commit()
@@ -1047,7 +1048,7 @@ class WorkerExecutor:
             logger.error(f"[Task {task_id}] Resume: container {container_name} not found: {e}")
             task.status = TaskStatus.FAILED
             task.error_message = f"Container disappeared during resume: {e}"
-            task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+            task.completed_at = utcnow()
             await db.commit()
             return False
 
@@ -1073,7 +1074,7 @@ class WorkerExecutor:
                 if settings.max_retries > 0 and task.retry_count < settings.max_retries:
                     task.retry_count += 1
                     task.status = TaskStatus.PENDING
-                    task.scheduled_at = datetime.now(UTC).replace(tzinfo=None)
+                    task.scheduled_at = utcnow()
                     logger.info(f"[Task {task_id}] Resume: scheduling retry {task.retry_count}/{settings.max_retries}")
                 await self._send_failure_notifications(task, success=False, had_existing_mr=had_existing_mr)
 
@@ -1098,7 +1099,7 @@ class WorkerExecutor:
         except Exception as e:
             logger.exception(f"[Task {task_id}] Resume failed with exception: {e}")
             task.status = TaskStatus.FAILED
-            task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+            task.completed_at = utcnow()
             task.error_message = sanitize_sensitive_data(str(e))[:1000]
             await db.commit()
 

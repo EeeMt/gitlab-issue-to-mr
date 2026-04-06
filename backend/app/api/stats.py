@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -17,6 +17,7 @@ from app.dependencies.auth import require_page_access
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
 from app.models import Task, TaskStatus
 from app.core.projects import build_project_lookup
+from app.core.utcnow import utcnow
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -76,7 +77,7 @@ async def get_stats(
         status_counts[status_value.value] = result.scalar() or 0
 
     # Time-windowed counts for Monitor dashboard
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = utcnow()
     cutoff_24h = now - timedelta(hours=24)
 
     completed_24h_result = await db.execute(
@@ -232,7 +233,7 @@ async def get_analytics(
                 detail=f"Project {project_id} is not available for analytics.",
             )
 
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = utcnow()
     since = now - timedelta(days=days - 1)
 
     finished_task_expr = case((Task.status.in_(FINISHED_TASK_STATUSES), 1), else_=0)
@@ -656,7 +657,7 @@ async def get_scheduled_stats(
     Returns summary counts and 24-hour hourly distribution without
     fetching individual task objects — designed for ScheduleOverview polling.
     """
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = utcnow()
     now_hour = now.replace(minute=0, second=0, microsecond=0)
     next_24h = now + timedelta(hours=24)
     end_24h_bucket = now_hour + timedelta(hours=24)

@@ -1,7 +1,9 @@
 """Scheduling helpers for task creation."""
 
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+from app.core.utcnow import utcnow
 
 
 def normalize_scheduled_datetime(scheduled_datetime: Optional[datetime]) -> Optional[datetime]:
@@ -24,6 +26,6 @@ def resolve_scheduled_at(
         return normalize_scheduled_datetime(scheduled_datetime)
 
     if delay_seconds:
-        return datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=delay_seconds)
+        return utcnow() + timedelta(seconds=delay_seconds)
 
     return None

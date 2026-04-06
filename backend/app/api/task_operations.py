@@ -1,6 +1,6 @@
 """Task operation helpers for the Task API."""
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from fastapi import HTTPException, status
@@ -13,6 +13,7 @@ from app.core.mattermost_notifications import (
     notify_task_event,
 )
 from app.core.scheduling import normalize_scheduled_datetime
+from app.core.utcnow import utcnow
 from app.dependencies.project_access import ProjectAccessScope, require_project_access
 from app.models import Task, TaskStatus
 
@@ -151,7 +152,7 @@ def validate_scheduled_datetime_in_future(scheduled_datetime: datetime) -> datet
         HTTPException: If datetime is not in the future
     """
     normalized = normalize_scheduled_datetime(scheduled_datetime)
-    if normalized is None or normalized <= datetime.now(UTC).replace(tzinfo=None):
+    if normalized is None or normalized <= utcnow():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Scheduled datetime must be in the future for manual tasks",

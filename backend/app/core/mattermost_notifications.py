@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Optional
 
 import httpx
@@ -12,6 +12,7 @@ from sqlalchemy import or_, select
 
 from app.config import get_effective_settings
 from app.core.ssl_utils import get_ssl_verify
+from app.core.utcnow import utcnow
 from app.database import AsyncSessionLocal
 from app.models import (
     MattermostNotificationDelivery,
@@ -277,7 +278,7 @@ async def _resolve_mattermost_user_id(
         user_mapping_query = select(MattermostUserMapping).where(or_(*filters))
         existing_mapping = (await session.execute(user_mapping_query)).scalars().first()
     if existing_mapping is not None:
-        existing_mapping.last_verified_at = datetime.now(UTC).replace(tzinfo=None)
+        existing_mapping.last_verified_at = utcnow()
         return existing_mapping.mattermost_user_id
 
     username = (task.initiator_username or "").strip()
@@ -296,14 +297,14 @@ async def _resolve_mattermost_user_id(
         mattermost_user_id=mattermost_user_id,
         mattermost_username=str(mattermost_user.get("username", username)),
         source="username",
-        last_verified_at=datetime.now(UTC).replace(tzinfo=None),
+        last_verified_at=utcnow(),
     )
     if existing_mapping is None:
         session.add(mapping)
     else:
         mapping.mattermost_username = str(mattermost_user.get("username", username))
         mapping.source = "username"
-        mapping.last_verified_at = datetime.now(UTC).replace(tzinfo=None)
+        mapping.last_verified_at = utcnow()
 
     return mattermost_user_id
 
