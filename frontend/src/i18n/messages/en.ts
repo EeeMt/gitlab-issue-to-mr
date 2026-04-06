@@ -190,6 +190,9 @@ const en = {
       'Only admins or the task owner can run actions for this task. Other users may review the details but cannot operate it.',
     selectRescheduleTime: 'Select a new scheduled date and time',
     saveScheduledTime: 'Save scheduled time',
+    viewScheduleHeatmap: 'View Schedule Heatmap',
+    schedulePreviewTitle: 'Schedule Overview',
+    schedulePreviewHint: 'Click a time slot to select it for rescheduling.',
     executeNow: 'Execute Now',
     executeNowDescription:
       'Remove scheduling delay and send the task straight to execution as soon as the worker is available.',

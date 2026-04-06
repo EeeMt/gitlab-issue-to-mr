@@ -133,6 +133,7 @@
             :tasks="tasks"
             :selected-ms="selectedWindow?.startMs ?? null"
             :max-per-slot="slotMaxTasks"
+            :enforce-capacity="slotEnforce"
             @cell-click="handleHeatmapCellClick"
           />
           <div class="schedule-section-tip">
@@ -318,6 +319,7 @@ const tasks = ref<Task[]>([])
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
 const slotMaxTasks = ref(0)
+const slotEnforce = ref(false)
 const selectedWindow = ref<SelectedWindow | null>(null)
 const scheduleDrafts = ref<Record<number, number | null>>({})
 const savingTaskId = ref<number | null>(null)
@@ -702,6 +704,7 @@ async function fetchData() {
     ])
     if (config) {
       slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
+      slotEnforce.value = config.runtime?.slot_max_tasks_enforce ?? false
     }
   } catch (error) {
     message.error(t('scheduleOverview.failedToFetch'))
@@ -736,8 +739,9 @@ async function handleTaskReschedule(task: Task) {
     tasks.value = tasks.value.map((item) => (item.id === updatedTask.id ? updatedTask : item))
     clearSelectedWindow()
     message.success(t('scheduleOverview.taskRescheduled'))
-  } catch (error) {
-    message.error(t('scheduleOverview.failedToRescheduleTask'))
+  } catch (error: any) {
+    const detail = error?.response?.data?.detail
+    message.error(typeof detail === 'string' ? detail : t('scheduleOverview.failedToRescheduleTask'))
   } finally {
     savingTaskId.value = null
   }

@@ -145,6 +145,16 @@
                         :disabled="!canManageTask"
                       />
                       <n-button
+                        secondary
+                        round
+                        :loading="scheduledTasksLoading"
+                        @click="openScheduleDrawer"
+                        :disabled="!canManageTask"
+                      >
+                        <template #icon><n-icon :component="CalendarOutline" /></template>
+                        {{ t('taskView.viewScheduleHeatmap') }}
+                      </n-button>
+                      <n-button
                         type="info"
                         secondary
                         strong
@@ -206,14 +216,33 @@
       </n-spin>
     </n-space>
   </div>
+
+  <!-- Schedule Heatmap Drawer -->
+  <n-drawer v-model:show="showScheduleDrawer" :width="isMobile ? '100%' : 580" placement="right">
+    <n-drawer-content :title="t('taskView.schedulePreviewTitle')" closable>
+      <n-spin v-if="scheduledTasksLoading" />
+      <template v-else>
+        <p style="margin-bottom: 12px; color: rgba(15, 23, 42, 0.58); font-size: 13px;">
+          {{ t('taskView.schedulePreviewHint') }}
+        </p>
+        <HeatmapChart
+          :tasks="scheduledTasksForPreview"
+          :selected-ms="rescheduleDatetime"
+          :max-per-slot="slotMaxTasks"
+          :enforce-capacity="slotEnforce"
+          @cell-click="handleScheduleHeatmapCellClick"
+        />
+      </template>
+    </n-drawer-content>
+  </n-drawer>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin, NDatePicker, useMessage } from 'naive-ui'
+import { NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin, NDatePicker, NDrawer, NDrawerContent, NIcon, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, streamTaskLogs, type Task, type TaskLog } from '../api'
+import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, streamTaskLogs, getScheduledTasks, getConfig, type Task, type TaskLog } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
 import PageHeader from '../components/PageHeader.vue'
 import TaskMetadataPanel from '../components/TaskMetadataPanel.vue'
@@ -221,6 +250,8 @@ import TaskProcessPanel from '../components/TaskProcessPanel.vue'
 import TaskResultPanel from '../components/TaskResultPanel.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { parseUtcDate } from '../utils/datetime'
+import { CalendarOutline } from '@vicons/ionicons5'
+import HeatmapChart from '../components/HeatmapChart.vue'
 import AnsiToHtml from 'ansi-to-html'
 
 const ansiConverter = new AnsiToHtml({ escapeXML: true })
@@ -244,6 +275,11 @@ const taskRequestInFlight = ref(false)
 const containerRequestInFlight = ref(false)
 const rescheduleDatetime = ref<number | null>(null)
 const retryScheduleDatetime = ref<number | null>(null)
+const showScheduleDrawer = ref(false)
+const scheduledTasksForPreview = ref<Task[]>([])
+const scheduledTasksLoading = ref(false)
+const slotMaxTasks = ref(0)
+const slotEnforce = ref(false)
 const taskLogs = ref<TaskLog[]>([])
 let pollTimer: number | null = null
 let logEventSource: EventSource | null = null
@@ -582,11 +618,34 @@ async function handleReschedule() {
     })
     syncRescheduleDatetime()
     message.success(t('taskView.taskRescheduled'))
-  } catch (error) {
-    message.error(t('taskView.failedToRescheduleTask'))
+  } catch (error: any) {
+    const detail = error?.response?.data?.detail
+    message.error(typeof detail === 'string' ? detail : t('taskView.failedToRescheduleTask'))
   } finally {
     actionLoading.value = false
   }
+}
+
+async function openScheduleDrawer() {
+  showScheduleDrawer.value = true
+  scheduledTasksLoading.value = true
+  try {
+    scheduledTasksForPreview.value = await getScheduledTasks()
+  } catch {
+    scheduledTasksForPreview.value = []
+  } finally {
+    scheduledTasksLoading.value = false
+  }
+  try {
+    const config = await getConfig()
+    slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
+    slotEnforce.value = config.runtime?.slot_max_tasks_enforce ?? false
+  } catch { /* ignore */ }
+}
+
+function handleScheduleHeatmapCellClick(startMs: number) {
+  rescheduleDatetime.value = startMs
+  showScheduleDrawer.value = false
 }
 
 onMounted(async () => {
