@@ -227,14 +227,13 @@
                       <div
                         v-for="(task, idx) in runningTasks"
                         :key="'run-' + task.id"
-                        class="queue-timeline__task-bar queue-timeline__has-tooltip"
+                        class="queue-timeline__task-bar queue-timeline__task-bar--running queue-timeline__has-tooltip"
                         role="button"
                         tabindex="0"
                         :style="{
                           left: timelinePct(task.started_at ? parseUtcDate(task.started_at).getTime() : nowMs) + '%',
                           width: Math.max(2, timelinePct(nowMs) - timelinePct(task.started_at ? parseUtcDate(task.started_at).getTime() : nowMs)) + '%',
                           top: idx * 36 + 'px',
-                          background: priorityColor(task.priority),
                         }"
                         @mouseenter="showTimelineTooltip($event, `#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.kanbanElapsed', { duration: task.started_at ? formatElapsedCompact(task.started_at) : '—' })}${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
                         @mouseleave="hideTimelineTooltip"
@@ -255,7 +254,6 @@
                         :style="{
                           left: timelinePct(task.scheduled_at ? Math.min(parseUtcDate(task.scheduled_at).getTime(), nowMs) : nowMs) + '%',
                           top: (runningTasks.length + idx) * 36 + 'px',
-                          '--bar-color': priorityColor(task.priority),
                         }"
                         @mouseenter="showTimelineTooltip($event, `#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineReady')}${task.scheduled_at ? ' · ' + formatTimeUtc8(task.scheduled_at) : ''}${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
                         @mouseleave="hideTimelineTooltip"
@@ -266,7 +264,7 @@
                         <span class="queue-timeline__bar-label">#{{ task.id }} P{{ task.priority }} {{ t('monitor.timelineReady') }}</span>
                       </div>
 
-                      <!-- Waiting tasks: dashed bars -->
+                      <!-- Waiting tasks: lighter bars -->
                       <div
                         v-for="(task, idx) in waitingTasks"
                         :key="'wait-' + task.id"
@@ -276,7 +274,6 @@
                         :style="{
                           left: timelinePct(parseUtcDate(task.scheduled_at!).getTime()) + '%',
                           top: (runningTasks.length + readyTasks.length + idx) * 36 + 'px',
-                          '--bar-color': priorityColor(task.priority),
                         }"
                         @mouseenter="showTimelineTooltip($event, `#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineWaiting')}: ${formatTimeUtc8(task.scheduled_at!)} (${t('monitor.kanbanIn', { duration: formatRelativeFuture(task.scheduled_at!) })})${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
                         @mouseleave="hideTimelineTooltip"
@@ -1823,15 +1820,20 @@ onBeforeUnmount(() => {
   align-items: center;
   padding: 0 8px;
   font-size: 12px;
-  color: white;
   white-space: nowrap;
   min-width: 60px;
-  opacity: 0.9;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
-  transition: opacity 0.15s, box-shadow 0.15s, transform 0.15s;
+  transition: opacity 0.15s, filter 0.15s, box-shadow 0.15s, transform 0.15s;
 }
 
-.queue-timeline__task-bar:hover {
+/* Running tasks: solid sky-blue bar */
+.queue-timeline__task-bar--running {
+  background: #0284c7;
+  color: #f0f9ff;
+  opacity: 0.9;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+
+.queue-timeline__task-bar--running:hover {
   opacity: 1;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.22);
   transform: translateY(-1px);
@@ -1839,56 +1841,68 @@ onBeforeUnmount(() => {
 
 /* Ready tasks: arrow-shaped bar */
 .queue-timeline__task-bar--ready {
-  background: var(--bar-color) !important;
-  opacity: 0.8;
-  border-left: 4px solid rgba(255, 255, 255, 0.5);
-  min-width: 100px;
-  width: auto;
-  border-radius: 14px 0 0 14px;
-  margin-right: 12px;
-}
-
-.queue-timeline__task-bar--ready::after {
-  content: '';
-  position: absolute;
-  right: -12px;
-  top: 0;
-  width: 0;
-  height: 0;
-  border-top: 14px solid transparent;
-  border-bottom: 14px solid transparent;
-  border-left: 12px solid var(--bar-color);
-}
-
-.queue-timeline__task-bar--ready:hover {
-  opacity: 1;
-}
-
-/* Waiting tasks: arrow-shaped bar with light fill */
-.queue-timeline__task-bar--waiting {
-  background: color-mix(in srgb, var(--bar-color) 18%, transparent) !important;
-  border-left: 4px dashed var(--bar-color);
+  --bar-color: #0ea5e9;
+  background: color-mix(in srgb, var(--bar-color) 25%, transparent);
+  color: #0c4a6e;
   opacity: 0.9;
   min-width: 100px;
   width: auto;
   border-radius: 14px 0 0 14px;
   margin-right: 12px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.12));
+}
+
+.queue-timeline__task-bar--ready::after {
+  content: '';
+  position: absolute;
+  right: -10px;
+  top: 50%;
+  transform: translateY(-50%) rotate(45deg);
+  width: 18px;
+  height: 18px;
+  border-radius: 0 4px 4px 0;
+  background-color: color-mix(in srgb, var(--bar-color) 25%, transparent);
+}
+
+.queue-timeline__task-bar--ready:hover {
+  opacity: 1;
+  filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.2));
+  transform: translateY(-1px);
+}
+
+/* Waiting tasks: arrow-shaped bar with lighter fill */
+.queue-timeline__task-bar--waiting {
+  --bar-color: #38bdf8;
+  background: color-mix(in srgb, var(--bar-color) 15%, transparent);
+  color: #075985;
+  opacity: 0.9;
+  min-width: 100px;
+  width: auto;
+  border-radius: 14px 0 0 14px;
+  margin-right: 12px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.12));
 }
 
 .queue-timeline__task-bar--waiting::after {
   content: '';
   position: absolute;
-  right: -12px;
-  top: 0;
-  width: 0;
-  height: 0;
-  border-top: 14px solid transparent;
-  border-bottom: 14px solid transparent;
-  border-left: 12px solid color-mix(in srgb, var(--bar-color) 18%, transparent);
+  right: -10px;
+  top: 50%;
+  transform: translateY(-50%) rotate(45deg);
+  width: 18px;
+  height: 18px;
+  border-radius: 0 4px 4px 0;
+  background-color: color-mix(in srgb, var(--bar-color) 15%, transparent);
 }
 
+.queue-timeline__task-bar--waiting:hover {
+  opacity: 1;
+  filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.2));
+  transform: translateY(-1px);
+}
+
+.queue-timeline__task-bar--ready .queue-timeline__bar-label,
 .queue-timeline__task-bar--waiting .queue-timeline__bar-label {
-  color: #0f172a;
   text-shadow: none;
 }
 
