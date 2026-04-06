@@ -49,7 +49,7 @@ async def test_list_scheduled_tasks_serializes_active_scheduled_rows():
             "project_path_with_namespace": "group/project-alpha",
         }
     })):
-        result = await list_scheduled_tasks(db=db, access_scope=access_scope)
+        result = await list_scheduled_tasks(db=db, access_scope=access_scope, hour_start=None)
 
     assert len(result) == 1
     assert result[0]["id"] == 1
@@ -70,7 +70,7 @@ async def test_list_scheduled_tasks_uses_accessible_project_scope():
     )
 
     with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
-        result = await list_scheduled_tasks(db=db, access_scope=access_scope)
+        result = await list_scheduled_tasks(db=db, access_scope=access_scope, hour_start=None)
 
     executed_query = db.execute.await_args.args[0]
 

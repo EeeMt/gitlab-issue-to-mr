@@ -254,7 +254,7 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
 
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
-    with patch("app.api.stats.datetime") as datetime_mock, patch(
+    with patch("app.api.stats.utcnow", return_value=fixed_now), patch(
         "app.api.stats.build_project_lookup",
         new=AsyncMock(
             return_value={
@@ -265,8 +265,6 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
             }
         ),
     ):
-        datetime_mock.utcnow.return_value = fixed_now
-        datetime_mock.now.return_value = fixed_now
         response = await get_analytics(days=7, project_id=None, initiator_username=None, db=db, _current_user=None, access_scope=access_scope)
 
     assert response["window_days"] == 7
