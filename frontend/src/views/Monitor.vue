@@ -236,7 +236,8 @@
                           top: idx * 36 + 'px',
                           background: priorityColor(task.priority),
                         }"
-                        :data-tooltip="`#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.kanbanElapsed', { duration: task.started_at ? formatElapsedCompact(task.started_at) : '—' })}${task.initiator_username ? '\n@' + task.initiator_username : ''}`"
+                        @mouseenter="showTimelineTooltip($event, `#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.kanbanElapsed', { duration: task.started_at ? formatElapsedCompact(task.started_at) : '—' })}${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
+                        @mouseleave="hideTimelineTooltip"
                         @click="goToTask(task.id)"
                         @keydown.enter="goToTask(task.id)"
                         @keydown.space.prevent="goToTask(task.id)"
@@ -256,7 +257,8 @@
                           top: (runningTasks.length + idx) * 36 + 'px',
                           '--bar-color': priorityColor(task.priority),
                         }"
-                        :data-tooltip="`#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineReady')}${task.scheduled_at ? ' · ' + formatTimeUtc8(task.scheduled_at) : ''}${task.initiator_username ? '\n@' + task.initiator_username : ''}`"
+                        @mouseenter="showTimelineTooltip($event, `#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineReady')}${task.scheduled_at ? ' · ' + formatTimeUtc8(task.scheduled_at) : ''}${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
+                        @mouseleave="hideTimelineTooltip"
                         @click="goToTask(task.id)"
                         @keydown.enter="goToTask(task.id)"
                         @keydown.space.prevent="goToTask(task.id)"
@@ -276,7 +278,8 @@
                           top: (runningTasks.length + readyTasks.length + idx) * 36 + 'px',
                           '--bar-color': priorityColor(task.priority),
                         }"
-                        :data-tooltip="`#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineWaiting')}: ${formatTimeUtc8(task.scheduled_at!)} (${t('monitor.kanbanIn', { duration: formatRelativeFuture(task.scheduled_at!) })})${task.initiator_username ? '\n@' + task.initiator_username : ''}`"
+                        @mouseenter="showTimelineTooltip($event, `#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineWaiting')}: ${formatTimeUtc8(task.scheduled_at!)} (${t('monitor.kanbanIn', { duration: formatRelativeFuture(task.scheduled_at!) })})${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
+                        @mouseleave="hideTimelineTooltip"
                         @click="goToTask(task.id)"
                         @keydown.enter="goToTask(task.id)"
                         @keydown.space.prevent="goToTask(task.id)"
@@ -285,6 +288,13 @@
                       </div>
                     </div>
                   </div>
+
+                  <!-- Dynamic tooltip element -->
+                  <div
+                    v-show="tooltipVisible"
+                    class="queue-timeline__tooltip"
+                    :style="tooltipStyle"
+                  >{{ tooltipText }}</div>
                 </div>
 
                 <!-- Table View (existing) -->
@@ -618,6 +628,37 @@ const timelineTracksHeight = computed(() => {
   const totalTasks = runningTasks.value.length + readyTasks.value.length + waitingTasks.value.length
   return Math.max(36, totalTasks * 36)
 })
+
+/* --- Smart timeline tooltip --- */
+const tooltipVisible = ref(false)
+const tooltipText = ref('')
+const tooltipStyle = ref<Record<string, string>>({})
+
+function showTimelineTooltip(e: MouseEvent, text: string) {
+  const el = e.currentTarget as HTMLElement
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  const spaceBelow = window.innerHeight - rect.bottom
+  tooltipText.value = text
+  const left = Math.min(rect.left, window.innerWidth - 270)
+  if (spaceBelow > 120) {
+    tooltipStyle.value = {
+      left: Math.max(4, left) + 'px',
+      top: rect.bottom + 6 + 'px',
+    }
+  } else {
+    tooltipStyle.value = {
+      left: Math.max(4, left) + 'px',
+      top: rect.top - 6 + 'px',
+      transform: 'translateY(-100%)',
+    }
+  }
+  tooltipVisible.value = true
+}
+
+function hideTimelineTooltip() {
+  tooltipVisible.value = false
+}
 
 const runningContainers = computed(() =>
   containers.value.filter((container) => container.status === 'running')
@@ -1788,7 +1829,7 @@ onBeforeUnmount(() => {
 .queue-timeline__task-bar {
   position: absolute;
   height: 28px;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1808,26 +1849,54 @@ onBeforeUnmount(() => {
   transform: translateY(-1px);
 }
 
-/* Ready tasks: solid bar with left accent, slightly transparent */
+/* Ready tasks: arrow-shaped bar */
 .queue-timeline__task-bar--ready {
   background: var(--bar-color) !important;
   opacity: 0.8;
   border-left: 4px solid rgba(255, 255, 255, 0.5);
-  min-width: 120px;
-  width: 15%;
+  min-width: 100px;
+  width: auto;
+  border-radius: 14px 0 0 14px;
+  margin-right: 12px;
+}
+
+.queue-timeline__task-bar--ready::after {
+  content: '';
+  position: absolute;
+  right: -12px;
+  top: 0;
+  width: 0;
+  height: 0;
+  border-top: 14px solid transparent;
+  border-bottom: 14px solid transparent;
+  border-left: 12px solid var(--bar-color);
 }
 
 .queue-timeline__task-bar--ready:hover {
   opacity: 1;
 }
 
-/* Waiting tasks: dashed left border, light fill */
+/* Waiting tasks: arrow-shaped bar with light fill */
 .queue-timeline__task-bar--waiting {
   background: color-mix(in srgb, var(--bar-color) 18%, transparent) !important;
   border-left: 4px dashed var(--bar-color);
   opacity: 0.9;
-  min-width: 120px;
-  width: 15%;
+  min-width: 100px;
+  width: auto;
+  border-radius: 14px 0 0 14px;
+  margin-right: 12px;
+}
+
+.queue-timeline__task-bar--waiting::after {
+  content: '';
+  position: absolute;
+  right: -12px;
+  top: 0;
+  width: 0;
+  height: 0;
+  border-top: 14px solid transparent;
+  border-bottom: 14px solid transparent;
+  border-left: 12px solid color-mix(in srgb, var(--bar-color) 18%, transparent);
 }
 
 .queue-timeline__task-bar--waiting .queue-timeline__bar-label {
@@ -1844,7 +1913,7 @@ onBeforeUnmount(() => {
 
 /* (dot styles removed — ready/waiting now use task-bar with modifiers) */
 
-/* ----- Timeline CSS Tooltip ----- */
+/* ----- Timeline tooltip (positioned via JS) ----- */
 .queue-timeline__has-tooltip {
   position: absolute;
 }
@@ -1853,31 +1922,19 @@ onBeforeUnmount(() => {
   z-index: 50;
 }
 
-.queue-timeline__has-tooltip::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
+.queue-timeline__tooltip {
+  position: fixed;
   background: #1e293b;
   color: #f8fafc;
   font-size: 12px;
-  font-weight: 400;
-  line-height: 1.5;
   padding: 6px 10px;
   border-radius: 6px;
   white-space: pre-line;
   pointer-events: none;
-  opacity: 0;
-  transform: translateY(-4px);
-  transition: opacity 0.15s, transform 0.15s;
-  z-index: 1000;
+  z-index: 9999;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
-  max-width: 280px;
-}
-
-.queue-timeline__has-tooltip:hover::after {
-  opacity: 1;
-  transform: translateY(0);
+  max-width: 260px;
+  line-height: 1.5;
 }
 
 @media (max-width: 768px) {
