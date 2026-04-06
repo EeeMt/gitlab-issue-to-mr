@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import case, select, func, false
+from sqlalchemy import case, select, func, false, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -691,9 +691,12 @@ async def get_scheduled_stats(
     s = summary_result.one()
 
     # Hourly distribution: count tasks bucketed by hour for next 24 hours
+    # Use literal_column to embed 'hour' directly in SQL, avoiding separate
+    # bind parameters that PostgreSQL can't match across SELECT/GROUP BY/ORDER BY
+    hour_trunc = func.date_trunc(literal_column("'hour'"), Task.scheduled_at)
     hourly_q = (
         select(
-            func.date_trunc("hour", Task.scheduled_at).label("hour_start"),
+            hour_trunc.label("hour_start"),
             func.count().label("count"),
         )
         .where(
@@ -701,8 +704,8 @@ async def get_scheduled_stats(
             Task.scheduled_at >= now_hour,
             Task.scheduled_at < end_24h_bucket,
         )
-        .group_by(func.date_trunc("hour", Task.scheduled_at))
-        .order_by(func.date_trunc("hour", Task.scheduled_at))
+        .group_by(hour_trunc)
+        .order_by(hour_trunc)
     )
     hourly_result = await db.execute(hourly_q)
     hourly_rows = hourly_result.all()
