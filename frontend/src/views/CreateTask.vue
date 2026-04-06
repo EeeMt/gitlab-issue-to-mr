@@ -312,6 +312,7 @@
               :tasks="scheduledTasksForPreview"
               :selected-ms="heatmapSelectedMs"
               :max-per-slot="slotMaxTasks"
+              :enforce-capacity="slotEnforce"
               @cell-click="handleScheduleHeatmapCellClick"
             />
           </template>
@@ -431,6 +432,7 @@ const showScheduleDrawer = ref(false)
 const slotCapacity = ref<SlotCapacityInfo | null>(null)
 const slotCapacityLoading = ref(false)
 const slotMaxTasks = ref(0)
+const slotEnforce = ref(false)
 let slotCheckTimeout: ReturnType<typeof setTimeout> | undefined
 let slotCheckGeneration = 0
 
@@ -616,10 +618,11 @@ async function openScheduleDrawer() {
       scheduledTasksLoading.value = false
     }
   }
-  // Fetch slot_max_tasks config for heatmap display
+  // Fetch slot config for heatmap display
   try {
     const config = await getConfig()
     slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
+    slotEnforce.value = config.runtime?.slot_max_tasks_enforce ?? false
   } catch { /* ignore */ }
 }
 
@@ -855,8 +858,11 @@ async function handleSubmit() {
     const task = await createTask(request)
     createdTaskId.value = task.id
     showSuccessModal.value = true
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : t('createTask.failedToCreateTask')
+  } catch (error: any) {
+    const detail = error?.response?.data?.detail
+    const errorMessage = typeof detail === 'string' ? detail
+      : error instanceof Error ? error.message
+      : t('createTask.failedToCreateTask')
     message.error(errorMessage)
   } finally {
     submitting.value = false

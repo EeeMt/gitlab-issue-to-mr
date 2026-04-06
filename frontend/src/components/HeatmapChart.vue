@@ -29,11 +29,15 @@
         <div
           v-for="cell in row.cells"
           :key="cell.key"
-          class="heatmap-chart__cell heatmap-chart__cell--clickable"
-          :class="{ 'heatmap-chart__cell--active': isCellActive(cell) }"
+          class="heatmap-chart__cell"
+          :class="{
+            'heatmap-chart__cell--clickable': !isCellFull(cell),
+            'heatmap-chart__cell--disabled': isCellFull(cell),
+            'heatmap-chart__cell--active': isCellActive(cell),
+          }"
           :style="heatmapCellStyle(cell.count, heatmapMax)"
           :title="cellTooltip(cell)"
-          @click="emit('cellClick', cell.startMs)"
+          @click="!isCellFull(cell) && emit('cellClick', cell.startMs)"
         >
           {{ cellDisplayText(cell.count) }}
         </div>
@@ -52,12 +56,14 @@ interface Props {
   selectedMs?: number | null
   days?: number
   maxPerSlot?: number
+  enforceCapacity?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   selectedMs: null,
   days: 7,
   maxPerSlot: 0,
+  enforceCapacity: false,
 })
 
 const emit = defineEmits<{
@@ -173,6 +179,10 @@ function cellTooltip(cell: HeatmapCell): string {
   return `${cell.label}: ${countText} task${cell.count !== 1 ? 's' : ''}`
 }
 
+function isCellFull(cell: HeatmapCell): boolean {
+  return props.enforceCapacity && props.maxPerSlot > 0 && cell.count >= props.maxPerSlot
+}
+
 function isCellActive(cell: HeatmapCell): boolean {
   if (props.selectedMs == null) return false
   return props.selectedMs >= cell.startMs && props.selectedMs < cell.endMs
@@ -253,6 +263,11 @@ function isCellActive(cell: HeatmapCell): boolean {
 
 .heatmap-chart__cell--clickable {
   cursor: pointer;
+}
+
+.heatmap-chart__cell--disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 
 .heatmap-chart__cell--clickable:not(.heatmap-chart__cell--active):hover {
