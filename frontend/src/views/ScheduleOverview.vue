@@ -934,7 +934,10 @@ onBeforeUnmount(() => {
 
 .hourly-chart__count {
   min-height: 20px;
+  line-height: 20px;
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
   color: rgba(15, 23, 42, 0.64);
 }
 

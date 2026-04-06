@@ -244,7 +244,7 @@
                         <span class="queue-timeline__bar-label">#{{ task.id }} P{{ task.priority }}</span>
                       </div>
 
-                      <!-- Ready tasks: solid bars -->
+                      <!-- Ready tasks: SVG arrow-shaped bars -->
                       <div
                         v-for="(task, idx) in readyTasks"
                         :key="'rdy-' + task.id"
@@ -261,10 +261,13 @@
                         @keydown.enter="goToTask(task.id)"
                         @keydown.space.prevent="goToTask(task.id)"
                       >
+                        <svg class="queue-timeline__bar-svg" preserveAspectRatio="none" viewBox="0 0 100 28">
+                          <path d="M0,4 Q0,0 4,0 L92,0 L100,14 L92,28 L4,28 Q0,28 0,24 Z" fill="#0ea5e9" />
+                        </svg>
                         <span class="queue-timeline__bar-label">#{{ task.id }} P{{ task.priority }} {{ t('monitor.timelineReady') }}</span>
                       </div>
 
-                      <!-- Waiting tasks: lighter bars -->
+                      <!-- Waiting tasks: SVG arrow-shaped bars (lighter) -->
                       <div
                         v-for="(task, idx) in waitingTasks"
                         :key="'wait-' + task.id"
@@ -281,6 +284,9 @@
                         @keydown.enter="goToTask(task.id)"
                         @keydown.space.prevent="goToTask(task.id)"
                       >
+                        <svg class="queue-timeline__bar-svg" preserveAspectRatio="none" viewBox="0 0 100 28">
+                          <path d="M0,4 Q0,0 4,0 L92,0 L100,14 L92,28 L4,28 Q0,28 0,24 Z" fill="#38bdf8" />
+                        </svg>
                         <span class="queue-timeline__bar-label">#{{ task.id }} P{{ task.priority }} {{ formatTimeUtc8(task.scheduled_at!) }}</span>
                       </div>
                     </div>
@@ -1253,9 +1259,9 @@ function goToTask(taskId: number) {
 }
 
 const PRIORITY_COLORS: Record<number, string> = {
-  0: '#E53E3E',
-  1: '#DD6B20',
-  2: '#38A169',
+  0: '#ef4444',
+  1: '#f59e0b',
+  2: '#6b7280',
 }
 
 function priorityColor(priority: number): string {
@@ -1786,7 +1792,7 @@ onBeforeUnmount(() => {
   top: 28px;
   bottom: 0;
   width: 2px;
-  background: #E53E3E;
+  background: #475569;
   z-index: 10;
   transform: translateX(-50%);
 }
@@ -1798,7 +1804,7 @@ onBeforeUnmount(() => {
   transform: translateX(-50%);
   font-size: 10px;
   font-weight: 600;
-  color: #E53E3E;
+  color: #475569;
   white-space: nowrap;
   background: rgba(255, 255, 255, 0.9);
   padding: 1px 4px;
@@ -1827,76 +1833,56 @@ onBeforeUnmount(() => {
 
 /* Running tasks: solid sky-blue bar */
 .queue-timeline__task-bar--running {
-  background: #0284c7;
+  background: rgba(2, 132, 199, 0.85);
   color: #f0f9ff;
-  opacity: 0.9;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.15));
 }
 
 .queue-timeline__task-bar--running:hover {
-  opacity: 1;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.22);
+  background: #0284c7;
+  filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.22));
   transform: translateY(-1px);
 }
 
-/* Ready tasks: arrow-shaped bar */
+/* --- SVG arrow-shape base --- */
+.queue-timeline__bar-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.85;
+  transition: opacity 0.15s;
+}
+
+.queue-timeline__task-bar:hover .queue-timeline__bar-svg {
+  opacity: 1;
+}
+
+/* Ready tasks: arrow-shaped SVG bar */
 .queue-timeline__task-bar--ready {
-  --bar-color: #0ea5e9;
-  background: color-mix(in srgb, var(--bar-color) 25%, transparent);
   color: #0c4a6e;
-  opacity: 0.9;
   min-width: 100px;
   width: auto;
-  border-radius: 14px 0 0 14px;
-  margin-right: 12px;
+  padding-right: 14px;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.12));
 }
 
-.queue-timeline__task-bar--ready::after {
-  content: '';
-  position: absolute;
-  right: -10px;
-  top: 50%;
-  transform: translateY(-50%) rotate(45deg);
-  width: 18px;
-  height: 18px;
-  border-radius: 0 4px 4px 0;
-  background-color: color-mix(in srgb, var(--bar-color) 25%, transparent);
-}
-
 .queue-timeline__task-bar--ready:hover {
-  opacity: 1;
   filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.2));
   transform: translateY(-1px);
 }
 
-/* Waiting tasks: arrow-shaped bar with lighter fill */
+/* Waiting tasks: arrow-shaped SVG bar with lighter fill */
 .queue-timeline__task-bar--waiting {
-  --bar-color: #38bdf8;
-  background: color-mix(in srgb, var(--bar-color) 15%, transparent);
   color: #075985;
-  opacity: 0.9;
   min-width: 100px;
   width: auto;
-  border-radius: 14px 0 0 14px;
-  margin-right: 12px;
+  padding-right: 14px;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.12));
 }
 
-.queue-timeline__task-bar--waiting::after {
-  content: '';
-  position: absolute;
-  right: -10px;
-  top: 50%;
-  transform: translateY(-50%) rotate(45deg);
-  width: 18px;
-  height: 18px;
-  border-radius: 0 4px 4px 0;
-  background-color: color-mix(in srgb, var(--bar-color) 15%, transparent);
-}
-
 .queue-timeline__task-bar--waiting:hover {
-  opacity: 1;
   filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.2));
   transform: translateY(-1px);
 }
@@ -1907,6 +1893,7 @@ onBeforeUnmount(() => {
 }
 
 .queue-timeline__bar-label {
+  position: relative;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
