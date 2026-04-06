@@ -1017,6 +1017,9 @@ const zhCN = {
     ok: '正常',
     error: '错误',
     failedToFetch: '获取 OIDC 诊断失败'
+  },
+  slotCapacity: {
+    slotFullError: '时段 {start}–{end} 已满载（{count}/{max} 个任务）。'
   }
 }
 

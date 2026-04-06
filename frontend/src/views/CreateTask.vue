@@ -246,14 +246,14 @@
                        >
                          {{ slotCapacity.enforce
                            ? t('createTask.slotFullError', {
-                               start: slotCapacity.hour_start.substring(11, 16),
-                               end: slotCapacity.hour_end.substring(11, 16),
+                               start: formatDateTimeUtc8Compact(slotCapacity.hour_start),
+                               end: formatTimeUtc8(slotCapacity.hour_end),
                                count: slotCapacity.count,
                                max: slotCapacity.max
                              })
                            : t('createTask.slotFullWarning', {
-                               start: slotCapacity.hour_start.substring(11, 16),
-                               end: slotCapacity.hour_end.substring(11, 16),
+                               start: formatDateTimeUtc8Compact(slotCapacity.hour_start),
+                               end: formatTimeUtc8(slotCapacity.hour_end),
                                count: slotCapacity.count,
                                max: slotCapacity.max
                              })
@@ -354,7 +354,8 @@ import {
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { getProjects, getBranches, createTask, getPromptTemplates, getScheduledTasks, getSlotCapacity, getConfig, type Project, type Branch, type CreateTaskRequest, type PromptTemplate, type Task, type SlotCapacityInfo } from '../api'
-import { formatDateTimeUtc8 } from '../utils/datetime'
+import { formatDateTimeUtc8, formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
+import { extractSlotErrorMessage } from '../utils/slotError'
 import { DocumentTextOutline, WarningOutline, InformationCircleOutline, CalendarOutline } from '@vicons/ionicons5'
 import PageHeader from '../components/PageHeader.vue'
 import VariableEditor from '../components/VariableEditor.vue'
@@ -859,11 +860,7 @@ async function handleSubmit() {
     createdTaskId.value = task.id
     showSuccessModal.value = true
   } catch (error: any) {
-    const detail = error?.response?.data?.detail
-    const errorMessage = typeof detail === 'string' ? detail
-      : error instanceof Error ? error.message
-      : t('createTask.failedToCreateTask')
-    message.error(errorMessage)
+    message.error(extractSlotErrorMessage(error, t, 'createTask.failedToCreateTask'))
   } finally {
     submitting.value = false
   }

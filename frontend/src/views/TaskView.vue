@@ -250,6 +250,7 @@ import TaskProcessPanel from '../components/TaskProcessPanel.vue'
 import TaskResultPanel from '../components/TaskResultPanel.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { parseUtcDate } from '../utils/datetime'
+import { extractSlotErrorMessage } from '../utils/slotError'
 import { CalendarOutline } from '@vicons/ionicons5'
 import HeatmapChart from '../components/HeatmapChart.vue'
 import AnsiToHtml from 'ansi-to-html'
@@ -619,8 +620,7 @@ async function handleReschedule() {
     syncRescheduleDatetime()
     message.success(t('taskView.taskRescheduled'))
   } catch (error: any) {
-    const detail = error?.response?.data?.detail
-    message.error(typeof detail === 'string' ? detail : t('taskView.failedToRescheduleTask'))
+    message.error(extractSlotErrorMessage(error, t, 'taskView.failedToRescheduleTask'))
   } finally {
     actionLoading.value = false
   }

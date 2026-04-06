@@ -120,10 +120,24 @@ def format_slot_rejection_message(info: SlotCapacityInfo) -> str:
 
 
 def format_slot_full_detail(info: SlotCapacityInfo) -> str:
-    """Plain-text capacity message for HTTP error details."""
+    """Plain-text capacity message for GitLab comments and logs."""
     start_str = info.hour_start.strftime("%Y-%m-%d %H:%M")
     end_str = info.hour_end.strftime("%H:%M")
     return (
         f"Time slot {start_str}–{end_str} is at full capacity "
         f"({info.count}/{info.max} tasks)"
     )
+
+
+def slot_full_detail_dict(info: SlotCapacityInfo) -> dict:
+    """Structured capacity detail for HTTP 409 responses.
+
+    Returns a dict so the frontend can format with proper timezone and locale.
+    """
+    return {
+        "code": "SLOT_FULL",
+        "hour_start": info.hour_start.isoformat(),
+        "hour_end": info.hour_end.isoformat(),
+        "count": info.count,
+        "max": info.max,
+    }

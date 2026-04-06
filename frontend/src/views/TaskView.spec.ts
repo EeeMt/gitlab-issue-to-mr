@@ -17,7 +17,9 @@ const { mockApi, resetMockApi } = vi.hoisted(() => {
     executeTask: vi.fn<() => Promise<void>>(),
     rescheduleTask: vi.fn<() => Promise<any>>(),
     getAuthStatus: vi.fn<() => Promise<any>>(),
-    streamTaskLogs: vi.fn<() => any>()
+    streamTaskLogs: vi.fn<() => any>(),
+    getScheduledTasks: vi.fn<() => Promise<any[]>>(),
+    getConfig: vi.fn<() => Promise<any>>()
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => {
@@ -65,7 +67,9 @@ vi.mock('../api', () => ({
   executeTask: mockApi.executeTask,
   rescheduleTask: mockApi.rescheduleTask,
   getAuthStatus: mockApi.getAuthStatus,
-  streamTaskLogs: mockApi.streamTaskLogs
+  streamTaskLogs: mockApi.streamTaskLogs,
+  getScheduledTasks: mockApi.getScheduledTasks,
+  getConfig: mockApi.getConfig
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -76,6 +80,20 @@ vi.mock('vue-i18n', () => ({
     n: vi.fn((value: number) => String(value)),
     te: vi.fn((_key: string) => false)
   })
+}))
+
+vi.mock('../components/HeatmapChart.vue', () => ({
+  default: {
+    name: 'HeatmapChart',
+    props: ['tasks', 'selectedMs', 'maxPerSlot', 'enforceCapacity'],
+    setup() {
+      return () => h('div', { class: 'heatmap-chart-mock' })
+    }
+  }
+}))
+
+vi.mock('../utils/slotError', () => ({
+  extractSlotErrorMessage: vi.fn((_error: any, t: any, fallbackKey: string) => t(fallbackKey))
 }))
 
 vi.mock('@vueuse/core', () => ({
@@ -325,6 +343,27 @@ vi.mock('naive-ui', () => ({
       return () => h('div', { class: 'n-collapse-item' }, slots.default?.())
     }
   },
+  NDrawer: {
+    name: 'NDrawer',
+    props: ['show', 'width', 'placement'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-drawer' }, slots.default?.())
+    }
+  },
+  NDrawerContent: {
+    name: 'NDrawerContent',
+    props: ['title', 'closable'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-drawer-content' }, slots.default?.())
+    }
+  },
+  NIcon: {
+    name: 'NIcon',
+    props: ['component', 'size'],
+    setup() {
+      return () => h('i', { class: 'n-icon' })
+    }
+  },
   NEmpty: {
     name: 'NEmpty',
     props: ['description'],
@@ -354,7 +393,8 @@ vi.mock('@vicons/ionicons5', () => ({
   DocumentTextOutline: { name: 'DocumentTextOutline' },
   CreateOutline: { name: 'CreateOutline' },
   BulbOutline: { name: 'BulbOutline' },
-  SearchOutline: { name: 'SearchOutline' }
+  SearchOutline: { name: 'SearchOutline' },
+  CalendarOutline: { name: 'CalendarOutline' }
 }))
 
 // Mock ansi-to-html
@@ -431,6 +471,8 @@ describe('TaskView', () => {
       logs: 'Container log content',
       status: 'running'
     })
+    ;(mockApi.getScheduledTasks as Mock).mockResolvedValue([])
+    ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: {} })
 
     wrapper = mount(TaskView, {
       global: {

@@ -1048,6 +1048,9 @@ const en = {
     ok: 'OK',
     error: 'Error',
     failedToFetch: 'Failed to fetch OIDC diagnostics'
+  },
+  slotCapacity: {
+    slotFullError: 'Time slot {start}–{end} is at full capacity ({count}/{max} tasks).'
   }
 }
 

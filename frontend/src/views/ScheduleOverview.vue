@@ -212,6 +212,7 @@
                       :placeholder="t('scheduleOverview.selectNewTime')"
                       :is-date-disabled="isScheduledDateDisabled"
                       :is-time-disabled="isScheduledTimeDisabled"
+                      @update:value="() => onDraftChange(task.id)"
                     />
                     <n-button
                       type="info"
@@ -290,6 +291,7 @@ import { useI18n } from 'vue-i18n'
 import { authState, isAdmin, initializeAuth } from '../auth'
 import { getScheduledTasks, rescheduleTask, getConfig, type Task } from '../api'
 import { formatDateTimeUtc8Compact, formatMonthDayTimeUtc8, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
+import { extractSlotErrorMessage } from '../utils/slotError'
 import HeatmapChart from '../components/HeatmapChart.vue'
 
 type HourBucket = {
@@ -322,6 +324,7 @@ const slotMaxTasks = ref(0)
 const slotEnforce = ref(false)
 const selectedWindow = ref<SelectedWindow | null>(null)
 const scheduleDrafts = ref<Record<number, number | null>>({})
+const dirtyDraftIds = ref<Set<number>>(new Set())
 const savingTaskId = ref<number | null>(null)
 let pollTimer: number | null = null
 
@@ -537,6 +540,7 @@ function setSelectedWindow(nextWindow: SelectedWindow) {
 function clearSelectedWindow() {
   selectedWindow.value = null
   scheduleDrafts.value = {}
+  dirtyDraftIds.value.clear()
 }
 
 function isSelectedWindow(startMs: number, endMs: number): boolean {
@@ -592,15 +596,24 @@ const selectedWindowTasks = computed(() => {
 function syncScheduleDrafts() {
   if (!selectedWindow.value) {
     scheduleDrafts.value = {}
+    dirtyDraftIds.value.clear()
     return
   }
 
-  scheduleDrafts.value = Object.fromEntries(
-    selectedWindowTasks.value.map((task) => [
-      task.id,
-      task.scheduled_at ? parseUtcDate(task.scheduled_at).getTime() : null,
-    ])
-  )
+  const newDrafts: Record<number, number | null> = {}
+  for (const task of selectedWindowTasks.value) {
+    if (dirtyDraftIds.value.has(task.id)) {
+      // Preserve user's unsaved change during auto-refresh
+      newDrafts[task.id] = scheduleDrafts.value[task.id] ?? null
+    } else {
+      newDrafts[task.id] = task.scheduled_at ? parseUtcDate(task.scheduled_at).getTime() : null
+    }
+  }
+  scheduleDrafts.value = newDrafts
+}
+
+function onDraftChange(taskId: number) {
+  dirtyDraftIds.value.add(taskId)
 }
 
 function goToTask(task: Task) {
@@ -740,8 +753,7 @@ async function handleTaskReschedule(task: Task) {
     clearSelectedWindow()
     message.success(t('scheduleOverview.taskRescheduled'))
   } catch (error: any) {
-    const detail = error?.response?.data?.detail
-    message.error(typeof detail === 'string' ? detail : t('scheduleOverview.failedToRescheduleTask'))
+    message.error(extractSlotErrorMessage(error, t, 'scheduleOverview.failedToRescheduleTask'))
   } finally {
     savingTaskId.value = null
   }

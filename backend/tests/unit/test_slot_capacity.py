@@ -517,7 +517,9 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
         data = response.json()
-        self.assertIn("full capacity", data["detail"])
+        self.assertEqual(data["detail"]["code"], "SLOT_FULL")
+        self.assertEqual(data["detail"]["count"], 5)
+        self.assertEqual(data["detail"]["max"], 5)
 
     @patch("app.core.slot_capacity.check_slot_capacity", new_callable=AsyncMock)
     def test_scheduled_task_full_no_enforce_returns_200_with_warning(self, mock_check) -> None:
@@ -547,7 +549,7 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertIn("slot_warning", data)
-        self.assertIn("capacity", data["slot_warning"])
+        self.assertEqual(data["slot_warning"]["code"], "SLOT_FULL")
 
     @patch("app.core.slot_capacity.check_slot_capacity", new_callable=AsyncMock)
     def test_scheduled_task_not_full_returns_200_without_warning(self, mock_check) -> None:
@@ -647,7 +649,7 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
         data = response.json()
-        self.assertIn("full capacity", data["detail"])
+        self.assertEqual(data["detail"]["code"], "SLOT_FULL")
 
     @patch("app.core.slot_capacity.check_slot_capacity", new_callable=AsyncMock)
     def test_scheduled_retry_not_full_returns_success(self, mock_check) -> None:
@@ -779,7 +781,7 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
         data = response.json()
-        self.assertIn("full capacity", data["detail"])
+        self.assertEqual(data["detail"]["code"], "SLOT_FULL")
 
     @patch("app.core.slot_capacity.check_slot_capacity", new_callable=AsyncMock)
     def test_reschedule_not_full_returns_success(self, mock_check) -> None:

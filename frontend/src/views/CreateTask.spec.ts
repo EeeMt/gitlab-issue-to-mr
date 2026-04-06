@@ -34,7 +34,14 @@ vi.mock('../i18n', () => ({
 
 // Mock datetime utils
 vi.mock('../utils/datetime', () => ({
-  formatDateTimeUtc8: vi.fn((value: any) => `formatted-date-${value}`)
+  formatDateTimeUtc8: vi.fn((value: any) => `formatted-date-${value}`),
+  formatDateTimeUtc8Compact: vi.fn((value: any) => `compact-${value}`),
+  formatTimeUtc8: vi.fn((value: any) => `time-${value}`)
+}))
+
+// Mock slot error utils
+vi.mock('../utils/slotError', () => ({
+  extractSlotErrorMessage: vi.fn((_error: any, t: any, fallbackKey: string) => t(fallbackKey))
 }))
 
 // Mock dependencies
