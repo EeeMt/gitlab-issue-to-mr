@@ -37,17 +37,23 @@ def _get_slot_max_tasks_input(page: Page):
 
 
 def _get_enforce_switch(page: Page):
-    """Locate the role='switch' button for 'Enforce Slot Limit'."""
+    """Locate the role='switch' element for 'Enforce Slot Limit'."""
     form_item = page.locator(".n-form-item").filter(
         has_text="Enforce Slot Limit"
     )
-    return form_item.locator("button[role='switch']")
+    # Naive UI renders NSwitch as <div role="switch">, not <button>
+    return form_item.locator("[role='switch']")
 
 
 def _set_slot_max_tasks(page: Page, value: int):
-    """Fill slot_max_tasks and blur so the form becomes dirty."""
+    """Fill slot_max_tasks and blur so the form becomes dirty.
+
+    Clears the field first with triple-click + delete to ensure the form
+    detects a change even when the existing value equals `value`.
+    """
     input_el = _get_slot_max_tasks_input(page)
-    input_el.click()
+    input_el.click(click_count=3)          # select all existing text
+    input_el.press("Backspace")            # clear → triggers dirty
     input_el.fill(str(value))
     input_el.press("Tab")
 
@@ -290,7 +296,7 @@ class TestScheduleOverviewSlotCapacityConfig:
         self, logged_in_page: Page
     ):
         """When slot_max_tasks > 0, a 'Full Slots' summary card appears."""
-        _set_slot_config_via_ui(logged_in_page, max_tasks=5)
+        _set_slot_config_via_ui(logged_in_page, max_tasks=8)
 
         logged_in_page.goto("/schedule-overview")
         logged_in_page.wait_for_selector(
