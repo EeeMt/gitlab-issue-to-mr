@@ -226,11 +226,12 @@ class TestCreateTaskNoMRToggle:
         project selector, base_branch selector, and target_branch selector.
         """
         class_page.goto("/create-task")
-        class_page.wait_for_load_state("domcontentloaded")
+        class_page.wait_for_load_state("networkidle")
 
         # With createMR=true (default), the target_branch n-select is rendered,
         # so the form contains at least 3 .n-select elements.
         selects = class_page.locator(".create-task-form .n-select")
+        expect(selects.first).to_be_visible(timeout=5000)
         select_count = selects.count()
         assert select_count >= 3, (
             f"Expected at least 3 .n-select elements (project + base_branch + target_branch) "
@@ -248,10 +249,11 @@ class TestCreateTaskNoMRToggle:
         elements drops from 3 to 2.
         """
         class_page.goto("/create-task")
-        class_page.wait_for_load_state("domcontentloaded")
+        class_page.wait_for_load_state("networkidle")
 
         # Confirm initial state: toggle is ON, target_branch select is present.
         selects_before = class_page.locator(".create-task-form .n-select")
+        expect(selects_before.first).to_be_visible(timeout=5000)
         assert selects_before.count() >= 3, (
             "Pre-condition failed: expected ≥3 selects (MR toggle ON) before clicking toggle"
         )
@@ -280,7 +282,7 @@ class TestCreateTaskNoMRToggle:
         is turned back ON.
         """
         class_page.goto("/create-task")
-        class_page.wait_for_load_state("domcontentloaded")
+        class_page.wait_for_load_state("networkidle")
 
         toggle = class_page.locator(".create-task-form .n-switch")
 

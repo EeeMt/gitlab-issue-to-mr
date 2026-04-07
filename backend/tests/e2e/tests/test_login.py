@@ -112,7 +112,7 @@ class TestLoginPage:
         password-toggle form is present.
         """
         page.goto("/login")
-        page.wait_for_load_state("domcontentloaded")
+        page.wait_for_load_state("networkidle")
         tabs = page.get_by_test_id("login-tabs")
         toggle = page.locator(".login-card__toggle")
         # One or the other must be present in the DOM
