@@ -79,7 +79,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, h, watch, computed } from 'vue'
+import { ref, onMounted, h, watch, computed } from 'vue'
 import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -87,7 +87,9 @@ import { getProjects, getTasksPaginated, getStats, type Project, type Task } fro
 import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
+import { usePolling } from '../composables/usePolling'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
+import { formatPriority, getProjectLabel as _getProjectLabel } from '../utils/format'
 
 const router = useRouter()
 const message = useMessage()
@@ -101,7 +103,6 @@ const hasLoadedOnce = ref(false)
 const statusFilter = ref<string | null>(null)
 const projectFilter = ref<number | null>(null)
 const initiatorFilter = ref<string | null>(null)
-let pollTimer: number | null = null
 
 const currentPage = ref(1)
 const pageSize = ref(20)
@@ -164,7 +165,7 @@ const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 
 }
 
 function getProjectLabel(task: Task): string {
-  return task.project_path_with_namespace || task.project_name || t('dashboard.projectFallback', { id: task.project_id })
+  return _getProjectLabel(task, t('dashboard.projectFallback', { id: task.project_id }))
 }
 
 function renderExternalLink(label: string, href?: string | null) {
@@ -181,18 +182,6 @@ function getProjectSecondaryLabel(task: Task): string {
 
 function getInitiatorLabel(task: Task): string {
   return task.initiator_username?.trim() || '-'
-}
-
-function formatPriority(priority?: string | number | null): string {
-  if (priority === null || priority === undefined || priority === '') {
-    return '-'
-  }
-
-  const normalized = String(priority).toLowerCase().trim()
-  if (normalized === '0' || normalized === 'p0') return 'P0'
-  if (normalized === '1' || normalized === 'p1') return 'P1'
-  if (normalized === '2' || normalized === 'p2') return 'P2'
-  return String(priority)
 }
 
 function formatCompactDateTime(value?: string | null): string {
@@ -435,6 +424,11 @@ function refreshTasks() {
   fetchStats()
 }
 
+const { start: startPolling } = usePolling(
+  () => { fetchTasks(); fetchStats() },
+  { interval: 15_000, immediate: false }
+)
+
 watch([statusFilter, projectFilter, initiatorFilter], () => {
   currentPage.value = 1
   fetchTasks()
@@ -444,19 +438,7 @@ onMounted(() => {
   fetchProjects()
   fetchStats()
   fetchTasks()
-  // Auto-refresh every 15 seconds and skip when tab is not visible
-  pollTimer = window.setInterval(() => {
-    if (document.visibilityState !== 'visible') return
-    fetchTasks()
-    fetchStats()
-  }, 15000)
-})
-
-onBeforeUnmount(() => {
-  if (pollTimer !== null) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
+  startPolling()
 })
 </script>
 

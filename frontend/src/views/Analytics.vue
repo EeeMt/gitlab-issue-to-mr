@@ -329,6 +329,7 @@ import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeLocal, formatMonthDayLocal } from '../utils/datetime'
+import { formatDurationSec } from '../utils/format'
 import { ExpandOutline, CloseOutline } from '@vicons/ionicons5'
 
 type TrendBar = {
@@ -395,27 +396,6 @@ function formatDateTime(value: string | null) {
   return formatDateTimeLocal(value)
 }
 
-function formatDuration(value: number | null | undefined) {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return '—'
-  }
-
-  const seconds = Math.max(Math.round(value), 0)
-  if (seconds < 60) {
-    return `${seconds}s`
-  }
-
-  if (seconds < 3600) {
-    const minutes = Math.floor(seconds / 60)
-    const remainder = seconds % 60
-    return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`
-  }
-
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`
-}
-
 function formatNumber(value: number | null | undefined) {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return '—'
@@ -476,18 +456,18 @@ const summaryItems = computed(() => {
     },
     {
       label: t('analytics.avgDuration'),
-      value: formatDuration(summary.avg_execution_seconds),
+      value: formatDurationSec(summary.avg_execution_seconds),
       note:
         summary.max_execution_seconds !== null
-          ? t('analytics.maxDuration', { value: formatDuration(summary.max_execution_seconds) })
+          ? t('analytics.maxDuration', { value: formatDurationSec(summary.max_execution_seconds) })
           : t('analytics.noExecutionData')
     },
     {
       label: t('analytics.avgQueueWait'),
-      value: formatDuration(summary.avg_queue_wait_seconds),
+      value: formatDurationSec(summary.avg_queue_wait_seconds),
       note:
         summary.max_queue_wait_seconds !== null
-          ? t('analytics.maxQueueWait', { value: formatDuration(summary.max_queue_wait_seconds) })
+          ? t('analytics.maxQueueWait', { value: formatDurationSec(summary.max_queue_wait_seconds) })
           : t('analytics.noQueueData')
     },
     {
@@ -549,7 +529,7 @@ const durationTrendBars = computed(() =>
       key: `${point.date}-duration`,
       label: formatShortDate(point.date),
       value: point.avg_execution_seconds ?? 0,
-      displayValue: formatDuration(point.avg_execution_seconds)
+      displayValue: formatDurationSec(point.avg_execution_seconds)
     }))
   )
 )
@@ -592,14 +572,14 @@ const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
     key: 'avg_execution_seconds',
     width: 120,
     sorter: (a, b) => (a.avg_execution_seconds ?? -1) - (b.avg_execution_seconds ?? -1),
-    render: (row) => formatDuration(row.avg_execution_seconds)
+    render: (row) => formatDurationSec(row.avg_execution_seconds)
   },
   {
     title: t('analytics.avgWait'),
     key: 'avg_queue_wait_seconds',
     width: 120,
     sorter: (a, b) => (a.avg_queue_wait_seconds ?? -1) - (b.avg_queue_wait_seconds ?? -1),
-    render: (row) => formatDuration(row.avg_queue_wait_seconds)
+    render: (row) => formatDurationSec(row.avg_queue_wait_seconds)
   },
   {
     title: t('common.changes'),
@@ -660,14 +640,14 @@ const initiatorColumns = computed<DataTableColumns<AnalyticsInitiatorRow>>(() =>
     key: 'avg_execution_seconds',
     width: 120,
     sorter: (a, b) => (a.avg_execution_seconds ?? -1) - (b.avg_execution_seconds ?? -1),
-    render: (row) => formatDuration(row.avg_execution_seconds)
+    render: (row) => formatDurationSec(row.avg_execution_seconds)
   },
   {
     title: t('analytics.avgWait'),
     key: 'avg_queue_wait_seconds',
     width: 120,
     sorter: (a, b) => (a.avg_queue_wait_seconds ?? -1) - (b.avg_queue_wait_seconds ?? -1),
-    render: (row) => formatDuration(row.avg_queue_wait_seconds)
+    render: (row) => formatDurationSec(row.avg_queue_wait_seconds)
   },
   {
     title: t('common.changes'),
@@ -708,13 +688,13 @@ const priorityColumns = computed<DataTableColumns<AnalyticsPriorityWaitRow>>(() 
     title: t('analytics.avgWait'),
     key: 'avg_queue_wait_seconds',
     width: 130,
-    render: (row) => formatDuration(row.avg_queue_wait_seconds)
+    render: (row) => formatDurationSec(row.avg_queue_wait_seconds)
   },
   {
     title: t('analytics.maxWait'),
     key: 'max_queue_wait_seconds',
     width: 130,
-    render: (row) => formatDuration(row.max_queue_wait_seconds)
+    render: (row) => formatDurationSec(row.max_queue_wait_seconds)
   }
 ])
 

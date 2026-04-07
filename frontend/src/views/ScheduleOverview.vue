@@ -273,6 +273,7 @@ import { useI18n } from 'vue-i18n'
 import { authState, isAdmin, initializeAuth } from '../auth'
 import { getScheduledTasks, getScheduledStats, rescheduleTask, getConfig, type Task, type ScheduledStatsResponse } from '../api'
 import { formatDateTimeUtc8Compact, formatMonthDayTimeUtc8, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
+import { formatPriority, getProjectLabel as _getProjectLabel, isSameLocalDay } from '../utils/format'
 import { extractSlotErrorMessage } from '../utils/slotError'
 import HeatmapChart from '../components/HeatmapChart.vue'
 
@@ -314,19 +315,7 @@ let pollTimer: number | null = null
 const canEditScheduleOverview = computed(() => !authState.oidcEnabled || isAdmin.value)
 
 function getProjectLabel(task: Task): string {
-  return task.project_path_with_namespace || task.project_name || t('dashboard.projectFallback', { id: task.project_id })
-}
-
-function formatPriority(priority?: string | number | null): string {
-  if (priority === null || priority === undefined || priority === '') {
-    return '-'
-  }
-
-  const normalized = String(priority).toLowerCase().trim()
-  if (normalized === '0' || normalized === 'p0') return 'P0'
-  if (normalized === '1' || normalized === 'p1') return 'P1'
-  if (normalized === '2' || normalized === 'p2') return 'P2'
-  return String(priority)
+  return _getProjectLabel(task, t('dashboard.projectFallback', { id: task.project_id }))
 }
 
 function formatShortDateTime(value?: string | null): string {
@@ -428,14 +417,6 @@ const idleWindows = computed(() =>
     .filter((bucket) => bucket.count === 0)
     .slice(0, 5)
 )
-
-function isSameLocalDay(left: Date, right: Date): boolean {
-  return (
-    left.getFullYear() === right.getFullYear()
-    && left.getMonth() === right.getMonth()
-    && left.getDate() === right.getDate()
-  )
-}
 
 function isScheduledDateDisabled(timestamp: number): boolean {
   const candidate = new Date(timestamp)

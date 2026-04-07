@@ -359,6 +359,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import { getProjects, getBranches, createTask, getPromptTemplates, getScheduledTasks, getSlotCapacity, getConfig, type Project, type Branch, type CreateTaskRequest, type PromptTemplate, type Task, type SlotCapacityInfo } from '../api'
 import { formatDateTimeUtc8, formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
+import { isSameLocalDay } from '../utils/format'
 import { extractSlotErrorMessage } from '../utils/slotError'
 import { DocumentTextOutline, WarningOutline, InformationCircleOutline, CalendarOutline } from '@vicons/ionicons5'
 import PageHeader from '../components/PageHeader.vue'
@@ -569,14 +570,6 @@ const scheduleSummary = computed(() => {
 
   return t('createTask.taskWillRunAt', { time: formatDateTimeUtc8(scheduledDatetime.value) })
 })
-
-function isSameLocalDay(left: Date, right: Date): boolean {
-  return (
-    left.getFullYear() === right.getFullYear()
-    && left.getMonth() === right.getMonth()
-    && left.getDate() === right.getDate()
-  )
-}
 
 function isScheduledDateDisabled(timestamp: number): boolean {
   const candidate = new Date(timestamp)

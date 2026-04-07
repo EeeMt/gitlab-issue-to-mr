@@ -163,6 +163,7 @@ import {
 } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import type { Task } from '../api'
+import { formatPriority } from '../utils/format'
 import { formatDateTimeUtc8 } from '../utils/datetime'
 
 const props = defineProps<{
@@ -197,15 +198,6 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
   } catch {
     return false
   }
-}
-
-function formatPriority(priority?: string | number | null): string {
-  if (priority === null || priority === undefined || priority === '') return '-'
-  const normalized = String(priority).toLowerCase().trim()
-  if (normalized === '0' || normalized === 'p0') return 'P0'
-  if (normalized === '1' || normalized === 'p1') return 'P1'
-  if (normalized === '2' || normalized === 'p2') return 'P2'
-  return String(priority)
 }
 </script>
 

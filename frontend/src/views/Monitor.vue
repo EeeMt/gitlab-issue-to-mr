@@ -505,6 +505,7 @@ import { getContainers, getStats, getTasks, getTasksPaginated, type Container, t
 import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
 import { formatDateTimeUtc8Compact, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
+import { formatPriority, formatDurationMs, getProjectLabel as _getProjectLabel } from '../utils/format'
 
 type CardTagType = 'default' | 'info' | 'success' | 'warning' | 'error'
 type CheckType = 'default' | 'info' | 'success' | 'warning' | 'error'
@@ -1108,18 +1109,6 @@ function summarizeError(error?: string | null): string {
   return (firstLine || error).trim().slice(0, 140)
 }
 
-function formatPriority(priority?: string | number | null): string {
-  if (priority === null || priority === undefined || priority === '') {
-    return '-'
-  }
-
-  const normalized = String(priority).toLowerCase().trim()
-  if (normalized === '0' || normalized === 'p0') return 'P0'
-  if (normalized === '1' || normalized === 'p1') return 'P1'
-  if (normalized === '2' || normalized === 'p2') return 'P2'
-  return String(priority)
-}
-
 function priorityClass(priority?: string | number | null): string {
   const normalized = String(priority ?? '').toLowerCase().trim()
   if (normalized === '0' || normalized === 'p0') return 'priority-tone--p0'
@@ -1128,30 +1117,14 @@ function priorityClass(priority?: string | number | null): string {
   return 'priority-tone--default'
 }
 
-function formatDuration(milliseconds: number): string {
-  if (milliseconds <= 0) return '-'
-
-  const totalMinutes = Math.floor(milliseconds / 60000)
-  const hours = Math.floor(totalMinutes / 60)
-  const minutes = totalMinutes % 60
-
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`
-  }
-  if (minutes > 0) {
-    return `${minutes}m`
-  }
-  return '<1m'
-}
-
 function formatAge(value?: string | null): string {
   if (!value) return '-'
-  return formatDuration(Date.now() - parseTimestamp(value))
+  return formatDurationMs(Date.now() - parseTimestamp(value))
 }
 
 function getExecutionDuration(task: Task): string {
   if (!task.started_at || !task.completed_at) return '-'
-  return formatDuration(parseTimestamp(task.completed_at) - parseTimestamp(task.started_at))
+  return formatDurationMs(parseTimestamp(task.completed_at) - parseTimestamp(task.started_at))
 }
 
 function getTaskElapsedLabel(task: Task): string {
@@ -1162,7 +1135,7 @@ function getTaskElapsedLabel(task: Task): string {
 }
 
 function getProjectLabel(task: Task): string {
-  return task.project_path_with_namespace || task.project_name || t('dashboard.projectFallback', { id: task.project_id })
+  return _getProjectLabel(task, t('dashboard.projectFallback', { id: task.project_id }))
 }
 
 function getContainerRelation(container: Container): { label: string; type: CardTagType } {

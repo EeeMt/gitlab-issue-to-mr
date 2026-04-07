@@ -46,16 +46,17 @@ api.interceptors.response.use(
   },
   async (error: AxiosError) => {
     // 从错误响应中提取 Trace ID
+    const errorData = error.response?.data as Record<string, unknown> | undefined
     const traceId =
       error.response?.headers?.['x-trace-id'] ||
-      (error.response?.data as any)?.trace_id ||
+      errorData?.trace_id ||
       lastTraceId ||
       'unknown'
 
     // 保存到全局
     window.__lastTraceId = traceId
     window.__lastError = {
-      message: (error.response?.data as any)?.error || error.message,
+      message: (typeof errorData?.error === 'string' ? errorData.error : undefined) || error.message,
       traceId,
       timestamp: new Date().toISOString(),
       status: error.response?.status,

@@ -1,5 +1,12 @@
 import axios from 'axios'
 
+// Augment AxiosError so callers can access error.apiError with type safety
+declare module 'axios' {
+  interface AxiosError {
+    apiError?: ApiError
+  }
+}
+
 const api = axios.create({
   baseURL: '/api',
   timeout: 30000,
@@ -24,9 +31,34 @@ api.interceptors.response.use(
       const reason = detail ? `&reason=${encodeURIComponent(detail)}` : ''
       window.location.assign(`/login?next=${encodeURIComponent(next)}${reason}`)
     }
+
+    // Normalize error for callers
+    const apiError: ApiError = {
+      status: error?.response?.status ?? 0,
+      message: error?.message ?? 'Unknown error',
+      traceId: error?.response?.data?.trace_id,
+      detail: typeof error?.response?.data?.detail === 'string' ? error.response.data.detail : undefined,
+    }
+    // Attach structured error info to the rejected error
+    if (error) {
+      error.apiError = apiError
+    }
+
     return Promise.reject(error)
   }
 )
+
+// Status union types
+export type TaskStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type ContainerStatus = 'created' | 'running' | 'paused' | 'restarting' | 'removing' | 'exited' | 'dead'
+
+// API error type
+export interface ApiError {
+  status: number
+  message: string
+  traceId?: string
+  detail?: string
+}
 
 // Task types
 export interface Task {
@@ -47,7 +79,7 @@ export interface Task {
   branch_url?: string | null
   merge_request_iid: number | null
   merge_request_url: string | null
-  status: string
+  status: TaskStatus
   priority: number
   scheduled_at: string | null
   container_id: string | null
@@ -127,7 +159,7 @@ export interface TaskStats {
 export interface Container {
   id: string
   name: string
-  status: string
+  status: ContainerStatus
   task_id: number | null
   project_id: number | null
   issue_iid: number | null
