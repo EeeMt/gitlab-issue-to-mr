@@ -130,7 +130,7 @@ pip install -r tests/e2e/requirements-e2e.txt
 playwright install chromium
 
 # 2. 启动后端服务
-# （需要有 PostgreSQL 和 Redis 运行）
+# （需要有 PostgreSQL 运行）
 
 # 3. 运行测试
 pytest tests/e2e/ -v
@@ -538,7 +538,7 @@ docker logs codify-e2e-backend --tail 100
 docker logs codify-e2e-postgres --tail 100
 
 # 7. 进入测试容器
-docker run --rm -it --network=deploy_codify-e2e-network codify-e2e:latest /bin/bash
+docker run --rm -it --network=codify-e2e-network codify-e2e:latest /bin/bash
 
 # 8. 检查数据库表
 docker exec codify-e2e-postgres psql -U codify -d codify -c "\dt"

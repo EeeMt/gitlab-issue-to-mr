@@ -179,7 +179,7 @@ curl -f http://<host>:8000/health
 当 `backend/`、调度逻辑或 API 变更时：
 
 ```bash
-docker build -f deploy/Dockerfile.backend -t deploy-backend .
+docker build -f deploy/Dockerfile.backend -t codify-backend:latest .
 cd deploy && docker-compose up -d backend scheduler
 ```
 
@@ -286,7 +286,7 @@ docker exec codify-postgres psql -U codify -d codify -c \
 建议采用以下原则：
 
 - 一次只发布一类改动，便于定位问题
-- 保留上一版 `deploy-backend` 和 Worker 镜像标签
+- 保留上一版 `codify-backend:latest` 和 Worker 镜像标签
 - 在升级前导出数据库
 - 升级后优先验证：
   - `/health`

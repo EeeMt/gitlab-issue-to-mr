@@ -36,7 +36,7 @@
 
 ```bash
 git clone <your-repo-url>
-cd gitlab-issue-to-mr
+cd codif_docs
 ```
 
 ## 4. 后端开发环境
@@ -99,11 +99,12 @@ cp .env.example .env
 
 #### 方式 B：用 Docker 起一个 PostgreSQL
 
-最简单的方式是直接使用项目里的 compose，把 `postgres` 起起来：
+最简单的方式是直接使用项目里的 compose，把 `codify-postgres` 起起来：
 
 ```bash
 cd ../deploy
-docker-compose up -d postgres
+docker-compose up -d
+# 或只启动 postgres：docker-compose up -d codify-postgres
 ```
 
 然后在 `backend/.env` 中把 `DATABASE_URL` 指向与当前运行方式匹配的地址。
@@ -112,10 +113,18 @@ docker-compose up -d postgres
 
 ### 4.4 执行数据库迁移
 
+数据库迁移在服务启动时自动执行（由 `AUTO_MIGRATE` 环境变量控制）。如需手动迁移：
+
 ```bash
-cd ../backend
-alembic upgrade head
+# 方式一：后端本地运行时（在 backend/ 目录，有 Python 环境）
+cd backend
+python -m alembic upgrade head
+
+# 方式二：后端在 Docker 中运行时
+docker exec codify-backend python -m alembic upgrade head
 ```
+
+> 项目使用 Alembic 进行数据库迁移，迁移脚本位于 `backend/alembic/versions/`。
 
 ### 4.5 本地启动后端
 
@@ -248,7 +257,7 @@ cd frontend && npm run build
 
 ## 9. 本地开发常见问题
 
-### 10.1 后端启动时报数据库连接失败
+### 9.1 后端启动时报数据库连接失败
 
 先确认：
 
@@ -256,7 +265,7 @@ cd frontend && npm run build
 - `DATABASE_URL` 是否指向当前运行方式下可访问的地址
 - 你是否误用了 Docker 内部主机名 `postgres`
 
-### 10.2 前端页面打开了，但接口全 401 或无数据
+### 9.2 前端页面打开了，但接口全 401 或无数据
 
 先确认：
 
@@ -264,7 +273,7 @@ cd frontend && npm run build
 - 你是否已经登录
 - 后端 `/api/auth/me` 返回的 `oidc_enabled` 和 `authenticated` 是否符合预期
 
-### 10.3 任务能创建，但 Worker 起不来
+### 9.3 任务能创建，但 Worker 起不来
 
 先确认：
 
@@ -272,7 +281,7 @@ cd frontend && npm run build
 - `WORKER_IMAGE` 是否存在
 - 当前运行方式能否访问 Docker Engine
 
-### 10.4 OIDC UI 元素突然消失
+### 9.4 OIDC UI 元素突然消失
 
 先确认：
 
