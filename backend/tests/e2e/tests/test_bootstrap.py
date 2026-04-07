@@ -4,6 +4,7 @@ Bootstrap Page E2E Tests
 Tests for the initial setup/bootstrap page that should have no sidebar navigation.
 """
 
+import os
 import re
 
 import pytest
@@ -12,6 +13,15 @@ from playwright.sync_api import Page, expect
 # Requires exclusive access to system_bootstrap and shared user tables.
 # Run with: make test-e2e-serial
 pytestmark = pytest.mark.serial
+
+# Skip the entire module when running under pytest-xdist (parallel mode).
+# Bootstrap tests need the system to be uninitialized, which is impossible
+# when xdist workers each create their own admin user on startup.
+if os.environ.get("PYTEST_XDIST_WORKER"):
+    pytest.skip(
+        "Bootstrap tests require exclusive DB access; run with -m serial",
+        allow_module_level=True,
+    )
 
 
 @pytest.mark.bootstrap

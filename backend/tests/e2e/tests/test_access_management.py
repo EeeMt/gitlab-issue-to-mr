@@ -34,7 +34,9 @@ class TestAccessManagement:
                 'test_viewer', 'Test Viewer', 'viewer@test.example.com', 'local',
                 %s, 'platform_user', 'manual', 'active', NOW(), NOW()
             )
-            ON CONFLICT (username) DO NOTHING
+            ON CONFLICT (username) DO UPDATE
+                SET platform_role = 'platform_user',
+                    local_password_hash = EXCLUDED.local_password_hash
             """,
             (password_hash,),
         )

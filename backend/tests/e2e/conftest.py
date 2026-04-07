@@ -103,9 +103,11 @@ def _reset_db(cursor, clear_sessions=True):
     """
     Reset database state.
 
-    In xdist mode: only clears this worker's sessions to avoid cross-worker
-    interference.  The worker's user record and system_bootstrap are left
-    intact so other workers stay authenticated.
+    In xdist mode: no-op.  Each test gets a fresh browser context with a new
+    session cookie via ``_api_login()``.  Clearing sessions would invalidate
+    the module-scoped ``class_page`` cookie used by read-only tests in the
+    same file.  The per-worker admin user and system_bootstrap are left
+    intact for the same reason.
 
     In non-xdist mode: performs a full reset (original behaviour).
 
@@ -115,14 +117,8 @@ def _reset_db(cursor, clear_sessions=True):
     """
     worker_id = os.environ.get("PYTEST_XDIST_WORKER", "")
     if worker_id:
-        # xdist: only clear this worker's own sessions; preserve user + bootstrap
-        if clear_sessions:
-            username = f"test_admin_{worker_id}"
-            cursor.execute(
-                "DELETE FROM user_sessions WHERE user_id IN "
-                "(SELECT id FROM users WHERE username = %s)",
-                (username,),
-            )
+        # xdist: no-op — each test creates a fresh browser context/session.
+        pass
     else:
         # Non-xdist: full reset (original behavior)
         try:
@@ -484,6 +480,24 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "slow: mark test as slow running"
     )
+    config.addinivalue_line(
+        "markers", "serial: tests that require serial execution (modify shared DB state)"
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Assign xdist_group to serial-marked tests.
+
+    Serial-marked tests are assigned xdist_group("serial") so they all run
+    on the same worker sequentially when using --dist=loadgroup.
+
+    Note: Bootstrap tests handle their own skip via module-level
+    ``pytest.skip(allow_module_level=True)`` when ``PYTEST_XDIST_WORKER``
+    is set, which is more reliable than hook-based deselection.
+    """
+    for item in items:
+        if item.get_closest_marker("serial"):
+            item.add_marker(pytest.mark.xdist_group("serial"))
 
 
 def pytest_report_header(config):

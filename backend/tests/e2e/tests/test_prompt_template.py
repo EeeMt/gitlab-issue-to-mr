@@ -117,7 +117,10 @@ class TestPromptTemplates:
         self.open_prompt_templates(logged_in_page)
         self.create_template(logged_in_page, "Editable Template", "Original {{files}}")
 
-        edit_button = logged_in_page.locator(".n-data-table").get_by_role("button", name="Edit").first
+        # Find the specific row containing our template and click its Edit button.
+        # Use .first in case templates from prior tests accumulated (DB not reset in xdist).
+        row = logged_in_page.locator(".n-data-table tr").filter(has_text="Editable Template").first
+        edit_button = row.get_by_role("button", name="Edit")
         expect(edit_button).to_be_visible()
         edit_button.click()
 
@@ -135,7 +138,9 @@ class TestPromptTemplates:
         self.open_prompt_templates(logged_in_page)
         self.create_template(logged_in_page, "Disposable Template", "Disposable {{files}}")
 
-        delete_button = logged_in_page.locator(".n-data-table").get_by_role("button", name="Delete").first
+        # Find the specific row containing our template and click its Delete button.
+        row = logged_in_page.locator(".n-data-table tr").filter(has_text="Disposable Template").first
+        delete_button = row.get_by_role("button", name="Delete")
         expect(delete_button).to_be_visible()
         delete_button.click()
 

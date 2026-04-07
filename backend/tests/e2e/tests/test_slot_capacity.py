@@ -23,8 +23,8 @@ def _wait_for_config_tab(page: Page):
 
 
 def _goto_runtime(page: Page):
-    """Navigate to the runtime settings tab and wait for it to render."""
-    page.goto("/config?tab=runtime")
+    """Navigate to the runtime settings tab and wait for data to load."""
+    page.goto("/config?tab=runtime", wait_until="networkidle")
     _wait_for_config_tab(page)
 
 
@@ -63,10 +63,10 @@ def _save_runtime_and_wait(page: Page):
     save_btn = page.get_by_role("button", name="Save changes").first
     # The button is disabled while the form is clean; wait for it to become
     # enabled after our edits have been detected by Vue reactivity.
-    expect(save_btn).to_be_enabled(timeout=3000)
+    expect(save_btn).to_be_enabled(timeout=5000)
     save_btn.click()
-    # Give the async PUT /config round-trip time to complete.
-    page.wait_for_timeout(1500)
+    # Wait for the save to complete — button becomes disabled when form is clean.
+    expect(save_btn).to_be_disabled(timeout=10000)
 
 
 def _set_slot_config_via_ui(page: Page, max_tasks: int):
@@ -145,6 +145,17 @@ class TestSlotCapacityConfigStructure:
 @pytest.mark.serial
 class TestSlotCapacityConfigPersistence:
     """Verify that slot capacity settings persist across page reloads."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_slot_config(self, db_cursor):
+        """Reset slot config to defaults before each test to avoid stale state."""
+        db_cursor.execute(
+            "DELETE FROM system_config WHERE key IN ('slot_max_tasks', 'slot_max_tasks_enforce')"
+        )
+        yield
+        db_cursor.execute(
+            "DELETE FROM system_config WHERE key IN ('slot_max_tasks', 'slot_max_tasks_enforce')"
+        )
 
     def test_save_slot_max_tasks_value(self, logged_in_page: Page):
         """Set slot_max_tasks to 5, save, reload, verify it persisted."""
@@ -228,7 +239,7 @@ class TestCreateTaskSlotElements:
 
     def _goto_create_task(self, page: Page):
         page.goto("/create-task")
-        page.wait_for_load_state("domcontentloaded")
+        page.wait_for_load_state("networkidle")
 
     def test_submit_button_exists(self, class_page: Page):
         """The submit button with data-testid is present."""
@@ -261,14 +272,16 @@ class TestScheduleOverviewSlotCapacity:
     def test_page_loads(self, class_page: Page):
         """The schedule overview page loads."""
         class_page.goto("/schedule-overview")
-        class_page.wait_for_selector(".schedule-overview__hero", timeout=10000)
+        class_page.wait_for_load_state("networkidle")
+        class_page.wait_for_selector(".schedule-overview__hero", timeout=15000)
         container = class_page.locator(".schedule-overview")
         expect(container).to_be_visible()
 
     def test_summary_cards_visible(self, class_page: Page):
         """At least one summary card is rendered."""
         class_page.goto("/schedule-overview")
-        class_page.wait_for_selector(".schedule-overview__hero", timeout=10000)
+        class_page.wait_for_load_state("networkidle")
+        class_page.wait_for_selector(".schedule-overview__hero", timeout=15000)
         cards = class_page.locator(".schedule-summary-card")
         expect(cards.first).to_be_visible()
 
@@ -278,6 +291,17 @@ class TestScheduleOverviewSlotCapacity:
 @pytest.mark.serial
 class TestScheduleOverviewSlotCapacityConfig:
     """Verify slot capacity cards depend on slot_max_tasks config value."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_slot_config(self, db_cursor):
+        """Reset slot config to defaults before each test."""
+        db_cursor.execute(
+            "DELETE FROM system_config WHERE key IN ('slot_max_tasks', 'slot_max_tasks_enforce')"
+        )
+        yield
+        db_cursor.execute(
+            "DELETE FROM system_config WHERE key IN ('slot_max_tasks', 'slot_max_tasks_enforce')"
+        )
 
     def test_slot_capacity_card_visible_when_configured(
         self, logged_in_page: Page
@@ -333,21 +357,20 @@ class TestScheduleOverviewSlotCapacityConfig:
 class TestHeatmapLegend:
     """Verify the heatmap legend renders on the schedule overview page."""
 
+    def _goto_schedule(self, page: Page):
+        page.goto("/schedule-overview")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_selector(".schedule-overview__hero", timeout=15000)
+
     def test_heatmap_legend_visible(self, class_page: Page):
         """The heatmap legend bar is visible."""
-        class_page.goto("/schedule-overview")
-        class_page.wait_for_selector(
-            ".schedule-overview__hero", timeout=10000
-        )
+        self._goto_schedule(class_page)
         legend = class_page.locator(".heatmap-chart__legend")
         expect(legend.first).to_be_visible(timeout=5000)
 
     def test_heatmap_legend_has_light_and_busy_labels(self, class_page: Page):
         """The legend shows 'Light' and 'Busy' baseline labels."""
-        class_page.goto("/schedule-overview")
-        class_page.wait_for_selector(
-            ".schedule-overview__hero", timeout=10000
-        )
+        self._goto_schedule(class_page)
         legend = class_page.locator(".heatmap-chart__legend").first
         expect(legend.get_by_text("Light")).to_be_visible()
         expect(legend.get_by_text("Busy")).to_be_visible()
@@ -358,6 +381,17 @@ class TestHeatmapLegend:
 @pytest.mark.serial
 class TestHeatmapFullIndicator:
     """Verify 'Full' legend appears only when slot capacity is configured."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_slot_config(self, db_cursor):
+        """Reset slot config to defaults before each test."""
+        db_cursor.execute(
+            "DELETE FROM system_config WHERE key IN ('slot_max_tasks', 'slot_max_tasks_enforce')"
+        )
+        yield
+        db_cursor.execute(
+            "DELETE FROM system_config WHERE key IN ('slot_max_tasks', 'slot_max_tasks_enforce')"
+        )
 
     def test_full_legend_visible_when_capacity_set(
         self, logged_in_page: Page

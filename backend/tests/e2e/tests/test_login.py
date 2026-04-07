@@ -136,20 +136,23 @@ class TestLoginErrors:
         When the system is not initialized yet, the form is inside login-tabs
         and already visible.
         """
+        # Wait for the login card to render before checking form state
+        page.wait_for_selector(".login-card", timeout=15000)
+
         # Case 1: system not initialized — form is inside login-tabs
         tabs = page.get_by_test_id("login-tabs")
-        if tabs.is_visible(timeout=2000):
+        if tabs.is_visible(timeout=3000):
             return  # form elements are already accessible via login-username-input
 
         # Case 2: system initialized — toggle the password form open
         toggle_btn = page.locator(".login-card__toggle button")
-        if toggle_btn.count() > 0 and toggle_btn.first.is_visible(timeout=2000):
+        if toggle_btn.count() > 0 and toggle_btn.first.is_visible(timeout=3000):
             toggle_btn.first.click()
             # Wait for the password form to expand
             page.wait_for_selector(
                 "[data-testid='login-password-toggle-username-input'],"
                 "[data-testid='login-username-input']",
-                timeout=5000,
+                timeout=10000,
             )
 
     def test_invalid_credentials_show_error(self, page: Page, initialized_system):
@@ -157,8 +160,7 @@ class TestLoginErrors:
         Test that submitting wrong credentials displays an error message.
         The error surfaces as an n-message toast from NaiveUI.
         """
-        page.goto("/login")
-        page.wait_for_load_state("domcontentloaded")
+        page.goto("/login", wait_until="networkidle")
 
         self._reveal_password_form(page)
 
