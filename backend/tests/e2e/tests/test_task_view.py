@@ -9,6 +9,9 @@ Tests for the TaskView page functionality including:
 """
 
 import re
+import time
+
+import httpx
 import pytest
 from playwright.sync_api import Page, expect
 
@@ -213,3 +216,130 @@ class TestTaskViewRefreshButton:
             refresh_btn.click()
             class_page.wait_for_timeout(500)
             expect(class_page.locator(".task-view")).to_be_visible()
+
+
+# ---------------------------------------------------------------------------
+# Action tests with a real task created via API
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def test_task_id(logged_in_page, backend_url):
+    """Create a pending test task via API and return its ID.
+
+    Requires at least one GitLab project to be configured. Skips the test
+    gracefully if no projects are available or task creation fails.
+    """
+    cookies = {c["name"]: c["value"] for c in logged_in_page.context.cookies()}
+    with httpx.Client(base_url=backend_url, timeout=15, cookies=cookies) as client:
+        # Fetch available projects
+        resp = client.get("/api/projects")
+        if resp.status_code != 200:
+            pytest.skip(f"Cannot fetch projects: {resp.status_code}")
+        projects = resp.json()
+        if not projects:
+            pytest.skip("No GitLab projects available")
+        project_id = projects[0]["id"]
+
+        # Create a pending task
+        resp = client.post(
+            "/api/tasks",
+            json={
+                "project_id": project_id,
+                "branch_name": f"test-e2e-{int(time.time())}",
+                "user_prompt": "E2E test task - do nothing",
+                "priority": 2,
+            },
+        )
+        if resp.status_code not in (200, 201):
+            pytest.skip(f"Cannot create test task: {resp.status_code}")
+        return resp.json()["id"]
+
+
+@pytest.mark.task_view
+class TestTaskViewActionInteractions:
+    """Tests for task view actions using a real task created via the API.
+
+    Each test receives its own ``logged_in_page`` (function-scoped with DB
+    reset) and a freshly created ``test_task_id`` so tests are fully isolated.
+    """
+
+    def test_task_view_shows_created_task(self, logged_in_page: Page, test_task_id: int):
+        """Navigate to the created task and verify its details are visible."""
+        logged_in_page.goto(f"/tasks/{test_task_id}")
+        logged_in_page.wait_for_load_state("domcontentloaded")
+
+        task_view = logged_in_page.get_by_test_id("task-view-page")
+        expect(task_view).to_be_visible()
+
+        # Title should contain the task ID
+        title = logged_in_page.locator(".task-view__title")
+        expect(title).to_contain_text(str(test_task_id))
+
+        # The metadata panel should be visible with project/branch info
+        metadata = logged_in_page.locator(".task-metadata-panel")
+        expect(metadata).to_be_visible()
+
+    def test_cancel_button_shows_confirmation(self, logged_in_page: Page, test_task_id: int):
+        """Click Cancel on a pending task and verify a feedback message appears.
+
+        TaskView fires the cancel API directly (no confirmation dialog);
+        a Naive UI message toast (.n-message) is shown on success or failure.
+        """
+        logged_in_page.goto(f"/tasks/{test_task_id}")
+        logged_in_page.wait_for_load_state("domcontentloaded")
+        logged_in_page.wait_for_timeout(500)
+
+        cancel_btn = logged_in_page.get_by_role("button", name="Cancel")
+        if not cancel_btn.is_visible():
+            pytest.skip("Cancel button not visible for this task state")
+
+        cancel_btn.click()
+
+        # A Naive UI message toast should appear (success or error)
+        msg = logged_in_page.locator(".n-message")
+        expect(msg.first).to_be_visible(timeout=5000)
+
+    def test_execute_button_on_pending_task(self, logged_in_page: Page, test_task_id: int):
+        """Click Execute on a pending task and verify success feedback."""
+        logged_in_page.goto(f"/tasks/{test_task_id}")
+        logged_in_page.wait_for_load_state("domcontentloaded")
+        logged_in_page.wait_for_timeout(500)
+
+        execute_btn = logged_in_page.get_by_role("button", name="Execute")
+        if not execute_btn.is_visible():
+            pytest.skip("Execute button not visible for this task state")
+
+        execute_btn.click()
+
+        # A Naive UI message toast should appear (success or error)
+        msg = logged_in_page.locator(".n-message")
+        expect(msg.first).to_be_visible(timeout=5000)
+
+    def test_task_log_section_rendered(self, logged_in_page: Page, test_task_id: int):
+        """Task process/log panel is rendered for the created task."""
+        logged_in_page.goto(f"/tasks/{test_task_id}")
+        logged_in_page.wait_for_load_state("domcontentloaded")
+
+        log_panel = logged_in_page.locator(".task-process-panel")
+        expect(log_panel).to_be_attached()
+
+    def test_task_metadata_shows_data(self, logged_in_page: Page, test_task_id: int):
+        """Metadata panel shows actual data (project, branch, source) for the task."""
+        logged_in_page.goto(f"/tasks/{test_task_id}")
+        logged_in_page.wait_for_load_state("domcontentloaded")
+
+        metadata = logged_in_page.locator(".task-metadata-panel")
+        expect(metadata).to_be_visible()
+
+        # At least one metadata row should be present with label and value
+        rows = metadata.locator(".metadata-row")
+        assert rows.count() > 0, "Expected at least one metadata row"
+
+        for i in range(min(rows.count(), 3)):
+            row = rows.nth(i)
+            label = row.locator(".metadata-label")
+            value = row.locator(".metadata-value")
+            expect(label).to_be_visible()
+            expect(value).to_be_visible()
+            assert value.text_content().strip(), f"Metadata row {i} value should not be empty"

@@ -479,6 +479,9 @@ def pytest_configure(config):
         "markers", "task_view: mark test as a task view page test"
     )
     config.addinivalue_line(
+        "markers", "schedule_overview: mark test as a schedule overview test"
+    )
+    config.addinivalue_line(
         "markers", "slow: mark test as slow running"
     )
 
