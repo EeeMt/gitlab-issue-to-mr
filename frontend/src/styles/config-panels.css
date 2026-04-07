@@ -43,7 +43,6 @@
 
 .config-section-form {
   display: grid;
-  max-width: 880px;
 }
 
 .config-form__section {
