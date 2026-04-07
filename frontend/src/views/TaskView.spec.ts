@@ -261,11 +261,10 @@ vi.mock('naive-ui', () => ({
   },
   NIcon: {
     name: 'NIcon',
-    props: ['component'],
-    setup(_props: any) {
+    props: ['component', 'size'],
+    setup() {
       return () => h('i', { class: 'n-icon' })
-    },
-    template: '<i class="n-icon"></i>'
+    }
   },
   NSpin: {
     name: 'NSpin',
@@ -355,13 +354,6 @@ vi.mock('naive-ui', () => ({
     props: ['title', 'closable'],
     setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-drawer-content' }, slots.default?.())
-    }
-  },
-  NIcon: {
-    name: 'NIcon',
-    props: ['component', 'size'],
-    setup() {
-      return () => h('i', { class: 'n-icon' })
     }
   },
   NEmpty: {
