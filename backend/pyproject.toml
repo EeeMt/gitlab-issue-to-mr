@@ -29,6 +29,9 @@ testpaths = ["tests"]
 markers = [
     "slow: marks tests as slow-running (use -m 'not slow' to skip)",
 ]
+filterwarnings = [
+    "ignore:datetime.datetime.utcnow:DeprecationWarning:sqlalchemy",
+]
 
 [tool.ruff]
 line-length = 100

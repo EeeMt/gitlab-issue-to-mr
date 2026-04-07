@@ -588,7 +588,8 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
              patch("app.scheduler.get_docker_client", return_value=mock_docker), \
-             patch("asyncio.create_task") as mock_create_task:
+             patch.object(scheduler, "_resume_task_background", new=MagicMock()), \
+             patch("app.scheduler.asyncio.create_task") as mock_create_task:
             await scheduler._crash_recovery()
 
         # Container should NOT be removed — it's being resumed
