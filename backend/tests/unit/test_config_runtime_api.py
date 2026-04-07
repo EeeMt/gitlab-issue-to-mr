@@ -5,7 +5,7 @@ import os
 import sys
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from starlette.requests import Request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -13,8 +13,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from fastapi.testclient import TestClient
 from app.main import app
 from app.database import get_db
-from app.config import get_settings, reset_runtime_config
+from app.config import get_settings, reset_runtime_config, set_runtime_config
 from app.dependencies.auth import require_authenticated_context
+from app.runtime_config import reset_runtime_config_sync_state
 
 
 class ConfigRuntimeAPITests(unittest.TestCase):
@@ -25,6 +26,7 @@ class ConfigRuntimeAPITests(unittest.TestCase):
         os.environ["CONFIG_ENCRYPTION_KEY"] = "unit-test-config-key"
         get_settings.cache_clear()
         reset_runtime_config()
+        reset_runtime_config_sync_state()
 
         self.client = TestClient(app)
         self.mock_db = MagicMock()
@@ -48,6 +50,7 @@ class ConfigRuntimeAPITests(unittest.TestCase):
     def tearDown(self):
         app.dependency_overrides.clear()
         reset_runtime_config()
+        reset_runtime_config_sync_state()
         if self._original_config_encryption_key is None:
             os.environ.pop("CONFIG_ENCRYPTION_KEY", None)
         else:
@@ -150,6 +153,40 @@ class ConfigRuntimeAPITests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("anthropic_model", response.json()["detail"].lower())
+
+    def test_api_middleware_refreshes_runtime_config_for_non_auth_route(self):
+        """API middleware syncs runtime config before non-authenticated routes run."""
+        set_runtime_config({"oidc_enabled": False})
+
+        mock_session = AsyncMock()
+        mock_session_ctx = MagicMock()
+        mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        async def refresh_side_effect(_session):
+            set_runtime_config({"oidc_enabled": True})
+            return True
+
+        with patch("app.main.AsyncSessionLocal", return_value=mock_session_ctx):
+            with patch(
+                "app.main.refresh_runtime_config_if_stale",
+                new=AsyncMock(side_effect=refresh_side_effect),
+            ) as mock_refresh:
+                original_db_override = app.dependency_overrides.pop(get_db, None)
+                try:
+                    with patch(
+                        "app.api.auth.build_authorization_url",
+                        new_callable=AsyncMock,
+                        return_value="https://example.com/oauth/authorize",
+                    ):
+                        response = self.client.get("/api/auth/login", follow_redirects=False)
+                finally:
+                    if original_db_override is not None:
+                        app.dependency_overrides[get_db] = original_db_override
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["location"], "https://example.com/oauth/authorize")
+        mock_refresh.assert_awaited_once()
 
 
 if __name__ == "__main__":

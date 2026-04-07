@@ -12,11 +12,11 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.core.logging import setup_logging, get_logger
-from app.database import close_db, init_db
+from app.database import AsyncSessionLocal, close_db, get_db, init_db
 from app.dependencies.auth import require_admin_user, require_authenticated_user
 from app.migrations import run_migrations
 from app.middleware.trace import TraceMiddleware, get_trace_id
-from app.runtime_config import load_runtime_config_from_db
+from app.runtime_config import load_runtime_config_from_db, refresh_runtime_config_if_stale
 
 settings = get_settings()
 
@@ -102,6 +102,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def sync_runtime_config(request: Request, call_next):
+    """Keep each worker's in-memory runtime config in sync with the database."""
+    if request.url.path.startswith("/api/"):
+        # API tests often override get_db with mocks; avoid bypassing those
+        # overrides by opening a separate real AsyncSession in middleware.
+        if get_db not in request.app.dependency_overrides:
+            async with AsyncSessionLocal() as session:
+                await refresh_runtime_config_if_stale(session)
+        request.state.runtime_config_synced = True
+    return await call_next(request)
 
 
 @app.middleware("http")

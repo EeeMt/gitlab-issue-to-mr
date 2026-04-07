@@ -14,6 +14,7 @@ from app.runtime_config import (
     _serialize_runtime_value,
     load_runtime_config_from_db,
     reset_runtime_config_override,
+    reset_runtime_config_sync_state,
     save_runtime_config_override,
 )
 
@@ -25,9 +26,11 @@ class RuntimeConfigCoverageTests(unittest.IsolatedAsyncioTestCase):
         self._original_key = os.environ.get("CONFIG_ENCRYPTION_KEY")
         os.environ["CONFIG_ENCRYPTION_KEY"] = "unit-test-config-key"
         get_settings.cache_clear()
+        reset_runtime_config_sync_state()
 
     def tearDown(self) -> None:
         reset_runtime_config()
+        reset_runtime_config_sync_state()
         if self._original_key is None:
             os.environ.pop("CONFIG_ENCRYPTION_KEY", None)
         else:

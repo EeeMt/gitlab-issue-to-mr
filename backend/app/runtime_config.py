@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import time
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import (
@@ -25,6 +27,26 @@ from app.database import AsyncSessionLocal
 from app.models import SystemConfig
 
 logger = logging.getLogger(__name__)
+_runtime_config_last_check_monotonic = 0.0
+_runtime_config_last_signature: tuple[int, datetime | None] | None = None
+
+
+def reset_runtime_config_sync_state() -> None:
+    """Reset in-process refresh bookkeeping.
+
+    Useful in tests and when a process deliberately wants to forget its last
+    refresh checkpoint.
+    """
+    global _runtime_config_last_check_monotonic, _runtime_config_last_signature
+    _runtime_config_last_check_monotonic = 0.0
+    _runtime_config_last_signature = None
+
+
+def _mark_runtime_config_synced(signature: tuple[int, datetime | None]) -> None:
+    """Record the last observed runtime-config table signature for this process."""
+    global _runtime_config_last_check_monotonic, _runtime_config_last_signature
+    _runtime_config_last_check_monotonic = time.monotonic()
+    _runtime_config_last_signature = signature
 
 
 def _serialize_runtime_value(key: str, value: RuntimeConfigValue) -> tuple[str, str]:
@@ -60,10 +82,11 @@ async def load_runtime_config_from_db(db: Optional[AsyncSession] = None) -> dict
             return await load_runtime_config_from_db(session)
 
     result = await db.execute(select(SystemConfig))
+    rows = result.scalars().all()
     overrides: dict[str, RuntimeConfigValue] = {}
     supported_keys = get_runtime_config_types()
 
-    for row in result.scalars().all():
+    for row in rows:
         if row.key not in supported_keys:
             logger.warning("Ignoring unsupported system config key: %s", row.key)
             continue
@@ -73,7 +96,45 @@ async def load_runtime_config_from_db(db: Optional[AsyncSession] = None) -> dict
             logger.warning("Ignoring invalid system config value for %s: %s", row.key, exc)
 
     set_runtime_config(overrides)
+    latest_update = max((row.updated_at for row in rows if row.updated_at is not None), default=None)
+    _mark_runtime_config_synced((len(rows), latest_update))
     return overrides
+
+
+async def refresh_runtime_config_if_stale(
+    db: Optional[AsyncSession] = None,
+    *,
+    min_check_interval: float = 1.0,
+) -> bool:
+    """Refresh process-local runtime config when the persisted config changed.
+
+    Every worker keeps runtime overrides in local memory. This helper lets a
+    worker cheaply poll a compact ``system_config`` signature and only perform
+    a full reload when another process has changed the persisted config.
+    """
+    owns_session = db is None
+    if owns_session:
+        async with AsyncSessionLocal() as session:
+            return await refresh_runtime_config_if_stale(
+                session,
+                min_check_interval=min_check_interval,
+            )
+
+    if (
+        _runtime_config_last_check_monotonic
+        and time.monotonic() - _runtime_config_last_check_monotonic < min_check_interval
+    ):
+        return False
+
+    result = await db.execute(select(func.count(SystemConfig.key), func.max(SystemConfig.updated_at)))
+    row_count, latest_update = result.one()
+    signature = (int(row_count or 0), latest_update)
+    if _runtime_config_last_check_monotonic and signature == _runtime_config_last_signature:
+        _mark_runtime_config_synced(signature)
+        return False
+
+    await load_runtime_config_from_db(db)
+    return True
 
 
 async def save_runtime_config_override(
