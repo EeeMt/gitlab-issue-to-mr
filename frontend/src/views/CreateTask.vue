@@ -174,7 +174,6 @@
                         @click="formValue.priority = opt.value"
                       >
                         <n-radio :value="opt.value" class="priority-card__radio" />
-                        <span class="priority-card__dot"></span>
                         <div class="priority-card__text">
                           <div class="priority-card__label">{{ opt.label }}</div>
                           <div class="priority-card__desc">{{ opt.desc }}</div>
@@ -1117,77 +1116,92 @@ watch(scheduleType, (newType) => {
 }
 
 .priority-card {
+  --priority-card-accent: rgba(100, 116, 139, 0.9);
+  --priority-card-accent-soft: rgba(148, 163, 184, 0.18);
+  --priority-card-accent-border: rgba(148, 163, 184, 0.24);
+  --priority-card-gradient-strong: rgba(148, 163, 184, 0.18);
+  --priority-card-gradient-soft: rgba(148, 163, 184, 0.08);
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 14px;
-  border-radius: 10px;
-  border: 1.5px solid rgba(148, 163, 184, 0.22);
-  background: rgba(248, 250, 252, 0.5);
+  padding: 11px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(148, 163, 184, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
   cursor: pointer;
-  transition: border-color 0.18s, background 0.18s, box-shadow 0.18s;
+  transition: border-color 0.18s, background 0.18s, box-shadow 0.18s, transform 0.18s;
 }
 
 .priority-card:hover {
-  border-color: rgba(148, 163, 184, 0.38);
-  background: rgba(248, 250, 252, 0.85);
+  border-color: rgba(148, 163, 184, 0.2);
+  background: rgba(148, 163, 184, 0.13);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.46),
+    0 10px 24px -24px rgba(15, 23, 42, 0.85);
+  transform: translateY(-1px);
 }
 
 .priority-card--active {
-  border-color: rgba(32, 128, 240, 0.45);
-  background: rgba(32, 128, 240, 0.04);
-  box-shadow: 0 0 0 2px rgba(32, 128, 240, 0.12);
+  border-color: var(--priority-card-accent-border);
+  background: linear-gradient(180deg, var(--priority-card-gradient-strong), var(--priority-card-gradient-soft));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.52),
+    0 0 0 1px var(--priority-card-accent-soft);
 }
 
 .priority-card--active:hover {
-  border-color: rgba(32, 128, 240, 0.55);
-  background: rgba(32, 128, 240, 0.06);
+  border-color: var(--priority-card-accent-border);
+  background: linear-gradient(180deg, var(--priority-card-gradient-strong), var(--priority-card-gradient-soft));
 }
 
 .priority-card__radio {
   flex-shrink: 0;
+  margin-top: 1px;
 }
 
-.priority-card__dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
+.priority-card--p0 {
+  --priority-card-accent: #d03050;
+  --priority-card-accent-soft: rgba(208, 48, 80, 0.14);
+  --priority-card-accent-border: rgba(208, 48, 80, 0.28);
+  --priority-card-gradient-strong: rgba(208, 48, 80, 0.22);
+  --priority-card-gradient-soft: rgba(208, 48, 80, 0.08);
 }
 
-.priority-card--p0 .priority-card__dot {
-  background-color: #d03050;
-  box-shadow: 0 0 0 3px rgba(208, 48, 80, 0.15);
+.priority-card--p1 {
+  --priority-card-accent: #f0a020;
+  --priority-card-accent-soft: rgba(240, 160, 32, 0.16);
+  --priority-card-accent-border: rgba(240, 160, 32, 0.28);
+  --priority-card-gradient-strong: rgba(245, 158, 11, 0.24);
+  --priority-card-gradient-soft: rgba(245, 158, 11, 0.1);
 }
 
-.priority-card--p1 .priority-card__dot {
-  background-color: #f0a020;
-  box-shadow: 0 0 0 3px rgba(240, 160, 32, 0.15);
-}
-
-.priority-card--p2 .priority-card__dot {
-  background-color: #18a058;
-  box-shadow: 0 0 0 3px rgba(24, 160, 88, 0.15);
+.priority-card--p2 {
+  --priority-card-accent: #18a058;
+  --priority-card-accent-soft: rgba(24, 160, 88, 0.14);
+  --priority-card-accent-border: rgba(24, 160, 88, 0.26);
+  --priority-card-gradient-strong: rgba(24, 160, 88, 0.22);
+  --priority-card-gradient-soft: rgba(24, 160, 88, 0.08);
 }
 
 .priority-card__text {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   min-width: 0;
 }
 
 .priority-card__label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #0f172a;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(15, 23, 42, 0.88);
+  letter-spacing: 0.01em;
   line-height: 1.3;
 }
 
 .priority-card__desc {
   font-size: 12px;
-  color: rgba(15, 23, 42, 0.52);
-  line-height: 1.35;
+  color: rgba(15, 23, 42, 0.54);
+  line-height: 1.4;
 }
 </style>

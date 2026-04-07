@@ -8,8 +8,9 @@ import { createMockTask, createMockProject } from '../test/mocks/api'
 // Use hoisted to ensure proper initialization order
 const { mockApi, resetMockApi } = vi.hoisted(() => {
   const mock = {
-    getTasks: vi.fn<() => Promise<any[]>>(),
-    getProjects: vi.fn<() => Promise<any[]>>()
+    getTasksPaginated: vi.fn<() => Promise<any>>(),
+    getProjects: vi.fn<() => Promise<any[]>>(),
+    getStats: vi.fn<() => Promise<any>>()
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => {
@@ -33,8 +34,9 @@ vi.mock('../utils/datetime', () => ({
 
 // Mock dependencies
 vi.mock('../api', () => ({
-  getTasks: mockApi.getTasks,
-  getProjects: mockApi.getProjects
+  getTasksPaginated: mockApi.getTasksPaginated,
+  getProjects: mockApi.getProjects,
+  getStats: mockApi.getStats
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -167,6 +169,14 @@ const mockProjects = [
   createMockProject({ id: 2, name: 'Project 2', path_with_namespace: 'group/project-2' })
 ]
 
+const mockStats = {
+  total: 5,
+  running: 1,
+  completed: 1,
+  pending: 1,
+  queued: 1
+}
+
 describe('Dashboard', () => {
   let wrapper: VueWrapper<any>
 
@@ -196,9 +206,10 @@ describe('Dashboard', () => {
     vi.restoreAllMocks()
   })
 
-  const mountComponent = async (tasks = mockTasks, projects = mockProjects) => {
-    ;(mockApi.getTasks as Mock).mockResolvedValue(tasks)
+  const mountComponent = async (tasks = mockTasks, projects = mockProjects, stats = mockStats) => {
+    ;(mockApi.getTasksPaginated as Mock).mockResolvedValue({ items: tasks, total: tasks.length })
     ;(mockApi.getProjects as Mock).mockResolvedValue(projects)
+    ;(mockApi.getStats as Mock).mockResolvedValue(stats)
 
     wrapper = mount(Dashboard, {
       global: {
@@ -208,7 +219,7 @@ describe('Dashboard', () => {
 
     // Wait for onMounted to complete
     await vi.waitFor(() => {
-      return (mockApi.getTasks as Mock).mock.calls.length > 0
+      return (mockApi.getTasksPaginated as Mock).mock.calls.length > 0
     })
 
     return wrapper
@@ -221,12 +232,13 @@ describe('Dashboard', () => {
     })
 
     it('should show loading state during initial fetch', async () => {
-      let resolveTasks: (value: any[]) => void
-      const tasksPromise = new Promise<any[]>(resolve => {
+      let resolveTasks!: (value: { items: any[]; total: number }) => void
+      const tasksPromise = new Promise<{ items: any[]; total: number }>(resolve => {
         resolveTasks = resolve
       })
-      ;(mockApi.getTasks as Mock).mockReturnValue(tasksPromise)
+      ;(mockApi.getTasksPaginated as Mock).mockReturnValue(tasksPromise)
       ;(mockApi.getProjects as Mock).mockResolvedValue(mockProjects)
+      ;(mockApi.getStats as Mock).mockResolvedValue(mockStats)
 
       wrapper = mount(Dashboard, {
         global: {
@@ -239,7 +251,7 @@ describe('Dashboard', () => {
       expect(wrapper.vm.loading).toBe(true)
 
       // Resolve the tasks
-      resolveTasks!(mockTasks)
+      resolveTasks({ items: mockTasks, total: mockTasks.length })
 
       // Wait for loading to complete
       await vi.waitFor(() => {
@@ -263,7 +275,8 @@ describe('Dashboard', () => {
 
     it('should fetch tasks on mount', async () => {
       await mountComponent()
-      expect(mockApi.getTasks).toHaveBeenCalledTimes(1)
+      expect(mockApi.getTasksPaginated).toHaveBeenCalledTimes(1)
+      expect(mockApi.getStats).toHaveBeenCalledTimes(1)
     })
 
     it('should fetch projects on mount', async () => {
@@ -275,43 +288,43 @@ describe('Dashboard', () => {
   describe('filters', () => {
     it('should filter by status', async () => {
       await mountComponent()
-      ;(mockApi.getTasks as Mock).mockClear()
+      ;(mockApi.getTasksPaginated as Mock).mockClear()
 
       wrapper.vm.statusFilter = 'running'
       await nextTick()
 
       await vi.waitFor(() => {
-        expect(mockApi.getTasks).toHaveBeenCalledWith({ status: 'running' })
+        expect(mockApi.getTasksPaginated).toHaveBeenCalledWith({ page: 1, page_size: 20, status: 'running' })
       })
     })
 
     it('should filter by project', async () => {
       await mountComponent()
-      ;(mockApi.getTasks as Mock).mockClear()
+      ;(mockApi.getTasksPaginated as Mock).mockClear()
 
       wrapper.vm.projectFilter = 1
       await nextTick()
 
       await vi.waitFor(() => {
-        expect(mockApi.getTasks).toHaveBeenCalledWith({ project_id: 1 })
+        expect(mockApi.getTasksPaginated).toHaveBeenCalledWith({ page: 1, page_size: 20, project_id: 1 })
       })
     })
 
     it('should filter by initiator', async () => {
       await mountComponent()
-      ;(mockApi.getTasks as Mock).mockClear()
+      ;(mockApi.getTasksPaginated as Mock).mockClear()
 
       wrapper.vm.initiatorFilter = 'user1'
       await nextTick()
 
       await vi.waitFor(() => {
-        expect(mockApi.getTasks).toHaveBeenCalledWith({ initiator_username: 'user1' })
+        expect(mockApi.getTasksPaginated).toHaveBeenCalledWith({ page: 1, page_size: 20, initiator_username: 'user1' })
       })
     })
 
     it('should combine multiple filters', async () => {
       await mountComponent()
-      ;(mockApi.getTasks as Mock).mockClear()
+      ;(mockApi.getTasksPaginated as Mock).mockClear()
 
       wrapper.vm.statusFilter = 'pending'
       wrapper.vm.projectFilter = 1
@@ -319,7 +332,9 @@ describe('Dashboard', () => {
       await nextTick()
 
       await vi.waitFor(() => {
-        expect(mockApi.getTasks).toHaveBeenCalledWith({
+        expect(mockApi.getTasksPaginated).toHaveBeenCalledWith({
+          page: 1,
+          page_size: 20,
           status: 'pending',
           project_id: 1,
           initiator_username: 'user1'
@@ -331,17 +346,17 @@ describe('Dashboard', () => {
       await mountComponent()
 
       // Initial fetch
-      expect((mockApi.getTasks as Mock).mock.calls.length).toBe(1)
+      expect((mockApi.getTasksPaginated as Mock).mock.calls.length).toBe(1)
 
       // Change status filter
       wrapper.vm.statusFilter = 'completed'
       await nextTick()
 
       await vi.waitFor(() => {
-        return (mockApi.getTasks as Mock).mock.calls.length >= 2
+        return (mockApi.getTasksPaginated as Mock).mock.calls.length >= 2
       })
 
-      expect((mockApi.getTasks as Mock).mock.calls.length).toBeGreaterThanOrEqual(2)
+      expect((mockApi.getTasksPaginated as Mock).mock.calls.length).toBeGreaterThanOrEqual(2)
     })
   })
 
@@ -355,7 +370,7 @@ describe('Dashboard', () => {
       vi.advanceTimersByTime(15000)
 
       await vi.waitFor(() => {
-        expect(mockApi.getTasks).toHaveBeenCalledTimes(2)
+        expect(mockApi.getTasksPaginated).toHaveBeenCalledTimes(2)
       })
 
       vi.useRealTimers()
@@ -375,8 +390,8 @@ describe('Dashboard', () => {
       // Advance time by 15 seconds
       vi.advanceTimersByTime(15000)
 
-      // getTasks should only be called once (initial fetch)
-      expect(mockApi.getTasks).toHaveBeenCalledTimes(1)
+      // getTasksPaginated should only be called once (initial fetch)
+      expect(mockApi.getTasksPaginated).toHaveBeenCalledTimes(1)
 
       vi.useRealTimers()
     })
@@ -387,7 +402,7 @@ describe('Dashboard', () => {
       await mountComponent()
 
       // Initial call count
-      const initialCalls = (mockApi.getTasks as Mock).mock.calls.length
+      const initialCalls = (mockApi.getTasksPaginated as Mock).mock.calls.length
 
       // Make tab hidden and advance time
       Object.defineProperty(document, 'visibilityState', {
@@ -395,7 +410,7 @@ describe('Dashboard', () => {
         writable: true
       })
       vi.advanceTimersByTime(15000)
-      expect((mockApi.getTasks as Mock).mock.calls.length).toBe(initialCalls)
+      expect((mockApi.getTasksPaginated as Mock).mock.calls.length).toBe(initialCalls)
 
       // Make tab visible again
       Object.defineProperty(document, 'visibilityState', {
@@ -408,7 +423,7 @@ describe('Dashboard', () => {
       vi.advanceTimersByTime(15000)
 
       // After making visible and triggering interval, should fetch
-      expect((mockApi.getTasks as Mock).mock.calls.length).toBe(initialCalls + 1)
+      expect((mockApi.getTasksPaginated as Mock).mock.calls.length).toBe(initialCalls + 1)
 
       vi.useRealTimers()
     })
@@ -509,7 +524,7 @@ describe('Dashboard', () => {
       })
 
       const totalItem = wrapper.vm.summaryItems.find((item: any) => item.label === 'dashboard.visibleTasks')
-      expect(totalItem.value).toBe('5')
+      expect(totalItem.value).toBe(String(mockStats.total))
     })
 
     it('should count running tasks', async () => {
@@ -520,7 +535,7 @@ describe('Dashboard', () => {
       })
 
       const runningItem = wrapper.vm.summaryItems.find((item: any) => item.label === 'dashboard.running')
-      expect(runningItem.value).toBe('1')
+      expect(runningItem.value).toBe(String(mockStats.running))
     })
 
     it('should count pending/queued tasks', async () => {
@@ -531,7 +546,7 @@ describe('Dashboard', () => {
       })
 
       const pendingItem = wrapper.vm.summaryItems.find((item: any) => item.label === 'dashboard.pendingQueued')
-      expect(pendingItem.value).toBe('2') // 1 pending + 1 queued
+      expect(pendingItem.value).toBe(String(mockStats.pending + mockStats.queued))
     })
 
     it('should count completed tasks', async () => {
@@ -542,11 +557,11 @@ describe('Dashboard', () => {
       })
 
       const completedItem = wrapper.vm.summaryItems.find((item: any) => item.label === 'dashboard.completed')
-      expect(completedItem.value).toBe('1')
+      expect(completedItem.value).toBe(String(mockStats.completed))
     })
 
     it('should handle empty task list', async () => {
-      await mountComponent([])
+      await mountComponent([], mockProjects, { total: 0, running: 0, completed: 0, pending: 0, queued: 0 })
 
       await vi.waitFor(() => {
         return wrapper.vm.hasLoadedOnce === true
@@ -556,7 +571,7 @@ describe('Dashboard', () => {
       expect(totalItem.value).toBe('0')
     })
 
-    it('should update summary when tasks change', async () => {
+    it('should update visible task rows when filters change', async () => {
       await mountComponent()
 
       await vi.waitFor(() => {
@@ -565,14 +580,14 @@ describe('Dashboard', () => {
 
       // Mock the second call to return only 1 pending task
       const pendingTask = createMockTask({ id: 1, status: 'pending', initiator_username: 'user1', project_id: 1 })
-      ;(mockApi.getTasks as Mock).mockResolvedValueOnce([pendingTask])
+      ;(mockApi.getTasksPaginated as Mock).mockResolvedValueOnce({ items: [pendingTask], total: 1 })
 
       // Change filter to get different tasks
       wrapper.vm.statusFilter = 'pending'
       await nextTick()
 
       await vi.waitFor(() => {
-        return (mockApi.getTasks as Mock).mock.calls.length >= 2
+        return (mockApi.getTasksPaginated as Mock).mock.calls.length >= 2
       })
 
       // Wait for tasks to update
@@ -580,8 +595,8 @@ describe('Dashboard', () => {
         return wrapper.vm.tasks.length === 1
       })
 
-      const totalItem = wrapper.vm.summaryItems.find((item: any) => item.label === 'dashboard.visibleTasks')
-      expect(totalItem.value).toBe('1')
+      expect(wrapper.vm.tasks).toHaveLength(1)
+      expect(wrapper.vm.tasks[0].id).toBe(1)
     })
   })
 
@@ -590,20 +605,24 @@ describe('Dashboard', () => {
       await mountComponent()
 
       // Clear previous calls
-      ;(mockApi.getTasks as Mock).mockClear()
+      ;(mockApi.getTasksPaginated as Mock).mockClear()
+      ;(mockApi.getStats as Mock).mockClear()
 
       wrapper.vm.refreshTasks()
       await nextTick()
 
       await vi.waitFor(() => {
-        expect(mockApi.getTasks).toHaveBeenCalledTimes(1)
+        expect(mockApi.getTasksPaginated).toHaveBeenCalledTimes(1)
+        expect(mockApi.getStats).toHaveBeenCalledTimes(1)
       })
     })
 
     it('should set loading state during refresh', async () => {
       await mountComponent()
 
-      ;(mockApi.getTasks as Mock).mockImplementation(() => new Promise(resolve => setTimeout(() => resolve(mockTasks), 100)))
+      ;(mockApi.getTasksPaginated as Mock).mockImplementationOnce(
+        () => new Promise(resolve => setTimeout(() => resolve({ items: mockTasks, total: mockTasks.length }), 100))
+      )
 
       wrapper.vm.refreshTasks()
 
@@ -620,8 +639,9 @@ describe('Dashboard', () => {
 
   describe('error handling', () => {
     it('should handle fetch error gracefully', async () => {
-      ;(mockApi.getTasks as Mock).mockRejectedValue(new Error('API Error'))
+      ;(mockApi.getTasksPaginated as Mock).mockRejectedValue(new Error('API Error'))
       ;(mockApi.getProjects as Mock).mockResolvedValue(mockProjects)
+      ;(mockApi.getStats as Mock).mockResolvedValue(mockStats)
 
       wrapper = mount(Dashboard, {
         global: {

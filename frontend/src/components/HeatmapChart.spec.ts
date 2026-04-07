@@ -109,10 +109,10 @@ describe('HeatmapChart', () => {
       expect(legendLabels.some(el => el.text() === 'Full')).toBe(true)
     })
 
-    it('cell text shows count/max format when maxPerSlot > 0', () => {
+    it('cell text still shows plain count when maxPerSlot > 0', () => {
       wrapper = mountComponent({ maxPerSlot: 5 })
-      expect(wrapper.vm.cellDisplayText(3)).toBe('3/5')
-      expect(wrapper.vm.cellDisplayText(5)).toBe('5/5')
+      expect(wrapper.vm.cellDisplayText(3)).toBe('3')
+      expect(wrapper.vm.cellDisplayText(5)).toBe('5')
     })
 
     it('cellDisplayText still returns empty for zero count with maxPerSlot', () => {
@@ -130,6 +130,18 @@ describe('HeatmapChart', () => {
       wrapper = mountComponent({ maxPerSlot: 5 })
       const cell = { key: 'k', label: 'Mon 10:00', count: 1, startMs: 0, endMs: 0 }
       expect(wrapper.vm.cellTooltip(cell)).toBe('Mon 10:00: 1/5 task')
+    })
+
+    it('isCellDisabled blocks full slots when capacity is enforced', () => {
+      wrapper = mountComponent({ maxPerSlot: 5, enforceCapacity: true })
+      const cell = { key: 'k', label: 'Mon 10:00', count: 5, startMs: 0, endMs: 0 }
+      expect(wrapper.vm.isCellDisabled(cell)).toBe(true)
+    })
+
+    it('isCellDisabled allows full-slot selection when opted in', () => {
+      wrapper = mountComponent({ maxPerSlot: 5, enforceCapacity: true, allowFullSelection: true })
+      const cell = { key: 'k', label: 'Mon 10:00', count: 5, startMs: 0, endMs: 0 }
+      expect(wrapper.vm.isCellDisabled(cell)).toBe(false)
     })
 
     it('heatmapCellStyle returns red background when count >= maxPerSlot (exact)', () => {

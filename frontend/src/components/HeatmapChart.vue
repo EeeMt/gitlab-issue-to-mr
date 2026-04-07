@@ -31,13 +31,13 @@
           :key="cell.key"
           class="heatmap-chart__cell"
           :class="{
-            'heatmap-chart__cell--clickable': !isCellFull(cell),
-            'heatmap-chart__cell--disabled': isCellFull(cell),
+            'heatmap-chart__cell--clickable': !isCellDisabled(cell),
+            'heatmap-chart__cell--disabled': isCellDisabled(cell),
             'heatmap-chart__cell--active': isCellActive(cell),
           }"
           :style="heatmapCellStyle(cell.count, heatmapMax)"
           :title="cellTooltip(cell)"
-          @click="!isCellFull(cell) && emit('cellClick', cell.startMs)"
+          @click="!isCellDisabled(cell) && emit('cellClick', cell.startMs)"
         >
           {{ cellDisplayText(cell.count) }}
         </div>
@@ -57,6 +57,7 @@ interface Props {
   days?: number
   maxPerSlot?: number
   enforceCapacity?: boolean
+  allowFullSelection?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -64,6 +65,7 @@ const props = withDefaults(defineProps<Props>(), {
   days: 7,
   maxPerSlot: 0,
   enforceCapacity: false,
+  allowFullSelection: false,
 })
 
 const emit = defineEmits<{
@@ -168,7 +170,6 @@ function heatmapCellStyle(count: number, maxCount: number) {
 
 function cellDisplayText(count: number): string {
   if (count === 0) return ''
-  if (props.maxPerSlot > 0) return `${count}/${props.maxPerSlot}`
   return String(count)
 }
 
@@ -180,7 +181,11 @@ function cellTooltip(cell: HeatmapCell): string {
 }
 
 function isCellFull(cell: HeatmapCell): boolean {
-  return props.enforceCapacity && props.maxPerSlot > 0 && cell.count >= props.maxPerSlot
+  return props.maxPerSlot > 0 && cell.count >= props.maxPerSlot
+}
+
+function isCellDisabled(cell: HeatmapCell): boolean {
+  return props.enforceCapacity && !props.allowFullSelection && isCellFull(cell)
 }
 
 function isCellActive(cell: HeatmapCell): boolean {

@@ -93,9 +93,11 @@
                     >
                       <div class="queue-kanban__card-top">
                         <span
-                          class="queue-kanban__priority-badge"
-                          :style="{ background: priorityColor(task.priority) }"
-                        >P{{ task.priority }}</span>
+                          :class="['queue-kanban__priority-badge', priorityClass(task.priority)]"
+                        >
+                          <span class="queue-kanban__priority-dot"></span>
+                          {{ formatPriority(task.priority) }}
+                        </span>
                         <span class="queue-kanban__task-id">#{{ task.id }}</span>
                       </div>
                       <div class="queue-kanban__card-project">{{ kanbanProjectLabel(task) }} {{ kanbanIssueLabel(task) }}</div>
@@ -133,9 +135,11 @@
                     >
                       <div class="queue-kanban__card-top">
                         <span
-                          class="queue-kanban__priority-badge"
-                          :style="{ background: priorityColor(task.priority) }"
-                        >P{{ task.priority }}</span>
+                          :class="['queue-kanban__priority-badge', priorityClass(task.priority)]"
+                        >
+                          <span class="queue-kanban__priority-dot"></span>
+                          {{ formatPriority(task.priority) }}
+                        </span>
                         <span class="queue-kanban__task-id">#{{ task.id }}</span>
                       </div>
                       <div class="queue-kanban__card-project">{{ kanbanProjectLabel(task) }} {{ kanbanIssueLabel(task) }}</div>
@@ -178,9 +182,11 @@
                     >
                       <div class="queue-kanban__card-top">
                         <span
-                          class="queue-kanban__priority-badge"
-                          :style="{ background: priorityColor(task.priority) }"
-                        >P{{ task.priority }}</span>
+                          :class="['queue-kanban__priority-badge', priorityClass(task.priority)]"
+                        >
+                          <span class="queue-kanban__priority-dot"></span>
+                          {{ formatPriority(task.priority) }}
+                        </span>
                         <span class="queue-kanban__task-id">#{{ task.id }}</span>
                       </div>
                       <div class="queue-kanban__card-project">{{ kanbanProjectLabel(task) }}</div>
@@ -235,16 +241,16 @@
                           width: Math.max(2, timelinePct(nowMs) - timelinePct(task.started_at ? parseUtcDate(task.started_at).getTime() : nowMs)) + '%',
                           top: idx * 36 + 'px',
                         }"
-                        @mouseenter="showTimelineTooltip($event, `#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.kanbanElapsed', { duration: task.started_at ? formatElapsedCompact(task.started_at) : '—' })}${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
+                        @mouseenter="showTimelineTooltip($event, `#${task.id} · ${formatPriority(task.priority)} · ${kanbanProjectLabel(task)}\n${t('monitor.kanbanElapsed', { duration: task.started_at ? formatElapsedCompact(task.started_at) : '—' })}${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
                         @mouseleave="hideTimelineTooltip"
                         @click="goToTask(task.id)"
                         @keydown.enter="goToTask(task.id)"
                         @keydown.space.prevent="goToTask(task.id)"
                       >
-                        <span class="queue-timeline__bar-label">#{{ task.id }} P{{ task.priority }}</span>
+                        <span class="queue-timeline__bar-label">#{{ task.id }} {{ formatPriority(task.priority) }}</span>
                       </div>
 
-                      <!-- Ready tasks: SVG arrow-shaped bars -->
+                      <!-- Ready tasks -->
                       <div
                         v-for="(task, idx) in readyTasks"
                         :key="'rdy-' + task.id"
@@ -255,19 +261,16 @@
                           left: timelinePct(task.scheduled_at ? Math.min(parseUtcDate(task.scheduled_at).getTime(), nowMs) : nowMs) + '%',
                           top: (runningTasks.length + idx) * 36 + 'px',
                         }"
-                        @mouseenter="showTimelineTooltip($event, `#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineReady')}${task.scheduled_at ? ' · ' + formatTimeUtc8(task.scheduled_at) : ''}${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
+                        @mouseenter="showTimelineTooltip($event, `#${task.id} · ${formatPriority(task.priority)} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineReady')}${task.scheduled_at ? ' · ' + formatTimeUtc8(task.scheduled_at) : ''}${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
                         @mouseleave="hideTimelineTooltip"
                         @click="goToTask(task.id)"
                         @keydown.enter="goToTask(task.id)"
                         @keydown.space.prevent="goToTask(task.id)"
                       >
-                        <svg class="queue-timeline__bar-svg" preserveAspectRatio="none" viewBox="0 0 100 28">
-                          <path d="M0,4 Q0,0 4,0 L92,0 L100,14 L92,28 L4,28 Q0,28 0,24 Z" fill="#0ea5e9" />
-                        </svg>
-                        <span class="queue-timeline__bar-label">#{{ task.id }} P{{ task.priority }} {{ t('monitor.timelineReady') }}</span>
+                        <span class="queue-timeline__bar-label">#{{ task.id }} {{ formatPriority(task.priority) }} {{ t('monitor.timelineReady') }}</span>
                       </div>
 
-                      <!-- Waiting tasks: SVG arrow-shaped bars (lighter) -->
+                      <!-- Waiting tasks -->
                       <div
                         v-for="(task, idx) in waitingTasks"
                         :key="'wait-' + task.id"
@@ -278,16 +281,13 @@
                           left: timelinePct(parseUtcDate(task.scheduled_at!).getTime()) + '%',
                           top: (runningTasks.length + readyTasks.length + idx) * 36 + 'px',
                         }"
-                        @mouseenter="showTimelineTooltip($event, `#${task.id} · P${task.priority} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineWaiting')}: ${formatTimeUtc8(task.scheduled_at!)} (${t('monitor.kanbanIn', { duration: formatRelativeFuture(task.scheduled_at!) })})${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
+                        @mouseenter="showTimelineTooltip($event, `#${task.id} · ${formatPriority(task.priority)} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineWaiting')}: ${formatTimeUtc8(task.scheduled_at!)} (${t('monitor.kanbanIn', { duration: formatRelativeFuture(task.scheduled_at!) })})${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
                         @mouseleave="hideTimelineTooltip"
                         @click="goToTask(task.id)"
                         @keydown.enter="goToTask(task.id)"
                         @keydown.space.prevent="goToTask(task.id)"
                       >
-                        <svg class="queue-timeline__bar-svg" preserveAspectRatio="none" viewBox="0 0 100 28">
-                          <path d="M0,4 Q0,0 4,0 L92,0 L100,14 L92,28 L4,28 Q0,28 0,24 Z" fill="#38bdf8" />
-                        </svg>
-                        <span class="queue-timeline__bar-label">#{{ task.id }} P{{ task.priority }} {{ formatTimeUtc8(task.scheduled_at!) }}</span>
+                        <span class="queue-timeline__bar-label">#{{ task.id }} {{ formatPriority(task.priority) }} {{ formatTimeUtc8(task.scheduled_at!) }}</span>
                       </div>
                     </div>
                   </div>
@@ -1120,6 +1120,14 @@ function formatPriority(priority?: string | number | null): string {
   return String(priority)
 }
 
+function priorityClass(priority?: string | number | null): string {
+  const normalized = String(priority ?? '').toLowerCase().trim()
+  if (normalized === '0' || normalized === 'p0') return 'priority-tone--p0'
+  if (normalized === '1' || normalized === 'p1') return 'priority-tone--p1'
+  if (normalized === '2' || normalized === 'p2') return 'priority-tone--p2'
+  return 'priority-tone--default'
+}
+
 function formatDuration(milliseconds: number): string {
   if (milliseconds <= 0) return '-'
 
@@ -1256,16 +1264,6 @@ function containerRowProps(container: Container) {
 
 function goToTask(taskId: number) {
   router.push(`/tasks/${taskId}`)
-}
-
-const PRIORITY_COLORS: Record<number, string> = {
-  0: '#ef4444',
-  1: '#f59e0b',
-  2: '#6b7280',
-}
-
-function priorityColor(priority: number): string {
-  return PRIORITY_COLORS[priority] ?? '#718096'
 }
 
 function formatElapsedCompact(startedAt: string): string {
@@ -1712,13 +1710,43 @@ onBeforeUnmount(() => {
 }
 
 .queue-kanban__priority-badge {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: 4px;
+  --queue-priority-color: rgba(100, 116, 139, 0.9);
+  --queue-priority-soft: rgba(148, 163, 184, 0.16);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
   font-size: 11px;
-  font-weight: 600;
-  color: white;
-  line-height: 1.5;
+  font-weight: 500;
+  color: rgba(15, 23, 42, 0.72);
+  line-height: 1;
+  background: rgba(248, 250, 252, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.queue-kanban__priority-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--queue-priority-color);
+  box-shadow: 0 0 0 3px var(--queue-priority-soft);
+}
+
+.priority-tone--p0 {
+  --queue-priority-color: #d03050;
+  --queue-priority-soft: rgba(208, 48, 80, 0.12);
+}
+
+.priority-tone--p1 {
+  --queue-priority-color: #f0a020;
+  --queue-priority-soft: rgba(240, 160, 32, 0.14);
+}
+
+.priority-tone--p2 {
+  --queue-priority-color: #18a058;
+  --queue-priority-soft: rgba(24, 160, 88, 0.12);
 }
 
 .queue-kanban__task-id {
@@ -1770,6 +1798,7 @@ onBeforeUnmount(() => {
   top: 0;
   transform: translateX(-50%);
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
   color: rgba(15, 23, 42, 0.56);
   white-space: nowrap;
   line-height: 1;
@@ -1792,7 +1821,7 @@ onBeforeUnmount(() => {
   top: 28px;
   bottom: 0;
   width: 2px;
-  background: #475569;
+  background: rgba(71, 85, 105, 0.68);
   z-index: 10;
   transform: translateX(-50%);
 }
@@ -1803,12 +1832,13 @@ onBeforeUnmount(() => {
   left: 50%;
   transform: translateX(-50%);
   font-size: 10px;
-  font-weight: 600;
-  color: #475569;
+  font-weight: 500;
+  color: rgba(71, 85, 105, 0.9);
   white-space: nowrap;
-  background: rgba(255, 255, 255, 0.9);
-  padding: 1px 4px;
-  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
 }
 
 .queue-timeline__tracks {
@@ -1818,72 +1848,64 @@ onBeforeUnmount(() => {
 }
 
 .queue-timeline__task-bar {
+  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(226, 232, 240, 0.92), rgba(203, 213, 225, 0.72));
+  --queue-timeline-bar-border: rgba(148, 163, 184, 0.16);
   position: absolute;
-  height: 28px;
-  border-radius: 6px;
+  height: 30px;
+  border-radius: 999px;
   cursor: pointer;
   display: flex;
   align-items: center;
-  padding: 0 8px;
+  padding: 0 10px;
   font-size: 12px;
   white-space: nowrap;
   min-width: 60px;
-  transition: opacity 0.15s, filter 0.15s, box-shadow 0.15s, transform 0.15s;
+  background: var(--queue-timeline-bar-fill);
+  box-shadow:
+    inset 0 0 0 1px var(--queue-timeline-bar-border),
+    0 10px 18px -20px rgba(15, 23, 42, 0.72);
+  transition: opacity 0.15s, filter 0.15s, box-shadow 0.15s, transform 0.15s, background 0.15s;
 }
 
-/* Running tasks: solid sky-blue bar */
 .queue-timeline__task-bar--running {
-  background: rgba(2, 132, 199, 0.85);
-  color: #f0f9ff;
-  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.15));
+  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(32, 128, 240, 0.92), rgba(32, 128, 240, 0.55));
+  --queue-timeline-bar-border: rgba(32, 128, 240, 0.28);
+  color: rgba(255, 255, 255, 0.98);
 }
 
 .queue-timeline__task-bar--running:hover {
-  background: #0284c7;
-  filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.22));
+  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(21, 114, 214, 0.96), rgba(32, 128, 240, 0.62));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+    0 12px 22px -20px rgba(15, 23, 42, 0.68);
   transform: translateY(-1px);
 }
 
-/* --- SVG arrow-shape base --- */
-.queue-timeline__bar-svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  opacity: 0.85;
-  transition: opacity 0.15s;
-}
-
-.queue-timeline__task-bar:hover .queue-timeline__bar-svg {
-  opacity: 1;
-}
-
-/* Ready tasks: arrow-shaped SVG bar */
 .queue-timeline__task-bar--ready {
-  color: #0c4a6e;
+  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(56, 189, 248, 0.88), rgba(56, 189, 248, 0.5));
+  --queue-timeline-bar-border: rgba(56, 189, 248, 0.28);
+  color: rgba(255, 255, 255, 0.98);
   min-width: 100px;
   width: auto;
   padding-right: 14px;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.12));
 }
 
 .queue-timeline__task-bar--ready:hover {
-  filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.2));
+  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(14, 165, 233, 0.92), rgba(56, 189, 248, 0.58));
   transform: translateY(-1px);
 }
 
-/* Waiting tasks: arrow-shaped SVG bar with lighter fill */
 .queue-timeline__task-bar--waiting {
-  color: #075985;
+  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(125, 211, 252, 0.8), rgba(125, 211, 252, 0.42));
+  --queue-timeline-bar-border: rgba(125, 211, 252, 0.26);
+  color: rgba(255, 255, 255, 0.96);
   min-width: 100px;
   width: auto;
   padding-right: 14px;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.12));
 }
 
 .queue-timeline__task-bar--waiting:hover {
-  filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.2));
+  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(56, 189, 248, 0.86), rgba(125, 211, 252, 0.5));
   transform: translateY(-1px);
 }
 
@@ -1894,10 +1916,10 @@ onBeforeUnmount(() => {
 
 .queue-timeline__bar-label {
   position: relative;
-  font-weight: 600;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  text-shadow: none;
 }
 
 /* (dot styles removed — ready/waiting now use task-bar with modifiers) */

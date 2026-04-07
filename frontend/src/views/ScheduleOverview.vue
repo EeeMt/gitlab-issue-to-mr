@@ -130,10 +130,11 @@
           </template>
 
           <HeatmapChart
-            :tasks="tasks"
+            :tasks="scheduledTasks"
             :selected-ms="selectedWindow?.startMs ?? null"
             :max-per-slot="slotMaxTasks"
             :enforce-capacity="slotEnforce"
+            :allow-full-selection="true"
             @cell-click="handleHeatmapCellClick"
           />
           <div class="schedule-section-tip">
@@ -167,8 +168,13 @@
           <div class="slot-detail">
             <div class="slot-detail__summary">
               <div class="slot-detail__window">{{ selectedWindow.label }}</div>
-              <div class="slot-detail__meta">
-                {{ t('scheduleOverview.slotTaskCount', { count: selectedWindowTasks.length }) }}
+              <div class="slot-detail__meta-row">
+                <div class="slot-detail__meta">
+                  {{ t('scheduleOverview.slotTaskCount', { count: selectedWindowTasks.length }) }}
+                </div>
+                <span v-if="selectedWindowLoadLabel" class="schedule-chip schedule-chip--soft">
+                  {{ selectedWindowLoadLabel }}
+                </span>
               </div>
             </div>
 
@@ -243,39 +249,16 @@
             </div>
           </div>
         </n-card>
-
-        <n-card class="schedule-card" :bordered="false">
-          <template #header>
-            <div class="schedule-card__header">
-              <div>
-                  <div class="schedule-card__title">{{ t('scheduleOverview.scheduledTasks') }}</div>
-                  <div class="schedule-card__subtitle">{{ t('scheduleOverview.scheduledTasksSubtitle') }}</div>
-              </div>
-            </div>
-          </template>
-
-          <n-data-table
-            :columns="columns"
-            :data="tasks"
-            :loading="tableLoading"
-            :bordered="false"
-            :row-key="(row: Task) => row.id"
-            :row-props="getRowProps"
-            :pagination="pagination"
-            :scroll-x="isMobile ? undefined : 980"
-          />
-        </n-card>
       </n-space>
     </n-spin>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   NButton,
   NCard,
-  NDataTable,
   NDatePicker,
   NGrid,
   NGi,
@@ -283,7 +266,6 @@ import {
   NSpin,
   NTag,
   useMessage,
-  type DataTableColumns,
 } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
 import { useRouter } from 'vue-router'
@@ -317,7 +299,7 @@ const { t } = useI18n()
 const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
-const tasks = ref<Task[]>([])
+const scheduledTasks = ref<Task[]>([])
 const scheduledStats = ref<ScheduledStatsResponse | null>(null)
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
@@ -329,28 +311,10 @@ const dirtyDraftIds = ref<Set<number>>(new Set())
 const savingTaskId = ref<number | null>(null)
 let pollTimer: number | null = null
 
-const pagination = {
-  pageSize: 20,
-  responsive: true,
-}
-
 const canEditScheduleOverview = computed(() => !authState.oidcEnabled || isAdmin.value)
-
-const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
-  pending: 'default',
-  queued: 'info',
-  running: 'warning',
-  completed: 'success',
-  failed: 'error',
-  cancelled: 'default',
-}
 
 function getProjectLabel(task: Task): string {
   return task.project_path_with_namespace || task.project_name || t('dashboard.projectFallback', { id: task.project_id })
-}
-
-function getStatusTagType(status: string) {
-  return statusColors[status] || 'default'
 }
 
 function formatPriority(priority?: string | number | null): string {
@@ -376,7 +340,6 @@ function getScheduledTimestamp(value?: string | null): number | null {
 }
 
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
-const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 
 const fullSlotCount = computed(() => {
   if (slotMaxTasks.value <= 0) return 0
@@ -515,12 +478,11 @@ function isScheduledTimeDisabled(timestamp: number) {
 
 function setSelectedWindow(nextWindow: SelectedWindow) {
   selectedWindow.value = nextWindow
-  fetchWindowTasks(nextWindow)
+  syncScheduleDrafts()
 }
 
 function clearSelectedWindow() {
   selectedWindow.value = null
-  tasks.value = []
   scheduleDrafts.value = {}
   dirtyDraftIds.value.clear()
 }
@@ -566,13 +528,24 @@ function isTaskInSelectedWindow(task: Task, window: SelectedWindow): boolean {
 const selectedWindowTasks = computed(() => {
   if (!selectedWindow.value) return []
 
-  return tasks.value
+  return scheduledTasks.value
     .filter((task) => isTaskInSelectedWindow(task, selectedWindow.value!))
     .sort((left, right) => {
       const leftMs = getScheduledTimestamp(left.scheduled_at) ?? 0
       const rightMs = getScheduledTimestamp(right.scheduled_at) ?? 0
       return leftMs - rightMs || right.priority - left.priority || left.id - right.id
     })
+})
+
+const selectedWindowLoadLabel = computed(() => {
+  if (!selectedWindow.value || slotMaxTasks.value <= 0) {
+    return null
+  }
+
+  return t('scheduleOverview.capacityLabel', {
+    count: selectedWindowTasks.value.length,
+    max: slotMaxTasks.value,
+  })
 })
 
 function syncScheduleDrafts() {
@@ -602,106 +575,23 @@ function goToTask(task: Task) {
   router.push({ name: 'TaskView', params: { id: task.id } })
 }
 
-function isInteractiveTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) {
-    return false
-  }
-
-  return Boolean(target.closest('a, button, input, textarea, select, summary, [role="button"], .n-button, .n-base-selection'))
-}
-
-function getRowProps(row: Task) {
-  return {
-    style: 'cursor: pointer;',
-    onClick: (event: MouseEvent) => {
-      if (isInteractiveTarget(event.target)) {
-        return
-      }
-      goToTask(row)
-    },
-  }
-}
-
-const columns = computed<DataTableColumns<Task>>(() => {
-  const mobileColumns: DataTableColumns<Task> = [
-    {
-      title: t('scheduleOverview.task'),
-      key: 'task',
-      render: (row) =>
-        h('div', { style: 'line-height: 1.45' }, [
-          h('div', { style: 'font-weight: 600;' }, `#${row.id} · ${getProjectLabel(row)}`),
-          h('div', { style: 'font-size: 12px; color: rgba(15, 23, 42, 0.58);' }, formatShortDateTime(row.scheduled_at)),
-        ]),
-    },
-    {
-      title: t('common.status'),
-      key: 'status',
-      width: 92,
-      render: (row) => h(NTag, { size: 'small', type: getStatusTagType(row.status) }, () => t(`status.${row.status}`)),
-    },
-  ]
-
-  const desktopColumns: DataTableColumns<Task> = [
-    { title: t('scheduleOverview.id'), key: 'id', width: 64 },
-    {
-      title: t('common.project'),
-      key: 'project',
-      width: 180,
-      ellipsis: { tooltip: true },
-      render: (row) => getProjectLabel(row),
-    },
-    {
-      title: t('common.status'),
-      key: 'status',
-      width: 96,
-      render: (row) => h(NTag, { size: 'small', type: getStatusTagType(row.status) }, () => t(`status.${row.status}`)),
-    },
-    {
-      title: t('common.priority'),
-      key: 'priority',
-      width: 72,
-      render: (row) => formatPriority(row.priority),
-    },
-    {
-      title: t('common.scheduled'),
-      key: 'scheduled_at',
-      width: 150,
-      render: (row) => formatShortDateTime(row.scheduled_at),
-    },
-    {
-      title: t('common.branch'),
-      key: 'branch_name',
-      width: 150,
-      ellipsis: { tooltip: true },
-      render: (row) => row.branch_name || '-',
-    },
-    {
-      title: t('scheduleOverview.prompt'),
-      key: 'user_prompt',
-      width: 320,
-      render: (row) => h('div', { class: 'schedule-table__ellipsis', title: row.user_prompt }, row.user_prompt),
-    },
-  ]
-
-  return isMobile.value ? mobileColumns : desktopColumns
-})
-
 async function fetchData() {
   if (loading.value) return
   loading.value = true
   try {
-    const [statsData, config] = await Promise.all([
+    const [statsData, scheduledTaskData, config] = await Promise.all([
       getScheduledStats(),
+      getScheduledTasks(),
       getConfig().catch(() => null),
     ])
     scheduledStats.value = statsData
+    scheduledTasks.value = scheduledTaskData
     if (config) {
       slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
       slotEnforce.value = config.runtime?.slot_max_tasks_enforce ?? false
     }
-    // If a window is selected, refresh its task data
     if (selectedWindow.value) {
-      await fetchWindowTasks(selectedWindow.value)
+      syncScheduleDrafts()
     }
   } catch (error) {
     message.error(t('scheduleOverview.failedToFetch'))
@@ -709,13 +599,6 @@ async function fetchData() {
     hasLoadedOnce.value = true
     loading.value = false
   }
-}
-
-async function fetchWindowTasks(window: SelectedWindow) {
-  const hourStart = new Date(window.startMs).toISOString()
-  const result = await getScheduledTasks({ hour_start: hourStart })
-  tasks.value = result
-  syncScheduleDrafts()
 }
 
 function refresh() {
@@ -737,11 +620,11 @@ async function handleTaskReschedule(task: Task) {
 
   savingTaskId.value = task.id
   try {
-    const updatedTask = await rescheduleTask(task.id, {
+    await rescheduleTask(task.id, {
       scheduled_datetime: new Date(draft).toISOString()
     })
-    tasks.value = tasks.value.map((item) => (item.id === updatedTask.id ? updatedTask : item))
     clearSelectedWindow()
+    await fetchData()
     message.success(t('scheduleOverview.taskRescheduled'))
   } catch (error: any) {
     message.error(extractSlotErrorMessage(error, t, 'scheduleOverview.failedToRescheduleTask'))
@@ -881,13 +764,21 @@ onBeforeUnmount(() => {
 }
 
 .schedule-chip--active {
-  background: rgba(24, 160, 88, 0.12);
-  color: rgba(24, 160, 88, 0.95);
+  background: linear-gradient(180deg, rgba(24, 160, 88, 0.92), rgba(24, 160, 88, 0.52));
+  color: rgba(255, 255, 255, 0.96);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 8px 18px -16px rgba(24, 160, 88, 0.56);
 }
 
 .schedule-chip--readonly {
   background: rgba(240, 160, 32, 0.12);
   color: rgba(163, 94, 12, 0.92);
+}
+
+.schedule-chip--soft {
+  background: rgba(148, 163, 184, 0.14);
+  color: rgba(15, 23, 42, 0.68);
 }
 
 .schedule-section-tip {
@@ -896,24 +787,18 @@ onBeforeUnmount(() => {
   color: rgba(15, 23, 42, 0.58);
 }
 
-.schedule-table__ellipsis {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .hourly-chart {
   display: grid;
   grid-template-columns: repeat(24, minmax(0, 1fr));
-  gap: 8px;
-  align-items: end;
+  gap: 10px;
+  align-items: stretch;
   min-height: 240px;
 }
 
 .hourly-chart__item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  display: grid;
+  grid-template-rows: 20px 148px 48px;
+  justify-items: center;
   gap: 6px;
   min-width: 0;
 }
@@ -923,13 +808,15 @@ onBeforeUnmount(() => {
 }
 
 .hourly-chart__item--clickable:hover .hourly-chart__bar-wrap {
-  background: rgba(32, 128, 240, 0.14);
+  background: rgba(148, 163, 184, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.18);
 }
 
 .hourly-chart__item--active .hourly-chart__bar-wrap {
-  outline: 2px solid rgba(32, 128, 240, 0.45);
-  outline-offset: 2px;
-  background: rgba(32, 128, 240, 0.16);
+  background: rgba(148, 163, 184, 0.18);
+  box-shadow:
+    inset 0 0 0 1px rgba(32, 128, 240, 0.18),
+    0 0 0 2px rgba(32, 128, 240, 0.12);
 }
 
 .hourly-chart__count {
@@ -942,28 +829,36 @@ onBeforeUnmount(() => {
 }
 
 .hourly-chart__bar-wrap {
-  width: 100%;
+  width: min(100%, 26px);
   height: 148px;
   display: flex;
-  align-items: flex-end;
+  align-items: end;
   justify-content: center;
-  background: rgba(148, 163, 184, 0.08);
-  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
   overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12);
+  transition: background 0.18s ease, box-shadow 0.18s ease;
 }
 
 .hourly-chart__bar {
   width: 100%;
-  min-height: 2px;
-  border-radius: 999px;
-  background: linear-gradient(180deg, rgba(32, 128, 240, 0.95), rgba(54, 173, 106, 0.78));
+  min-height: 6px;
+  border-radius: 10px 10px 0 0;
+  background: linear-gradient(180deg, rgba(32, 128, 240, 0.92), rgba(32, 128, 240, 0.55));
 }
 
 .hourly-chart__label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 100%;
   font-size: 11px;
   color: rgba(15, 23, 42, 0.58);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-variant-numeric: tabular-nums;
   writing-mode: vertical-rl;
-  text-orientation: mixed;
+  transform: rotate(180deg);
 }
 
 .window-insights {
@@ -1027,12 +922,21 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 8px 16px;
 }
 
 .slot-detail__window {
   font-size: 16px;
   font-weight: 600;
+}
+
+.slot-detail__meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .slot-detail__meta,

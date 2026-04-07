@@ -9,6 +9,7 @@ import { createMockTask } from '../test/mocks/api'
 // ---------------------------------------------------------------------------
 const { mockApi, mockMessage, resetMockApi } = vi.hoisted(() => {
   const api = {
+    getScheduledStats: vi.fn(),
     getScheduledTasks: vi.fn(),
     rescheduleTask: vi.fn(),
     getConfig: vi.fn()
@@ -27,6 +28,7 @@ const { mockApi, mockMessage, resetMockApi } = vi.hoisted(() => {
 // Module mocks
 // ---------------------------------------------------------------------------
 vi.mock('../api', () => ({
+  getScheduledStats: mockApi.getScheduledStats,
   getScheduledTasks: mockApi.getScheduledTasks,
   rescheduleTask: mockApi.rescheduleTask,
   getConfig: mockApi.getConfig
@@ -52,13 +54,33 @@ vi.mock('vue-router', () => ({
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: vi.fn((key: string) => key),
+    t: vi.fn((key: string, params?: Record<string, unknown>) => {
+      if (key === 'scheduleOverview.capacityLabel' && params) {
+        return `${params.count}/${params.max}`
+      }
+      return key
+    }),
     locale: { value: 'en' }
   })
 }))
 
 vi.mock('@vueuse/core', () => ({
   useWindowSize: vi.fn(() => ({ width: ref(1200) }))
+}))
+
+vi.mock('../components/HeatmapChart.vue', () => ({
+  default: {
+    name: 'HeatmapChart',
+    props: ['tasks', 'selectedMs', 'maxPerSlot', 'enforceCapacity', 'allowFullSelection'],
+    setup(props: any) {
+      return () => h('div', {
+        class: 'heatmap-chart-stub',
+        'data-task-count': String(props.tasks?.length ?? 0),
+        'data-selected-ms': props.selectedMs ?? '',
+        'data-allow-full-selection': String(props.allowFullSelection ?? false)
+      })
+    }
+  }
 }))
 
 // ---------------------------------------------------------------------------
@@ -170,13 +192,33 @@ vi.mock('naive-ui', () => ({
 // Mock data — tasks scheduled in the future
 // ---------------------------------------------------------------------------
 const futureTime = new Date(Date.now() + 60 * 60 * 1000).toISOString() // +1h
+const laterTodayTime = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString() // +3h
 const farFutureTime = new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString() // +25h
 
 const mockScheduledTasks = [
   createMockTask({ id: 1, status: 'queued', scheduled_at: futureTime, project_id: 1 }),
   createMockTask({ id: 2, status: 'queued', scheduled_at: farFutureTime, project_id: 2 }),
-  createMockTask({ id: 3, status: 'running', scheduled_at: null, project_id: 1 })
+  createMockTask({ id: 3, status: 'running', scheduled_at: laterTodayTime, project_id: 1 })
 ]
+
+const mockScheduledStats = {
+  summary: {
+    total: 3,
+    ready_now: 1,
+    next_24h: 2,
+    later: 1,
+    queued_count: 2,
+    running_count: 1,
+    busiest_hour_count: 1,
+    busiest_hour_label: futureTime
+  },
+  hourly_distribution: [
+    { hour_start: futureTime, count: 1 },
+    { hour_start: laterTodayTime, count: 1 },
+    { hour_start: farFutureTime, count: 1 }
+  ],
+  max_count: 1
+}
 
 // ---------------------------------------------------------------------------
 // Mount helper
@@ -201,6 +243,7 @@ describe('ScheduleOverview', () => {
 
   beforeEach(() => {
     resetMockApi()
+    ;(mockApi.getScheduledStats as Mock).mockResolvedValue(mockScheduledStats)
     ;(mockApi.getScheduledTasks as Mock).mockResolvedValue(mockScheduledTasks)
     ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 0 } })
     vi.spyOn(window, 'setInterval').mockImplementation(() => 1 as any)
@@ -216,16 +259,17 @@ describe('ScheduleOverview', () => {
   })
 
   // -------------------------------------------------------------------------
-  it('calls getScheduledTasks on mount', async () => {
+  it('calls scheduled stats and task APIs on mount', async () => {
     wrapper = mountComponent()
     await flushPromises()
+    expect(mockApi.getScheduledStats).toHaveBeenCalledTimes(1)
     expect(mockApi.getScheduledTasks).toHaveBeenCalledTimes(1)
   })
 
   // -------------------------------------------------------------------------
   it('shows loading spinner during initial fetch', async () => {
     let resolve!: (v: any) => void
-    ;(mockApi.getScheduledTasks as Mock).mockReturnValue(new Promise(r => { resolve = r }))
+    ;(mockApi.getScheduledStats as Mock).mockReturnValue(new Promise(r => { resolve = r }))
 
     wrapper = mountComponent()
     await nextTick()
@@ -233,7 +277,7 @@ describe('ScheduleOverview', () => {
     expect(wrapper.vm.initialLoading).toBe(true)
     expect(wrapper.vm.loading).toBe(true)
 
-    resolve(mockScheduledTasks)
+    resolve(mockScheduledStats)
     await flushPromises()
 
     expect(wrapper.vm.loading).toBe(false)
@@ -248,15 +292,15 @@ describe('ScheduleOverview', () => {
   })
 
   // -------------------------------------------------------------------------
-  it('stores tasks in component state after load', async () => {
+  it('stores scheduled tasks in component state after load', async () => {
     wrapper = mountComponent()
     await flushPromises()
 
-    expect(wrapper.vm.tasks.length).toBe(3)
+    expect(wrapper.vm.scheduledTasks.length).toBe(3)
   })
 
   // -------------------------------------------------------------------------
-  it('summary items are computed from tasks', async () => {
+  it('summary items are computed from scheduled stats', async () => {
     wrapper = mountComponent()
     await flushPromises()
 
@@ -292,18 +336,20 @@ describe('ScheduleOverview', () => {
     wrapper = mountComponent()
     await flushPromises()
 
+    ;(mockApi.getScheduledStats as Mock).mockClear()
     ;(mockApi.getScheduledTasks as Mock).mockClear()
 
     const btn = wrapper.find('button.n-button')
     await btn.trigger('click')
     await flushPromises()
 
+    expect(mockApi.getScheduledStats).toHaveBeenCalledTimes(1)
     expect(mockApi.getScheduledTasks).toHaveBeenCalledTimes(1)
   })
 
   // -------------------------------------------------------------------------
   it('handles fetch error gracefully', async () => {
-    ;(mockApi.getScheduledTasks as Mock).mockRejectedValue(new Error('Network error'))
+    ;(mockApi.getScheduledStats as Mock).mockRejectedValue(new Error('Network error'))
 
     wrapper = mountComponent()
     await flushPromises()
@@ -311,6 +357,32 @@ describe('ScheduleOverview', () => {
     expect(mockMessage.error).toHaveBeenCalled()
     expect(wrapper.vm.hasLoadedOnce).toBe(true)
     expect(wrapper.vm.loading).toBe(false)
+  })
+
+  // -------------------------------------------------------------------------
+  it('passes all scheduled tasks to the heatmap and hides the removed scheduled table card', async () => {
+    wrapper = mountComponent()
+    await flushPromises()
+
+    const heatmap = wrapper.find('.heatmap-chart-stub')
+    expect(heatmap.attributes('data-task-count')).toBe('3')
+    expect(heatmap.attributes('data-allow-full-selection')).toBe('true')
+    expect(wrapper.html()).not.toContain('scheduleOverview.scheduledTasks')
+  })
+
+  // -------------------------------------------------------------------------
+  it('derives selected window details from the loaded scheduled tasks', async () => {
+    ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 5 } })
+
+    wrapper = mountComponent()
+    await flushPromises()
+
+    wrapper.vm.handleHeatmapCellClick(new Date(futureTime).getTime())
+    await nextTick()
+
+    expect(wrapper.vm.selectedWindowTasks).toHaveLength(1)
+    expect(wrapper.vm.selectedWindowTasks[0].id).toBe(1)
+    expect(wrapper.vm.selectedWindowLoadLabel).toBe('1/5')
   })
 
   // -------------------------------------------------------------------------
@@ -325,6 +397,9 @@ describe('ScheduleOverview', () => {
     wrapper = mountComponent()
     await flushPromises()
 
+    wrapper.vm.handleHeatmapCellClick(new Date(futureTime).getTime())
+    await nextTick()
+
     // Set up a future draft timestamp
     const futureMs = Date.now() + 2 * 60 * 60 * 1000
     wrapper.vm.scheduleDrafts[1] = futureMs
@@ -335,6 +410,9 @@ describe('ScheduleOverview', () => {
     expect(mockApi.rescheduleTask).toHaveBeenCalledWith(1, expect.objectContaining({
       scheduled_datetime: expect.any(String)
     }))
+    expect(mockApi.getScheduledStats).toHaveBeenCalledTimes(2)
+    expect(mockApi.getScheduledTasks).toHaveBeenCalledTimes(2)
+    expect(wrapper.vm.selectedWindow).toBe(null)
     expect(mockMessage.success).toHaveBeenCalled()
   })
 

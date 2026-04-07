@@ -777,7 +777,7 @@ describe('CreateTask', () => {
       expect(wrapper.vm.formValue.new_branch_name).toBe('')
       expect(wrapper.vm.formValue.target_branch).toBe('main')
       expect(wrapper.vm.formValue.user_prompt).toBe('')
-      expect(wrapper.vm.formValue.priority).toBe(0)
+      expect(wrapper.vm.formValue.priority).toBe(1)
       expect(wrapper.vm.scheduleType).toBe('now')
       expect(wrapper.vm.delayValue).toBe(5)
       expect(wrapper.vm.delayUnit).toBe('minutes')
