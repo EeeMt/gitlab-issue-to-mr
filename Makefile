@@ -16,6 +16,10 @@ export COMPOSE_DOCKER_CLI_BUILD := 1
 build: ## Build all images (backend, nginx, worker)
 	cd $(PROJECT_ROOT)/deploy && docker-compose build
 	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t codify-worker:latest $(PROJECT_ROOT)
+	@printf "\nBuild summary:\n"
+	@printf "  - codify-backend:latest\n"
+	@printf "  - codify-nginx:latest\n"
+	@printf "  - codify-worker:latest\n"
 
 .PHONY: up
 up: ## Start development environment
