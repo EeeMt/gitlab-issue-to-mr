@@ -1138,7 +1138,7 @@ watch(scheduleType, (newType) => {
 
 .priority-card--active {
   border-color: var(--priority-card-accent-border);
-  background: linear-gradient(180deg, var(--priority-card-gradient-strong), var(--priority-card-gradient-soft));
+  background: rgba(148, 163, 184, 0.1);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.52),
     0 0 0 1px var(--priority-card-accent-soft),
@@ -1147,7 +1147,7 @@ watch(scheduleType, (newType) => {
 
 .priority-card--active:hover {
   border-color: var(--priority-card-accent-border);
-  background: linear-gradient(180deg, var(--priority-card-gradient-strong), var(--priority-card-gradient-soft));
+  background: rgba(148, 163, 184, 0.06);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.52),
     0 0 0 1px var(--priority-card-accent-soft),
