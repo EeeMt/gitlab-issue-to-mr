@@ -1840,7 +1840,7 @@ onBeforeUnmount(() => {
     100% 50%,
     calc(100% - var(--arrow-depth)) 100%,
     0 100%
-  );
+  ) round 4px;
   transition: opacity 0.15s, filter 0.15s, box-shadow 0.15s, transform 0.15s, background 0.15s;
 }
 
