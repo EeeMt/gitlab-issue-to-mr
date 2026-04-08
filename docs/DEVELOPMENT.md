@@ -36,7 +36,7 @@
 
 ```bash
 git clone <your-repo-url>
-cd codif_docs
+cd codify
 ```
 
 ## 4. 后端开发环境
