@@ -1850,7 +1850,10 @@ onBeforeUnmount(() => {
   width: var(--arrow-depth);
   height: 100%;
   background: inherit;
-  clip-path: polygon(0 0, 100% 50%, 0 100%);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 30'%3E%3Cpath d='M0,0 L7,11 Q12,15 7,19 L0,30Z' fill='white'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 30'%3E%3Cpath d='M0,0 L7,11 Q12,15 7,19 L0,30Z' fill='white'/%3E%3C/svg%3E");
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
 }
 
 .queue-timeline__task-bar--running {
