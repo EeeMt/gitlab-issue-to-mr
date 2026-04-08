@@ -1822,11 +1822,9 @@ onBeforeUnmount(() => {
 
 .queue-timeline__task-bar {
   --queue-timeline-bar-fill: linear-gradient(180deg, rgba(226, 232, 240, 0.92), rgba(203, 213, 225, 0.72));
-  --queue-timeline-bar-border: rgba(148, 163, 184, 0.16);
   --arrow-depth: 12px;
   position: absolute;
   height: 30px;
-  border-radius: var(--app-card-radius-small) 0 0 var(--app-card-radius-small);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1836,47 +1834,31 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   min-width: 60px;
   background: var(--queue-timeline-bar-fill);
-  box-shadow:
-    inset 0 0 0 1px var(--queue-timeline-bar-border),
-    0 10px 18px -20px rgba(15, 23, 42, 0.72);
+  clip-path: polygon(
+    0 0,
+    calc(100% - var(--arrow-depth)) 0,
+    100% 50%,
+    calc(100% - var(--arrow-depth)) 100%,
+    0 100%
+  );
   transition: opacity 0.15s, filter 0.15s, box-shadow 0.15s, transform 0.15s, background 0.15s;
-}
-
-.queue-timeline__task-bar::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: calc(-1 * var(--arrow-depth));
-  width: var(--arrow-depth);
-  height: 100%;
-  background: inherit;
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 30'%3E%3Cpath d='M0,0 L7,11 Q12,15 7,19 L0,30Z' fill='white'/%3E%3C/svg%3E");
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 30'%3E%3Cpath d='M0,0 L7,11 Q12,15 7,19 L0,30Z' fill='white'/%3E%3C/svg%3E");
-  -webkit-mask-size: 100% 100%;
-  mask-size: 100% 100%;
 }
 
 .queue-timeline__task-bar--running {
   --queue-timeline-bar-fill: linear-gradient(180deg, rgba(32, 128, 240, 0.92), rgba(32, 128, 240, 0.55));
-  --queue-timeline-bar-border: rgba(32, 128, 240, 0.28);
   color: rgba(255, 255, 255, 0.98);
 }
 
 .queue-timeline__task-bar--running:hover {
   --queue-timeline-bar-fill: linear-gradient(180deg, rgba(21, 114, 214, 0.96), rgba(32, 128, 240, 0.62));
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
-    0 12px 22px -20px rgba(15, 23, 42, 0.68);
   transform: translateY(-1px);
 }
 
 .queue-timeline__task-bar--ready {
   --queue-timeline-bar-fill: linear-gradient(180deg, rgba(56, 189, 248, 0.88), rgba(56, 189, 248, 0.5));
-  --queue-timeline-bar-border: rgba(56, 189, 248, 0.28);
   color: rgba(255, 255, 255, 0.98);
   min-width: 100px;
   width: auto;
-  padding-right: 14px;
 }
 
 .queue-timeline__task-bar--ready:hover {
@@ -1886,11 +1868,9 @@ onBeforeUnmount(() => {
 
 .queue-timeline__task-bar--waiting {
   --queue-timeline-bar-fill: linear-gradient(180deg, rgba(125, 211, 252, 0.8), rgba(125, 211, 252, 0.42));
-  --queue-timeline-bar-border: rgba(125, 211, 252, 0.26);
   color: rgba(255, 255, 255, 0.96);
   min-width: 100px;
   width: auto;
-  padding-right: 14px;
 }
 
 .queue-timeline__task-bar--waiting:hover {
