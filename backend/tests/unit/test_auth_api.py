@@ -855,8 +855,8 @@ class OIDCCallbackEndpointTests(unittest.TestCase):
                 follow_redirects=False,
             )
 
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.headers["location"], "/settings")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("/settings", response.text)
 
     def test_oidc_auth_failure_returns_401(self) -> None:
         """Should return 401 when OIDC token exchange fails."""
@@ -1347,8 +1347,7 @@ class OIDCCallbackTokenExpiryTests(unittest.TestCase):
                 follow_redirects=False,
             )
 
-        self.assertEqual(response.status_code, 302)
-        # Verify create_user_session was called with max_expires_at=None
+        self.assertEqual(response.status_code, 200)
         call_kwargs = session_mock.call_args
         self.assertIsNone(call_kwargs.kwargs.get("max_expires_at"))
 

@@ -10,7 +10,7 @@ from typing import Any, Optional
 import httpx
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -117,6 +117,68 @@ def _sanitize_next_path(next_path: Optional[str]) -> str:
     if not next_path or not next_path.startswith("/") or next_path.startswith("//"):
         return "/dashboard"
     return next_path
+
+
+def _build_redirect_html(target_url: str, username: str = "") -> str:
+    """Build a styled HTML page that auto-redirects to target_url."""
+    import html as html_mod
+
+    safe_url = html_mod.escape(target_url, quote=True)
+    safe_user = html_mod.escape(username) if username else ""
+    greeting = f"<p class='greeting'>Welcome back, <strong>{safe_user}</strong></p>" if safe_user else ""
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="1;url={safe_url}">
+<title>Codify — Redirecting</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{
+  min-height:100dvh;display:flex;align-items:center;justify-content:center;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:radial-gradient(circle at top left,rgba(32,128,240,.12),transparent 28%),
+             linear-gradient(180deg,rgba(248,250,252,.94),rgba(241,245,249,.98));
+  color:#1e293b;
+}}
+.card{{
+  text-align:center;padding:48px 40px;
+  border-radius:18px;
+  background:rgba(255,255,255,.88);backdrop-filter:blur(14px);
+  box-shadow:0 24px 60px rgba(15,23,42,.12);
+  border:1px solid rgba(148,163,184,.14);
+  max-width:380px;width:100%;
+}}
+.mark{{
+  width:52px;height:52px;display:inline-flex;align-items:center;justify-content:center;
+  border-radius:18px;background:linear-gradient(135deg,#2080f0,#36ad6a);
+  color:#fff;font-size:24px;margin-bottom:20px;
+  box-shadow:0 12px 24px rgba(32,128,240,.24);
+}}
+.greeting{{margin-bottom:16px;font-size:15px;color:#334155}}
+.spinner{{
+  width:28px;height:28px;border:3px solid rgba(32,128,240,.18);
+  border-top-color:#2080f0;border-radius:50%;
+  animation:spin .7s linear infinite;display:inline-block;margin-bottom:14px;
+}}
+@keyframes spin{{to{{transform:rotate(360deg)}}}}
+.hint{{font-size:14px;color:#64748b}}
+.link{{display:inline-block;margin-top:12px;font-size:13px;color:#2080f0;text-decoration:none}}
+.link:hover{{text-decoration:underline}}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="mark">&#x1F680;</div>
+  {greeting}
+  <div class="spinner"></div>
+  <p class="hint">Redirecting&hellip;</p>
+  <a class="link" href="{safe_url}">Click here if not redirected</a>
+</div>
+<script>setTimeout(function(){{window.location.replace("{safe_url}")}},200)</script>
+</body>
+</html>"""
 
 
 async def _record_auth_audit(
@@ -640,7 +702,8 @@ async def callback(
         ),
     )
 
-    response = RedirectResponse(next_path, status_code=status.HTTP_302_FOUND)
+    redirect_html = _build_redirect_html(next_path, username=user.display_name or user.username)
+    response = HTMLResponse(content=redirect_html, status_code=200)
     cookie_kwargs = _build_cookie_kwargs()
     response.set_cookie(
         settings.session_cookie_name,
