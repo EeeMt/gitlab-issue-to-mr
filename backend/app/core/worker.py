@@ -330,7 +330,7 @@ class WorkerExecutor:
                     th_match = _CODIFY_THINKING_RE.match(stripped)
                     if th_match:
                         try:
-                            json_str = th_match.group(1)
+                            json_str = th_match.group(1).strip()
                             _json.loads(json_str)  # validate before storing
                             db.add(TaskLog(
                                 task_id=task_id,
@@ -348,7 +348,7 @@ class WorkerExecutor:
                     at_match = _CODIFY_ASSISTANT_TEXT_RE.match(stripped)
                     if at_match:
                         try:
-                            json_str = at_match.group(1)
+                            json_str = at_match.group(1).strip()
                             _json.loads(json_str)  # validate before storing
                             db.add(TaskLog(
                                 task_id=task_id,

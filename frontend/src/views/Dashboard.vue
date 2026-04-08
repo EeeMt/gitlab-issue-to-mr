@@ -71,7 +71,6 @@
             :pagination="pagination"
             remote
             :bordered="false"
-            :scroll-x="isMobile ? undefined : undefined"
           />
         </n-card>
       </n-space>
