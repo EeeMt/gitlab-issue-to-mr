@@ -10,6 +10,7 @@ Tests for the TaskView page functionality including:
 
 import re
 import time
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -119,7 +120,7 @@ class TestTaskViewActions:
         """Test that retry button is shown for failed/cancelled tasks."""
         class_page.goto("/tasks/1")
         class_page.wait_for_load_state("domcontentloaded")
-        retry_button = class_page.get_by_role("button", name="Retry")
+        retry_button = class_page.get_by_role("button", name="Retry", exact=True)
         if retry_button.is_visible():
             expect(retry_button).to_be_visible()
 
@@ -241,7 +242,9 @@ def test_task_id(logged_in_page, backend_url):
             pytest.skip("No GitLab projects available")
         project_id = projects[0]["id"]
 
-        # Create a pending task
+        # Create a pending task scheduled far in future so the scheduler
+        # won't pick it up — keeps task in PENDING for button-click tests.
+        future_dt = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
         resp = client.post(
             "/api/tasks",
             json={
@@ -249,6 +252,7 @@ def test_task_id(logged_in_page, backend_url):
                 "branch_name": f"test-e2e-{int(time.time())}",
                 "user_prompt": "E2E test task - do nothing",
                 "priority": 2,
+                "scheduled_datetime": future_dt,
             },
         )
         if resp.status_code not in (200, 201):
@@ -307,8 +311,7 @@ class TestTaskViewActionInteractions:
         logged_in_page.wait_for_timeout(500)
 
         execute_btn = logged_in_page.get_by_role("button", name="Execute")
-        if not execute_btn.is_visible():
-            pytest.skip("Execute button not visible for this task state")
+        expect(execute_btn).to_be_visible(timeout=5000)
 
         execute_btn.click()
 

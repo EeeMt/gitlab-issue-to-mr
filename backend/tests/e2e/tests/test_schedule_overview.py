@@ -116,6 +116,7 @@ class TestScheduleOverviewInteraction:
         """Each summary card displays a non-empty label and a non-empty value."""
         class_page.goto("/schedule-overview")
         class_page.wait_for_selector(".schedule-overview__hero")
+        class_page.wait_for_selector(".schedule-summary-card", timeout=10000)
 
         cards = class_page.locator(".schedule-summary-card")
         count = cards.count()
@@ -134,6 +135,8 @@ class TestScheduleOverviewInteraction:
         """Verify at least 3 summary cards are rendered (base items are always ≥ 6)."""
         class_page.goto("/schedule-overview")
         class_page.wait_for_selector(".schedule-overview__hero")
+        # Wait for cards to render after API data loads
+        class_page.wait_for_selector(".schedule-summary-card", timeout=10000)
 
         cards = class_page.locator(".schedule-summary-card")
         count = cards.count()
