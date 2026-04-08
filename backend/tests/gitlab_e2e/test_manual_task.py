@@ -21,7 +21,8 @@ import requests
 # Configuration - should be set in environment or .env file
 GITLAB_URL = os.getenv("GITLAB_URL", "http://192.168.50.129:8080")
 GITLAB_TOKEN = os.getenv("GITLAB_BOT_TOKEN", "")
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+BACKEND_URL = os.getenv("E2E_BACKEND_URL", os.getenv("BACKEND_URL", "http://localhost:8000"))
+TEST_PROJECT_ID = int(os.getenv("TEST_PROJECT_ID", "1"))
 
 _TEST_USERNAME = "test_admin_manual_e2e"
 _TEST_PASSWORD = "SecurePass123!"
@@ -223,18 +224,10 @@ class TestManualTaskFullWorkflow:
     @pytest.mark.slow
     def test_manual_task_workflow(self):
         """Test complete manual task workflow from creation to MR."""
-        # 1. Get projects
-        projects_response = _be("GET", "/api/projects")
-        assert projects_response.status_code == 200
-
-        projects = projects_response.json()
-        if not projects:
-            pytest.skip("No projects available")
-
-        project_id = projects[0]["id"]
+        project_id = TEST_PROJECT_ID
         print(f"Using project: {project_id}")
 
-        # 2. Get branches
+        # 1. Get branches for the project
         branches_response = _be("GET", f"/api/projects/{project_id}/branches")
         assert branches_response.status_code == 200
 
@@ -242,13 +235,13 @@ class TestManualTaskFullWorkflow:
         main_branch = "main" if any(b["name"] == "main" for b in branches) else branches[0]["name"]
         print(f"Using main branch: {main_branch}")
 
-        # 3. Create manual task
+        # 2. Create manual task
         branch_name = f"test-manual-e2e-{int(datetime.now().timestamp())}"
         task_data = {
             "project_id": project_id,
             "branch_name": branch_name,
             "target_branch": main_branch,
-            "user_prompt": "Create a simple README.md file",
+            "user_prompt": "Create a new file named e2e_test_marker.txt with the single line: E2E manual task test passed",
             "priority": 0,
         }
 
@@ -259,8 +252,8 @@ class TestManualTaskFullWorkflow:
         task_id = task["id"]
         print(f"Created task: {task_id}")
 
-        # 4. Wait for task to complete (with timeout)
-        max_wait = 300
+        # 3. Wait for task to complete
+        max_wait = 360
         wait_interval = 5
         elapsed = 0
 
@@ -268,7 +261,12 @@ class TestManualTaskFullWorkflow:
             time.sleep(wait_interval)
             elapsed += wait_interval
 
-            task_response = _be("GET", f"/api/tasks/{task_id}")
+            try:
+                task_response = _be("GET", f"/api/tasks/{task_id}")
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                print(f"Connection error polling task {task_id}: {e}")
+                continue
+
             if task_response.status_code == 200:
                 task = task_response.json()
                 status = task["status"]
@@ -284,7 +282,7 @@ class TestManualTaskFullWorkflow:
                 elif status in ["failed", "cancelled"]:
                     pytest.fail(f"Task failed: {task.get('error_message')}")
 
-        pytest.skip("Task did not complete within timeout")
+        pytest.fail(f"Task {task_id} did not complete within {max_wait}s")
 
 
 if __name__ == "__main__":

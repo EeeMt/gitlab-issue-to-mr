@@ -47,7 +47,7 @@ for _env_file in [
 
 GITLAB_URL = os.getenv("GITLAB_URL", "http://192.168.50.129:8080")
 GITLAB_TOKEN = os.getenv("GITLAB_BOT_TOKEN", "")
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+BACKEND_URL = os.getenv("E2E_BACKEND_URL", os.getenv("BACKEND_URL", "http://localhost:8000"))
 
 # Credentials follow the same convention as the Playwright E2E conftest:
 # hardcoded "SecurePass123!" for the auto-bootstrapped E2E environment.
@@ -210,14 +210,23 @@ def _create_task(
 def _wait_for_terminal(task_id: int, timeout: int = TASK_EXECUTION_TIMEOUT) -> dict:
     """Poll GET /api/tasks/{id} until status is completed, failed, or cancelled."""
     deadline = time.monotonic() + timeout
+    consecutive_errors = 0
+    max_consecutive_errors = 5
     while time.monotonic() < deadline:
-        r = _be("GET", f"/api/tasks/{task_id}")
-        assert r.status_code == 200, f"Cannot fetch task {task_id}: {r.status_code}"
-        task = r.json()
-        status = task["status"]
-        log.info(f"Task {task_id} status: {status}")
-        if status in ("completed", "failed", "cancelled"):
-            return task
+        try:
+            r = _be("GET", f"/api/tasks/{task_id}")
+            assert r.status_code == 200, f"Cannot fetch task {task_id}: {r.status_code}"
+            consecutive_errors = 0
+            task = r.json()
+            status = task["status"]
+            log.info(f"Task {task_id} status: {status}")
+            if status in ("completed", "failed", "cancelled"):
+                return task
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            consecutive_errors += 1
+            log.warning(f"Connection error polling task {task_id} ({consecutive_errors}): {e}")
+            if consecutive_errors >= max_consecutive_errors:
+                raise
         time.sleep(POLL_INTERVAL)
     pytest.fail(f"Task {task_id} did not reach terminal status within {timeout}s")
 
@@ -352,6 +361,39 @@ class TestManualTaskExecution:
             assert branch_r.json()["commit"]["id"] == result["commit_sha"]
 
             log.info(f"✅ no-MR test passed — branch {branch} pushed, commit {result['commit_sha']}")
+
+        finally:
+            _delete_branch(TEST_PROJECT_ID, branch)
+
+    def test_without_mr_no_changes(self):
+        """No-MR task where Claude makes no code changes should still succeed."""
+        branch = _unique_branch("e2e-no-mr-noop")
+        default_branch = _get_project_default_branch(TEST_PROJECT_ID)
+
+        task = _create_task(
+            project_id=TEST_PROJECT_ID,
+            branch_name=branch,
+            user_prompt="Review the project structure and list the top-level files. Do not modify any files.",
+            target_branch=None,
+            base_branch=default_branch,
+        )
+        task_id = task["id"]
+        log.info(f"Created task {task_id} (no-MR, no-changes), branch={branch}")
+
+        assert task["is_manual"] is True
+        assert task["target_branch"] is None
+
+        try:
+            result = _wait_for_terminal(task_id)
+
+            assert result["status"] == "completed", (
+                f"No-MR task with no changes should succeed, got: "
+                f"{result['status']}: {result.get('error_message', '')[:500]}"
+            )
+            assert result["merge_request_iid"] is None
+            assert result["merge_request_url"] is None
+
+            log.info("✅ no-MR no-changes test passed — task completed without code changes")
 
         finally:
             _delete_branch(TEST_PROJECT_ID, branch)

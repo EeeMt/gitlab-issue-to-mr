@@ -44,7 +44,7 @@ if os.path.exists(env_file):
 # ---------------------------------------------------------------------------
 GITLAB_URL = os.getenv("GITLAB_URL", "http://192.168.50.129:8080")
 GITLAB_TOKEN = os.getenv("GITLAB_BOT_TOKEN", "")
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+BACKEND_URL = os.getenv("E2E_BACKEND_URL", os.getenv("BACKEND_URL", "http://localhost:8000"))
 WEBHOOK_URL = f"{BACKEND_URL}/api/webhook/gitlab"
 WEBHOOK_SECRET = os.getenv("GITLAB_WEBHOOK_SECRET", "test_webhook_secret")
 

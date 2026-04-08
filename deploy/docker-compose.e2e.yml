@@ -52,6 +52,12 @@ services:
         condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - type: bind
+        source: /opt/ca.crt
+        target: /etc/ssl/certs/custom-ca.crt
+        read_only: true
+        bind:
+          create_host_path: false
     networks:
       - codify-e2e-network
     healthcheck:
@@ -96,13 +102,19 @@ services:
       - AUTO_MIGRATE=false
       - COOKIE_SECURE=false
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
-      - WORKER_CA_CERT_HOST_PATH=${WORKER_CA_CERT_HOST_PATH:-}
+      - WORKER_CA_CERT_HOST_PATH=/opt/ca.crt
       - WORKER_VOLUME_MOUNTS=${WORKER_VOLUME_MOUNTS:-}
     depends_on:
       backend:
         condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - type: bind
+        source: /opt/ca.crt
+        target: /etc/ssl/certs/custom-ca.crt
+        read_only: true
+        bind:
+          create_host_path: false
     networks:
       - codify-e2e-network
 
