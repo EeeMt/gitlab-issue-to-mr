@@ -1111,16 +1111,17 @@ watch(scheduleType, (newType) => {
 .priority-card {
   --priority-card-accent: rgba(100, 116, 139, 0.9);
   --priority-card-accent-soft: rgba(148, 163, 184, 0.18);
-  --priority-card-accent-border: rgba(148, 163, 184, 0.24);
+  --priority-card-accent-border: rgba(97, 107, 120, 0.24);
   --priority-card-gradient-strong: rgba(148, 163, 184, 0.18);
   --priority-card-gradient-soft: rgba(148, 163, 184, 0.08);
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 11px 14px;
+  max-width: 350px;
   border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(97, 107, 121, 0.14);
+  background: rgba(204, 213, 225, 0.1);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
   cursor: pointer;
   transition: border-color 0.18s, background 0.18s, box-shadow 0.18s, transform 0.18s;
@@ -1138,7 +1139,7 @@ watch(scheduleType, (newType) => {
 
 .priority-card--active {
   border-color: var(--priority-card-accent-border);
-  background: rgba(148, 163, 184, 0.1);
+  background: rgba(221, 226, 234, 0.1);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.52),
     0 0 0 1px var(--priority-card-accent-soft),
