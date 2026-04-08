@@ -1127,11 +1127,12 @@ watch(scheduleType, (newType) => {
 }
 
 .priority-card:hover {
-  border-color: rgba(148, 163, 184, 0.2);
-  background: rgba(148, 163, 184, 0.13);
+  border-color: var(--priority-card-accent-border, rgba(148, 163, 184, 0.2));
+  background: rgba(148, 163, 184, 0.06);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.46),
-    0 10px 24px -24px rgba(15, 23, 42, 0.85);
+    0 0 12px 1px var(--priority-card-accent-soft, rgba(148, 163, 184, 0.18)),
+    0 0 24px 2px var(--priority-card-accent-soft, rgba(148, 163, 184, 0.10));
   transform: translateY(-1px);
 }
 
@@ -1140,12 +1141,18 @@ watch(scheduleType, (newType) => {
   background: linear-gradient(180deg, var(--priority-card-gradient-strong), var(--priority-card-gradient-soft));
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.52),
-    0 0 0 1px var(--priority-card-accent-soft);
+    0 0 0 1px var(--priority-card-accent-soft),
+    0 0 14px 1px var(--priority-card-accent-soft);
 }
 
 .priority-card--active:hover {
   border-color: var(--priority-card-accent-border);
   background: linear-gradient(180deg, var(--priority-card-gradient-strong), var(--priority-card-gradient-soft));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.52),
+    0 0 0 1px var(--priority-card-accent-soft),
+    0 0 18px 2px var(--priority-card-accent-soft),
+    0 0 32px 4px var(--priority-card-accent-soft);
 }
 
 .priority-card__radio {
