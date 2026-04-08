@@ -69,6 +69,7 @@
             :row-key="(row: Task) => row.id"
             :row-props="getRowProps"
             :pagination="pagination"
+            remote
             :bordered="false"
             :scroll-x="isMobile ? undefined : undefined"
           />
