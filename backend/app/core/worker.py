@@ -263,97 +263,107 @@ class WorkerExecutor:
                 # Sentinel: stream ended because container stopped
                 break
 
-            line = item.decode("utf-8", errors="replace")
+            text = item.decode("utf-8", errors="replace")
 
-            stripped = line.rstrip('\n\r')
+            # Docker may batch multiple lines into a single chunk.
+            # Split into individual lines so CODIFY markers are detected
+            # even when they appear in the middle of a multi-line chunk.
+            lines = text.splitlines(keepends=True)
 
-            # CODIFY_TOOL_USE_START: tool_use block completed → create a tool_call log entry
-            # immediately so the frontend sees it in real-time (output populated later).
-            if stripped.startswith('CODIFY_TOOL_USE_START:'):
-                match = _CODIFY_TOOL_USE_START_RE.match(stripped)
-                if match:
-                    try:
-                        data = _json.loads(match.group(1))
-                        tool_use_id = data.get('id', '')
-                        log_entry = TaskLog(
-                            task_id=task_id,
-                            log_level="INFO",
-                            message="",
-                            log_type="tool_call",
-                            log_metadata=_json.dumps({
-                                "name": data.get("name", ""),
-                                "input": data.get("input", {}),
-                                "output": None,
-                                "error": False,
-                            }),
-                        )
-                        db.add(log_entry)
-                        await db.flush()   # get auto-assigned ID
-                        if tool_use_id and log_entry.id:
-                            pending_tool_uses[tool_use_id] = log_entry.id
-                        await db.commit()
-                        logger.debug(f"[Task {task_id}] Tool use start: {data.get('name')} (id={tool_use_id})")
-                    except Exception as exc:
-                        logger.debug(f"[Task {task_id}] Failed to parse CODIFY_TOOL_USE_START: {exc}")
+            for line in lines:
+                stripped = line.rstrip('\n\r')
+                if not stripped:
+                    buffer.append(line)
+                    all_lines.append(line)
+                    continue
 
-            # CODIFY_TOOL_RESULT: tool result arrived → update the matching log entry with output.
-            elif stripped.startswith('CODIFY_TOOL_RESULT:'):
-                match = _CODIFY_TOOL_RESULT_RE.match(stripped)
-                if match:
-                    try:
-                        data = _json.loads(match.group(1))
-                        tool_use_id = data.get('id', '')
-                        log_id = pending_tool_uses.pop(tool_use_id, None)
-                        if log_id:
-                            log_entry = await db.get(TaskLog, log_id)
-                            if log_entry and log_entry.log_metadata:
-                                existing = _json.loads(log_entry.log_metadata)
-                                existing['output'] = data.get('output', '')
-                                existing['error'] = data.get('error', False)
-                                log_entry.log_metadata = _json.dumps(existing)
-                                await db.commit()
-                                logger.debug(f"[Task {task_id}] Tool result stored (id={tool_use_id})")
-                    except Exception as exc:
-                        logger.debug(f"[Task {task_id}] Failed to parse CODIFY_TOOL_RESULT: {exc}")
+                # CODIFY_TOOL_USE_START: tool_use block completed → create a tool_call log entry
+                # immediately so the frontend sees it in real-time (output populated later).
+                if stripped.startswith('CODIFY_TOOL_USE_START:'):
+                    match = _CODIFY_TOOL_USE_START_RE.match(stripped)
+                    if match:
+                        try:
+                            data = _json.loads(match.group(1))
+                            tool_use_id = data.get('id', '')
+                            log_entry = TaskLog(
+                                task_id=task_id,
+                                log_level="INFO",
+                                message="",
+                                log_type="tool_call",
+                                log_metadata=_json.dumps({
+                                    "name": data.get("name", ""),
+                                    "input": data.get("input", {}),
+                                    "output": None,
+                                    "error": False,
+                                }),
+                            )
+                            db.add(log_entry)
+                            await db.flush()   # get auto-assigned ID
+                            if tool_use_id and log_entry.id:
+                                pending_tool_uses[tool_use_id] = log_entry.id
+                            await db.commit()
+                            logger.debug(f"[Task {task_id}] Tool use start: {data.get('name')} (id={tool_use_id})")
+                        except Exception as exc:
+                            logger.debug(f"[Task {task_id}] Failed to parse CODIFY_TOOL_USE_START: {exc}")
 
-            elif stripped.startswith('CODIFY_THINKING:'):
-                th_match = _CODIFY_THINKING_RE.match(stripped)
-                if th_match:
-                    try:
-                        json_str = th_match.group(1)
-                        _json.loads(json_str)  # validate before storing
-                        db.add(TaskLog(
-                            task_id=task_id,
-                            log_level="INFO",
-                            message="",
-                            log_type="thinking",
-                            log_metadata=json_str,
-                        ))
-                        await db.commit()
-                        logger.debug(f"[Task {task_id}] Stored real-time thinking entry")
-                    except Exception as exc:
-                        logger.debug(f"[Task {task_id}] Failed to parse CODIFY_THINKING: {exc}")
+                # CODIFY_TOOL_RESULT: tool result arrived → update the matching log entry with output.
+                elif stripped.startswith('CODIFY_TOOL_RESULT:'):
+                    match = _CODIFY_TOOL_RESULT_RE.match(stripped)
+                    if match:
+                        try:
+                            data = _json.loads(match.group(1))
+                            tool_use_id = data.get('id', '')
+                            log_id = pending_tool_uses.pop(tool_use_id, None)
+                            if log_id:
+                                log_entry = await db.get(TaskLog, log_id)
+                                if log_entry and log_entry.log_metadata:
+                                    existing = _json.loads(log_entry.log_metadata)
+                                    existing['output'] = data.get('output', '')
+                                    existing['error'] = data.get('error', False)
+                                    log_entry.log_metadata = _json.dumps(existing)
+                                    await db.commit()
+                                    logger.debug(f"[Task {task_id}] Tool result stored (id={tool_use_id})")
+                        except Exception as exc:
+                            logger.debug(f"[Task {task_id}] Failed to parse CODIFY_TOOL_RESULT: {exc}")
 
-            elif stripped.startswith('CODIFY_ASSISTANT_TEXT:'):
-                at_match = _CODIFY_ASSISTANT_TEXT_RE.match(stripped)
-                if at_match:
-                    try:
-                        json_str = at_match.group(1)
-                        _json.loads(json_str)  # validate before storing
-                        db.add(TaskLog(
-                            task_id=task_id,
-                            log_level="INFO",
-                            message="",
-                            log_type="assistant_text",
-                            log_metadata=json_str,
-                        ))
-                        await db.commit()
-                        logger.debug(f"[Task {task_id}] Stored real-time assistant_text entry")
-                    except Exception as exc:
-                        logger.debug(f"[Task {task_id}] Failed to parse CODIFY_ASSISTANT_TEXT: {exc}")
+                elif stripped.startswith('CODIFY_THINKING:'):
+                    th_match = _CODIFY_THINKING_RE.match(stripped)
+                    if th_match:
+                        try:
+                            json_str = th_match.group(1)
+                            _json.loads(json_str)  # validate before storing
+                            db.add(TaskLog(
+                                task_id=task_id,
+                                log_level="INFO",
+                                message="",
+                                log_type="thinking",
+                                log_metadata=json_str,
+                            ))
+                            await db.commit()
+                            logger.debug(f"[Task {task_id}] Stored real-time thinking entry")
+                        except Exception as exc:
+                            logger.debug(f"[Task {task_id}] Failed to parse CODIFY_THINKING: {exc}")
 
-            buffer.append(line)
-            all_lines.append(line)
+                elif stripped.startswith('CODIFY_ASSISTANT_TEXT:'):
+                    at_match = _CODIFY_ASSISTANT_TEXT_RE.match(stripped)
+                    if at_match:
+                        try:
+                            json_str = at_match.group(1)
+                            _json.loads(json_str)  # validate before storing
+                            db.add(TaskLog(
+                                task_id=task_id,
+                                log_level="INFO",
+                                message="",
+                                log_type="assistant_text",
+                                log_metadata=json_str,
+                            ))
+                            await db.commit()
+                            logger.debug(f"[Task {task_id}] Stored real-time assistant_text entry")
+                        except Exception as exc:
+                            logger.debug(f"[Task {task_id}] Failed to parse CODIFY_ASSISTANT_TEXT: {exc}")
+
+                buffer.append(line)
+                all_lines.append(line)
 
             now = time.monotonic()
             if len(buffer) >= MAX_BUFFER_LINES or (now - last_flush) >= FLUSH_INTERVAL:
