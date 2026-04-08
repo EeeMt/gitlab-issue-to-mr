@@ -1823,13 +1823,15 @@ onBeforeUnmount(() => {
 .queue-timeline__task-bar {
   --queue-timeline-bar-fill: linear-gradient(180deg, rgba(226, 232, 240, 0.92), rgba(203, 213, 225, 0.72));
   --queue-timeline-bar-border: rgba(148, 163, 184, 0.16);
+  --arrow-depth: 12px;
   position: absolute;
   height: 30px;
-  border-radius: 999px;
+  border-radius: var(--app-card-radius-small) 0 0 var(--app-card-radius-small);
   cursor: pointer;
   display: flex;
   align-items: center;
   padding: 0 10px;
+  padding-right: calc(10px + var(--arrow-depth));
   font-size: 12px;
   white-space: nowrap;
   min-width: 60px;
@@ -1838,6 +1840,17 @@ onBeforeUnmount(() => {
     inset 0 0 0 1px var(--queue-timeline-bar-border),
     0 10px 18px -20px rgba(15, 23, 42, 0.72);
   transition: opacity 0.15s, filter 0.15s, box-shadow 0.15s, transform 0.15s, background 0.15s;
+}
+
+.queue-timeline__task-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: calc(-1 * var(--arrow-depth));
+  width: var(--arrow-depth);
+  height: 100%;
+  background: inherit;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
 }
 
 .queue-timeline__task-bar--running {
