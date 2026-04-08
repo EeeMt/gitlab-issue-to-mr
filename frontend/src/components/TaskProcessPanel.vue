@@ -434,7 +434,7 @@ const sortedEvents = computed<TaskLog[]>(() => {
 })
 
 const hasStructuredContent = computed(() =>
-  sortedEvents.value.length > 0 || systemInitEntry.value !== null
+  sortedEvents.value.length > 0 || systemInitEntry.value !== null || !!props.task?.container_id
 )
 
 // ── Raw-tab open/close events ─────────────────────────────────────────────────

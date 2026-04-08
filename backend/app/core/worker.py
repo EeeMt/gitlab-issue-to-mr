@@ -362,6 +362,24 @@ class WorkerExecutor:
                         except Exception as exc:
                             logger.debug(f"[Task {task_id}] Failed to parse CODIFY_ASSISTANT_TEXT: {exc}")
 
+                elif stripped.startswith('CODIFY_SYSTEM_INIT:'):
+                    si_match = _CODIFY_SYSTEM_INIT_RE.match(stripped)
+                    if si_match:
+                        try:
+                            json_str = si_match.group(1).strip()
+                            _json.loads(json_str)  # validate
+                            db.add(TaskLog(
+                                task_id=task_id,
+                                log_level="INFO",
+                                message="",
+                                log_type="system_init",
+                                log_metadata=json_str,
+                            ))
+                            await db.commit()
+                            logger.debug(f"[Task {task_id}] Stored real-time system_init entry")
+                        except Exception as exc:
+                            logger.debug(f"[Task {task_id}] Failed to parse CODIFY_SYSTEM_INIT: {exc}")
+
                 buffer.append(line)
                 all_lines.append(line)
 
