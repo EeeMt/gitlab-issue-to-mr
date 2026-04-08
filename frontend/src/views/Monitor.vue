@@ -1834,13 +1834,10 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   min-width: 60px;
   background: var(--queue-timeline-bar-fill);
-  clip-path: polygon(
-    0 0,
-    calc(100% - var(--arrow-depth)) 0,
-    100% 50%,
-    calc(100% - var(--arrow-depth)) 100%,
-    0 100%
-  ) round 4px;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 30' preserveAspectRatio='none'%3E%3Cpath d='M5,5 H183 L195,15 L183,25 H5Z' fill='white' stroke='white' stroke-width='10' stroke-linejoin='round'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 30' preserveAspectRatio='none'%3E%3Cpath d='M5,5 H183 L195,15 L183,25 H5Z' fill='white' stroke='white' stroke-width='10' stroke-linejoin='round'/%3E%3C/svg%3E");
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
   transition: opacity 0.15s, filter 0.15s, box-shadow 0.15s, transform 0.15s, background 0.15s;
 }
 
