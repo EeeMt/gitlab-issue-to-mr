@@ -119,11 +119,11 @@ const pagination = computed(() => ({
   itemCount: totalTasks.value,
   showSizePicker: true,
   pageSizes: [20, 50, 100],
-  onChange: (page: number) => {
+  'onUpdate:page': (page: number) => {
     currentPage.value = page
     fetchTasks()
   },
-  onUpdatePageSize: (size: number) => {
+  'onUpdate:pageSize': (size: number) => {
     pageSize.value = size
     currentPage.value = 1
     fetchTasks()
