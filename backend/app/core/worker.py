@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings as get_settings
@@ -886,6 +886,9 @@ class WorkerExecutor:
 
         logger.info(f"[Task {task_id}] Executing for project={task.project_id} issue_iid={task.issue_iid} priority={task.priority}")
         had_existing_mr = task.merge_request_iid is not None
+
+        # Clear logs from any previous execution so the event stream starts fresh
+        await db.execute(delete(TaskLog).where(TaskLog.task_id == task_id))
 
         # Update task status to running
         task.status = TaskStatus.RUNNING

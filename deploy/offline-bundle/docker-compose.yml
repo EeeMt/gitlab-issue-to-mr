@@ -54,6 +54,8 @@ services:
       - DOCKER_TLS_KEY=
       - AUTO_MIGRATE=true
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
+      - WORKER_CA_CERT_HOST_PATH=${WORKER_CA_CERT_HOST_PATH:-}
+      - WORKER_VOLUME_MOUNTS=${WORKER_VOLUME_MOUNTS:-}
     depends_on:
       postgres:
         condition: service_healthy

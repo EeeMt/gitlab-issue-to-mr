@@ -86,6 +86,11 @@ These are optional. Configure them if you want Mattermost integration available 
 
 These are optional host paths mounted into worker containers to speed up Maven dependency resolution in Java projects.
 
+### Worker container mounts
+
+- `WORKER_CA_CERT_HOST_PATH`: absolute path on the Docker host to a PEM-encoded CA cert file. When set, this certificate is automatically mounted into every spawned worker container and trusted by git, Python, Node.js, and the JDK.
+- `WORKER_VOLUME_MOUNTS`: JSON array of extra volume mounts to inject into worker containers. Each element has `host_path`, `container_path`, and `mode` keys (e.g., `[{"host_path": "/data/cache", "container_path": "/cache", "mode": "rw"}]`).
+
 ### Custom CA certificate
 
 - `CUSTOM_CA_BUNDLE`: path inside the container to a PEM-encoded CA certificate file (e.g. `/certs/ca.crt`)
