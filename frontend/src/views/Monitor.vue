@@ -76,7 +76,6 @@
                   <!-- Running Column -->
                   <div class="queue-kanban__column queue-kanban__column--running">
                     <div class="queue-kanban__column-header">
-                      <span class="queue-kanban__column-icon queue-kanban__column-icon--running"></span>
                       <span>{{ t('monitor.kanbanRunning') }}</span>
                       <n-tag size="tiny" round :bordered="false">{{ runningTasks.length }}</n-tag>
                     </div>
@@ -118,7 +117,6 @@
                   <!-- Ready Column -->
                   <div class="queue-kanban__column queue-kanban__column--ready">
                     <div class="queue-kanban__column-header">
-                      <span class="queue-kanban__column-icon queue-kanban__column-icon--ready"></span>
                       <span>{{ t('monitor.kanbanReady') }}</span>
                       <n-tag size="tiny" round :bordered="false">{{ readyTasks.length }}</n-tag>
                     </div>
@@ -165,7 +163,6 @@
                   <!-- Waiting Column -->
                   <div class="queue-kanban__column queue-kanban__column--waiting">
                     <div class="queue-kanban__column-header">
-                      <span class="queue-kanban__column-icon queue-kanban__column-icon--waiting"></span>
                       <span>{{ t('monitor.kanbanWaiting') }}</span>
                       <n-tag size="tiny" round :bordered="false">{{ waitingTasks.length }}</n-tag>
                     </div>
@@ -1753,27 +1750,16 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
-.queue-kanban__column-icon {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
+.queue-kanban__column--running {
+  border-left: 3px solid rgba(24, 160, 88, 0.5);
 }
 
-.queue-kanban__column-icon--running {
-  background-color: #18a058;
-  /* box-shadow: 0 0 0 3px rgba(24, 160, 88, 0.18); */
+.queue-kanban__column--ready {
+  border-left: 3px solid rgba(32, 128, 240, 0.5);
 }
 
-.queue-kanban__column-icon--ready {
-  background-color: #2080f0;
-  /* box-shadow: 0 0 0 3px rgba(32, 128, 240, 0.18); */
-}
-
-.queue-kanban__column-icon--waiting {
-  background-color: #f0a020;
-  /* box-shadow: 0 0 0 3px rgba(240, 160, 32, 0.18); */
+.queue-kanban__column--waiting {
+  border-left: 3px solid rgba(240, 160, 32, 0.5);
 }
 
 .queue-kanban__card {
