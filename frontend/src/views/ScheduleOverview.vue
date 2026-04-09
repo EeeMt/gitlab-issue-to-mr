@@ -332,7 +332,26 @@ const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
 const fullSlotCount = computed(() => {
   if (slotMaxTasks.value <= 0) return 0
-  return hourlyBuckets.value.filter((bucket) => bucket.count >= slotMaxTasks.value).length
+  // Count full slots across 7-day range (matching the heatmap scope)
+  const now = new Date()
+  const utc8Offset = 8 * 60 * 60 * 1000
+  const nowUtc8 = new Date(now.getTime() + utc8Offset)
+  const startHour = new Date(Date.UTC(nowUtc8.getUTCFullYear(), nowUtc8.getUTCMonth(), nowUtc8.getUTCDate()) - utc8Offset)
+  const endMs = startHour.getTime() + 7 * 24 * 60 * 60 * 1000
+
+  const bucketCounts = new Map<number, number>()
+  for (const task of scheduledTasks.value) {
+    if (!task.scheduled_at) continue
+    const ts = parseUtcDate(task.scheduled_at).getTime()
+    if (ts < startHour.getTime() || ts >= endMs) continue
+    const hourKey = Math.floor(ts / (60 * 60 * 1000))
+    bucketCounts.set(hourKey, (bucketCounts.get(hourKey) ?? 0) + 1)
+  }
+  let count = 0
+  for (const c of bucketCounts.values()) {
+    if (c >= slotMaxTasks.value) count++
+  }
+  return count
 })
 
 const summaryItems = computed(() => {
@@ -353,11 +372,11 @@ const summaryItems = computed(() => {
 
   if (slotMaxTasks.value > 0) {
     baseItems.push({
-      label: t('scheduleOverview.slotCapacity'),
-      value: String(slotMaxTasks.value),
+      label: t('scheduleOverview.fullSlots'),
+      value: String(fullSlotCount.value),
       note: fullSlotCount.value > 0
-        ? t('scheduleOverview.fullSlotsNote', { count: fullSlotCount.value })
-        : t('scheduleOverview.noSlotsAtCapacity'),
+        ? t('scheduleOverview.fullSlotsNote', { capacity: slotMaxTasks.value })
+        : t('scheduleOverview.noSlotsAtCapacity', { capacity: slotMaxTasks.value }),
     })
   }
 

@@ -557,9 +557,9 @@ const zhCN = {
     rescheduleTimeFuture: '预约时间必须晚于当前时间。',
     taskRescheduled: '任务预约时间已更新',
     failedToRescheduleTask: '更新预约时间失败',
-    slotCapacity: '时段容量',
-    fullSlotsNote: '{count} 个时段满载',
-    noSlotsAtCapacity: '暂无满载时段',
+    fullSlots: '满载时段',
+    fullSlotsNote: '时段容量：每小时 {capacity} 个',
+    noSlotsAtCapacity: '时段容量：每小时 {capacity} 个 · 暂无满载',
   },
   analytics: {
     title: '任务统计分析',

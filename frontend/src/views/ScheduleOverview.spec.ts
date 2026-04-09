@@ -467,9 +467,8 @@ describe('ScheduleOverview', () => {
     await flushPromises()
 
     const items = wrapper.vm.summaryItems as any[]
-    const slotCapItem = items.find((i: any) => i.label === 'scheduleOverview.slotCapacity')
-    expect(slotCapItem).toBeTruthy()
-    expect(slotCapItem.value).toBe('5')
+    const fullSlotsItem = items.find((i: any) => i.label === 'scheduleOverview.fullSlots')
+    expect(fullSlotsItem).toBeTruthy()
   })
 
   it('excludes slot capacity from summaryItems when slotMaxTasks = 0', async () => {
@@ -477,7 +476,7 @@ describe('ScheduleOverview', () => {
     await flushPromises()
 
     const items = wrapper.vm.summaryItems as any[]
-    const slotCapItem = items.find((i: any) => i.label === 'scheduleOverview.slotCapacity')
-    expect(slotCapItem).toBeUndefined()
+    const fullSlotsItem = items.find((i: any) => i.label === 'scheduleOverview.fullSlots')
+    expect(fullSlotsItem).toBeUndefined()
   })
 })

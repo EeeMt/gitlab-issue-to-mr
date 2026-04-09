@@ -573,9 +573,9 @@ const en = {
     rescheduleTimeFuture: 'Scheduled time must be in the future.',
     taskRescheduled: 'Task schedule updated',
     failedToRescheduleTask: 'Failed to update scheduled time',
-    slotCapacity: 'Slot Capacity',
-    fullSlotsNote: '{count} slot(s) at capacity',
-    noSlotsAtCapacity: 'No slots at capacity',
+    fullSlots: 'Full Slots',
+    fullSlotsNote: 'Slot capacity: {capacity} per hour',
+    noSlotsAtCapacity: 'Slot capacity: {capacity} per hour · None full',
   },
   analytics: {
     title: 'Task Analytics',
