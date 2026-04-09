@@ -208,20 +208,31 @@
 
                 <!-- Timeline View -->
                 <div v-else-if="queueViewMode === 'timeline'" class="queue-timeline">
-                  <!-- Legend -->
-                  <div class="queue-timeline__legend">
-                    <span class="queue-timeline__legend-item">
-                      <span class="queue-timeline__legend-swatch queue-timeline__legend-swatch--running"></span>
-                      {{ t('monitor.kanbanRunning') }}
-                    </span>
-                    <span class="queue-timeline__legend-item">
-                      <span class="queue-timeline__legend-swatch queue-timeline__legend-swatch--ready"></span>
-                      {{ t('monitor.kanbanReady') }}
-                    </span>
-                    <span class="queue-timeline__legend-item">
-                      <span class="queue-timeline__legend-swatch queue-timeline__legend-swatch--waiting"></span>
-                      {{ t('monitor.kanbanWaiting') }}
-                    </span>
+                  <!-- Legend + Zoom -->
+                  <div class="queue-timeline__toolbar">
+                    <div class="queue-timeline__legend">
+                      <span class="queue-timeline__legend-item">
+                        <span class="queue-timeline__legend-swatch queue-timeline__legend-swatch--running"></span>
+                        {{ t('monitor.kanbanRunning') }}
+                      </span>
+                      <span class="queue-timeline__legend-item">
+                        <span class="queue-timeline__legend-swatch queue-timeline__legend-swatch--ready"></span>
+                        {{ t('monitor.kanbanReady') }}
+                      </span>
+                      <span class="queue-timeline__legend-item">
+                        <span class="queue-timeline__legend-swatch queue-timeline__legend-swatch--waiting"></span>
+                        {{ t('monitor.kanbanWaiting') }}
+                      </span>
+                    </div>
+                    <n-button-group size="tiny">
+                      <n-button
+                        v-for="opt in timelineZoomOptions"
+                        :key="opt.value"
+                        :type="timelineZoom === opt.value ? 'primary' : 'default'"
+                        :ghost="timelineZoom === opt.value"
+                        @click="timelineZoom = opt.value"
+                      >{{ opt.label }}</n-button>
+                    </n-button-group>
                   </div>
 
                   <!-- Scrollable area -->
@@ -631,6 +642,16 @@ let elapsedTimer: ReturnType<typeof setInterval> | null = null
 
 const queueViewMode = ref<'kanban' | 'timeline' | 'table'>('kanban')
 const nowMs = ref(Date.now())
+const timelineZoom = ref<'auto' | '1h' | '2h' | '4h' | '8h' | '24h'>('auto')
+
+const timelineZoomOptions = [
+  { label: 'Auto', value: 'auto' as const },
+  { label: '1h', value: '1h' as const },
+  { label: '2h', value: '2h' as const },
+  { label: '4h', value: '4h' as const },
+  { label: '8h', value: '8h' as const },
+  { label: '24h', value: '24h' as const },
+]
 
 const queueViewOptions = computed(() => [
   { label: t('monitor.viewKanban'), value: 'kanban' as const },
@@ -1339,8 +1360,17 @@ function kanbanIssueLabel(task: Task): string {
 
 const timelineRange = computed(() => {
   const now = nowMs.value
-  let minTime = now - 60 * 60 * 1000 // now - 1h
-  let maxTime = now + 4 * 60 * 60 * 1000 // now + 4h
+
+  if (timelineZoom.value !== 'auto') {
+    const hours = parseInt(timelineZoom.value)
+    const windowMs = hours * 60 * 60 * 1000
+    const start = now - windowMs * 0.3
+    const end = now + windowMs * 0.7
+    return { start, end }
+  }
+
+  let minTime = now - 60 * 60 * 1000
+  let maxTime = now + 4 * 60 * 60 * 1000
 
   for (const task of activeTasks.value) {
     if (task.started_at) {
@@ -1353,7 +1383,6 @@ const timelineRange = computed(() => {
     }
   }
 
-  // Add 10% padding on each side
   const span = maxTime - minTime
   const pad = span * 0.05
   return { start: minTime - pad, end: maxTime + pad }
@@ -1818,13 +1847,18 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-/* ─── Legend ─── */
+/* ─── Toolbar (legend + zoom) ─── */
+.queue-timeline__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
 .queue-timeline__legend {
   display: flex;
   gap: 16px;
-  padding: 0 24px 10px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
-  margin-bottom: 0;
 }
 
 .queue-timeline__legend-item {
@@ -2031,9 +2065,9 @@ onBeforeUnmount(() => {
 
 .queue-timeline__task-bar--ready {
   --queue-timeline-bar-fill: linear-gradient(180deg, rgba(56, 189, 248, 0.88), rgba(56, 189, 248, 0.55));
-  color: rgba(255, 255, 255, 0.98);
-  min-width: 100px;
-  width: auto;
+  color: #0c4a6e;
+  min-width: 120px;
+  width: 120px;
 }
 
 .queue-timeline__task-bar--ready:hover {
@@ -2043,9 +2077,9 @@ onBeforeUnmount(() => {
 
 .queue-timeline__task-bar--waiting {
   --queue-timeline-bar-fill: linear-gradient(180deg, rgba(125, 211, 252, 0.8), rgba(125, 211, 252, 0.48));
-  color: rgba(255, 255, 255, 0.96);
-  min-width: 100px;
-  width: auto;
+  color: #0c4a6e;
+  min-width: 120px;
+  width: 120px;
 }
 
 .queue-timeline__task-bar--waiting:hover {
