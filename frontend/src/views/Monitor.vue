@@ -1759,7 +1759,7 @@ onBeforeUnmount(() => {
 }
 
 .queue-kanban__column--waiting {
-  border-left: 3px solid rgba(240, 160, 32, 0.5);
+  border-left: 3px solid rgba(148, 163, 184, 0.55);
 }
 
 .queue-kanban__card {
