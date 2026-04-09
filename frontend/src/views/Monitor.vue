@@ -293,7 +293,6 @@
                               tabindex="0"
                               :style="{
                                 left: timelinePct(task.started_at ? parseUtcDate(task.started_at).getTime() : nowMs) + '%',
-                                width: Math.max(2, timelinePct(nowMs) - timelinePct(task.started_at ? parseUtcDate(task.started_at).getTime() : nowMs)) + '%',
                                 top: idx * 36 + 'px',
                               }"
                               @mouseenter="showTimelineTooltip($event, `#${task.id} · ${formatPriority(task.priority)} · ${kanbanProjectLabel(task)}\n${t('monitor.kanbanElapsed', { duration: task.started_at ? formatElapsedCompact(task.started_at) : '—' })}${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
@@ -2082,6 +2081,8 @@ onBeforeUnmount(() => {
 .queue-timeline__task-bar--running {
   --queue-timeline-bar-fill: linear-gradient(180deg, rgba(32, 128, 240, 0.92), rgba(32, 128, 240, 0.6));
   color: #0c4a6e;
+  min-width: 140px;
+  width: 140px;
 }
 
 .queue-timeline__task-bar--running:hover {
