@@ -236,7 +236,7 @@
                   </div>
 
                   <!-- Scrollable area -->
-                  <div class="queue-timeline__scroll">
+                  <div ref="timelineScrollRef" class="queue-timeline__scroll">
                     <div class="queue-timeline__container" :style="{ minWidth: timelineContainerMinWidth }">
                       <!-- Time axis -->
                       <div class="queue-timeline__axis">
@@ -563,7 +563,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NAlert,
@@ -652,6 +652,22 @@ const timelineZoomOptions = [
   { label: '8h', value: '8h' as const },
   { label: '24h', value: '24h' as const },
 ]
+
+const timelineScrollRef = ref<HTMLElement | null>(null)
+
+function scrollTimelineToNow() {
+  const el = timelineScrollRef.value
+  if (!el) return
+  const containerWidth = el.scrollWidth
+  const viewportWidth = el.clientWidth
+  const nowPct = timelinePct(nowMs.value) / 100
+  const nowPx = nowPct * containerWidth
+  el.scrollLeft = nowPx - viewportWidth / 2
+}
+
+watch(timelineZoom, () => {
+  nextTick(() => scrollTimelineToNow())
+})
 
 const queueViewOptions = computed(() => [
   { label: t('monitor.viewKanban'), value: 'kanban' as const },
@@ -1360,15 +1376,6 @@ function kanbanIssueLabel(task: Task): string {
 
 const timelineRange = computed(() => {
   const now = nowMs.value
-
-  if (timelineZoom.value !== 'auto') {
-    const hours = parseInt(timelineZoom.value)
-    const windowMs = hours * 60 * 60 * 1000
-    const start = now - windowMs * 0.3
-    const end = now + windowMs * 0.7
-    return { start, end }
-  }
-
   let minTime = now - 60 * 60 * 1000
   let maxTime = now + 4 * 60 * 60 * 1000
 
@@ -1381,6 +1388,14 @@ const timelineRange = computed(() => {
       minTime = Math.min(minTime, st)
       maxTime = Math.max(maxTime, st + 30 * 60 * 1000)
     }
+  }
+
+  // In zoom mode, extend range to at least cover the zoom window
+  if (timelineZoom.value !== 'auto') {
+    const hours = parseInt(timelineZoom.value)
+    const windowMs = hours * 60 * 60 * 1000
+    minTime = Math.min(minTime, now - windowMs * 0.3)
+    maxTime = Math.max(maxTime, now + windowMs * 0.7)
   }
 
   const span = maxTime - minTime
@@ -1398,13 +1413,24 @@ function timelinePct(timeMs: number): number {
 const timelineTicks = computed(() => {
   const { start, end } = timelineRange.value
   const span = end - start
-  // Choose an interval: 15min, 30min, 1h, 2h, 4h — keep max ~8 ticks
   const intervals = [15, 30, 60, 120, 240]
   let intervalMin = 60
-  for (const iv of intervals) {
-    if (span / (iv * 60 * 1000) <= 8) {
-      intervalMin = iv
-      break
+
+  if (timelineZoom.value !== 'auto') {
+    // Tick density based on zoom level
+    const zoomMs = parseInt(timelineZoom.value) * 60 * 60 * 1000
+    for (const iv of intervals) {
+      if (zoomMs / (iv * 60 * 1000) <= 8) {
+        intervalMin = iv
+        break
+      }
+    }
+  } else {
+    for (const iv of intervals) {
+      if (span / (iv * 60 * 1000) <= 8) {
+        intervalMin = iv
+        break
+      }
     }
   }
   const intervalMs = intervalMin * 60 * 1000
@@ -1953,7 +1979,7 @@ onBeforeUnmount(() => {
   bottom: 0;
   width: 2px;
   background: linear-gradient(to bottom, #f43f5e, rgba(244, 63, 94, 0.2));
-  z-index: 5;
+  z-index: 2;
   transform: translateX(-50%);
   pointer-events: none;
 }
@@ -1988,7 +2014,7 @@ onBeforeUnmount(() => {
 /* ─── Group (Running / Ready / Waiting) ─── */
 .queue-timeline__group {
   position: relative;
-  z-index: 1;
+  z-index: 3;
 }
 
 .queue-timeline__group + .queue-timeline__group {
@@ -2050,17 +2076,16 @@ onBeforeUnmount(() => {
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 28' preserveAspectRatio='none'%3E%3Cpath d='M4,4 H182 L196,14 L182,24 H4Z' fill='white' stroke='white' stroke-width='8' stroke-linejoin='round'/%3E%3C/svg%3E");
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
-  transition: filter 0.15s, transform 0.15s, background 0.15s;
+  transition: filter 0.15s, background 0.15s;
 }
 
 .queue-timeline__task-bar--running {
   --queue-timeline-bar-fill: linear-gradient(180deg, rgba(32, 128, 240, 0.92), rgba(32, 128, 240, 0.6));
-  color: rgba(255, 255, 255, 0.98);
+  color: #0c4a6e;
 }
 
 .queue-timeline__task-bar--running:hover {
   --queue-timeline-bar-fill: linear-gradient(180deg, rgba(21, 114, 214, 0.96), rgba(32, 128, 240, 0.68));
-  transform: translateY(-1px);
 }
 
 .queue-timeline__task-bar--ready {
@@ -2072,7 +2097,6 @@ onBeforeUnmount(() => {
 
 .queue-timeline__task-bar--ready:hover {
   --queue-timeline-bar-fill: linear-gradient(180deg, rgba(14, 165, 233, 0.92), rgba(56, 189, 248, 0.62));
-  transform: translateY(-1px);
 }
 
 .queue-timeline__task-bar--waiting {
@@ -2084,7 +2108,6 @@ onBeforeUnmount(() => {
 
 .queue-timeline__task-bar--waiting:hover {
   --queue-timeline-bar-fill: linear-gradient(180deg, rgba(56, 189, 248, 0.86), rgba(125, 211, 252, 0.55));
-  transform: translateY(-1px);
 }
 
 .queue-timeline__bar-label {
