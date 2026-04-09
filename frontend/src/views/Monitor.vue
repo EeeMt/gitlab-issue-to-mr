@@ -1738,17 +1738,17 @@ onBeforeUnmount(() => {
 
 .queue-kanban__column-icon--running {
   background-color: #18a058;
-  box-shadow: 0 0 0 3px rgba(24, 160, 88, 0.18);
+  /* box-shadow: 0 0 0 3px rgba(24, 160, 88, 0.18); */
 }
 
 .queue-kanban__column-icon--ready {
   background-color: #2080f0;
-  box-shadow: 0 0 0 3px rgba(32, 128, 240, 0.18);
+  /* box-shadow: 0 0 0 3px rgba(32, 128, 240, 0.18); */
 }
 
 .queue-kanban__column-icon--waiting {
   background-color: #f0a020;
-  box-shadow: 0 0 0 3px rgba(240, 160, 32, 0.18);
+  /* box-shadow: 0 0 0 3px rgba(240, 160, 32, 0.18); */
 }
 
 .queue-kanban__card {
@@ -1799,7 +1799,7 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   flex-shrink: 0;
   background: var(--queue-priority-color);
-  box-shadow: 0 0 0 3px var(--queue-priority-soft);
+  /* box-shadow: 0 0 0 3px var(--queue-priority-soft); */
 }
 
 .priority-tone--p0 {
