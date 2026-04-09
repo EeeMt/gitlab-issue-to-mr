@@ -344,7 +344,6 @@ const summaryItems = computed(() => {
     { label: t('scheduleOverview.readyNow'), value: String(s.ready_now), note: t('scheduleOverview.alreadyDue') },
     { label: t('scheduleOverview.upcoming24h'), value: String(s.next_24h), note: t('scheduleOverview.upcomingScheduledWork') },
     { label: t('scheduleOverview.after24h'), value: String(s.later), note: t('scheduleOverview.laterBacklog') },
-    { label: t('scheduleOverview.queuedRunning'), value: `${s.queued_count} / ${s.running_count}`, note: t('scheduleOverview.executionStateSplit') },
     {
       label: t('scheduleOverview.busiestHour'),
       value: s.busiest_hour_count > 0 ? String(s.busiest_hour_count) : '0',
@@ -356,13 +355,8 @@ const summaryItems = computed(() => {
     baseItems.push({
       label: t('scheduleOverview.slotCapacity'),
       value: String(slotMaxTasks.value),
-      note: t('scheduleOverview.maxTasksPerSlot'),
-    })
-    baseItems.push({
-      label: t('scheduleOverview.fullSlots'),
-      value: String(fullSlotCount.value),
       note: fullSlotCount.value > 0
-        ? t('scheduleOverview.slotsAtCapacity')
+        ? t('scheduleOverview.fullSlotsNote', { count: fullSlotCount.value })
         : t('scheduleOverview.noSlotsAtCapacity'),
     })
   }
@@ -745,7 +739,7 @@ onBeforeUnmount(() => {
 }
 
 .schedule-chip--active {
-  background: linear-gradient(180deg, rgba(24, 160, 88, 0.92), rgba(24, 160, 88, 0.52));
+  background: linear-gradient(180deg, rgba(24, 160, 88, 0.92), rgba(24, 160, 88, 0.82));
   color: rgba(255, 255, 255, 0.96);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.16),

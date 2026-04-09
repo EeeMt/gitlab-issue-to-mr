@@ -468,10 +468,8 @@ describe('ScheduleOverview', () => {
 
     const items = wrapper.vm.summaryItems as any[]
     const slotCapItem = items.find((i: any) => i.label === 'scheduleOverview.slotCapacity')
-    const fullSlotsItem = items.find((i: any) => i.label === 'scheduleOverview.fullSlots')
     expect(slotCapItem).toBeTruthy()
     expect(slotCapItem.value).toBe('5')
-    expect(fullSlotsItem).toBeTruthy()
   })
 
   it('excludes slot capacity from summaryItems when slotMaxTasks = 0', async () => {
