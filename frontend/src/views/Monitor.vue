@@ -208,86 +208,157 @@
 
                 <!-- Timeline View -->
                 <div v-else-if="queueViewMode === 'timeline'" class="queue-timeline">
-                  <div class="queue-timeline__container" :style="{ minWidth: timelineContainerMinWidth }">
-                    <!-- Time axis -->
-                    <div class="queue-timeline__axis">
-                      <span
-                        v-for="tick in timelineTicks"
-                        :key="tick.time"
-                        class="queue-timeline__tick"
-                        :style="{ left: tick.pct + '%' }"
-                      >{{ tick.label }}</span>
-                    </div>
+                  <!-- Legend -->
+                  <div class="queue-timeline__legend">
+                    <span class="queue-timeline__legend-item">
+                      <span class="queue-timeline__legend-swatch queue-timeline__legend-swatch--running"></span>
+                      {{ t('monitor.kanbanRunning') }}
+                    </span>
+                    <span class="queue-timeline__legend-item">
+                      <span class="queue-timeline__legend-swatch queue-timeline__legend-swatch--ready"></span>
+                      {{ t('monitor.kanbanReady') }}
+                    </span>
+                    <span class="queue-timeline__legend-item">
+                      <span class="queue-timeline__legend-swatch queue-timeline__legend-swatch--waiting"></span>
+                      {{ t('monitor.kanbanWaiting') }}
+                    </span>
+                  </div>
 
-                    <!-- Now marker -->
-                    <div
-                      class="queue-timeline__now-marker"
-                      :style="{ left: timelinePct(nowMs) + '%' }"
-                    >
-                      <span class="queue-timeline__now-label">{{ t('monitor.timelineNow') }}</span>
-                    </div>
-
-                    <!-- Track area -->
-                    <div class="queue-timeline__tracks" :style="{ height: timelineTracksHeight + 'px' }">
-                      <!-- Running tasks: bars from started_at to now -->
-                      <div
-                        v-for="(task, idx) in runningTasks"
-                        :key="'run-' + task.id"
-                        class="queue-timeline__task-bar queue-timeline__task-bar--running queue-timeline__has-tooltip"
-                        role="button"
-                        tabindex="0"
-                        :style="{
-                          left: timelinePct(task.started_at ? parseUtcDate(task.started_at).getTime() : nowMs) + '%',
-                          width: Math.max(2, timelinePct(nowMs) - timelinePct(task.started_at ? parseUtcDate(task.started_at).getTime() : nowMs)) + '%',
-                          top: idx * 36 + 'px',
-                        }"
-                        @mouseenter="showTimelineTooltip($event, `#${task.id} · ${formatPriority(task.priority)} · ${kanbanProjectLabel(task)}\n${t('monitor.kanbanElapsed', { duration: task.started_at ? formatElapsedCompact(task.started_at) : '—' })}${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
-                        @mouseleave="hideTimelineTooltip"
-                        @click="goToTask(task.id)"
-                        @keydown.enter="goToTask(task.id)"
-                        @keydown.space.prevent="goToTask(task.id)"
-                      >
-                        <span class="queue-timeline__bar-label">#{{ task.id }} {{ formatPriority(task.priority) }}</span>
+                  <!-- Scrollable area -->
+                  <div class="queue-timeline__scroll">
+                    <div class="queue-timeline__container" :style="{ minWidth: timelineContainerMinWidth }">
+                      <!-- Time axis -->
+                      <div class="queue-timeline__axis">
+                        <span
+                          v-for="tick in timelineTicks"
+                          :key="tick.time"
+                          class="queue-timeline__tick"
+                          :style="{ left: tick.pct + '%' }"
+                        >{{ tick.label }}</span>
                       </div>
 
-                      <!-- Ready tasks -->
-                      <div
-                        v-for="(task, idx) in readyTasks"
-                        :key="'rdy-' + task.id"
-                        class="queue-timeline__task-bar queue-timeline__task-bar--ready queue-timeline__has-tooltip"
-                        role="button"
-                        tabindex="0"
-                        :style="{
-                          left: timelinePct(task.scheduled_at ? Math.min(parseUtcDate(task.scheduled_at).getTime(), nowMs) : nowMs) + '%',
-                          top: (runningTasks.length + idx) * 36 + 'px',
-                        }"
-                        @mouseenter="showTimelineTooltip($event, `#${task.id} · ${formatPriority(task.priority)} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineReady')}${task.scheduled_at ? ' · ' + formatTimeUtc8(task.scheduled_at) : ''}${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
-                        @mouseleave="hideTimelineTooltip"
-                        @click="goToTask(task.id)"
-                        @keydown.enter="goToTask(task.id)"
-                        @keydown.space.prevent="goToTask(task.id)"
-                      >
-                        <span class="queue-timeline__bar-label">#{{ task.id }} {{ formatPriority(task.priority) }} {{ t('monitor.timelineReady') }}</span>
-                      </div>
+                      <!-- Content area (gridlines + now marker + groups) -->
+                      <div class="queue-timeline__content">
+                        <!-- Vertical gridlines -->
+                        <div
+                          v-for="tick in timelineTicks"
+                          :key="'grid-' + tick.time"
+                          class="queue-timeline__gridline"
+                          :style="{ left: tick.pct + '%' }"
+                        ></div>
 
-                      <!-- Waiting tasks -->
-                      <div
-                        v-for="(task, idx) in waitingTasks"
-                        :key="'wait-' + task.id"
-                        class="queue-timeline__task-bar queue-timeline__task-bar--waiting queue-timeline__has-tooltip"
-                        role="button"
-                        tabindex="0"
-                        :style="{
-                          left: timelinePct(parseUtcDate(task.scheduled_at!).getTime()) + '%',
-                          top: (runningTasks.length + readyTasks.length + idx) * 36 + 'px',
-                        }"
-                        @mouseenter="showTimelineTooltip($event, `#${task.id} · ${formatPriority(task.priority)} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineWaiting')}: ${formatTimeUtc8(task.scheduled_at!)} (${t('monitor.kanbanIn', { duration: formatRelativeFuture(task.scheduled_at!) })})${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
-                        @mouseleave="hideTimelineTooltip"
-                        @click="goToTask(task.id)"
-                        @keydown.enter="goToTask(task.id)"
-                        @keydown.space.prevent="goToTask(task.id)"
-                      >
-                        <span class="queue-timeline__bar-label">#{{ task.id }} {{ formatPriority(task.priority) }} {{ formatTimeUtc8(task.scheduled_at!) }}</span>
+                        <!-- Now marker -->
+                        <div
+                          class="queue-timeline__now-marker"
+                          :style="{ left: timelinePct(nowMs) + '%' }"
+                        >
+                          <span class="queue-timeline__now-label">{{ t('monitor.timelineNow') }}</span>
+                        </div>
+
+                        <!-- Empty state -->
+                        <div
+                          v-if="!runningTasks.length && !readyTasks.length && !waitingTasks.length"
+                          class="queue-timeline__empty"
+                        >
+                          <n-empty size="small" :description="t('monitor.noActiveTasks')" />
+                        </div>
+
+                        <!-- Running group -->
+                        <div v-if="runningTasks.length" class="queue-timeline__group">
+                          <div class="queue-timeline__group-header">
+                            <span class="queue-timeline__group-badge queue-timeline__group-badge--running">
+                              {{ t('monitor.kanbanRunning') }} · {{ runningTasks.length }}
+                            </span>
+                          </div>
+                          <div
+                            class="queue-timeline__group-tracks"
+                            :style="{ height: runningTasks.length * 36 + 'px' }"
+                          >
+                            <div
+                              v-for="(task, idx) in runningTasks"
+                              :key="'run-' + task.id"
+                              class="queue-timeline__task-bar queue-timeline__task-bar--running queue-timeline__has-tooltip"
+                              role="button"
+                              tabindex="0"
+                              :style="{
+                                left: timelinePct(task.started_at ? parseUtcDate(task.started_at).getTime() : nowMs) + '%',
+                                width: Math.max(2, timelinePct(nowMs) - timelinePct(task.started_at ? parseUtcDate(task.started_at).getTime() : nowMs)) + '%',
+                                top: idx * 36 + 'px',
+                              }"
+                              @mouseenter="showTimelineTooltip($event, `#${task.id} · ${formatPriority(task.priority)} · ${kanbanProjectLabel(task)}\n${t('monitor.kanbanElapsed', { duration: task.started_at ? formatElapsedCompact(task.started_at) : '—' })}${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
+                              @mouseleave="hideTimelineTooltip"
+                              @click="goToTask(task.id)"
+                              @keydown.enter="goToTask(task.id)"
+                              @keydown.space.prevent="goToTask(task.id)"
+                            >
+                              <span class="queue-timeline__bar-label">#{{ task.id }} {{ formatPriority(task.priority) }}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <!-- Ready group -->
+                        <div v-if="readyTasks.length" class="queue-timeline__group">
+                          <div class="queue-timeline__group-header">
+                            <span class="queue-timeline__group-badge queue-timeline__group-badge--ready">
+                              {{ t('monitor.kanbanReady') }} · {{ readyTasks.length }}
+                            </span>
+                          </div>
+                          <div
+                            class="queue-timeline__group-tracks"
+                            :style="{ height: readyTasks.length * 36 + 'px' }"
+                          >
+                            <div
+                              v-for="(task, idx) in readyTasks"
+                              :key="'rdy-' + task.id"
+                              class="queue-timeline__task-bar queue-timeline__task-bar--ready queue-timeline__has-tooltip"
+                              role="button"
+                              tabindex="0"
+                              :style="{
+                                left: timelinePct(task.scheduled_at ? Math.min(parseUtcDate(task.scheduled_at).getTime(), nowMs) : nowMs) + '%',
+                                top: idx * 36 + 'px',
+                              }"
+                              @mouseenter="showTimelineTooltip($event, `#${task.id} · ${formatPriority(task.priority)} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineReady')}${task.scheduled_at ? ' · ' + formatTimeUtc8(task.scheduled_at) : ''}${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
+                              @mouseleave="hideTimelineTooltip"
+                              @click="goToTask(task.id)"
+                              @keydown.enter="goToTask(task.id)"
+                              @keydown.space.prevent="goToTask(task.id)"
+                            >
+                              <span class="queue-timeline__bar-label">#{{ task.id }} {{ formatPriority(task.priority) }} {{ t('monitor.timelineReady') }}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <!-- Waiting group -->
+                        <div v-if="waitingTasks.length" class="queue-timeline__group">
+                          <div class="queue-timeline__group-header">
+                            <span class="queue-timeline__group-badge queue-timeline__group-badge--waiting">
+                              {{ t('monitor.kanbanWaiting') }} · {{ waitingTasks.length }}
+                            </span>
+                          </div>
+                          <div
+                            class="queue-timeline__group-tracks"
+                            :style="{ height: waitingTasks.length * 36 + 'px' }"
+                          >
+                            <div
+                              v-for="(task, idx) in waitingTasks"
+                              :key="'wait-' + task.id"
+                              class="queue-timeline__task-bar queue-timeline__task-bar--waiting queue-timeline__has-tooltip"
+                              role="button"
+                              tabindex="0"
+                              :style="{
+                                left: timelinePct(parseUtcDate(task.scheduled_at!).getTime()) + '%',
+                                top: idx * 36 + 'px',
+                              }"
+                              @mouseenter="showTimelineTooltip($event, `#${task.id} · ${formatPriority(task.priority)} · ${kanbanProjectLabel(task)}\n${t('monitor.timelineWaiting')}: ${formatTimeUtc8(task.scheduled_at!)} (${t('monitor.kanbanIn', { duration: formatRelativeFuture(task.scheduled_at!) })})${task.initiator_username ? '\n@' + task.initiator_username : ''}`)"
+                              @mouseleave="hideTimelineTooltip"
+                              @click="goToTask(task.id)"
+                              @keydown.enter="goToTask(task.id)"
+                              @keydown.space.prevent="goToTask(task.id)"
+                            >
+                              <span class="queue-timeline__bar-label">#{{ task.id }} {{ formatPriority(task.priority) }} {{ formatTimeUtc8(task.scheduled_at!) }}</span>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -629,11 +700,6 @@ const waitingTasks = computed(() => {
   return pendingQueuedTasks.value.filter(
     (t) => t.scheduled_at != null && parseUtcDate(t.scheduled_at).getTime() > now
   )
-})
-
-const timelineTracksHeight = computed(() => {
-  const totalTasks = runningTasks.value.length + readyTasks.value.length + waitingTasks.value.length
-  return Math.max(36, totalTasks * 36)
 })
 
 /* --- Smart timeline tooltip --- */
@@ -1747,23 +1813,55 @@ onBeforeUnmount(() => {
 }
 
 /* ----- Timeline View ----- */
+/* ===== Timeline — redesigned ===== */
 .queue-timeline {
   position: relative;
+}
+
+/* ─── Legend ─── */
+.queue-timeline__legend {
+  display: flex;
+  gap: 16px;
+  padding: 0 24px 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  margin-bottom: 0;
+}
+
+.queue-timeline__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(15, 23, 42, 0.6);
+}
+
+.queue-timeline__legend-swatch {
+  width: 12px;
+  height: 8px;
+  border-radius: 3px;
+}
+
+.queue-timeline__legend-swatch--running { background: #2080f0; }
+.queue-timeline__legend-swatch--ready   { background: #38bdf8; }
+.queue-timeline__legend-swatch--waiting { background: #7dd3fc; }
+
+/* ─── Scroll wrapper ─── */
+.queue-timeline__scroll {
   overflow-x: auto;
-  padding: 8px 0 12px;
-  min-height: 200px;
+  padding: 0;
 }
 
 .queue-timeline__container {
   position: relative;
-  min-height: 160px;
   padding: 0 24px;
 }
 
+/* ─── Time axis ─── */
 .queue-timeline__axis {
   position: relative;
   height: 36px;
-  border-bottom: 2px solid rgba(15, 23, 42, 0.12);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
 }
 
 .queue-timeline__tick {
@@ -1772,7 +1870,7 @@ onBeforeUnmount(() => {
   transform: translateX(-50%);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  color: rgba(15, 23, 42, 0.56);
+  color: rgba(15, 23, 42, 0.48);
   white-space: nowrap;
   line-height: 1;
   padding-bottom: 8px;
@@ -1785,46 +1883,126 @@ onBeforeUnmount(() => {
   left: 50%;
   width: 1px;
   height: 6px;
-  background: rgba(15, 23, 42, 0.2);
+  background: rgba(15, 23, 42, 0.14);
   transform: translateX(-50%);
 }
 
+/* ─── Content area (positions gridlines + now marker) ─── */
+.queue-timeline__content {
+  position: relative;
+  min-height: 80px;
+  padding-bottom: 8px;
+}
+
+/* ─── Vertical gridlines ─── */
+.queue-timeline__gridline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(148, 163, 184, 0.1) 0px,
+    rgba(148, 163, 184, 0.1) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ─── Now marker ─── */
 .queue-timeline__now-marker {
   position: absolute;
-  top: 28px;
+  top: 0;
   bottom: 0;
   width: 2px;
-  background: rgba(71, 85, 105, 0.68);
-  z-index: 10;
+  background: linear-gradient(to bottom, #f43f5e, rgba(244, 63, 94, 0.2));
+  z-index: 5;
   transform: translateX(-50%);
+  pointer-events: none;
 }
 
 .queue-timeline__now-label {
   position: absolute;
-  top: -18px;
+  top: 4px;
   left: 50%;
   transform: translateX(-50%);
   font-size: 10px;
-  font-weight: 500;
-  color: rgba(71, 85, 105, 0.9);
+  font-weight: 600;
+  color: #f43f5e;
   white-space: nowrap;
-  background: rgba(255, 255, 255, 0.96);
-  padding: 2px 6px;
+  background: rgba(255, 241, 242, 0.95);
+  padding: 2px 8px;
   border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  border: 1px solid rgba(244, 63, 94, 0.18);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
 }
 
-.queue-timeline__tracks {
+/* ─── Empty state ─── */
+.queue-timeline__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
   position: relative;
-  padding-top: 12px;
-  min-height: 80px;
+  z-index: 1;
 }
 
+/* ─── Group (Running / Ready / Waiting) ─── */
+.queue-timeline__group {
+  position: relative;
+  z-index: 1;
+}
+
+.queue-timeline__group + .queue-timeline__group {
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.queue-timeline__group-header {
+  padding: 8px 0 4px;
+}
+
+.queue-timeline__group-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  line-height: 1.5;
+}
+
+.queue-timeline__group-badge--running {
+  background: rgba(32, 128, 240, 0.08);
+  color: #2080f0;
+}
+
+.queue-timeline__group-badge--ready {
+  background: rgba(56, 189, 248, 0.08);
+  color: #0ea5e9;
+}
+
+.queue-timeline__group-badge--waiting {
+  background: rgba(125, 211, 252, 0.08);
+  color: #38bdf8;
+}
+
+/* ─── Group track area (bar container) ─── */
+.queue-timeline__group-tracks {
+  position: relative;
+  padding: 2px 0;
+}
+
+/* ─── Task bars ─── */
 .queue-timeline__task-bar {
   --queue-timeline-bar-fill: linear-gradient(180deg, rgba(226, 232, 240, 0.92), rgba(203, 213, 225, 0.72));
-  --arrow-depth: 12px;
+  --arrow-depth: 10px;
   position: absolute;
-  height: 30px;
+  height: 28px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1832,52 +2010,47 @@ onBeforeUnmount(() => {
   padding-right: calc(10px + var(--arrow-depth));
   font-size: 12px;
   white-space: nowrap;
-  min-width: 60px;
+  min-width: 56px;
   background: var(--queue-timeline-bar-fill);
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 30' preserveAspectRatio='none'%3E%3Cpath d='M5,5 H183 L195,15 L183,25 H5Z' fill='white' stroke='white' stroke-width='10' stroke-linejoin='round'/%3E%3C/svg%3E");
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 30' preserveAspectRatio='none'%3E%3Cpath d='M5,5 H183 L195,15 L183,25 H5Z' fill='white' stroke='white' stroke-width='10' stroke-linejoin='round'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 28' preserveAspectRatio='none'%3E%3Cpath d='M4,4 H182 L196,14 L182,24 H4Z' fill='white' stroke='white' stroke-width='8' stroke-linejoin='round'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 28' preserveAspectRatio='none'%3E%3Cpath d='M4,4 H182 L196,14 L182,24 H4Z' fill='white' stroke='white' stroke-width='8' stroke-linejoin='round'/%3E%3C/svg%3E");
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
-  transition: opacity 0.15s, filter 0.15s, box-shadow 0.15s, transform 0.15s, background 0.15s;
+  transition: filter 0.15s, transform 0.15s, background 0.15s;
 }
 
 .queue-timeline__task-bar--running {
-  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(32, 128, 240, 0.92), rgba(32, 128, 240, 0.55));
+  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(32, 128, 240, 0.92), rgba(32, 128, 240, 0.6));
   color: rgba(255, 255, 255, 0.98);
 }
 
 .queue-timeline__task-bar--running:hover {
-  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(21, 114, 214, 0.96), rgba(32, 128, 240, 0.62));
+  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(21, 114, 214, 0.96), rgba(32, 128, 240, 0.68));
   transform: translateY(-1px);
 }
 
 .queue-timeline__task-bar--ready {
-  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(56, 189, 248, 0.88), rgba(56, 189, 248, 0.5));
+  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(56, 189, 248, 0.88), rgba(56, 189, 248, 0.55));
   color: rgba(255, 255, 255, 0.98);
   min-width: 100px;
   width: auto;
 }
 
 .queue-timeline__task-bar--ready:hover {
-  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(14, 165, 233, 0.92), rgba(56, 189, 248, 0.58));
+  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(14, 165, 233, 0.92), rgba(56, 189, 248, 0.62));
   transform: translateY(-1px);
 }
 
 .queue-timeline__task-bar--waiting {
-  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(125, 211, 252, 0.8), rgba(125, 211, 252, 0.42));
+  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(125, 211, 252, 0.8), rgba(125, 211, 252, 0.48));
   color: rgba(255, 255, 255, 0.96);
   min-width: 100px;
   width: auto;
 }
 
 .queue-timeline__task-bar--waiting:hover {
-  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(56, 189, 248, 0.86), rgba(125, 211, 252, 0.5));
+  --queue-timeline-bar-fill: linear-gradient(180deg, rgba(56, 189, 248, 0.86), rgba(125, 211, 252, 0.55));
   transform: translateY(-1px);
-}
-
-.queue-timeline__task-bar--ready .queue-timeline__bar-label,
-.queue-timeline__task-bar--waiting .queue-timeline__bar-label {
-  text-shadow: none;
 }
 
 .queue-timeline__bar-label {
@@ -1888,9 +2061,7 @@ onBeforeUnmount(() => {
   text-shadow: none;
 }
 
-/* (dot styles removed — ready/waiting now use task-bar with modifiers) */
-
-/* ----- Timeline tooltip (positioned via JS) ----- */
+/* ─── Timeline tooltip ─── */
 .queue-timeline__has-tooltip {
   position: absolute;
 }
@@ -1904,13 +2075,13 @@ onBeforeUnmount(() => {
   background: #1e293b;
   color: #f8fafc;
   font-size: 12px;
-  padding: 6px 10px;
-  border-radius: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
   white-space: pre-line;
   pointer-events: none;
   z-index: 9999;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
-  max-width: 260px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+  max-width: 280px;
   line-height: 1.5;
 }
 
