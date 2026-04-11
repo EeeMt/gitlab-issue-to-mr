@@ -1305,6 +1305,43 @@ class TestExecuteTask(unittest.TestCase):
         info_entries = [e for e in added_entries if e.log_level == "INFO"]
         self.assertTrue(len(info_entries) >= 1)
 
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_execute_task_clears_old_logs(self, mock_notify, mock_get_settings):
+        """execute_task() deletes previous TaskLog entries before starting."""
+        mock_get_settings.return_value = _make_settings()
+        mock_docker = MagicMock()
+        mock_docker.create_container.return_value = MagicMock(id="ctr-clear")
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.normalize_web_url.side_effect = lambda x: x
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(target_branch="main", merge_request_iid=None)
+        db = _make_db(task)
+
+        # Track execute calls to verify DELETE happens before anything else
+        execute_calls = []
+        original_execute = db.execute
+
+        async def tracking_execute(stmt, *args, **kwargs):
+            execute_calls.append(str(stmt))
+            return await original_execute(stmt, *args, **kwargs)
+
+        db.execute = AsyncMock(side_effect=tracking_execute)
+
+        fake_logs = "CODIFY_DIFF:+1-0\n"
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
+            asyncio.run(worker.execute_task(db, task.id))
+
+        # The first execute call should be the DELETE for TaskLog
+        self.assertTrue(len(execute_calls) >= 2, "Expected at least 2 db.execute calls")
+        # First call: SELECT task; second call: DELETE logs
+        delete_found = any('task_logs' in call.lower() or 'DELETE' in call for call in execute_calls[:3])
+        self.assertTrue(delete_found, f"Expected DELETE on task_logs in early calls: {execute_calls[:3]}")
+
 
 # ===================================================================
 # _send_notifications / _send_failure_notifications
