@@ -7,6 +7,7 @@ Prerequisites:
     docker-compose -f backend/tests/mock_integration/docker-compose.mock-test.yml up -d
 """
 
+import json
 import logging
 
 import httpx
@@ -214,7 +215,6 @@ class TestClaudeOutputTypes:
         )
 
         # Verify thinking metadata contains text
-        import json
         for tl in thinking_logs:
             meta = json.loads(tl["metadata"]) if isinstance(tl["metadata"], str) else tl["metadata"]
             assert "text" in meta, f"Thinking log should have 'text' field: {meta}"
@@ -264,7 +264,6 @@ class TestClaudeOutputTypes:
         )
 
         # Verify tool call metadata structure
-        import json
         tool_names = []
         for tc in tool_call_logs:
             meta = json.loads(tc["metadata"]) if isinstance(tc["metadata"], str) else tc["metadata"]
@@ -324,7 +323,6 @@ class TestClaudeOutputTypes:
             f"Log types: {[l.get('log_type') for l in logs]}"
         )
 
-        import json
         for tl in text_logs:
             meta = json.loads(tl["metadata"]) if isinstance(tl["metadata"], str) else tl["metadata"]
             assert "text" in meta, f"Assistant text log should have 'text' field: {meta}"
@@ -372,7 +370,6 @@ class TestClaudeOutputTypes:
             f"Log types: {[l.get('log_type') for l in logs]}"
         )
 
-        import json
         meta = json.loads(init_logs[0]["metadata"]) if isinstance(init_logs[0]["metadata"], str) else init_logs[0]["metadata"]
         assert meta.get("model") == "fake-claude-1.0", f"Expected model 'fake-claude-1.0', got: {meta}"
 

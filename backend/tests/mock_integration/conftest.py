@@ -5,8 +5,6 @@ External services (GitLab, Claude) are mocked by the mock-services container.
 """
 
 import asyncio
-import hashlib
-import hmac
 import json
 import logging
 import os
@@ -83,8 +81,9 @@ async def http_client():
 async def reset_mock_state(mock_url: str):
     """Reset mock server state before each test: clear call logs, reset config, reinit git."""
     async with httpx.AsyncClient(timeout=30.0) as client:
-        await client.delete(f"{mock_url}/mock/calls")
-        await client.patch(
+        resp = await client.delete(f"{mock_url}/mock/calls")
+        assert resp.status_code == 200, f"Failed to reset mock calls: {resp.status_code}"
+        resp = await client.patch(
             f"{mock_url}/mock/config",
             json={
                 "claude_exit_code": 0,
@@ -95,7 +94,9 @@ async def reset_mock_state(mock_url: str):
                 "fail_issue_notes": False,
             },
         )
-        await client.post(f"{mock_url}/mock/reset-git")
+        assert resp.status_code == 200, f"Failed to reset mock config: {resp.status_code}"
+        resp = await client.post(f"{mock_url}/mock/reset-git")
+        assert resp.status_code == 200, f"Failed to reset git repos: {resp.status_code}"
     yield
 
 
@@ -177,12 +178,6 @@ def build_webhook_payload(
     }
 
 
-def sign_webhook_payload(payload: dict, secret: str = WEBHOOK_SECRET) -> str:
-    """Compute GitLab webhook signature."""
-    body = json.dumps(payload, separators=(",", ":"))
-    return hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
-
-
 async def send_webhook(
     client: httpx.AsyncClient,
     backend_url: str,
@@ -191,7 +186,6 @@ async def send_webhook(
 ) -> httpx.Response:
     """Send a signed webhook to the backend."""
     body = json.dumps(payload, separators=(",", ":"))
-    token = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
     return await client.post(
         f"{backend_url}/api/webhook/gitlab",
         content=body,

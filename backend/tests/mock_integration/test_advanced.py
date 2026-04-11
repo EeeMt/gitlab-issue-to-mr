@@ -14,6 +14,7 @@ import asyncio
 import logging
 import subprocess
 import time
+from pathlib import Path
 
 import httpx
 import pytest
@@ -28,6 +29,9 @@ from .conftest import (
 
 logger = logging.getLogger(__name__)
 pytestmark = pytest.mark.asyncio
+
+# Project root: backend/tests/mock_integration/test_advanced.py → 4 levels up
+PROJECT_ROOT = str(Path(__file__).resolve().parents[3])
 
 
 class TestBaseBranch:
@@ -368,7 +372,7 @@ class TestCrashRecovery:
         subprocess.run(
             ["docker", "compose", "-f", compose_file, "stop", "scheduler"],
             capture_output=True, text=True, timeout=30,
-            cwd="/Users/AI/Projects/codify",
+            cwd=PROJECT_ROOT,
         )
         await asyncio.sleep(2)
 
@@ -394,7 +398,7 @@ class TestCrashRecovery:
         subprocess.run(
             ["docker", "compose", "-f", compose_file, "start", "scheduler"],
             capture_output=True, text=True, timeout=30,
-            cwd="/Users/AI/Projects/codify",
+            cwd=PROJECT_ROOT,
         )
 
         # Wait for scheduler to boot and run crash recovery
@@ -468,7 +472,7 @@ class TestCrashRecovery:
         subprocess.run(
             ["docker", "compose", "-f", compose_file, "restart", "scheduler"],
             capture_output=True, text=True, timeout=30,
-            cwd="/Users/AI/Projects/codify",
+            cwd=PROJECT_ROOT,
         )
 
         # Wait for task to complete (scheduler resumes monitoring)

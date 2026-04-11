@@ -97,12 +97,6 @@ class TestPriorityOrdering:
             )
         logger.info(f"✅ Priority verified: P0 started={p0_started}, P2 started={p2_started}")
 
-        # Reset delay
-        await http_client.patch(
-            f"{mock_url}/mock/config",
-            json={"claude_delay_seconds": 0},
-        )
-
 
 class TestConcurrencyLimit:
     """Scheduler respects MAX_CONCURRENCY setting."""

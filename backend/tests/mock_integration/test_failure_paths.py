@@ -67,12 +67,6 @@ class TestContainerFailure:
         assert task.get("error_message"), "Failed task should have error_message"
         logger.info(f"✅ Claude failure → task FAILED: {task.get('error_message', '')[:80]}")
 
-        # Reset mock config for other tests
-        await http_client.patch(
-            f"{mock_url}/mock/config",
-            json={"claude_exit_code": 0},
-        )
-
 
 class TestTaskCancel:
     """Cancel a running task via API."""
@@ -133,12 +127,6 @@ class TestTaskCancel:
         assert task["status"] == "cancelled", f"Expected cancelled, got {task['status']}"
         assert task.get("error_message") == "Cancelled by user"
         logger.info(f"✅ Task {task_id} cancelled successfully")
-
-        # Reset mock config
-        await http_client.patch(
-            f"{mock_url}/mock/config",
-            json={"claude_delay_seconds": 0},
-        )
 
 
 class TestTaskRetry:

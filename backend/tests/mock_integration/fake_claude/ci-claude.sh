@@ -10,6 +10,8 @@
 #   FAKE_CLAUDE_RESULT     — Result text (default: "Created hello.py")
 #   FAKE_CLAUDE_FAIL_MSG   — Error message when exit code != 0
 
+# Intentionally omitting -e: we always want to reach the jq output at the
+# bottom and exit with $EXIT_CODE, even if intermediate commands fail.
 set -uo pipefail
 
 PROMPT="${1:-}"

@@ -11,7 +11,7 @@ import os
 import subprocess
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +32,7 @@ _call_log_lock = threading.Lock()
 
 def record_call(service: str, method: str, path: str, body: Any = None, extra: dict | None = None):
     entry = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "service": service,
         "method": method,
         "path": path,
@@ -90,18 +90,21 @@ _mock_config: dict[str, Any] = {
     "fail_project_lookup": False,
     "fail_issue_notes": False,
 }
+_mock_config_lock = threading.Lock()
 
 
 @app.get("/mock/config")
 async def get_mock_config():
-    return _mock_config
+    with _mock_config_lock:
+        return dict(_mock_config)
 
 
 @app.patch("/mock/config")
 async def update_mock_config(request: Request):
     body = await request.json()
-    _mock_config.update(body)
-    return _mock_config
+    with _mock_config_lock:
+        _mock_config.update(body)
+        return dict(_mock_config)
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +152,7 @@ async def gitlab_create_issue_note(project_id: int, issue_iid: int, request: Req
     record_call("gitlab", "POST", f"/api/v4/projects/{project_id}/issues/{issue_iid}/notes", body)
     if _mock_config.get("fail_issue_notes"):
         return JSONResponse(status_code=403, content={"message": "Forbidden"})
-    return {"id": int(time.time() * 1000), "body": body.get("body", ""), "created_at": datetime.utcnow().isoformat()}
+    return {"id": int(time.time() * 1000), "body": body.get("body", ""), "created_at": datetime.now(timezone.utc).isoformat()}
 
 
 @app.post("/api/v4/projects/{project_id}/merge_requests/{mr_iid}/notes")
