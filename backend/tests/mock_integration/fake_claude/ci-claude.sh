@@ -49,18 +49,20 @@ if [[ -n "${FAKE_CLAUDE_FILES:-}" ]]; then
         echo "[fake-claude] Created: $fpath" >&2
     done
 else
-    # Default: create a simple hello.py
-    cat > hello.py << 'PYEOF'
+    # Default: create a simple hello.py (include TASK_ID for uniqueness
+    # so consecutive runs on the same branch still produce changes)
+    cat > hello.py << PYEOF
 def hello():
     """Greeting function created by Codify."""
     return "Hello from Codify!"
 
 
+# Task: ${TASK_ID:-unknown}, generated at $(date -u +%Y%m%d%H%M%S)
 if __name__ == "__main__":
     print(hello())
 PYEOF
     git add hello.py 2>/dev/null || true
-    echo "[fake-claude] Created default: hello.py" >&2
+    echo "[fake-claude] Created default: hello.py (task=${TASK_ID:-unknown})" >&2
 fi
 
 # Emit CODIFY markers to stderr — simulates a realistic multi-step AI interaction.
