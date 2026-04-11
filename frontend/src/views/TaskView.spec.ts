@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { mount, type VueWrapper, flushPromises } from '@vue/test-utils'
 import { h, ref, nextTick } from 'vue'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import TaskView from './TaskView.vue'
 import { createMockTask, createMockTaskLog } from '../test/mocks/api'
 
 // Use hoisted to ensure proper initialization order
-const { mockApi, resetMockApi } = vi.hoisted(() => {
+const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
   const mock = {
     getTask: vi.fn<() => Promise<any>>(),
     getTaskLogs: vi.fn<() => Promise<any[]>>(),
@@ -28,7 +28,8 @@ const { mockApi, resetMockApi } = vi.hoisted(() => {
       }
     })
   }
-  return { mockApi: mock, resetMockApi }
+  const mockMsg = { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }
+  return { mockApi: mock, resetMockApi, mockMessage: mockMsg }
 })
 
 // Mock i18n module
@@ -308,12 +309,7 @@ vi.mock('naive-ui', () => ({
     },
     template: '<div class="n-descriptions-item"><slot /></div>'
   },
-  useMessage: () => ({
-    error: vi.fn(),
-    success: vi.fn(),
-    warning: vi.fn(),
-    info: vi.fn()
-  }),
+  useMessage: () => mockMessage,
   NTabs: {
     name: 'NTabs',
     props: ['value', 'type', 'size'],
@@ -435,9 +431,15 @@ describe('TaskView', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     resetMockApi()
+    Object.values(mockMessage).forEach(fn => fn.mockReset())
     mockEventSourceInstance.close.mockClear()
     mockEventSourceInstance.onerror = null
     ;(mockApi.streamTaskLogs as Mock).mockReturnValue(mockEventSourceInstance)
+    // Reset auth state to defaults to prevent leaks between tests
+    const { authState, isAdmin } = await import('../auth')
+    authState.oidcEnabled = false
+    authState.user = null
+    ;(isAdmin as unknown as { value: boolean }).value = false
     router.push('/tasks/1')
     await router.isReady()
     vi.useFakeTimers()
@@ -824,6 +826,12 @@ describe('TaskView', () => {
 
       // Should not have fetched again since tab was hidden
       expect((mockApi.getTask as Mock).mock.calls.length).toBe(initialFetchCount)
+
+      // Restore visibilityState to avoid leaking into subsequent tests
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'visible',
+        configurable: true
+      })
     })
 
     it('should close log stream on unmount', async () => {
@@ -1070,6 +1078,414 @@ describe('TaskView', () => {
 
       const futureDate = new Date('2030-01-01').getTime()
       expect(wrapper.vm.isScheduledDateDisabled(futureDate)).toBe(false)
+    })
+  })
+
+  describe('action error handling', () => {
+    it('should handle cancelTask error gracefully', async () => {
+      await mountComponent({ status: 'running' })
+      ;(mockApi.cancelTask as Mock).mockRejectedValue(new Error('Cancel failed'))
+
+      await wrapper.vm.handleCancel()
+
+      expect(wrapper.vm.actionLoading).toBe(false)
+    })
+
+    it('should handle retryTask error gracefully', async () => {
+      await mountComponent({ status: 'failed' })
+      ;(mockApi.retryTask as Mock).mockRejectedValue(new Error('Retry failed'))
+
+      await wrapper.vm.handleRetry()
+
+      expect(wrapper.vm.actionLoading).toBe(false)
+    })
+
+    it('should handle executeTask error gracefully', async () => {
+      await mountComponent({ status: 'pending' })
+      ;(mockApi.executeTask as Mock).mockRejectedValue(new Error('Execute failed'))
+
+      await wrapper.vm.handleExecute()
+
+      expect(wrapper.vm.actionLoading).toBe(false)
+    })
+  })
+
+  describe('handleRetryWithSchedule validation', () => {
+    it('should not call API when no datetime is selected', async () => {
+      await mountComponent({ status: 'failed' })
+
+      wrapper.vm.retryScheduleDatetime = null
+
+      await wrapper.vm.handleRetryWithSchedule()
+
+      expect(mockApi.retryTask).not.toHaveBeenCalled()
+    })
+
+    it('should not call API when datetime is in the past', async () => {
+      await mountComponent({ status: 'failed' })
+
+      wrapper.vm.retryScheduleDatetime = Date.now() - 1000
+
+      await wrapper.vm.handleRetryWithSchedule()
+
+      expect(mockApi.retryTask).not.toHaveBeenCalled()
+    })
+
+    it('should handle retryTask with schedule API error', async () => {
+      await mountComponent({ status: 'failed' })
+      ;(mockApi.retryTask as Mock).mockRejectedValue(new Error('Retry failed'))
+
+      wrapper.vm.retryScheduleDatetime = Date.now() + 86400000
+
+      await wrapper.vm.handleRetryWithSchedule()
+
+      expect(wrapper.vm.actionLoading).toBe(false)
+    })
+
+    it('should clear retryScheduleDatetime on success', async () => {
+      await mountComponent({ status: 'failed' })
+      ;(mockApi.retryTask as Mock).mockResolvedValue(undefined)
+      ;(mockApi.getTask as Mock).mockResolvedValue(createMockTaskWithStatus('pending'))
+
+      wrapper.vm.retryScheduleDatetime = Date.now() + 86400000
+
+      await wrapper.vm.handleRetryWithSchedule()
+
+      expect(wrapper.vm.retryScheduleDatetime).toBeNull()
+    })
+  })
+
+  describe('handleReschedule validation', () => {
+    it('should not call API when no datetime is selected', async () => {
+      await mountComponent({ status: 'pending', scheduled_at: '2026-04-01T10:00:00Z' })
+
+      wrapper.vm.rescheduleDatetime = null
+
+      await wrapper.vm.handleReschedule()
+
+      expect(mockApi.rescheduleTask).not.toHaveBeenCalled()
+    })
+
+    it('should not call API when datetime is in the past', async () => {
+      await mountComponent({ status: 'pending', scheduled_at: '2026-04-01T10:00:00Z' })
+
+      wrapper.vm.rescheduleDatetime = Date.now() - 1000
+
+      await wrapper.vm.handleReschedule()
+
+      expect(mockApi.rescheduleTask).not.toHaveBeenCalled()
+    })
+
+    it('should handle rescheduleTask API error with slot error extraction', async () => {
+      await mountComponent({ status: 'pending', scheduled_at: '2026-04-01T10:00:00Z' })
+      ;(mockApi.rescheduleTask as Mock).mockRejectedValue(new Error('Slot full'))
+
+      wrapper.vm.rescheduleDatetime = Date.now() + 86400000
+
+      await wrapper.vm.handleReschedule()
+
+      expect(wrapper.vm.actionLoading).toBe(false)
+    })
+  })
+
+  describe('fetchContainerLogs', () => {
+    it('should clear containerLogs when no container_id', async () => {
+      await mountComponent({ status: 'completed', container_id: null })
+
+      wrapper.vm.containerLogs = 'old logs'
+
+      await wrapper.vm.fetchContainerLogs()
+
+      expect(wrapper.vm.containerLogs).toBe('')
+    })
+
+    it('should fetch container logs for completed tasks', async () => {
+      await mountComponent({ status: 'completed', container_id: 'container-123' })
+
+      await wrapper.vm.fetchContainerLogs()
+
+      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1)
+      expect(wrapper.vm.containerLogs).toBe('Container log content')
+    })
+
+    it('should handle fetchContainerLogs API error', async () => {
+      await mountComponent({ status: 'completed', container_id: 'container-123' })
+      ;(mockApi.getTaskContainerLogs as Mock).mockRejectedValue(new Error('Fetch failed'))
+
+      await wrapper.vm.fetchContainerLogs()
+
+      expect(wrapper.vm.containerLogs).toContain('taskView.failedToFetchContainerLogs')
+    })
+
+    it('should prevent duplicate requests via containerRequestInFlight guard', async () => {
+      await mountComponent({ status: 'completed', container_id: 'container-123' })
+
+      // Simulate in-flight request
+      wrapper.vm.containerRequestInFlight = true
+
+      await wrapper.vm.fetchContainerLogs()
+
+      // Should not have called the API since request is in-flight
+      expect(mockApi.getTaskContainerLogs).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('onRawTabOpen and onRawTabClose', () => {
+    it('should fetch container logs for completed tasks via onRawTabOpen', async () => {
+      await mountComponent({ status: 'completed', container_id: 'container-123' })
+
+      await wrapper.vm.onRawTabOpen()
+
+      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1)
+      expect(wrapper.vm.containerLogs).toBe('Container log content')
+    })
+
+    it('should close log stream on onRawTabClose', async () => {
+      await mountComponent({ status: 'running', container_id: 'container-123' })
+
+      // Open raw tab to establish SSE connection
+      await wrapper.vm.onRawTabOpen()
+
+      // Clear the close mock after open
+      mockEventSourceInstance.close.mockClear()
+
+      // Close the tab
+      wrapper.vm.onRawTabClose()
+
+      // Verify EventSource was closed
+      expect(mockEventSourceInstance.close).toHaveBeenCalled()
+    })
+  })
+
+  describe('openScheduleDrawer', () => {
+    it('should open drawer and fetch scheduled tasks', async () => {
+      await mountComponent({ status: 'pending', scheduled_at: '2026-04-01T10:00:00Z' })
+
+      await wrapper.vm.openScheduleDrawer()
+      await flushPromises()
+
+      expect(wrapper.vm.showScheduleDrawer).toBe(true)
+      expect(mockApi.getScheduledTasks).toHaveBeenCalled()
+      expect(mockApi.getConfig).toHaveBeenCalled()
+    })
+
+    it('should handle getScheduledTasks error gracefully', async () => {
+      await mountComponent({ status: 'pending', scheduled_at: '2026-04-01T10:00:00Z' })
+      ;(mockApi.getScheduledTasks as Mock).mockRejectedValue(new Error('API Error'))
+
+      await wrapper.vm.openScheduleDrawer()
+      await flushPromises()
+
+      expect(wrapper.vm.showScheduleDrawer).toBe(true)
+      expect(wrapper.vm.scheduledTasksForPreview).toEqual([])
+    })
+
+    it('should handle getConfig error gracefully', async () => {
+      await mountComponent({ status: 'pending', scheduled_at: '2026-04-01T10:00:00Z' })
+      ;(mockApi.getConfig as Mock).mockRejectedValue(new Error('Config Error'))
+
+      await wrapper.vm.openScheduleDrawer()
+      await flushPromises()
+
+      // Should not crash
+      expect(wrapper.vm.showScheduleDrawer).toBe(true)
+    })
+
+    it('should set slot config from API response', async () => {
+      await mountComponent({ status: 'pending', scheduled_at: '2026-04-01T10:00:00Z' })
+      ;(mockApi.getConfig as Mock).mockResolvedValue({
+        runtime: { slot_max_tasks: 5, slot_max_tasks_enforce: true }
+      })
+
+      await wrapper.vm.openScheduleDrawer()
+      await flushPromises()
+
+      expect(wrapper.vm.slotMaxTasks).toBe(5)
+      expect(wrapper.vm.slotEnforce).toBe(true)
+    })
+  })
+
+  describe('handleScheduleHeatmapCellClick', () => {
+    it('should set rescheduleDatetime and close drawer', async () => {
+      await mountComponent({ status: 'pending', scheduled_at: '2026-04-01T10:00:00Z' })
+
+      wrapper.vm.showScheduleDrawer = true
+      const clickTime = Date.now() + 3600000
+
+      wrapper.vm.handleScheduleHeatmapCellClick(clickTime)
+
+      expect(wrapper.vm.rescheduleDatetime).toBe(clickTime)
+      expect(wrapper.vm.showScheduleDrawer).toBe(false)
+    })
+  })
+
+  describe('no actions display', () => {
+    it('should show empty state for completed tasks', async () => {
+      await mountComponent({ status: 'completed' })
+
+      expect(wrapper.vm.hasActions).toBe(false)
+      expect(wrapper.find('.task-actions__empty').exists()).toBe(true)
+    })
+
+    it('should not show cancel button for completed tasks', async () => {
+      await mountComponent({ status: 'completed' })
+
+      // Cancel section should not exist
+      const cancelItems = wrapper.findAll('.task-actions__item--error')
+      expect(cancelItems.length).toBe(0)
+    })
+  })
+
+  describe('canReschedule computed', () => {
+    it('should return false for running tasks', async () => {
+      await mountComponent({ status: 'running' })
+
+      expect(wrapper.vm.canReschedule).toBe(false)
+    })
+
+    it('should return false for pending tasks without scheduled_at', async () => {
+      await mountComponent({ status: 'pending', scheduled_at: null })
+
+      expect(wrapper.vm.canReschedule).toBe(false)
+    })
+
+    it('should return true for pending tasks with scheduled_at', async () => {
+      await mountComponent({ status: 'pending', scheduled_at: '2026-04-01T10:00:00Z' })
+
+      expect(wrapper.vm.canReschedule).toBe(true)
+    })
+  })
+
+  describe('initialLoading computed', () => {
+    it('should be true when loading and not yet loaded', async () => {
+      ;(mockApi.getTask as Mock).mockImplementation(() => new Promise(() => {})) // Never resolves
+      ;(mockApi.getTaskLogs as Mock).mockResolvedValue([])
+      ;(mockApi.getTaskContainerLogs as Mock).mockResolvedValue({ logs: '' })
+
+      wrapper = mount(TaskView, {
+        global: {
+          plugins: [router]
+        }
+      })
+
+      // Component is loading
+      await nextTick()
+      expect(wrapper.vm.initialLoading).toBe(true)
+    })
+  })
+
+  describe('statusColors', () => {
+    it('should map all task statuses to correct color types', async () => {
+      await mountComponent()
+
+      expect(wrapper.vm.statusColors['pending']).toBe('default')
+      expect(wrapper.vm.statusColors['queued']).toBe('info')
+      expect(wrapper.vm.statusColors['running']).toBe('warning')
+      expect(wrapper.vm.statusColors['completed']).toBe('success')
+      expect(wrapper.vm.statusColors['failed']).toBe('error')
+      expect(wrapper.vm.statusColors['cancelled']).toBe('default')
+    })
+  })
+
+  describe('resetLogsState', () => {
+    it('should clear all log state and close streams', async () => {
+      await mountComponent({ status: 'running', container_id: 'container-123' })
+
+      // Open raw tab to create an SSE connection
+      await wrapper.vm.onRawTabOpen()
+
+      // Populate some log state
+      wrapper.vm.taskLogs = [createMockTaskLog()]
+      wrapper.vm.logs = 'some logs'
+      wrapper.vm.containerLogs = 'container logs'
+
+      mockEventSourceInstance.close.mockClear()
+
+      wrapper.vm.resetLogsState()
+
+      expect(wrapper.vm.taskLogs).toEqual([])
+      expect(wrapper.vm.logs).toBe('')
+      expect(wrapper.vm.containerLogs).toBe('')
+      expect(mockEventSourceInstance.close).toHaveBeenCalled()
+    })
+  })
+
+  describe('syncRescheduleDatetime', () => {
+    it('should sync rescheduleDatetime from task scheduled_at', async () => {
+      const scheduledAt = '2026-04-01T10:00:00Z'
+      await mountComponent({ status: 'pending', scheduled_at: scheduledAt })
+
+      // After mount, syncRescheduleDatetime should have been called
+      expect(wrapper.vm.rescheduleDatetime).toBe(new Date(scheduledAt).getTime())
+    })
+
+    it('should set null when task has no scheduled_at', async () => {
+      await mountComponent({ status: 'pending', scheduled_at: null })
+
+      expect(wrapper.vm.rescheduleDatetime).toBeNull()
+    })
+  })
+
+  describe('isActiveTaskStatus', () => {
+    it('should return false for null and undefined', async () => {
+      await mountComponent()
+
+      expect(wrapper.vm.isActiveTaskStatus(null)).toBe(false)
+      expect(wrapper.vm.isActiveTaskStatus(undefined)).toBe(false)
+    })
+  })
+
+  describe('terminalLogHtml', () => {
+    it('should return empty string when no logs', async () => {
+      ;(mockApi.getTask as Mock).mockResolvedValue(createMockTaskWithStatus('pending'))
+      ;(mockApi.getTaskLogs as Mock).mockResolvedValue([])
+      ;(mockApi.getTaskContainerLogs as Mock).mockResolvedValue({ logs: '' })
+      ;(mockApi.getScheduledTasks as Mock).mockResolvedValue([])
+      ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: {} })
+
+      wrapper = mount(TaskView, {
+        global: { plugins: [router] }
+      })
+
+      await vi.waitFor(() => {
+        return (mockApi.getTask as Mock).mock.calls.length > 0
+      })
+      // Wait for fetchLogs to complete
+      await vi.waitFor(() => {
+        return (mockApi.getTaskLogs as Mock).mock.calls.length > 0
+      })
+      await nextTick()
+
+      expect(wrapper.vm.terminalLogHtml).toBe('')
+    })
+
+    it('should prefer containerLogs over logs', async () => {
+      await mountComponent({ status: 'running' })
+
+      // Wait for all mount async operations
+      await vi.waitFor(() => {
+        return (mockApi.getTaskLogs as Mock).mock.calls.length > 0
+      })
+      await nextTick()
+
+      wrapper.vm.containerLogs = 'container output'
+      await nextTick()
+
+      expect(wrapper.vm.terminalLogHtml).toContain('container output')
+    })
+
+    it('should fall back to logs when containerLogs is empty', async () => {
+      await mountComponent({ status: 'completed' })
+
+      // Wait for fetchLogs to complete
+      await vi.waitFor(() => {
+        return (mockApi.getTaskLogs as Mock).mock.calls.length > 0
+      })
+      await nextTick()
+
+      // containerLogs is empty for completed tasks, logs is populated from fetchLogs
+      expect(wrapper.vm.containerLogs).toBe('')
+      expect(wrapper.vm.terminalLogHtml).toContain('Log entry 1')
     })
   })
 })

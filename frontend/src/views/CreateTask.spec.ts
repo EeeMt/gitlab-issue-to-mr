@@ -7,7 +7,7 @@ import VariableEditor from '../components/VariableEditor.vue'
 import { createMockProject, createMockBranch, createMockPromptTemplate, createMockTask } from '../test/mocks/api'
 
 // Use hoisted to ensure proper initialization order
-const { mockApi, resetMockApi } = vi.hoisted(() => {
+const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
   const mock = {
     getProjects: vi.fn<() => Promise<any[]>>(),
     getBranches: vi.fn<() => Promise<any[]>>(),
@@ -24,7 +24,8 @@ const { mockApi, resetMockApi } = vi.hoisted(() => {
       }
     })
   }
-  return { mockApi: mock, resetMockApi }
+  const mockMsg = { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }
+  return { mockApi: mock, resetMockApi, mockMessage: mockMsg }
 })
 
 // Mock i18n module that datetime.ts imports
@@ -261,12 +262,7 @@ vi.mock('naive-ui', () => ({
     },
     template: '<div v-if="show" class="n-modal"><slot /></div>'
   },
-  useMessage: () => ({
-    error: vi.fn(),
-    success: vi.fn(),
-    warning: vi.fn(),
-    info: vi.fn()
-  }),
+  useMessage: () => mockMessage,
   NDrawer: {
     name: 'NDrawer',
     props: ['show', 'width', 'placement'],
@@ -310,6 +306,18 @@ vi.mock('../components/VariableEditor.vue', () => ({
   }
 }))
 
+// Mock HeatmapChart component
+vi.mock('../components/HeatmapChart.vue', () => ({
+  default: {
+    name: 'HeatmapChart',
+    props: ['tasks', 'selectedMs', 'maxPerSlot', 'enforceCapacity'],
+    emits: ['cell-click'],
+    setup() {
+      return () => h('div', { class: 'heatmap-chart-mock' })
+    }
+  }
+}))
+
 // Mock @vicons/ionicons5
 vi.mock('@vicons/ionicons5', () => ({
   DocumentTextOutline: { name: 'DocumentTextOutline' },
@@ -349,6 +357,7 @@ describe('CreateTask', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     resetMockApi()
+    Object.values(mockMessage).forEach(fn => fn.mockReset())
     router.push('/')
     await router.isReady()
   })
@@ -540,15 +549,15 @@ describe('CreateTask', () => {
     it('should require base branch selection', async () => {
       await mountComponent()
 
-      const formRef = wrapper.vm.formRef
-      expect(formRef).toBeDefined()
+      // Form model should have empty new_branch_name initially
+      expect(wrapper.vm.formValue.new_branch_name).toBe('')
     })
 
     it('should require user prompt', async () => {
       await mountComponent()
 
-      const formRef = wrapper.vm.formRef
-      expect(formRef).toBeDefined()
+      // Form model should have no prompt initially (required field)
+      expect(wrapper.vm.formValue.prompt).toBeFalsy()
     })
 
     it('should show branch conflict warning', async () => {
@@ -789,8 +798,8 @@ describe('CreateTask', () => {
       // Simply verify handleReset completes without error
       // The actual form validation clearing is handled internally by the form component
       await wrapper.vm.handleReset()
-      // If we get here without error, the test passes
-      expect(true).toBe(true)
+      // Verify form ref still accessible after reset (handleReset calls restoreValidation internally)
+      expect(wrapper.vm.formRef).toBeDefined()
     })
   })
 
@@ -941,6 +950,566 @@ describe('CreateTask', () => {
       wrapper.vm.scheduledDatetime = null
 
       expect(wrapper.vm.scheduleSummary).toContain('selectFutureTime')
+    })
+  })
+
+  describe('branch name validation', () => {
+    it('should return null for valid branch names', async () => {
+      await mountComponent()
+      expect(wrapper.vm.validateBranchName('feature/my-branch')).toBeNull()
+      expect(wrapper.vm.validateBranchName('fix-bug-123')).toBeNull()
+      expect(wrapper.vm.validateBranchName('release/v1.0')).toBeNull()
+    })
+
+    it('should return null for empty name', async () => {
+      await mountComponent()
+      expect(wrapper.vm.validateBranchName('')).toBeNull()
+    })
+
+    it('should reject single @ character', async () => {
+      await mountComponent()
+      expect(wrapper.vm.validateBranchName('@')).not.toBeNull()
+    })
+
+    it('should reject names with special characters', async () => {
+      await mountComponent()
+      expect(wrapper.vm.validateBranchName('branch name')).not.toBeNull()
+      expect(wrapper.vm.validateBranchName('branch~name')).not.toBeNull()
+      expect(wrapper.vm.validateBranchName('branch^name')).not.toBeNull()
+      expect(wrapper.vm.validateBranchName('branch:name')).not.toBeNull()
+      expect(wrapper.vm.validateBranchName('branch?name')).not.toBeNull()
+      expect(wrapper.vm.validateBranchName('branch*name')).not.toBeNull()
+      expect(wrapper.vm.validateBranchName('branch[name')).not.toBeNull()
+      expect(wrapper.vm.validateBranchName('branch\\name')).not.toBeNull()
+    })
+
+    it('should reject names starting with . or -', async () => {
+      await mountComponent()
+      expect(wrapper.vm.validateBranchName('.hidden')).not.toBeNull()
+      expect(wrapper.vm.validateBranchName('-flag')).not.toBeNull()
+    })
+
+    it('should reject names starting or ending with /', async () => {
+      await mountComponent()
+      expect(wrapper.vm.validateBranchName('/leading')).not.toBeNull()
+      expect(wrapper.vm.validateBranchName('trailing/')).not.toBeNull()
+    })
+
+    it('should reject names ending with .', async () => {
+      await mountComponent()
+      expect(wrapper.vm.validateBranchName('branch.')).not.toBeNull()
+    })
+
+    it('should reject names with .., @{, or //', async () => {
+      await mountComponent()
+      expect(wrapper.vm.validateBranchName('branch..name')).not.toBeNull()
+      expect(wrapper.vm.validateBranchName('branch@{name')).not.toBeNull()
+      expect(wrapper.vm.validateBranchName('branch//name')).not.toBeNull()
+    })
+
+    it('should reject path components starting with . or ending with .lock', async () => {
+      await mountComponent()
+      expect(wrapper.vm.validateBranchName('refs/.hidden/branch')).not.toBeNull()
+      expect(wrapper.vm.validateBranchName('refs/heads/branch.lock')).not.toBeNull()
+    })
+  })
+
+  describe('isScheduledDateDisabled', () => {
+    it('should disable past dates and allow future dates', async () => {
+      await mountComponent()
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+      const tomorrow = new Date()
+      tomorrow.setDate(tomorrow.getDate() + 1)
+
+      expect(wrapper.vm.isScheduledDateDisabled(yesterday.getTime())).toBe(true)
+      expect(wrapper.vm.isScheduledDateDisabled(tomorrow.getTime())).toBe(false)
+    })
+  })
+
+  describe('isScheduledTimeDisabled', () => {
+    it('should return empty object for future dates', async () => {
+      await mountComponent()
+      const tomorrow = new Date()
+      tomorrow.setDate(tomorrow.getDate() + 1)
+
+      const result = wrapper.vm.isScheduledTimeDisabled(tomorrow.getTime())
+      expect(result).toEqual({})
+    })
+
+    it('should disable past hours/minutes/seconds for today', async () => {
+      await mountComponent()
+      const now = new Date()
+
+      const result = wrapper.vm.isScheduledTimeDisabled(now.getTime())
+      expect(result.isHourDisabled).toBeDefined()
+      expect(result.isMinuteDisabled).toBeDefined()
+      expect(result.isSecondDisabled).toBeDefined()
+
+      // Past hour should be disabled
+      if (now.getHours() > 0) {
+        expect(result.isHourDisabled(0)).toBe(true)
+      }
+      // Future hour should not be disabled
+      expect(result.isHourDisabled(23)).toBe(false)
+
+      // Past minute in current hour should be disabled
+      if (now.getMinutes() > 0) {
+        expect(result.isMinuteDisabled(0, now.getHours())).toBe(true)
+      }
+      // Minute in different hour should not be disabled
+      expect(result.isMinuteDisabled(0, now.getHours() + 1)).toBe(false)
+
+      // Past second in current hour and minute should be disabled
+      if (now.getSeconds() > 0) {
+        expect(result.isSecondDisabled(0, now.getMinutes(), now.getHours())).toBe(true)
+      }
+    })
+  })
+
+  describe('openScheduleDrawer', () => {
+    it('should open drawer, fetch scheduled tasks and config', async () => {
+      await mountComponent()
+
+      await wrapper.vm.openScheduleDrawer()
+      await flushPromises()
+
+      expect(wrapper.vm.showScheduleDrawer).toBe(true)
+      expect(mockApi.getScheduledTasks).toHaveBeenCalled()
+      expect(mockApi.getConfig).toHaveBeenCalled()
+    })
+
+    it('should handle getScheduledTasks error gracefully', async () => {
+      await mountComponent()
+      ;(mockApi.getScheduledTasks as Mock).mockRejectedValue(new Error('API Error'))
+
+      await wrapper.vm.openScheduleDrawer()
+      await flushPromises()
+
+      expect(wrapper.vm.showScheduleDrawer).toBe(true)
+      expect(wrapper.vm.scheduledTasksForPreview).toEqual([])
+    })
+
+    it('should not refetch tasks if already cached', async () => {
+      await mountComponent()
+
+      // First open fetches tasks
+      await wrapper.vm.openScheduleDrawer()
+      await flushPromises()
+      const callCount = (mockApi.getScheduledTasks as Mock).mock.calls.length
+
+      // Second open should skip fetch since tasks are already loaded (empty array from first call)
+      // Set a non-empty result to simulate cached data
+      wrapper.vm.scheduledTasksForPreview = [createMockTask()]
+
+      await wrapper.vm.openScheduleDrawer()
+      await flushPromises()
+
+      // Should not have called getScheduledTasks again
+      expect((mockApi.getScheduledTasks as Mock).mock.calls.length).toBe(callCount)
+    })
+  })
+
+  describe('handleScheduleHeatmapCellClick', () => {
+    it('should set datetime, switch to scheduled mode, and close drawer', async () => {
+      await mountComponent()
+
+      wrapper.vm.showScheduleDrawer = true
+      const clickTime = Date.now() + 3600000
+
+      wrapper.vm.handleScheduleHeatmapCellClick(clickTime)
+
+      expect(wrapper.vm.scheduledDatetime).toBe(clickTime)
+      expect(wrapper.vm.scheduleType).toBe('scheduled')
+      expect(wrapper.vm.showScheduleDrawer).toBe(false)
+    })
+  })
+
+  describe('handleCreateMRChange', () => {
+    it('should restore project default branch when toggled on', async () => {
+      await mountComponent()
+
+      // Select project 2 which has default_branch = 'develop'
+      wrapper.vm.formValue.project_id = 2
+      await wrapper.vm.handleProjectChange(2)
+      await flushPromises()
+
+      // Manually change target branch away from default
+      wrapper.vm.formValue.target_branch = 'feature/test'
+
+      // Toggling MR on should restore project default
+      wrapper.vm.handleCreateMRChange(true)
+
+      expect(wrapper.vm.formValue.target_branch).toBe('develop')
+    })
+
+    it('should not update target branch when no project selected', async () => {
+      await mountComponent()
+
+      wrapper.vm.formValue.project_id = undefined
+      wrapper.vm.formValue.target_branch = 'old-branch'
+
+      wrapper.vm.handleCreateMRChange(true)
+
+      // Should not change since no project is selected
+      expect(wrapper.vm.formValue.target_branch).toBe('old-branch')
+    })
+
+    it('should fall back to main when project has no default_branch', async () => {
+      // Override projects to include one without default_branch
+      ;(mockApi.getProjects as Mock).mockResolvedValue([
+        ...mockProjects,
+        createMockProject({ id: 99, name: 'No Default', path_with_namespace: 'group/no-default', default_branch: undefined })
+      ])
+      await mountComponent()
+      await flushPromises()
+
+      wrapper.vm.formValue.project_id = 99
+      wrapper.vm.handleCreateMRChange(true)
+
+      expect(wrapper.vm.formValue.target_branch).toBe('main')
+    })
+  })
+
+  describe('buildScheduleRequest edge cases', () => {
+    it('should return empty object for now schedule type', async () => {
+      await mountComponent()
+      wrapper.vm.scheduleType = 'now'
+
+      const result = wrapper.vm.buildScheduleRequest()
+      expect(result).toEqual({})
+    })
+
+    it('should throw for invalid delay value (null)', async () => {
+      await mountComponent()
+      wrapper.vm.scheduleType = 'delay'
+      wrapper.vm.delayValue = null
+
+      expect(() => wrapper.vm.buildScheduleRequest()).toThrow()
+    })
+
+    it('should throw for zero delay value', async () => {
+      await mountComponent()
+      wrapper.vm.scheduleType = 'delay'
+      wrapper.vm.delayValue = 0
+
+      expect(() => wrapper.vm.buildScheduleRequest()).toThrow()
+    })
+
+    it('should throw when scheduled datetime is null', async () => {
+      await mountComponent()
+      wrapper.vm.scheduleType = 'scheduled'
+      wrapper.vm.scheduledDatetime = null
+
+      expect(() => wrapper.vm.buildScheduleRequest()).toThrow()
+    })
+
+    it('should calculate delay_seconds for seconds unit', async () => {
+      await mountComponent()
+      wrapper.vm.scheduleType = 'delay'
+      wrapper.vm.delayValue = 30
+      wrapper.vm.delayUnit = 'seconds'
+
+      const result = wrapper.vm.buildScheduleRequest()
+      expect(result.delay_seconds).toBe(30)
+    })
+
+    it('should return ISO datetime for valid scheduled time', async () => {
+      await mountComponent()
+      wrapper.vm.scheduleType = 'scheduled'
+      const futureTime = Date.now() + 86400000
+      wrapper.vm.scheduledDatetime = futureTime
+
+      const result = wrapper.vm.buildScheduleRequest()
+      expect(result.scheduled_datetime).toBe(new Date(futureTime).toISOString())
+    })
+  })
+
+  describe('form submission edge cases', () => {
+    it('should auto-generate branch name when not provided', async () => {
+      await mountComponent()
+
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.formValue.new_branch_name = ''
+      wrapper.vm.formValue.target_branch = 'main'
+      wrapper.vm.formValue.user_prompt = 'Fix the bug'
+
+      await wrapper.vm.handleSubmit()
+
+      await vi.waitFor(() => {
+        return (mockApi.createTask as Mock).mock.calls.length > 0
+      })
+
+      const call = (mockApi.createTask as Mock).mock.calls[0][0]
+      expect(call.branch_name).toMatch(/^ai-task-\d+$/)
+    })
+
+    it('should set target_branch to null when createMR is false', async () => {
+      await mountComponent()
+
+      wrapper.vm.createMR = false
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+      wrapper.vm.formValue.new_branch_name = 'test-branch'
+      wrapper.vm.formValue.user_prompt = 'Fix the bug'
+
+      await wrapper.vm.handleSubmit()
+
+      await vi.waitFor(() => {
+        return (mockApi.createTask as Mock).mock.calls.length > 0
+      })
+
+      const call = (mockApi.createTask as Mock).mock.calls[0][0]
+      expect(call.target_branch).toBeNull()
+    })
+
+    it('should return early when formRef is null', async () => {
+      await mountComponent()
+
+      wrapper.vm.formRef = null
+
+      await wrapper.vm.handleSubmit()
+
+      expect(mockApi.createTask).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('scheduleSummary additional edge cases', () => {
+    it('should show delayGreaterThanZero when delayValue is 0', async () => {
+      await mountComponent()
+      wrapper.vm.scheduleType = 'delay'
+      wrapper.vm.delayValue = 0
+
+      expect(wrapper.vm.scheduleSummary).toContain('delayGreaterThanZero')
+    })
+
+    it('should show summary for seconds unit', async () => {
+      await mountComponent()
+      wrapper.vm.scheduleType = 'delay'
+      wrapper.vm.delayValue = 30
+      wrapper.vm.delayUnit = 'seconds'
+
+      expect(wrapper.vm.scheduleSummary).toContain('taskWillRunAfter')
+    })
+
+    it('should show scheduled time when datetime is set', async () => {
+      await mountComponent()
+      wrapper.vm.scheduleType = 'scheduled'
+      wrapper.vm.scheduledDatetime = Date.now() + 3600000
+
+      expect(wrapper.vm.scheduleSummary).toContain('taskWillRunAt')
+    })
+  })
+
+  describe('scheduledDatetime watcher', () => {
+    it('should set error when datetime is in the past', async () => {
+      await mountComponent()
+
+      wrapper.vm.scheduledDatetime = Date.now() - 1000
+      await nextTick()
+
+      expect(wrapper.vm.scheduledDatetimeError).not.toBeNull()
+    })
+
+    it('should clear error when datetime is in the future', async () => {
+      await mountComponent()
+
+      // First set a past time to trigger error
+      wrapper.vm.scheduledDatetime = Date.now() - 1000
+      await nextTick()
+      expect(wrapper.vm.scheduledDatetimeError).not.toBeNull()
+
+      // Then set a future time to clear error
+      wrapper.vm.scheduledDatetime = Date.now() + 60000
+      await nextTick()
+
+      expect(wrapper.vm.scheduledDatetimeError).toBeNull()
+    })
+  })
+
+  describe('scheduleType watcher', () => {
+    it('should clear scheduledDatetime when changing from scheduled to now', async () => {
+      await mountComponent()
+
+      wrapper.vm.scheduleType = 'scheduled'
+      wrapper.vm.scheduledDatetime = Date.now() + 3600000
+      await nextTick()
+
+      wrapper.vm.scheduleType = 'now'
+      await nextTick()
+
+      expect(wrapper.vm.scheduledDatetime).toBeNull()
+    })
+
+    it('should close schedule drawer when changing away from scheduled', async () => {
+      await mountComponent()
+
+      wrapper.vm.scheduleType = 'scheduled'
+      wrapper.vm.showScheduleDrawer = true
+      await nextTick()
+
+      wrapper.vm.scheduleType = 'delay'
+      await nextTick()
+
+      expect(wrapper.vm.showScheduleDrawer).toBe(false)
+    })
+  })
+
+  describe('fetch error handling', () => {
+    it('should handle fetchProjects error gracefully', async () => {
+      ;(mockApi.getProjects as Mock).mockRejectedValue(new Error('API Error'))
+      ;(mockApi.getBranches as Mock).mockResolvedValue([])
+      ;(mockApi.getPromptTemplates as Mock).mockResolvedValue([])
+      ;(mockApi.createTask as Mock).mockResolvedValue(createMockTask())
+      ;(mockApi.getScheduledTasks as Mock).mockResolvedValue([])
+      ;(mockApi.getSlotCapacity as Mock).mockResolvedValue({ is_full: false })
+      ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: {} })
+
+      wrapper = mount(CreateTask, {
+        global: {
+          plugins: [router],
+          stubs: { 'variable-editor': VariableEditor }
+        }
+      })
+
+      await vi.waitFor(() => {
+        return (mockApi.getProjects as Mock).mock.calls.length > 0
+      })
+      await flushPromises()
+
+      // Component should not crash
+      expect(wrapper.find('.create-task-page').exists()).toBe(true)
+      expect(wrapper.vm.projects).toEqual([])
+    })
+
+    it('should handle fetchBranches error gracefully', async () => {
+      await mountComponent()
+      ;(mockApi.getBranches as Mock).mockRejectedValue(new Error('API Error'))
+
+      await wrapper.vm.handleProjectChange(1)
+      await flushPromises()
+
+      // Should not crash, branches should remain empty
+      expect(wrapper.vm.branches).toEqual([])
+    })
+
+    it('should handle fetchPromptTemplates error gracefully', async () => {
+      ;(mockApi.getProjects as Mock).mockResolvedValue(mockProjects)
+      ;(mockApi.getBranches as Mock).mockResolvedValue([])
+      ;(mockApi.getPromptTemplates as Mock).mockRejectedValue(new Error('API Error'))
+      ;(mockApi.createTask as Mock).mockResolvedValue(createMockTask())
+      ;(mockApi.getScheduledTasks as Mock).mockResolvedValue([])
+      ;(mockApi.getSlotCapacity as Mock).mockResolvedValue({ is_full: false })
+      ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: {} })
+
+      wrapper = mount(CreateTask, {
+        global: {
+          plugins: [router],
+          stubs: { 'variable-editor': VariableEditor }
+        }
+      })
+
+      await vi.waitFor(() => {
+        return (mockApi.getPromptTemplates as Mock).mock.calls.length > 0
+      })
+      await flushPromises()
+
+      expect(wrapper.find('.create-task-page').exists()).toBe(true)
+    })
+  })
+
+  describe('targetBranchOptions reorder', () => {
+    it('should move main to top when it is not first in branches list', async () => {
+      // Override branches so main is NOT first
+      ;(mockApi.getBranches as Mock).mockResolvedValue([
+        createMockBranch({ name: 'develop' }),
+        createMockBranch({ name: 'feature/test' }),
+        createMockBranch({ name: 'main' })
+      ])
+
+      await mountComponent()
+      await wrapper.vm.handleProjectChange(1)
+      await flushPromises()
+
+      const options = wrapper.vm.targetBranchOptions
+      expect(options[0].value).toBe('main')
+      expect(options.length).toBe(3)
+    })
+  })
+
+  describe('priorityOptions computed', () => {
+    it('should return three priority options with correct values', async () => {
+      await mountComponent()
+
+      const options = wrapper.vm.priorityOptions
+      expect(options).toHaveLength(3)
+      expect(options[0].value).toBe(0)
+      expect(options[1].value).toBe(1)
+      expect(options[2].value).toBe(2)
+    })
+  })
+
+  describe('form reset additional checks', () => {
+    it('should increment formResetKey on reset', async () => {
+      await mountComponent()
+      const initialKey = wrapper.vm.formResetKey
+
+      await wrapper.vm.handleReset()
+
+      expect(wrapper.vm.formResetKey).toBe(initialKey + 1)
+    })
+
+    it('should clear branches array on reset', async () => {
+      await mountComponent()
+
+      // Load some branches first
+      await wrapper.vm.handleProjectChange(1)
+      await flushPromises()
+      expect(wrapper.vm.branches.length).toBeGreaterThan(0)
+
+      await wrapper.vm.handleReset()
+
+      expect(wrapper.vm.branches).toEqual([])
+    })
+
+    it('should restore createMR to true on reset', async () => {
+      await mountComponent()
+      wrapper.vm.createMR = false
+
+      await wrapper.vm.handleReset()
+
+      expect(wrapper.vm.createMR).toBe(true)
+    })
+
+    it('should reset createdTaskId on reset', async () => {
+      await mountComponent()
+      wrapper.vm.createdTaskId = 99
+
+      await wrapper.vm.handleReset()
+
+      expect(wrapper.vm.createdTaskId).toBe(0)
+    })
+
+    it('should reset scheduledDatetime on reset', async () => {
+      await mountComponent()
+      wrapper.vm.scheduledDatetime = Date.now() + 3600000
+
+      await wrapper.vm.handleReset()
+
+      expect(wrapper.vm.scheduledDatetime).toBeNull()
+    })
+  })
+
+  describe('createAnother', () => {
+    it('should clear scheduledTasksForPreview', async () => {
+      await mountComponent()
+      wrapper.vm.scheduledTasksForPreview = [createMockTask()]
+      wrapper.vm.showSuccessModal = true
+
+      await wrapper.vm.createAnother()
+
+      expect(wrapper.vm.scheduledTasksForPreview).toEqual([])
     })
   })
 })

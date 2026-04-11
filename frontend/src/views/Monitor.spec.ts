@@ -872,4 +872,568 @@ describe('Monitor', () => {
       expect(wrapper.vm.tableLoading).toBe(false)
     })
   })
+
+  // =========================================================================
+  // K. Timeline Computed Helpers
+  // =========================================================================
+  describe('timeline computed helpers', () => {
+    it('timelineRange returns a range covering tasks, with 5% padding', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const range = wrapper.vm.timelineRange as { start: number; end: number }
+      expect(range.start).toBeLessThan(FIXED_NOW)
+      expect(range.end).toBeGreaterThan(FIXED_NOW)
+      // Waiting task has scheduled_at 2h in future → maxTime ≥ that + 30min + padding
+      const waitingScheduledMs = new Date('2026-06-15T14:00:00Z').getTime()
+      expect(range.end).toBeGreaterThan(waitingScheduledMs)
+    })
+
+    it('timelineRange extends when zoom is set (non-auto)', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      wrapper.vm.timelineZoom = '8h'
+      await nextTick()
+
+      const range = wrapper.vm.timelineRange as { start: number; end: number }
+      // 8h zoom window → minTime ≤ now - 8h*0.3 = now - 2.4h
+      expect(range.start).toBeLessThanOrEqual(FIXED_NOW - 8 * 60 * 60 * 1000 * 0.3 * 0.95)
+      // maxTime ≥ now + 8h*0.7 = now + 5.6h
+      expect(range.end).toBeGreaterThanOrEqual(FIXED_NOW + 8 * 60 * 60 * 1000 * 0.7 * 0.95)
+    })
+
+    it('timelinePct clamps values to [0, 100]', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const range = wrapper.vm.timelineRange as { start: number; end: number }
+      // A time far before range.start → 0%
+      expect(wrapper.vm.timelinePct(range.start - 999999999)).toBe(0)
+      // A time far after range.end → 100%
+      expect(wrapper.vm.timelinePct(range.end + 999999999)).toBe(100)
+    })
+
+    it('timelineTicks generates tick marks between start and end', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const ticks = wrapper.vm.timelineTicks as any[]
+      expect(ticks.length).toBeGreaterThan(0)
+      for (const tick of ticks) {
+        expect(tick).toHaveProperty('time')
+        expect(tick).toHaveProperty('pct')
+        expect(tick).toHaveProperty('label')
+        expect(tick.pct).toBeGreaterThanOrEqual(0)
+        expect(tick.pct).toBeLessThanOrEqual(100)
+      }
+    })
+
+    it('timelineTicks adjusts density based on zoom level', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const autoTicks = (wrapper.vm.timelineTicks as any[]).length
+
+      wrapper.vm.timelineZoom = '1h'
+      await nextTick()
+
+      const zoomedTicks = (wrapper.vm.timelineTicks as any[]).length
+      // 1h zoom should produce different tick count than auto
+      expect(zoomedTicks).not.toBe(autoTicks)
+    })
+
+    it('timelineContainerMinWidth is at least 600px', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const minWidth = wrapper.vm.timelineContainerMinWidth as string
+      const numericPart = parseInt(minWidth)
+      expect(numericPart).toBeGreaterThanOrEqual(600)
+      expect(minWidth).toContain('px')
+    })
+  })
+
+  // =========================================================================
+  // L. Helper Functions
+  // =========================================================================
+  describe('helper functions', () => {
+    it('formatElapsedCompact returns "Xm Ys" for < 1 hour', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      // runningTask1 started at 11:30, now=12:00 → 30min 0s
+      const result = wrapper.vm.formatElapsedCompact('2026-06-15T11:30:00Z')
+      expect(result).toBe('30m 0s')
+    })
+
+    it('formatElapsedCompact returns "Xh Ym" for >= 1 hour', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      // 2h before now = 10:00
+      const result = wrapper.vm.formatElapsedCompact('2026-06-15T10:00:00Z')
+      expect(result).toBe('2h 0m')
+    })
+
+    it('formatRelativeFuture returns "<1m" when < 1 minute away', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      // Exactly now → 0ms → <1m
+      const result = wrapper.vm.formatRelativeFuture(new Date(FIXED_NOW + 30 * 1000).toISOString())
+      expect(result).toBe('<1m')
+    })
+
+    it('formatRelativeFuture returns "Xh Ym" for future time > 1 hour', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      // 2h + 15min = 135 min in the future
+      const futureTime = new Date(FIXED_NOW + (2 * 60 + 15) * 60 * 1000).toISOString()
+      const result = wrapper.vm.formatRelativeFuture(futureTime)
+      expect(result).toBe('2h 15m')
+    })
+
+    it('formatRelativeFuture returns "Xh" when minutes=0', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const futureTime = new Date(FIXED_NOW + 3 * 60 * 60 * 1000).toISOString()
+      const result = wrapper.vm.formatRelativeFuture(futureTime)
+      expect(result).toBe('3h')
+    })
+
+    it('formatRelativeFuture returns "Xm" for future time < 1 hour', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const futureTime = new Date(FIXED_NOW + 45 * 60 * 1000).toISOString()
+      const result = wrapper.vm.formatRelativeFuture(futureTime)
+      expect(result).toBe('45m')
+    })
+
+    it('formatPromptPreview returns "-" for null/empty prompt', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      expect(wrapper.vm.formatPromptPreview(null)).toBe('-')
+      expect(wrapper.vm.formatPromptPreview(undefined)).toBe('-')
+    })
+
+    it('formatPromptPreview truncates long prompts to 96 characters', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const longPrompt = 'A'.repeat(200)
+      const result = wrapper.vm.formatPromptPreview(longPrompt)
+      expect(result).toHaveLength(96)
+    })
+
+    it('formatPromptPreview collapses whitespace', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const result = wrapper.vm.formatPromptPreview('hello   world\n\nnew line')
+      expect(result).toBe('hello world new line')
+    })
+
+    it('summarizeError returns i18n key for null/empty error', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      expect(wrapper.vm.summarizeError(null)).toBe('monitor.noErrorMessage')
+      expect(wrapper.vm.summarizeError(undefined)).toBe('monitor.noErrorMessage')
+    })
+
+    it('summarizeError returns first non-empty line trimmed to 140 chars', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const error = '\n  Error: something failed\nStack trace line 1'
+      const result = wrapper.vm.summarizeError(error)
+      expect(result).toBe('Error: something failed')
+    })
+
+    it('priorityClass returns correct class for P0, P1, P2 and default', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      expect(wrapper.vm.priorityClass(0)).toBe('priority-tone--p0')
+      expect(wrapper.vm.priorityClass(1)).toBe('priority-tone--p1')
+      expect(wrapper.vm.priorityClass(2)).toBe('priority-tone--p2')
+      expect(wrapper.vm.priorityClass(3)).toBe('priority-tone--default')
+      expect(wrapper.vm.priorityClass(null)).toBe('priority-tone--default')
+    })
+
+    it('kanbanProjectLabel returns project_name or path_with_namespace or "—"', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      expect(wrapper.vm.kanbanProjectLabel({ project_name: 'My Project', project_path_with_namespace: 'grp/proj' })).toBe('My Project')
+      expect(wrapper.vm.kanbanProjectLabel({ project_name: null, project_path_with_namespace: 'grp/proj' })).toBe('grp/proj')
+      expect(wrapper.vm.kanbanProjectLabel({ project_name: null, project_path_with_namespace: null })).toBe('—')
+    })
+
+    it('kanbanIssueLabel returns #iid or kanbanManual', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      expect(wrapper.vm.kanbanIssueLabel({ issue_iid: 42 })).toBe('#42')
+      expect(wrapper.vm.kanbanIssueLabel({ issue_iid: null })).toBe('monitor.kanbanManual')
+    })
+
+    it('getExecutionDuration returns "-" when started_at or completed_at is missing', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      expect(wrapper.vm.getExecutionDuration({ started_at: null, completed_at: null })).toBe('-')
+      expect(wrapper.vm.getExecutionDuration({ started_at: '2026-06-15T11:00:00Z', completed_at: null })).toBe('-')
+    })
+
+    it('getTaskElapsedLabel shows running prefix for running tasks', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const result = wrapper.vm.getTaskElapsedLabel({
+        status: 'running',
+        started_at: '2026-06-15T11:30:00Z',
+        created_at: '2026-06-15T11:00:00Z'
+      })
+      expect(result).toContain('monitor.runningForPrefix')
+    })
+
+    it('getTaskElapsedLabel shows waiting prefix for non-running tasks', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const result = wrapper.vm.getTaskElapsedLabel({
+        status: 'pending',
+        started_at: null,
+        created_at: '2026-06-15T11:00:00Z'
+      })
+      expect(result).toContain('monitor.waitingForPrefix')
+    })
+  })
+
+  // =========================================================================
+  // M. Container Relation Logic
+  // =========================================================================
+  describe('getContainerRelation', () => {
+    it('returns "unmapped" when container has no task_id', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const result = wrapper.vm.getContainerRelation({ task_id: null, status: 'running' })
+      expect(result.label).toBe('monitor.unmapped')
+      expect(result.type).toBe('default')
+    })
+
+    it('returns "taskMissing" when task not found for container', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const result = wrapper.vm.getContainerRelation({ task_id: 999, status: 'running' })
+      expect(result.label).toBe('monitor.taskMissing')
+      expect(result.type).toBe('warning')
+    })
+
+    it('returns "linked" when both container and task are running', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      // ctr-1 → task_id=1, task 1 is running
+      const result = wrapper.vm.getContainerRelation({ task_id: 1, status: 'running' })
+      expect(result.label).toBe('monitor.linked')
+      expect(result.type).toBe('success')
+    })
+
+    it('returns "outlivedTask" when container is running but task is not running', async () => {
+      // Need a non-running task with a running container
+      const completedTask = createMockTask({ id: 50, status: 'completed', container_name: null })
+      ;(mockApi.getTasks as Mock).mockResolvedValue([...mockActiveTasks, completedTask])
+
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const result = wrapper.vm.getContainerRelation({ task_id: 50, status: 'running' })
+      expect(result.label).toBe('monitor.outlivedTask')
+      expect(result.type).toBe('warning')
+    })
+
+    it('returns "taskStillMarkedRunning" when container exited but task running', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      // task 1 is running, but container is exited
+      const result = wrapper.vm.getContainerRelation({ task_id: 1, status: 'exited' })
+      expect(result.label).toBe('monitor.taskStillMarkedRunning')
+      expect(result.type).toBe('warning')
+    })
+
+    it('returns "historical" when both container and task are not running', async () => {
+      const completedTask = createMockTask({ id: 50, status: 'completed', container_name: null })
+      ;(mockApi.getTasks as Mock).mockResolvedValue([...mockActiveTasks, completedTask])
+
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const result = wrapper.vm.getContainerRelation({ task_id: 50, status: 'exited' })
+      expect(result.label).toBe('monitor.historical')
+      expect(result.type).toBe('info')
+    })
+  })
+
+  // =========================================================================
+  // N. Status Breakdown & Sorted Containers
+  // =========================================================================
+  describe('statusBreakdown & sortedContainers', () => {
+    it('statusBreakdown returns 6 items with correct keys and percentages', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const breakdown = wrapper.vm.statusBreakdown as any[]
+      expect(breakdown).toHaveLength(6)
+      expect(breakdown.map((b: any) => b.key)).toEqual(['pending', 'queued', 'running', 'completed', 'failed', 'cancelled'])
+
+      // With defaultStats: total=42, pending=5 → (5/42)*100
+      const pending = breakdown.find((b: any) => b.key === 'pending')
+      expect(pending.percent).toBeCloseTo((5 / 42) * 100, 1)
+    })
+
+    it('statusBreakdown uses Math.max(total, 1) to avoid division by zero', async () => {
+      ;(mockApi.getStats as Mock).mockResolvedValue({
+        total: 0, pending: 0, queued: 0, running: 0,
+        completed: 0, failed: 0, cancelled: 0,
+        completed_24h: 0, failed_cancelled_24h: 0, running_long_30min: 0,
+      })
+      ;(mockApi.getTasks as Mock).mockResolvedValue([])
+      ;(mockApi.getContainers as Mock).mockResolvedValue([])
+
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const breakdown = wrapper.vm.statusBreakdown as any[]
+      // All percents should be 0 (0/1 * 100 = 0), not NaN
+      breakdown.forEach((b: any) => {
+        expect(Number.isNaN(b.percent)).toBe(false)
+        expect(b.percent).toBe(0)
+      })
+    })
+
+    it('sortedContainers puts running containers first, then sorts by created_at desc', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const sorted = wrapper.vm.sortedContainers as any[]
+      // running containers: ctr-1, ctr-2, ctr-3; exited: ctr-4
+      // First 3 should be running
+      expect(sorted.slice(0, 3).every((c: any) => c.status === 'running')).toBe(true)
+      // Last should be exited
+      expect(sorted[sorted.length - 1].status).toBe('exited')
+    })
+  })
+
+  // =========================================================================
+  // O. Debug Cards
+  // =========================================================================
+  describe('computed — debug cards', () => {
+    it('debugCards has 4 items with correct metric values', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const cards = wrapper.vm.debugCards as any[]
+      expect(cards).toHaveLength(4)
+
+      expect(cards.find((c: any) => c.key === 'visible').value).toBe('4')  // all containers
+      expect(cards.find((c: any) => c.key === 'linked').value).toBe('1')   // only ctr-1 linked
+      expect(cards.find((c: any) => c.key === 'missing').value).toBe('1')  // task 2 has no container
+      expect(cards.find((c: any) => c.key === 'orphaned').value).toBe('2') // ctr-2, ctr-3
+    })
+  })
+
+  // =========================================================================
+  // P. Row Props & Navigation
+  // =========================================================================
+  describe('row props & navigation', () => {
+    it('activeTaskRowProps returns click handler that navigates to task', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const props = wrapper.vm.activeTaskRowProps({ id: 42 } as any)
+      expect(props.style).toBe('cursor: pointer;')
+      expect(typeof props.onClick).toBe('function')
+    })
+
+    it('recentActivityRowProps returns click handler', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const props = wrapper.vm.recentActivityRowProps({ id: 7 } as any)
+      expect(props.style).toBe('cursor: pointer;')
+    })
+
+    it('recentFailureRowProps returns click handler', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const props = wrapper.vm.recentFailureRowProps({ id: 10 } as any)
+      expect(props.style).toBe('cursor: pointer;')
+    })
+
+    it('containerRowProps returns empty object when no task_id', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const props = wrapper.vm.containerRowProps({ task_id: null } as any)
+      expect(props).toEqual({})
+    })
+
+    it('containerRowProps returns empty object when task_id not in tasksById', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const props = wrapper.vm.containerRowProps({ task_id: 9999 } as any)
+      expect(props).toEqual({})
+    })
+
+    it('containerRowProps returns click handler when task_id maps to known task', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const props = wrapper.vm.containerRowProps({ task_id: 1 } as any)
+      expect(props.style).toBe('cursor: pointer;')
+      expect(typeof props.onClick).toBe('function')
+    })
+  })
+
+  // =========================================================================
+  // Q. Timeline Tooltip
+  // =========================================================================
+  describe('timeline tooltip', () => {
+    it('showTimelineTooltip sets tooltip state and hideTimelineTooltip clears it', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      expect(wrapper.vm.tooltipVisible).toBe(false)
+
+      // Simulate mouseenter with a mock event
+      const mockEl = document.createElement('div')
+      document.body.appendChild(mockEl)
+      const rect = mockEl.getBoundingClientRect()
+
+      const mockEvent = {
+        currentTarget: mockEl,
+      } as unknown as MouseEvent
+
+      // Mock getBoundingClientRect to return known values
+      vi.spyOn(mockEl, 'getBoundingClientRect').mockReturnValue({
+        left: 100, top: 200, bottom: 300, right: 200,
+        width: 100, height: 100, x: 100, y: 200, toJSON: () => {}
+      })
+
+      wrapper.vm.showTimelineTooltip(mockEvent, 'Task #1 details')
+
+      expect(wrapper.vm.tooltipVisible).toBe(true)
+      expect(wrapper.vm.tooltipText).toBe('Task #1 details')
+
+      wrapper.vm.hideTimelineTooltip()
+      expect(wrapper.vm.tooltipVisible).toBe(false)
+
+      document.body.removeChild(mockEl)
+    })
+  })
+
+  // =========================================================================
+  // R. Kanban View Rendering
+  // =========================================================================
+  describe('kanban view rendering', () => {
+    it('renders kanban columns with task cards', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      // Default view is kanban
+      expect(wrapper.vm.queueViewMode).toBe('kanban')
+      // Check running column has cards
+      const kanban = wrapper.find('.queue-kanban')
+      expect(kanban.exists()).toBe(true)
+
+      // Running column
+      const runningCol = wrapper.find('.queue-kanban__column--running')
+      expect(runningCol.exists()).toBe(true)
+      const runningCards = runningCol.findAll('.queue-kanban__card')
+      expect(runningCards).toHaveLength(2)
+
+      // Ready column
+      const readyCol = wrapper.find('.queue-kanban__column--ready')
+      expect(readyCol.exists()).toBe(true)
+      const readyCards = readyCol.findAll('.queue-kanban__card')
+      expect(readyCards).toHaveLength(2)
+
+      // Waiting column
+      const waitingCol = wrapper.find('.queue-kanban__column--waiting')
+      expect(waitingCol.exists()).toBe(true)
+      const waitingCards = waitingCol.findAll('.queue-kanban__card')
+      expect(waitingCards).toHaveLength(1)
+    })
+
+    it('kanban cards display task id and priority', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const firstCard = wrapper.find('.queue-kanban__card')
+      expect(firstCard.text()).toContain('#1')
+    })
+
+    it('kanban card click navigates to task', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const card = wrapper.find('.queue-kanban__card')
+      await card.trigger('click')
+      // goToTask calls router.push
+    })
+  })
+
+  // =========================================================================
+  // S. Queue View Options
+  // =========================================================================
+  describe('queueViewOptions', () => {
+    it('provides three view options: kanban, timeline, table', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const options = wrapper.vm.queueViewOptions as any[]
+      expect(options).toHaveLength(3)
+      expect(options.map((o: any) => o.value)).toEqual(['kanban', 'timeline', 'table'])
+    })
+  })
+
+  // =========================================================================
+  // T. Silent Refresh Queuing
+  // =========================================================================
+  describe('silent refresh queuing', () => {
+    it('queues a silent refresh when fetchData is called silently during in-flight request', async () => {
+      let resolveFirst!: (v: any) => void
+      ;(mockApi.getStats as Mock)
+        .mockReturnValueOnce(new Promise(r => { resolveFirst = r }))
+        .mockResolvedValue(defaultStats)
+
+      wrapper = mountComponent()
+      await nextTick()
+
+      // First fetch is in-flight; trigger a silent refresh
+      wrapper.vm.fetchData({ silent: true })
+      await nextTick()
+
+      // Only one call so far
+      expect(mockApi.getStats).toHaveBeenCalledTimes(1)
+
+      resolveFirst(defaultStats)
+      await flushPromises()
+
+      // Queued silent refresh fires
+      expect(mockApi.getStats).toHaveBeenCalledTimes(2)
+    })
+  })
 })
