@@ -169,6 +169,288 @@ class TestCODIFYMarkersDetailed:
         logger.info(f"✅ {len(logs)} log entries recorded for task {task_id}")
 
 
+class TestClaudeOutputTypes:
+    """Verify all Claude output types (thinking/tool calls/text) are parsed and stored."""
+
+    async def test_thinking_logs_created(
+        self,
+        http_client: httpx.AsyncClient,
+        backend_url: str,
+        admin_auth_headers: dict,
+    ):
+        """CODIFY_THINKING markers should create 'thinking' log entries."""
+        resp = await http_client.post(
+            f"{backend_url}/api/tasks",
+            json={
+                "project_id": 1,
+                "user_prompt": "Create files to test thinking output",
+                "branch_name": "codify/thinking-test",
+                "target_branch": "main",
+            },
+            headers=admin_auth_headers,
+        )
+        assert resp.status_code in (200, 201)
+        task_id = resp.json()["id"]
+
+        task = await wait_for_task_status(
+            http_client, backend_url, task_id,
+            target_statuses=["completed"],
+            auth_headers=admin_auth_headers,
+            timeout=120,
+        )
+        assert task["status"] == "completed"
+
+        resp = await http_client.get(
+            f"{backend_url}/api/tasks/{task_id}/logs",
+            headers=admin_auth_headers,
+        )
+        assert resp.status_code == 200
+        logs = resp.json()
+
+        thinking_logs = [l for l in logs if l.get("log_type") == "thinking"]
+        assert len(thinking_logs) >= 2, (
+            f"Expected at least 2 thinking entries, got {len(thinking_logs)}. "
+            f"Log types: {[l.get('log_type') for l in logs]}"
+        )
+
+        # Verify thinking metadata contains text
+        import json
+        for tl in thinking_logs:
+            meta = json.loads(tl["metadata"]) if isinstance(tl["metadata"], str) else tl["metadata"]
+            assert "text" in meta, f"Thinking log should have 'text' field: {meta}"
+            assert len(meta["text"]) > 0, "Thinking text should not be empty"
+
+        logger.info(f"✅ {len(thinking_logs)} thinking entries verified for task {task_id}")
+
+    async def test_tool_call_logs_with_results(
+        self,
+        http_client: httpx.AsyncClient,
+        backend_url: str,
+        admin_auth_headers: dict,
+    ):
+        """CODIFY_TOOL_USE_START + CODIFY_TOOL_RESULT should create tool_call logs with output."""
+        resp = await http_client.post(
+            f"{backend_url}/api/tasks",
+            json={
+                "project_id": 1,
+                "user_prompt": "Create files to test tool call output",
+                "branch_name": "codify/tool-call-test",
+                "target_branch": "main",
+            },
+            headers=admin_auth_headers,
+        )
+        assert resp.status_code in (200, 201)
+        task_id = resp.json()["id"]
+
+        task = await wait_for_task_status(
+            http_client, backend_url, task_id,
+            target_statuses=["completed"],
+            auth_headers=admin_auth_headers,
+            timeout=120,
+        )
+        assert task["status"] == "completed"
+
+        resp = await http_client.get(
+            f"{backend_url}/api/tasks/{task_id}/logs",
+            headers=admin_auth_headers,
+        )
+        assert resp.status_code == 200
+        logs = resp.json()
+
+        tool_call_logs = [l for l in logs if l.get("log_type") == "tool_call"]
+        assert len(tool_call_logs) >= 3, (
+            f"Expected at least 3 tool_call entries (Read + 2x Write), got {len(tool_call_logs)}. "
+            f"Log types: {[l.get('log_type') for l in logs]}"
+        )
+
+        # Verify tool call metadata structure
+        import json
+        tool_names = []
+        for tc in tool_call_logs:
+            meta = json.loads(tc["metadata"]) if isinstance(tc["metadata"], str) else tc["metadata"]
+            assert "name" in meta, f"Tool call should have 'name': {meta}"
+            assert "input" in meta, f"Tool call should have 'input': {meta}"
+            # Output should be populated by CODIFY_TOOL_RESULT
+            assert meta.get("output") is not None, (
+                f"Tool call output should be populated by TOOL_RESULT: {meta}"
+            )
+            assert meta.get("error") is False, f"Tool call should not have error: {meta}"
+            tool_names.append(meta["name"])
+
+        # Verify we have the expected tool types
+        assert "Read" in tool_names, f"Expected Read tool call, got: {tool_names}"
+        assert tool_names.count("Write") >= 2, f"Expected 2+ Write calls, got: {tool_names}"
+
+        logger.info(f"✅ {len(tool_call_logs)} tool_call entries verified: {tool_names}")
+
+    async def test_assistant_text_logs_created(
+        self,
+        http_client: httpx.AsyncClient,
+        backend_url: str,
+        admin_auth_headers: dict,
+    ):
+        """CODIFY_ASSISTANT_TEXT markers should create 'assistant_text' log entries."""
+        resp = await http_client.post(
+            f"{backend_url}/api/tasks",
+            json={
+                "project_id": 1,
+                "user_prompt": "Create files to test assistant text output",
+                "branch_name": "codify/assistant-text-test",
+                "target_branch": "main",
+            },
+            headers=admin_auth_headers,
+        )
+        assert resp.status_code in (200, 201)
+        task_id = resp.json()["id"]
+
+        task = await wait_for_task_status(
+            http_client, backend_url, task_id,
+            target_statuses=["completed"],
+            auth_headers=admin_auth_headers,
+            timeout=120,
+        )
+        assert task["status"] == "completed"
+
+        resp = await http_client.get(
+            f"{backend_url}/api/tasks/{task_id}/logs",
+            headers=admin_auth_headers,
+        )
+        assert resp.status_code == 200
+        logs = resp.json()
+
+        text_logs = [l for l in logs if l.get("log_type") == "assistant_text"]
+        assert len(text_logs) >= 2, (
+            f"Expected at least 2 assistant_text entries, got {len(text_logs)}. "
+            f"Log types: {[l.get('log_type') for l in logs]}"
+        )
+
+        import json
+        for tl in text_logs:
+            meta = json.loads(tl["metadata"]) if isinstance(tl["metadata"], str) else tl["metadata"]
+            assert "text" in meta, f"Assistant text log should have 'text' field: {meta}"
+
+        logger.info(f"✅ {len(text_logs)} assistant_text entries verified")
+
+    async def test_system_init_log_created(
+        self,
+        http_client: httpx.AsyncClient,
+        backend_url: str,
+        admin_auth_headers: dict,
+    ):
+        """CODIFY_SYSTEM_INIT should create 'system_init' log entry with model name."""
+        resp = await http_client.post(
+            f"{backend_url}/api/tasks",
+            json={
+                "project_id": 1,
+                "user_prompt": "Create a file for system init test",
+                "branch_name": "codify/system-init-test",
+                "target_branch": "main",
+            },
+            headers=admin_auth_headers,
+        )
+        assert resp.status_code in (200, 201)
+        task_id = resp.json()["id"]
+
+        task = await wait_for_task_status(
+            http_client, backend_url, task_id,
+            target_statuses=["completed"],
+            auth_headers=admin_auth_headers,
+            timeout=120,
+        )
+        assert task["status"] == "completed"
+
+        resp = await http_client.get(
+            f"{backend_url}/api/tasks/{task_id}/logs",
+            headers=admin_auth_headers,
+        )
+        assert resp.status_code == 200
+        logs = resp.json()
+
+        init_logs = [l for l in logs if l.get("log_type") == "system_init"]
+        assert len(init_logs) >= 1, (
+            f"Expected at least 1 system_init entry, got {len(init_logs)}. "
+            f"Log types: {[l.get('log_type') for l in logs]}"
+        )
+
+        import json
+        meta = json.loads(init_logs[0]["metadata"]) if isinstance(init_logs[0]["metadata"], str) else init_logs[0]["metadata"]
+        assert meta.get("model") == "fake-claude-1.0", f"Expected model 'fake-claude-1.0', got: {meta}"
+
+        # Also verify model_name is set on the task
+        assert task.get("model_name") == "fake-claude-1.0", (
+            f"Task model_name should be 'fake-claude-1.0', got: {task.get('model_name')}"
+        )
+
+        logger.info(f"✅ system_init verified: model={meta.get('model')}")
+
+    async def test_all_output_types_in_correct_order(
+        self,
+        http_client: httpx.AsyncClient,
+        backend_url: str,
+        admin_auth_headers: dict,
+    ):
+        """Verify the complete sequence of Claude output types appears in order."""
+        resp = await http_client.post(
+            f"{backend_url}/api/tasks",
+            json={
+                "project_id": 1,
+                "user_prompt": "Create files for full output sequence test",
+                "branch_name": "codify/output-sequence-test",
+                "target_branch": "main",
+            },
+            headers=admin_auth_headers,
+        )
+        assert resp.status_code in (200, 201)
+        task_id = resp.json()["id"]
+
+        task = await wait_for_task_status(
+            http_client, backend_url, task_id,
+            target_statuses=["completed"],
+            auth_headers=admin_auth_headers,
+            timeout=120,
+        )
+        assert task["status"] == "completed"
+
+        resp = await http_client.get(
+            f"{backend_url}/api/tasks/{task_id}/logs",
+            headers=admin_auth_headers,
+        )
+        assert resp.status_code == 200
+        logs = resp.json()
+
+        # Extract typed log entries (exclude raw log chunks)
+        typed_logs = [l for l in logs if l.get("log_type") in (
+            "system_init", "thinking", "assistant_text", "tool_call", "tool_calls_json"
+        )]
+
+        # Extract sequence of types
+        type_sequence = [l["log_type"] for l in typed_logs]
+        logger.info(f"Log type sequence: {type_sequence}")
+
+        # system_init should come first among typed entries
+        assert type_sequence[0] == "system_init", (
+            f"First typed entry should be system_init, got: {type_sequence[0]}"
+        )
+
+        # Should have all expected types
+        type_set = set(type_sequence)
+        assert "thinking" in type_set, f"Missing 'thinking' in log types: {type_set}"
+        assert "tool_call" in type_set, f"Missing 'tool_call' in log types: {type_set}"
+        assert "assistant_text" in type_set, f"Missing 'assistant_text' in log types: {type_set}"
+
+        # Verify counts
+        assert type_sequence.count("thinking") >= 2, f"Expected 2+ thinking, got {type_sequence.count('thinking')}"
+        assert type_sequence.count("tool_call") >= 3, f"Expected 3+ tool_call, got {type_sequence.count('tool_call')}"
+        assert type_sequence.count("assistant_text") >= 2, f"Expected 2+ assistant_text, got {type_sequence.count('assistant_text')}"
+
+        logger.info(
+            f"✅ Full output sequence verified: "
+            f"{type_sequence.count('thinking')} thinking, "
+            f"{type_sequence.count('tool_call')} tool_call, "
+            f"{type_sequence.count('assistant_text')} assistant_text"
+        )
+
+
 class TestNoMRMode:
     """Verify no-MR mode: target_branch=None skips MR creation."""
 

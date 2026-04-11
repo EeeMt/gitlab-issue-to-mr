@@ -63,11 +63,35 @@ PYEOF
     echo "[fake-claude] Created default: hello.py" >&2
 fi
 
-# Emit CODIFY markers to stderr (same as real ci-claude.sh process_stream)
+# Emit CODIFY markers to stderr — simulates a realistic multi-step AI interaction.
+# worker.py parses these in real-time and creates TaskLog entries.
+
+# 1. System initialization
 echo 'CODIFY_SYSTEM_INIT:{"model":"fake-claude-1.0","cwd":"/workspace"}' >&2
-echo 'CODIFY_TOOL_USE_START:{"id":"tool_001","name":"Write","input":{"file_path":"hello.py"}}' >&2
-echo 'CODIFY_TOOL_RESULT:{"id":"tool_001","output":"File created","error":false}' >&2
-echo 'CODIFY_ASSISTANT_TEXT:{"text":"I created hello.py with a greeting function."}' >&2
+
+# 2. First thinking block — AI analyzes the prompt
+echo 'CODIFY_THINKING:{"text":"Let me analyze the request. I need to create a Python file with a greeting function. I should make it well-structured with docstrings and a main guard."}' >&2
+
+# 3. First assistant text — AI explains its plan
+echo 'CODIFY_ASSISTANT_TEXT:{"text":"I'"'"'ll create a hello.py file with a well-structured greeting function."}' >&2
+
+# 4. First tool call — Read existing files to understand context
+echo 'CODIFY_TOOL_USE_START:{"id":"tool_001","name":"Read","input":{"file_path":"README.md"}}' >&2
+echo 'CODIFY_TOOL_RESULT:{"id":"tool_001","output":"# Test Project\n\nThis is a test repository.","error":false}' >&2
+
+# 5. Second thinking block — AI decides on implementation
+echo 'CODIFY_THINKING:{"text":"The project has a README. I'"'"'ll create hello.py with proper structure and also add a utils.py for helper functions."}' >&2
+
+# 6. Second tool call — Write the main file
+echo 'CODIFY_TOOL_USE_START:{"id":"tool_002","name":"Write","input":{"file_path":"hello.py","content":"def hello():\n    return \"Hello from Codify!\""}}' >&2
+echo 'CODIFY_TOOL_RESULT:{"id":"tool_002","output":"File created successfully","error":false}' >&2
+
+# 7. Third tool call — Write a second file
+echo 'CODIFY_TOOL_USE_START:{"id":"tool_003","name":"Write","input":{"file_path":"utils.py","content":"def greet(name):\n    return f\"Hello, {name}!\""}}' >&2
+echo 'CODIFY_TOOL_RESULT:{"id":"tool_003","output":"File created successfully","error":false}' >&2
+
+# 8. Final assistant text — AI summarizes what it did
+echo 'CODIFY_ASSISTANT_TEXT:{"text":"I created two files:\n1. hello.py — main greeting function\n2. utils.py — helper greeting with name parameter"}' >&2
 
 # Build and output JSON result to stdout (entrypoint.sh captures this)
 if [[ "$EXIT_CODE" == "0" ]]; then
@@ -83,7 +107,9 @@ if [[ "$EXIT_CODE" == "0" ]]; then
             session_id: $session_id,
             usage: {input_tokens: 1500, output_tokens: 800, cache_read_input_tokens: 200, cache_creation_input_tokens: 100},
             tool_calls: [
-                {name: "Write", input: {file_path: "hello.py", content: "..."}, output: "File created", error: false}
+                {name: "Read", input: {file_path: "README.md"}, output: "# Test Project", error: false},
+                {name: "Write", input: {file_path: "hello.py", content: "..."}, output: "File created successfully", error: false},
+                {name: "Write", input: {file_path: "utils.py", content: "..."}, output: "File created successfully", error: false}
             ]
         }'
 else
