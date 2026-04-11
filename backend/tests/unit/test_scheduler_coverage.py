@@ -151,10 +151,8 @@ class TestRunCycleManualTask(unittest.IsolatedAsyncioTestCase):
 
         # _execute_task should be called with issue_key="manual:42"
         mock_exec.assert_awaited_once()
-        _, call_kwargs = mock_exec.await_args
-        if mock_exec.await_args.args:
-            args = mock_exec.await_args.args
-            self.assertEqual(args[2], "manual:42")
+        args = mock_exec.await_args.args
+        self.assertEqual(args[2], "manual:42")
 
 
 # ---------------------------------------------------------------------------
@@ -762,6 +760,317 @@ class TestExecuteTask(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(task.error_message)
         self.assertNotIn(77, scheduler._running_tasks)
         self.assertNotIn("100:10", scheduler._running_issues)
+
+
+# ---------------------------------------------------------------------------
+# _crash_recovery — lines 287-288 (dead container remove() raises)
+# ---------------------------------------------------------------------------
+
+class TestCrashRecoveryContainerRemoveFailures(unittest.IsolatedAsyncioTestCase):
+    """Tests for container.remove() failure paths during crash recovery."""
+
+    def _make_container(self, name: str, status: str = "exited") -> MagicMock:
+        c = MagicMock()
+        c.name = name
+        c.status = status
+        c.remove = MagicMock()
+        return c
+
+    async def test_dead_container_remove_failure_is_caught(self) -> None:
+        """Lines 287-288: when removing a dead container raises, recovery should continue."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+
+        # Task 60 in RUNNING state in DB
+        stuck_task = _make_mock_task(task_id=60, project_id=400, issue_iid=2, status="running")
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [stuck_task]
+
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.commit = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        # Container in "dead" state — remove() will raise
+        dead_container = self._make_container("codify-60-p400-i2", status="dead")
+        dead_container.remove.side_effect = RuntimeError("Cannot remove dead container")
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.list.return_value = [dead_container]
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
+             patch("app.scheduler.get_docker_client", return_value=mock_docker):
+            # Should NOT raise — exception is caught and logged
+            await scheduler._crash_recovery()
+
+        dead_container.remove.assert_called_once_with(force=True)
+        # Task should still be marked failed (no container resumed it)
+        self.assertEqual(stuck_task.status, TaskStatus.FAILED)
+
+    async def test_orphan_container_remove_failure_is_caught(self) -> None:
+        """Lines 297-298: when removing an orphan container raises, recovery should continue."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+
+        # No stuck tasks in DB
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.commit = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        # Orphan container whose remove() raises
+        orphan = self._make_container("codify-99-p100-i10", status="running")
+        orphan.remove.side_effect = RuntimeError("Container in use by another process")
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.list.return_value = [orphan]
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
+             patch("app.scheduler.get_docker_client", return_value=mock_docker):
+            # Should NOT raise
+            await scheduler._crash_recovery()
+
+        orphan.remove.assert_called_once_with(force=True)
+
+    async def test_orphan_exited_container_remove_failure_is_caught(self) -> None:
+        """Lines 297-298: orphan exited container remove failure is safely caught."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.commit = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        orphan = self._make_container("codify-77-p200-manual", status="exited")
+        orphan.remove.side_effect = RuntimeError("Filesystem busy")
+
+        mock_docker = MagicMock()
+        mock_docker.client.containers.list.return_value = [orphan]
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
+             patch("app.scheduler.get_docker_client", return_value=mock_docker):
+            await scheduler._crash_recovery()
+
+        # Exited orphan: force=False (c_status != "running")
+        orphan.remove.assert_called_once_with(force=False)
+
+
+# ---------------------------------------------------------------------------
+# _resume_task_background — lines 323-352
+# ---------------------------------------------------------------------------
+
+class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
+    """Tests for _resume_task_background covering all paths."""
+
+    async def test_resume_success_cleans_up_tracking(self) -> None:
+        """Lines 323-332: successful resume returns True, tracking cleaned up."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        scheduler._running_tasks.add(42)
+        scheduler._running_issues.add("100:10")
+
+        mock_task = _make_mock_task(task_id=42, project_id=100, issue_iid=10)
+
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_task
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db):
+            loop = asyncio.get_event_loop()
+            with patch.object(loop, "run_in_executor", new_callable=AsyncMock, return_value=True):
+                await scheduler._resume_task_background(42, "codify-42-p100-i10")
+
+        self.assertNotIn(42, scheduler._running_tasks)
+        self.assertNotIn("100:10", scheduler._running_issues)
+
+    async def test_resume_failure_returns_false(self) -> None:
+        """Lines 333-334: when resume returns False, error is logged and tracking cleaned."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        scheduler._running_tasks.add(43)
+        scheduler._running_issues.add("200:20")
+
+        mock_task = _make_mock_task(task_id=43, project_id=200, issue_iid=20)
+
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_task
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db):
+            loop = asyncio.get_event_loop()
+            with patch.object(loop, "run_in_executor", new_callable=AsyncMock, return_value=False):
+                await scheduler._resume_task_background(43, "codify-43-p200-i20")
+
+        self.assertNotIn(43, scheduler._running_tasks)
+        self.assertNotIn("200:20", scheduler._running_issues)
+
+    async def test_resume_exception_cleans_up_tracking(self) -> None:
+        """Lines 335-336: executor exception during resume is caught, tracking cleaned."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        scheduler._running_tasks.add(44)
+        scheduler._running_issues.add("300:30")
+
+        mock_task = _make_mock_task(task_id=44, project_id=300, issue_iid=30)
+
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_task
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db):
+            loop = asyncio.get_event_loop()
+            with patch.object(loop, "run_in_executor", new_callable=AsyncMock,
+                              side_effect=RuntimeError("thread pool crashed")):
+                await scheduler._resume_task_background(44, "codify-44-p300-i30")
+
+        self.assertNotIn(44, scheduler._running_tasks)
+        self.assertNotIn("300:30", scheduler._running_issues)
+
+    async def test_resume_manual_task_uses_manual_issue_key(self) -> None:
+        """Lines 346-349: manual task (issue_iid=None) uses 'manual:{id}' key."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        scheduler._running_tasks.add(55)
+        scheduler._running_issues.add("manual:55")
+
+        mock_task = _make_mock_task(task_id=55, project_id=100, issue_iid=None)
+
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_task
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db):
+            loop = asyncio.get_event_loop()
+            with patch.object(loop, "run_in_executor", new_callable=AsyncMock, return_value=True):
+                await scheduler._resume_task_background(55, "codify-55-p100-manual")
+
+        self.assertNotIn(55, scheduler._running_tasks)
+        self.assertNotIn("manual:55", scheduler._running_issues)
+
+    async def test_resume_db_cleanup_failure_is_caught(self) -> None:
+        """Lines 351-352: DB exception during cleanup in finally block is silently caught."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        scheduler._running_tasks.add(66)
+
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(side_effect=RuntimeError("DB connection lost"))
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db):
+            loop = asyncio.get_event_loop()
+            with patch.object(loop, "run_in_executor", new_callable=AsyncMock, return_value=True):
+                # Should NOT raise
+                await scheduler._resume_task_background(66, "codify-66-p100-i5")
+
+        # Task cleaned up even though DB lookup failed
+        self.assertNotIn(66, scheduler._running_tasks)
+
+    async def test_resume_task_not_found_in_db(self) -> None:
+        """Lines 345-350: task not found in DB during cleanup — no issue_key to discard."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        scheduler._running_tasks.add(77)
+
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None  # task not found
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db):
+            loop = asyncio.get_event_loop()
+            with patch.object(loop, "run_in_executor", new_callable=AsyncMock, return_value=True):
+                await scheduler._resume_task_background(77, "codify-77-p100-i5")
+
+        self.assertNotIn(77, scheduler._running_tasks)
+
+
+# ---------------------------------------------------------------------------
+# _run_worker_resume_task — lines 441-476
+# ---------------------------------------------------------------------------
+
+class TestRunWorkerResumeTask(unittest.TestCase):
+    """Tests for the module-level _run_worker_resume_task() function.
+
+    The function uses local imports so we patch at the *source* modules:
+    - app.database._database_url
+    - sqlalchemy.ext.asyncio.create_async_engine
+    - sqlalchemy.ext.asyncio.async_sessionmaker
+    - app.core.worker.WorkerExecutor
+    """
+
+    def _run_with_mocks(self, resume_return_value=True):
+        """Helper: run _run_worker_resume_task with all imports mocked."""
+        from app.scheduler import _run_worker_resume_task
+
+        mock_worker = MagicMock()
+        mock_worker.resume_task = AsyncMock(return_value=resume_return_value)
+
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+
+        mock_engine = MagicMock()
+        mock_engine.dispose = AsyncMock()
+
+        with patch("app.database._database_url", "sqlite+aiosqlite:///:memory:"), \
+             patch("sqlalchemy.ext.asyncio.create_async_engine", return_value=mock_engine), \
+             patch("sqlalchemy.ext.asyncio.async_sessionmaker") as mock_sm, \
+             patch("app.core.worker.WorkerExecutor", return_value=mock_worker):
+            mock_sm.return_value = MagicMock(return_value=mock_db)
+            result = _run_worker_resume_task(42, "codify-42-p100-i10")
+
+        return result, mock_worker, mock_engine
+
+    def test_run_worker_resume_task_success(self) -> None:
+        """Lines 441-476: successful resume returns True."""
+        result, mock_worker, _ = self._run_with_mocks(resume_return_value=True)
+        self.assertTrue(result)
+        mock_worker.resume_task.assert_awaited_once()
+
+    def test_run_worker_resume_task_failure(self) -> None:
+        """_run_worker_resume_task returns False when worker returns False."""
+        result, _, _ = self._run_with_mocks(resume_return_value=False)
+        self.assertFalse(result)
+
+    def test_run_worker_resume_task_disposes_engine(self) -> None:
+        """Engine should be disposed in the finally block even on success."""
+        _, _, mock_engine = self._run_with_mocks(resume_return_value=True)
+        mock_engine.dispose.assert_called_once()
 
 
 if __name__ == "__main__":
