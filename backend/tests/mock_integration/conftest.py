@@ -88,8 +88,10 @@ async def reset_mock_state(mock_url: str):
             json={
                 "claude_exit_code": 0,
                 "claude_delay_seconds": 0,
+                "claude_skip_files": False,
                 "fail_git_push": False,
                 "fail_mr_update": False,
+                "fail_mr_creation": False,
                 "fail_project_lookup": False,
                 "fail_issue_notes": False,
             },

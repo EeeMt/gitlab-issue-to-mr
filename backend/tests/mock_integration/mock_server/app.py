@@ -87,8 +87,11 @@ _mock_config: dict[str, Any] = {
     # Failure injection — tests can toggle these to simulate errors
     "fail_git_push": False,
     "fail_mr_update": False,
+    "fail_mr_creation": False,
     "fail_project_lookup": False,
     "fail_issue_notes": False,
+    # When True, fake claude skips creating files (simulates "no changes" scenario)
+    "claude_skip_files": False,
 }
 _mock_config_lock = threading.Lock()
 
@@ -166,6 +169,11 @@ async def gitlab_create_mr_note(project_id: int, mr_iid: int, request: Request):
 async def gitlab_create_mr(project_id: int, request: Request):
     body = await request.json()
     record_call("gitlab", "POST", f"/api/v4/projects/{project_id}/merge_requests", body)
+    if _mock_config.get("fail_mr_creation"):
+        return JSONResponse(
+            status_code=500,
+            content={"message": "500 Internal Server Error"},
+        )
     mr_iid = _mock_config["mr_iid"]
     host = request.headers.get("host", "mock-services:9000")
     ns = _mock_config["project_namespace"]
@@ -240,6 +248,9 @@ async def gitlab_list_mrs(project_id: int, request: Request):
     """List MRs — used by entrypoint.sh to search for existing MR by source_branch."""
     params = dict(request.query_params)
     record_call("gitlab", "GET", f"/api/v4/projects/{project_id}/merge_requests", extra={"params": params})
+    # When fail_mr_creation is set, also return empty list so worker tries to POST
+    if _mock_config.get("fail_mr_creation"):
+        return []
     host = request.headers.get("host", "mock-services:9000")
     ns = _mock_config["project_namespace"]
     name = _mock_config["project_name"]

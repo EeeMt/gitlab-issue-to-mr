@@ -26,12 +26,15 @@ if command -v curl &>/dev/null && [[ -n "${GITLAB_URL:-}" ]]; then
     MOCK_CONFIG=$(curl -sf "${GITLAB_URL}/mock/config" 2>/dev/null || echo "{}")
     _MC_EXIT=$(echo "$MOCK_CONFIG" | jq -r '.claude_exit_code // empty' 2>/dev/null || true)
     _MC_DELAY=$(echo "$MOCK_CONFIG" | jq -r '.claude_delay_seconds // empty' 2>/dev/null || true)
+    _MC_SKIP=$(echo "$MOCK_CONFIG" | jq -r '.claude_skip_files // empty' 2>/dev/null || true)
     [[ -n "$_MC_EXIT" ]] && EXIT_CODE="$_MC_EXIT"
     [[ -n "$_MC_DELAY" ]] && DELAY_SECONDS="$_MC_DELAY"
 fi
 
+SKIP_FILES="${_MC_SKIP:-false}"
+
 echo "[fake-claude] Prompt: ${PROMPT}" >&2
-echo "[fake-claude] Exit code will be: ${EXIT_CODE}" >&2
+echo "[fake-claude] Exit code will be: ${EXIT_CODE}, skip_files: ${SKIP_FILES}" >&2
 
 # Optional delay — lets cancel tests catch the task in RUNNING state
 if [[ "$DELAY_SECONDS" -gt 0 ]] 2>/dev/null; then
@@ -39,8 +42,10 @@ if [[ "$DELAY_SECONDS" -gt 0 ]] 2>/dev/null; then
     sleep "$DELAY_SECONDS"
 fi
 
-# Create file changes in workspace
-if [[ -n "${FAKE_CLAUDE_FILES:-}" ]]; then
+# Create file changes in workspace (unless skip_files is set)
+if [[ "$SKIP_FILES" == "true" ]]; then
+    echo "[fake-claude] Skipping file creation (claude_skip_files=true)" >&2
+elif [[ -n "${FAKE_CLAUDE_FILES:-}" ]]; then
     echo "[fake-claude] Creating files from FAKE_CLAUDE_FILES" >&2
     echo "${FAKE_CLAUDE_FILES}" | jq -c '.[]' 2>/dev/null | while read -r entry; do
         fpath=$(echo "$entry" | jq -r '.path')
