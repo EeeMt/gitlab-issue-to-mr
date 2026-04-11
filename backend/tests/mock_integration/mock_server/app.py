@@ -84,6 +84,11 @@ _mock_config: dict[str, Any] = {
     "claude_file_changes": [
         {"path": "hello.py", "content": 'def hello():\n    return "Hello from Codify!"\n'}
     ],
+    # Failure injection — tests can toggle these to simulate errors
+    "fail_git_push": False,
+    "fail_mr_update": False,
+    "fail_project_lookup": False,
+    "fail_issue_notes": False,
 }
 
 
@@ -108,6 +113,8 @@ REPOS_ROOT = Path("/repos")
 @app.get("/api/v4/projects/{project_id}")
 async def gitlab_get_project(project_id: int, request: Request):
     record_call("gitlab", "GET", f"/api/v4/projects/{project_id}")
+    if _mock_config.get("fail_project_lookup"):
+        return JSONResponse(status_code=404, content={"message": "404 Project Not Found"})
     name = _mock_config["project_name"]
     ns = _mock_config["project_namespace"]
     host = request.headers.get("host", "mock-services:9000")
@@ -140,6 +147,8 @@ async def gitlab_get_issue(project_id: int, issue_iid: int):
 async def gitlab_create_issue_note(project_id: int, issue_iid: int, request: Request):
     body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {"body": (await request.form()).get("body", "")}
     record_call("gitlab", "POST", f"/api/v4/projects/{project_id}/issues/{issue_iid}/notes", body)
+    if _mock_config.get("fail_issue_notes"):
+        return JSONResponse(status_code=403, content={"message": "Forbidden"})
     return {"id": int(time.time() * 1000), "body": body.get("body", ""), "created_at": datetime.utcnow().isoformat()}
 
 
@@ -207,6 +216,8 @@ async def gitlab_update_mr(project_id: int, mr_iid: int, request: Request):
         form = await request.form()
         body = dict(form)
     record_call("gitlab", "PUT", f"/api/v4/projects/{project_id}/merge_requests/{mr_iid}", body)
+    if _mock_config.get("fail_mr_update"):
+        return JSONResponse(status_code=500, content={"message": "Internal Server Error"})
     host = request.headers.get("host", "mock-services:9000")
     ns = _mock_config["project_namespace"]
     name = _mock_config["project_name"]
@@ -281,6 +292,12 @@ async def gitlab_current_user():
 async def _handle_git_request(repo_path: str, request: Request) -> Response:
     """Process a git HTTP request via git http-backend CGI."""
     record_call("git", request.method, request.url.path)
+
+    # Reject pushes when fail_git_push is enabled
+    query = str(request.url.query) if request.url.query else ""
+    is_push = "receive-pack" in request.url.path or "service=git-receive-pack" in query
+    if is_push and _mock_config.get("fail_git_push"):
+        return Response(content="Push rejected by mock server", status_code=403)
 
     # Map URL path to filesystem
     # repo_path examples: test-group/test-project.git/info/refs

@@ -86,7 +86,14 @@ async def reset_mock_state(mock_url: str):
         await client.delete(f"{mock_url}/mock/calls")
         await client.patch(
             f"{mock_url}/mock/config",
-            json={"claude_exit_code": 0, "claude_delay_seconds": 0},
+            json={
+                "claude_exit_code": 0,
+                "claude_delay_seconds": 0,
+                "fail_git_push": False,
+                "fail_mr_update": False,
+                "fail_project_lookup": False,
+                "fail_issue_notes": False,
+            },
         )
         await client.post(f"{mock_url}/mock/reset-git")
     yield
