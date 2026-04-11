@@ -1,0 +1,111 @@
+# Docker Compose for mock integration tests
+# Usage: docker-compose -f backend/tests/mock_integration/docker-compose.mock-test.yml up -d
+#
+# All external services are mocked:
+# - mock-services: GitLab API + Git HTTP backend
+# - Worker uses fake Claude CLI instead of real one
+# - Real Docker daemon is used to spawn worker containers
+
+services:
+  # PostgreSQL — ephemeral, fresh for each test run
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: codify
+      POSTGRES_PASSWORD: codify_password
+      POSTGRES_DB: codify
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codify"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+    networks:
+      - mock-test
+
+  # Mock services — replaces GitLab + provides Git HTTP backend
+  mock-services:
+    build:
+      context: ../../../
+      dockerfile: backend/tests/mock_integration/mock_server/Dockerfile
+    ports:
+      - "19000:9000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/mock/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+    networks:
+      - mock-test
+
+  # Codify backend — real application server
+  backend:
+    image: codify-backend:latest
+    ports:
+      - "18000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://codify:codify_password@postgres:5432/codify
+      GITLAB_URL: http://mock-services:9000
+      GITLAB_BOT_TOKEN: mock-token-12345
+      GITLAB_WEBHOOK_SECRET: mock-webhook-secret
+      ANTHROPIC_BASE_URL: http://mock-services:9000/anthropic
+      ANTHROPIC_API_KEY: mock-api-key
+      ANTHROPIC_MODEL: fake-claude-1.0
+      DOCKER_HOST: unix:///var/run/docker.sock
+      WORKER_IMAGE: codify-worker-test:latest
+      WORKER_NETWORK: codify-mock-test
+      AUTO_MIGRATE: "true"
+      MAX_CONCURRENCY: "2"
+      TASK_TIMEOUT: "120"
+      DEFAULT_TARGET_BRANCH: main
+      SECRET_KEY: mock-secret-key-for-testing-only
+      BACKEND_URL: http://backend:8000
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock-services:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+    networks:
+      - mock-test
+
+  # Scheduler — picks up pending tasks and spawns worker containers
+  scheduler:
+    image: codify-backend:latest
+    command: ["python3", "-m", "app.scheduler_service"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://codify:codify_password@postgres:5432/codify
+      GITLAB_URL: http://mock-services:9000
+      GITLAB_BOT_TOKEN: mock-token-12345
+      GITLAB_WEBHOOK_SECRET: mock-webhook-secret
+      ANTHROPIC_BASE_URL: http://mock-services:9000/anthropic
+      ANTHROPIC_API_KEY: mock-api-key
+      ANTHROPIC_MODEL: fake-claude-1.0
+      DOCKER_HOST: unix:///var/run/docker.sock
+      WORKER_IMAGE: codify-worker-test:latest
+      WORKER_NETWORK: codify-mock-test
+      AUTO_MIGRATE: "false"
+      MAX_CONCURRENCY: "2"
+      TASK_TIMEOUT: "120"
+      DEFAULT_TARGET_BRANCH: main
+      SECRET_KEY: mock-secret-key-for-testing-only
+      BACKEND_URL: http://backend:8000
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - mock-test
+
+networks:
+  mock-test:
+    name: codify-mock-test
+    driver: bridge

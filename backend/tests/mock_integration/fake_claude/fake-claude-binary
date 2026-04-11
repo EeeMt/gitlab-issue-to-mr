@@ -1,0 +1,23 @@
+#!/bin/bash
+# Fake claude binary — handles --version and -p (prompt) modes
+# entrypoint.sh calls claude --version to check availability,
+# and claude -p to generate commit messages and MR titles.
+
+if [[ "$1" == "--version" ]]; then
+    echo "claude-fake 1.0.0 (mock-integration-test)"
+    exit 0
+fi
+
+if [[ "$1" == "-p" ]]; then
+    # Prompt mode — used for commit message and MR title generation
+    # Just echo a reasonable commit message / title
+    echo "chore: AI-generated code changes
+
+Implemented the requested modifications.
+
+AI-Generated: true"
+    exit 0
+fi
+
+echo "Error: fake claude binary called with unexpected args: $*" >&2
+exit 1

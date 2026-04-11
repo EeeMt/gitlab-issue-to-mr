@@ -1,0 +1,36 @@
+# Test worker image — real entrypoint.sh + fake Claude CLI
+# Built from base python image (does NOT need real claude binary download)
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies needed by entrypoint.sh
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    jq \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create codify user (same as real worker)
+RUN useradd --create-home --shell /bin/bash --uid 1000 codify
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Install fake claude binary (responds to --version only)
+COPY backend/tests/mock_integration/fake_claude/fake-claude-binary /usr/local/bin/claude
+RUN chmod +x /usr/local/bin/claude
+
+# Install fake ci-claude.sh (creates predictable file changes)
+COPY backend/tests/mock_integration/fake_claude/ci-claude.sh /usr/local/bin/ci-claude.sh
+RUN chmod +x /usr/local/bin/ci-claude.sh
+
+# Copy real entrypoint.sh (this is what we're testing!)
+COPY deploy/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Ensure codify user can write to workspace
+RUN mkdir -p /workspace && chown codify:codify /workspace
+
+ENTRYPOINT ["/entrypoint.sh"]

@@ -200,6 +200,35 @@ test-frontend: $(NODE_MODULES)/.installed ## Run frontend unit tests
 test-mock-e2e: $(VENV)/.installed ## Run mock E2E tests
 	cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/mock_e2e/ -v
 
+# ---------------------------------------------------------------------------
+# Mock Integration Tests (full lifecycle with mock GitLab + fake Claude)
+# ---------------------------------------------------------------------------
+
+MOCK_INT_COMPOSE := $(PROJECT_ROOT)/backend/tests/mock_integration/docker-compose.mock-test.yml
+
+.PHONY: test-mock-integration-build
+test-mock-integration-build: ## Build images for mock integration tests
+	docker build -f $(PROJECT_ROOT)/backend/tests/mock_integration/mock_server/Dockerfile -t codify-mock-services:latest $(PROJECT_ROOT)
+	docker build -f $(PROJECT_ROOT)/backend/tests/mock_integration/fake_claude/Dockerfile.worker-test -t codify-worker-test:latest $(PROJECT_ROOT)
+	@echo "Mock integration test images built: codify-mock-services:latest, codify-worker-test:latest"
+
+.PHONY: test-mock-integration-up
+test-mock-integration-up: test-mock-integration-build ## Start mock integration test environment
+	docker-compose -f $(MOCK_INT_COMPOSE) up -d --wait postgres mock-services backend scheduler
+
+.PHONY: test-mock-integration-down
+test-mock-integration-down: ## Stop mock integration test environment
+	docker-compose -f $(MOCK_INT_COMPOSE) down -v
+
+.PHONY: test-mock-integration-logs
+test-mock-integration-logs: ## View mock integration test logs
+	docker-compose -f $(MOCK_INT_COMPOSE) logs -f
+
+.PHONY: test-mock-integration
+test-mock-integration: $(VENV)/.installed test-mock-integration-up ## Run mock integration tests (builds + starts env + runs tests)
+	cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/mock_integration/ -v --tb=short || \
+		{ docker-compose -f $(MOCK_INT_COMPOSE) logs; false; }
+
 .PHONY: test-e2e-gitlab
 test-e2e-gitlab: ## Run GitLab E2E tests inside Docker (auto-skips if no GITLAB_BOT_TOKEN)
 	$(_E2E_RUN) pytest tests/gitlab_e2e/ -v

@@ -936,7 +936,7 @@ class WorkerExecutor:
                 command="",
                 environment=environment,
                 volumes=volumes if volumes else None,
-                network="bridge",
+                network=settings.worker_network,
                 name=container_name,
             )
 
