@@ -888,7 +888,14 @@ class WorkerExecutor:
         had_existing_mr = task.merge_request_iid is not None
 
         # Clear logs from any previous execution so the event stream starts fresh
-        await db.execute(delete(TaskLog).where(TaskLog.task_id == task_id))
+        del_result = await db.execute(
+            delete(TaskLog).where(TaskLog.task_id == task_id)
+        )
+        if del_result.rowcount:
+            logger.info(
+                f"[Task {task_id}] Cleared {del_result.rowcount} log entries"
+                " from previous execution"
+            )
 
         # Update task status to running
         task.status = TaskStatus.RUNNING

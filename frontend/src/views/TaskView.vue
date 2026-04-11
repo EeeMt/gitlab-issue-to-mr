@@ -455,6 +455,13 @@ async function fetchTask() {
     if (isActiveTaskStatus(previousStatus) && !isActiveTaskStatus(task.value.status)) {
       await fetchLogs()
     }
+
+    // Auto-retry detection: task restarted (non-active → active) while we were watching.
+    // Clear stale in-memory logs so the event stream starts fresh.
+    if (!isActiveTaskStatus(previousStatus) && isActiveTaskStatus(task.value.status)) {
+      resetLogsState()
+      connectStructuredLogStream()
+    }
   } catch (error) {
     message.error(t('taskView.failedToFetchTask'))
   } finally {
