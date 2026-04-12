@@ -50,6 +50,7 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "worker_ca_cert_host_path": str,  # Absolute path to CA cert on Docker host; auto-added to volume mounts
     "slot_max_tasks": int,  # Max tasks per 1-hour slot (0 = unlimited)
     "slot_max_tasks_enforce": bool,  # Enforce slot limit (True = hard reject, False = soft warning)
+    "session_storage_root": str,
 }
 
 SECRET_CONFIG_KEYS = {
@@ -140,6 +141,9 @@ class Settings(BaseSettings):
     # Shortcut: absolute path to CA cert on Docker host → automatically mounted into workers.
     # Simpler alternative to encoding a full JSON entry in worker_volume_mounts.
     worker_ca_cert_host_path: str = Field(default="")
+
+    # Session storage for Claude session persistence (Issue→Task model)
+    session_storage_root: str = Field(default="/var/codify/sessions")
 
     # Scheduler Configuration
     max_concurrency: int = Field(default=3)
