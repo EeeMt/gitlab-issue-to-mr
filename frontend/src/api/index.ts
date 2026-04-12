@@ -210,6 +210,10 @@ export interface Stats {
   completed_24h: number
   failed_cancelled_24h: number
   running_long_30min: number
+  issues?: {
+    total: number
+    by_status: Record<string, number>
+  }
 }
 
 export interface AnalyticsSummary {
