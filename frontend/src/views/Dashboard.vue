@@ -176,7 +176,7 @@ function renderExternalLink(label: string, href?: string | null) {
 }
 
 function getProjectSecondaryLabel(task: Task): string {
-  const issueLabel = task.issue_iid ? `!${task.issue_iid}` : '-'
+  const issueLabel = task.issue ? `#${task.issue.id}` : '-'
   return `${getProjectLabel(task)} · ${issueLabel}`
 }
 
@@ -247,7 +247,7 @@ const columns = computed<DataTableColumns<Task>>(() => {
               style:
                 'font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px'
             },
-            row.branch_name ? renderExternalLink(row.branch_name, row.branch_url) : '-'
+            row.issue?.branch_name ? renderExternalLink(row.issue.branch_name) : '-'
           )
         ])
     },
@@ -289,9 +289,23 @@ const columns = computed<DataTableColumns<Task>>(() => {
     },
     {
       title: t('dashboard.issue'),
-      key: 'issue_iid',
-      width: 68,
-      render: (row) => (row.issue_iid ? renderExternalLink(`!${row.issue_iid}`, row.issue_url) : '-')
+      key: 'issue',
+      width: 100,
+      ellipsis: { tooltip: true },
+      render: (row) => {
+        if (!row.issue) return '-'
+        return h(
+          'a',
+          {
+            style: 'cursor: pointer; color: var(--n-text-color);',
+            onClick: (e: MouseEvent) => {
+              e.stopPropagation()
+              router.push(`/issues/${row.issue!.id}`)
+            }
+          },
+          `#${row.issue.id} ${row.issue.title}`
+        )
+      }
     },
     {
       title: t('dashboard.status'),
@@ -310,19 +324,19 @@ const columns = computed<DataTableColumns<Task>>(() => {
       key: 'branch_name',
       width: 120,
       ellipsis: { tooltip: true },
-      render: (row) => (row.branch_name ? renderExternalLink(row.branch_name, row.branch_url) : '-')
+      render: (row) => (row.issue?.branch_name ? row.issue.branch_name : '-')
     },
     {
       title: t('dashboard.mergeRequest'),
       key: 'merge_request_url',
       width: 72,
       render: (row) => {
-        if (!row.merge_request_url) return '-'
-        const label = row.merge_request_iid ? `!${row.merge_request_iid}` : t('dashboard.open')
+        const mrUrl = row.issue?.merge_request_url
+        if (!mrUrl) return '-'
         return h(
           'a',
-          { href: row.merge_request_url, target: '_blank', rel: 'noopener noreferrer', class: 'app-link' },
-          label
+          { href: mrUrl, target: '_blank', rel: 'noopener noreferrer', class: 'app-link' },
+          t('dashboard.open')
         )
       }
     },

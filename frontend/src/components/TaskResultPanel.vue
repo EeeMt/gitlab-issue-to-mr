@@ -6,19 +6,19 @@
 
     <div class="result-body">
       <!-- MR Card -->
-      <div v-if="task.merge_request_url" class="result-card result-card--mr">
+      <div v-if="task.issue?.merge_request_url" class="result-card result-card--mr">
         <div class="result-card__title">
           <n-icon size="16" class="result-card__icon"><GitMergeOutline /></n-icon>
           {{ t('taskView.mergeRequest') }}
         </div>
         <div class="result-card__content">
-          <a :href="task.merge_request_url" target="_blank" rel="noopener noreferrer" class="app-link mr-link">
-            {{ task.merge_request_title || task.merge_request_url }}
+          <a :href="task.issue.merge_request_url" target="_blank" rel="noopener noreferrer" class="app-link mr-link">
+            {{ task.merge_request_title || task.issue.merge_request_url }}
           </a>
-          <div v-if="task.branch_name && task.target_branch" class="mr-branch-flow">
-            <span class="branch-item branch-item--work">{{ task.branch_name }}</span>
+          <div v-if="task.issue?.branch_name && task.issue?.target_branch" class="mr-branch-flow">
+            <span class="branch-item branch-item--work">{{ task.issue.branch_name }}</span>
             <span class="branch-arrow">→</span>
-            <span class="branch-item branch-item--target">{{ task.target_branch }}</span>
+            <span class="branch-item branch-item--target">{{ task.issue.target_branch }}</span>
           </div>
         </div>
       </div>

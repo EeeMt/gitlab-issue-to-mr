@@ -45,6 +45,24 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
+      path: '/issues',
+      name: 'Issues',
+      component: () => import('../views/IssueList.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/issues/create',
+      name: 'CreateIssue',
+      component: () => import('../views/CreateIssue.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/issues/:id',
+      name: 'IssueView',
+      component: () => import('../views/IssueView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/tasks/:id',
       name: 'TaskView',
       component: TaskView,

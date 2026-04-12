@@ -204,7 +204,7 @@
                     {{ t('scheduleOverview.currentSchedule') }}: {{ formatShortDateTime(task.scheduled_at) }}
                   </div>
                   <div class="slot-task-card__branch">
-                    {{ t('common.branch') }}: {{ task.branch_name || '-' }}
+                    {{ t('common.branch') }}: {{ task.issue?.branch_name || '-' }}
                   </div>
                   <div class="slot-task-card__prompt">{{ task.user_prompt }}</div>
                 </div>

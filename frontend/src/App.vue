@@ -159,6 +159,7 @@ import { useI18n } from 'vue-i18n'
 import {
   AddCircleOutline,
   BarChartOutline,
+  DocumentTextOutline,
   FingerPrintOutline,
   GridOutline,
   LogOutOutline,
@@ -192,6 +193,8 @@ const showShell = computed(() => !isLoginRoute.value && !isBootstrapRoute.value)
 
 const menuLabels: Record<string, string> = {
   Dashboard: 'nav.dashboard',
+  Issues: 'nav.issues',
+  CreateIssue: 'nav.createIssue',
   CreateTask: 'nav.createTask',
   Sessions: 'nav.sessions',
   Monitor: 'nav.monitor',
@@ -240,6 +243,7 @@ function buildMenuSection(labelKey: string, children: MenuOption[]): MenuOption[
 const menuOptions = computed<MenuOption[]>(() => {
   const workspaceItems: MenuOption[] = [
     buildMenuItem('nav.dashboard', 'Dashboard', GridOutline),
+    buildMenuItem('nav.issues', 'Issues', DocumentTextOutline),
     buildMenuItem('nav.createTask', 'CreateTask', AddCircleOutline)
   ]
 

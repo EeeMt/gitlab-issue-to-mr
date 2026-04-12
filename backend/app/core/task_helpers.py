@@ -14,7 +14,7 @@ def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = Non
     settings = get_effective_settings()
     project_path = metadata.get("project_path_with_namespace")
     project_url = f"{settings.gitlab_url.rstrip('/')}/{project_path}" if project_path else None
-    return {
+    data = {
         "id": task.id,
         "issue_id": task.issue_id,
         "project_id": task.project_id,
@@ -50,6 +50,17 @@ def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = Non
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
     }
+    issue = getattr(task, "issue", None)
+    if issue is not None:
+        data["issue"] = {
+            "id": issue.id,
+            "title": issue.title,
+            "branch_name": issue.branch_name,
+            "base_branch": issue.base_branch,
+            "target_branch": issue.target_branch,
+            "merge_request_url": issue.merge_request_url,
+        }
+    return data
 
 
 def _can_manage_task(task: Task, current_user: Optional[User]) -> bool:

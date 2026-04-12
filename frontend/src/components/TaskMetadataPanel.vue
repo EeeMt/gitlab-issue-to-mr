@@ -31,20 +31,16 @@
       <div class="metadata-row">
         <span class="metadata-label">
           <n-icon size="14" class="metadata-label-icon">
-            <GitMergeOutline v-if="task.issue_iid" />
+            <GitMergeOutline v-if="task.issue" />
             <PersonOutline v-else />
           </n-icon>
           {{ t('common.source') }}
         </span>
         <span class="metadata-value">
-          <template v-if="task.issue_iid && task.issue_url">
-            <a :href="task.issue_url" target="_blank" rel="noopener noreferrer" class="app-link">
-              #{{ task.issue_iid }}
-            </a>
-            <span v-if="task.initiator_username" class="metadata-initiator"> · {{ task.initiator_username }}</span>
-          </template>
-          <template v-else-if="task.issue_iid">
-            #{{ task.issue_iid }}
+          <template v-if="task.issue">
+            <router-link :to="`/issues/${task.issue.id}`" class="app-link">
+              #{{ task.issue.id }} {{ task.issue.title }}
+            </router-link>
             <span v-if="task.initiator_username" class="metadata-initiator"> · {{ task.initiator_username }}</span>
           </template>
           <template v-else>
@@ -62,18 +58,16 @@
         </span>
         <span class="metadata-value">
           <span class="branch-flow">
-            <span v-if="task.base_branch" class="branch-item branch-item--base">{{ task.base_branch }}</span>
-            <span v-if="task.base_branch && task.branch_name" class="branch-arrow">➜</span>
-            <span v-if="task.branch_name" class="branch-item branch-item--work">
-              <a v-if="task.branch_url" :href="task.branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.branch_name }}</a>
-              <span v-else>{{ task.branch_name }}</span>
+            <span v-if="task.issue?.base_branch" class="branch-item branch-item--base">{{ task.issue.base_branch }}</span>
+            <span v-if="task.issue?.base_branch && task.issue?.branch_name" class="branch-arrow">➜</span>
+            <span v-if="task.issue?.branch_name" class="branch-item branch-item--work">
+              {{ task.issue.branch_name }}
             </span>
-            <span v-if="task.branch_name" class="branch-arrow">➜</span>
-            <span v-if="task.target_branch" class="branch-item branch-item--target">
-              <a v-if="task.target_branch_url" :href="task.target_branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.target_branch }}</a>
-              <span v-else>{{ task.target_branch }}</span>
+            <span v-if="task.issue?.branch_name && task.issue?.target_branch" class="branch-arrow">➜</span>
+            <span v-if="task.issue?.target_branch" class="branch-item branch-item--target">
+              {{ task.issue.target_branch }}
             </span>
-            <span v-else class="branch-item branch-item--direct">{{ t('taskView.directPush') }}</span>
+            <span v-if="!task.issue?.branch_name" class="branch-item branch-item--direct">{{ t('taskView.directPush') }}</span>
           </span>
         </span>
       </div>
@@ -85,17 +79,14 @@
           {{ t('taskView.mergeRequest') }}
         </span>
         <span class="metadata-value">
-          <!-- Completed with MR -->
-          <template v-if="task.merge_request_url">
-            <a :href="task.merge_request_url" target="_blank" rel="noopener noreferrer" class="app-link mr-link">
-              {{ task.merge_request_title || `MR !${task.merge_request_iid}` }}
+          <template v-if="task.issue?.merge_request_url">
+            <a :href="task.issue.merge_request_url" target="_blank" rel="noopener noreferrer" class="app-link mr-link">
+              {{ task.merge_request_title || 'Merge Request' }}
             </a>
           </template>
-          <!-- Will create MR (target branch set, not yet done) -->
-          <template v-else-if="task.target_branch">
-            <span class="mr-pending">{{ t('taskView.mrWillBeCreated') }} → <span class="branch-item branch-item--target" style="display:inline">{{ task.target_branch }}</span></span>
+          <template v-else-if="task.issue?.target_branch">
+            <span class="mr-pending">{{ t('taskView.mrWillBeCreated') }} → <span class="branch-item branch-item--target" style="display:inline">{{ task.issue.target_branch }}</span></span>
           </template>
-          <!-- No MR -->
           <template v-else>
             <span class="mr-none">{{ t('taskView.mrNotCreated') }}</span>
           </template>

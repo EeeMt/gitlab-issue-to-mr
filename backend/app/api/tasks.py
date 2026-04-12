@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, func, select, false
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.docker_client import get_docker_client
 from app.core.projects import build_project_lookup, get_project_metadata
@@ -60,7 +61,7 @@ async def list_tasks(
     When ``page`` is provided, returns ``{items, total, page, page_size}``.
     Without ``page``, returns a plain ``Task[]`` array (legacy behaviour).
     """
-    query = select(Task).order_by(Task.created_at.desc())
+    query = select(Task).options(selectinload(Task.issue)).order_by(Task.created_at.desc())
 
     if status:
         # Support comma-separated status values: ?status=running,pending,queued
@@ -226,7 +227,7 @@ async def get_task(
     """
     t0 = time.time()
     logger.info(f"[HANDLER START] get_task/{task_id} t={t0:.3f}")
-    result = await db.execute(select(Task).where(Task.id == task_id))
+    result = await db.execute(select(Task).options(selectinload(Task.issue)).where(Task.id == task_id))
     t1 = time.time()
     task = result.scalar_one_or_none()
 

@@ -14,7 +14,7 @@
           <n-space :size="8" wrap class="create-task-page__tags">
             <n-tag size="small" round type="info">{{ t('createTask.manualTrigger') }}</n-tag>
             <n-tag size="small" round>{{ t('createTask.schedulerAware') }}</n-tag>
-            <n-tag size="small" round>{{ t('createTask.gitlabBranchWorkflow') }}</n-tag>
+            <n-tag size="small" round>{{ t('createTask.issueDriven') }}</n-tag>
           </n-space>
         </template>
       </PageHeader>
@@ -39,93 +39,48 @@
             data-testid="create-task-form"
           >
             <div class="create-task-form__section">
-              <div class="create-task-form__section-title">{{ t('createTask.repositoryBranches') }}</div>
-              <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-                <n-gi>
-                  <n-form-item :label="t('createTask.project')" path="project_id">
-                      <n-select
-                        data-testid="create-task-project-select"
-                        v-model:value="formValue.project_id"
-                      :options="projectOptions"
-                      :loading="projectsLoading"
-                      :placeholder="t('createTask.selectProject')"
-                      @update:value="handleProjectChange"
-                    />
-                  </n-form-item>
-                </n-gi>
-                <n-gi>
-                  <n-form-item :label="t('createTask.baseBranch')" path="base_branch">
-                      <n-select
-                        data-testid="create-task-base-branch-select"
-                        v-model:value="formValue.base_branch"
-                      :options="branchOptions"
-                      :loading="branchesLoading"
-                      :placeholder="t('createTask.selectBaseBranch')"
-                      :disabled="!formValue.project_id"
-                      @update:value="handleBaseBranchChange"
-                    />
-                    <template #feedback>
-                      {{ t('createTask.baseBranchHint') }}
-                    </template>
-                  </n-form-item>
-                </n-gi>
-                <n-gi>
-                  <n-form-item :label="t('createTask.newBranchName')" path="new_branch_name">
-                      <n-input
-                        data-testid="create-task-new-branch-input"
-                        v-model:value="formValue.new_branch_name"
-                      :placeholder="t('createTask.newBranchPlaceholder')"
-                      :disabled="!formValue.project_id || !formValue.base_branch"
-                    />
-                    <template #feedback>
-                      {{ t('createTask.newBranchHint') }}
-                    </template>
-                  </n-form-item>
-                </n-gi>
-              </n-grid>
-            </div>
-
-            <div class="create-task-form__section">
-              <div class="create-task-form__section-title">{{ t('createTask.mrSettings') }}</div>
-              <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-                <n-gi>
-                  <n-form-item path="create_mr">
-                    <template #label>
-                      <n-tooltip placement="top">
-                        <template #trigger>
-                          <span class="create-task-form__toggle-label">
-                            {{ t('createTask.createMR') }}
-                            <n-icon :component="InformationCircleOutline" size="14" class="create-task-form__toggle-label-icon" />
-                          </span>
-                        </template>
-                        {{ t('createTask.createMRTooltip') }}
-                      </n-tooltip>
-                    </template>
-                    <n-switch
-                      v-model:value="createMR"
-                      data-testid="create-task-create-mr-switch"
-                      @update:value="handleCreateMRChange"
-                    />
-                  </n-form-item>
-                </n-gi>
-                <n-gi v-if="createMR">
-                  <n-form-item :label="t('createTask.targetBranch')" path="target_branch">
-                      <n-select
-                        data-testid="create-task-target-branch-select"
-                        v-model:value="formValue.target_branch"
-                      :options="targetBranchOptions"
-                      :disabled="!formValue.project_id"
-                      :placeholder="t('createTask.selectTargetBranch')"
-                    />
-                    <template #feedback>
-                      {{ t('createTask.targetBranchHint') }}
-                    </template>
-                  </n-form-item>
-                  <div v-if="sameBranchConflict" class="create-task-form__warning">
-                    {{ t('createTask.branchConflict') }}
-                  </div>
-                </n-gi>
-              </n-grid>
+              <div class="create-task-form__section-title">{{ t('createTask.issueSelection') }}</div>
+              <n-form-item :label="t('createTask.issue')" path="issue_id">
+                <n-select
+                  data-testid="create-task-issue-select"
+                  v-model:value="formValue.issue_id"
+                  :options="issueOptions"
+                  :loading="issuesLoading"
+                  filterable
+                  :placeholder="t('createTask.selectIssue')"
+                  @update:value="handleIssueChange"
+                />
+              </n-form-item>
+              <div v-if="selectedIssue" class="issue-context" data-testid="create-task-issue-context">
+                <div class="issue-context__title">{{ selectedIssue.title }}</div>
+                <div class="issue-context__meta">
+                  <span v-if="selectedIssue.project_id" class="issue-context__item">
+                    <span class="issue-context__label">{{ t('createTask.project') }}:</span>
+                    #{{ selectedIssue.project_id }}
+                  </span>
+                  <span v-if="selectedIssue.branch_name" class="issue-context__item">
+                    <span class="issue-context__label">{{ t('createTask.branch') }}:</span>
+                    {{ selectedIssue.branch_name }}
+                  </span>
+                  <span v-if="selectedIssue.base_branch" class="issue-context__item">
+                    <span class="issue-context__label">{{ t('createTask.baseBranch') }}:</span>
+                    {{ selectedIssue.base_branch }}
+                  </span>
+                  <span v-if="selectedIssue.target_branch" class="issue-context__item">
+                    <span class="issue-context__label">{{ t('createTask.targetBranch') }}:</span>
+                    {{ selectedIssue.target_branch }}
+                  </span>
+                  <span class="issue-context__item">
+                    <span class="issue-context__label">{{ t('common.status') }}:</span>
+                    <n-tag size="tiny" :type="selectedIssue.status === 'open' ? 'info' : selectedIssue.status === 'in_progress' ? 'warning' : 'success'">
+                      {{ selectedIssue.status }}
+                    </n-tag>
+                  </span>
+                </div>
+                <div v-if="selectedIssue.description" class="issue-context__description">
+                  {{ selectedIssue.description }}
+                </div>
+              </div>
             </div>
 
             <div class="create-task-form__section">
@@ -350,18 +305,18 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  NCard, NForm, NFormItem, NSelect, NInput, NInputNumber,
+  NCard, NForm, NFormItem, NSelect, NInputNumber,
   NButton, NSpin, NSpace, NRadioGroup, NRadio, NModal,
-  NDatePicker, NTag, NGrid, NGi, NIcon, NSwitch, NTooltip,
+  NDatePicker, NTag, NGrid, NGi, NIcon,
   NDrawer, NDrawerContent, NAlert,
   useMessage, FormInst, FormRules
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getProjects, getBranches, createTask, getPromptTemplates, getScheduledTasks, getSlotCapacity, getConfig, type Project, type Branch, type CreateTaskRequest, type PromptTemplate, type Task, type SlotCapacityInfo } from '../api'
+import { createTask, getIssues, getPromptTemplates, getScheduledTasks, getSlotCapacity, getConfig, type Issue, type CreateTaskRequest, type PromptTemplate, type Task, type SlotCapacityInfo } from '../api'
 import { formatDateTimeUtc8, formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
 import { isSameLocalDay } from '../utils/format'
 import { extractSlotErrorMessage } from '../utils/slotError'
-import { DocumentTextOutline, WarningOutline, InformationCircleOutline, CalendarOutline } from '@vicons/ionicons5'
+import { DocumentTextOutline, WarningOutline, CalendarOutline } from '@vicons/ionicons5'
 import PageHeader from '../components/PageHeader.vue'
 import VariableEditor from '../components/VariableEditor.vue'
 import HeatmapChart from '../components/HeatmapChart.vue'
@@ -374,14 +329,12 @@ const { isMobile } = useBreakpoints()
 
 // Loading states
 const loading = ref(false)
-const projectsLoading = ref(false)
-const branchesLoading = ref(false)
+const issuesLoading = ref(false)
 const submitting = ref(false)
 const promptTemplatesLoading = ref(false)
 
 // Data
-const projects = ref<Project[]>([])
-const branches = ref<Branch[]>([])
+const issues = ref<Issue[]>([])
 const promptTemplates = ref<PromptTemplate[]>([])
 
 // Per-session variable tips from template (not persisted)
@@ -405,13 +358,17 @@ const priorityOptions = computed(() => [
 const formRef = ref<FormInst | null>(null)
 const formResetKey = ref(0)
 
-function createInitialFormValue(): CreateTaskRequest & { base_branch?: string; new_branch_name?: string; branch_name?: string } {
+interface FormModel {
+  issue_id: number | null
+  user_prompt: string
+  priority: number
+  delay_seconds?: number
+  scheduled_datetime?: string
+}
+
+function createInitialFormValue(): FormModel {
   return {
-    project_id: undefined,
-    base_branch: undefined,
-    new_branch_name: '',
-    branch_name: '',
-    target_branch: 'main',
+    issue_id: null,
     user_prompt: '',
     priority: 1,
     delay_seconds: undefined,
@@ -419,7 +376,7 @@ function createInitialFormValue(): CreateTaskRequest & { base_branch?: string; n
   }
 }
 
-const formValue = ref<CreateTaskRequest & { base_branch?: string; new_branch_name?: string; branch_name?: string }>(createInitialFormValue())
+const formValue = ref<FormModel>(createInitialFormValue())
 
 // UI state
 const scheduleType = ref<'now' | 'delay' | 'scheduled'>('now')
@@ -496,56 +453,24 @@ const heatmapSelectedMs = computed<number | null>(() => {
 
 watch(heatmapSelectedMs, () => checkSlotCapacity())
 
-// Create MR toggle
-const createMR = ref(true)
-
 // Success modal
 const showSuccessModal = ref(false)
 const createdTaskId = ref(0)
 
-// Options
-const projectOptions = computed(() =>
-  projects.value.map(p => ({
-    label: p.path_with_namespace,
-    value: p.id
+// Issue options for the select dropdown
+const issueOptions = computed(() =>
+  issues.value.map(issue => ({
+    label: `#${issue.id} – ${issue.title}`,
+    value: issue.id
   }))
 )
 
-const branchOptions = computed(() =>
-  branches.value.map(b => ({
-    label: b.name,
-    value: b.name
-  }))
+// Currently selected issue (for displaying context info)
+const selectedIssue = computed(() =>
+  formValue.value.issue_id != null
+    ? issues.value.find(i => i.id === formValue.value.issue_id) ?? null
+    : null
 )
-
-const targetBranchOptions = computed(() => {
-  // Use branches for target, with 'main' as first option
-  let options = branches.value.map(b => ({
-    label: b.name,
-    value: b.name
-  }))
-
-  // Move main to top if exists
-  const mainIdx = options.findIndex(o => o.value === 'main')
-  if (mainIdx > 0) {
-    const main = options.splice(mainIdx, 1)[0]
-    options.unshift(main)
-  }
-
-  return options
-})
-
-const resolvedSourceBranch = computed(() => {
-  return (formValue.value.new_branch_name || '').trim()
-})
-
-const sameBranchConflict = computed(() => {
-  return (
-    !!resolvedSourceBranch.value &&
-    !!formValue.value.target_branch &&
-    resolvedSourceBranch.value === formValue.value.target_branch
-  )
-})
 
 const scheduleSummary = computed(() => {
   if (scheduleType.value === 'now') {
@@ -636,63 +561,13 @@ function handleScheduleHeatmapCellClick(startMs: number) {
   showScheduleDrawer.value = false
 }
 
-// Git branch name validation (based on git-check-ref-format rules)
-function validateBranchName(name: string): string | null {
-  if (!name) return null
-  // Single '@' is not allowed
-  if (name === '@') return t('createTask.branchNameInvalidChars')
-  // Cannot contain ASCII control chars (0x00-0x1f, 0x7f), space, ~, ^, :, ?, *, [, \
-  if (/[\x00-\x20\x7f~^:?*\[\\]/.test(name)) return t('createTask.branchNameInvalidChars')
-  // Cannot start with . or -
-  if (name.startsWith('.') || name.startsWith('-')) return t('createTask.branchNameInvalidStart')
-  // Cannot start or end with /
-  if (name.startsWith('/') || name.endsWith('/')) return t('createTask.branchNameInvalidEnd')
-  // Cannot end with .
-  if (name.endsWith('.')) return t('createTask.branchNameInvalidEnd')
-  // Cannot contain .., @{, or //
-  if (name.includes('..') || name.includes('@{') || name.includes('//')) return t('createTask.branchNameInvalidSequence')
-  // Each path component cannot start with . or end with .lock
-  for (const component of name.split('/')) {
-    if (component.startsWith('.')) return t('createTask.branchNameInvalidComponent')
-    if (component.endsWith('.lock')) return t('createTask.branchNameInvalidEnd')
-  }
-  return null
-}
-
 // Validation rules
 const rules: FormRules = {
-  project_id: {
+  issue_id: {
     required: true,
     type: 'number',
-    message: t('createTask.pleaseSelectProject'),
+    message: t('createTask.pleaseSelectIssue'),
     trigger: 'change'
-  },
-  base_branch: {
-    required: true,
-    message: t('createTask.pleaseSelectBaseBranch'),
-    trigger: 'change'
-  },
-  new_branch_name: {
-    validator: () => {
-      const name = (formValue.value.new_branch_name || '').trim()
-      if (name) {
-        const branchError = validateBranchName(name)
-        if (branchError) return new Error(branchError)
-      }
-      return !sameBranchConflict.value || new Error(t('createTask.sourceTargetDifferent'))
-    },
-    trigger: ['blur', 'input', 'change']
-  },
-  target_branch: {
-    required: true,
-    validator: () => {
-      if (!createMR.value) return true
-      if (!formValue.value.target_branch) {
-        return new Error(t('createTask.pleaseSelectTargetBranch'))
-      }
-      return !sameBranchConflict.value || new Error(t('createTask.sourceTargetDifferent'))
-    },
-    trigger: ['blur', 'change', 'input']
   },
   user_prompt: {
     required: true,
@@ -701,15 +576,16 @@ const rules: FormRules = {
   }
 }
 
-// Fetch projects
-async function fetchProjects() {
-  projectsLoading.value = true
+// Fetch issues
+async function fetchIssues() {
+  issuesLoading.value = true
   try {
-    projects.value = await getProjects()
+    const response = await getIssues({ status: 'open', page_size: 100 })
+    issues.value = response.items
   } catch (error) {
-    message.error(t('createTask.failedToFetchProjects'))
+    message.error(t('createTask.failedToFetchIssues'))
   } finally {
-    projectsLoading.value = false
+    issuesLoading.value = false
   }
 }
 
@@ -736,61 +612,17 @@ function applyPromptTemplate(template: PromptTemplate) {
   promptVariableTips.value = template.variable_tips
 }
 
-// Fetch branches when project changes
-async function fetchBranches(projectId: number) {
-  branchesLoading.value = true
-  branches.value = []
-  try {
-    branches.value = await getBranches(projectId)
-    // Reset branch selection
-    formValue.value.branch_name = ''
-    // Auto-set base_branch to the project's default branch
-    const project = projects.value.find(p => p.id === projectId)
-    const defaultBranch = project?.default_branch
-    if (defaultBranch && branches.value.some(b => b.name === defaultBranch)) {
-      formValue.value.base_branch = defaultBranch
-    }
-  } catch (error) {
-    message.error(t('createTask.failedToFetchBranches'))
-  } finally {
-    branchesLoading.value = false
-  }
-}
-
-function handleProjectChange(projectId: number) {
-  if (projectId) {
-    fetchBranches(projectId)
-    formValue.value.base_branch = undefined
-    formValue.value.new_branch_name = ''
-    // Set target_branch to the project's default branch only when MR creation is enabled
-    if (createMR.value) {
-      const project = projects.value.find(p => p.id === projectId)
-      formValue.value.target_branch = project?.default_branch || 'main'
-    }
-  }
-}
-
-function handleBaseBranchChange(_branch: string) {
-  // Reset new branch name when base branch changes
-  formValue.value.new_branch_name = ''
-}
-
-function handleCreateMRChange(value: boolean) {
-  if (value && formValue.value.project_id) {
-    // Restore project default branch when toggling MR creation back on
-    const project = projects.value.find(p => p.id === formValue.value.project_id)
-    formValue.value.target_branch = project?.default_branch || 'main'
-  }
+// Handle issue selection change
+function handleIssueChange(_issueId: number | null) {
+  // Selection itself is bound via v-model; no extra logic needed
 }
 
 async function handleReset() {
-  branches.value = []
   Object.assign(formValue.value, createInitialFormValue())
   scheduleType.value = 'now'
   delayValue.value = 5
   delayUnit.value = 'minutes'
   scheduledDatetime.value = null
-  createMR.value = true
   createdTaskId.value = 0
   formResetKey.value += 1
 
@@ -844,16 +676,14 @@ async function handleSubmit() {
   submitting.value = true
 
   try {
-    // Determine branch_name: use new_branch_name if provided, otherwise auto-generate
-    const branchName = formValue.value.new_branch_name?.trim() || `ai-task-${Date.now()}`
+    if (formValue.value.issue_id == null) {
+      message.error(t('createTask.pleaseSelectIssue'))
+      return
+    }
 
-    // Prepare request; base_branch is the branch to fork from (sent separately)
     const request: CreateTaskRequest = {
-      project_id: formValue.value.project_id,
-      branch_name: branchName,
-      base_branch: formValue.value.base_branch || undefined,
-      target_branch: createMR.value ? formValue.value.target_branch : null,
-      user_prompt: formValue.value.user_prompt,
+      issue_id: formValue.value.issue_id,
+      user_prompt: formValue.value.user_prompt || undefined,
       priority: formValue.value.priority
     }
 
@@ -881,7 +711,7 @@ function createAnother() {
 }
 
 onMounted(() => {
-  fetchProjects()
+  fetchIssues()
   fetchPromptTemplates()
 })
 
@@ -965,12 +795,6 @@ watch(scheduleType, (newType) => {
 .content-width-datetime-picker {
   width: fit-content;
   max-width: 100%;
-}
-
-.create-task-form__warning {
-  margin-top: 6px;
-  font-size: 12px;
-  color: #d03050;
 }
 
 @media (max-width: 768px) {
@@ -1076,16 +900,52 @@ watch(scheduleType, (newType) => {
   margin-top: 4px;
 }
 
-.create-task-form__toggle-label {
+.issue-context {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: rgba(32, 128, 240, 0.04);
+  border: 1px solid rgba(32, 128, 240, 0.12);
+}
+
+.issue-context__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.88);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.issue-context__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.issue-context__item {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  cursor: default;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.68);
 }
 
-.create-task-form__toggle-label-icon {
-  opacity: 0.55;
-  vertical-align: middle;
+.issue-context__label {
+  font-weight: 500;
+  color: rgba(15, 23, 42, 0.52);
+}
+
+.issue-context__description {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(32, 128, 240, 0.08);
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgba(15, 23, 42, 0.58);
+  white-space: pre-wrap;
+  max-height: 80px;
+  overflow-y: auto;
 }
 
 .schedule-drawer__hint {

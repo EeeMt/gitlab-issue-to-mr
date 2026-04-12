@@ -1364,8 +1364,8 @@ function kanbanProjectLabel(task: Task): string {
 }
 
 function kanbanIssueLabel(task: Task): string {
-  if (task.issue_iid) return `#${task.issue_iid}`
-  return t('monitor.kanbanManual')
+  if (task.issue) return `#${task.issue.id} ${task.issue.title}`
+  return '—'
 }
 
 /* ----- Timeline computed helpers ----- */

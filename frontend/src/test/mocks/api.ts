@@ -15,28 +15,22 @@ import type {
 // Mock data factories
 export const createMockTask = (overrides = {}): Task => ({
   id: 1,
+  issue_id: 1,
   project_id: 1,
   project_name: 'test-project',
   project_path_with_namespace: 'group/test-project',
   project_url: 'https://gitlab.example.com/group/test-project',
-  issue_iid: 42,
-  issue_url: 'https://gitlab.example.com/group/test-project/-/issues/42',
-  issue_id: 100,
-  note_id: null,
   user_prompt: 'Fix the login bug',
   initiator_user_id: 1,
   initiator_gitlab_user_id: 10,
   initiator_username: 'testuser',
-  branch_name: 'fix-login-bug',
-  branch_url: 'https://gitlab.example.com/group/test-project/-/tree/fix-login-bug',
-  merge_request_iid: null,
-  merge_request_url: null,
   status: 'pending',
   priority: 1,
+  is_retry: false,
+  retry_source_task_id: null,
   scheduled_at: null,
   container_id: null,
-  target_branch: 'main',
-  target_branch_url: null,
+  container_name: null,
   commit_sha: null,
   error_message: null,
   additions: 0,
@@ -44,11 +38,20 @@ export const createMockTask = (overrides = {}): Task => ({
   total_changes: 0,
   input_tokens: null,
   output_tokens: null,
-  is_manual: true,
+  model_name: null,
+  merge_request_title: null,
   created_at: '2026-03-31T10:00:00Z',
   updated_at: '2026-03-31T10:00:00Z',
   started_at: null,
   completed_at: null,
+  issue: {
+    id: 1,
+    title: 'Fix login bug',
+    branch_name: 'codify/issue-1',
+    base_branch: 'main',
+    target_branch: 'main',
+    merge_request_url: null,
+  },
   ...overrides
 })
 
@@ -89,11 +92,11 @@ export const createMockStats = (overrides = {}): Stats => ({
 
 export const createMockContainer = (overrides = {}): Container => ({
   id: 'container-1',
-  name: 'codify-1-p1-i42',
+  name: 'codify-1-issue1',
   status: 'running',
   task_id: 1,
   project_id: 1,
-  issue_iid: 42,
+  issue_id: 1,
   created_at: '2026-03-31T10:00:00Z',
   ...overrides
 })
