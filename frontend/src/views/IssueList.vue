@@ -16,6 +16,7 @@
               :placeholder="t('common.status')"
               clearable
               class="issue-list__filter issue-list__filter--status"
+              data-testid="issue-list-status-filter"
             />
             <n-select
               v-model:value="projectFilter"
@@ -27,6 +28,7 @@
             />
             <n-button
               type="primary"
+              data-testid="issue-list-create-button"
               @click="router.push('/issues/create')"
             >
               {{ t('issue.create') }}

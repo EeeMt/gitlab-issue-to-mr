@@ -1,7 +1,8 @@
 <template>
-  <div class="create-issue-page">
+  <div class="create-issue-page" data-testid="create-issue-page">
     <n-space vertical :size="16">
       <PageHeader
+        data-testid="create-issue-header"
         root-class="create-issue-page__hero"
         title-class="create-issue-page__title"
         subtitle-class="create-issue-page__subtitle"
@@ -23,6 +24,7 @@
             :rules="rules"
             label-placement="top"
             class="create-issue-form"
+            data-testid="create-issue-form"
           >
             <div class="create-issue-form__section">
               <div class="create-issue-form__section-title">{{ t('issue.field.project') }}</div>
@@ -35,6 +37,7 @@
                       :loading="projectsLoading"
                       :placeholder="t('createTask.selectProject')"
                       filterable
+                      data-testid="create-issue-project"
                       @update:value="handleProjectChange"
                     />
                   </n-form-item>
@@ -48,6 +51,7 @@
                 <n-input
                   v-model:value="formValue.title"
                   :placeholder="t('issue.field.title')"
+                  data-testid="create-issue-title"
                 />
               </n-form-item>
 
@@ -57,6 +61,7 @@
                   type="textarea"
                   :rows="6"
                   :placeholder="t('issue.field.description')"
+                  data-testid="create-issue-description"
                 />
               </n-form-item>
             </div>
@@ -73,6 +78,7 @@
                       :disabled="!formValue.project_id"
                       :placeholder="t('createTask.selectBaseBranch')"
                       filterable
+                      data-testid="create-issue-base-branch"
                     />
                   </n-form-item>
                 </n-gi>
@@ -85,6 +91,7 @@
                       :disabled="!formValue.project_id"
                       :placeholder="t('createTask.selectTargetBranch')"
                       filterable
+                      data-testid="create-issue-target-branch"
                     />
                   </n-form-item>
                 </n-gi>
@@ -102,6 +109,7 @@
                   round
                   :loading="submitting"
                   :disabled="submitting"
+                  data-testid="create-issue-submit"
                   @click="handleSubmit"
                 >
                   {{ t('issue.create') }}

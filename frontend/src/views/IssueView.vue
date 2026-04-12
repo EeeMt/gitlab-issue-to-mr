@@ -14,7 +14,7 @@
           </n-tag>
         </template>
         <template #actions>
-          <n-button @click="openEditModal">
+          <n-button data-testid="issue-edit-button" @click="openEditModal">
             {{ t('issue.edit') }}
           </n-button>
           <n-popconfirm @positive-click="handleClose">
@@ -23,6 +23,7 @@
                 type="error"
                 secondary
                 :disabled="issue.status === 'closed'"
+                data-testid="issue-close-button"
               >
                 {{ t('issue.close') }}
               </n-button>
@@ -130,6 +131,7 @@
               type="textarea"
               :placeholder="issue.description || t('issue.promptPlaceholder')"
               :rows="4"
+              data-testid="issue-task-prompt"
             />
           </n-form-item>
           <n-grid :cols="isMobile ? 1 : 3" :x-gap="16" :y-gap="12">
@@ -157,6 +159,7 @@
                 <n-button
                   type="primary"
                   :loading="createTaskLoading"
+                  data-testid="issue-create-task-button"
                   @click="handleCreateTask"
                 >
                   {{ t('issue.createTask') }}
