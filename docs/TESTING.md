@@ -24,6 +24,7 @@ make test-all
 | 后端单元测试 | `make test-backend` | Python |
 | 前端单元测试 | `make test-frontend` | Node.js |
 | Mock E2E | `make test-mock-e2e` | Python |
+| Mock 集成测试 | `make test-mock-integration` | Docker |
 | Playwright E2E | `make test-e2e-ui` | Docker |
 | GitLab E2E | `make test-e2e-gitlab` | Docker + 真实 GitLab |
 | 全部 E2E | `make test-e2e` | Docker（含 GitLab） |
@@ -101,7 +102,68 @@ make test-mock-e2e
 
 ---
 
-## 4. Playwright E2E 测试
+## 4. Mock 集成测试
+
+Mock 集成测试用 Mock 服务替代外部依赖（GitLab API、Claude CLI），但保留真实 Docker 容器、真实 entrypoint.sh（683行）、真实业务逻辑。与纯 Mock E2E 不同，这套测试在完整的 Docker 容器环境中运行。
+
+### 架构
+
+```
+pytest (本机) → HTTP → codify-backend (Docker)
+                      → codify-scheduler (Docker)
+                      → mock-services (Docker): Mock GitLab API + Git HTTP + Anthropic API
+                      → codify-worker-test (Docker): 真实 entrypoint.sh + fake ci-claude.sh
+                      → postgres (Docker)
+```
+
+### 运行命令
+
+```bash
+make test-mock-integration          # 一键运行（构建+启动+测试）
+make test-mock-integration-up       # 仅启动环境
+cd backend && pytest tests/mock_integration/ -v  # 手动运行测试
+make test-mock-integration-down     # 停止环境
+```
+
+### 测试文件概览（16 文件，164 个测试）
+
+| 文件 | 测试数 | 覆盖范围 |
+|------|--------|----------|
+| test_happy_path.py | 4 | 核心 webhook→task→MR 流程 |
+| test_entrypoint.py | 11 | entrypoint.sh 逻辑 |
+| test_failure_paths.py | 3 | Claude 失败、超时、取消 |
+| test_edge_cases.py | 7 | 边缘场景 |
+| test_scheduling.py | 2 | 优先级、并发 |
+| test_advanced.py | 6 | Base branch、mutex、crash recovery |
+| test_additional.py | 8 | 超时、webhook 验证 |
+| test_gap_analysis.py | 7 | No-changes、MR 失败、并发 |
+| test_coverage_gaps.py | 9 | 事件过滤、CODIFY markers |
+| test_api_endpoints.py | 12 | 分页、SSE、重试、日志 |
+| test_system_apis.py | 14 | 统计、分析、配置、认证 |
+| test_admin_and_templates.py | 13 | 模板、用户管理、会话 |
+| test_webhook_and_lifecycle.py | 14 | 提示词、运行时配置、生命周期 |
+| test_notifications_and_operations.py | 17 | 通知、slot capacity |
+| test_mr_followup_and_env.py | 12 | MR follow-up、容器环境、重试 |
+| test_health_access_sse.py | 25 | 健康检查、访问控制、SSE、webhook配置 |
+
+### 关键配置
+
+| 配置项 | 值 |
+|--------|-----|
+| WORKER_NETWORK | codify-mock-test |
+| MAX_CONCURRENCY | 2 |
+| TASK_TIMEOUT | 120 |
+| Backend 端口 | 18000 |
+| Mock 服务端口 | 19000 |
+
+> **注意**：完整运行约 17 分钟，可单独运行文件加快调试：
+> ```bash
+> cd backend && pytest tests/mock_integration/test_happy_path.py -v
+> ```
+
+---
+
+## 5. Playwright E2E 测试
 
 Playwright E2E 测试需要完整的 Docker 环境。测试套件使用 **pytest-xdist 并行执行**，运行时间约 73 秒（状态无关测试并行）+ 39 秒（状态相关测试串行）。
 
@@ -306,7 +368,7 @@ test_dashboard_page_loads_chromium_gw0.webm
 
 ---
 
-## 5. GitLab E2E 测试
+## 6. GitLab E2E 测试
 
 ### 运行命令
 

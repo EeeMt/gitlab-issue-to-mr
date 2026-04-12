@@ -390,9 +390,10 @@ test-e2e-logs: ## View E2E test logs
 
 .PHONY: test-all
 test-all: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run ALL tests: unit + E2E (with unified summary)
-	@_rf=$$(mktemp); _t0=$$(date +%s); r_unit=0; r_e2e=0; \
+	@_rf=$$(mktemp); _t0=$$(date +%s); r_unit=0; r_mock_int=0; r_e2e=0; \
 	export _RESULTS_FILE=$$_rf; \
 	$(MAKE) --no-print-directory test-unit || r_unit=1; \
+	$(MAKE) --no-print-directory test-mock-integration || r_mock_int=1; \
 	$(MAKE) --no-print-directory test-e2e  || r_e2e=1; \
 	_total_t=$$(( $$(date +%s) - $$_t0 )); \
 	echo ""; \
@@ -423,7 +424,7 @@ test-all: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run ALL tests: unit +
 	else printf "  ❌  \033[31m$$_ok/$$_n SUITES PASSED\033[0m  (wall %ss)\n" "$$_total_t"; fi; \
 	printf "\033[1m══════════════════════════════════════════════════════════════════════════\033[0m\n"; \
 	rm -f "$$_rf"; \
-	[ "$$r_unit" = "0" ] && [ "$$r_e2e" = "0" ]
+	[ "$$r_unit" = "0" ] && [ "$$r_mock_int" = "0" ] && [ "$$r_e2e" = "0" ]
 
 # ============================================
 # Help
@@ -458,6 +459,13 @@ help:
 	@echo "  make test-frontend     Run frontend unit tests"
 	@echo "  make test-mock-e2e     Run mock E2E tests"
 	@echo ""
+	@echo "Mock Integration Tests (Docker):"
+	@echo "  make test-mock-integration            Run mock integration tests (build + start + test)"
+	@echo "  make test-mock-integration-build      Build mock integration test images"
+	@echo "  make test-mock-integration-up         Start mock integration test environment"
+	@echo "  make test-mock-integration-down       Stop mock integration test environment"
+	@echo "  make test-mock-integration-logs       View mock integration test logs"
+	@echo ""
 	@echo "E2E Tests:"
 	@echo "  make test-e2e                        Run ALL E2E: parallel + serial + gitlab + cleanup"
 	@echo "  make test-e2e RECORD_VIDEO=1               Run ALL E2E with video recording"
@@ -472,7 +480,7 @@ help:
 	@echo "  Videos saved to deploy/e2e-videos/ (RECORD_VIDEO=1 only)"
 	@echo ""
 	@echo "All Tests:"
-	@echo "  make test-all          Run ALL tests (unit + E2E) with overall summary"
+	@echo "  make test-all          Run ALL tests (unit + E2E + mock integration) with overall summary"
 	@echo ""
 
 .DEFAULT_GOAL := help
