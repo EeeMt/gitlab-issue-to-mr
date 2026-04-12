@@ -24,7 +24,7 @@ from app.core.mattermost_notifications import (
     MATTERMOST_EVENT_TASK_RETRY_SCHEDULED,
     notify_task_event,
 )
-from app.models import Task, TaskLog, TaskStatus
+from app.models import Task, TaskLog, TaskStatus, Issue, IssueStatus
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,8 @@ _CODIFY_ASSISTANT_TEXT_RE = re.compile(r'^CODIFY_ASSISTANT_TEXT:(.+)$')
 _CODIFY_TOOL_USE_START_RE = re.compile(r'^CODIFY_TOOL_USE_START:(.+)$')
 # Emitted by ci-claude.sh when a tool_result arrives in a user message; correlates via id.
 _CODIFY_TOOL_RESULT_RE = re.compile(r'^CODIFY_TOOL_RESULT:(.+)$')
+# Emitted by entrypoint.sh after Claude finishes; contains the session ID for resumption.
+_CODIFY_SESSION_ID_RE = re.compile(r'^CODIFY_SESSION_ID:(\S+)$', re.MULTILINE)
 
 # Volume mount constants
 _MAVEN_CACHE_CONTAINER_PATH = "/home/codify/.m2/repository"
@@ -127,15 +129,6 @@ class WorkerExecutor:
 
     def _build_initial_mr_title(self, task: Task) -> str:
         """Build a reasonable initial MR title before AI execution finishes."""
-        if task.issue_iid:
-            try:
-                issue_info = self.gitlab.get_issue(task.project_id, task.issue_iid)
-                issue_title = (issue_info or {}).get("title", "").strip() if issue_info else ""
-                if issue_title:
-                    return f"AI: {issue_title[:100]}"
-            except Exception as e:
-                logger.warning(f"[Task {task.id}] Failed to fetch issue title for MR title: {e}")
-
         prompt = re.sub(r"\s+", " ", task.user_prompt or "").strip()
         if prompt:
             short_prompt = re.split(r"[;\n。！？.!?]", prompt, maxsplit=1)[0].strip()
@@ -146,7 +139,7 @@ class WorkerExecutor:
 
     def _build_initial_mr_description(self, task: Task) -> str:
         """Build the initial MR description shown while the worker is running."""
-        description = f"""## 🚀 AI 正在执行
+        return f"""## 🚀 AI 正在执行
 
 ### 需求
 {task.user_prompt}
@@ -154,15 +147,14 @@ class WorkerExecutor:
 ---
 *AI 正在直接实施变更...*"""
 
-        if task.issue_iid:
-            description += f"\n\nCloses #{task.issue_iid}"
-
-        return description
-
     def _remove_mr_draft_status(self, task: Task) -> None:
+        """Remove draft status from an MR by normalizing its title (legacy)."""
+        pass
+
+    def _remove_mr_draft_status_for_issue(self, task: Task, issue: Issue) -> None:
         """Remove draft status from an MR by normalizing its title."""
         project = self.gitlab.gl.projects.get(task.project_id)
-        mr = project.mergerequests.get(task.merge_request_iid)
+        mr = project.mergerequests.get(issue.merge_request_iid)
 
         title = getattr(mr, "title", "")
         if not isinstance(title, str):
@@ -171,12 +163,12 @@ class WorkerExecutor:
 
         updated_title = re.sub(r"^(?:\[Draft\]\s*|Draft:\s*|WIP:\s*)", "", title, count=1, flags=re.IGNORECASE).strip()
         if not updated_title or updated_title == title:
-            logger.info(f"[Task {task.id}] MR !{task.merge_request_iid} is already non-draft")
+            logger.info(f"[Task {task.id}] MR !{issue.merge_request_iid} is already non-draft")
             return
 
         mr.title = updated_title
         mr.save()
-        logger.info(f"[Task {task.id}] Removed draft status from MR !{task.merge_request_iid}")
+        logger.info(f"[Task {task.id}] Removed draft status from MR !{issue.merge_request_iid}")
 
     async def _flush_log_chunk(
         self,
@@ -413,46 +405,29 @@ class WorkerExecutor:
     def _create_mr_if_needed(
         self,
         task: Task,
+        issue: Issue,
         mr_iid: Optional[int],
         mr_web_url: Optional[str],
     ) -> tuple[Optional[int], Optional[str]]:
-        """Create MR if needed or reuse existing one.
-
-        Args:
-            task: Task object
-            mr_iid: Existing MR IID (if any)
-            mr_web_url: Existing MR web URL (if any)
-
-        Returns:
-            Tuple of (mr_iid, mr_web_url) - may be unchanged or newly created
-        """
-        # Use existing MR for continuation tasks
+        """Create or reuse MR for the task's issue."""
         if mr_iid:
             return mr_iid, mr_web_url
 
-        # Try to find existing open MR from this branch
-        existing = self._find_existing_mr(task)
+        existing = self._find_existing_mr(task, issue)
         if existing:
             return existing
 
-        # No existing MR - create a new one
-        return self._create_new_mr(task)
+        return self._create_new_mr(task, issue)
 
     def _find_existing_mr(
         self,
         task: Task,
+        issue: Issue,
     ) -> tuple[Optional[int], Optional[str]] | None:
-        """Find existing open MR for the task's branch.
-
-        Args:
-            task: Task object
-
-        Returns:
-            Tuple of (mr_iid, mr_web_url) if found, None otherwise
-        """
+        """Find existing open MR for the issue's branch."""
         try:
             existing_mrs = self.gitlab.gl.projects.get(task.project_id).mergerequests.list(
-                source_branch=task.branch_name,
+                source_branch=issue.branch_name,
                 state="opened",
             )
             if not existing_mrs:
@@ -460,7 +435,7 @@ class WorkerExecutor:
 
             mr_iid = existing_mrs[0].iid
             mr_web_url = self.gitlab.normalize_web_url(existing_mrs[0].web_url)
-            logger.info(f"[Task {task.id}] Reusing existing MR !{mr_iid} for branch {task.branch_name}")
+            logger.info(f"[Task {task.id}] Reusing existing MR !{mr_iid} for branch {issue.branch_name}")
             return mr_iid, mr_web_url
         except Exception as e:
             logger.warning(f"[Task {task.id}] Failed to look up existing MR: {e}")
@@ -469,27 +444,21 @@ class WorkerExecutor:
     def _create_new_mr(
         self,
         task: Task,
+        issue: Issue,
     ) -> tuple[Optional[int], Optional[str]]:
-        """Create a new draft MR for the task.
-
-        Args:
-            task: Task object
-
-        Returns:
-            Tuple of (mr_iid, mr_web_url) if successful, (None, None) otherwise
-        """
+        """Create a new draft MR for the task's issue."""
         settings = get_settings()
-        target_branch = task.target_branch or settings.default_target_branch
+        target_branch = issue.target_branch or settings.default_target_branch
         mr_title = self._build_initial_mr_title(task)
         initial_mr_desc = self._build_initial_mr_description(task)
 
         try:
             mr_response = self.gitlab.gl.projects.get(task.project_id).mergerequests.create({
-                "source_branch": task.branch_name,
+                "source_branch": issue.branch_name,
                 "target_branch": target_branch,
                 "title": mr_title,
                 "description": initial_mr_desc,
-                "draft": True,  # Create as draft MR
+                "draft": True,
             })
         except Exception as e:
             logger.warning(f"[Task {task.id}] Failed to create initial MR: {e}, continuing without MR")
@@ -503,28 +472,18 @@ class WorkerExecutor:
     def _build_container_env(
         self,
         task: Task,
+        issue: Issue,
         mr_iid: Optional[int],
         target_branch: Optional[str],
     ) -> dict[str, str]:
-        """Build environment variables for the worker container.
-
-        Args:
-            task: Task object
-            mr_iid: MR IID (if available)
-            target_branch: Target branch for the MR; None = no-MR mode (direct push only)
-
-        Returns:
-            Dict of environment variables for the container
-        """
+        """Build environment variables for the worker container."""
         settings = get_settings()
 
-        # In no-MR mode target_branch is None; pass empty string so entrypoint
-        # knows to skip MR creation and push the branch without opening an MR.
         environment = {
             "GITLAB_URL": settings.gitlab_url,
             "GITLAB_TOKEN": settings.gitlab_bot_token,
             "PROJECT_ID": str(task.project_id),
-            "BRANCH_NAME": task.branch_name,
+            "BRANCH_NAME": issue.branch_name,
             "USER_PROMPT": task.user_prompt,
             "TARGET_BRANCH": target_branch or "",
             "ANTHROPIC_BASE_URL": settings.anthropic_base_url,
@@ -533,35 +492,28 @@ class WorkerExecutor:
             "CLAUDE_MAX_TURNS": str(settings.claude_max_turns),
             "TASK_ID": str(task.id),
             "TASK_TIMEOUT": str(settings.task_timeout),
+            "ISSUE_ID": str(issue.id),
         }
 
-        # Add optional fields for webhook-triggered tasks
-        if task.issue_iid:
-            environment["ISSUE_IID"] = str(task.issue_iid)
+        # Pass session ID for resume
+        if issue.claude_session_id:
+            environment["RESUME_SESSION"] = issue.claude_session_id
 
-        # Add BASE_BRANCH if task specifies a source branch to fork from
-        if task.base_branch:
-            environment["BASE_BRANCH"] = task.base_branch
+        # Add BASE_BRANCH if issue specifies a source branch to fork from
+        if issue.base_branch:
+            environment["BASE_BRANCH"] = issue.base_branch
 
-        # Pass MR_IID to worker so execution can update the MR description
         if mr_iid:
             environment["MR_IID"] = str(mr_iid)
 
-        # Pass custom CA bundle to worker container for HTTPS verification
         if settings.custom_ca_bundle:
             environment["CUSTOM_CA_BUNDLE"] = settings.custom_ca_bundle
 
         return environment
 
-    def _build_container_volumes(self, settings: Any) -> dict:
-        """Build volume mounts for the worker container.
-
-        Args:
-            settings: Application settings object
-
-        Returns:
-            Dict of volume mounts (host_path -> container_path mapping)
-        """
+    def _build_container_volumes(self, settings: Any, issue: Optional[Issue] = None) -> dict:
+        """Build volume mounts for the worker container."""
+        import os
         volumes: dict = {}
 
         if settings.maven_cache_host_path:
@@ -583,6 +535,14 @@ class WorkerExecutor:
             if host_path and container_path:
                 volumes[host_path] = {"bind": container_path, "mode": mode}
 
+        # Mount session storage for Claude session persistence
+        if issue and issue.session_storage_path:
+            os.makedirs(issue.session_storage_path, exist_ok=True)
+            volumes[issue.session_storage_path] = {
+                "bind": "/home/codify/.claude",
+                "mode": "rw",
+            }
+
         return volumes if volumes else {}
 
     async def _parse_task_result(
@@ -591,15 +551,9 @@ class WorkerExecutor:
         logs: str,
         db: AsyncSession,
         exit_code: int,
+        issue: Optional[Issue] = None,
     ) -> None:
-        """Parse task execution logs and update task with results.
-
-        Args:
-            task: Task object to update
-            logs: Full container logs
-            db: Database session
-            exit_code: Container exit code
-        """
+        """Parse task execution logs and update task with results."""
         # Extract token usage from CODIFY_STATS marker line
         stats_match = _CODIFY_STATS_RE.search(logs)
         if stats_match:
@@ -667,58 +621,52 @@ class WorkerExecutor:
             task.status = TaskStatus.COMPLETED
             task.completed_at = utcnow()
             await self._parse_mr_from_logs(task, logs)
-            await self._update_task_stats_from_logs_or_api(task, logs)
+            await self._update_task_stats_from_logs_or_api(task, logs, issue)
         else:
             task.status = TaskStatus.FAILED
             task.completed_at = utcnow()
             task.error_message = sanitize_sensitive_data(logs)[-1000:]
 
+        # Extract session ID from container output
+        session_match = _CODIFY_SESSION_ID_RE.search(logs)
+        if session_match:
+            extracted_session_id = session_match.group(1)
+            logger.info(f"[Task {task.id}] Extracted session ID: {extracted_session_id}")
+            task._extracted_session_id = extracted_session_id
+
     async def _parse_mr_from_logs(self, task: Task, logs: str) -> None:
         """Parse MR URL and IID from container logs.
 
-        Args:
-            task: Task object to update
-            logs: Container logs
+        Stores parsed values as temporary attributes on the task object
+        (_parsed_mr_iid, _parsed_mr_url) for the caller to persist to the Issue.
         """
+        parsed_mr_url = None
+        parsed_mr_iid = None
+
         # Try to find web_url in any line of logs
         for line in logs.split("\n"):
             if "/merge_requests/" in line:
-                # Extract URL from line containing merge_requests
                 match = re.search(r'http[^\s]*merge_requests/\d+', line)
                 if match:
-                    task.merge_request_url = self.gitlab.normalize_web_url(match.group(0))
+                    parsed_mr_url = self.gitlab.normalize_web_url(match.group(0))
                     iid_match = re.search(r'/merge_requests/(\d+)', match.group(0))
                     if iid_match:
-                        task.merge_request_iid = int(iid_match.group(1))
+                        parsed_mr_iid = int(iid_match.group(1))
                     break
 
         # If URL is present but IID is still missing, derive it from the URL.
-        if task.merge_request_url and not task.merge_request_iid:
-            iid_match = re.search(r'/merge_requests/(\d+)', task.merge_request_url)
+        if parsed_mr_url and not parsed_mr_iid:
+            iid_match = re.search(r'/merge_requests/(\d+)', parsed_mr_url)
             if iid_match:
-                task.merge_request_iid = int(iid_match.group(1))
+                parsed_mr_iid = int(iid_match.group(1))
 
-        # If not found in logs, try to get MR from GitLab API by branch name
-        if not task.merge_request_iid or not task.merge_request_url:
-            try:
-                mrs = self.gitlab.gl.projects.get(task.project_id).mergerequests.list(
-                    source_branch=task.branch_name,
-                    state='opened'
-                )
-                if mrs:
-                    task.merge_request_iid = mrs[0].iid
-                    task.merge_request_url = self.gitlab.normalize_web_url(mrs[0].web_url)
-            except Exception as e:
-                logger.warning(f"Failed to get MR from API: {e}")
+        if parsed_mr_iid:
+            task._parsed_mr_iid = parsed_mr_iid
+        if parsed_mr_url:
+            task._parsed_mr_url = parsed_mr_url
 
-    async def _update_task_stats_from_logs_or_api(self, task: Task, logs: str) -> None:
-        """Update task with change statistics from logs or GitLab API.
-
-        Args:
-            task: Task object to update
-            logs: Container logs
-        """
-        # Get MR change stats — prefer log-parsed git diff (accurate), fall back to GitLab API.
+    async def _update_task_stats_from_logs_or_api(self, task: Task, logs: str, issue: Optional[Issue] = None) -> None:
+        """Update task with change statistics from logs or GitLab API."""
         diff_match = _CODIFY_DIFF_RE.search(logs)
         if diff_match:
             task.additions = int(diff_match.group(1))
@@ -728,25 +676,27 @@ class WorkerExecutor:
                 f"[Task {task.id}] Diff stats (from log): "
                 f"+{task.additions} -{task.deletions} ({task.total_changes} total)"
             )
-        elif task.merge_request_iid:
-            try:
-                logger.info(f"[Task {task.id}] Getting MR stats for MR !{task.merge_request_iid}")
-                stats = await self.gitlab.get_merge_request_stats(
-                    task.project_id, task.merge_request_iid
-                )
-                logger.info(f"[Task {task.id}] MR stats result: {stats}")
-                if stats:
-                    task.additions = stats.get("additions", 0)
-                    task.deletions = stats.get("deletions", 0)
-                    task.total_changes = stats.get("total", 0)
-                    logger.info(
-                        f"[Task {task.id}] MR stats (from API): "
-                        f"+{task.additions} -{task.deletions} ({task.total_changes} total)"
+        else:
+            mr_iid = (issue.merge_request_iid if issue else None) or getattr(task, '_parsed_mr_iid', None)
+            if mr_iid:
+                try:
+                    logger.info(f"[Task {task.id}] Getting MR stats for MR !{mr_iid}")
+                    stats = await self.gitlab.get_merge_request_stats(
+                        task.project_id, mr_iid
                     )
-                else:
-                    logger.warning(f"[Task {task.id}] MR stats returned None")
-            except Exception as e:
-                logger.warning(f"[Task {task.id}] Failed to get MR stats: {e}")
+                    logger.info(f"[Task {task.id}] MR stats result: {stats}")
+                    if stats:
+                        task.additions = stats.get("additions", 0)
+                        task.deletions = stats.get("deletions", 0)
+                        task.total_changes = stats.get("total", 0)
+                        logger.info(
+                            f"[Task {task.id}] MR stats (from API): "
+                            f"+{task.additions} -{task.deletions} ({task.total_changes} total)"
+                        )
+                    else:
+                        logger.warning(f"[Task {task.id}] MR stats returned None")
+                except Exception as e:
+                    logger.warning(f"[Task {task.id}] Failed to get MR stats: {e}")
 
     def _update_mr_description(self, task: Task, mr_iid: int) -> None:
         """Update MR description with execution progress.
@@ -793,23 +743,15 @@ class WorkerExecutor:
         success: bool,
         had_existing_mr: bool,
         logs: str,
+        issue: Optional[Issue] = None,
     ) -> None:
-        """Send notifications for task completion.
-
-        Args:
-            task: Task object
-            success: Whether the task succeeded
-            had_existing_mr: Whether task started with an existing MR
-            logs: Container logs
-        """
-        # Send completion notification to MR or issue
+        """Send notifications for task completion."""
         notify_target = "mr" if had_existing_mr else "issue"
         try:
-            await self._notify_task_completed(task, success=success, notify_target=notify_target)
+            await self._notify_task_completed(task, success=success, notify_target=notify_target, issue=issue)
         except Exception as e:
             logger.warning(f"Failed to send completion notification: {e}")
 
-        # Send Mattermost notification
         try:
             await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
         except Exception as e:
@@ -820,22 +762,15 @@ class WorkerExecutor:
         task: Task,
         success: bool,
         had_existing_mr: bool,
+        issue: Optional[Issue] = None,
     ) -> None:
-        """Send notifications for task failure.
-
-        Args:
-            task: Task object
-            success: Whether the task succeeded (False)
-            had_existing_mr: Whether task started with an existing MR
-        """
-        # Send failure notification
+        """Send notifications for task failure."""
         notify_target = "mr" if had_existing_mr else "issue"
         try:
-            await self._notify_task_completed(task, success=success, notify_target=notify_target)
+            await self._notify_task_completed(task, success=success, notify_target=notify_target, issue=issue)
         except Exception as e:
             logger.warning(f"Failed to send failure notification: {e}")
 
-        # Send Mattermost notification
         try:
             if task.status == TaskStatus.PENDING:
                 await notify_task_event(
@@ -852,40 +787,33 @@ class WorkerExecutor:
             logger.warning(f"Failed to send Mattermost failure notification: {e}")
 
     def _get_container_name(self, task: Task) -> str:
-        """Generate container name with naming convention.
-
-        Args:
-            task: Task object
-
-        Returns:
-            Container name string
-        """
-        issue_suffix = f"i{task.issue_iid}" if task.issue_iid else "manual"
-        return f"codify-{task.id}-p{task.project_id}-{issue_suffix}"
+        """Generate container name with naming convention."""
+        return f"codify-{task.id}-issue{task.issue_id}"
 
     async def execute_task(self, db: AsyncSession, task_id: int) -> bool:
-        """Execute a task.
-
-        Args:
-            db: Database session
-            task_id: Task ID to execute
-
-        Returns:
-            True if successful, False otherwise
-        """
-        # Get settings
+        """Execute a task."""
         settings = get_settings()
 
-        # Fetch task
         result = await db.execute(select(Task).where(Task.id == task_id))
         task = result.scalar_one_or_none()
-
         if not task:
             logger.error(f"[Task {task_id}] Task not found in database")
             return False
 
-        logger.info(f"[Task {task_id}] Executing for project={task.project_id} issue_iid={task.issue_iid} priority={task.priority}")
-        had_existing_mr = task.merge_request_iid is not None
+        # Load parent issue
+        issue = None
+        if task.issue_id:
+            issue = await db.get(Issue, task.issue_id)
+            if not issue:
+                logger.error(f"[Task {task_id}] Issue {task.issue_id} not found")
+                task.status = TaskStatus.FAILED
+                task.error_message = f"Parent issue {task.issue_id} not found"
+                task.completed_at = utcnow()
+                await db.commit()
+                return False
+
+        logger.info(f"[Task {task_id}] Executing for project={task.project_id} issue_id={task.issue_id} priority={task.priority}")
+        had_existing_mr = (issue.merge_request_iid is not None) if issue else False
 
         # Clear logs from any previous execution so the event stream starts fresh
         del_result = await db.execute(
@@ -902,45 +830,42 @@ class WorkerExecutor:
         task.started_at = utcnow()
         await db.commit()
 
-        # Send "starting" notification to issue
+        # Send "starting" notification
         try:
-            self._notify_task_started(task)
+            self._notify_task_started(task, issue)
         except Exception as e:
             logger.warning(f"Failed to send start notification: {e}")
 
         container = None
 
         try:
-            # Pull worker image (force pull for development)
+            # Pull worker image
             try:
                 self.docker.pull_image(settings.worker_image, force=True)
             except Exception as e:
                 logger.warning(f"Failed to pull image: {e}, trying to use existing")
 
-            # Prepare environment variables
-            mr_iid = task.merge_request_iid
-            mr_web_url = task.merge_request_url
+            mr_iid = issue.merge_request_iid if issue else None
+            mr_web_url = issue.merge_request_url if issue else None
 
             # Create or reuse MR (skip when target_branch is None — no-MR mode)
-            if task.target_branch:
-                mr_iid, mr_web_url = self._create_mr_if_needed(task, mr_iid, mr_web_url)
+            if issue and issue.target_branch:
+                mr_iid, mr_web_url = self._create_mr_if_needed(task, issue, mr_iid, mr_web_url)
 
-            # Update task with MR info if new MR was created
-            if mr_iid and mr_iid != task.merge_request_iid:
-                task.merge_request_iid = mr_iid
-                task.merge_request_url = mr_web_url
+            # Save MR info to Issue if new MR was created
+            if issue and mr_iid and mr_iid != issue.merge_request_iid:
+                issue.merge_request_iid = mr_iid
+                issue.merge_request_url = mr_web_url
                 await db.commit()
 
-            target_branch = task.target_branch  # None = no-MR mode; entrypoint sees TARGET_BRANCH=""
+            target_branch = issue.target_branch if issue else None
 
             # Build environment and volumes
-            environment = self._build_container_env(task, mr_iid, target_branch)
-            volumes = self._build_container_volumes(settings)
+            environment = self._build_container_env(task, issue, mr_iid, target_branch)
+            volumes = self._build_container_volumes(settings, issue)
 
-            # Generate container name
             container_name = self._get_container_name(task)
 
-            # Create and run container
             container = self.docker.create_container(
                 image=settings.worker_image,
                 command="",
@@ -950,44 +875,44 @@ class WorkerExecutor:
                 name=container_name,
             )
 
-            # Track container ID in task
             task.container_id = container.id
             await db.commit()
 
-            # Stream logs to DB while waiting for container to finish
+            # Stream logs
             exit_code, logs, log_chunks_saved = await self._stream_logs_to_db(
                 container, task.id, db, settings.task_timeout
             )
 
-            # Parse results and update task
-            await self._parse_task_result(task, logs, db, exit_code)
+            # Parse results
+            await self._parse_task_result(task, logs, db, exit_code, issue=issue)
+
+            # Save session ID to Issue if extracted
+            if issue and hasattr(task, '_extracted_session_id') and task._extracted_session_id:
+                if not issue.claude_session_id:
+                    issue.claude_session_id = task._extracted_session_id
+                    logger.info(f"[Task {task_id}] Saved session ID to issue {issue.id}")
+                await db.commit()
+
+            # Save parsed MR info from logs to Issue
+            if issue:
+                parsed_mr_iid = getattr(task, '_parsed_mr_iid', None)
+                parsed_mr_url = getattr(task, '_parsed_mr_url', None)
+                if parsed_mr_iid and not issue.merge_request_iid:
+                    issue.merge_request_iid = parsed_mr_iid
+                    issue.merge_request_url = parsed_mr_url
+                    await db.commit()
 
             if exit_code == 0:
                 logger.info(f"Task {task_id} completed successfully")
-
-                # Remove draft status from MR if it was created
-                if task.merge_request_iid:
+                if issue and issue.merge_request_iid:
                     try:
-                        self._remove_mr_draft_status(task)
+                        self._remove_mr_draft_status_for_issue(task, issue)
                     except Exception as e:
                         logger.warning(f"[Task {task_id}] Failed to update MR draft status: {e}")
-
-                # Send success notifications
-                await self._send_notifications(task, success=True, had_existing_mr=had_existing_mr, logs=logs)
+                await self._send_notifications(task, success=True, had_existing_mr=had_existing_mr, logs=logs, issue=issue)
             else:
                 logger.error(f"[Task {task_id}] Failed with exit code {exit_code}")
-
-                # Check if we should retry
-                if settings.max_retries > 0 and task.retry_count < settings.max_retries:
-                    # Schedule retry
-                    previous_scheduled_at = task.scheduled_at
-                    task.retry_count += 1
-                    task.status = TaskStatus.PENDING
-                    task.scheduled_at = utcnow()
-                    logger.info(f"[Task {task_id}] Scheduling retry {task.retry_count}/{settings.max_retries}")
-
-                # Send failure notifications
-                await self._send_failure_notifications(task, success=False, had_existing_mr=had_existing_mr)
+                await self._send_failure_notifications(task, success=False, had_existing_mr=had_existing_mr, issue=issue)
 
             # Save a final log entry for failures, or for very fast tasks with no
             # streaming chunks (e.g., container exited immediately).
@@ -1001,7 +926,6 @@ class WorkerExecutor:
                 )
                 db.add(log_entry)
             elif log_chunks_saved == 0:
-                # No streaming chunks were flushed (very fast / empty output)
                 log_entry = TaskLog(
                     task_id=task.id,
                     log_level="INFO",
@@ -1011,7 +935,6 @@ class WorkerExecutor:
 
             await db.commit()
 
-            # Cleanup container
             try:
                 self.docker.remove_container(container, force=True)
             except Exception as e:
@@ -1023,21 +946,17 @@ class WorkerExecutor:
             logger.exception(f"Task {task_id} failed with exception: {e}")
             task.status = TaskStatus.FAILED
             task.completed_at = utcnow()
-            # Sanitize error message
             task.error_message = sanitize_sensitive_data(str(e))[:1000]
             await db.commit()
 
-            # Cleanup container on exception
             if container:
                 try:
                     self.docker.remove_container(container, force=True)
-                    logger.info(f"Cleaned up container after exception: {container.id}")
                 except Exception as cleanup_error:
                     logger.warning(f"Failed to cleanup container: {cleanup_error}")
 
-            # Send failure notification for exceptions
             try:
-                await self._notify_task_completed(task, success=False, notify_target="mr" if had_existing_mr else "issue")
+                await self._notify_task_completed(task, success=False, notify_target="mr" if had_existing_mr else "issue", issue=issue)
             except Exception as notify_error:
                 logger.warning(f"Failed to send failure notification: {notify_error}")
             try:
@@ -1054,18 +973,9 @@ class WorkerExecutor:
         attaches to the existing running container, streams remaining logs,
         and performs the same post-processing (parse results, update status,
         notifications, cleanup).
-
-        Args:
-            db: Database session
-            task_id: Task ID to resume
-            container_name: Name of the running Docker container
-
-        Returns:
-            True if the task completed successfully, False otherwise
         """
         settings = get_settings()
 
-        # Fetch task
         result = await db.execute(select(Task).where(Task.id == task_id))
         task = result.scalar_one_or_none()
 
@@ -1073,11 +983,16 @@ class WorkerExecutor:
             logger.error(f"[Task {task_id}] Resume: task not found in database")
             return False
 
+        # Load parent issue
+        issue = None
+        if task.issue_id:
+            issue = await db.get(Issue, task.issue_id)
+
         logger.info(
             f"[Task {task_id}] Resuming monitoring for container {container_name} "
-            f"(project={task.project_id} issue_iid={task.issue_iid})"
+            f"(project={task.project_id} issue_id={task.issue_id})"
         )
-        had_existing_mr = task.merge_request_iid is not None
+        had_existing_mr = (issue.merge_request_iid is not None) if issue else False
 
         # Find the running container
         try:
@@ -1097,24 +1012,35 @@ class WorkerExecutor:
             )
 
             # Parse results and update task
-            await self._parse_task_result(task, logs, db, exit_code)
+            await self._parse_task_result(task, logs, db, exit_code, issue=issue)
+
+            # Save session ID to Issue if extracted
+            if issue and hasattr(task, '_extracted_session_id') and task._extracted_session_id:
+                if not issue.claude_session_id:
+                    issue.claude_session_id = task._extracted_session_id
+                    logger.info(f"[Task {task_id}] Resume: saved session ID to issue {issue.id}")
+                await db.commit()
+
+            # Save parsed MR info from logs to Issue
+            if issue:
+                parsed_mr_iid = getattr(task, '_parsed_mr_iid', None)
+                parsed_mr_url = getattr(task, '_parsed_mr_url', None)
+                if parsed_mr_iid and not issue.merge_request_iid:
+                    issue.merge_request_iid = parsed_mr_iid
+                    issue.merge_request_url = parsed_mr_url
+                    await db.commit()
 
             if exit_code == 0:
                 logger.info(f"[Task {task_id}] Resume: completed successfully")
-                if task.merge_request_iid:
+                if issue and issue.merge_request_iid:
                     try:
-                        self._remove_mr_draft_status(task)
+                        self._remove_mr_draft_status_for_issue(task, issue)
                     except Exception as e:
                         logger.warning(f"[Task {task_id}] Resume: failed to update MR draft status: {e}")
-                await self._send_notifications(task, success=True, had_existing_mr=had_existing_mr, logs=logs)
+                await self._send_notifications(task, success=True, had_existing_mr=had_existing_mr, logs=logs, issue=issue)
             else:
                 logger.error(f"[Task {task_id}] Resume: failed with exit code {exit_code}")
-                if settings.max_retries > 0 and task.retry_count < settings.max_retries:
-                    task.retry_count += 1
-                    task.status = TaskStatus.PENDING
-                    task.scheduled_at = utcnow()
-                    logger.info(f"[Task {task_id}] Resume: scheduling retry {task.retry_count}/{settings.max_retries}")
-                await self._send_failure_notifications(task, success=False, had_existing_mr=had_existing_mr)
+                await self._send_failure_notifications(task, success=False, had_existing_mr=had_existing_mr, issue=issue)
 
             scrubbed_logs = scrub_sensitive_data(logs)
             if exit_code != 0:
@@ -1147,7 +1073,7 @@ class WorkerExecutor:
                 logger.warning(f"[Task {task_id}] Resume: failed to cleanup container: {cleanup_error}")
 
             try:
-                await self._notify_task_completed(task, success=False, notify_target="mr" if had_existing_mr else "issue")
+                await self._notify_task_completed(task, success=False, notify_target="mr" if had_existing_mr else "issue", issue=issue)
             except Exception as notify_error:
                 logger.warning(f"[Task {task_id}] Resume: failed to send failure notification: {notify_error}")
             try:
@@ -1157,61 +1083,35 @@ class WorkerExecutor:
 
             return False
 
-    def _notify_task_started(self, task: Task) -> None:
-        """Send notification when task starts execution.
-
-        Args:
-            task: Task object
-        """
-        # Skip notifications for manual tasks (no issue to notify)
-        if task.is_manual:
-            logger.info(f"Skipping start notification for manual task {task.id}")
+    def _notify_task_started(self, task: Task, issue: Optional[Issue] = None) -> None:
+        """Send notification when task starts execution."""
+        if not issue:
+            logger.info(f"Skipping start notification for task {task.id} (no issue)")
             return
 
         settings = get_settings()
         task_url = f"{settings.dashboard_url}/tasks/{task.id}"
         message = f"🔄 开始处理请求... [任务 {task.id}]({task_url})"
-        if task.merge_request_iid:
+        if issue.merge_request_iid:
             self.gitlab.create_mr_note(
                 task.project_id,
-                task.merge_request_iid,
+                issue.merge_request_iid,
                 message,
             )
-            logger.info(f"Sent start notification to MR !{task.merge_request_iid} for task {task.id}")
-        elif task.issue_iid:
-            self.gitlab.create_note(
-                task.project_id,
-                task.issue_iid,
-                message,
-            )
-            logger.info(f"Sent start notification for task {task.id}")
+            logger.info(f"Sent start notification to MR !{issue.merge_request_iid} for task {task.id}")
 
-    async def _notify_task_completed(self, task: Task, success: bool, notify_target: str = "issue") -> None:
-        """Send notification when task completes.
-
-        Args:
-            task: Task object
-            success: Whether the task succeeded
-            notify_target: Target discussion, either "issue" or "mr"
-        """
-        # Skip notifications for manual tasks (no issue to notify)
-        if task.is_manual:
-            logger.info(f"Skipping completion notification for manual task {task.id}")
+    async def _notify_task_completed(self, task: Task, success: bool, notify_target: str = "issue", issue: Optional[Issue] = None) -> None:
+        """Send notification when task completes."""
+        if not issue:
+            logger.info(f"Skipping completion notification for task {task.id} (no issue)")
             return
 
-        mr_iid = task.merge_request_iid
+        mr_iid = issue.merge_request_iid
         settings = get_settings()
         task_url = f"{settings.dashboard_url}/tasks/{task.id}"
 
         if success:
-            if task.merge_request_url:
-                # Extract MR IID from URL if not already set
-                if not mr_iid and "/merge_requests/" in task.merge_request_url:
-                    try:
-                        mr_iid = task.merge_request_url.split("/merge_requests/")[-1].split("/")[0].split("?")[0]
-                    except (IndexError, ValueError):
-                        pass
-
+            if issue.merge_request_url:
                 if mr_iid:
                     message = f"✅ 代码已更新到 MR !{mr_iid} [任务 {task.id}]({task_url})"
                 else:
@@ -1220,42 +1120,29 @@ class WorkerExecutor:
                 message = f"✅ 任务已完成 [任务 {task.id}]({task_url})"
         else:
             error_msg = task.error_message[:200] if task.error_message else "未知错误"
-            # Double sanitization for messages sent to external systems
             error_msg = sanitize_sensitive_data(error_msg)
             message = f"❌ 任务失败 [任务 {task.id}]({task_url}): {error_msg}"
 
-        # Send notification to the original trigger discussion.
         if notify_target == "mr" and mr_iid:
             await asyncio.to_thread(self.gitlab.create_mr_note, task.project_id, mr_iid, message)
             logger.info(f"Sent completion notification to MR !{mr_iid} for task {task.id}, success={success}")
 
-            # Update MR description with execution progress
             if success:
                 try:
                     self._update_mr_description(task, mr_iid)
                 except Exception as e:
                     logger.warning(f"Failed to update MR description: {e}")
-        elif task.issue_iid:
-            await asyncio.to_thread(self.gitlab.create_note, task.project_id, task.issue_iid, message)
-            logger.info(f"Sent completion notification for task {task.id}, success={success}")
 
-        # Send webhook alert if configured
         if not success:
-            await self._send_failure_alert(task)
+            await self._send_failure_alert(task, issue)
 
-    async def _send_failure_alert(self, task: Task) -> None:
-        """Send failure alert to webhook URL.
-
-        Args:
-            task: Task object
-        """
+    async def _send_failure_alert(self, task: Task, issue: Optional[Issue] = None) -> None:
+        """Send failure alert to webhook URL."""
         settings = get_settings()
 
-        # Check if alerts are enabled
         if not settings.alert_on_failure or not settings.alert_webhook_url:
             return
 
-        # Build alert message
         error_msg = task.error_message[:500] if task.error_message else "Unknown error"
         alert_data = {
             "text": f"🚨 Task Failed",
@@ -1264,13 +1151,12 @@ class WorkerExecutor:
                 "fields": [
                     {"title": "Task ID", "value": str(task.id), "short": True},
                     {"title": "Project ID", "value": str(task.project_id), "short": True},
-                    {"title": "Issue", "value": f"!{task.issue_iid}", "short": True},
+                    {"title": "Issue", "value": f"#{issue.id}" if issue else "N/A", "short": True},
                     {"title": "Error", "value": error_msg},
                 ]
             }]
         }
 
-        # Send webhook request
         try:
             async with httpx.AsyncClient(timeout=10.0, verify=get_ssl_verify(settings)) as client:
                 response = await client.post(
