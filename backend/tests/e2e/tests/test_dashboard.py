@@ -1,189 +1,101 @@
 """
 Dashboard E2E Tests
 
-Tests for the Dashboard (task queue) functionality including:
-- Task list display
-- Filter interactions (P0/P1/P2/All)
-- Task row click navigation
-- Auto-refresh behavior
-- Summary card display
+Tests for the Dashboard overview page including:
+- Page loads and header displays
+- Summary cards (4: Issues, Tasks, Running, Completed)
+- Recent Issues section
+- Running Tasks section
+- New Issue button navigation
 """
 
 import pytest
 from playwright.sync_api import Page, expect
 
 
-
-
 @pytest.mark.dashboard
 class TestDashboardPage:
-    """Tests for the dashboard page functionality."""
+    """Tests for dashboard overview page layout."""
 
     def test_dashboard_page_loads(self, class_page: Page):
-        """Test that the dashboard page loads without errors."""
+        class_page.goto("/dashboard")
+        class_page.wait_for_load_state("domcontentloaded")
+        expect(class_page.get_by_test_id("dashboard-page")).to_be_visible()
+
+    def test_dashboard_header_is_displayed(self, class_page: Page):
         class_page.goto("/dashboard")
         class_page.wait_for_load_state("domcontentloaded")
         expect(class_page.get_by_test_id("dashboard-header")).to_be_visible()
 
-    def test_dashboard_title_is_displayed(self, class_page: Page):
-        """Test that the dashboard title is displayed."""
+    def test_dashboard_new_issue_button_visible(self, class_page: Page):
         class_page.goto("/dashboard")
         class_page.wait_for_load_state("domcontentloaded")
-        expect(class_page.get_by_test_id("dashboard-header")).to_be_visible()
-
-    def test_dashboard_subtitle_is_displayed(self, class_page: Page):
-        """Test that the dashboard subtitle is displayed."""
-        class_page.goto("/dashboard")
-        class_page.wait_for_load_state("domcontentloaded")
-        expect(class_page.get_by_test_id("dashboard-header")).to_be_visible()
-
-
-@pytest.mark.dashboard
-class TestDashboardFilters:
-    """Tests for dashboard filter interactions."""
-
-    def test_status_filter_is_present(self, class_page: Page):
-        """Test that status filter dropdown is present."""
-        class_page.goto("/dashboard")
-        class_page.wait_for_load_state("domcontentloaded")
-        status_filter = class_page.locator(".dashboard__filters .n-base-selection").nth(0)
-        expect(status_filter).to_be_visible()
-
-    def test_project_filter_is_present(self, class_page: Page):
-        """Test that project filter dropdown is present."""
-        class_page.goto("/dashboard")
-        class_page.wait_for_load_state("domcontentloaded")
-        project_filter = class_page.locator(".dashboard__filters .n-base-selection").nth(1)
-        expect(project_filter).to_be_visible()
-
-    def test_initiator_filter_is_present(self, class_page: Page):
-        """Test that initiator filter dropdown is present (only shown when tasks exist)."""
-        class_page.goto("/dashboard")
-        class_page.wait_for_load_state("domcontentloaded")
-        class_page.wait_for_timeout(500)
-        initiator_filter = class_page.locator(".dashboard__filters .n-base-selection").nth(2)
-        if initiator_filter.is_visible():
-            expect(initiator_filter).to_be_visible()
-
-    def test_filters_area_contains_refresh_button(self, class_page: Page):
-        """Test that refresh button is present in filters area."""
-        class_page.goto("/dashboard")
-        class_page.wait_for_load_state("domcontentloaded")
-        refresh_button = class_page.get_by_role("button", name="Refresh")
-        expect(refresh_button).to_be_visible()
+        expect(class_page.get_by_test_id("dashboard-new-issue-button")).to_be_visible()
 
 
 @pytest.mark.dashboard
 class TestDashboardSummaryCards:
-    """Tests for dashboard summary card display."""
+    """Tests for dashboard summary cards."""
 
-    def test_summary_cards_are_displayed(self, class_page: Page):
-        """Test that summary cards are displayed on the dashboard."""
+    def test_summary_section_visible(self, class_page: Page):
         class_page.goto("/dashboard")
-        # Wait for the summary grid (rendered only after first API response via v-if="hasLoadedOnce")
-        class_page.wait_for_selector("[data-testid='dashboard-summary']")
-        summary_cards = class_page.locator(".dashboard-summary-card")
-        expect(summary_cards.first).to_be_visible()
+        class_page.wait_for_selector("[data-testid='dashboard-summary']", timeout=10000)
+        expect(class_page.get_by_test_id("dashboard-summary")).to_be_visible()
 
-    def test_summary_card_has_label(self, class_page: Page):
-        """Test that summary cards have labels."""
+    def test_summary_has_four_cards(self, class_page: Page):
         class_page.goto("/dashboard")
-        class_page.wait_for_selector("[data-testid='dashboard-summary']")
-        summary_label = class_page.locator(".dashboard-summary-card__label").first
-        expect(summary_label).to_be_visible()
+        class_page.wait_for_selector("[data-testid='dashboard-summary']", timeout=10000)
+        cards = class_page.get_by_test_id("dashboard-summary-card")
+        assert cards.count() == 4
 
-    def test_summary_card_has_value(self, class_page: Page):
-        """Test that summary cards have values."""
+    def test_summary_cards_have_labels_and_values(self, class_page: Page):
         class_page.goto("/dashboard")
-        class_page.wait_for_selector("[data-testid='dashboard-summary']")
-        summary_value = class_page.locator(".dashboard-summary-card__value").first
-        expect(summary_value).to_be_visible()
+        class_page.wait_for_selector("[data-testid='dashboard-summary']", timeout=10000)
+        labels = class_page.locator(".summary-card__label")
+        values = class_page.locator(".summary-card__value")
+        expect(labels.first).to_be_visible()
+        expect(values.first).to_be_visible()
 
 
 @pytest.mark.dashboard
-class TestDashboardTaskTable:
-    """Tests for dashboard task table display."""
+class TestDashboardSections:
+    """Tests for dashboard content sections."""
 
-    def test_task_table_is_present(self, class_page: Page):
-        """Test that the task data table is present."""
+    def test_recent_issues_section_visible(self, class_page: Page):
         class_page.goto("/dashboard")
         class_page.wait_for_load_state("domcontentloaded")
-        data_table = class_page.locator(".n-data-table")
-        expect(data_table).to_be_visible()
+        expect(class_page.get_by_test_id("dashboard-recent-issues")).to_be_visible()
 
-    def test_task_table_has_headers(self, class_page: Page):
-        """Test that the task table has column headers (only visible when table has data)."""
+    def test_running_tasks_section_visible(self, class_page: Page):
         class_page.goto("/dashboard")
         class_page.wait_for_load_state("domcontentloaded")
-        table_headers = class_page.locator(".n-data-table-th")
-        # Headers may not exist if table is empty
-        if table_headers.count() > 0:
-            expect(table_headers.first).to_be_visible()
+        expect(class_page.get_by_test_id("dashboard-running-tasks")).to_be_visible()
 
-    def test_refresh_button_triggers_update(self, class_page: Page):
-        """Test that the refresh button triggers a data refresh."""
+    def test_recent_issues_has_data_table(self, class_page: Page):
         class_page.goto("/dashboard")
         class_page.wait_for_load_state("domcontentloaded")
-        refresh_button = class_page.get_by_role("button", name="Refresh")
-        expect(refresh_button).to_be_visible()
-        refresh_button.click()
-        class_page.wait_for_timeout(500)
+        table = class_page.get_by_test_id("dashboard-recent-issues").locator(".n-data-table")
+        expect(table).to_be_visible()
+
+    def test_running_tasks_has_data_table(self, class_page: Page):
+        class_page.goto("/dashboard")
+        class_page.wait_for_load_state("domcontentloaded")
+        table = class_page.get_by_test_id("dashboard-running-tasks").locator(".n-data-table")
+        expect(table).to_be_visible()
 
 
 @pytest.mark.dashboard
 class TestDashboardNavigation:
     """Tests for dashboard navigation interactions."""
 
-    def test_dashboard_accessible_from_sidebar(self, class_page: Page):
-        """Test that dashboard is accessible from sidebar navigation."""
-        class_page.goto("/dashboard")
-        class_page.wait_for_load_state("domcontentloaded")
+    def test_new_issue_button_navigates_to_create(self, logged_in_page: Page):
+        logged_in_page.goto("/dashboard")
+        logged_in_page.wait_for_load_state("domcontentloaded")
+        logged_in_page.get_by_test_id("dashboard-new-issue-button").click()
+        logged_in_page.wait_for_url("**/issues/create", timeout=5000)
+        assert "/issues/create" in logged_in_page.url
 
-        dashboard_link = class_page.locator(".nav-menu").get_by_text("Dashboard")
-        if dashboard_link.is_visible():
-            dashboard_link.click()
-            class_page.wait_for_url("**/dashboard", timeout=5000)
-
-    def test_task_row_click_navigation(self, class_page: Page):
-        """Test that clicking a task row initiates navigation."""
-        class_page.goto("/dashboard")
-        class_page.wait_for_load_state("domcontentloaded")
-
-        table_row = class_page.locator(".n-data-table-tr").first
-        if table_row.is_visible():
-            expect(table_row).to_be_visible()
-
-
-@pytest.mark.dashboard
-class TestDashboardFilterInteractions:
-    """Tests for interactive filter behaviour on the dashboard."""
-
-    def test_status_filter_can_be_opened(self, class_page: Page):
-        """Test that the status filter dropdown can be opened."""
-        class_page.goto("/dashboard")
-        class_page.wait_for_selector("[data-testid='dashboard-header']")
-        # Click the inner selection trigger of the first n-select (status filter)
-        first_select = class_page.locator(".n-select").first
-        first_select.locator(".n-base-selection").click()
-        # Verify dropdown opened
-        expect(class_page.locator(".n-base-select-menu")).to_be_visible()
-
-    def test_status_filter_has_options(self, class_page: Page):
-        """Test that the status filter dropdown contains selectable options."""
-        class_page.goto("/dashboard")
-        class_page.wait_for_selector("[data-testid='dashboard-header']")
-        first_select = class_page.locator(".n-select").first
-        first_select.locator(".n-base-selection").click()
-        expect(class_page.locator(".n-base-select-menu")).to_be_visible()
-        options = class_page.locator(".n-base-select-option")
-        expect(options.first).to_be_visible()
-
-    def test_status_filter_can_select_option(self, class_page: Page):
-        """Test that selecting an option from the status filter closes the dropdown."""
-        class_page.goto("/dashboard")
-        class_page.wait_for_selector("[data-testid='dashboard-header']")
-        first_select = class_page.locator(".n-select").first
-        first_select.locator(".n-base-selection").click()
-        class_page.locator(".n-base-select-option").first.click()
-        # After selecting, dropdown should close
-        expect(class_page.locator(".n-base-select-menu")).not_to_be_visible()
+    def test_root_redirects_to_dashboard(self, class_page: Page):
+        class_page.goto("/")
+        class_page.wait_for_url("**/dashboard", timeout=10000)
+        assert "/dashboard" in class_page.url

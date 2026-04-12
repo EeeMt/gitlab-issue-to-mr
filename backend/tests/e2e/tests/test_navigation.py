@@ -45,6 +45,20 @@ class TestNavigation:
         menu = class_page.locator(".nav-menu")
         expect(menu).to_be_visible()
 
+    def test_issues_menu_item_visible(self, class_page: Page):
+        """Test that Issues menu item is visible in sidebar."""
+        class_page.goto("/dashboard")
+        class_page.wait_for_selector(".nav-menu", state="visible", timeout=5000)
+        issues_menu = class_page.locator(".nav-menu").get_by_text("Issues")
+        expect(issues_menu).to_be_visible()
+
+    def test_tasks_menu_item_visible(self, class_page: Page):
+        """Test that Tasks menu item is visible in sidebar."""
+        class_page.goto("/dashboard")
+        class_page.wait_for_selector(".nav-menu", state="visible", timeout=5000)
+        tasks_menu = class_page.locator(".nav-menu").get_by_text("Tasks")
+        expect(tasks_menu).to_be_visible()
+
     def test_mobile_drawer_exists(self, class_page: Page):
         """Test that mobile drawer header exists for small screens."""
         class_page.set_viewport_size({"width": 375, "height": 667})  # iPhone SE size
@@ -74,6 +88,12 @@ class TestPageRouting:
         class_page.goto("/")
         class_page.wait_for_url("**/dashboard", timeout=10000)
         assert "/dashboard" in class_page.url
+
+    def test_create_task_redirects_to_create_issue(self, class_page: Page):
+        """Test that /create-task redirects to /issues/create."""
+        class_page.goto("/create-task")
+        class_page.wait_for_url("**/issues/create", timeout=5000)
+        assert "/issues/create" in class_page.url
 
     def test_nonexistent_page_shows_error(self, page: Page):
         """Test that navigating to a nonexistent page shows error or redirects."""
