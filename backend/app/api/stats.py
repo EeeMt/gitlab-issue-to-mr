@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies.auth import require_page_access
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
-from app.models import Task, TaskStatus
+from app.models import Task, TaskStatus, Issue, IssueStatus
 from app.core.projects import build_project_lookup
 from app.core.utcnow import utcnow
 
@@ -113,6 +113,29 @@ async def get_stats(
     )
     running_long_30min = running_long_result.scalar() or 0
 
+    # Issue statistics
+    issue_base_query = select(Issue.id)
+    if not access_scope.is_unrestricted:
+        allowed_project_ids = access_scope.accessible_project_ids
+        if not allowed_project_ids:
+            issue_base_query = issue_base_query.where(false())
+        else:
+            issue_base_query = issue_base_query.where(Issue.project_id.in_(allowed_project_ids))
+
+    issue_total_result = await db.execute(
+        select(func.count()).select_from(issue_base_query.subquery())
+    )
+    issue_total = issue_total_result.scalar() or 0
+
+    issue_by_status = {}
+    for status_val in IssueStatus:
+        result = await db.execute(
+            select(func.count()).select_from(
+                issue_base_query.where(Issue.status == status_val).subquery()
+            )
+        )
+        issue_by_status[status_val.value] = result.scalar() or 0
+
     return {
         "total": total,
         "pending": status_counts.get("pending", 0),
@@ -124,6 +147,10 @@ async def get_stats(
         "completed_24h": completed_24h,
         "failed_cancelled_24h": failed_cancelled_24h,
         "running_long_30min": running_long_30min,
+        "issues": {
+            "total": issue_total,
+            "by_status": issue_by_status,
+        },
     }
 
 
