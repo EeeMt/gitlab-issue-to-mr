@@ -24,6 +24,9 @@ def setup_logging():
     # 移除默认 handler
     logger.remove()
 
+    # Set default extra values so format strings don't KeyError during startup
+    logger.configure(extra={"trace_id": "--------"})
+
     # 控制台输出（开发环境）
     logger.add(
         sys.stderr,
