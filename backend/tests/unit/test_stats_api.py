@@ -202,8 +202,13 @@ class StatsTimeWindowTests(unittest.TestCase):
         completed_24h=0,
         failed_cancelled_24h=0,
         running_long_30min=0,
+        issue_total=0,
+        issue_open=0,
+        issue_in_progress=0,
+        issue_completed=0,
+        issue_closed=0,
     ):
-        """Return a list of 10 mock results matching the db.execute call order in get_stats."""
+        """Return a list of 15 mock results matching the db.execute call order in get_stats."""
         return [
             self._make_scalar_result(total),            # 1. total
             self._make_scalar_result(pending),           # 2. pending
@@ -215,6 +220,11 @@ class StatsTimeWindowTests(unittest.TestCase):
             self._make_scalar_result(completed_24h),     # 8. completed_24h
             self._make_scalar_result(failed_cancelled_24h),  # 9. failed_cancelled_24h
             self._make_scalar_result(running_long_30min),    # 10. running_long_30min
+            self._make_scalar_result(issue_total),           # 11. issue total
+            self._make_scalar_result(issue_open),            # 12. issue open
+            self._make_scalar_result(issue_in_progress),     # 13. issue in_progress
+            self._make_scalar_result(issue_completed),       # 14. issue completed
+            self._make_scalar_result(issue_closed),          # 15. issue closed
         ]
 
     def setUp(self):

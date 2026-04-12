@@ -191,7 +191,6 @@ class CancelTaskEndpointTests(unittest.TestCase):
         task = MagicMock()
         task.id = 1
         task.project_id = 1
-        task.issue_iid = 10
         task.status = TaskStatus.PENDING
         task.scheduled_at = None
 
@@ -250,22 +249,17 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task = MagicMock()
     task.id = task_id
     task.project_id = project_id
-    task.issue_iid = 10
-    task.issue_id = 100
-    task.note_id = 1000
+    task.issue_id = 1
     task.user_prompt = "Test prompt"
     task.initiator_user_id = None
     task.initiator_gitlab_user_id = None
     task.initiator_username = None
-    task.branch_name = "codify/issue-10"
-    task.merge_request_iid = None
-    task.merge_request_url = None
+    task.is_retry = False
+    task.retry_source_task_id = None
     task.status = task_status
     task.priority = 0
     task.scheduled_at = None
     task.container_id = None
-    task.target_branch = "main"
-    task.base_branch = None
     task.commit_sha = None
     task.error_message = None
     task.additions = 0
@@ -275,7 +269,7 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.output_tokens = 0
     task.model_name = None
     task.merge_request_title = None
-    task.is_manual = False
+    task.issue = None
     now = datetime(2024, 1, 1, 12, 0, 0)
     task.created_at = now
     task.updated_at = now
@@ -573,7 +567,8 @@ class RetryTaskAPITests(unittest.TestCase):
         app.dependency_overrides.clear()
 
     def test_retry_task_success_for_failed_task(self):
-        """POST /api/tasks/{id}/retry should reset a FAILED task to PENDING."""
+        """POST /api/tasks/{id}/retry should create a new retry task from a FAILED task."""
+        from app.models import Task
         task = _make_serializable_task(task_status=TaskStatus.FAILED)
         task.id = 5
         task.project_id = 1
@@ -581,25 +576,38 @@ class RetryTaskAPITests(unittest.TestCase):
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = task
 
+        now = datetime(2024, 1, 1, 12, 0, 0)
+
+        async def fake_refresh(obj):
+            if isinstance(obj, Task):
+                obj.id = 100
+                obj.status = TaskStatus.PENDING
+                obj.created_at = now
+                obj.updated_at = now
+
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
-        mock_db.refresh = AsyncMock()
+        mock_db.refresh = AsyncMock(side_effect=fake_refresh)
 
         client, app = _make_app_client_with_db(mock_db)
 
         with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                response = client.post("/api/tasks/5/retry")
+                with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+                    response = client.post("/api/tasks/5/retry")
 
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(task.status, TaskStatus.PENDING)
-        self.assertIsNone(task.error_message)
+        data = response.json()
+        self.assertTrue(data["is_retry"])
+        self.assertEqual(data["retry_source_task_id"], 5)
 
     def test_retry_task_success_for_cancelled_task(self):
-        """POST /api/tasks/{id}/retry should reset a CANCELLED task to PENDING."""
+        """POST /api/tasks/{id}/retry should create a new retry task from a CANCELLED task."""
+        from app.models import Task
         task = _make_serializable_task(task_status=TaskStatus.CANCELLED)
         task.id = 6
         task.project_id = 1
@@ -607,21 +615,34 @@ class RetryTaskAPITests(unittest.TestCase):
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = task
 
+        now = datetime(2024, 1, 1, 12, 0, 0)
+
+        async def fake_refresh(obj):
+            if isinstance(obj, Task):
+                obj.id = 101
+                obj.status = TaskStatus.PENDING
+                obj.created_at = now
+                obj.updated_at = now
+
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
-        mock_db.refresh = AsyncMock()
+        mock_db.refresh = AsyncMock(side_effect=fake_refresh)
 
         client, app = _make_app_client_with_db(mock_db)
 
         with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                response = client.post("/api/tasks/6/retry")
+                with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+                    response = client.post("/api/tasks/6/retry")
 
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(task.status, TaskStatus.PENDING)
+        data = response.json()
+        self.assertTrue(data["is_retry"])
+        self.assertEqual(data["retry_source_task_id"], 6)
 
     def test_retry_task_returns_404_when_not_found(self):
         """POST /api/tasks/{id}/retry should return 404 when task does not exist."""
@@ -751,7 +772,6 @@ class GetTaskStatsAPITests(unittest.TestCase):
         task.additions = 50
         task.deletions = 10
         task.total_changes = 60
-        task.merge_request_iid = 5
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = task
@@ -769,15 +789,15 @@ class GetTaskStatsAPITests(unittest.TestCase):
         self.assertEqual(data["deletions"], 10)
         self.assertEqual(data["total"], 60)
 
-    def test_get_task_stats_returns_zeros_when_no_mr_iid(self):
-        """GET /api/tasks/{id}/stats returns zeros when no merge_request_iid."""
+    def test_get_task_stats_returns_zeros_when_no_changes(self):
+        """GET /api/tasks/{id}/stats returns zeros when no changes recorded."""
         task = _make_serializable_task()
         task.id = 21
         task.project_id = 1
         task.additions = 0
         task.deletions = 0
         task.total_changes = 0
-        task.merge_request_iid = None
+        task.merge_request_iid = None  # no MR, take early return path
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = task
@@ -851,14 +871,19 @@ class CreateTaskAPITests(unittest.TestCase):
         app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
         app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
+        mock_issue = MagicMock()
+        mock_issue.id = 1
+        mock_issue.project_id = 1
+        mock_issue.description = "Fix the login bug"
+        mock_db.get = AsyncMock(return_value=mock_issue)
+
         client = TestClient(app, raise_server_exceptions=False)
-        response = client.post("/api/tasks", json={
-            "project_id": 1,
-            "user_prompt": "Fix the login bug",
-            "branch_name": "fix/login",
-            "target_branch": "main",
-            "priority": 0,
-        })
+        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+            response = client.post("/api/tasks", json={
+                "issue_id": 1,
+                "user_prompt": "Fix the login bug",
+                "priority": 0,
+            })
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
@@ -1058,6 +1083,7 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
     def test_retry_task_with_future_scheduled_datetime(self):
         """POST /api/tasks/{id}/retry with future scheduled_datetime schedules retry."""
         from datetime import timezone
+        from app.models import Task
         task = _make_serializable_task(task_status=TaskStatus.FAILED)
         task.id = 80
         task.project_id = 1
@@ -1065,10 +1091,20 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = task
 
+        now = datetime(2024, 1, 1, 12, 0, 0)
+
+        async def fake_refresh(obj):
+            if isinstance(obj, Task):
+                obj.id = 102
+                obj.status = TaskStatus.PENDING
+                obj.created_at = now
+                obj.updated_at = now
+
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
-        mock_db.refresh = AsyncMock()
+        mock_db.refresh = AsyncMock(side_effect=fake_refresh)
 
         client, app = _make_app_client_with_db(mock_db)
 
@@ -1076,14 +1112,18 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
 
         with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                response = client.post("/api/tasks/80/retry", json={
-                    "scheduled_datetime": future_dt
-                })
+                with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+                    response = client.post("/api/tasks/80/retry", json={
+                        "scheduled_datetime": future_dt
+                    })
 
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
-        self.assertIsNotNone(task.scheduled_at)
+        data = response.json()
+        self.assertTrue(data["is_retry"])
+        self.assertEqual(data["retry_source_task_id"], 80)
+        self.assertIsNotNone(data["scheduled_at"])
 
 
 # ---------------------------------------------------------------------------

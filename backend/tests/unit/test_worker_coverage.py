@@ -73,14 +73,44 @@ def _make_worker(mock_gitlab=None, mock_docker=None):
 
 def _make_task(**kwargs):
     """Create a Task object with defaults."""
+    from unittest.mock import MagicMock
+
+    # Separate issue-level kwargs
+    issue_overrides = {}
+    for key in ['branch_name', 'base_branch', 'target_branch', 'merge_request_iid', 'merge_request_url']:
+        if key in kwargs:
+            issue_overrides[key] = kwargs.pop(key)
+
     defaults = dict(
-        id=1, project_id=100, issue_iid=10, note_id=50,
-        user_prompt="Fix the bug", branch_name="codify-1-p100-i10",
-        target_branch="main", priority=0, status=TaskStatus.PENDING,
+        id=1, project_id=100, issue_id=1,
+        user_prompt="Fix the bug",
+        priority=0, status=TaskStatus.PENDING,
+        is_retry=False, retry_source_task_id=None,
         additions=0, deletions=0, total_changes=0,
     )
     defaults.update(kwargs)
-    return Task(**defaults)
+    task = Task(**defaults)
+
+    # Attach mock issue
+    if defaults.get('issue_id') is not None:
+        mock_issue = MagicMock()
+        mock_issue.id = defaults['issue_id']
+        mock_issue.branch_name = issue_overrides.get(
+            'branch_name',
+            f"codify-{defaults['id']}-p{defaults['project_id']}-i{defaults.get('issue_id', 1)}",
+        )
+        mock_issue.base_branch = issue_overrides.get('base_branch', None)
+        mock_issue.target_branch = issue_overrides.get('target_branch', 'main')
+        mock_issue.merge_request_iid = issue_overrides.get('merge_request_iid', None)
+        mock_issue.merge_request_url = issue_overrides.get('merge_request_url', None)
+        mock_issue.claude_session_id = None
+        mock_issue.session_storage_path = None
+        mock_issue.project_id = defaults['project_id']
+        task.issue = mock_issue
+    else:
+        task.issue = None
+
+    return task
 
 
 def _make_db(task=None):
@@ -93,7 +123,15 @@ def _make_db(task=None):
     db.commit = AsyncMock()
     db.add = MagicMock()
     db.flush = AsyncMock()
-    db.get = AsyncMock(return_value=None)
+
+    # Support db.get(Issue, issue_id) for loading issue from task
+    async def _mock_get(model_cls, id_val):
+        if task and hasattr(task, 'issue') and task.issue is not None:
+            if hasattr(task.issue, 'id') and task.issue.id == id_val:
+                return task.issue
+        return None
+
+    db.get = AsyncMock(side_effect=_mock_get)
     return db
 
 
@@ -102,37 +140,30 @@ def _make_db(task=None):
 # ===================================================================
 
 class TestBuildInitialMrTitle(unittest.TestCase):
-    """Tests for _build_initial_mr_title — lines 127-144."""
+    """Tests for _build_initial_mr_title — prompt-based only."""
 
-    def test_title_from_issue(self):
-        """When issue_iid is set and issue fetch succeeds, title comes from issue."""
-        mock_gitlab = MagicMock()
-        mock_gitlab.get_issue.return_value = {"title": "Login page broken", "description": "..."}
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(issue_iid=42)
+    def test_title_from_short_prompt(self):
+        """Title comes from user_prompt when present."""
+        worker = _make_worker()
+        task = _make_task(user_prompt="Login page broken")
 
         title = worker._build_initial_mr_title(task)
 
         self.assertEqual(title, "AI: Login page broken")
-        mock_gitlab.get_issue.assert_called_once_with(100, 42)
 
-    def test_title_from_issue_empty_title_falls_back_to_prompt(self):
-        """When issue title is empty, fall back to user_prompt."""
-        mock_gitlab = MagicMock()
-        mock_gitlab.get_issue.return_value = {"title": "  ", "description": ""}
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(issue_iid=42, user_prompt="Add unit tests for auth")
+    def test_title_from_prompt_strips_whitespace(self):
+        """Whitespace in prompt is collapsed."""
+        worker = _make_worker()
+        task = _make_task(user_prompt="Add  unit  tests  for  auth")
 
         title = worker._build_initial_mr_title(task)
 
         self.assertEqual(title, "AI: Add unit tests for auth")
 
-    def test_title_from_issue_fetch_failure_falls_back_to_prompt(self):
-        """When GitLab API fails, fall back to user_prompt."""
-        mock_gitlab = MagicMock()
-        mock_gitlab.get_issue.side_effect = Exception("API timeout")
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(issue_iid=42, user_prompt="Improve caching layer")
+    def test_title_from_prompt_uses_first_sentence(self):
+        """Prompt with punctuation takes first sentence only."""
+        worker = _make_worker()
+        task = _make_task(user_prompt="Improve caching layer. Also update docs.")
 
         title = worker._build_initial_mr_title(task)
 
@@ -141,7 +172,7 @@ class TestBuildInitialMrTitle(unittest.TestCase):
     def test_title_from_prompt_with_sentence_split(self):
         """Prompt with punctuation should be split at first sentence boundary."""
         worker = _make_worker()
-        task = _make_task(issue_iid=None, user_prompt="Fix login page. Also update the tests.")
+        task = _make_task(user_prompt="Fix login page. Also update the tests.")
 
         title = worker._build_initial_mr_title(task)
 
@@ -151,7 +182,7 @@ class TestBuildInitialMrTitle(unittest.TestCase):
         """Long prompt segment should be truncated to 100 chars."""
         worker = _make_worker()
         long_text = "A" * 200
-        task = _make_task(issue_iid=None, user_prompt=long_text)
+        task = _make_task(user_prompt=long_text)
 
         title = worker._build_initial_mr_title(task)
 
@@ -159,9 +190,9 @@ class TestBuildInitialMrTitle(unittest.TestCase):
         self.assertLessEqual(len(title), 104 + 1)  # "AI: " + 100 chars
 
     def test_title_fallback_to_task_id(self):
-        """When no issue and no prompt, use task ID."""
+        """When no prompt, use task ID."""
         worker = _make_worker()
-        task = _make_task(issue_iid=None, user_prompt="", id=99)
+        task = _make_task(user_prompt="", id=99)
 
         title = worker._build_initial_mr_title(task)
 
@@ -170,18 +201,16 @@ class TestBuildInitialMrTitle(unittest.TestCase):
     def test_title_prompt_none_falls_to_task_id(self):
         """When user_prompt is None, fall back to task ID."""
         worker = _make_worker()
-        task = _make_task(issue_iid=None, user_prompt=None, id=7)
+        task = _make_task(user_prompt=None, id=7)
 
         title = worker._build_initial_mr_title(task)
 
         self.assertEqual(title, "AI: Task 7")
 
-    def test_title_issue_returns_none(self):
-        """When get_issue returns None, fall back to prompt."""
-        mock_gitlab = MagicMock()
-        mock_gitlab.get_issue.return_value = None
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(issue_iid=42, user_prompt="Update README")
+    def test_title_from_multiword_prompt(self):
+        """Title uses prompt content directly."""
+        worker = _make_worker()
+        task = _make_task(user_prompt="Update README")
 
         title = worker._build_initial_mr_title(task)
 
@@ -193,27 +222,28 @@ class TestBuildInitialMrTitle(unittest.TestCase):
 # ===================================================================
 
 class TestBuildInitialMrDescription(unittest.TestCase):
-    """Tests for _build_initial_mr_description — lines 146-159."""
+    """Tests for _build_initial_mr_description — prompt-based only."""
 
-    def test_description_with_issue_iid(self):
-        """Description should include Closes # when issue_iid is set."""
+    def test_description_includes_prompt(self):
+        """Description should include the user prompt."""
         worker = _make_worker()
-        task = _make_task(issue_iid=42, user_prompt="Fix auth bug")
+        task = _make_task(user_prompt="Fix auth bug")
 
         desc = worker._build_initial_mr_description(task)
 
         self.assertIn("Fix auth bug", desc)
-        self.assertIn("Closes #42", desc)
+        self.assertNotIn("Closes", desc)
 
-    def test_description_without_issue_iid(self):
-        """Description should not include Closes # when issue_iid is None."""
+    def test_description_format(self):
+        """Description should have the expected format without Closes line."""
         worker = _make_worker()
-        task = _make_task(issue_iid=None, user_prompt="Add docs")
+        task = _make_task(user_prompt="Add docs")
 
         desc = worker._build_initial_mr_description(task)
 
         self.assertIn("Add docs", desc)
         self.assertNotIn("Closes", desc)
+        self.assertIn("AI 正在执行", desc)
 
 
 # ===================================================================
@@ -221,7 +251,7 @@ class TestBuildInitialMrDescription(unittest.TestCase):
 # ===================================================================
 
 class TestRemoveMrDraftStatus(unittest.TestCase):
-    """Tests for _remove_mr_draft_status — lines 161-178."""
+    """Tests for _remove_mr_draft_status_for_issue and legacy _remove_mr_draft_status."""
 
     def test_removes_draft_prefix(self):
         """Should remove 'Draft: ' prefix and save."""
@@ -235,7 +265,7 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task(merge_request_iid=5)
 
-        worker._remove_mr_draft_status(task)
+        worker._remove_mr_draft_status_for_issue(task, task.issue)
 
         self.assertEqual(mock_mr.title, "Add new feature")
         mock_mr.save.assert_called_once()
@@ -252,7 +282,7 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task(merge_request_iid=5)
 
-        worker._remove_mr_draft_status(task)
+        worker._remove_mr_draft_status_for_issue(task, task.issue)
 
         self.assertEqual(mock_mr.title, "Experimental changes")
 
@@ -268,15 +298,13 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task(merge_request_iid=5)
 
-        worker._remove_mr_draft_status(task)
+        worker._remove_mr_draft_status_for_issue(task, task.issue)
 
         self.assertEqual(mock_mr.title, "New API endpoint")
 
     def test_skips_when_title_not_string(self):
         """Should skip when title is not a string (e.g., None)."""
         mock_mr = MagicMock()
-        mock_mr.title = None
-        # getattr returns None for non-string title
         mock_project = MagicMock()
         mock_project.mergerequests.get.return_value = mock_mr
 
@@ -287,7 +315,7 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
 
         # Use type(mock_mr).title to control what getattr sees
         type(mock_mr).title = PropertyMock(return_value=None)
-        worker._remove_mr_draft_status(task)
+        worker._remove_mr_draft_status_for_issue(task, task.issue)
 
         mock_mr.save.assert_not_called()
 
@@ -303,9 +331,19 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task(merge_request_iid=5)
 
-        worker._remove_mr_draft_status(task)
+        worker._remove_mr_draft_status_for_issue(task, task.issue)
 
         mock_mr.save.assert_not_called()
+
+    def test_legacy_method_is_noop(self):
+        """The legacy _remove_mr_draft_status(task) does nothing."""
+        mock_gitlab = MagicMock()
+        worker = _make_worker(mock_gitlab=mock_gitlab)
+        task = _make_task(merge_request_iid=5)
+
+        worker._remove_mr_draft_status(task)
+
+        mock_gitlab.gl.projects.get.assert_not_called()
 
 
 # ===================================================================
@@ -373,31 +411,21 @@ class TestBuildContainerEnv(unittest.TestCase):
         mock_get_settings.return_value = settings
         worker = _make_worker()
         task = _make_task()
+        issue = task.issue
 
-        env = worker._build_container_env(task, mr_iid=5, target_branch="main")
+        env = worker._build_container_env(task, issue, mr_iid=5, target_branch="main")
 
         self.assertEqual(env["GITLAB_URL"], "http://gitlab.example.com")
         self.assertEqual(env["GITLAB_TOKEN"], "test-token")
         self.assertEqual(env["PROJECT_ID"], "100")
-        self.assertEqual(env["BRANCH_NAME"], "codify-1-p100-i10")
+        self.assertEqual(env["BRANCH_NAME"], issue.branch_name)
         self.assertEqual(env["USER_PROMPT"], "Fix the bug")
         self.assertEqual(env["TARGET_BRANCH"], "main")
         self.assertEqual(env["ANTHROPIC_API_KEY"], "test-key")
         self.assertEqual(env["TASK_ID"], "1")
-        self.assertEqual(env["ISSUE_IID"], "10")
+        self.assertEqual(env["ISSUE_ID"], "1")
         self.assertEqual(env["MR_IID"], "5")
         self.assertEqual(env["CLAUDE_MAX_TURNS"], "20")
-
-    @patch('app.core.worker.get_settings')
-    def test_env_without_issue(self, mock_get_settings):
-        """No ISSUE_IID env var when issue_iid is None — line 510-511."""
-        mock_get_settings.return_value = _make_settings()
-        worker = _make_worker()
-        task = _make_task(issue_iid=None)
-
-        env = worker._build_container_env(task, mr_iid=None, target_branch="main")
-
-        self.assertNotIn("ISSUE_IID", env)
 
     @patch('app.core.worker.get_settings')
     def test_env_without_mr_iid(self, mock_get_settings):
@@ -405,30 +433,33 @@ class TestBuildContainerEnv(unittest.TestCase):
         mock_get_settings.return_value = _make_settings()
         worker = _make_worker()
         task = _make_task()
+        issue = task.issue
 
-        env = worker._build_container_env(task, mr_iid=None, target_branch="main")
+        env = worker._build_container_env(task, issue, mr_iid=None, target_branch="main")
 
         self.assertNotIn("MR_IID", env)
 
     @patch('app.core.worker.get_settings')
     def test_env_with_base_branch(self, mock_get_settings):
-        """BASE_BRANCH env var when task has a base_branch — line 514-515."""
+        """BASE_BRANCH env var when issue has a base_branch — line 514-515."""
         mock_get_settings.return_value = _make_settings()
         worker = _make_worker()
         task = _make_task(base_branch="develop")
+        issue = task.issue
 
-        env = worker._build_container_env(task, mr_iid=None, target_branch="main")
+        env = worker._build_container_env(task, issue, mr_iid=None, target_branch="main")
 
         self.assertEqual(env["BASE_BRANCH"], "develop")
 
     @patch('app.core.worker.get_settings')
     def test_env_without_base_branch(self, mock_get_settings):
-        """No BASE_BRANCH env var when task.base_branch is None."""
+        """No BASE_BRANCH env var when issue.base_branch is None."""
         mock_get_settings.return_value = _make_settings()
         worker = _make_worker()
         task = _make_task(base_branch=None)
+        issue = task.issue
 
-        env = worker._build_container_env(task, mr_iid=None, target_branch="main")
+        env = worker._build_container_env(task, issue, mr_iid=None, target_branch="main")
 
         self.assertNotIn("BASE_BRANCH", env)
 
@@ -438,8 +469,9 @@ class TestBuildContainerEnv(unittest.TestCase):
         mock_get_settings.return_value = _make_settings(custom_ca_bundle="/etc/ssl/custom-ca.crt")
         worker = _make_worker()
         task = _make_task()
+        issue = task.issue
 
-        env = worker._build_container_env(task, mr_iid=None, target_branch="main")
+        env = worker._build_container_env(task, issue, mr_iid=None, target_branch="main")
 
         self.assertEqual(env["CUSTOM_CA_BUNDLE"], "/etc/ssl/custom-ca.crt")
 
@@ -449,8 +481,9 @@ class TestBuildContainerEnv(unittest.TestCase):
         mock_get_settings.return_value = _make_settings()
         worker = _make_worker()
         task = _make_task()
+        issue = task.issue
 
-        env = worker._build_container_env(task, mr_iid=None, target_branch=None)
+        env = worker._build_container_env(task, issue, mr_iid=None, target_branch=None)
 
         self.assertEqual(env["TARGET_BRANCH"], "")
 
@@ -552,22 +585,22 @@ class TestGetContainerName(unittest.TestCase):
     """Tests for _get_container_name — lines 825-835."""
 
     def test_name_with_issue(self):
-        """Container name includes 'i{issue_iid}' suffix when task has an issue."""
+        """Container name includes 'issue{issue_id}' suffix when task has an issue."""
         worker = _make_worker()
-        task = _make_task(id=5, project_id=200, issue_iid=42)
+        task = _make_task(id=5, project_id=200, issue_id=42)
 
         name = worker._get_container_name(task)
 
-        self.assertEqual(name, "codify-5-p200-i42")
+        self.assertEqual(name, "codify-5-issue42")
 
-    def test_name_manual_task(self):
-        """Container name includes 'manual' suffix when no issue."""
+    def test_name_with_different_issue_id(self):
+        """Container name uses issue_id from task."""
         worker = _make_worker()
-        task = _make_task(id=7, project_id=300, issue_iid=None)
+        task = _make_task(id=7, project_id=300, issue_id=99)
 
         name = worker._get_container_name(task)
 
-        self.assertEqual(name, "codify-7-p300-manual")
+        self.assertEqual(name, "codify-7-issue99")
 
 
 # ===================================================================
@@ -581,8 +614,9 @@ class TestCreateMrIfNeeded(unittest.TestCase):
         """When mr_iid is already set, return it unchanged — line 401-402."""
         worker = _make_worker()
         task = _make_task()
+        issue = task.issue
 
-        result = worker._create_mr_if_needed(task, mr_iid=99, mr_web_url="http://example.com/mr/99")
+        result = worker._create_mr_if_needed(task, issue, mr_iid=99, mr_web_url="http://example.com/mr/99")
 
         self.assertEqual(result, (99, "http://example.com/mr/99"))
 
@@ -600,8 +634,9 @@ class TestCreateMrIfNeeded(unittest.TestCase):
         mock_gitlab.normalize_web_url.return_value = "http://gitlab.example.com/mr/77"
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task()
+        issue = task.issue
 
-        result = worker._create_mr_if_needed(task, mr_iid=None, mr_web_url=None)
+        result = worker._create_mr_if_needed(task, issue, mr_iid=None, mr_web_url=None)
 
         self.assertEqual(result, (77, "http://gitlab.example.com/mr/77"))
 
@@ -614,8 +649,9 @@ class TestCreateMrIfNeeded(unittest.TestCase):
         mock_gitlab.gl.projects.get.return_value = mock_project
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task()
+        issue = task.issue
 
-        result = worker._find_existing_mr(task)
+        result = worker._find_existing_mr(task, issue)
 
         self.assertIsNone(result)
 
@@ -625,8 +661,9 @@ class TestCreateMrIfNeeded(unittest.TestCase):
         mock_gitlab.gl.projects.get.side_effect = Exception("Network error")
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task()
+        issue = task.issue
 
-        result = worker._find_existing_mr(task)
+        result = worker._find_existing_mr(task, issue)
 
         self.assertIsNone(result)
 
@@ -648,8 +685,9 @@ class TestCreateMrIfNeeded(unittest.TestCase):
         mock_gitlab.get_issue.return_value = {"title": "Test Issue", "description": ""}
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task()
+        issue = task.issue
 
-        result = worker._create_new_mr(task)
+        result = worker._create_new_mr(task, issue)
 
         self.assertEqual(result, (88, "http://gitlab.example.com/mr/88"))
 
@@ -663,8 +701,9 @@ class TestCreateMrIfNeeded(unittest.TestCase):
         mock_gitlab.get_issue.return_value = {"title": "Test", "description": ""}
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task()
+        issue = task.issue
 
-        result = worker._create_new_mr(task)
+        result = worker._create_new_mr(task, issue)
 
         self.assertEqual(result, (None, None))
 
@@ -769,66 +808,45 @@ class TestParseTaskResult(unittest.TestCase):
 # ===================================================================
 
 class TestParseMrFromLogs(unittest.TestCase):
-    """Tests for _parse_mr_from_logs — lines 647-683."""
+    """Tests for _parse_mr_from_logs — parses MR URL/IID to temp attributes."""
 
     def test_extracts_mr_from_url_in_logs(self):
-        """Finds MR URL and IID from log output — lines 655-664."""
+        """Finds MR URL and IID from log output, stores as _parsed_* attrs."""
         mock_gitlab = MagicMock()
         mock_gitlab.normalize_web_url.side_effect = lambda x: x
         worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(merge_request_url=None, merge_request_iid=None)
+        task = _make_task()
 
         logs = "Created MR: http://gitlab.example.com/project/-/merge_requests/42\nDone."
 
         asyncio.run(worker._parse_mr_from_logs(task, logs))
 
-        self.assertEqual(task.merge_request_iid, 42)
-        self.assertIn("merge_requests/42", task.merge_request_url)
+        self.assertEqual(task._parsed_mr_iid, 42)
+        self.assertIn("merge_requests/42", task._parsed_mr_url)
 
     def test_derives_iid_from_url_when_missing(self):
-        """Derives IID from MR URL when only URL is found — lines 667-670."""
+        """Derives IID from MR URL when only URL is found."""
         mock_gitlab = MagicMock()
         mock_gitlab.normalize_web_url.side_effect = lambda x: x
         worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(
-            merge_request_url="http://gitlab.example.com/-/merge_requests/99",
-            merge_request_iid=None,
-        )
+        task = _make_task()
 
-        asyncio.run(worker._parse_mr_from_logs(task, "no mr in logs"))
+        logs = "http://gitlab.example.com/-/merge_requests/99\n"
 
-        self.assertEqual(task.merge_request_iid, 99)
+        asyncio.run(worker._parse_mr_from_logs(task, logs))
 
-    def test_api_fallback_when_no_mr_in_logs(self):
-        """Falls back to GitLab API when MR not found in logs — lines 673-683."""
-        mock_mr = MagicMock()
-        mock_mr.iid = 33
-        mock_mr.web_url = "http://gitlab.example.com/-/merge_requests/33"
+        self.assertEqual(task._parsed_mr_iid, 99)
 
-        mock_project = MagicMock()
-        mock_project.mergerequests.list.return_value = [mock_mr]
-
+    def test_no_mr_in_logs_leaves_no_parsed_attrs(self):
+        """No MR URL in logs → no _parsed_* attributes set."""
         mock_gitlab = MagicMock()
-        mock_gitlab.gl.projects.get.return_value = mock_project
-        mock_gitlab.normalize_web_url.return_value = "http://gitlab.example.com/-/merge_requests/33"
         worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(merge_request_url=None, merge_request_iid=None)
+        task = _make_task()
 
         asyncio.run(worker._parse_mr_from_logs(task, "no mr url here"))
 
-        self.assertEqual(task.merge_request_iid, 33)
-
-    def test_api_fallback_handles_exception(self):
-        """API fallback error is caught — line 682-683."""
-        mock_gitlab = MagicMock()
-        mock_gitlab.gl.projects.get.side_effect = Exception("API down")
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(merge_request_url=None, merge_request_iid=None)
-
-        # Should not raise
-        asyncio.run(worker._parse_mr_from_logs(task, "no mr url here"))
-
-        self.assertIsNone(task.merge_request_iid)
+        self.assertFalse(hasattr(task, '_parsed_mr_iid'))
+        self.assertFalse(hasattr(task, '_parsed_mr_url'))
 
 
 # ===================================================================
@@ -885,28 +903,29 @@ class TestUpdateMrDescription(unittest.TestCase):
 # ===================================================================
 
 class TestNotifyTaskStarted(unittest.TestCase):
-    """Tests for _notify_task_started — lines 1011-1038."""
+    """Tests for _notify_task_started — now takes issue parameter."""
 
     @patch('app.core.worker.get_settings')
-    def test_skips_manual_task(self, mock_get_settings):
-        """Manual tasks skip notification — lines 1018-1020."""
+    def test_skips_when_no_issue(self, mock_get_settings):
+        """Skips notification when issue is None."""
         mock_get_settings.return_value = _make_settings()
         worker = _make_worker()
-        task = _make_task(is_manual=True)
+        task = _make_task()
 
-        worker._notify_task_started(task)
+        worker._notify_task_started(task, issue=None)
 
         worker.gitlab.create_note.assert_not_called()
         worker.gitlab.create_mr_note.assert_not_called()
 
     @patch('app.core.worker.get_settings')
     def test_notifies_mr_when_mr_iid_set(self, mock_get_settings):
-        """Sends notification to MR when merge_request_iid is set — lines 1025-1031."""
+        """Sends notification to MR when merge_request_iid is set on issue."""
         mock_get_settings.return_value = _make_settings()
         worker = _make_worker()
-        task = _make_task(merge_request_iid=55, is_manual=False)
+        task = _make_task(merge_request_iid=55)
+        issue = task.issue
 
-        worker._notify_task_started(task)
+        worker._notify_task_started(task, issue=issue)
 
         worker.gitlab.create_mr_note.assert_called_once()
         args = worker.gitlab.create_mr_note.call_args
@@ -915,18 +934,18 @@ class TestNotifyTaskStarted(unittest.TestCase):
         self.assertIn("开始处理", args[0][2])
 
     @patch('app.core.worker.get_settings')
-    def test_notifies_issue_when_no_mr_iid(self, mock_get_settings):
-        """Sends notification to issue when no MR — lines 1032-1038."""
+    def test_only_notifies_mr_when_mr_iid_set(self, mock_get_settings):
+        """Start notification only sent to MR, not to issue."""
         mock_get_settings.return_value = _make_settings()
         worker = _make_worker()
-        task = _make_task(merge_request_iid=None, issue_iid=10, is_manual=False)
+        task = _make_task(merge_request_iid=None)
+        issue = task.issue
 
-        worker._notify_task_started(task)
+        worker._notify_task_started(task, issue=issue)
 
-        worker.gitlab.create_note.assert_called_once()
-        args = worker.gitlab.create_note.call_args
-        self.assertEqual(args[0][0], 100)  # project_id
-        self.assertEqual(args[0][1], 10)   # issue_iid
+        # With no MR, no notification is sent
+        worker.gitlab.create_note.assert_not_called()
+        worker.gitlab.create_mr_note.assert_not_called()
 
 
 # ===================================================================
@@ -934,22 +953,22 @@ class TestNotifyTaskStarted(unittest.TestCase):
 # ===================================================================
 
 class TestNotifyTaskCompleted(unittest.TestCase):
-    """Tests for _notify_task_completed — lines 1040-1096."""
+    """Tests for _notify_task_completed — now takes issue parameter."""
 
     @patch('app.core.worker.get_settings')
-    def test_skips_manual_task(self, mock_get_settings):
-        """Manual tasks skip notification — lines 1049-1051."""
+    def test_skips_when_no_issue(self, mock_get_settings):
+        """Skips notification when issue is None."""
         mock_get_settings.return_value = _make_settings()
         worker = _make_worker()
-        task = _make_task(is_manual=True)
+        task = _make_task()
 
-        asyncio.run(worker._notify_task_completed(task, success=True))
+        asyncio.run(worker._notify_task_completed(task, success=True, issue=None))
 
         worker.gitlab.create_note.assert_not_called()
 
     @patch('app.core.worker.get_settings')
     def test_success_with_mr_url_and_iid(self, mock_get_settings):
-        """Success with MR URL and IID sends proper message — lines 1058-1067."""
+        """Success with MR URL and IID sends proper message."""
         mock_get_settings.return_value = _make_settings()
         mock_gitlab = MagicMock()
         mock_gitlab.create_mr_note = MagicMock()
@@ -957,10 +976,10 @@ class TestNotifyTaskCompleted(unittest.TestCase):
         task = _make_task(
             merge_request_iid=55,
             merge_request_url="http://gitlab.example.com/mr/55",
-            is_manual=False,
         )
+        issue = task.issue
 
-        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr"))
+        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr", issue=issue))
 
         mock_gitlab.create_mr_note.assert_called_once()
         msg = mock_gitlab.create_mr_note.call_args[0][2]
@@ -969,62 +988,60 @@ class TestNotifyTaskCompleted(unittest.TestCase):
 
     @patch('app.core.worker.get_settings')
     def test_success_without_mr_url(self, mock_get_settings):
-        """Success without MR URL sends generic message — line 1071."""
+        """Success without MR URL — no notification to issue (only MR supported)."""
         mock_get_settings.return_value = _make_settings()
         mock_gitlab = MagicMock()
         mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task(
             merge_request_iid=None,
             merge_request_url=None,
-            issue_iid=10,
-            is_manual=False,
         )
+        issue = task.issue
 
-        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="issue"))
+        # With notify_target="issue" but no issue notification path, nothing happens
+        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="issue", issue=issue))
 
-        mock_gitlab.create_note.assert_called_once()
-        msg = mock_gitlab.create_note.call_args[0][2]
-        self.assertIn("✅", msg)
-        self.assertIn("任务已完成", msg)
+        # No notification is sent since notify_target="issue" path only sends to MR when mr_iid
+        mock_gitlab.create_note.assert_not_called()
+        mock_gitlab.create_mr_note.assert_not_called()
 
     @patch('app.core.worker.get_settings')
-    def test_failure_notification(self, mock_get_settings):
-        """Failure sends error message — lines 1072-1076."""
-        mock_get_settings.return_value = _make_settings()
-        mock_gitlab = MagicMock()
-        mock_gitlab.create_note = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(
-            merge_request_iid=None,
-            issue_iid=10,
-            is_manual=False,
-            error_message="Container crashed with OOM",
-        )
-
-        asyncio.run(worker._notify_task_completed(task, success=False, notify_target="issue"))
-
-        mock_gitlab.create_note.assert_called_once()
-        msg = mock_gitlab.create_note.call_args[0][2]
-        self.assertIn("❌", msg)
-        self.assertIn("Container crashed with OOM", msg)
-
-    @patch('app.core.worker.get_settings')
-    def test_success_mr_extracts_iid_from_url(self, mock_get_settings):
-        """Extracts MR IID from URL when mr_iid is None — lines 1060-1064."""
+    def test_failure_notification_to_mr(self, mock_get_settings):
+        """Failure sends error message to MR when mr_iid is set."""
         mock_get_settings.return_value = _make_settings()
         mock_gitlab = MagicMock()
         mock_gitlab.create_mr_note = MagicMock()
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task(
-            merge_request_iid=None,
-            merge_request_url="http://gitlab.example.com/project/-/merge_requests/42",
-            is_manual=False,
+            merge_request_iid=55,
+            error_message="Container crashed with OOM",
         )
+        issue = task.issue
 
-        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr"))
+        asyncio.run(worker._notify_task_completed(task, success=False, notify_target="mr", issue=issue))
 
-        # Should have extracted iid=42 from URL
+        mock_gitlab.create_mr_note.assert_called_once()
+        msg = mock_gitlab.create_mr_note.call_args[0][2]
+        self.assertIn("❌", msg)
+        self.assertIn("Container crashed with OOM", msg)
+
+    @patch('app.core.worker.get_settings')
+    def test_success_mr_extracts_iid_from_url(self, mock_get_settings):
+        """Success message includes MR IID."""
+        mock_get_settings.return_value = _make_settings()
+        mock_gitlab = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+        worker = _make_worker(mock_gitlab=mock_gitlab)
+        task = _make_task(
+            merge_request_iid=42,
+            merge_request_url="http://gitlab.example.com/project/-/merge_requests/42",
+        )
+        issue = task.issue
+
+        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr", issue=issue))
+
         mock_gitlab.create_mr_note.assert_called_once()
         msg = mock_gitlab.create_mr_note.call_args[0][2]
         self.assertIn("!42", msg)
@@ -1138,9 +1155,9 @@ class TestExecuteTask(unittest.TestCase):
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
-    def test_task_failure_with_retry(self, mock_notify, mock_get_settings):
-        """Failed task with retries schedules retry — lines 942-948."""
-        mock_get_settings.return_value = _make_settings(max_retries=2)
+    def test_task_failure_sets_failed_status(self, mock_notify, mock_get_settings):
+        """Failed task sets status to FAILED."""
+        mock_get_settings.return_value = _make_settings()
         mock_docker = MagicMock()
         mock_docker.create_container.return_value = MagicMock(id="ctr-456")
 
@@ -1149,15 +1166,14 @@ class TestExecuteTask(unittest.TestCase):
         mock_gitlab.create_mr_note = MagicMock()
 
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
-        task = _make_task(target_branch="main", merge_request_iid=None, retry_count=0)
+        task = _make_task(target_branch="main", merge_request_iid=None)
         db = _make_db(task)
 
         with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error output", 1))):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         self.assertFalse(result)
-        self.assertEqual(task.retry_count, 1)
-        self.assertEqual(task.status, TaskStatus.PENDING)
+        self.assertEqual(task.status, TaskStatus.FAILED)
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)

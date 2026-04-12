@@ -25,7 +25,9 @@ class SchedulerPriorityQueueTests(unittest.IsolatedAsyncioTestCase):
         task = MagicMock()
         task.id = task_id
         task.project_id = 1
-        task.issue_iid = task_id * 10
+        task.issue_id = task_id
+        task.is_retry = False
+        task.retry_source_task_id = None
         task.priority = priority
         task.status = "pending"
         task.scheduled_at = scheduled_at
@@ -109,45 +111,44 @@ class SchedulerIssueMutexTests(unittest.IsolatedAsyncioTestCase):
         scheduler = Scheduler()
 
         # Pre-populate running issues set
-        scheduler._running_issues.add("1:10")  # project_id:issue_iid
+        scheduler._running_issues.add(10)  # issue_id
 
         # Check if issue is in mutex
-        issue_key = "1:10"
+        issue_key = 10
         self.assertIn(issue_key, scheduler._running_issues)
 
         # Simulate what _run_cycle does - check mutex before execution
         task = MagicMock()
         task.project_id = 1
-        task.issue_iid = 10
+        task.issue_id = 10
 
-        issue_key = f"{task.project_id}:{task.issue_iid}"
+        issue_key = task.issue_id
 
         # Should skip because issue is already running
         self.assertIn(issue_key, scheduler._running_issues)
 
     async def test_different_issues_not_blocked_by_mutex(self) -> None:
-        """Different issue_iid values should not conflict."""
+        """Different issue_id values should not conflict."""
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
 
-        scheduler._running_issues.add("1:10")
+        scheduler._running_issues.add(10)
 
         # Different issue
-        issue_key_2 = "1:20"
+        issue_key_2 = 20
         self.assertNotIn(issue_key_2, scheduler._running_issues)
 
     async def test_manual_task_with_no_issue_not_blocked(self) -> None:
-        """Manual tasks (issue_iid=None) should not be blocked."""
+        """Tasks with issue_id=None are independent and skip the mutex entirely."""
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
 
-        scheduler._running_issues.add("1:10")
+        scheduler._running_issues.add(10)
 
-        # Manual task issue_key is "1:None"
-        manual_task_key = "1:None"
-        self.assertNotIn(manual_task_key, scheduler._running_issues)
+        # A task with issue_id=None is independent; None is never in Set[int]
+        self.assertNotIn(None, scheduler._running_issues)
 
     async def test_issue_cleanup_after_task_completion(self) -> None:
         """_run_task_background should remove issue from _running_issues."""
@@ -156,15 +157,15 @@ class SchedulerIssueMutexTests(unittest.IsolatedAsyncioTestCase):
         scheduler = Scheduler()
 
         # Issue is running
-        scheduler._running_issues.add("1:10")
+        scheduler._running_issues.add(10)
         scheduler._running_tasks.add(1)
 
         # Mock the background task to cleanup
         # We simulate the finally block cleanup
         scheduler._running_tasks.discard(1)
-        scheduler._running_issues.discard("1:10")
+        scheduler._running_issues.discard(10)
 
-        self.assertNotIn("1:10", scheduler._running_issues)
+        self.assertNotIn(10, scheduler._running_issues)
         self.assertNotIn(1, scheduler._running_tasks)
 
 
@@ -236,8 +237,8 @@ class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         from app.scheduler import WORKER_CONTAINER_PATTERN
 
         # Valid worker container names
-        self.assertTrue(WORKER_CONTAINER_PATTERN.match("codify-1-p1-i10"))
-        self.assertTrue(WORKER_CONTAINER_PATTERN.match("codify-123-p456-i789"))
+        self.assertTrue(WORKER_CONTAINER_PATTERN.match("codify-1-issue10"))
+        self.assertTrue(WORKER_CONTAINER_PATTERN.match("codify-123-issue789"))
 
         # Non-worker containers should not match
         self.assertFalse(WORKER_CONTAINER_PATTERN.match("codify-backend"))
@@ -257,7 +258,7 @@ class SchedulerTaskExecutionTests(unittest.IsolatedAsyncioTestCase):
         task = MagicMock()
         task.id = 1
         task.project_id = 1
-        task.issue_iid = 10
+        task.issue_id = 10
         task.status = "pending"
 
         mock_db = MagicMock()
@@ -268,10 +269,10 @@ class SchedulerTaskExecutionTests(unittest.IsolatedAsyncioTestCase):
 
         # Just verify the tracking sets exist and can be modified
         scheduler._running_tasks.add(task.id)
-        scheduler._running_issues.add(f"{task.project_id}:{task.issue_iid}")
+        scheduler._running_issues.add(task.issue_id)
 
         self.assertIn(task.id, scheduler._running_tasks)
-        self.assertIn("1:10", scheduler._running_issues)
+        self.assertIn(10, scheduler._running_issues)
 
     async def test_execute_task_updates_task_status(self) -> None:
         """_execute_task should update task status to RUNNING."""
@@ -283,7 +284,7 @@ class SchedulerTaskExecutionTests(unittest.IsolatedAsyncioTestCase):
         task = MagicMock()
         task.id = 1
         task.project_id = 1
-        task.issue_iid = 10
+        task.issue_id = 10
         task.status = TaskStatus.PENDING
 
         mock_db = MagicMock()
@@ -605,10 +606,10 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
         task = MagicMock()
         task.id = 1
         task.project_id = 10
-        task.issue_iid = 99
+        task.issue_id = 99
 
         # Pre-populate the running issues mutex
-        scheduler._running_issues.add("10:99")
+        scheduler._running_issues.add(99)
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
             with patch("app.scheduler.load_runtime_config_from_db", new=AsyncMock()):
@@ -632,7 +633,7 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
         task = MagicMock()
         task.id = 2
         task.project_id = 5
-        task.issue_iid = 50
+        task.issue_id = 50
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
             with patch("app.scheduler.load_runtime_config_from_db", new=AsyncMock()):
@@ -642,7 +643,7 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
                             with patch.object(scheduler, "_get_next_task", new=AsyncMock(return_value=task)):
                                 with patch.object(scheduler, "_execute_task", new=AsyncMock()) as mock_exec:
                                     await scheduler._run_cycle()
-                                    mock_exec.assert_called_once_with(mock_db, task, "5:50")
+                                    mock_exec.assert_called_once_with(mock_db, task)
 
 
 # ---------------------------------------------------------------------------
@@ -701,7 +702,7 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
         task = MagicMock()
         task.id = 5
         task.project_id = 10
-        task.issue_iid = 20
+        task.issue_id = 20
         task.status = TaskStatus.PENDING
 
         mock_db = MagicMock()
@@ -709,13 +710,13 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(scheduler, "_run_task_background", new=MagicMock()) as mock_bg:
             with patch("app.scheduler.asyncio.create_task") as mock_create_task:
-                await scheduler._execute_task(mock_db, task, "10:20")
+                await scheduler._execute_task(mock_db, task)
 
         self.assertEqual(task.status, TaskStatus.RUNNING)
         self.assertIsNotNone(task.started_at)
         mock_db.commit.assert_awaited_once()
         self.assertIn(5, scheduler._running_tasks)
-        self.assertIn("10:20", scheduler._running_issues)
+        self.assertIn(20, scheduler._running_issues)
         mock_create_task.assert_called_once()
 
     async def test_execute_task_handles_exception_and_marks_failed(self) -> None:
@@ -728,19 +729,19 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
         task = MagicMock()
         task.id = 6
         task.project_id = 11
-        task.issue_iid = 21
+        task.issue_id = 21
         task.status = TaskStatus.PENDING
 
         mock_db = MagicMock()
         # First commit (marking running) raises an exception
         mock_db.commit = AsyncMock(side_effect=[Exception("DB failure"), None])
 
-        await scheduler._execute_task(mock_db, task, "11:21")
+        await scheduler._execute_task(mock_db, task)
 
         self.assertEqual(task.status, TaskStatus.FAILED)
         self.assertIn("DB failure", task.error_message)
         self.assertNotIn(6, scheduler._running_tasks)
-        self.assertNotIn("11:21", scheduler._running_issues)
+        self.assertNotIn(21, scheduler._running_issues)
 
 
 # ---------------------------------------------------------------------------
@@ -761,7 +762,7 @@ class SchedulerRunTaskBackgroundTests(unittest.IsolatedAsyncioTestCase):
         task = MagicMock()
         task.id = 10
         task.project_id = 5
-        task.issue_iid = 50
+        task.issue_id = 50
 
         task_result = MagicMock()
         task_result.scalar_one_or_none.return_value = task
@@ -797,7 +798,7 @@ class SchedulerRunTaskBackgroundTests(unittest.IsolatedAsyncioTestCase):
         task = MagicMock()
         task.id = 11
         task.project_id = 6
-        task.issue_iid = 60
+        task.issue_id = 60
 
         task_result = MagicMock()
         task_result.scalar_one_or_none.return_value = task

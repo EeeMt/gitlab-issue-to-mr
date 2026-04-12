@@ -24,9 +24,18 @@ mock_settings.anthropic_model = "claude-sonnet-4-20250514"
 mock_settings.default_target_branch = "main"
 mock_settings.max_retries = 0
 
+mock_settings.dashboard_url = "http://localhost:3000"
+mock_settings.alert_on_failure = False
+mock_settings.claude_max_turns = 10
+mock_settings.custom_ca_bundle = ""
+mock_settings.maven_cache_host_path = ""
+mock_settings.maven_settings_host_path = ""
+mock_settings.worker_network = ""
+mock_settings.worker_extra_volumes = ""
+
 with patch('app.core.worker.get_settings', return_value=mock_settings):
     from app.core.worker import WorkerExecutor
-    from app.models import Task, TaskStatus
+    from app.models import Task, TaskStatus, Issue
 
 
 class MockContainer:
@@ -35,7 +44,7 @@ class MockContainer:
         self.id = "mock-container-id"
 
 
-def create_mock_db(task):
+def create_mock_db(task, issue=None):
     """Create a properly configured mock database session."""
     mock_db = MagicMock()
     mock_result = MagicMock()
@@ -43,7 +52,23 @@ def create_mock_db(task):
     mock_db.execute = AsyncMock(return_value=mock_result)
     mock_db.commit = AsyncMock()
     mock_db.add = MagicMock()
+    mock_db.get = AsyncMock(return_value=issue)
     return mock_db
+
+
+def create_mock_issue(issue_id, project_id, branch_name=None, target_branch="main"):
+    """Create a mock Issue object with the needed fields."""
+    issue = MagicMock(spec=Issue)
+    issue.id = issue_id
+    issue.project_id = project_id
+    issue.branch_name = branch_name or f"codify-issue{issue_id}"
+    issue.base_branch = None
+    issue.target_branch = target_branch
+    issue.merge_request_iid = None
+    issue.merge_request_url = None
+    issue.claude_session_id = None
+    issue.session_storage_path = None
+    return issue
 
 
 def test_create_initial_mr():
@@ -55,12 +80,12 @@ def test_create_initial_mr():
     # Create mock GitLab client
     mock_gitlab = MagicMock()
     mock_gitlab.normalize_web_url.side_effect = lambda url: url
+    mock_gitlab.get_merge_request_stats = AsyncMock(return_value=None)
     mock_docker = MagicMock()
 
     # Mock the create_container to return a mock container
     mock_container = MockContainer()
     mock_docker.create_container.return_value = mock_container
-    mock_docker.wait_for_container.return_value = (0, "MR created: !1")
 
     # Create mock project and MR objects
     mock_project = MagicMock()
@@ -79,22 +104,21 @@ def test_create_initial_mr():
     task = Task(
         id=1,
         project_id=123,
-        issue_iid=456,
-        note_id=789,
+        issue_id=456,
         user_prompt="Add user authentication feature",
-        branch_name="codify-1-p123-i456",
-        target_branch="main",
         priority=2,
         status=TaskStatus.PENDING,
     )
 
-    # Mock database session
-    mock_db = create_mock_db(task)
+    issue = create_mock_issue(456, 123, branch_name="codify-1-issue456", target_branch="main")
+    mock_db = create_mock_db(task, issue)
 
     # Run execute_task (it's async)
     async def run_test():
-        result = await worker.execute_task(mock_db, task.id)
-        return result
+        with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1))):
+            with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
+                result = await worker.execute_task(mock_db, task.id)
+                return result
 
     result = asyncio.run(run_test())
 
@@ -102,32 +126,32 @@ def test_create_initial_mr():
     mock_project.mergerequests.create.assert_called_once()
     call_args = mock_project.mergerequests.create.call_args
 
-    # Check if called with keyword arguments
-    if call_args[1]:  # kwargs
-        call_kwargs = call_args[1]
-        # Verify it's a draft MR
-        assert call_kwargs.get("draft") == True, "MR should be created as draft"
+    # The worker passes a single dict as positional arg
+    call_dict = call_args[0][0]
 
-        # Verify title contains AI prefix
-        assert call_kwargs["title"].startswith("AI:"), "Title should start with AI:"
+    # Verify it's a draft MR
+    assert call_dict.get("draft") == True, "MR should be created as draft"
 
-        # Verify description contains the prompt
-        assert "Add user authentication feature" in call_kwargs.get("description", ""), \
-            "Description should contain user prompt"
+    # Verify title contains AI prefix
+    assert call_dict["title"].startswith("AI:"), "Title should start with AI:"
 
-    # Verify task.merge_request_iid was set
-    assert task.merge_request_iid == 42, "Task merge_request_iid should be set"
-    assert task.merge_request_url == "http://gitlab.example.com/project/-/merge_requests/42"
+    # Verify description contains the prompt
+    assert "Add user authentication feature" in call_dict.get("description", ""), \
+        "Description should contain user prompt"
+
+    # Verify MR info was set on the issue (not the task)
+    assert issue.merge_request_iid == 42, "Issue merge_request_iid should be set"
+    assert issue.merge_request_url == "http://gitlab.example.com/project/-/merge_requests/42"
 
     print("✓ Worker creates initial draft MR")
-    print(f"  - MR IID: {task.merge_request_iid}")
-    print(f"  - MR URL: {task.merge_request_url}")
+    print(f"  - MR IID: {issue.merge_request_iid}")
+    print(f"  - MR URL: {issue.merge_request_url}")
 
 
 def test_initial_mr_description_links_issue():
-    """Test initial MR description keeps the GitLab issue linkage."""
+    """Test initial MR description contains the user prompt."""
     print("\n" + "=" * 60)
-    print("Testing: Initial MR description includes issue closure reference")
+    print("Testing: Initial MR description includes user prompt")
     print("=" * 60)
 
     mock_gitlab = MagicMock()
@@ -137,11 +161,8 @@ def test_initial_mr_description_links_issue():
     task = Task(
         id=11,
         project_id=123,
-        issue_iid=456,
-        note_id=999,
+        issue_id=456,
         user_prompt="Add user authentication feature",
-        branch_name="codify-11-p123-i456",
-        target_branch="main",
         priority=2,
         status=TaskStatus.PENDING,
     )
@@ -149,9 +170,8 @@ def test_initial_mr_description_links_issue():
     description = worker._build_initial_mr_description(task)
 
     assert "Add user authentication feature" in description
-    assert "Closes #456" in description
 
-    print("✓ Initial MR description retains issue linkage")
+    print("✓ Initial MR description contains user prompt")
 
 
 def test_mr_iid_passed_to_container():
@@ -162,11 +182,11 @@ def test_mr_iid_passed_to_container():
 
     mock_gitlab = MagicMock()
     mock_gitlab.normalize_web_url.side_effect = lambda url: url
+    mock_gitlab.get_merge_request_stats = AsyncMock(return_value=None)
     mock_docker = MagicMock()
 
     mock_container = MockContainer()
     mock_docker.create_container.return_value = mock_container
-    mock_docker.wait_for_container.return_value = (0, "Success")
 
     mock_project = MagicMock()
     mock_mr = MagicMock()
@@ -182,19 +202,19 @@ def test_mr_iid_passed_to_container():
     task = Task(
         id=2,
         project_id=123,
-        issue_iid=456,
-        note_id=790,
+        issue_id=456,
         user_prompt="Fix login bug",
-        branch_name="codify-2-p123-i456",
-        target_branch="main",
         priority=2,
         status=TaskStatus.PENDING,
     )
 
-    mock_db = create_mock_db(task)
+    issue = create_mock_issue(456, 123, branch_name="codify-2-issue456", target_branch="main")
+    mock_db = create_mock_db(task, issue)
 
     async def run_test():
-        await worker.execute_task(mock_db, task.id)
+        with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1))):
+            with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
+                await worker.execute_task(mock_db, task.id)
 
     asyncio.run(run_test())
 
@@ -219,11 +239,11 @@ def test_mr_creation_failure_handled():
 
     mock_gitlab = MagicMock()
     mock_gitlab.normalize_web_url.side_effect = lambda url: url
+    mock_gitlab.get_merge_request_stats = AsyncMock(return_value=None)
     mock_docker = MagicMock()
 
     mock_container = MockContainer()
     mock_docker.create_container.return_value = mock_container
-    mock_docker.wait_for_container.return_value = (0, "Success")
 
     # Make MR creation fail
     mock_project = MagicMock()
@@ -236,20 +256,20 @@ def test_mr_creation_failure_handled():
     task = Task(
         id=3,
         project_id=123,
-        issue_iid=456,
-        note_id=791,
+        issue_id=456,
         user_prompt="Test feature",
-        branch_name="codify-3-p123-i456",
-        target_branch="main",
         priority=2,
         status=TaskStatus.PENDING,
     )
 
-    mock_db = create_mock_db(task)
+    issue = create_mock_issue(456, 123, branch_name="codify-3-issue456", target_branch="main")
+    mock_db = create_mock_db(task, issue)
 
     async def run_test():
-        result = await worker.execute_task(mock_db, task.id)
-        return result
+        with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1))):
+            with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
+                result = await worker.execute_task(mock_db, task.id)
+                return result
 
     result = asyncio.run(run_test())
 
@@ -273,11 +293,11 @@ def test_draft_removed_on_completion():
 
     mock_gitlab = MagicMock()
     mock_gitlab.normalize_web_url.side_effect = lambda url: url
+    mock_gitlab.get_merge_request_stats = AsyncMock(return_value=None)
     mock_docker = MagicMock()
 
     mock_container = MockContainer()
     mock_docker.create_container.return_value = mock_container
-    mock_docker.wait_for_container.return_value = (0, "MR created: !1")
 
     mock_project = MagicMock()
     mock_mr = MagicMock()
@@ -298,24 +318,23 @@ def test_draft_removed_on_completion():
     task = Task(
         id=4,
         project_id=123,
-        issue_iid=456,
-        note_id=792,
+        issue_id=456,
         user_prompt="Complete feature",
-        branch_name="codify-4-p123-i456",
-        target_branch="main",
         priority=2,
         status=TaskStatus.PENDING,
     )
 
-    mock_db = create_mock_db(task)
+    issue = create_mock_issue(456, 123, branch_name="codify-4-issue456", target_branch="main")
+    mock_db = create_mock_db(task, issue)
 
     async def run_test():
         with patch.object(
             worker,
             "_stream_logs_to_db",
-            AsyncMock(return_value=(0, "MR created: http://gitlab.example.com/project/-/merge_requests/42", 1)),
+            AsyncMock(return_value=(0, "Success", 1)),
         ):
-            await worker.execute_task(mock_db, task.id)
+            with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
+                await worker.execute_task(mock_db, task.id)
 
     asyncio.run(run_test())
 
@@ -328,61 +347,41 @@ def test_draft_removed_on_completion():
 
 
 def test_mr_iid_in_issue_comment():
-    """Test that issue completion comments keep the MR shorthand in the issue reply."""
+    """Test that completion comments use the MR shorthand (!iid)."""
     print("\n" + "=" * 60)
-    print("Testing: Issue comment uses GitLab shorthand (!iid)")
+    print("Testing: Completion comment uses GitLab shorthand (!iid)")
     print("=" * 60)
 
     mock_gitlab = MagicMock()
     mock_docker = MagicMock()
-
-    mock_container = MockContainer()
-    mock_docker.create_container.return_value = mock_container
-    mock_docker.wait_for_container.return_value = (0, "MR created")
-
-    mock_project = MagicMock()
-    mock_mr = MagicMock()
-    mock_mr.iid = 42
-    mock_mr.web_url = "http://gitlab.example.com/project/-/merge_requests/42"
-    mock_project.mergerequests.create.return_value = mock_mr
-
-    mock_gitlab.gl.projects.get.return_value = mock_project
 
     worker = WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
 
     task = Task(
         id=5,
         project_id=123,
-        issue_iid=456,
-        note_id=793,
+        issue_id=456,
         user_prompt="Test",
-        branch_name="codify-5-p123-i456",
-        target_branch="main",
         priority=2,
         status=TaskStatus.PENDING,
     )
 
-    # This test doesn't need to run execute_task, it directly calls _notify_task_completed
+    issue = create_mock_issue(456, 123)
+    issue.merge_request_iid = 42
+    issue.merge_request_url = "http://gitlab.example.com/project/-/merge_requests/42"
 
-    # Check the create_note call for completion
-    # The notification is sent after container completes
-    # Let's verify the format by calling _notify_task_completed directly
+    # _notify_task_completed with notify_target="mr" sends via create_mr_note
+    asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr", issue=issue))
 
-    task.merge_request_url = "http://gitlab.example.com/project/-/merge_requests/42"
-    task.merge_request_iid = 42
+    mock_gitlab.create_mr_note.assert_called()
+    call_args = mock_gitlab.create_mr_note.call_args[0]
 
-    asyncio.run(worker._notify_task_completed(task, success=True, notify_target="issue"))
-
-    mock_gitlab.create_note.assert_called()
-    call_args = mock_gitlab.create_note.call_args[0]
-
-    # The comment should contain !42 (GitLab shorthand) instead of full URL
+    # The comment should contain !42 (GitLab shorthand)
     comment_body = call_args[2]
     assert "!42" in comment_body or "✅" in comment_body, \
         "Comment should use GitLab shorthand format"
-    mock_gitlab.create_mr_note.assert_not_called()
 
-    print("✓ Issue comment uses GitLab shorthand format")
+    print("✓ Completion comment uses GitLab shorthand format")
     print(f"  - Comment: {comment_body[:60]}...")
 
 

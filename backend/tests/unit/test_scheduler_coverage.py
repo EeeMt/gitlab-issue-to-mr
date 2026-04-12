@@ -3,9 +3,9 @@
 
 Targets missed lines:
 - 44-61: start() — full scheduler loop, crash recovery exception, cycle exception
-- 95: _run_cycle manual task issue_key (issue_iid is None)
+- 95: _run_cycle task with issue_id=None (skips mutex)
 - 182: _run_task_background worker failure path (success=False)
-- 201: _run_task_background cleanup for manual task (issue_iid is None)
+- 201: _run_task_background cleanup for task with issue_id=None
 - 203-204: _run_task_background cleanup DB exception
 - 232-240: _crash_recovery container cleanup (WORKER_CONTAINER_PATTERN, running/exited)
 - 273-274: start_scheduler() module-level helper
@@ -27,18 +27,20 @@ from app.models import TaskStatus
 def _make_mock_task(
     task_id: int = 1,
     project_id: int = 100,
-    issue_iid: int | None = 10,
+    issue_id: int | None = 10,
     status: str = "pending",
 ) -> MagicMock:
     """Return a lightweight mock Task object."""
     task = MagicMock()
     task.id = task_id
     task.project_id = project_id
-    task.issue_iid = issue_iid
+    task.issue_id = issue_id
     task.status = status
     task.started_at = None
     task.error_message = None
     task.completed_at = None
+    task.is_retry = False
+    task.retry_source_task_id = None
     return task
 
 
@@ -126,14 +128,14 @@ class TestSchedulerStart(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 
 class TestRunCycleManualTask(unittest.IsolatedAsyncioTestCase):
-    """Tests for _run_cycle when the task has issue_iid=None (manual task)."""
+    """Tests for _run_cycle when the task has issue_id=None (skips mutex)."""
 
-    async def test_run_cycle_uses_manual_issue_key(self) -> None:
-        """Manual task (issue_iid=None) should use 'manual:{task.id}' as issue key."""
+    async def test_run_cycle_skips_mutex_for_null_issue_id(self) -> None:
+        """Task with issue_id=None should skip the issue mutex and call _execute_task."""
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
-        task = _make_mock_task(task_id=42, issue_iid=None)
+        task = _make_mock_task(task_id=42, issue_id=None)
 
         mock_db = MagicMock()
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
@@ -149,10 +151,10 @@ class TestRunCycleManualTask(unittest.IsolatedAsyncioTestCase):
             mock_settings.return_value = MagicMock(max_concurrency=5)
             await scheduler._run_cycle()
 
-        # _execute_task should be called with issue_key="manual:42"
+        # _execute_task should be called with (db, task) — no issue_key arg
         mock_exec.assert_awaited_once()
         args = mock_exec.await_args.args
-        self.assertEqual(args[2], "manual:42")
+        self.assertEqual(args[1], task)  # second arg is the task
 
 
 # ---------------------------------------------------------------------------
@@ -168,10 +170,10 @@ class TestRunTaskBackground(unittest.IsolatedAsyncioTestCase):
 
         scheduler = Scheduler()
         scheduler._running_tasks.add(7)
-        scheduler._running_issues.add("100:10")
+        scheduler._running_issues.add(10)
 
-        # Build a mock Task with issue_iid set
-        mock_task = _make_mock_task(task_id=7, project_id=100, issue_iid=10)
+        # Build a mock Task with issue_id set
+        mock_task = _make_mock_task(task_id=7, project_id=100, issue_id=10)
 
         mock_db = MagicMock()
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
@@ -192,17 +194,16 @@ class TestRunTaskBackground(unittest.IsolatedAsyncioTestCase):
 
         # Task and issue should be cleaned up
         self.assertNotIn(7, scheduler._running_tasks)
-        self.assertNotIn("100:10", scheduler._running_issues)
+        self.assertNotIn(10, scheduler._running_issues)
 
-    async def test_background_cleanup_uses_manual_key_for_null_issue_iid(self) -> None:
-        """Line 201: cleanup should use 'manual:{task_id}' when issue_iid is None."""
+    async def test_background_cleanup_for_null_issue_id(self) -> None:
+        """Tasks with issue_id=None don't add to _running_issues, only _running_tasks."""
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
         scheduler._running_tasks.add(55)
-        scheduler._running_issues.add("manual:55")
 
-        mock_task = _make_mock_task(task_id=55, project_id=100, issue_iid=None)
+        mock_task = _make_mock_task(task_id=55, project_id=100, issue_id=None)
 
         mock_db = MagicMock()
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
@@ -218,7 +219,7 @@ class TestRunTaskBackground(unittest.IsolatedAsyncioTestCase):
                 await scheduler._run_task_background(55)
 
         self.assertNotIn(55, scheduler._running_tasks)
-        self.assertNotIn("manual:55", scheduler._running_issues)
+        self.assertEqual(len(scheduler._running_issues), 0)
 
     async def test_background_cleanup_handles_db_exception(self) -> None:
         """Lines 203-204: DB exception during cleanup should be silently caught."""
@@ -247,9 +248,9 @@ class TestRunTaskBackground(unittest.IsolatedAsyncioTestCase):
 
         scheduler = Scheduler()
         scheduler._running_tasks.add(88)
-        scheduler._running_issues.add("100:10")
+        scheduler._running_issues.add(10)
 
-        mock_task = _make_mock_task(task_id=88, project_id=100, issue_iid=10)
+        mock_task = _make_mock_task(task_id=88, project_id=100, issue_id=10)
 
         mock_db = MagicMock()
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
@@ -266,7 +267,7 @@ class TestRunTaskBackground(unittest.IsolatedAsyncioTestCase):
                 await scheduler._run_task_background(88)
 
         self.assertNotIn(88, scheduler._running_tasks)
-        self.assertNotIn("100:10", scheduler._running_issues)
+        self.assertNotIn(10, scheduler._running_issues)
 
 
 # ---------------------------------------------------------------------------
@@ -289,8 +290,8 @@ class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
 
         scheduler = Scheduler()
 
-        running_worker = self._make_container("codify-1-p100-i10", status="running")
-        exited_worker = self._make_container("codify-2-p200-i20", status="exited")
+        running_worker = self._make_container("codify-1-issue10", status="running")
+        exited_worker = self._make_container("codify-2-issue20", status="exited")
 
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [running_worker, exited_worker]
@@ -322,7 +323,7 @@ class TestCrashRecoveryContainers(unittest.IsolatedAsyncioTestCase):
         backend = self._make_container("codify-backend", status="running")
         postgres = self._make_container("codify-postgres", status="running")
         # Valid worker container
-        worker = self._make_container("codify-5-p300-manual", status="exited")
+        worker = self._make_container("codify-5-issue300", status="exited")
 
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [backend, postgres, worker]
@@ -420,7 +421,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         scheduler = Scheduler()
 
         # RUNNING task id=42 in DB
-        stuck_task = _make_mock_task(task_id=42, project_id=100, issue_iid=10, status="running")
+        stuck_task = _make_mock_task(task_id=42, project_id=100, issue_id=10, status="running")
 
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [stuck_task]
@@ -432,7 +433,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         # Running container whose name maps to task 42
-        running_container = self._make_container("codify-42-p100-i10", status="running")
+        running_container = self._make_container("codify-42-issue10", status="running")
 
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [running_container]
@@ -448,20 +449,20 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         # Container should NOT be removed
         running_container.remove.assert_not_called()
         # _resume_task_background should have been called with the task/container
-        mock_resume.assert_called_once_with(42, "codify-42-p100-i10")
+        mock_resume.assert_called_once_with(42, "codify-42-issue10")
         # asyncio.create_task should have been called to schedule the resume
         mock_create_task.assert_called_once()
         # Task should be tracked as running
         self.assertIn(42, scheduler._running_tasks)
-        self.assertIn("100:10", scheduler._running_issues)
+        self.assertIn(10, scheduler._running_issues)
 
-    async def test_crash_recovery_resumes_manual_task(self) -> None:
-        """A RUNNING manual task (issue_iid=None) should use 'manual:{id}' as issue_key."""
+    async def test_crash_recovery_resumes_task_with_issue_id(self) -> None:
+        """A RUNNING task with issue_id should be resumed and tracked in _running_issues."""
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
 
-        stuck_task = _make_mock_task(task_id=7, project_id=200, issue_iid=None, status="running")
+        stuck_task = _make_mock_task(task_id=7, project_id=200, issue_id=200, status="running")
 
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [stuck_task]
@@ -472,7 +473,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_db.commit = AsyncMock()
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        container = self._make_container("codify-7-p200-manual", status="running")
+        container = self._make_container("codify-7-issue200", status="running")
 
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [container]
@@ -486,7 +487,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(stuck_task.status, TaskStatus.FAILED)
         container.remove.assert_not_called()
         self.assertIn(7, scheduler._running_tasks)
-        self.assertIn("manual:7", scheduler._running_issues)
+        self.assertIn(200, scheduler._running_issues)
 
     async def test_crash_recovery_kills_orphan_running_containers(self) -> None:
         """A running container with no matching RUNNING task should be force-removed."""
@@ -505,7 +506,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         # Orphan running container (task_id=99 not in DB)
-        orphan = self._make_container("codify-99-p100-i10", status="running")
+        orphan = self._make_container("codify-99-issue10", status="running")
 
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [orphan]
@@ -522,8 +523,8 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
 
         scheduler = Scheduler()
 
-        task_with_container = _make_mock_task(task_id=10, project_id=100, issue_iid=5, status="running")
-        task_without_container = _make_mock_task(task_id=20, project_id=200, issue_iid=15, status="running")
+        task_with_container = _make_mock_task(task_id=10, project_id=100, issue_id=5, status="running")
+        task_without_container = _make_mock_task(task_id=20, project_id=200, issue_id=15, status="running")
 
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [task_with_container, task_without_container]
@@ -535,7 +536,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         # Only task 10 has a running container
-        container_10 = self._make_container("codify-10-p100-i5", status="running")
+        container_10 = self._make_container("codify-10-issue5", status="running")
 
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [container_10]
@@ -567,7 +568,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
 
         scheduler = Scheduler()
 
-        stuck_task = _make_mock_task(task_id=50, project_id=300, issue_iid=1, status="running")
+        stuck_task = _make_mock_task(task_id=50, project_id=300, issue_id=1, status="running")
 
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [stuck_task]
@@ -579,7 +580,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         # Container for task 50 exists but is exited
-        exited_container = self._make_container("codify-50-p300-i1", status="exited")
+        exited_container = self._make_container("codify-50-issue1", status="exited")
 
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [exited_container]
@@ -594,7 +595,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         exited_container.remove.assert_not_called()
         # Task should be tracked for resume, NOT marked failed
         self.assertIn(50, scheduler._running_tasks)
-        self.assertIn("300:1", scheduler._running_issues)
+        self.assertIn(1, scheduler._running_issues)
         # asyncio.create_task should have been called to resume
         mock_create_task.assert_called_once()
 
@@ -604,7 +605,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
 
         scheduler = Scheduler()
 
-        stuck_task = _make_mock_task(task_id=60, project_id=400, issue_iid=2, status="running")
+        stuck_task = _make_mock_task(task_id=60, project_id=400, issue_id=2, status="running")
 
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [stuck_task]
@@ -615,7 +616,7 @@ class TestSmartCrashRecovery(unittest.IsolatedAsyncioTestCase):
         mock_db.commit = AsyncMock()
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        dead_container = self._make_container("codify-60-p400-i2", status="dead")
+        dead_container = self._make_container("codify-60-issue2", status="dead")
 
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [dead_container]
@@ -635,14 +636,14 @@ class TestExtractTaskId(unittest.TestCase):
     """Tests for the _extract_task_id() helper function."""
 
     def test_standard_issue_container(self) -> None:
-        """codify-123-p456-i789 → 123."""
+        """codify-123-issue789 → 123."""
         from app.scheduler import _extract_task_id
-        self.assertEqual(_extract_task_id("codify-123-p456-i789"), 123)
+        self.assertEqual(_extract_task_id("codify-123-issue789"), 123)
 
-    def test_manual_container(self) -> None:
-        """codify-1-p2-manual → 1."""
+    def test_another_issue_container(self) -> None:
+        """codify-1-issue2 → 1."""
         from app.scheduler import _extract_task_id
-        self.assertEqual(_extract_task_id("codify-1-p2-manual"), 1)
+        self.assertEqual(_extract_task_id("codify-1-issue2"), 1)
 
     def test_service_container_returns_none(self) -> None:
         """codify-backend → None (not a worker container)."""
@@ -662,7 +663,7 @@ class TestExtractTaskId(unittest.TestCase):
     def test_large_ids(self) -> None:
         """Large numeric IDs should be extracted correctly."""
         from app.scheduler import _extract_task_id
-        self.assertEqual(_extract_task_id("codify-99999-p88888-i77777"), 99999)
+        self.assertEqual(_extract_task_id("codify-99999-issue77777"), 99999)
 
 
 # ---------------------------------------------------------------------------
@@ -721,11 +722,11 @@ class TestWorkerContainerPattern(unittest.TestCase):
 
     def test_matches_issue_container(self) -> None:
         from app.scheduler import WORKER_CONTAINER_PATTERN
-        self.assertIsNotNone(WORKER_CONTAINER_PATTERN.match("codify-1-p100-i10"))
+        self.assertIsNotNone(WORKER_CONTAINER_PATTERN.match("codify-1-issue10"))
 
-    def test_matches_manual_container(self) -> None:
+    def test_matches_another_issue_container(self) -> None:
         from app.scheduler import WORKER_CONTAINER_PATTERN
-        self.assertIsNotNone(WORKER_CONTAINER_PATTERN.match("codify-42-p200-manual"))
+        self.assertIsNotNone(WORKER_CONTAINER_PATTERN.match("codify-42-issue200"))
 
     def test_rejects_service_container(self) -> None:
         from app.scheduler import WORKER_CONTAINER_PATTERN
@@ -749,17 +750,17 @@ class TestExecuteTask(unittest.IsolatedAsyncioTestCase):
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
-        task = _make_mock_task(task_id=77, issue_iid=10)
+        task = _make_mock_task(task_id=77, issue_id=10)
 
         mock_db = MagicMock()
         mock_db.commit = AsyncMock(side_effect=[RuntimeError("DB error"), AsyncMock()])
 
-        await scheduler._execute_task(mock_db, task, "100:10")
+        await scheduler._execute_task(mock_db, task)
 
         self.assertEqual(task.status, TaskStatus.FAILED)
         self.assertIsNotNone(task.error_message)
         self.assertNotIn(77, scheduler._running_tasks)
-        self.assertNotIn("100:10", scheduler._running_issues)
+        self.assertNotIn(10, scheduler._running_issues)
 
 
 # ---------------------------------------------------------------------------
@@ -783,7 +784,7 @@ class TestCrashRecoveryContainerRemoveFailures(unittest.IsolatedAsyncioTestCase)
         scheduler = Scheduler()
 
         # Task 60 in RUNNING state in DB
-        stuck_task = _make_mock_task(task_id=60, project_id=400, issue_iid=2, status="running")
+        stuck_task = _make_mock_task(task_id=60, project_id=400, issue_id=2, status="running")
 
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [stuck_task]
@@ -795,7 +796,7 @@ class TestCrashRecoveryContainerRemoveFailures(unittest.IsolatedAsyncioTestCase)
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         # Container in "dead" state — remove() will raise
-        dead_container = self._make_container("codify-60-p400-i2", status="dead")
+        dead_container = self._make_container("codify-60-issue2", status="dead")
         dead_container.remove.side_effect = RuntimeError("Cannot remove dead container")
 
         mock_docker = MagicMock()
@@ -827,7 +828,7 @@ class TestCrashRecoveryContainerRemoveFailures(unittest.IsolatedAsyncioTestCase)
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         # Orphan container whose remove() raises
-        orphan = self._make_container("codify-99-p100-i10", status="running")
+        orphan = self._make_container("codify-99-issue10", status="running")
         orphan.remove.side_effect = RuntimeError("Container in use by another process")
 
         mock_docker = MagicMock()
@@ -855,7 +856,7 @@ class TestCrashRecoveryContainerRemoveFailures(unittest.IsolatedAsyncioTestCase)
         mock_db.commit = AsyncMock()
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        orphan = self._make_container("codify-77-p200-manual", status="exited")
+        orphan = self._make_container("codify-77-issue200", status="exited")
         orphan.remove.side_effect = RuntimeError("Filesystem busy")
 
         mock_docker = MagicMock()
@@ -882,9 +883,9 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
 
         scheduler = Scheduler()
         scheduler._running_tasks.add(42)
-        scheduler._running_issues.add("100:10")
+        scheduler._running_issues.add(10)
 
-        mock_task = _make_mock_task(task_id=42, project_id=100, issue_iid=10)
+        mock_task = _make_mock_task(task_id=42, project_id=100, issue_id=10)
 
         mock_db = MagicMock()
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
@@ -896,10 +897,10 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db):
             loop = asyncio.get_event_loop()
             with patch.object(loop, "run_in_executor", new_callable=AsyncMock, return_value=True):
-                await scheduler._resume_task_background(42, "codify-42-p100-i10")
+                await scheduler._resume_task_background(42, "codify-42-issue10")
 
         self.assertNotIn(42, scheduler._running_tasks)
-        self.assertNotIn("100:10", scheduler._running_issues)
+        self.assertNotIn(10, scheduler._running_issues)
 
     async def test_resume_failure_returns_false(self) -> None:
         """Lines 333-334: when resume returns False, error is logged and tracking cleaned."""
@@ -907,9 +908,9 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
 
         scheduler = Scheduler()
         scheduler._running_tasks.add(43)
-        scheduler._running_issues.add("200:20")
+        scheduler._running_issues.add(20)
 
-        mock_task = _make_mock_task(task_id=43, project_id=200, issue_iid=20)
+        mock_task = _make_mock_task(task_id=43, project_id=200, issue_id=20)
 
         mock_db = MagicMock()
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
@@ -921,10 +922,10 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db):
             loop = asyncio.get_event_loop()
             with patch.object(loop, "run_in_executor", new_callable=AsyncMock, return_value=False):
-                await scheduler._resume_task_background(43, "codify-43-p200-i20")
+                await scheduler._resume_task_background(43, "codify-43-issue20")
 
         self.assertNotIn(43, scheduler._running_tasks)
-        self.assertNotIn("200:20", scheduler._running_issues)
+        self.assertNotIn(20, scheduler._running_issues)
 
     async def test_resume_exception_cleans_up_tracking(self) -> None:
         """Lines 335-336: executor exception during resume is caught, tracking cleaned."""
@@ -932,9 +933,9 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
 
         scheduler = Scheduler()
         scheduler._running_tasks.add(44)
-        scheduler._running_issues.add("300:30")
+        scheduler._running_issues.add(30)
 
-        mock_task = _make_mock_task(task_id=44, project_id=300, issue_iid=30)
+        mock_task = _make_mock_task(task_id=44, project_id=300, issue_id=30)
 
         mock_db = MagicMock()
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
@@ -947,20 +948,20 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
             loop = asyncio.get_event_loop()
             with patch.object(loop, "run_in_executor", new_callable=AsyncMock,
                               side_effect=RuntimeError("thread pool crashed")):
-                await scheduler._resume_task_background(44, "codify-44-p300-i30")
+                await scheduler._resume_task_background(44, "codify-44-issue30")
 
         self.assertNotIn(44, scheduler._running_tasks)
-        self.assertNotIn("300:30", scheduler._running_issues)
+        self.assertNotIn(30, scheduler._running_issues)
 
-    async def test_resume_manual_task_uses_manual_issue_key(self) -> None:
-        """Lines 346-349: manual task (issue_iid=None) uses 'manual:{id}' key."""
+    async def test_resume_task_with_issue_id_cleans_up(self) -> None:
+        """Task with issue_id cleans up _running_issues with the int issue_id."""
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
         scheduler._running_tasks.add(55)
-        scheduler._running_issues.add("manual:55")
+        scheduler._running_issues.add(100)
 
-        mock_task = _make_mock_task(task_id=55, project_id=100, issue_iid=None)
+        mock_task = _make_mock_task(task_id=55, project_id=100, issue_id=100)
 
         mock_db = MagicMock()
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
@@ -972,10 +973,10 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db):
             loop = asyncio.get_event_loop()
             with patch.object(loop, "run_in_executor", new_callable=AsyncMock, return_value=True):
-                await scheduler._resume_task_background(55, "codify-55-p100-manual")
+                await scheduler._resume_task_background(55, "codify-55-issue100")
 
         self.assertNotIn(55, scheduler._running_tasks)
-        self.assertNotIn("manual:55", scheduler._running_issues)
+        self.assertNotIn(100, scheduler._running_issues)
 
     async def test_resume_db_cleanup_failure_is_caught(self) -> None:
         """Lines 351-352: DB exception during cleanup in finally block is silently caught."""
@@ -992,7 +993,7 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
             loop = asyncio.get_event_loop()
             with patch.object(loop, "run_in_executor", new_callable=AsyncMock, return_value=True):
                 # Should NOT raise
-                await scheduler._resume_task_background(66, "codify-66-p100-i5")
+                await scheduler._resume_task_background(66, "codify-66-issue5")
 
         # Task cleaned up even though DB lookup failed
         self.assertNotIn(66, scheduler._running_tasks)
@@ -1014,7 +1015,7 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db):
             loop = asyncio.get_event_loop()
             with patch.object(loop, "run_in_executor", new_callable=AsyncMock, return_value=True):
-                await scheduler._resume_task_background(77, "codify-77-p100-i5")
+                await scheduler._resume_task_background(77, "codify-77-issue5")
 
         self.assertNotIn(77, scheduler._running_tasks)
 
@@ -1052,7 +1053,7 @@ class TestRunWorkerResumeTask(unittest.TestCase):
              patch("sqlalchemy.ext.asyncio.async_sessionmaker") as mock_sm, \
              patch("app.core.worker.WorkerExecutor", return_value=mock_worker):
             mock_sm.return_value = MagicMock(return_value=mock_db)
-            result = _run_worker_resume_task(42, "codify-42-p100-i10")
+            result = _run_worker_resume_task(42, "codify-42-issue10")
 
         return result, mock_worker, mock_engine
 

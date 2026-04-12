@@ -62,24 +62,35 @@ def _make_worker():
 
 
 def _make_task(**kwargs):
-    """Return a minimal Task instance."""
+    """Return a minimal Task instance with a mock issue attached."""
     from app.models import Task, TaskStatus
     defaults = dict(
         id=1,
         project_id=123,
-        issue_iid=456,
-        note_id=100,
+        issue_id=1,
         user_prompt="Test prompt",
-        branch_name="test-branch",
-        target_branch="main",
         priority=0,
         status=TaskStatus.PENDING,
+        is_retry=False,
+        retry_source_task_id=None,
         additions=0,
         deletions=0,
         total_changes=0,
     )
     defaults.update(kwargs)
-    return Task(**defaults)
+    task = Task(**defaults)
+    mock_issue = MagicMock()
+    mock_issue.id = defaults.get('issue_id', 1)
+    mock_issue.branch_name = "test-branch"
+    mock_issue.base_branch = None
+    mock_issue.target_branch = "main"
+    mock_issue.merge_request_iid = None
+    mock_issue.merge_request_url = None
+    mock_issue.claude_session_id = None
+    mock_issue.session_storage_path = None
+    mock_issue.project_id = defaults['project_id']
+    task.issue = mock_issue
+    return task
 
 
 # ---------------------------------------------------------------------------
@@ -378,7 +389,9 @@ class TestSerializeTaskNewFields(unittest.TestCase):
             project_id=1,
             user_prompt="test",
             status=TaskStatus.PENDING,
-            is_manual=False,
+            issue_id=1,
+            is_retry=False,
+            retry_source_task_id=None,
             additions=0,
             deletions=0,
             total_changes=0,
@@ -386,7 +399,19 @@ class TestSerializeTaskNewFields(unittest.TestCase):
             updated_at=datetime(2024, 1, 1),
         )
         defaults.update(kwargs)
-        return Task(**defaults)
+        task = Task(**defaults)
+        mock_issue = MagicMock()
+        mock_issue.id = defaults.get('issue_id', 1)
+        mock_issue.branch_name = "test-branch"
+        mock_issue.base_branch = None
+        mock_issue.target_branch = "main"
+        mock_issue.merge_request_iid = None
+        mock_issue.merge_request_url = None
+        mock_issue.claude_session_id = None
+        mock_issue.session_storage_path = None
+        mock_issue.project_id = defaults['project_id']
+        task.issue = mock_issue
+        return task
 
     def test_model_name_included_in_serialized_task(self):
         """_serialize_task includes model_name when it is set."""

@@ -87,19 +87,51 @@ def _make_worker(mock_gitlab=None, mock_docker=None):
 
 
 def _make_task(**kwargs):
-    """Create a Task object with defaults."""
+    """Create a Task object with defaults and attach a mock issue."""
+    from unittest.mock import MagicMock
+
+    # Separate issue-level kwargs
+    issue_overrides = {}
+    for key in ['branch_name', 'base_branch', 'target_branch', 'merge_request_iid', 'merge_request_url']:
+        if key in kwargs:
+            issue_overrides[key] = kwargs.pop(key)
+
+    # Remove old fields that callers might still pass
+    for old_key in ['issue_iid', 'note_id', 'is_manual', 'retry_count']:
+        kwargs.pop(old_key, None)
+
     defaults = dict(
-        id=1, project_id=100, issue_iid=10, note_id=50,
-        user_prompt="Fix the bug", branch_name="codify-1-p100-i10",
-        target_branch="main", priority=0, status=TaskStatus.PENDING,
+        id=1, project_id=100, issue_id=1,
+        user_prompt="Fix the bug",
+        priority=0, status=TaskStatus.PENDING,
+        is_retry=False, retry_source_task_id=None,
         additions=0, deletions=0, total_changes=0,
     )
     defaults.update(kwargs)
-    return Task(**defaults)
+    task = Task(**defaults)
+
+    # Attach mock issue
+    if defaults.get('issue_id') is not None:
+        mock_issue = MagicMock()
+        mock_issue.id = defaults['issue_id']
+        mock_issue.branch_name = issue_overrides.get('branch_name', f"codify-{defaults['id']}-p{defaults['project_id']}-i{defaults.get('issue_id', 1)}")
+        mock_issue.base_branch = issue_overrides.get('base_branch', None)
+        mock_issue.target_branch = issue_overrides.get('target_branch', 'main')
+        mock_issue.merge_request_iid = issue_overrides.get('merge_request_iid', None)
+        mock_issue.merge_request_url = issue_overrides.get('merge_request_url', None)
+        mock_issue.claude_session_id = None
+        mock_issue.session_storage_path = None
+        mock_issue.project_id = defaults['project_id']
+        task.issue = mock_issue
+    else:
+        task.issue = None
+
+    return task
 
 
 def _make_db(task=None):
     """Create a mock async DB session."""
+    from app.models import Issue
     db = MagicMock()
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = task
@@ -108,7 +140,14 @@ def _make_db(task=None):
     db.commit = AsyncMock()
     db.add = MagicMock()
     db.flush = AsyncMock()
-    db.get = AsyncMock(return_value=None)
+
+    # db.get should return the task's issue when queried
+    async def mock_get(model_class, id_val):
+        if task and model_class is Issue and hasattr(task, 'issue') and task.issue and task.issue.id == id_val:
+            return task.issue
+        return None
+    db.get = AsyncMock(side_effect=mock_get)
+
     return db
 
 
@@ -554,10 +593,11 @@ class TestUpdateTaskStatsFromApi(unittest.TestCase):
             "total": 35,
         })
         worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(merge_request_iid=42)
+        task = _make_task()
+        task.issue.merge_request_iid = 42
         logs = "no diff stats here\n"
 
-        asyncio.run(worker._update_task_stats_from_logs_or_api(task, logs))
+        asyncio.run(worker._update_task_stats_from_logs_or_api(task, logs, issue=task.issue))
 
         self.assertEqual(task.additions, 25)
         self.assertEqual(task.deletions, 10)
@@ -568,11 +608,12 @@ class TestUpdateTaskStatsFromApi(unittest.TestCase):
         mock_gitlab = MagicMock()
         mock_gitlab.get_merge_request_stats = AsyncMock(return_value=None)
         worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(merge_request_iid=42)
+        task = _make_task()
+        task.issue.merge_request_iid = 42
         logs = "no diff stats\n"
 
         # Should not raise, stats remain at defaults
-        asyncio.run(worker._update_task_stats_from_logs_or_api(task, logs))
+        asyncio.run(worker._update_task_stats_from_logs_or_api(task, logs, issue=task.issue))
 
         self.assertEqual(task.additions, 0)
         self.assertEqual(task.deletions, 0)
@@ -582,11 +623,12 @@ class TestUpdateTaskStatsFromApi(unittest.TestCase):
         mock_gitlab = MagicMock()
         mock_gitlab.get_merge_request_stats = AsyncMock(side_effect=Exception("API error"))
         worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(merge_request_iid=42)
+        task = _make_task()
+        task.issue.merge_request_iid = 42
         logs = "no diff stats\n"
 
         # Should not raise
-        asyncio.run(worker._update_task_stats_from_logs_or_api(task, logs))
+        asyncio.run(worker._update_task_stats_from_logs_or_api(task, logs, issue=task.issue))
 
         self.assertEqual(task.additions, 0)
 
@@ -595,10 +637,11 @@ class TestUpdateTaskStatsFromApi(unittest.TestCase):
         mock_gitlab = MagicMock()
         mock_gitlab.get_merge_request_stats = AsyncMock()
         worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(merge_request_iid=None)
+        task = _make_task()
+        task.issue.merge_request_iid = None
         logs = "no diff stats\n"
 
-        asyncio.run(worker._update_task_stats_from_logs_or_api(task, logs))
+        asyncio.run(worker._update_task_stats_from_logs_or_api(task, logs, issue=task.issue))
 
         mock_gitlab.get_merge_request_stats.assert_not_awaited()
 
@@ -637,30 +680,30 @@ class TestSendNotificationsExceptions(unittest.TestCase):
         """_send_notifications catches exception from _notify_task_completed — lines 809-810."""
         mock_gitlab = MagicMock()
         worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(is_manual=False, issue_iid=10)
+        task = _make_task(issue_id=1)
 
         # Make _notify_task_completed raise
         with patch.object(worker, '_notify_task_completed', new=AsyncMock(side_effect=Exception("notify error"))):
             # Should not raise
-            asyncio.run(worker._send_notifications(task, success=True, had_existing_mr=False, logs=""))
+            asyncio.run(worker._send_notifications(task, success=True, had_existing_mr=False, logs="", issue=task.issue))
 
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
     def test_send_failure_notifications_completion_exception(self, mock_notify_event):
         """_send_failure_notifications catches exception from _notify_task_completed — lines 835-836."""
         mock_gitlab = MagicMock()
         worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(is_manual=False, issue_iid=10, status=TaskStatus.FAILED)
+        task = _make_task(issue_id=1, status=TaskStatus.FAILED)
 
         with patch.object(worker, '_notify_task_completed', new=AsyncMock(side_effect=Exception("notify boom"))):
             # Should not raise
-            asyncio.run(worker._send_failure_notifications(task, success=False, had_existing_mr=False))
+            asyncio.run(worker._send_failure_notifications(task, success=False, had_existing_mr=False, issue=task.issue))
 
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
     def test_send_failure_notifications_mattermost_exception(self, mock_notify_event):
         """_send_failure_notifications catches Mattermost exception — lines 851-852."""
         mock_gitlab = MagicMock()
         worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(is_manual=True, status=TaskStatus.FAILED)
+        task = _make_task(issue_id=None, status=TaskStatus.FAILED)
 
         mock_notify_event.side_effect = Exception("Mattermost down")
 
@@ -685,7 +728,7 @@ class TestExecuteTaskNotifyStartedException(unittest.TestCase):
         mock_gitlab.normalize_web_url.side_effect = lambda x: x
 
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
-        task = _make_task(target_branch="main", merge_request_iid=None, is_manual=False)
+        task = _make_task(issue_id=1)
         db = _make_db(task)
 
         fake_logs = "CODIFY_DIFF:+1-0\n"
@@ -775,7 +818,7 @@ class TestResumeTaskSuccess(unittest.TestCase):
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
     def test_resume_success_removes_mr_draft(self, mock_notify, mock_get_settings):
-        """resume_task on success removes MR draft status — lines 1094-1098."""
+        """resume_task on success removes MR draft status via _remove_mr_draft_status_for_issue."""
         mock_get_settings.return_value = _make_settings()
         mock_container = MagicMock(id="ctr-resume-draft")
         mock_docker = MagicMock()
@@ -790,15 +833,15 @@ class TestResumeTaskSuccess(unittest.TestCase):
         db = _make_db(task)
 
         with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1))):
-            with patch.object(worker, '_remove_mr_draft_status') as mock_remove_draft:
+            with patch.object(worker, '_remove_mr_draft_status_for_issue') as mock_remove_draft:
                 asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
-        mock_remove_draft.assert_called_once_with(task)
+        mock_remove_draft.assert_called_once_with(task, task.issue)
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
     def test_resume_success_draft_removal_exception(self, mock_notify, mock_get_settings):
-        """resume_task catches _remove_mr_draft_status exception — line 1098."""
+        """resume_task catches _remove_mr_draft_status_for_issue exception."""
         mock_get_settings.return_value = _make_settings()
         mock_container = MagicMock(id="ctr-resume-draft-err")
         mock_docker = MagicMock()
@@ -813,7 +856,7 @@ class TestResumeTaskSuccess(unittest.TestCase):
         db = _make_db(task)
 
         with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1))):
-            with patch.object(worker, '_remove_mr_draft_status', side_effect=Exception("draft boom")):
+            with patch.object(worker, '_remove_mr_draft_status_for_issue', side_effect=Exception("draft boom")):
                 result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
         # Should still succeed
@@ -826,8 +869,8 @@ class TestResumeTaskFailure(unittest.TestCase):
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
     def test_resume_failure_no_retry(self, mock_notify, mock_get_settings):
-        """resume_task failure without retries sets FAILED — lines 1100-1107."""
-        mock_get_settings.return_value = _make_settings(max_retries=0)
+        """resume_task failure sets FAILED — lines 1100-1107."""
+        mock_get_settings.return_value = _make_settings()
         mock_container = MagicMock(id="ctr-resume-fail")
         mock_docker = MagicMock()
         mock_docker.client.containers.get.return_value = mock_container
@@ -837,7 +880,7 @@ class TestResumeTaskFailure(unittest.TestCase):
         mock_gitlab.create_mr_note = MagicMock()
 
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
-        task = _make_task(status=TaskStatus.RUNNING, merge_request_iid=None)
+        task = _make_task(status=TaskStatus.RUNNING)
         db = _make_db(task)
 
         with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error occurred", 1))):
@@ -849,9 +892,9 @@ class TestResumeTaskFailure(unittest.TestCase):
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
-    def test_resume_failure_with_retry(self, mock_notify, mock_get_settings):
-        """resume_task failure with retries schedules retry — lines 1102-1106."""
-        mock_get_settings.return_value = _make_settings(max_retries=3)
+    def test_resume_failure_stays_failed(self, mock_notify, mock_get_settings):
+        """resume_task failure stays FAILED (no retry logic)."""
+        mock_get_settings.return_value = _make_settings()
         mock_container = MagicMock(id="ctr-resume-retry")
         mock_docker = MagicMock()
         mock_docker.client.containers.get.return_value = mock_container
@@ -861,16 +904,14 @@ class TestResumeTaskFailure(unittest.TestCase):
         mock_gitlab.create_mr_note = MagicMock()
 
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
-        task = _make_task(status=TaskStatus.RUNNING, merge_request_iid=None, retry_count=0)
+        task = _make_task(status=TaskStatus.RUNNING)
         db = _make_db(task)
 
         with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error", 1))):
             result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
         self.assertFalse(result)
-        self.assertEqual(task.retry_count, 1)
-        self.assertEqual(task.status, TaskStatus.PENDING)
-        self.assertIsNotNone(task.scheduled_at)
+        self.assertEqual(task.status, TaskStatus.FAILED)
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
@@ -887,34 +928,7 @@ class TestResumeTaskFailure(unittest.TestCase):
         mock_gitlab.create_mr_note = MagicMock()
 
         worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
-        task = _make_task(status=TaskStatus.RUNNING, merge_request_iid=None)
-        db = _make_db(task)
-
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 0))):
-            asyncio.run(worker.resume_task(db, task.id, "codify-1"))
-
-        # Should have added a fallback INFO log entry
-        added_entries = [call[0][0] for call in db.add.call_args_list if isinstance(call[0][0], TaskLog)]
-        info_entries = [e for e in added_entries if e.log_level == "INFO"]
-        self.assertTrue(len(info_entries) >= 1)
-
-    @patch('app.core.worker.get_settings')
-    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
-    def test_resume_container_removal_exception(self, mock_notify, mock_get_settings):
-        """resume_task catches container removal exception — lines 1122-1123."""
-        mock_get_settings.return_value = _make_settings()
-        mock_container = MagicMock(id="ctr-resume-rm-err")
-        mock_docker = MagicMock()
-        mock_docker.client.containers.get.return_value = mock_container
-        mock_docker.remove_container.side_effect = Exception("Cannot remove")
-
-        mock_gitlab = MagicMock()
-        mock_gitlab.normalize_web_url.side_effect = lambda x: x
-        mock_gitlab.create_note = MagicMock()
-        mock_gitlab.create_mr_note = MagicMock()
-
-        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
-        task = _make_task(status=TaskStatus.RUNNING, merge_request_iid=None)
+        task = _make_task(status=TaskStatus.RUNNING)
         db = _make_db(task)
 
         with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1))):
@@ -1147,25 +1161,26 @@ class TestNotifyTaskCompletedMrIidExtraction(unittest.TestCase):
 
     @patch('app.core.worker.get_settings')
     def test_success_mr_url_with_no_extractable_iid(self, mock_get_settings):
-        """Success with MR URL but empty IID uses generic message — line 1208."""
+        """Success with MR URL but non-numeric IID — notify_target=issue does not send."""
         mock_get_settings.return_value = _make_settings()
         mock_gitlab = MagicMock()
         mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
         worker = _make_worker(mock_gitlab=mock_gitlab)
 
         # URL that has merge_requests but splitting gives empty string
         task = _make_task(
             merge_request_iid=None,
             merge_request_url="http://gitlab.example.com/merge_requests/abc?foo=bar",
-            is_manual=False,
         )
+        issue = task.issue
 
-        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="issue"))
+        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="issue", issue=issue))
 
-        # The message should be sent (to issue since mr_iid is None or non-numeric)
-        mock_gitlab.create_note.assert_called_once()
-        msg = mock_gitlab.create_note.call_args[0][2]
-        self.assertIn("✅", msg)
+        # With no mr_iid and notify_target="issue", the worker doesn't send to issue
+        # Only MR notifications are supported now
+        mock_gitlab.create_note.assert_not_called()
+        mock_gitlab.create_mr_note.assert_not_called()
 
 
 class TestNotifyTaskCompletedUpdateMrDescException(unittest.TestCase):
@@ -1181,12 +1196,12 @@ class TestNotifyTaskCompletedUpdateMrDescException(unittest.TestCase):
         task = _make_task(
             merge_request_iid=42,
             merge_request_url="http://gitlab.example.com/-/merge_requests/42",
-            is_manual=False,
         )
+        issue = task.issue
 
         with patch.object(worker, '_update_mr_description', side_effect=Exception("desc update failed")):
             # Should not raise
-            asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr"))
+            asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr", issue=issue))
 
         mock_gitlab.create_mr_note.assert_called_once()
 

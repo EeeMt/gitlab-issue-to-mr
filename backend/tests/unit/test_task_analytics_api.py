@@ -21,27 +21,34 @@ from app.models import TaskStatus
 
 @pytest.mark.asyncio
 async def test_create_task_persists_manual_initiator_metadata():
+    from app.models import Issue
     request = CreateTaskRequest(
-        project_id=101,
-        branch_name="feature/analytics",
-        target_branch="main",
+        issue_id=1,
         user_prompt="Build analytics page",
         priority=1,
     )
+    mock_issue = MagicMock(spec=Issue)
+    mock_issue.id = 1
+    mock_issue.project_id = 101
+    mock_issue.description = "Build analytics page"
+
     db = MagicMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
+    db.get = AsyncMock(return_value=mock_issue)
 
     async def refresh(task):
         task.id = 23
         task.status = TaskStatus.PENDING
         task.created_at = datetime(2026, 3, 14, 12, 0, 0)
+        task.updated_at = datetime(2026, 3, 14, 12, 0, 0)
 
     db.refresh = AsyncMock(side_effect=refresh)
     current_user = SimpleNamespace(id=7, gitlab_user_id=77, username="alice")
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
-    result = await create_task(request=request, db=db, current_user=current_user, access_scope=access_scope)
+    with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+        result = await create_task(request=request, db=db, current_user=current_user, access_scope=access_scope)
 
     task = db.add.call_args.args[0]
     assert task.initiator_user_id == 7

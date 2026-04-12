@@ -40,22 +40,17 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task = MagicMock()
     task.id = task_id
     task.project_id = project_id
-    task.issue_iid = 10
-    task.issue_id = 100
-    task.note_id = 1000
+    task.issue_id = 1
     task.user_prompt = "Test prompt"
     task.initiator_user_id = None
     task.initiator_gitlab_user_id = None
     task.initiator_username = None
-    task.branch_name = "codify/issue-10"
-    task.merge_request_iid = None
-    task.merge_request_url = None
+    task.is_retry = False
+    task.retry_source_task_id = None
     task.status = task_status
     task.priority = 0
     task.scheduled_at = None
     task.container_id = None
-    task.target_branch = "main"
-    task.base_branch = None
     task.commit_sha = None
     task.error_message = None
     task.additions = 0
@@ -65,7 +60,7 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.output_tokens = 0
     task.model_name = None
     task.merge_request_title = None
-    task.is_manual = False
+    task.issue = None
     now = datetime(2024, 1, 1, 12, 0, 0)
     task.created_at = now
     task.updated_at = now
@@ -480,10 +475,8 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
     def _make_create_payload(self, scheduled_datetime=None):
         """Build a valid task creation payload."""
         payload = {
-            "project_id": 1,
+            "issue_id": 1,
             "user_prompt": "Fix the login bug",
-            "branch_name": "fix/login",
-            "target_branch": "main",
             "priority": 0,
         }
         if scheduled_datetime is not None:
@@ -504,15 +497,22 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
             if task.updated_at is None:
                 task.updated_at = datetime(2024, 1, 1, 12, 0, 0)
 
+        mock_issue = MagicMock()
+        mock_issue.id = 1
+        mock_issue.project_id = 1
+        mock_issue.description = "Fix the login bug"
+
         mock_db = MagicMock()
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+        mock_db.get = AsyncMock(return_value=mock_issue)
 
         client, app = _make_app_client_with_db(mock_db)
 
         future_dt = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
-        response = client.post("/api/tasks", json=self._make_create_payload(scheduled_datetime=future_dt))
+        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+            response = client.post("/api/tasks", json=self._make_create_payload(scheduled_datetime=future_dt))
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 409)
@@ -535,15 +535,22 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
             if task.updated_at is None:
                 task.updated_at = datetime(2024, 1, 1, 12, 0, 0)
 
+        mock_issue = MagicMock()
+        mock_issue.id = 1
+        mock_issue.project_id = 1
+        mock_issue.description = "Fix the login bug"
+
         mock_db = MagicMock()
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+        mock_db.get = AsyncMock(return_value=mock_issue)
 
         client, app = _make_app_client_with_db(mock_db)
 
         future_dt = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
-        response = client.post("/api/tasks", json=self._make_create_payload(scheduled_datetime=future_dt))
+        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+            response = client.post("/api/tasks", json=self._make_create_payload(scheduled_datetime=future_dt))
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
@@ -565,15 +572,22 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
             if task.updated_at is None:
                 task.updated_at = datetime(2024, 1, 1, 12, 0, 0)
 
+        mock_issue = MagicMock()
+        mock_issue.id = 1
+        mock_issue.project_id = 1
+        mock_issue.description = "Fix the login bug"
+
         mock_db = MagicMock()
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+        mock_db.get = AsyncMock(return_value=mock_issue)
 
         client, app = _make_app_client_with_db(mock_db)
 
         future_dt = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
-        response = client.post("/api/tasks", json=self._make_create_payload(scheduled_datetime=future_dt))
+        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+            response = client.post("/api/tasks", json=self._make_create_payload(scheduled_datetime=future_dt))
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
@@ -591,15 +605,22 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
             if task.updated_at is None:
                 task.updated_at = datetime(2024, 1, 1, 12, 0, 0)
 
+        mock_issue = MagicMock()
+        mock_issue.id = 1
+        mock_issue.project_id = 1
+        mock_issue.description = "Fix the login bug"
+
         mock_db = MagicMock()
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+        mock_db.get = AsyncMock(return_value=mock_issue)
 
         client, app = _make_app_client_with_db(mock_db)
 
         with patch("app.core.slot_capacity.check_slot_capacity", new_callable=AsyncMock) as mock_check:
-            response = client.post("/api/tasks", json=self._make_create_payload())
+            with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+                response = client.post("/api/tasks", json=self._make_create_payload())
             mock_check.assert_not_called()
 
         app.dependency_overrides.clear()
@@ -654,6 +675,7 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
     @patch("app.core.slot_capacity.check_slot_capacity", new_callable=AsyncMock)
     def test_scheduled_retry_not_full_returns_success(self, mock_check) -> None:
         """POST /tasks/{id}/retry with scheduled_at + not full → 200 success."""
+        from app.models import Task as TaskModel
         mock_check.return_value = _make_slot_info(count=2, max_tasks=5, is_full=False, enforce=True)
 
         task = _make_serializable_task(task_status=TaskStatus.FAILED, task_id=81)
@@ -662,10 +684,20 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = task
 
+        now = datetime(2024, 1, 1, 12, 0, 0)
+
+        async def fake_refresh(obj):
+            if isinstance(obj, TaskModel):
+                obj.id = 200
+                obj.status = TaskStatus.PENDING
+                obj.created_at = now
+                obj.updated_at = now
+
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
-        mock_db.refresh = AsyncMock()
+        mock_db.refresh = AsyncMock(side_effect=fake_refresh)
 
         client, app = _make_app_client_with_db(mock_db)
 
@@ -673,9 +705,10 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
 
         with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                response = client.post("/api/tasks/81/retry", json={
-                    "scheduled_datetime": future_dt
-                })
+                with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+                    response = client.post("/api/tasks/81/retry", json={
+                        "scheduled_datetime": future_dt
+                    })
 
         app.dependency_overrides.clear()
 
@@ -683,23 +716,35 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
 
     def test_retry_without_schedule_no_capacity_check(self) -> None:
         """POST /tasks/{id}/retry without scheduled_datetime should not check capacity."""
+        from app.models import Task as TaskModel
         task = _make_serializable_task(task_status=TaskStatus.FAILED, task_id=82)
         task.project_id = 1
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = task
 
+        now = datetime(2024, 1, 1, 12, 0, 0)
+
+        async def fake_refresh(obj):
+            if isinstance(obj, TaskModel):
+                obj.id = 201
+                obj.status = TaskStatus.PENDING
+                obj.created_at = now
+                obj.updated_at = now
+
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
-        mock_db.refresh = AsyncMock()
+        mock_db.refresh = AsyncMock(side_effect=fake_refresh)
 
         client, app = _make_app_client_with_db(mock_db)
 
         with patch("app.core.slot_capacity.check_slot_capacity", new_callable=AsyncMock) as mock_check:
             with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
                 with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                    response = client.post("/api/tasks/82/retry")
+                    with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+                        response = client.post("/api/tasks/82/retry")
             mock_check.assert_not_called()
 
         app.dependency_overrides.clear()

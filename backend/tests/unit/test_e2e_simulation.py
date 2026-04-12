@@ -39,13 +39,9 @@ def simulate_full_workflow():
     task = Task(
         project_id=123,
         issue_id=456,
-        issue_iid=789,
-        note_id=111,
         user_prompt=cmd.args,
-        branch_name="codify/issue-789",
         priority=cmd.priority,
         scheduled_at=scheduled_at,
-        target_branch="main",
         status=TaskStatus.PENDING,
     )
     print(f"   Task ID: {task.id} (mock)")
