@@ -33,36 +33,25 @@ class RescheduleTaskRequest(BaseModel):
 
 
 class CreateTaskRequest(BaseModel):
-    """Request model for creating a manual task."""
+    """Request model for creating a task under an Issue."""
 
-    project_id: int
-    branch_name: str
-    base_branch: Optional[str] = None
-    # None means the task will not create a Merge Request (direct push only).
-    target_branch: Optional[str] = None
-    user_prompt: str
+    issue_id: int
+    user_prompt: Optional[str] = None  # If None, uses Issue.description
     priority: int = 0
     delay_seconds: Optional[int] = None
     scheduled_datetime: Optional[datetime] = None
 
     @model_validator(mode="after")
-    def validate_distinct_branches(self) -> "CreateTaskRequest":
-        """When a target branch is provided, it must differ from the source branch."""
-        if self.target_branch and self.branch_name == self.target_branch:
-            raise ValueError("Source branch and target branch must be different for manual tasks")
-        return self
-
-    @model_validator(mode="after")
     def validate_schedule_is_future(self) -> "CreateTaskRequest":
-        """Manual tasks can only be scheduled in the future."""
+        """Tasks can only be scheduled in the future."""
         if self.delay_seconds is not None and self.delay_seconds <= 0:
-            raise ValueError("Delay seconds must be greater than 0 for manual tasks")
+            raise ValueError("Delay seconds must be greater than 0")
 
         if self.scheduled_datetime is None:
             return self
 
         normalized_scheduled = normalize_scheduled_datetime(self.scheduled_datetime)
         if normalized_scheduled is not None and normalized_scheduled <= utcnow():
-            raise ValueError("Scheduled datetime must be in the future for manual tasks")
+            raise ValueError("Scheduled datetime must be in the future")
 
         return self

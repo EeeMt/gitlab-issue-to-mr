@@ -48,6 +48,7 @@ router = APIRouter()
 async def list_tasks(
     status: Optional[str] = None,
     project_id: Optional[int] = None,
+    issue_id: Optional[int] = None,
     initiator_username: Optional[str] = None,
     page: Optional[int] = None,
     page_size: int = 20,
@@ -87,6 +88,9 @@ async def list_tasks(
 
     if initiator_username:
         query = query.where(Task.initiator_username == initiator_username)
+
+    if issue_id:
+        query = query.where(Task.issue_id == issue_id)
 
     project_lookup = await build_project_lookup(
         accessible_projects=access_scope.accessible_projects,
@@ -519,21 +523,19 @@ async def retry_task(
     current_user: Optional[User] = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
-    """Retry a failed or cancelled task.
+    """Retry a failed or cancelled task by creating a new task with the same prompt.
 
-    If a scheduled_datetime is supplied in the request body the task will be
-    reset to PENDING and held until that time; otherwise it is queued
-    immediately (existing behaviour).
+    The original task is preserved with its error state. A new task is created
+    with is_retry=True and retry_source_task_id pointing to the original.
     """
-    task = await get_task_with_access_check(task_id, db, access_scope, current_user)
-    validate_task_status_for_retry(task)
+    original_task = await get_task_with_access_check(task_id, db, access_scope, current_user)
+    validate_task_status_for_retry(original_task)
 
     scheduled_at: Optional[datetime] = None
     if request and request.scheduled_datetime is not None:
         scheduled_at = validate_scheduled_datetime_in_future(request.scheduled_datetime)
 
     # Check slot capacity for scheduled retries
-    # exclude_task_id: no-op here (task is FAILED/CANCELLED), but needed for reschedule
     if scheduled_at is not None:
         from app.core.slot_capacity import check_slot_capacity, slot_full_detail_dict
         slot_info = await check_slot_capacity(db, scheduled_at, exclude_task_id=task_id, acquire_lock=True)
@@ -543,30 +545,27 @@ async def retry_task(
                 detail=slot_full_detail_dict(slot_info),
             )
 
-    previous_scheduled_at = task.scheduled_at
-    task.status = TaskStatus.PENDING
-    task.error_message = None
-    task.completed_at = None
-    task.started_at = None
-    task.container_id = None
-    task.commit_sha = None
-    task.additions = 0
-    task.deletions = 0
-    task.total_changes = 0
-    task.model_name = None
-    task.scheduled_at = scheduled_at
-
-    # Clear logs from previous execution so the event stream starts fresh
-    await db.execute(delete(TaskLog).where(TaskLog.task_id == task_id))
-
+    new_task = Task(
+        issue_id=original_task.issue_id,
+        project_id=original_task.project_id,
+        user_prompt=original_task.user_prompt,
+        priority=original_task.priority,
+        scheduled_at=scheduled_at,
+        is_retry=True,
+        retry_source_task_id=original_task.id,
+        initiator_user_id=current_user.id if current_user is not None else None,
+        initiator_gitlab_user_id=current_user.gitlab_user_id if current_user is not None else None,
+        initiator_username=current_user.username if current_user is not None else None,
+    )
+    db.add(new_task)
     await db.commit()
-    await db.refresh(task)
+    await db.refresh(new_task)
 
-    await notify_task_retried(task, previous_scheduled_at, scheduled_at)
-    action = f"scheduled for retry at {scheduled_at}" if scheduled_at else "reset for retry"
-    logger.info(f"Task {task_id} {action}")
+    await notify_task_retried(new_task, None, scheduled_at)
+    action = f"scheduled for retry at {scheduled_at}" if scheduled_at else "created as retry"
+    logger.info(f"Task {new_task.id} {action} (retry of task {task_id})")
 
-    return {"status": "success", "message": f"Task {task_id} {action}"}
+    return _serialize_task(new_task, await get_project_metadata(new_task.project_id))
 
 
 @router.post("/tasks/{task_id}/execute")
@@ -632,22 +631,36 @@ async def create_task(
     current_user: Optional[User] = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
-    """Create a new manual task.
+    """Create a new task under an Issue.
 
     Args:
-        request: Task creation request
+        request: Task creation request (requires issue_id)
         db: Database session
 
     Returns:
         Created task details
     """
+    from app.models import Issue
+
+    issue = await db.get(Issue, request.issue_id)
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issue not found")
+
+    require_project_access(issue.project_id, access_scope)
+
+    prompt = request.user_prompt or issue.description
+    if not prompt:
+        raise HTTPException(
+            status_code=400,
+            detail="No prompt provided and issue has no description",
+        )
+
     scheduled_at = resolve_scheduled_at(
         request.scheduled_datetime,
         request.delay_seconds,
     )
-    require_project_access(request.project_id, access_scope)
 
-    # Slot capacity only applies to scheduled tasks; immediate tasks bypass capacity checks
+    # Slot capacity only applies to scheduled tasks
     slot_warning = None
     if scheduled_at is not None:
         from app.core.slot_capacity import check_slot_capacity, slot_full_detail_dict
@@ -660,46 +673,26 @@ async def create_task(
                 )
             slot_warning = slot_full_detail_dict(slot_info)
 
-    # Create task
     task = Task(
-        project_id=request.project_id,
-        user_prompt=request.user_prompt,
+        issue_id=issue.id,
+        project_id=issue.project_id,
+        user_prompt=prompt,
         initiator_user_id=current_user.id if current_user is not None else None,
         initiator_gitlab_user_id=current_user.gitlab_user_id if current_user is not None else None,
         initiator_username=current_user.username if current_user is not None else None,
-        branch_name=request.branch_name,
-        base_branch=request.base_branch,
-        target_branch=request.target_branch,
         priority=request.priority,
         scheduled_at=scheduled_at,
-        is_manual=True,
-        # These are nullable for manual tasks
-        issue_iid=None,
-        issue_id=None,
-        note_id=None,
     )
     db.add(task)
     await db.commit()
     await db.refresh(task)
 
     logger.info(
-        f"Created manual task {task.id} for project {request.project_id}, "
-        f"branch={request.branch_name}, target={request.target_branch}, "
+        f"Created task {task.id} for issue {issue.id} (project {issue.project_id}), "
         f"priority={request.priority}, delay={request.delay_seconds}"
     )
 
-    response = {
-        "id": task.id,
-        "project_id": task.project_id,
-        "user_prompt": task.user_prompt,
-        "branch_name": task.branch_name,
-        "target_branch": task.target_branch,
-        "status": task.status.value,
-        "priority": task.priority,
-        "scheduled_at": task.scheduled_at.isoformat() if task.scheduled_at else None,
-        "is_manual": task.is_manual,
-        "created_at": task.created_at.isoformat(),
-    }
+    response = _serialize_task(task, await get_project_metadata(issue.project_id))
     if slot_warning:
         response["slot_warning"] = slot_warning
     return response
