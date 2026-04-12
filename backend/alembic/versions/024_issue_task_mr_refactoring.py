@@ -1,7 +1,7 @@
 """issue task mr refactoring — add issues table, modify tasks table
 
-Revision ID: 022_issue_task_mr_refactoring
-Revises: 021_add_structured_logs
+Revision ID: 024_issue_task_mr_refactoring
+Revises: 023_add_task_merge_request_title
 Create Date: 2026-04-12
 """
 
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "022_issue_task_mr_refactoring"
-down_revision: Union[str, None] = "021_add_structured_logs"
+revision: str = "024_issue_task_mr_refactoring"
+down_revision: Union[str, None] = "023_add_task_merge_request_title"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
