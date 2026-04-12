@@ -86,6 +86,7 @@ _mock_config: dict[str, Any] = {
     ],
     # Failure injection — tests can toggle these to simulate errors
     "fail_git_push": False,
+    "fail_git_clone": False,
     "fail_mr_update": False,
     "fail_mr_creation": False,
     "fail_project_lookup": False,
@@ -310,8 +311,11 @@ async def _handle_git_request(repo_path: str, request: Request) -> Response:
     # Reject pushes when fail_git_push is enabled
     query = str(request.url.query) if request.url.query else ""
     is_push = "receive-pack" in request.url.path or "service=git-receive-pack" in query
+    is_clone = "upload-pack" in request.url.path or "service=git-upload-pack" in query
     if is_push and _mock_config.get("fail_git_push"):
         return Response(content="Push rejected by mock server", status_code=403)
+    if is_clone and _mock_config.get("fail_git_clone"):
+        return Response(content="Clone rejected by mock server", status_code=500)
 
     # Map URL path to filesystem
     # repo_path examples: test-group/test-project.git/info/refs
