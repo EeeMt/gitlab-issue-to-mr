@@ -13,8 +13,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.api.stats import get_analytics
 from app.api.tasks import CreateTaskRequest, create_task
-from app.api.webhook import _handle_generate_command
-from app.core.parser import BotCommand
 from app.dependencies.project_access import ProjectAccessScope
 from app.models import TaskStatus
 
@@ -56,44 +54,6 @@ async def test_create_task_persists_manual_initiator_metadata():
     assert task.initiator_username == "alice"
     assert result["id"] == 23
 
-
-@pytest.mark.asyncio
-async def test_handle_generate_command_persists_webhook_initiator_metadata():
-    db = MagicMock()
-    db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: None))
-    db.add = MagicMock()
-    db.commit = AsyncMock()
-    db.flush = AsyncMock()
-
-    async def refresh(task):
-        task.id = 88
-        task.created_at = datetime(2026, 3, 14, 12, 0, 0)
-
-    db.refresh = AsyncMock(side_effect=refresh)
-    command = BotCommand(command="generate", args="Please update this issue", raw_mention="@ai-bot")
-    initiator = {"id": 501, "username": "gitlab-user"}
-    fake_gitlab = MagicMock()
-    fake_gitlab.get_issue.return_value = {
-        "title": "Analytics",
-        "description": "Need reporting",
-    }
-
-    with patch("app.api.webhook.get_gitlab_client", return_value=fake_gitlab):
-        result = await _handle_generate_command(
-            db=db,
-            project_id=11,
-            issue_id=12,
-            issue_iid=13,
-            note_id=14,
-            command=command,
-            initiator=initiator,
-        )
-
-    task = db.add.call_args.args[0]
-    assert task.initiator_user_id is None
-    assert task.initiator_gitlab_user_id == 501
-    assert task.initiator_username == "gitlab-user"
-    assert result["task_id"] == 88
 
 
 class MockResult:

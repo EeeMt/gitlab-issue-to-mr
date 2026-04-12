@@ -39,12 +39,3 @@ def pytest_configure(config):
             object.__setattr__(self, k, v)
 
     Task.__init__ = _compat_init
-
-    # Register the webhook router (removed from main.py during refactor)
-    # so that HTTP-level dispatch tests can still POST /api/webhook/gitlab.
-    from app.main import app
-    from app.api.webhook import router as webhook_router
-
-    existing = {r.path for r in app.routes if hasattr(r, "path")}
-    if "/api/webhook/gitlab" not in existing:
-        app.include_router(webhook_router, prefix="/api")
