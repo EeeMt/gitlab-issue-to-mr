@@ -59,6 +59,41 @@ class TestNavigation:
         tasks_menu = class_page.locator(".nav-menu").get_by_text("Tasks")
         expect(tasks_menu).to_be_visible()
 
+    def test_issues_menu_navigates_to_issues(self, logged_in_page: Page):
+        """Clicking Issues in sidebar should navigate to /issues."""
+        logged_in_page.goto("/dashboard")
+        logged_in_page.wait_for_selector(".nav-menu", state="visible", timeout=5000)
+        issues_menu = logged_in_page.locator(".nav-menu").get_by_text("Issues")
+        issues_menu.click()
+        logged_in_page.wait_for_url("**/issues", timeout=5000)
+        assert "/issues" in logged_in_page.url
+
+    def test_tasks_menu_navigates_to_tasks(self, logged_in_page: Page):
+        """Clicking Tasks in sidebar should navigate to /tasks."""
+        logged_in_page.goto("/dashboard")
+        logged_in_page.wait_for_selector(".nav-menu", state="visible", timeout=5000)
+        tasks_menu = logged_in_page.locator(".nav-menu").get_by_text("Tasks")
+        tasks_menu.click()
+        logged_in_page.wait_for_url("**/tasks", timeout=5000)
+        assert "/tasks" in logged_in_page.url
+
+    def test_dashboard_menu_navigates_to_dashboard(self, logged_in_page: Page):
+        """Clicking Dashboard in sidebar should navigate to /dashboard."""
+        logged_in_page.goto("/issues")
+        logged_in_page.wait_for_selector(".nav-menu", state="visible", timeout=5000)
+        dash_menu = logged_in_page.locator(".nav-menu").get_by_text("Dashboard")
+        dash_menu.click()
+        logged_in_page.wait_for_url("**/dashboard", timeout=5000)
+        assert "/dashboard" in logged_in_page.url
+
+    def test_no_create_task_menu_item(self, class_page: Page):
+        """CreateTask menu item should not be in sidebar (removed in refactoring)."""
+        class_page.goto("/dashboard")
+        class_page.wait_for_selector(".nav-menu", state="visible", timeout=5000)
+        menu = class_page.locator(".nav-menu")
+        create_task = menu.get_by_text("Create Task", exact=True)
+        assert create_task.count() == 0, "CreateTask menu item should not exist"
+
     def test_mobile_drawer_exists(self, class_page: Page):
         """Test that mobile drawer header exists for small screens."""
         class_page.set_viewport_size({"width": 375, "height": 667})  # iPhone SE size

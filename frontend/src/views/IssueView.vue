@@ -131,7 +131,6 @@
               type="textarea"
               :placeholder="issue.description || t('issue.promptPlaceholder')"
               :rows="4"
-              data-testid="issue-task-prompt"
             />
           </n-form-item>
           <n-grid :cols="isMobile ? 1 : 3" :x-gap="16" :y-gap="12">

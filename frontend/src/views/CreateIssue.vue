@@ -37,7 +37,6 @@
                       :loading="projectsLoading"
                       :placeholder="t('createTask.selectProject')"
                       filterable
-                      data-testid="create-issue-project"
                       @update:value="handleProjectChange"
                     />
                   </n-form-item>
@@ -51,7 +50,6 @@
                 <n-input
                   v-model:value="formValue.title"
                   :placeholder="t('issue.field.title')"
-                  data-testid="create-issue-title"
                 />
               </n-form-item>
 
@@ -61,7 +59,6 @@
                   type="textarea"
                   :rows="6"
                   :placeholder="t('issue.field.description')"
-                  data-testid="create-issue-description"
                 />
               </n-form-item>
             </div>
@@ -78,7 +75,6 @@
                       :disabled="!formValue.project_id"
                       :placeholder="t('createTask.selectBaseBranch')"
                       filterable
-                      data-testid="create-issue-base-branch"
                     />
                   </n-form-item>
                 </n-gi>
@@ -91,7 +87,6 @@
                       :disabled="!formValue.project_id"
                       :placeholder="t('createTask.selectTargetBranch')"
                       filterable
-                      data-testid="create-issue-target-branch"
                     />
                   </n-form-item>
                 </n-gi>
@@ -127,7 +122,21 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useMessage, type FormInst, type FormRules } from 'naive-ui'
+import {
+  NButton,
+  NCard,
+  NForm,
+  NFormItem,
+  NGi,
+  NGrid,
+  NInput,
+  NSelect,
+  NSpace,
+  NSpin,
+  useMessage,
+  type FormInst,
+  type FormRules,
+} from 'naive-ui'
 import PageHeader from '../components/PageHeader.vue'
 import { createIssue, getProjects, getBranches, type Project, type Branch, type CreateIssueRequest } from '../api'
 import { useBreakpoints } from '../composables/useBreakpoints'

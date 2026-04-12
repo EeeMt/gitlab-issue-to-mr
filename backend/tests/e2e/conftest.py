@@ -478,6 +478,9 @@ def pytest_configure(config):
         "markers", "task_view: mark test as a task view page test"
     )
     config.addinivalue_line(
+        "markers", "task_list: mark test as a task list page test"
+    )
+    config.addinivalue_line(
         "markers", "schedule_overview: mark test as a schedule overview test"
     )
     config.addinivalue_line(
@@ -526,16 +529,44 @@ def api_get_first_project(backend_url: str, cookies: dict) -> dict:
         return projects[0]
 
 
-def api_create_issue(backend_url: str, cookies: dict, project_id: int, title: str = "E2E Test Issue") -> dict:
+def api_create_issue(backend_url: str, cookies: dict, project_id: int, title: str = "E2E Test Issue", description: str = None) -> dict:
     """Create a test issue via the API and return the response JSON."""
+    if description is None:
+        description = f"E2E test issue: {title}"
     with _httpx.Client(base_url=backend_url, timeout=15, cookies=cookies) as client:
         resp = client.post(
             "/api/issues",
             json={
                 "title": title,
-                "description": f"E2E test issue: {title}",
+                "description": description,
                 "project_id": project_id,
             },
         )
         assert resp.status_code in (200, 201), f"Failed to create issue: {resp.status_code} {resp.text}"
         return resp.json()
+
+
+def api_create_task(backend_url: str, cookies: dict, issue_id: int, prompt: str = "E2E test task", priority: int = 2, scheduled_datetime: str = None) -> dict:
+    """Create a test task under an issue via the API and return the response JSON."""
+    from datetime import datetime, timezone, timedelta
+    payload = {
+        "issue_id": issue_id,
+        "user_prompt": prompt,
+        "priority": priority,
+    }
+    if scheduled_datetime is None:
+        # Schedule far in the future so it stays pending
+        future = (datetime.now(timezone.utc) + timedelta(hours=48)).isoformat()
+        payload["scheduled_datetime"] = future
+    else:
+        payload["scheduled_datetime"] = scheduled_datetime
+
+    with _httpx.Client(base_url=backend_url, timeout=15, cookies=cookies) as client:
+        resp = client.post("/api/tasks", json=payload)
+        assert resp.status_code in (200, 201), f"Failed to create task: {resp.status_code} {resp.text}"
+        return resp.json()
+
+
+def _get_cookies(page) -> dict:
+    """Extract cookies as dict from a Playwright page context."""
+    return {c["name"]: c["value"] for c in page.context.cookies()}
