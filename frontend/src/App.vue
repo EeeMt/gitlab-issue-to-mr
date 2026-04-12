@@ -157,11 +157,11 @@ import type { MenuOption } from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
-  AddCircleOutline,
   BarChartOutline,
   DocumentTextOutline,
   FingerPrintOutline,
   GridOutline,
+  ListOutline,
   LogOutOutline,
   MenuOutline,
   CalendarOutline,
@@ -193,9 +193,9 @@ const showShell = computed(() => !isLoginRoute.value && !isBootstrapRoute.value)
 
 const menuLabels: Record<string, string> = {
   Dashboard: 'nav.dashboard',
+  TaskList: 'nav.tasks',
   Issues: 'nav.issues',
   CreateIssue: 'nav.createIssue',
-  CreateTask: 'nav.createTask',
   Sessions: 'nav.sessions',
   Monitor: 'nav.monitor',
   ScheduleOverview: 'nav.scheduleOverview',
@@ -243,8 +243,8 @@ function buildMenuSection(labelKey: string, children: MenuOption[]): MenuOption[
 const menuOptions = computed<MenuOption[]>(() => {
   const workspaceItems: MenuOption[] = [
     buildMenuItem('nav.dashboard', 'Dashboard', GridOutline),
+    buildMenuItem('nav.tasks', 'TaskList', ListOutline),
     buildMenuItem('nav.issues', 'Issues', DocumentTextOutline),
-    buildMenuItem('nav.createTask', 'CreateTask', AddCircleOutline)
   ]
 
   if (authState.authenticated) {

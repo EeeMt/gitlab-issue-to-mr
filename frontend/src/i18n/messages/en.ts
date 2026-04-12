@@ -36,6 +36,7 @@ const en = {
   },
   nav: {
     dashboard: 'Dashboard',
+    tasks: 'Tasks',
     issues: 'Issues',
     createIssue: 'Create Issue',
     createTask: 'Create Task',
