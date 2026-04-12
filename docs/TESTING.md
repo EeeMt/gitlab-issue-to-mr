@@ -125,7 +125,7 @@ cd backend && pytest tests/mock_integration/ -v  # 手动运行测试
 make test-mock-integration-down     # 停止环境
 ```
 
-### 测试文件概览（16 文件，164 个测试）
+### 测试文件概览（19 文件，222 个测试）
 
 | 文件 | 测试数 | 覆盖范围 |
 |------|--------|----------|
@@ -145,6 +145,9 @@ make test-mock-integration-down     # 停止环境
 | test_notifications_and_operations.py | 17 | 通知、slot capacity |
 | test_mr_followup_and_env.py | 12 | MR follow-up、容器环境、重试 |
 | test_health_access_sse.py | 25 | 健康检查、访问控制、SSE、webhook配置 |
+| test_remaining_endpoints.py | 27 | 剩余端点覆盖 |
+| test_failure_injection.py | 15 | 故障注入（项目404、退出码、git clone、组合故障） |
+| test_mutex_and_scheduling.py | 16 | 互斥锁、调度、分支验证、快速创建 |
 
 ### 关键配置
 
