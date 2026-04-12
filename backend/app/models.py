@@ -2,16 +2,25 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Optional, List
 
 from sqlalchemy import Boolean, DateTime, Enum as SQLEnum, ForeignKey, Index, Integer, JSON, String, Text
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
     """Base class for all database models."""
 
     pass
+
+
+class IssueStatus(str, Enum):
+    """Issue status enumeration."""
+
+    OPEN = "open"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    CLOSED = "closed"
 
 
 class TaskStatus(str, Enum):
@@ -32,21 +41,63 @@ task_status_enum = SQLEnum(
 )
 
 
+class Issue(Base):
+    """Issue model — requirement container that groups Tasks. One Issue = one branch + one MR."""
+
+    __tablename__ = "issues"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(512), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), default=IssueStatus.OPEN.value, nullable=False)
+
+    # Branch & MR (promoted from Task)
+    branch_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    base_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    target_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    merge_request_iid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    merge_request_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+
+    # Claude session persistence
+    claude_session_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    session_storage_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+
+    # Creator
+    initiator_user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    initiator_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Relationships
+    tasks: Mapped[List["Task"]] = relationship("Task", back_populates="issue", order_by="Task.created_at")
+
+    __table_args__ = (
+        Index("ix_issues_status_created", "status", "created_at"),
+        Index("ix_issues_project_status", "project_id", "status"),
+    )
+
+
 class Task(Base):
-    """Task model for storing AI code generation tasks."""
+    """Task model — one execution unit (one `claude -p` call). Belongs to an Issue."""
 
     __tablename__ = "tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
-    # GitLab identifiers
+    # Parent issue
+    issue_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("issues.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    issue_iid: Mapped[int] = mapped_column(Integer, nullable=True)
-    issue_id: Mapped[int] = mapped_column(Integer, nullable=True)
-    note_id: Mapped[int] = mapped_column(Integer, nullable=True, unique=True)
-
-    # Manual task flag
-    is_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Task details
     user_prompt: Mapped[str] = mapped_column(Text, nullable=False)
@@ -56,11 +107,11 @@ class Task(Base):
     initiator_gitlab_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     initiator_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
 
-    # Branch and MR info
-    branch_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    base_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    merge_request_iid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    merge_request_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    # Retry tracking
+    is_retry: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    retry_source_task_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("tasks.id"), nullable=True
+    )
 
     # Status
     status: Mapped[TaskStatus] = mapped_column(
@@ -75,10 +126,6 @@ class Task(Base):
 
     # Container tracking
     container_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-
-    # Branch configuration
-    # target_branch=None means the task should not create an MR (direct push only)
-    target_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, default=None)
 
     # Results
     commit_sha: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
@@ -99,9 +146,6 @@ class Task(Base):
     # MR title generated by AI post-execution (populated from CODIFY_MR_TITLE marker)
     merge_request_title: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
-    # Retry tracking
-    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow
@@ -112,11 +156,17 @@ class Task(Base):
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    # Relationships
+    issue: Mapped[Optional["Issue"]] = relationship("Issue", back_populates="tasks")
+    retry_source: Mapped[Optional["Task"]] = relationship(
+        "Task", remote_side="Task.id", foreign_keys=[retry_source_task_id]
+    )
+
     # Indexes for querying tasks
     __table_args__ = (
         Index("ix_tasks_status_created", "status", "created_at"),
         Index("ix_tasks_status_priority", "status", "priority", "scheduled_at"),
-        Index("ix_tasks_project_issue", "project_id", "issue_iid"),
+        Index("ix_tasks_issue_id_status", "issue_id", "status"),
         Index("ix_tasks_created_at_project", "created_at", "project_id"),
         Index("ix_tasks_created_at_status", "created_at", "status"),
     )
