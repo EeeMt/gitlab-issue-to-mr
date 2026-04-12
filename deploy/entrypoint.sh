@@ -14,6 +14,7 @@ USER_PROMPT="${USER_PROMPT:?Missing USER_PROMPT}"
 # Optional environment variables
 # ISSUE_IID - required for webhook-triggered tasks, optional for manual tasks
 ISSUE_IID="${ISSUE_IID:-}"
+ISSUE_ID="${ISSUE_ID:-}"
 # BASE_BRANCH - base branch to create new branch from (defaults to TARGET_BRANCH if not set)
 BASE_BRANCH="${BASE_BRANCH:-}"
 TARGET_BRANCH="${TARGET_BRANCH:-}"
@@ -471,6 +472,12 @@ if [ -f /tmp/claude_result.json ] && [ -s /tmp/claude_result.json ]; then
       .output = ((.output // "") | if length > 2000 then .[:2000] + "…(truncated)" else . end)
     ]' /tmp/claude_result.json 2>/dev/null || echo '[]')
     echo "CODIFY_TOOL_CALLS:${TOOL_CALLS_JSON}"
+
+    # Extract and emit session ID for backend to store on the Issue
+    SESSION_ID=$(jq -r '.session_id // ""' /tmp/claude_result.json 2>/dev/null || echo '')
+    if [ -n "${SESSION_ID}" ]; then
+        echo "CODIFY_SESSION_ID:${SESSION_ID}"
+    fi
 fi
 
 if [ $RESULT -ne 0 ]; then

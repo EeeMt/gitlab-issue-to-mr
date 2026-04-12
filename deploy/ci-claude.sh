@@ -67,7 +67,6 @@ CLAUDE_ARGS=(
   --output-format stream-json
   --verbose
   --include-partial-messages
-  --no-session-persistence
 )
 
 if [[ "$SANDBOX_MODE" == "1" ]]; then
