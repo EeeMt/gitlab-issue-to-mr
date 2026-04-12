@@ -466,10 +466,13 @@ def pytest_configure(config):
         "markers", "task_details: mark test as a task detail view test"
     )
     config.addinivalue_line(
-        "markers", "manual_task: mark test as a manual task creation test"
+        "markers", "issue_list: mark test as an issue list page test"
     )
     config.addinivalue_line(
-        "markers", "create_task: mark test as a create task page test"
+        "markers", "create_issue: mark test as a create issue page test"
+    )
+    config.addinivalue_line(
+        "markers", "issue_view: mark test as an issue view page test"
     )
     config.addinivalue_line(
         "markers", "task_view: mark test as a task view page test"
@@ -509,3 +512,30 @@ def pytest_report_header(config):
         f"Backend URL: {os.environ.get('E2E_BACKEND_URL', 'http://backend:8000')}",
         f"GitLab URL: {os.environ.get('E2E_GITLAB_URL', 'http://gitlab:8080')}",
     ]
+
+
+def api_get_first_project(backend_url: str, cookies: dict) -> dict:
+    """Get the first available project. Skips test if none available."""
+    with _httpx.Client(base_url=backend_url, timeout=15, cookies=cookies) as client:
+        resp = client.get("/api/projects")
+        if resp.status_code != 200:
+            pytest.skip(f"Cannot fetch projects: {resp.status_code}")
+        projects = resp.json()
+        if not projects:
+            pytest.skip("No GitLab projects available")
+        return projects[0]
+
+
+def api_create_issue(backend_url: str, cookies: dict, project_id: int, title: str = "E2E Test Issue") -> dict:
+    """Create a test issue via the API and return the response JSON."""
+    with _httpx.Client(base_url=backend_url, timeout=15, cookies=cookies) as client:
+        resp = client.post(
+            "/api/issues",
+            json={
+                "title": title,
+                "description": f"E2E test issue: {title}",
+                "project_id": project_id,
+            },
+        )
+        assert resp.status_code in (200, 201), f"Failed to create issue: {resp.status_code} {resp.text}"
+        return resp.json()

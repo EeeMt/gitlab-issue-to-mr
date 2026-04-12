@@ -9,7 +9,6 @@ Tests for the TaskView page functionality including:
 """
 
 import re
-import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -228,35 +227,31 @@ class TestTaskViewRefreshButton:
 def test_task_id(logged_in_page, backend_url):
     """Create a pending test task via API and return its ID.
 
-    Requires at least one GitLab project to be configured. Skips the test
-    gracefully if no projects are available or task creation fails.
+    Creates an Issue first, then creates a Task under it. Requires at least
+    one GitLab project to be configured. Skips the test gracefully if no
+    projects are available or task creation fails.
     """
-    cookies = {c["name"]: c["value"] for c in logged_in_page.context.cookies()}
-    with httpx.Client(base_url=backend_url, timeout=15, cookies=cookies) as client:
-        # Fetch available projects
-        resp = client.get("/api/projects")
-        if resp.status_code != 200:
-            pytest.skip(f"Cannot fetch projects: {resp.status_code}")
-        projects = resp.json()
-        if not projects:
-            pytest.skip("No GitLab projects available")
-        project_id = projects[0]["id"]
+    from conftest import api_get_first_project, api_create_issue
 
-        # Create a pending task scheduled far in future so the scheduler
-        # won't pick it up — keeps task in PENDING for button-click tests.
-        future_dt = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    cookies = {c["name"]: c["value"] for c in logged_in_page.context.cookies()}
+    project = api_get_first_project(backend_url, cookies)
+    issue = api_create_issue(backend_url, cookies, project["id"], title="E2E TaskView Test Issue")
+
+    # Create a pending task scheduled far in future so the scheduler
+    # won't pick it up — keeps task in PENDING for button-click tests.
+    future_dt = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    with httpx.Client(base_url=backend_url, timeout=15, cookies=cookies) as client:
         resp = client.post(
             "/api/tasks",
             json={
-                "project_id": project_id,
-                "branch_name": f"test-e2e-{int(time.time())}",
+                "issue_id": issue["id"],
                 "user_prompt": "E2E test task - do nothing",
                 "priority": 2,
                 "scheduled_datetime": future_dt,
             },
         )
         if resp.status_code not in (200, 201):
-            pytest.skip(f"Cannot create test task: {resp.status_code}")
+            pytest.skip(f"Cannot create test task: {resp.status_code} {resp.text}")
         return resp.json()["id"]
 
 
