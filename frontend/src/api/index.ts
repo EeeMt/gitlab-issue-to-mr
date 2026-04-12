@@ -50,6 +50,7 @@ api.interceptors.response.use(
 
 // Status union types
 export type TaskStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type IssueStatus = 'open' | 'in_progress' | 'completed' | 'closed'
 export type ContainerStatus = 'created' | 'running' | 'paused' | 'restarting' | 'removing' | 'exited' | 'dead'
 
 // API error type
@@ -60,32 +61,61 @@ export interface ApiError {
   detail?: string
 }
 
+// Issue types
+export interface Issue {
+  id: number
+  title: string
+  description: string | null
+  project_id: number
+  status: IssueStatus
+  branch_name: string | null
+  base_branch: string | null
+  target_branch: string | null
+  merge_request_iid: number | null
+  merge_request_url: string | null
+  claude_session_id: string | null
+  initiator_user_id: number | null
+  initiator_username: string | null
+  created_at: string
+  updated_at: string
+  task_count?: number
+  tasks?: Task[]
+}
+
+export interface CreateIssueRequest {
+  title: string
+  description?: string
+  project_id: number
+  base_branch?: string
+  target_branch?: string
+}
+
+export interface IssueListResponse {
+  items: Issue[]
+  total: number
+  page: number
+  page_size: number
+}
+
 // Task types
 export interface Task {
   id: number
+  issue_id: number | null
   project_id: number
   project_name?: string | null
   project_path_with_namespace?: string | null
   project_url?: string | null
-  issue_iid: number | null
-  issue_url?: string | null
-  issue_id: number | null
-  note_id: number | null
   user_prompt: string
   initiator_user_id?: number | null
   initiator_gitlab_user_id?: number | null
   initiator_username?: string | null
-  branch_name: string | null
-  branch_url?: string | null
-  merge_request_iid: number | null
-  merge_request_url: string | null
   status: TaskStatus
   priority: number
+  is_retry: boolean
+  retry_source_task_id: number | null
   scheduled_at: string | null
   container_id: string | null
   container_name: string | null
-  target_branch: string | null
-  target_branch_url?: string | null
   commit_sha: string | null
   error_message: string | null
   additions: number
@@ -95,12 +125,16 @@ export interface Task {
   output_tokens: number | null
   model_name?: string | null
   merge_request_title?: string | null
-  base_branch?: string | null
-  is_manual: boolean
   created_at: string
   updated_at: string
   started_at: string | null
   completed_at: string | null
+  issue?: {
+    id: number
+    title: string
+    branch_name: string | null
+    merge_request_url: string | null
+  }
 }
 
 // Project and Branch types for manual task creation
@@ -117,11 +151,8 @@ export interface Branch {
 
 // Request types
 export interface CreateTaskRequest {
-  project_id?: number | null
-  branch_name: string
-  base_branch?: string
-  target_branch?: string | null
-  user_prompt: string
+  issue_id: number
+  user_prompt?: string
   priority?: number
   delay_seconds?: number
   scheduled_datetime?: string
@@ -162,7 +193,7 @@ export interface Container {
   status: ContainerStatus
   task_id: number | null
   project_id: number | null
-  issue_iid: number | null
+  issue_id: number | null
   created_at: string
 }
 
@@ -988,6 +1019,45 @@ export async function updatePromptTemplate(templateId: number, template: { name?
 
 export async function deletePromptTemplate(templateId: number): Promise<void> {
   await api.delete(`/prompt-templates/${templateId}`)
+}
+
+// Issue APIs
+export async function getIssues(params?: {
+  status?: string
+  project_id?: number
+  page?: number
+  page_size?: number
+}): Promise<IssueListResponse> {
+  const response = await api.get('/issues', { params })
+  return response.data
+}
+
+export async function getIssue(id: number): Promise<Issue> {
+  const response = await api.get(`/issues/${id}`)
+  return response.data
+}
+
+export async function createIssue(data: CreateIssueRequest): Promise<Issue> {
+  const response = await api.post('/issues', data)
+  return response.data
+}
+
+export async function updateIssue(id: number, data: Partial<{
+  title: string
+  description: string
+  status: string
+}>): Promise<Issue> {
+  const response = await api.patch(`/issues/${id}`, data)
+  return response.data
+}
+
+export async function closeIssue(id: number): Promise<Issue> {
+  const response = await api.post(`/issues/${id}/close`)
+  return response.data
+}
+
+export async function deleteIssue(id: number): Promise<void> {
+  await api.delete(`/issues/${id}`)
 }
 
 export default api
