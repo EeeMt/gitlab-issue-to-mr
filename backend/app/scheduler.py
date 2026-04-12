@@ -18,7 +18,7 @@ from app.core.session import cleanup_stale_sessions
 from app.core.utcnow import utcnow
 from app.core.worker import WorkerExecutor
 from app.database import AsyncSessionLocal
-from app.models import Task, TaskStatus
+from app.models import Task, TaskStatus, Issue, IssueStatus
 from app.runtime_config import load_runtime_config_from_db
 
 logger = logging.getLogger(__name__)
@@ -28,11 +28,11 @@ _SESSION_CLEANUP_INTERVAL_SECONDS = 3600
 _worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-")
 
 
-WORKER_CONTAINER_PATTERN = re.compile(r"^codify-(\d+)-p\d+-(i\d+|manual)$")
+WORKER_CONTAINER_PATTERN = re.compile(r"^codify-(\d+)-issue(\d+)$")
 
 
 def _extract_task_id(container_name: str) -> int | None:
-    """Extract task_id from a worker container name like codify-123-p456-i789."""
+    """Extract task_id from a worker container name like codify-123-issue456."""
     m = WORKER_CONTAINER_PATTERN.match(container_name)
     return int(m.group(1)) if m else None
 
@@ -43,7 +43,7 @@ class Scheduler:
     def __init__(self) -> None:
         self.running = False
         self._running_tasks: Set[int] = set()  # task_ids currently running
-        self._running_issues: Set[str] = set()  # "project_id:issue_iid" pairs
+        self._running_issues: Set[int] = set()  # issue_ids with running tasks
         self._last_session_cleanup_at = 0.0
 
     async def start(self) -> None:
@@ -91,18 +91,15 @@ class Scheduler:
                 logger.debug("No tasks available")
                 return
 
-            # Check issue mutex — prevents duplicate processing of the same issue.
-            # Manual tasks (issue_iid=None) are independent and skip the shared mutex.
-            if task.issue_iid is not None:
-                issue_key = f"{task.project_id}:{task.issue_iid}"
-                if issue_key in self._running_issues:
-                    logger.debug(f"Issue {issue_key} already running, skipping")
+            # Check issue mutex — prevents concurrent tasks on the same issue.
+            # Tasks without issue_id are independent and skip the shared mutex.
+            if task.issue_id is not None:
+                if task.issue_id in self._running_issues:
+                    logger.debug(f"Issue {task.issue_id} already running, skipping")
                     return
-            else:
-                issue_key = f"manual:{task.id}"
 
             # Execute task
-            await self._execute_task(db, task, issue_key)
+            await self._execute_task(db, task)
 
     async def _maybe_cleanup_sessions(self, db: AsyncSession) -> None:
         """Periodically delete long-stale dashboard sessions."""
@@ -151,13 +148,14 @@ class Scheduler:
         )
         return result.scalar_one_or_none()
 
-    async def _execute_task(self, db: AsyncSession, task: Task, issue_key: str) -> None:
+    async def _execute_task(self, db: AsyncSession, task: Task) -> None:
         """Execute a task in a separate thread to avoid blocking the event loop."""
-        logger.info(f"Executing task {task.id} for issue {issue_key}")
+        logger.info(f"Executing task {task.id} for issue {task.issue_id}")
 
         # Mark as running
         self._running_tasks.add(task.id)
-        self._running_issues.add(issue_key)
+        if task.issue_id is not None:
+            self._running_issues.add(task.issue_id)
 
         try:
             # Update status to RUNNING
@@ -165,8 +163,11 @@ class Scheduler:
             task.started_at = utcnow()
             await db.commit()
 
+            # Auto-transition issue to IN_PROGRESS
+            if task.issue_id is not None:
+                await self._transition_issue_to_in_progress(db, task.issue_id)
+
             # Execute via worker in a thread pool WITHOUT waiting
-            # This allows multiple tasks to run in parallel
             asyncio.create_task(self._run_task_background(task.id))
             logger.info(f"Task {task.id} submitted to thread pool")
 
@@ -179,7 +180,19 @@ class Scheduler:
 
             # Clean up tracking
             self._running_tasks.discard(task.id)
-            self._running_issues.discard(issue_key)
+            if task.issue_id is not None:
+                self._running_issues.discard(task.issue_id)
+
+    async def _transition_issue_to_in_progress(self, db: AsyncSession, issue_id: int) -> None:
+        """Auto-transition issue OPEN → IN_PROGRESS when first task starts running."""
+        try:
+            issue = await db.get(Issue, issue_id)
+            if issue and issue.status == IssueStatus.OPEN.value:
+                issue.status = IssueStatus.IN_PROGRESS.value
+                await db.commit()
+                logger.info(f"Issue {issue_id} auto-transitioned to IN_PROGRESS")
+        except Exception as e:
+            logger.warning(f"Failed to transition issue {issue_id}: {e}")
 
     async def _run_task_background(self, task_id: int) -> None:
         """Run task in background thread pool."""
@@ -203,21 +216,48 @@ class Scheduler:
         finally:
             # Clean up tracking
             self._running_tasks.discard(task_id)
-            # Find the issue_key from database if needed
             try:
                 async with AsyncSessionLocal() as db:
                     result = await db.execute(
                         select(Task).where(Task.id == task_id)
                     )
                     task = result.scalar_one_or_none()
-                    if task:
-                        if task.issue_iid is not None:
-                            issue_key = f"{task.project_id}:{task.issue_iid}"
-                        else:
-                            issue_key = f"manual:{task_id}"
-                        self._running_issues.discard(issue_key)
+                    if task and task.issue_id is not None:
+                        self._running_issues.discard(task.issue_id)
+                        # Auto-transition issue to COMPLETED if all tasks done
+                        await self._maybe_complete_issue(db, task.issue_id)
             except Exception:
                 pass
+
+    async def _maybe_complete_issue(self, db: AsyncSession, issue_id: int) -> None:
+        """Auto-transition issue IN_PROGRESS → COMPLETED when last active task completes."""
+        try:
+            active_count = await db.execute(
+                select(func.count(Task.id)).where(
+                    Task.issue_id == issue_id,
+                    Task.status.in_([
+                        TaskStatus.PENDING,
+                        TaskStatus.QUEUED,
+                        TaskStatus.RUNNING,
+                    ]),
+                )
+            )
+            if active_count.scalar() == 0:
+                # Check if there's at least one completed task
+                completed_count = await db.execute(
+                    select(func.count(Task.id)).where(
+                        Task.issue_id == issue_id,
+                        Task.status == TaskStatus.COMPLETED,
+                    )
+                )
+                if completed_count.scalar() > 0:
+                    issue = await db.get(Issue, issue_id)
+                    if issue and issue.status == IssueStatus.IN_PROGRESS.value:
+                        issue.status = IssueStatus.COMPLETED.value
+                        await db.commit()
+                        logger.info(f"Issue {issue_id} auto-transitioned to COMPLETED")
+        except Exception as e:
+            logger.warning(f"Failed to check issue {issue_id} completion: {e}")
 
     async def _crash_recovery(self) -> None:
         """Recover from crashes: clean up orphan containers, resume legitimate ones.
@@ -260,19 +300,14 @@ class Scheduler:
                     if task_id is not None and task_id in running_task_map:
                         if c_status in ("running", "exited"):
                             # Legitimate worker (running or just finished) — resume monitoring.
-                            # For exited containers, resume_task collects output and processes results.
                             task = running_task_map[task_id]
-                            issue_key = (
-                                f"{task.project_id}:{task.issue_iid}"
-                                if task.issue_iid is not None
-                                else f"manual:{task.id}"
-                            )
                             logger.info(
                                 f"Resuming task {task_id} (container {container.name}, "
-                                f"status={c_status}, issue_key={issue_key})"
+                                f"status={c_status}, issue_id={task.issue_id})"
                             )
                             self._running_tasks.add(task_id)
-                            self._running_issues.add(issue_key)
+                            if task.issue_id is not None:
+                                self._running_issues.add(task.issue_id)
                             resumed_task_ids.add(task_id)
                             asyncio.create_task(
                                 self._resume_task_background(task_id, container.name)
@@ -342,12 +377,9 @@ class Scheduler:
                         select(Task).where(Task.id == task_id)
                     )
                     task = result.scalar_one_or_none()
-                    if task:
-                        if task.issue_iid is not None:
-                            issue_key = f"{task.project_id}:{task.issue_iid}"
-                        else:
-                            issue_key = f"manual:{task_id}"
-                        self._running_issues.discard(issue_key)
+                    if task and task.issue_id is not None:
+                        self._running_issues.discard(task.issue_id)
+                        await self._maybe_complete_issue(db, task.issue_id)
             except Exception:
                 pass
 
