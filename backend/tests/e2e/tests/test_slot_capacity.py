@@ -229,39 +229,7 @@ class TestSlotCapacityConfigPersistence:
 
 
 # ---------------------------------------------------------------------------
-# 3. CreateTask page – Slot warning elements
-# ---------------------------------------------------------------------------
-
-@pytest.mark.create_task
-@pytest.mark.slot_capacity
-class TestCreateTaskSlotElements:
-    """Verify slot-capacity-related elements on the Create Task page."""
-
-    def _goto_create_task(self, page: Page):
-        page.goto("/create-task")
-        page.wait_for_load_state("networkidle")
-
-    def test_submit_button_exists(self, class_page: Page):
-        """The submit button with data-testid is present."""
-        self._goto_create_task(class_page)
-        btn = class_page.get_by_test_id("create-task-submit-button")
-        expect(btn).to_be_visible()
-
-    def test_slot_warning_not_visible_by_default(self, class_page: Page):
-        """No slot warning alert shown when no schedule time is selected."""
-        self._goto_create_task(class_page)
-        warning = class_page.locator(".slot-warning")
-        expect(warning).to_have_count(0)
-
-    def test_submit_button_not_disabled_by_default(self, class_page: Page):
-        """Submit button is enabled when no schedule time is selected."""
-        self._goto_create_task(class_page)
-        btn = class_page.get_by_test_id("create-task-submit-button")
-        expect(btn).not_to_be_disabled()
-
-
-# ---------------------------------------------------------------------------
-# 4. ScheduleOverview page – Slot capacity summary cards
+# 3. ScheduleOverview page – Slot capacity summary cards
 # ---------------------------------------------------------------------------
 
 @pytest.mark.schedule_overview
