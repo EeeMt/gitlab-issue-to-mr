@@ -218,6 +218,7 @@ const zhCN = {
       sessionId: '会话 ID',
       createdAt: '创建时间',
       updatedAt: '更新时间',
+      creator: '创建人',
     },
   },
   taskView: {

@@ -221,6 +221,7 @@ const en = {
       sessionId: 'Session ID',
       createdAt: 'Created',
       updatedAt: 'Updated',
+      creator: 'Creator',
     },
   },
   taskView: {

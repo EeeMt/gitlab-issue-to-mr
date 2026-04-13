@@ -182,6 +182,13 @@ const columns = computed<DataTableColumns<Issue>>(() => [
     render: (row) => t('issue.taskCount', { count: row.task_count ?? 0 }),
   },
   {
+    title: t('issue.field.creator'),
+    key: 'initiator_username',
+    width: 120,
+    ellipsis: { tooltip: true },
+    render: (row) => row.initiator_username || '-',
+  },
+  {
     title: t('issue.field.createdAt'),
     key: 'created_at',
     width: 140,

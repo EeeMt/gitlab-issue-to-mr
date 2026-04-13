@@ -66,6 +66,17 @@
                 <span class="metadata-value">{{ issue.project_id }}</span>
               </div>
 
+              <!-- Creator -->
+              <div class="metadata-row">
+                <span class="metadata-label">
+                  <n-icon size="14" class="metadata-label-icon"><PersonOutline /></n-icon>
+                  {{ t('issue.field.creator') }}
+                </span>
+                <span class="metadata-value">
+                  {{ issue.initiator_username || '-' }}
+                </span>
+              </div>
+
               <!-- Branch flow -->
               <div class="metadata-row">
                 <span class="metadata-label">
@@ -396,7 +407,8 @@ import {
   InformationCircleOutline,
   DocumentTextOutline,
   WarningOutline,
-  CalendarOutline
+  CalendarOutline,
+  PersonOutline
 } from '@vicons/ionicons5'
 import VariableEditor from '../components/VariableEditor.vue'
 import HeatmapChart from '../components/HeatmapChart.vue'
