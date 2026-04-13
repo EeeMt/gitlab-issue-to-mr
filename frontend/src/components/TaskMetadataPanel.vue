@@ -106,15 +106,6 @@
         </span>
       </div>
 
-      <!-- User prompt -->
-      <div class="metadata-row">
-        <span class="metadata-label">
-          <n-icon size="14" class="metadata-label-icon"><ChatbubbleOutline /></n-icon>
-          {{ t('taskView.userPrompt') }}
-        </span>
-        <pre class="metadata-prompt">{{ task.user_prompt }}</pre>
-      </div>
-
       <!-- Time axis -->
       <div class="metadata-row">
         <span class="metadata-label">
@@ -161,7 +152,6 @@ import {
   GitMergeOutline,
   PersonOutline,
   GitBranchOutline,
-  ChatbubbleOutline,
   TimeOutline,
   GitPullRequest,
   RefreshOutline
@@ -209,6 +199,7 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 <style scoped>
 .task-metadata-panel {
   border-radius: var(--app-card-radius);
+  height: 100%;
 }
 
 .panel-header {
@@ -302,24 +293,6 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 .branch-arrow {
   color: var(--n-text-color-3, #999);
   font-size: 12px;
-}
-
-.metadata-prompt {
-  margin: 0;
-  padding: 12px;
-  font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
-  font-size: 12px;
-  line-height: 1.6;
-  background: rgba(128, 128, 128, 0.05);
-  border-radius: 8px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 280px;
-  overflow-y: auto;
-  border: 1px solid rgba(128, 128, 128, 0.12);
-  color: var(--n-text-color-2);
-  flex: 1;
-  min-width: 0;
 }
 
 .time-axis {

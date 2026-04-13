@@ -21,13 +21,27 @@
 
       <n-spin :show="initialLoading">
         <div class="task-view__content">
-          <!-- Top row: Metadata Panel + Actions side-by-side -->
-          <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
+          <!-- Top row: Metadata Panel + User Prompt side-by-side -->
+          <n-grid :cols="task?.user_prompt ? (isMobile ? 1 : 2) : 1" :x-gap="16" :y-gap="16">
             <n-gi>
               <TaskMetadataPanel v-if="task" :task="task" />
             </n-gi>
-            <n-gi>
-              <n-card class="task-card" :bordered="false" data-testid="task-actions-card">
+            <n-gi v-if="task?.user_prompt">
+              <n-card class="task-card task-card--equal" :bordered="false" data-testid="task-prompt-card">
+                <template #header>
+                  <div class="task-card__header">
+                    <div class="task-card__title">{{ t('taskView.userPrompt') }}</div>
+                  </div>
+                </template>
+                <div class="task-prompt-wrap">
+                  <div class="task-prompt-content">{{ task.user_prompt }}</div>
+                </div>
+              </n-card>
+            </n-gi>
+          </n-grid>
+
+          <!-- Actions card -->
+          <n-card class="task-card" :bordered="false" data-testid="task-actions-card">
                 <template #header>
                   <div class="task-card__header">
                     <div>
@@ -216,8 +230,6 @@
                   </div>
                 </div>
               </n-card>
-            </n-gi>
-          </n-grid>
 
           <!-- Process Panel -->
           <TaskProcessPanel
@@ -797,6 +809,38 @@ onBeforeUnmount(() => {
 
 .task-card {
   border-radius: var(--app-card-radius);
+}
+
+.task-card--equal {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.task-card--equal :deep(.n-card__content) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.task-prompt-wrap {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.task-prompt-content {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  color: rgba(15, 23, 42, 0.82);
+  background: rgba(15, 23, 42, 0.035);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-y: auto;
+  max-height: 320px;
+  flex: 1;
 }
 
 .task-card--spaced {
