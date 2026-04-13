@@ -13,9 +13,9 @@ from sqlalchemy import case, select, func, false, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies.auth import require_page_access
+from app.dependencies.auth import get_optional_current_user, require_page_access
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
-from app.models import Task, TaskStatus, Issue, IssueStatus
+from app.models import Task, TaskStatus, Issue, IssueStatus, User
 from app.core.projects import build_project_lookup
 from app.core.utcnow import utcnow
 
@@ -46,7 +46,9 @@ ERROR_CATEGORY_PATTERNS = (
 
 @router.get("/stats")
 async def get_stats(
+    my: bool = Query(False, description="When true, scope to the current user's data only"),
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Get task statistics.
@@ -62,6 +64,8 @@ async def get_stats(
             base_query = base_query.where(false())
         else:
             base_query = base_query.where(Task.project_id.in_(allowed_project_ids))
+    if my and current_user and current_user.username:
+        base_query = base_query.where(Task.initiator_username == current_user.username)
 
     total_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
     total = total_result.scalar() or 0
@@ -121,6 +125,8 @@ async def get_stats(
             issue_base_query = issue_base_query.where(false())
         else:
             issue_base_query = issue_base_query.where(Issue.project_id.in_(allowed_project_ids))
+    if my and current_user:
+        issue_base_query = issue_base_query.where(Issue.initiator_user_id == current_user.id)
 
     issue_total_result = await db.execute(
         select(func.count()).select_from(issue_base_query.subquery())
@@ -675,7 +681,9 @@ async def get_analytics(
 @router.get("/stats/activity-heatmap")
 async def get_activity_heatmap(
     days: int = Query(default=365, ge=1, le=730),
+    my: bool = Query(False, description="When true, scope to the current user's data only"),
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Return daily completed-task counts for the heatmap."""
@@ -698,6 +706,9 @@ async def get_activity_heatmap(
         if not allowed_project_ids:
             return []
         query = query.where(Task.project_id.in_(allowed_project_ids))
+
+    if my and current_user and current_user.username:
+        query = query.where(Task.initiator_username == current_user.username)
 
     result = await db.execute(query)
     rows = result.all()

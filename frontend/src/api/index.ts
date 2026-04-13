@@ -808,8 +808,10 @@ export async function getContainerLogs(containerId: string): Promise<string> {
   return response.data
 }
 
-export async function getStats(): Promise<Stats> {
-  const response = await api.get('/stats')
+export async function getStats(params?: {
+  my?: boolean
+}): Promise<Stats> {
+  const response = await api.get('/stats', { params })
   return response.data
 }
 
@@ -818,8 +820,10 @@ export interface ActivityHeatmapEntry {
   count: number
 }
 
-export async function getActivityHeatmap(days = 365): Promise<ActivityHeatmapEntry[]> {
-  const res = await api.get<ActivityHeatmapEntry[]>('/stats/activity-heatmap', { params: { days } })
+export async function getActivityHeatmap(days = 365, my = false): Promise<ActivityHeatmapEntry[]> {
+  const res = await api.get<ActivityHeatmapEntry[]>('/stats/activity-heatmap', {
+    params: { days, ...(my ? { my: true } : {}) },
+  })
   return res.data
 }
 

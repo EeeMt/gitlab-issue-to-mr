@@ -266,7 +266,7 @@ async function fetchData() {
 
 async function fetchStats() {
   try {
-    const stats = await getStats()
+    const stats = await getStats({ my: true })
     statsTotal.value = stats.total
     statsRunning.value = stats.running
     statsCompleted.value = stats.completed
@@ -281,7 +281,7 @@ async function fetchStats() {
 
 async function fetchHeatmap() {
   try {
-    heatmapData.value = await getActivityHeatmap()
+    heatmapData.value = await getActivityHeatmap(365, true)
   } catch {
     // Heatmap is supplementary
   }
