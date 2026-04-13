@@ -40,49 +40,98 @@
             <div class="issue-card__title">{{ t('issue.detail') }}</div>
           </div>
         </template>
-        <n-descriptions :column="isMobile ? 1 : 2" label-placement="left" bordered>
-          <n-descriptions-item :label="t('common.status')">
-            <n-tag :type="issueStatusColors[issue.status]" size="small" round>
-              {{ t(`issue.status.${issue.status}`) }}
-            </n-tag>
-          </n-descriptions-item>
-          <n-descriptions-item :label="t('issue.field.project')">
-            {{ issue.project_id }}
-          </n-descriptions-item>
-          <n-descriptions-item :label="t('issue.field.branch')">
-            {{ issue.branch_name || '-' }}
-          </n-descriptions-item>
-          <n-descriptions-item :label="t('issue.field.baseBranch')">
-            {{ issue.base_branch || '-' }}
-          </n-descriptions-item>
-          <n-descriptions-item :label="t('issue.field.targetBranch')">
-            {{ issue.target_branch || '-' }}
-          </n-descriptions-item>
-          <n-descriptions-item :label="t('issue.field.mergeRequest')">
-            <a
-              v-if="issue.merge_request_url"
-              :href="issue.merge_request_url"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="app-link"
-            >
-              !{{ issue.merge_request_iid }}
-            </a>
-            <span v-else>-</span>
-          </n-descriptions-item>
-          <n-descriptions-item :label="t('issue.field.sessionId')">
-            <code v-if="issue.claude_session_id" class="issue-view__code">
-              {{ issue.claude_session_id }}
-            </code>
-            <span v-else>-</span>
-          </n-descriptions-item>
-          <n-descriptions-item :label="t('issue.field.createdAt')">
-            {{ formatCompactDateTime(issue.created_at) }}
-          </n-descriptions-item>
-          <n-descriptions-item :label="t('issue.field.updatedAt')">
-            {{ formatCompactDateTime(issue.updated_at) }}
-          </n-descriptions-item>
-        </n-descriptions>
+        <div class="metadata-body">
+          <!-- Status -->
+          <div class="metadata-row">
+            <span class="metadata-label">
+              <n-icon size="14" class="metadata-label-icon"><InformationCircleOutline /></n-icon>
+              {{ t('common.status') }}
+            </span>
+            <span class="metadata-value">
+              <n-tag :type="issueStatusColors[issue.status]" size="small" round>
+                {{ t(`issue.status.${issue.status}`) }}
+              </n-tag>
+            </span>
+          </div>
+
+          <!-- Project -->
+          <div class="metadata-row">
+            <span class="metadata-label">
+              <n-icon size="14" class="metadata-label-icon"><FolderOpenOutline /></n-icon>
+              {{ t('issue.field.project') }}
+            </span>
+            <span class="metadata-value">{{ issue.project_id }}</span>
+          </div>
+
+          <!-- Branch flow -->
+          <div class="metadata-row">
+            <span class="metadata-label">
+              <n-icon size="14" class="metadata-label-icon"><GitBranchOutline /></n-icon>
+              {{ t('taskView.branchFlow') }}
+            </span>
+            <span class="metadata-value">
+              <span class="branch-flow">
+                <span v-if="issue.base_branch" class="branch-item branch-item--base">{{ issue.base_branch }}</span>
+                <span v-if="issue.base_branch && issue.branch_name" class="branch-arrow">➜</span>
+                <span v-if="issue.branch_name" class="branch-item branch-item--work">{{ issue.branch_name }}</span>
+                <span v-if="issue.branch_name && issue.target_branch" class="branch-arrow">➜</span>
+                <span v-if="issue.target_branch" class="branch-item branch-item--target">{{ issue.target_branch }}</span>
+                <span v-if="!issue.branch_name && !issue.base_branch && !issue.target_branch">-</span>
+              </span>
+            </span>
+          </div>
+
+          <!-- Merge Request -->
+          <div class="metadata-row">
+            <span class="metadata-label">
+              <n-icon size="14" class="metadata-label-icon"><GitPullRequest /></n-icon>
+              {{ t('issue.field.mergeRequest') }}
+            </span>
+            <span class="metadata-value">
+              <a
+                v-if="issue.merge_request_url"
+                :href="issue.merge_request_url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="app-link"
+              >
+                !{{ issue.merge_request_iid }}
+              </a>
+              <span v-else class="metadata-muted">-</span>
+            </span>
+          </div>
+
+          <!-- Session ID -->
+          <div class="metadata-row">
+            <span class="metadata-label">
+              <n-icon size="14" class="metadata-label-icon"><CodeOutline /></n-icon>
+              {{ t('issue.field.sessionId') }}
+            </span>
+            <span class="metadata-value">
+              <code v-if="issue.claude_session_id" class="issue-view__code">{{ issue.claude_session_id }}</code>
+              <span v-else class="metadata-muted">-</span>
+            </span>
+          </div>
+
+          <!-- Timeline -->
+          <div class="metadata-row">
+            <span class="metadata-label">
+              <n-icon size="14" class="metadata-label-icon"><TimeOutline /></n-icon>
+              {{ t('common.timeline') }}
+            </span>
+            <div class="time-axis">
+              <div class="time-point">
+                <span class="time-point__label">{{ t('common.created') }}</span>
+                <span class="time-point__value">{{ formatCompactDateTime(issue.created_at) }}</span>
+              </div>
+              <div class="time-axis__sep">→</div>
+              <div class="time-point">
+                <span class="time-point__label">{{ t('issue.field.updatedAt') }}</span>
+                <span class="time-point__value">{{ formatCompactDateTime(issue.updated_at) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </n-card>
 
       <!-- Description -->
@@ -205,12 +254,20 @@ import { ref, computed, h, onMounted, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin,
-  NDescriptions, NDescriptionsItem, NDataTable, NInput,
+  NIcon, NDataTable, NInput,
   NSelect, NForm, NFormItem, NDatePicker, NModal, NPopconfirm,
   useMessage,
   type DataTableColumns
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
+import {
+  FolderOpenOutline,
+  GitBranchOutline,
+  GitPullRequest,
+  CodeOutline,
+  TimeOutline,
+  InformationCircleOutline,
+} from '@vicons/ionicons5'
 import {
   getIssue, updateIssue, closeIssue, createTask, retryTask,
   type Issue, type Task
@@ -506,6 +563,116 @@ onMounted(() => {
 
 .issue-view__create-form {
   max-width: 800px;
+}
+
+.metadata-body {
+  display: grid;
+  gap: 14px;
+}
+
+.metadata-row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.metadata-label {
+  font-size: 13px;
+  color: var(--n-text-color-3, #999);
+  min-width: 90px;
+  flex-shrink: 0;
+}
+
+.metadata-label-icon {
+  vertical-align: middle;
+  margin-right: 3px;
+  opacity: 0.65;
+}
+
+.metadata-value {
+  font-size: 14px;
+  color: var(--n-text-color-1);
+  word-break: break-word;
+}
+
+.metadata-muted {
+  color: var(--n-text-color-3, #999);
+}
+
+.branch-flow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.branch-item {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
+  background: rgba(128, 128, 128, 0.08);
+}
+
+.branch-item--base {
+  background: rgba(2, 132, 199, 0.08);
+  color: #0284c7;
+}
+
+.branch-item--work {
+  background: rgba(5, 150, 105, 0.08);
+  color: #059669;
+}
+
+.branch-item--target {
+  background: rgba(124, 58, 237, 0.08);
+  color: #7c3aed;
+}
+
+.branch-arrow {
+  color: var(--n-text-color-3, #999);
+  font-size: 12px;
+}
+
+.time-axis {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px 8px;
+  flex-wrap: wrap;
+}
+
+.time-axis__sep {
+  color: var(--n-text-color-3, #999);
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.time-point {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.time-point__label {
+  font-size: 11px;
+  color: var(--n-text-color-3, #999);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.time-point__value {
+  font-size: 13px;
+  color: var(--n-text-color-2);
+}
+
+.app-link {
+  color: var(--n-primary-color, #18a058);
+  text-decoration: none;
+}
+.app-link:hover {
+  text-decoration: underline;
 }
 
 @media (max-width: 768px) {
