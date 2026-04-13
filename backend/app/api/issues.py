@@ -230,7 +230,11 @@ async def update_issue(
     current_user: User = Depends(require_authenticated_user),
 ):
     """Update an issue (title, description, status)."""
-    result = await db.execute(select(Issue).where(Issue.id == issue_id))
+    result = await db.execute(
+        select(Issue)
+        .where(Issue.id == issue_id)
+        .options(selectinload(Issue.tasks))
+    )
     issue = result.scalar_one_or_none()
     if issue is None:
         raise HTTPException(
@@ -253,8 +257,8 @@ async def update_issue(
         issue.status = body.status
 
     await db.commit()
-    await db.refresh(issue)
-    return _serialize_issue(issue)
+    await db.refresh(issue, attribute_names=["tasks"])
+    return _serialize_issue_detail(issue)
 
 
 @router.post("/{issue_id}/close")
@@ -264,7 +268,11 @@ async def close_issue(
     current_user: User = Depends(require_authenticated_user),
 ):
     """Close an issue."""
-    result = await db.execute(select(Issue).where(Issue.id == issue_id))
+    result = await db.execute(
+        select(Issue)
+        .where(Issue.id == issue_id)
+        .options(selectinload(Issue.tasks))
+    )
     issue = result.scalar_one_or_none()
     if issue is None:
         raise HTTPException(
@@ -274,8 +282,8 @@ async def close_issue(
 
     issue.status = IssueStatus.CLOSED.value
     await db.commit()
-    await db.refresh(issue)
-    return _serialize_issue(issue)
+    await db.refresh(issue, attribute_names=["tasks"])
+    return _serialize_issue_detail(issue)
 
 
 @router.delete("/{issue_id}")
