@@ -15,18 +15,54 @@
         <n-grid
           v-if="hasLoadedOnce"
           data-testid="dashboard-summary"
-          :cols="isMobile ? 2 : 4"
-          :x-gap="16"
-          :y-gap="16"
+          :cols="isMobile ? 2 : 5"
+          :x-gap="12"
+          :y-gap="12"
         >
-          <n-gi v-for="item in summaryItems" :key="item.label">
-            <SummaryCard
-              :label="item.label"
-              :value="item.value"
+          <n-gi>
+            <StatCard
+              :label="t('dashboard.issueCount')"
+              :value="statsIssueTotal"
+              :icon="FolderOpenOutline"
+              color="#2080f0"
               data-testid="dashboard-summary-card"
-              card-class="dashboard-summary-card"
-              label-class="dashboard-summary-card__label"
-              value-class="dashboard-summary-card__value"
+            />
+          </n-gi>
+          <n-gi>
+            <StatCard
+              :label="t('dashboard.openIssues')"
+              :value="statsOpenIssues"
+              :icon="AlertCircleOutline"
+              color="#f0a020"
+              data-testid="dashboard-summary-card"
+            />
+          </n-gi>
+          <n-gi>
+            <StatCard
+              :label="t('dashboard.tasks')"
+              :value="statsTotal"
+              :icon="CodeOutline"
+              color="#2080f0"
+              data-testid="dashboard-summary-card"
+            />
+          </n-gi>
+          <n-gi>
+            <StatCard
+              :label="t('dashboard.running')"
+              :value="statsRunning"
+              :icon="PlayOutline"
+              color="#18a058"
+              data-testid="dashboard-summary-card"
+            />
+          </n-gi>
+          <n-gi>
+            <StatCard
+              :label="t('dashboard.successRate')"
+              :value="successRate"
+              :icon="CheckmarkCircleOutline"
+              suffix="%"
+              color="#18a058"
+              data-testid="dashboard-summary-card"
             />
           </n-gi>
         </n-grid>
@@ -64,6 +100,15 @@
         </n-card>
 
         <n-card
+          :title="t('dashboard.activity')"
+          :bordered="false"
+          class="dashboard-table-card"
+          data-testid="dashboard-activity-heatmap"
+        >
+          <ActivityHeatmap :data="heatmapData" />
+        </n-card>
+
+        <n-card
           :title="t('dashboard.recentActivity')"
           :bordered="false"
           class="dashboard-table-card"
@@ -88,9 +133,17 @@ import { ref, onMounted, h, computed } from 'vue'
 import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, type DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getIssues, getTasksPaginated, getStats, type Issue, type Task } from '../api'
+import { getIssues, getTasksPaginated, getStats, getActivityHeatmap, type Issue, type Task, type ActivityHeatmapEntry } from '../api'
+import {
+  FolderOpenOutline,
+  AlertCircleOutline,
+  CodeOutline,
+  PlayOutline,
+  CheckmarkCircleOutline
+} from '@vicons/ionicons5'
 
-import SummaryCard from '../components/SummaryCard.vue'
+import StatCard from '../components/StatCard.vue'
+import ActivityHeatmap from '../components/ActivityHeatmap.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { usePolling } from '../composables/usePolling'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
@@ -117,9 +170,12 @@ const loading = ref(false)
 const hasLoadedOnce = ref(false)
 
 const statsIssueTotal = ref(0)
+const statsOpenIssues = ref(0)
 const statsTotal = ref(0)
 const statsRunning = ref(0)
 const statsCompleted = ref(0)
+const statsFailed = ref(0)
+const heatmapData = ref<ActivityHeatmapEntry[]>([])
 
 const runningAndQueuedTasks = computed(() => [...runningTasks.value, ...queuedTasks.value])
 
@@ -127,12 +183,11 @@ const recentActivity = computed(() => recentActivityTasks.value)
 
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
-const summaryItems = computed(() => [
-  { label: t('dashboard.issueCount'), value: String(statsIssueTotal.value) },
-  { label: t('dashboard.visibleTasks'), value: String(statsTotal.value) },
-  { label: t('dashboard.running'), value: String(statsRunning.value) },
-  { label: t('dashboard.completed'), value: String(statsCompleted.value) },
-])
+const successRate = computed(() => {
+  const total = statsCompleted.value + statsFailed.value
+  if (total === 0) return 0
+  return Math.round((statsCompleted.value / total) * 100)
+})
 
 const issueStatusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
   open: 'info',
@@ -324,15 +379,27 @@ async function fetchStats() {
     statsTotal.value = stats.total
     statsRunning.value = stats.running
     statsCompleted.value = stats.completed
+    statsFailed.value = stats.failed ?? 0
     statsIssueTotal.value = stats.issues?.total ?? 0
+    const byStatus = stats.issues?.by_status ?? {}
+    statsOpenIssues.value = (byStatus.open ?? 0) + (byStatus.in_progress ?? 0)
   } catch {
     // Stats are supplementary; don't block UI
+  }
+}
+
+async function fetchHeatmap() {
+  try {
+    heatmapData.value = await getActivityHeatmap()
+  } catch {
+    // Heatmap is supplementary
   }
 }
 
 function refreshAll() {
   fetchData()
   fetchStats()
+  fetchHeatmap()
 }
 
 const { start: startPolling } = usePolling(
@@ -342,6 +409,7 @@ const { start: startPolling } = usePolling(
 
 onMounted(() => {
   fetchStats()
+  fetchHeatmap()
   fetchData()
   startPolling()
 })

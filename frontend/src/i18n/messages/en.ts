@@ -108,7 +108,12 @@ const en = {
     notAvailable: 'N/A',
     source: 'Source',
     timeline: 'Timeline',
-    scheduledAt: 'Scheduled At'
+    scheduledAt: 'Scheduled At',
+    mon: 'Mon',
+    wed: 'Wed',
+    fri: 'Fri',
+    less: 'Less',
+    more: 'More'
   },
   login: {
     subtitle: 'Sign in to access the dashboard.',
@@ -169,6 +174,10 @@ const en = {
     recentIssues: 'Recent Issues',
     createIssue: 'New Issue',
     issueCount: 'Issues',
+    openIssues: 'Open Issues',
+    tasks: 'Tasks',
+    successRate: 'Success Rate',
+    activity: 'Activity',
     recentActivity: 'Recent Activity'
   },
   issue: {

@@ -108,7 +108,12 @@ const zhCN = {
     notAvailable: '暂无',
     source: '来源',
     timeline: '时间轴',
-    scheduledAt: '预约时间'
+    scheduledAt: '预约时间',
+    mon: '一',
+    wed: '三',
+    fri: '五',
+    less: '少',
+    more: '多'
   },
   login: {
     subtitle: '登录以访问控制台。',
@@ -166,6 +171,10 @@ const zhCN = {
     recentIssues: '最近的需求',
     createIssue: '新建需求',
     issueCount: '需求数',
+    openIssues: '进行中需求',
+    tasks: '任务总数',
+    successRate: '成功率',
+    activity: '活动',
     recentActivity: '最近活动'
   },
   issue: {
