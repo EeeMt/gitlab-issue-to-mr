@@ -211,6 +211,7 @@ class ListIssuesTests(unittest.IsolatedAsyncioTestCase):
     async def test_list_issues_default(self):
         """Should return paginated list of issues with task_count."""
         from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
 
         issue = _make_issue(id=1, title="Issue 1")
 
@@ -228,6 +229,7 @@ class ListIssuesTests(unittest.IsolatedAsyncioTestCase):
         mock_db.execute = AsyncMock(side_effect=[count_result, main_result])
 
         mock_user = MagicMock()
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
         result = await list_issues(
             status=None,
@@ -236,6 +238,7 @@ class ListIssuesTests(unittest.IsolatedAsyncioTestCase):
             page_size=20,
             db=mock_db,
             current_user=mock_user,
+            access_scope=access_scope,
         )
 
         self.assertEqual(result["total"], 1)

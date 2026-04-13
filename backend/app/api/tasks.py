@@ -9,7 +9,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, false
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -54,6 +54,7 @@ async def list_tasks(
     page: Optional[int] = None,
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """List tasks with optional filtering and pagination.
 
@@ -78,6 +79,12 @@ async def list_tasks(
 
     if project_id:
         query = query.where(Task.project_id == project_id)
+    elif not access_scope.is_unrestricted:
+        allowed_project_ids = access_scope.accessible_project_ids
+        if not allowed_project_ids:
+            query = query.where(false())
+        else:
+            query = query.where(Task.project_id.in_(allowed_project_ids))
 
     if initiator_username:
         query = query.where(Task.initiator_username == initiator_username)
@@ -85,7 +92,10 @@ async def list_tasks(
     if issue_id:
         query = query.where(Task.issue_id == issue_id)
 
-    project_lookup = await build_project_lookup()
+    project_lookup = await build_project_lookup(
+        accessible_projects=access_scope.accessible_projects,
+        is_unrestricted=access_scope.is_unrestricted,
+    )
 
     # Paginated mode: return { items, total, page, page_size }
     if page is not None:
@@ -127,6 +137,7 @@ async def list_scheduled_tasks(
     hour_start: Optional[str] = Query(None, description="ISO datetime; filter tasks in this 1-hour window"),
     db: AsyncSession = Depends(get_db),
     _current_user=Depends(require_page_access("schedule_overview")),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """List active scheduled tasks for queue analytics views.
 
@@ -158,10 +169,19 @@ async def list_scheduled_tasks(
 
     if project_id:
         query = query.where(Task.project_id == project_id)
+    elif not access_scope.is_unrestricted:
+        allowed_project_ids = access_scope.accessible_project_ids
+        if not allowed_project_ids:
+            query = query.where(false())
+        else:
+            query = query.where(Task.project_id.in_(allowed_project_ids))
 
     result = await db.execute(query)
     tasks = result.scalars().all()
-    project_lookup = await build_project_lookup()
+    project_lookup = await build_project_lookup(
+        accessible_projects=access_scope.accessible_projects,
+        is_unrestricted=access_scope.is_unrestricted,
+    )
 
     return [
         _serialize_task(task, project_lookup.get(task.project_id))

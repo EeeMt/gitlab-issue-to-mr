@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import false, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -13,6 +13,7 @@ from app.config import get_effective_settings
 from app.core.task_helpers import _require_issue_operator
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_user
+from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
 from app.models import Issue, IssueStatus, Task, TaskStatus, User
 
 logger = logging.getLogger(__name__)
@@ -147,6 +148,7 @@ async def list_issues(
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_authenticated_user),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """List issues with optional filtering and pagination."""
     page = max(1, page)
@@ -180,6 +182,12 @@ async def list_issues(
 
     if project_id is not None:
         query = query.where(Issue.project_id == project_id)
+    elif not access_scope.is_unrestricted:
+        allowed_project_ids = access_scope.accessible_project_ids
+        if not allowed_project_ids:
+            query = query.where(false())
+        else:
+            query = query.where(Issue.project_id.in_(allowed_project_ids))
 
     if initiator_user_id is not None:
         query = query.where(Issue.initiator_user_id == initiator_user_id)

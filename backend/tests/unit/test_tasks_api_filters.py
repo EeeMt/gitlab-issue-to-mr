@@ -57,7 +57,7 @@ async def test_list_tasks_serializes_initiator_fields():
             }
         ),
     ):
-        result = await list_tasks(db=db)
+        result = await list_tasks(db=db, access_scope=access_scope)
 
     assert len(result) == 1
     assert result[0]["initiator_user_id"] == 7
@@ -80,6 +80,7 @@ async def test_list_tasks_applies_project_and_initiator_filters():
             project_id=202,
             initiator_username="alice",
             db=db,
+            access_scope=access_scope,
         )
 
     executed_query = db.execute.await_args.args[0]
