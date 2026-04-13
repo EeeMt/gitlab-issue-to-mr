@@ -43,6 +43,7 @@
             :data="issues"
             :loading="tableLoading"
             :row-key="(row: Issue) => row.id"
+            :row-props="issueRowProps"
             :pagination="pagination"
             remote
             :bordered="false"
@@ -108,6 +109,13 @@ const projectOptions = computed(() =>
   }))
 )
 
+function issueRowProps(row: Issue) {
+  return {
+    style: 'cursor: pointer',
+    onClick: () => router.push(`/issues/${row.id}`)
+  }
+}
+
 const statusColors: Record<IssueStatus, 'default' | 'info' | 'warning' | 'success'> = {
   open: 'info',
   in_progress: 'warning',
@@ -141,7 +149,10 @@ const columns = computed<DataTableColumns<Issue>>(() => [
         {
           text: true,
           type: 'primary',
-          onClick: () => router.push(`/issues/${row.id}`),
+          onClick: (e: MouseEvent) => {
+            e.stopPropagation()
+            router.push(`/issues/${row.id}`)
+          },
         },
         () => row.title
       ),
