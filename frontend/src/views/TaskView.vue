@@ -238,7 +238,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin, NDatePicker, NDrawer, NDrawerContent, NIcon, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -674,6 +674,18 @@ onMounted(async () => {
     }
   }, 5000)
 })
+
+watch(
+  () => route.params.id,
+  (newId, oldId) => {
+    if (newId && newId !== oldId) {
+      resetLogsState()
+      task.value = null
+      hasLoadedOnce.value = false
+      fetchTask()
+    }
+  }
+)
 
 onBeforeUnmount(() => {
   closeLogStream()
