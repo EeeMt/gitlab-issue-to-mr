@@ -11,25 +11,32 @@
         >
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
-              <div class="metric-title">{{ t('dashboard.issueStatus') }}</div>
+              <div class="metric-title">
+                <span>{{ t('dashboard.issueStatus') }}</span>
+                <n-tooltip trigger="hover"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.last90days') }}</n-tooltip>
+              </div>
               <div class="metric-body">
                 <StatusPieChart :data="issueChartData" />
               </div>
-              <div class="metric-period">{{ t('dashboard.last90days') }}</div>
             </n-card>
           </n-gi>
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
-              <div class="metric-title">{{ t('dashboard.taskStatus') }}</div>
+              <div class="metric-title">
+                <span>{{ t('dashboard.taskStatus') }}</span>
+                <n-tooltip trigger="hover"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.last90days') }}</n-tooltip>
+              </div>
               <div class="metric-body">
                 <StatusPieChart :data="taskChartData" />
               </div>
-              <div class="metric-period">{{ t('dashboard.last90days') }}</div>
             </n-card>
           </n-gi>
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
-              <div class="metric-title">{{ t('dashboard.linesChanged') }}</div>
+              <div class="metric-title">
+                <span>{{ t('dashboard.linesChanged') }}</span>
+                <n-tooltip trigger="hover"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.last90days') }}</n-tooltip>
+              </div>
               <div class="metric-body">
                 <div class="dashboard-stat__value">{{ formatNumber(analyticsTotalChanges) }}</div>
                 <div class="dashboard-stat__detail">
@@ -37,12 +44,14 @@
                   <span class="dashboard-stat__del">-{{ formatNumber(analyticsTotalDeletions) }}</span>
                 </div>
               </div>
-              <div class="metric-period">{{ t('dashboard.last90days') }}</div>
             </n-card>
           </n-gi>
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
-              <div class="metric-title">{{ t('dashboard.tokensUsed') }}</div>
+              <div class="metric-title">
+                <span>{{ t('dashboard.tokensUsed') }}</span>
+                <n-tooltip trigger="hover"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.last90days') }}</n-tooltip>
+              </div>
               <div class="metric-body">
                 <div class="dashboard-stat__value">{{ formatNumber(analyticsTotalTokens) }}</div>
                 <div class="dashboard-stat__detail">
@@ -50,7 +59,6 @@
                   <span>{{ formatNumber(analyticsInputTokens) }} in / {{ formatNumber(analyticsOutputTokens) }} out</span>
                 </div>
               </div>
-              <div class="metric-period">{{ t('dashboard.last90days') }}</div>
             </n-card>
           </n-gi>
         </n-grid>
@@ -113,12 +121,13 @@
 
 <script setup lang="ts">
 import { ref, onMounted, h, computed } from 'vue'
-import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, NIcon, useMessage, type DataTableColumns } from 'naive-ui'
+import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, NIcon, NTooltip, useMessage, type DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getIssues, getTasksPaginated, getStats, getAnalytics, getActivityHeatmap, type Issue, type Task, type ActivityHeatmapEntry } from '../api'
 import {
   FlashOutline,
+  InformationCircleOutline,
 } from '@vicons/ionicons5'
 
 import StatusPieChart from '../components/StatusPieChart.vue'
@@ -368,7 +377,7 @@ onMounted(() => {
 
 .dashboard-metric-card :deep(.n-card-content) {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 1fr;
   height: 100%;
   overflow: hidden;
 }
@@ -377,7 +386,18 @@ onMounted(() => {
   font-size: 13px;
   font-weight: 600;
   color: #666;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.metric-info-icon {
+  color: #bbb;
+  cursor: pointer;
+  transition: color 0.2s;
+  &:hover {
+    color: #888;
+  }
 }
 
 .metric-body {
@@ -388,12 +408,6 @@ onMounted(() => {
   gap: 6px;
   min-height: 0;
   overflow: hidden;
-}
-
-.metric-period {
-  font-size: 11px;
-  color: #aaa;
-  text-align: center;
 }
 
 .dashboard-stat__value {

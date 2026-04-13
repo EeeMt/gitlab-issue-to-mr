@@ -135,6 +135,13 @@ vi.mock('naive-ui', () => ({
       return () => h('i', { class: 'n-icon' }, slots.default?.())
     },
   },
+  NTooltip: {
+    name: 'NTooltip',
+    props: ['trigger'],
+    setup(_p: any, { slots }: any) {
+      return () => h('span', { class: 'n-tooltip' }, [slots.trigger?.(), slots.default?.()])
+    },
+  },
   useMessage: () => mockMessage,
 }))
 
@@ -314,8 +321,8 @@ describe('Dashboard', () => {
       expect(pieCharts.length).toBe(2)
       const titles = wrapper.findAll('.metric-title')
       expect(titles.length).toBeGreaterThanOrEqual(4)
-      expect(titles[0].text()).toBe('dashboard.issueStatus')
-      expect(titles[1].text()).toBe('dashboard.taskStatus')
+      expect(titles[0].text()).toContain('dashboard.issueStatus')
+      expect(titles[1].text()).toContain('dashboard.taskStatus')
     })
 
     it('shows recent-issues section', async () => {
