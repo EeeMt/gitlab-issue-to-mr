@@ -823,8 +823,7 @@ const statusBreakdown = computed(() => {
   const total = Math.max(stats.value.total, 1)
 
   return [
-    { key: 'pending', label: t('monitor.pending'), value: stats.value.pending, percent: (stats.value.pending / total) * 100 },
-    { key: 'queued', label: t('monitor.queued'), value: stats.value.queued, percent: (stats.value.queued / total) * 100 },
+    { key: 'pending', label: t('monitor.pending'), value: stats.value.pending + stats.value.queued, percent: ((stats.value.pending + stats.value.queued) / total) * 100 },
     { key: 'running', label: t('monitor.running'), value: stats.value.running, percent: (stats.value.running / total) * 100 },
     { key: 'completed', label: t('monitor.completed'), value: stats.value.completed, percent: (stats.value.completed / total) * 100 },
     { key: 'failed', label: t('monitor.failed'), value: stats.value.failed, percent: (stats.value.failed / total) * 100 },
@@ -919,8 +918,8 @@ const overviewCards = computed<MonitorCard[]>(() => [
     key: 'backlog',
     label: t('monitor.backlogLabel'),
     value: String(pendingQueuedTasks.value.length),
-    help: t('monitor.backlogHelp', { pending: stats.value.pending, queued: stats.value.queued }),
-    tag: pendingQueuedTasks.value.length > 0 ? t('monitor.queued') : t('monitor.clear'),
+    help: t('monitor.backlogHelp', { count: stats.value.pending + stats.value.queued }),
+    tag: pendingQueuedTasks.value.length > 0 ? t('monitor.waiting') : t('monitor.clear'),
     tagType: pendingQueuedTasks.value.length > 6 ? 'warning' : 'info'
   },
   {

@@ -1189,17 +1189,17 @@ describe('Monitor', () => {
   // N. Status Breakdown & Sorted Containers
   // =========================================================================
   describe('statusBreakdown & sortedContainers', () => {
-    it('statusBreakdown returns 6 items with correct keys and percentages', async () => {
+    it('statusBreakdown returns 5 items with correct keys and percentages', async () => {
       wrapper = mountComponent()
       await flushPromises()
 
       const breakdown = wrapper.vm.statusBreakdown as any[]
-      expect(breakdown).toHaveLength(6)
-      expect(breakdown.map((b: any) => b.key)).toEqual(['pending', 'queued', 'running', 'completed', 'failed', 'cancelled'])
+      expect(breakdown).toHaveLength(5)
+      expect(breakdown.map((b: any) => b.key)).toEqual(['pending', 'running', 'completed', 'failed', 'cancelled'])
 
-      // With defaultStats: total=42, pending=5 → (5/42)*100
+      // With defaultStats: total=42, pending=5, queued=3 → merged pending=(5+3)/42*100
       const pending = breakdown.find((b: any) => b.key === 'pending')
-      expect(pending.percent).toBeCloseTo((5 / 42) * 100, 1)
+      expect(pending.percent).toBeCloseTo(((5 + 3) / 42) * 100, 1)
     })
 
     it('statusBreakdown uses Math.max(total, 1) to avoid division by zero', async () => {
