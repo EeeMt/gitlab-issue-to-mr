@@ -262,7 +262,7 @@
             </div>
           </template>
         </n-form-item>
-        <n-grid :cols="isMobile ? 1 : 3" :x-gap="16" :y-gap="12">
+        <n-grid :cols="isMobile ? 1 : 4" :x-gap="16" :y-gap="12">
           <n-gi>
             <n-form-item :label="t('common.priority')">
               <n-select
@@ -285,6 +285,19 @@
           <n-gi>
             <n-form-item label="&nbsp;">
               <n-button
+                size="small"
+                secondary
+                :loading="scheduledTasksLoading"
+                @click="openScheduleDrawer"
+              >
+                <template #icon><n-icon :component="CalendarOutline" /></template>
+                {{ t('createTask.viewScheduleHeatmap') }}
+              </n-button>
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item label="&nbsp;">
+              <n-button
                 type="primary"
                 :loading="createTaskLoading"
                 data-testid="issue-create-task-button"
@@ -295,8 +308,47 @@
             </n-form-item>
           </n-gi>
         </n-grid>
+        <n-alert
+          v-if="slotCapacity?.is_full"
+          :type="slotCapacity.enforce ? 'error' : 'warning'"
+          style="margin-top: 8px;"
+        >
+          {{ slotCapacity.enforce
+            ? t('createTask.slotFullError', {
+                start: formatDateTimeUtc8Compact(slotCapacity.hour_start),
+                end: formatTimeUtc8(slotCapacity.hour_end),
+                count: slotCapacity.count,
+                max: slotCapacity.max
+              })
+            : t('createTask.slotFullWarning', {
+                start: formatDateTimeUtc8Compact(slotCapacity.hour_start),
+                end: formatTimeUtc8(slotCapacity.hour_end),
+                count: slotCapacity.count,
+                max: slotCapacity.max
+              })
+          }}
+        </n-alert>
       </n-form>
     </n-modal>
+
+    <!-- Schedule Heatmap Drawer -->
+    <n-drawer v-model:show="showScheduleDrawer" :width="isMobile ? '100%' : 580" placement="right">
+      <n-drawer-content :title="t('createTask.schedulePreviewTitle')" closable>
+        <n-spin v-if="scheduledTasksLoading" :description="t('createTask.schedulePreviewLoading')" />
+        <template v-else>
+          <p style="margin-bottom: 12px; color: var(--n-text-color-3); font-size: 13px;">
+            {{ t('createTask.schedulePreviewHint') }}
+          </p>
+          <HeatmapChart
+            :tasks="scheduledTasksForPreview"
+            :selected-ms="heatmapSelectedMs"
+            :max-per-slot="slotMaxTasks"
+            :enforce-capacity="slotEnforce"
+            @cell-click="handleScheduleHeatmapCellClick"
+          />
+        </template>
+      </n-drawer-content>
+    </n-drawer>
   </div>
 
   <!-- Loading state before issue is loaded -->
@@ -304,12 +356,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, h, onMounted, reactive } from 'vue'
+import { ref, computed, h, onMounted, onUnmounted, reactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin,
   NIcon, NDataTable, NInput, NDrawer, NDrawerContent,
-  NSelect, NForm, NFormItem, NDatePicker, NModal, NPopconfirm,
+  NSelect, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NAlert,
   useMessage,
   type DataTableColumns
 } from 'naive-ui'
@@ -322,16 +374,19 @@ import {
   TimeOutline,
   InformationCircleOutline,
   DocumentTextOutline,
-  WarningOutline
+  WarningOutline,
+  CalendarOutline
 } from '@vicons/ionicons5'
 import VariableEditor from '../components/VariableEditor.vue'
+import HeatmapChart from '../components/HeatmapChart.vue'
 import {
   getIssue, updateIssue, closeIssue, createTask, retryTask, getPromptTemplates,
-  type Issue, type Task, type PromptTemplate
+  getScheduledTasks, getSlotCapacity, getConfig,
+  type Issue, type Task, type PromptTemplate, type SlotCapacityInfo
 } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
-import { formatDateTimeUtc8Compact } from '../utils/datetime'
+import { formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
 
 const route = useRoute()
 const router = useRouter()
@@ -355,6 +410,17 @@ const promptTemplates = ref<PromptTemplate[]>([])
 const promptTemplatesLoading = ref(false)
 const promptVariableTips = ref<Record<string, string> | undefined>(undefined)
 const showTemplateDrawer = ref(false)
+
+// Schedule heatmap
+const scheduledTasksForPreview = ref<Task[]>([])
+const scheduledTasksLoading = ref(false)
+const showScheduleDrawer = ref(false)
+const slotCapacity = ref<SlotCapacityInfo | null>(null)
+const slotCapacityLoading = ref(false)
+const slotMaxTasks = ref(0)
+const slotEnforce = ref(false)
+let slotCheckTimeout: ReturnType<typeof setTimeout> | undefined
+let slotCheckGeneration = 0
 
 // Edit modal
 const showEditModal = ref(false)
@@ -525,6 +591,66 @@ function isScheduleDateDisabled(timestamp: number): boolean {
   candidate.setHours(0, 0, 0, 0)
   today.setHours(0, 0, 0, 0)
   return candidate.getTime() < today.getTime()
+}
+
+// --- Schedule Heatmap ---
+const heatmapSelectedMs = computed<number | null>(() => newTaskSchedule.value)
+
+function checkSlotCapacity() {
+  slotCapacity.value = null
+  if (slotCheckTimeout) clearTimeout(slotCheckTimeout)
+  slotCheckGeneration++
+
+  const ms = heatmapSelectedMs.value
+  if (!ms) return
+
+  const currentGeneration = slotCheckGeneration
+  slotCheckTimeout = setTimeout(async () => {
+    slotCapacityLoading.value = true
+    try {
+      const result = await getSlotCapacity(new Date(ms).toISOString())
+      if (currentGeneration !== slotCheckGeneration) return
+      slotCapacity.value = result
+    } catch {
+      if (currentGeneration !== slotCheckGeneration) return
+      slotCapacity.value = null
+    } finally {
+      if (currentGeneration === slotCheckGeneration) {
+        slotCapacityLoading.value = false
+      }
+    }
+  }, 300)
+}
+
+watch(heatmapSelectedMs, () => checkSlotCapacity())
+
+onUnmounted(() => {
+  if (slotCheckTimeout) clearTimeout(slotCheckTimeout)
+  slotCheckGeneration++
+})
+
+async function openScheduleDrawer() {
+  showScheduleDrawer.value = true
+  if (scheduledTasksForPreview.value.length === 0) {
+    scheduledTasksLoading.value = true
+    try {
+      scheduledTasksForPreview.value = await getScheduledTasks()
+    } catch {
+      scheduledTasksForPreview.value = []
+    } finally {
+      scheduledTasksLoading.value = false
+    }
+  }
+  try {
+    const config = await getConfig()
+    slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
+    slotEnforce.value = config.runtime?.slot_max_tasks_enforce ?? false
+  } catch { /* ignore */ }
+}
+
+function handleScheduleHeatmapCellClick(startMs: number) {
+  newTaskSchedule.value = startMs
+  showScheduleDrawer.value = false
 }
 
 // --- API Actions ---
