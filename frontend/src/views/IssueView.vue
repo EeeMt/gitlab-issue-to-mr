@@ -14,7 +14,7 @@
           </n-tag>
         </template>
         <template #actions>
-          <n-button data-testid="issue-edit-button" @click="openEditModal">
+          <n-button data-testid="issue-edit-button" :disabled="issue.status === 'closed'" @click="openEditModal">
             {{ t('issue.edit') }}
           </n-button>
           <n-popconfirm @positive-click="handleClose">
@@ -162,6 +162,7 @@
               {{ t('issue.taskCount', { count: issue.tasks?.length ?? 0 }) }}
             </div>
             <n-button
+              v-if="issue.status !== 'closed'"
               size="small"
               type="primary"
               @click="showCreateDrawer = true"

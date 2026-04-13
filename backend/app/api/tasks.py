@@ -661,6 +661,9 @@ async def create_task(
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
 
+    if issue.status == "closed":
+        raise HTTPException(status_code=400, detail="Cannot create tasks on a closed issue")
+
     require_project_access(issue.project_id, access_scope)
 
     prompt = request.user_prompt or issue.description
