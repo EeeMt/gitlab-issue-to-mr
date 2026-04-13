@@ -198,7 +198,9 @@
                 <div class="issue-card__title">{{ t('issue.field.description') }}</div>
               </div>
             </template>
-            <div class="issue-view__description">{{ issue.description }}</div>
+            <div class="issue-view__description-wrap">
+              <div class="issue-view__description">{{ issue.description }}</div>
+            </div>
           </n-card>
         </n-gi>
       </n-grid>
@@ -886,6 +888,16 @@ onMounted(() => {
 
 .issue-card {
   border-radius: var(--app-card-radius);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.issue-card :deep(.n-card__content) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .stat-add {
@@ -916,10 +928,23 @@ onMounted(() => {
   font-weight: 600;
 }
 
+.issue-view__description-wrap {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 .issue-view__description {
   white-space: pre-wrap;
   line-height: 1.6;
   color: rgba(15, 23, 42, 0.82);
+  background: rgba(15, 23, 42, 0.035);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-y: auto;
+  max-height: 320px;
+  flex: 1;
 }
 
 .issue-view__code {
