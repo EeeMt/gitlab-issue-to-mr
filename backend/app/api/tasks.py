@@ -146,6 +146,7 @@ async def list_scheduled_tasks(
     """
     query = (
         select(Task)
+        .options(selectinload(Task.issue))
         .where(
             Task.scheduled_at.is_not(None),
             Task.status.in_([
