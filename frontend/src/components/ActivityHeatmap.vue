@@ -34,15 +34,15 @@
           </template>
         </div>
       </div>
-    </div>
-    <div class="activity-heatmap__legend">
-      <span class="activity-heatmap__legend-label">{{ t('common.less') }}</span>
-      <div class="activity-heatmap__cell activity-heatmap__cell--level-0" />
-      <div class="activity-heatmap__cell activity-heatmap__cell--level-1" />
-      <div class="activity-heatmap__cell activity-heatmap__cell--level-2" />
-      <div class="activity-heatmap__cell activity-heatmap__cell--level-3" />
-      <div class="activity-heatmap__cell activity-heatmap__cell--level-4" />
-      <span class="activity-heatmap__legend-label">{{ t('common.more') }}</span>
+      <div class="activity-heatmap__legend">
+        <span class="activity-heatmap__legend-label">{{ t('common.less') }}</span>
+        <div class="activity-heatmap__cell activity-heatmap__cell--level-0" />
+        <div class="activity-heatmap__cell activity-heatmap__cell--level-1" />
+        <div class="activity-heatmap__cell activity-heatmap__cell--level-2" />
+        <div class="activity-heatmap__cell activity-heatmap__cell--level-3" />
+        <div class="activity-heatmap__cell activity-heatmap__cell--level-4" />
+        <span class="activity-heatmap__legend-label">{{ t('common.more') }}</span>
+      </div>
     </div>
   </div>
 </template>
@@ -184,11 +184,10 @@ function getLevel(count: number): number {
   width: 11px;
   height: 11px;
   border-radius: 2px;
-  transition: outline 0.15s ease;
 }
 
 .activity-heatmap__cell:hover:not(.activity-heatmap__cell--empty) {
-  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline: 2px solid rgba(0, 0, 0, 0.4);
   outline-offset: -1px;
 }
 
@@ -221,6 +220,7 @@ function getLevel(count: number): number {
   align-items: center;
   gap: 3px;
   margin-top: 8px;
+  margin-left: 32px;
   justify-content: flex-end;
 }
 
