@@ -168,7 +168,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -320,6 +320,20 @@ function handleProjectChange(projectId: number) {
     fetchBranches(projectId)
   }
 }
+
+// When MR toggle is switched on, auto-fill target_branch with project default
+watch(
+  () => formValue.value.create_mr,
+  (enabled) => {
+    if (enabled && formValue.value.project_id && !formValue.value.target_branch) {
+      const project = projects.value.find(p => p.id === formValue.value.project_id)
+      const defaultBranch = project?.default_branch
+      if (defaultBranch && branches.value.some(b => b.name === defaultBranch)) {
+        formValue.value.target_branch = defaultBranch
+      }
+    }
+  }
+)
 
 // Fetch prompt templates
 async function fetchPromptTemplates() {
