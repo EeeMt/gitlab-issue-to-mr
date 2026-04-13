@@ -11,40 +11,46 @@
         >
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
-              <StatusPieChart :title="t('dashboard.issueStatus')" :data="issueChartData" />
-              <div class="dashboard-metric-card__period">{{ t('dashboard.last90days') }}</div>
+              <div class="metric-title">{{ t('dashboard.issueStatus') }}</div>
+              <div class="metric-body">
+                <StatusPieChart :data="issueChartData" />
+              </div>
+              <div class="metric-period">{{ t('dashboard.last90days') }}</div>
             </n-card>
           </n-gi>
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
-              <StatusPieChart :title="t('dashboard.taskStatus')" :data="taskChartData" />
-              <div class="dashboard-metric-card__period">{{ t('dashboard.last90days') }}</div>
+              <div class="metric-title">{{ t('dashboard.taskStatus') }}</div>
+              <div class="metric-body">
+                <StatusPieChart :data="taskChartData" />
+              </div>
+              <div class="metric-period">{{ t('dashboard.last90days') }}</div>
             </n-card>
           </n-gi>
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
-              <div class="dashboard-stat">
-                <div class="dashboard-stat__title">{{ t('dashboard.linesChanged') }}</div>
+              <div class="metric-title">{{ t('dashboard.linesChanged') }}</div>
+              <div class="metric-body">
                 <div class="dashboard-stat__value">{{ formatNumber(analyticsTotalChanges) }}</div>
                 <div class="dashboard-stat__detail">
                   <span class="dashboard-stat__add">+{{ formatNumber(analyticsTotalAdditions) }}</span>
                   <span class="dashboard-stat__del">-{{ formatNumber(analyticsTotalDeletions) }}</span>
                 </div>
               </div>
-              <div class="dashboard-metric-card__period">{{ t('dashboard.last90days') }}</div>
+              <div class="metric-period">{{ t('dashboard.last90days') }}</div>
             </n-card>
           </n-gi>
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
-              <div class="dashboard-stat">
-                <div class="dashboard-stat__title">{{ t('dashboard.tokensUsed') }}</div>
+              <div class="metric-title">{{ t('dashboard.tokensUsed') }}</div>
+              <div class="metric-body">
                 <div class="dashboard-stat__value">{{ formatNumber(analyticsTotalTokens) }}</div>
                 <div class="dashboard-stat__detail">
                   <n-icon size="12" :component="FlashOutline" style="margin-right:2px" />
                   <span>{{ formatNumber(analyticsInputTokens) }} in / {{ formatNumber(analyticsOutputTokens) }} out</span>
                 </div>
               </div>
-              <div class="dashboard-metric-card__period">{{ t('dashboard.last90days') }}</div>
+              <div class="metric-period">{{ t('dashboard.last90days') }}</div>
             </n-card>
           </n-gi>
         </n-grid>
@@ -360,36 +366,34 @@ onMounted(() => {
   border-radius: var(--app-card-radius);
 }
 
-.dashboard-metric-card :deep(.n-card__content) {
-  display: flex;
-  flex-direction: column;
+.dashboard-metric-card :deep(.n-card-content) {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
   height: 100%;
   overflow: hidden;
 }
 
-.dashboard-metric-card__period {
+.metric-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #666;
   text-align: center;
-  font-size: 11px;
-  color: #aaa;
-  margin-top: auto;
-  flex-shrink: 0;
 }
 
-.dashboard-stat {
+.metric-body {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  flex: 1;
   min-height: 0;
-  text-align: center;
+  overflow: hidden;
 }
 
-.dashboard-stat__title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #666;
+.metric-period {
+  font-size: 11px;
+  color: #aaa;
+  text-align: center;
 }
 
 .dashboard-stat__value {
@@ -397,6 +401,7 @@ onMounted(() => {
   font-weight: 700;
   color: var(--n-text-color, #333);
   line-height: 1.1;
+  text-align: center;
 }
 
 .dashboard-stat__detail {

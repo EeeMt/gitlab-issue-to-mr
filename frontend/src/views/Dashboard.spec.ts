@@ -144,17 +144,16 @@ vi.mock('naive-ui', () => ({
 vi.mock('../components/StatusPieChart.vue', () => ({
   default: {
     name: 'StatusPieChart',
-    props: ['title', 'data'],
-    setup(props: any) {
+    props: ['data'],
+    setup() {
       return () =>
         h(
           'div',
           {
             class: 'status-pie-chart',
             'data-testid': 'status-pie-chart',
-            'data-title': props.title,
           },
-          `PieChart: ${props.title}`,
+          'PieChart',
         )
     },
   },
@@ -313,8 +312,10 @@ describe('Dashboard', () => {
       await mountDashboard()
       const pieCharts = wrapper.findAll('[data-testid="status-pie-chart"]')
       expect(pieCharts.length).toBe(2)
-      expect(pieCharts[0].attributes('data-title')).toBe('dashboard.issueStatus')
-      expect(pieCharts[1].attributes('data-title')).toBe('dashboard.taskStatus')
+      const titles = wrapper.findAll('.metric-title')
+      expect(titles.length).toBeGreaterThanOrEqual(4)
+      expect(titles[0].text()).toBe('dashboard.issueStatus')
+      expect(titles[1].text()).toBe('dashboard.taskStatus')
     })
 
     it('shows recent-issues section', async () => {

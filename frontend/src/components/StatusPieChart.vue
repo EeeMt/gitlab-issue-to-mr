@@ -9,7 +9,6 @@ import { CanvasRenderer } from 'echarts/renderers'
 use([PieChart, TooltipComponent, LegendComponent, CanvasRenderer])
 
 const props = defineProps<{
-  title: string
   data: { name: string; value: number; color: string }[]
 }>()
 
@@ -29,7 +28,7 @@ const option = computed(() => ({
     {
       type: 'pie',
       radius: ['40%', '70%'],
-      center: ['50%', '42%'],
+      center: ['50%', '45%'],
       avoidLabelOverlap: false,
       itemStyle: { borderRadius: 4, borderColor: '#fff', borderWidth: 2 },
       label: { show: false },
@@ -47,31 +46,12 @@ const option = computed(() => ({
 </script>
 
 <template>
-  <div class="status-pie">
-    <div class="status-pie__title">{{ title }}</div>
-    <v-chart :option="option" autoresize class="status-pie__chart" />
-  </div>
+  <v-chart :option="option" autoresize class="status-pie-chart" />
 </template>
 
 <style scoped>
-.status-pie {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-
-.status-pie__title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #666;
-  margin-bottom: 4px;
-  text-align: center;
-  flex-shrink: 0;
-}
-
-.status-pie__chart {
-  height: 160px;
+.status-pie-chart {
   width: 100%;
+  height: 170px;
 }
 </style>
