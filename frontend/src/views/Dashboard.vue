@@ -2,24 +2,15 @@
   <div class="dashboard" data-testid="dashboard-page">
     <n-spin :show="initialLoading" :description="t('common.loadingTasks')">
       <n-space vertical :size="16">
-        <PageHeader
-          data-testid="dashboard-header"
-          root-class="dashboard__hero"
-          title-class="dashboard__title"
-          subtitle-class="dashboard__subtitle"
-          :title="t('dashboard.title')"
-          :subtitle="t('dashboard.subtitle')"
-        >
-          <template #actions>
-            <n-button
-              type="primary"
-              data-testid="dashboard-new-issue-button"
-              @click="router.push('/issues/create')"
-            >
-              {{ t('dashboard.createIssue') }}
-            </n-button>
-          </template>
-        </PageHeader>
+        <div class="dashboard__top-bar" data-testid="dashboard-header">
+          <n-button
+            type="primary"
+            data-testid="dashboard-new-issue-button"
+            @click="router.push('/issues/create')"
+          >
+            {{ t('dashboard.createIssue') }}
+          </n-button>
+        </div>
 
         <n-grid
           v-if="hasLoadedOnce"
@@ -51,6 +42,7 @@
             :data="recentIssues"
             :loading="loading"
             :row-key="(row: Issue) => row.id"
+            :row-props="issueRowProps"
             :bordered="false"
           />
         </n-card>
@@ -66,6 +58,7 @@
             :data="runningAndQueuedTasks"
             :loading="loading"
             :row-key="(row: Task) => row.id"
+            :row-props="taskRowProps"
             :bordered="false"
           />
         </n-card>
@@ -80,7 +73,7 @@ import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getIssues, getTasksPaginated, getStats, type Issue, type Task } from '../api'
-import PageHeader from '../components/PageHeader.vue'
+
 import SummaryCard from '../components/SummaryCard.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { usePolling } from '../composables/usePolling'
@@ -91,6 +84,14 @@ const router = useRouter()
 const message = useMessage()
 const { t } = useI18n()
 const { isMobile } = useBreakpoints()
+
+function issueRowProps(row: Issue) {
+  return { style: 'cursor: pointer', onClick: () => router.push(`/issues/${row.id}`) }
+}
+
+function taskRowProps(row: Task) {
+  return { style: 'cursor: pointer', onClick: () => router.push(`/tasks/${row.id}`) }
+}
 
 const recentIssues = ref<Issue[]>([])
 const runningTasks = ref<Task[]>([])
@@ -130,13 +131,17 @@ const issueColumns = computed<DataTableColumns<Issue>>(() => [
   {
     title: t('issue.field.title'),
     key: 'title',
+    ellipsis: { tooltip: true },
     render: (row) =>
       h(
         NButton,
         {
           text: true,
           type: 'primary',
-          onClick: () => router.push(`/issues/${row.id}`),
+          onClick: (e: MouseEvent) => {
+            e.stopPropagation()
+            router.push(`/issues/${row.id}`)
+          },
         },
         () => row.title,
       ),
@@ -175,14 +180,18 @@ const taskColumns = computed<DataTableColumns<Task>>(() => [
   {
     title: t('dashboard.task'),
     key: 'user_prompt',
+    ellipsis: { tooltip: true },
     render: (row) => {
-      const label = row.user_prompt ? (row.user_prompt.length > 80 ? row.user_prompt.slice(0, 80) + '…' : row.user_prompt) : '-'
+      const label = row.user_prompt || '-'
       return h(
         NButton,
         {
           text: true,
           type: 'primary',
-          onClick: () => router.push(`/tasks/${row.id}`),
+          onClick: (e: MouseEvent) => {
+            e.stopPropagation()
+            router.push(`/tasks/${row.id}`)
+          },
         },
         () => label,
       )
@@ -258,6 +267,12 @@ onMounted(() => {
 
 .dashboard-summary-card {
   min-height: 100%;
+}
+
+.dashboard__top-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
 }
 
 .dashboard-table-card {
