@@ -356,7 +356,7 @@ onMounted(() => {
 }
 
 .dashboard-metric-card {
-  height: 100%;
+  height: 240px;
   border-radius: var(--app-card-radius);
 }
 
@@ -364,13 +364,15 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow: hidden;
 }
 
 .dashboard-metric-card__period {
   text-align: center;
   font-size: 11px;
   color: #aaa;
-  padding-top: 4px;
+  margin-top: auto;
+  flex-shrink: 0;
 }
 
 .dashboard-stat {
@@ -380,6 +382,7 @@ onMounted(() => {
   justify-content: center;
   gap: 6px;
   flex: 1;
+  min-height: 0;
   text-align: center;
 }
 
