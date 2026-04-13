@@ -81,7 +81,7 @@
             </n-card>
           </n-gi>
           <n-gi>
-            <n-card size="small" class="dashboard-metric-card dashboard-metric-card--wide" data-testid="dashboard-trend-chart">
+            <n-card size="small" class="dashboard-metric-card dashboard-metric-card--wide dashboard-metric-card--trend" data-testid="dashboard-trend-chart">
               <div class="metric-title">
                 <span>{{ t('dashboard.trend') }}</span>
                 <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.last90days') }}</n-tooltip>
@@ -404,8 +404,9 @@ onMounted(() => {
   height: 320px;
 }
 
-.dashboard-metric-card--wide .metric-body {
+.dashboard-metric-card--trend .metric-body {
   justify-content: flex-start;
+  padding-bottom: 8px;
 }
 
 .dashboard-metric-card :deep(.n-card-content) {
