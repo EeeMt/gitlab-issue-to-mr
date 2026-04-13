@@ -186,6 +186,17 @@ const en = {
     last90days: 'Last 90 days',
     trend: 'Trend',
   },
+  trend: {
+    tasks: 'Tasks',
+    changes: 'Changes',
+    tokens: 'Tokens',
+    completed: 'Completed',
+    failed: 'Failed',
+    additions: 'Additions',
+    deletions: 'Deletions',
+    input: 'Input',
+    output: 'Output',
+  },
   issue: {
     title: 'Issues',
     subtitle: 'Manage your development issues',

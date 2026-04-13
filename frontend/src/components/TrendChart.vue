@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { LineChart } from 'echarts/charts'
@@ -17,15 +18,17 @@ const props = defineProps<{
   data: AnalyticsTrendPoint[]
 }>()
 
+const { t } = useI18n()
+
 type MetricKey = 'tasks' | 'changes' | 'tokens'
 
 const activeMetric = ref<MetricKey>('tasks')
 
-const metrics: { key: MetricKey; label: string; color: string }[] = [
-  { key: 'tasks', label: 'Tasks', color: '#2080f0' },
-  { key: 'changes', label: 'Changes', color: '#18a058' },
-  { key: 'tokens', label: 'Tokens', color: '#f0a020' },
-]
+const metrics = computed<{ key: MetricKey; label: string; color: string }[]>(() => [
+  { key: 'tasks', label: t('trend.tasks'), color: '#2080f0' },
+  { key: 'changes', label: t('trend.changes'), color: '#18a058' },
+  { key: 'tokens', label: t('trend.tokens'), color: '#f0a020' },
+])
 
 const option = computed(() => {
   const d = props.data
@@ -38,7 +41,7 @@ const option = computed(() => {
   if (m === 'tasks') {
     series.push(
       {
-        name: 'Completed',
+        name: t('trend.completed'),
         type: 'line',
         data: d.map((p) => p.completed_tasks),
         smooth: true,
@@ -48,7 +51,7 @@ const option = computed(() => {
         areaStyle: { color: 'rgba(24,160,88,0.08)' },
       },
       {
-        name: 'Failed',
+        name: t('trend.failed'),
         type: 'line',
         data: d.map((p) => p.failed_tasks),
         smooth: true,
@@ -61,7 +64,7 @@ const option = computed(() => {
   } else if (m === 'changes') {
     series.push(
       {
-        name: 'Additions',
+        name: t('trend.additions'),
         type: 'line',
         data: d.map((p) => p.additions),
         smooth: true,
@@ -71,7 +74,7 @@ const option = computed(() => {
         areaStyle: { color: 'rgba(24,160,88,0.08)' },
       },
       {
-        name: 'Deletions',
+        name: t('trend.deletions'),
         type: 'line',
         data: d.map((p) => p.deletions),
         smooth: true,
@@ -84,7 +87,7 @@ const option = computed(() => {
   } else {
     series.push(
       {
-        name: 'Input',
+        name: t('trend.input'),
         type: 'line',
         data: d.map((p) => p.input_tokens),
         smooth: true,
@@ -94,7 +97,7 @@ const option = computed(() => {
         areaStyle: { color: 'rgba(32,128,240,0.08)' },
       },
       {
-        name: 'Output',
+        name: t('trend.output'),
         type: 'line',
         data: d.map((p) => p.output_tokens),
         smooth: true,

@@ -183,6 +183,17 @@ const zhCN = {
     last90days: '最近 90 天',
     trend: '趋势',
   },
+  trend: {
+    tasks: '任务',
+    changes: '变更',
+    tokens: 'Token',
+    completed: '已完成',
+    failed: '失败',
+    additions: '新增',
+    deletions: '删除',
+    input: '输入',
+    output: '输出',
+  },
   issue: {
     title: '需求',
     subtitle: '管理你的开发需求',

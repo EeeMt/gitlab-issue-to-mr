@@ -401,7 +401,11 @@ onMounted(() => {
 }
 
 .dashboard-metric-card--wide {
-  height: 280px;
+  height: 320px;
+}
+
+.dashboard-metric-card--wide .metric-body {
+  justify-content: flex-start;
 }
 
 .dashboard-metric-card :deep(.n-card-content) {
