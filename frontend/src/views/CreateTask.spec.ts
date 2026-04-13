@@ -15,7 +15,8 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     getPromptTemplates: vi.fn<() => Promise<any[]>>(),
     getScheduledTasks: vi.fn<() => Promise<any[]>>(),
     getSlotCapacity: vi.fn<() => Promise<any>>(),
-    getConfig: vi.fn<() => Promise<any>>()
+    getConfig: vi.fn<() => Promise<any>>(),
+    getIssues: vi.fn<() => Promise<any>>()
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => {
@@ -53,7 +54,8 @@ vi.mock('../api', () => ({
   getPromptTemplates: mockApi.getPromptTemplates,
   getScheduledTasks: mockApi.getScheduledTasks,
   getSlotCapacity: mockApi.getSlotCapacity,
-  getConfig: mockApi.getConfig
+  getConfig: mockApi.getConfig,
+  getIssues: mockApi.getIssues
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -346,6 +348,12 @@ const mockBranches = [
   createMockBranch({ name: 'feature/test' })
 ]
 
+const mockIssues = [
+  { id: 1, title: 'Fix login bug', description: 'Login is broken', project_id: 1, status: 'open', branch_name: 'codify/issue-1', base_branch: 'main', target_branch: 'main', merge_request_iid: null, merge_request_url: null, claude_session_id: null, initiator_user_id: null, initiator_username: null, created_at: '2026-03-31T10:00:00Z', updated_at: '2026-03-31T10:00:00Z' },
+  { id: 2, title: 'Add feature X', description: null, project_id: 2, status: 'open', branch_name: 'codify/issue-2', base_branch: 'develop', target_branch: 'develop', merge_request_iid: null, merge_request_url: null, claude_session_id: null, initiator_user_id: null, initiator_username: null, created_at: '2026-03-31T11:00:00Z', updated_at: '2026-03-31T11:00:00Z' }
+]
+const mockIssueListResponse = { items: mockIssues, total: mockIssues.length, page: 1, page_size: 100 }
+
 const mockTemplates = [
   createMockPromptTemplate({ id: 1, name: 'Bug Fix', content: 'Fix {{issue}}', variable_tips: { issue: 'Issue description' } }),
   createMockPromptTemplate({ id: 2, name: 'Feature', content: 'Add {{feature}}', variable_tips: { feature: 'Feature name' } })
@@ -369,9 +377,8 @@ describe('CreateTask', () => {
   })
 
   const mountComponent = async () => {
-    // Mock getProjects to return successful response
-    ;(mockApi.getProjects as Mock).mockResolvedValue(mockProjects)
-    ;(mockApi.getBranches as Mock).mockResolvedValue(mockBranches)
+    // Mock getIssues to return successful response
+    ;(mockApi.getIssues as Mock).mockResolvedValue(mockIssueListResponse)
     ;(mockApi.getPromptTemplates as Mock).mockResolvedValue(mockTemplates)
     ;(mockApi.createTask as Mock).mockResolvedValue(createMockTask({ id: 123 }))
     ;(mockApi.getScheduledTasks as Mock).mockResolvedValue([])
@@ -389,8 +396,9 @@ describe('CreateTask', () => {
 
     // Wait for onMounted to complete
     await vi.waitFor(() => {
-      return (mockApi.getProjects as Mock).mock.calls.length > 0
+      return (mockApi.getIssues as Mock).mock.calls.length > 0
     })
+    await flushPromises()
 
     return wrapper
   }
@@ -404,8 +412,7 @@ describe('CreateTask', () => {
     })
 
     it('should show loading state during data fetch', async () => {
-      ;(mockApi.getProjects as Mock).mockImplementation(() => new Promise(resolve => setTimeout(() => resolve(mockProjects), 100)))
-      ;(mockApi.getBranches as Mock).mockResolvedValue([])
+      ;(mockApi.getIssues as Mock).mockImplementation(() => new Promise(resolve => setTimeout(() => resolve(mockIssueListResponse), 100)))
       ;(mockApi.getPromptTemplates as Mock).mockResolvedValue([])
       ;(mockApi.createTask as Mock).mockResolvedValue(createMockTask())
 
@@ -418,20 +425,15 @@ describe('CreateTask', () => {
         }
       })
 
-      // Initial state - loading should be shown
+      // After data loads, component should be rendered
       await vi.waitFor(() => {
-        return wrapper.find('.n-spin-loading').exists()
-      })
-
-      // After data loads, loading should be hidden
-      await vi.waitFor(() => {
-        return (mockApi.getProjects as Mock).mock.results.length > 0
+        return (mockApi.getIssues as Mock).mock.results.length > 0
       })
     })
 
-    it('should fetch projects on mount', async () => {
+    it('should fetch issues on mount', async () => {
       await mountComponent()
-      expect(mockApi.getProjects).toHaveBeenCalledTimes(1)
+      expect(mockApi.getIssues).toHaveBeenCalledTimes(1)
     })
 
     it('should fetch prompt templates on mount', async () => {
@@ -440,92 +442,33 @@ describe('CreateTask', () => {
     })
   })
 
-  describe('project selection', () => {
-    it('should fetch branches when project changes', async () => {
+  describe('issue selection', () => {
+    it('should populate issue options from fetched issues', async () => {
       await mountComponent()
 
-      // Clear previous calls
-      ;(mockApi.getBranches as Mock).mockClear()
-
-      // Simulate project change by calling handleProjectChange directly
-      await wrapper.vm.handleProjectChange(1)
-
-      await vi.waitFor(() => {
-        expect(mockApi.getBranches).toHaveBeenCalledWith(1)
-      })
+      const options = wrapper.vm.issueOptions
+      expect(options).toHaveLength(2)
+      expect(options[0].label).toContain('Fix login bug')
+      expect(options[0].value).toBe(1)
+      expect(options[1].label).toContain('Add feature X')
+      expect(options[1].value).toBe(2)
     })
 
-    it('should reset branch selection when project changes', async () => {
+    it('should show selected issue context when issue is selected', async () => {
       await mountComponent()
 
-      // Select project 1 first; wait for branches + auto-set base_branch
-      await wrapper.vm.handleProjectChange(1)
-      await vi.waitFor(() => {
-        return (mockApi.getBranches as Mock).mock.calls.length > 0
-      })
-      await flushPromises()
+      wrapper.vm.formValue.issue_id = 1
+      await nextTick()
 
-      // Change project; auto-set logic will pick project 2's default branch
-      await wrapper.vm.handleProjectChange(2)
-      await flushPromises()
-
-      // Base branch should be auto-set to project 2's default branch ('develop')
-      expect(wrapper.vm.formValue.base_branch).toBe('develop')
+      expect(wrapper.vm.selectedIssue).toBeTruthy()
+      expect(wrapper.vm.selectedIssue.title).toBe('Fix login bug')
+      expect(wrapper.vm.selectedIssue.project_id).toBe(1)
     })
 
-    it('should set target branch to project default', async () => {
+    it('should return null when no issue is selected', async () => {
       await mountComponent()
 
-      // Change to project with default_branch = 'develop'
-      await wrapper.vm.handleProjectChange(2)
-
-      expect(wrapper.vm.formValue.target_branch).toBe('develop')
-    })
-  })
-
-  describe('branch selection', () => {
-    it('should populate branch options from API', async () => {
-      await mountComponent()
-
-      await wrapper.vm.handleProjectChange(1)
-
-      await vi.waitFor(() => {
-        return wrapper.vm.branchOptions.length > 0
-      })
-
-      expect(wrapper.vm.branchOptions).toHaveLength(3)
-      expect(wrapper.vm.branchOptions.map((o: any) => o.label)).toEqual(['main', 'develop', 'feature/test'])
-    })
-
-    it('should move main to top of target branch options', async () => {
-      await mountComponent()
-
-      await wrapper.vm.handleProjectChange(1)
-
-      await vi.waitFor(() => {
-        return wrapper.vm.targetBranchOptions.length > 0
-      })
-
-      expect(wrapper.vm.targetBranchOptions[0].value).toBe('main')
-    })
-
-    it('should clear new branch name when base branch changes', async () => {
-      await mountComponent()
-
-      await wrapper.vm.handleProjectChange(1)
-      await vi.waitFor(() => {
-        return (mockApi.getBranches as Mock).mock.calls.length > 0
-      })
-
-      // Set new branch name
-      wrapper.vm.formValue.new_branch_name = 'my-feature-branch'
-      expect(wrapper.vm.formValue.new_branch_name).toBe('my-feature-branch')
-
-      // Change base branch
-      await wrapper.vm.handleBaseBranchChange('develop')
-
-      // New branch name should be cleared
-      expect(wrapper.vm.formValue.new_branch_name).toBe('')
+      expect(wrapper.vm.selectedIssue).toBeNull()
     })
   })
 
@@ -546,11 +489,11 @@ describe('CreateTask', () => {
       }
     })
 
-    it('should require base branch selection', async () => {
+    it('should require issue selection', async () => {
       await mountComponent()
 
-      // Form model should have empty new_branch_name initially
-      expect(wrapper.vm.formValue.new_branch_name).toBe('')
+      // Form model should have null issue_id initially (required field)
+      expect(wrapper.vm.formValue.issue_id).toBeNull()
     })
 
     it('should require user prompt', async () => {
@@ -560,16 +503,10 @@ describe('CreateTask', () => {
       expect(wrapper.vm.formValue.prompt).toBeFalsy()
     })
 
-    it('should show branch conflict warning', async () => {
+    it('should have default priority of 1', async () => {
       await mountComponent()
 
-      // Set same source and target branch
-      wrapper.vm.formValue.new_branch_name = 'main'
-      wrapper.vm.formValue.target_branch = 'main'
-
-      expect(wrapper.vm.sameBranchConflict).toBe(true)
-      // Warning is a sibling element in the template, not inside a slot
-      // Since our mock doesn't render the full template structure, we just verify the computed property
+      expect(wrapper.vm.formValue.priority).toBe(1)
     })
   })
 
@@ -670,10 +607,7 @@ describe('CreateTask', () => {
       await mountComponent()
 
       // Fill required fields
-      wrapper.vm.formValue.project_id = 1
-      wrapper.vm.formValue.base_branch = 'main'
-      wrapper.vm.formValue.new_branch_name = 'test-branch'
-      wrapper.vm.formValue.target_branch = 'main'
+      wrapper.vm.formValue.issue_id = 1
       wrapper.vm.formValue.user_prompt = 'Fix the bug'
 
       await wrapper.vm.handleSubmit()
@@ -683,20 +617,15 @@ describe('CreateTask', () => {
       })
 
       const call = (mockApi.createTask as Mock).mock.calls[0][0]
-      expect(call.project_id).toBe(1)
-      expect(call.branch_name).toBe('test-branch')
-      expect(call.base_branch).toBe('main')
-      expect(call.target_branch).toBe('main')
+      expect(call.issue_id).toBe(1)
       expect(call.user_prompt).toBe('Fix the bug')
+      expect(call.priority).toBe(1)
     })
 
     it('should show success modal on success', async () => {
       await mountComponent()
 
-      wrapper.vm.formValue.project_id = 1
-      wrapper.vm.formValue.base_branch = 'main'
-      wrapper.vm.formValue.new_branch_name = 'test-branch'
-      wrapper.vm.formValue.target_branch = 'main'
+      wrapper.vm.formValue.issue_id = 1
       wrapper.vm.formValue.user_prompt = 'Fix the bug'
 
       await wrapper.vm.handleSubmit()
@@ -769,10 +698,7 @@ describe('CreateTask', () => {
       await mountComponent()
 
       // Set various values
-      wrapper.vm.formValue.project_id = 1
-      wrapper.vm.formValue.base_branch = 'main'
-      wrapper.vm.formValue.new_branch_name = 'test-branch'
-      wrapper.vm.formValue.target_branch = 'develop'
+      wrapper.vm.formValue.issue_id = 1
       wrapper.vm.formValue.user_prompt = 'Some prompt'
       wrapper.vm.formValue.priority = 2
       wrapper.vm.scheduleType = 'delay'
@@ -781,10 +707,7 @@ describe('CreateTask', () => {
 
       await wrapper.vm.handleReset()
 
-      expect(wrapper.vm.formValue.project_id).toBeUndefined()
-      expect(wrapper.vm.formValue.base_branch).toBeUndefined()
-      expect(wrapper.vm.formValue.new_branch_name).toBe('')
-      expect(wrapper.vm.formValue.target_branch).toBe('main')
+      expect(wrapper.vm.formValue.issue_id).toBeNull()
       expect(wrapper.vm.formValue.user_prompt).toBe('')
       expect(wrapper.vm.formValue.priority).toBe(1)
       expect(wrapper.vm.scheduleType).toBe('now')
@@ -953,67 +876,6 @@ describe('CreateTask', () => {
     })
   })
 
-  describe('branch name validation', () => {
-    it('should return null for valid branch names', async () => {
-      await mountComponent()
-      expect(wrapper.vm.validateBranchName('feature/my-branch')).toBeNull()
-      expect(wrapper.vm.validateBranchName('fix-bug-123')).toBeNull()
-      expect(wrapper.vm.validateBranchName('release/v1.0')).toBeNull()
-    })
-
-    it('should return null for empty name', async () => {
-      await mountComponent()
-      expect(wrapper.vm.validateBranchName('')).toBeNull()
-    })
-
-    it('should reject single @ character', async () => {
-      await mountComponent()
-      expect(wrapper.vm.validateBranchName('@')).not.toBeNull()
-    })
-
-    it('should reject names with special characters', async () => {
-      await mountComponent()
-      expect(wrapper.vm.validateBranchName('branch name')).not.toBeNull()
-      expect(wrapper.vm.validateBranchName('branch~name')).not.toBeNull()
-      expect(wrapper.vm.validateBranchName('branch^name')).not.toBeNull()
-      expect(wrapper.vm.validateBranchName('branch:name')).not.toBeNull()
-      expect(wrapper.vm.validateBranchName('branch?name')).not.toBeNull()
-      expect(wrapper.vm.validateBranchName('branch*name')).not.toBeNull()
-      expect(wrapper.vm.validateBranchName('branch[name')).not.toBeNull()
-      expect(wrapper.vm.validateBranchName('branch\\name')).not.toBeNull()
-    })
-
-    it('should reject names starting with . or -', async () => {
-      await mountComponent()
-      expect(wrapper.vm.validateBranchName('.hidden')).not.toBeNull()
-      expect(wrapper.vm.validateBranchName('-flag')).not.toBeNull()
-    })
-
-    it('should reject names starting or ending with /', async () => {
-      await mountComponent()
-      expect(wrapper.vm.validateBranchName('/leading')).not.toBeNull()
-      expect(wrapper.vm.validateBranchName('trailing/')).not.toBeNull()
-    })
-
-    it('should reject names ending with .', async () => {
-      await mountComponent()
-      expect(wrapper.vm.validateBranchName('branch.')).not.toBeNull()
-    })
-
-    it('should reject names with .., @{, or //', async () => {
-      await mountComponent()
-      expect(wrapper.vm.validateBranchName('branch..name')).not.toBeNull()
-      expect(wrapper.vm.validateBranchName('branch@{name')).not.toBeNull()
-      expect(wrapper.vm.validateBranchName('branch//name')).not.toBeNull()
-    })
-
-    it('should reject path components starting with . or ending with .lock', async () => {
-      await mountComponent()
-      expect(wrapper.vm.validateBranchName('refs/.hidden/branch')).not.toBeNull()
-      expect(wrapper.vm.validateBranchName('refs/heads/branch.lock')).not.toBeNull()
-    })
-  })
-
   describe('isScheduledDateDisabled', () => {
     it('should disable past dates and allow future dates', async () => {
       await mountComponent()
@@ -1125,52 +987,6 @@ describe('CreateTask', () => {
     })
   })
 
-  describe('handleCreateMRChange', () => {
-    it('should restore project default branch when toggled on', async () => {
-      await mountComponent()
-
-      // Select project 2 which has default_branch = 'develop'
-      wrapper.vm.formValue.project_id = 2
-      await wrapper.vm.handleProjectChange(2)
-      await flushPromises()
-
-      // Manually change target branch away from default
-      wrapper.vm.formValue.target_branch = 'feature/test'
-
-      // Toggling MR on should restore project default
-      wrapper.vm.handleCreateMRChange(true)
-
-      expect(wrapper.vm.formValue.target_branch).toBe('develop')
-    })
-
-    it('should not update target branch when no project selected', async () => {
-      await mountComponent()
-
-      wrapper.vm.formValue.project_id = undefined
-      wrapper.vm.formValue.target_branch = 'old-branch'
-
-      wrapper.vm.handleCreateMRChange(true)
-
-      // Should not change since no project is selected
-      expect(wrapper.vm.formValue.target_branch).toBe('old-branch')
-    })
-
-    it('should fall back to main when project has no default_branch', async () => {
-      // Override projects to include one without default_branch
-      ;(mockApi.getProjects as Mock).mockResolvedValue([
-        ...mockProjects,
-        createMockProject({ id: 99, name: 'No Default', path_with_namespace: 'group/no-default', default_branch: undefined })
-      ])
-      await mountComponent()
-      await flushPromises()
-
-      wrapper.vm.formValue.project_id = 99
-      wrapper.vm.handleCreateMRChange(true)
-
-      expect(wrapper.vm.formValue.target_branch).toBe('main')
-    })
-  })
-
   describe('buildScheduleRequest edge cases', () => {
     it('should return empty object for now schedule type', async () => {
       await mountComponent()
@@ -1226,44 +1042,6 @@ describe('CreateTask', () => {
   })
 
   describe('form submission edge cases', () => {
-    it('should auto-generate branch name when not provided', async () => {
-      await mountComponent()
-
-      wrapper.vm.formValue.project_id = 1
-      wrapper.vm.formValue.base_branch = 'main'
-      wrapper.vm.formValue.new_branch_name = ''
-      wrapper.vm.formValue.target_branch = 'main'
-      wrapper.vm.formValue.user_prompt = 'Fix the bug'
-
-      await wrapper.vm.handleSubmit()
-
-      await vi.waitFor(() => {
-        return (mockApi.createTask as Mock).mock.calls.length > 0
-      })
-
-      const call = (mockApi.createTask as Mock).mock.calls[0][0]
-      expect(call.branch_name).toMatch(/^ai-task-\d+$/)
-    })
-
-    it('should set target_branch to null when createMR is false', async () => {
-      await mountComponent()
-
-      wrapper.vm.createMR = false
-      wrapper.vm.formValue.project_id = 1
-      wrapper.vm.formValue.base_branch = 'main'
-      wrapper.vm.formValue.new_branch_name = 'test-branch'
-      wrapper.vm.formValue.user_prompt = 'Fix the bug'
-
-      await wrapper.vm.handleSubmit()
-
-      await vi.waitFor(() => {
-        return (mockApi.createTask as Mock).mock.calls.length > 0
-      })
-
-      const call = (mockApi.createTask as Mock).mock.calls[0][0]
-      expect(call.target_branch).toBeNull()
-    })
-
     it('should return early when formRef is null', async () => {
       await mountComponent()
 
@@ -1357,9 +1135,8 @@ describe('CreateTask', () => {
   })
 
   describe('fetch error handling', () => {
-    it('should handle fetchProjects error gracefully', async () => {
-      ;(mockApi.getProjects as Mock).mockRejectedValue(new Error('API Error'))
-      ;(mockApi.getBranches as Mock).mockResolvedValue([])
+    it('should handle fetchIssues error gracefully', async () => {
+      ;(mockApi.getIssues as Mock).mockRejectedValue(new Error('API Error'))
       ;(mockApi.getPromptTemplates as Mock).mockResolvedValue([])
       ;(mockApi.createTask as Mock).mockResolvedValue(createMockTask())
       ;(mockApi.getScheduledTasks as Mock).mockResolvedValue([])
@@ -1374,24 +1151,13 @@ describe('CreateTask', () => {
       })
 
       await vi.waitFor(() => {
-        return (mockApi.getProjects as Mock).mock.calls.length > 0
+        return (mockApi.getIssues as Mock).mock.calls.length > 0
       })
       await flushPromises()
 
       // Component should not crash
       expect(wrapper.find('.create-task-page').exists()).toBe(true)
-      expect(wrapper.vm.projects).toEqual([])
-    })
-
-    it('should handle fetchBranches error gracefully', async () => {
-      await mountComponent()
-      ;(mockApi.getBranches as Mock).mockRejectedValue(new Error('API Error'))
-
-      await wrapper.vm.handleProjectChange(1)
-      await flushPromises()
-
-      // Should not crash, branches should remain empty
-      expect(wrapper.vm.branches).toEqual([])
+      expect(wrapper.vm.issueOptions).toEqual([])
     })
 
     it('should handle fetchPromptTemplates error gracefully', async () => {
@@ -1419,25 +1185,6 @@ describe('CreateTask', () => {
     })
   })
 
-  describe('targetBranchOptions reorder', () => {
-    it('should move main to top when it is not first in branches list', async () => {
-      // Override branches so main is NOT first
-      ;(mockApi.getBranches as Mock).mockResolvedValue([
-        createMockBranch({ name: 'develop' }),
-        createMockBranch({ name: 'feature/test' }),
-        createMockBranch({ name: 'main' })
-      ])
-
-      await mountComponent()
-      await wrapper.vm.handleProjectChange(1)
-      await flushPromises()
-
-      const options = wrapper.vm.targetBranchOptions
-      expect(options[0].value).toBe('main')
-      expect(options.length).toBe(3)
-    })
-  })
-
   describe('priorityOptions computed', () => {
     it('should return three priority options with correct values', async () => {
       await mountComponent()
@@ -1458,28 +1205,6 @@ describe('CreateTask', () => {
       await wrapper.vm.handleReset()
 
       expect(wrapper.vm.formResetKey).toBe(initialKey + 1)
-    })
-
-    it('should clear branches array on reset', async () => {
-      await mountComponent()
-
-      // Load some branches first
-      await wrapper.vm.handleProjectChange(1)
-      await flushPromises()
-      expect(wrapper.vm.branches.length).toBeGreaterThan(0)
-
-      await wrapper.vm.handleReset()
-
-      expect(wrapper.vm.branches).toEqual([])
-    })
-
-    it('should restore createMR to true on reset', async () => {
-      await mountComponent()
-      wrapper.vm.createMR = false
-
-      await wrapper.vm.handleReset()
-
-      expect(wrapper.vm.createMR).toBe(true)
     })
 
     it('should reset createdTaskId on reset', async () => {
