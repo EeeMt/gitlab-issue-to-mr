@@ -59,7 +59,6 @@ const option = computed(() => ({
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
 }
 
 .status-pie__title {
@@ -72,8 +71,7 @@ const option = computed(() => ({
 }
 
 .status-pie__chart {
-  flex: 1;
-  min-height: 0;
+  height: 160px;
   width: 100%;
 }
 </style>
