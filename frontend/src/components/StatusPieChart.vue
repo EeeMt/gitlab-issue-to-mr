@@ -16,6 +16,7 @@ const option = computed(() => ({
   tooltip: {
     trigger: 'item',
     formatter: '{b}: {c} ({d}%)',
+    appendTo: 'body',
   },
   legend: {
     bottom: 0,
