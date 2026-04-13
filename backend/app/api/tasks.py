@@ -664,6 +664,9 @@ async def create_task(
     if issue.status == "closed":
         raise HTTPException(status_code=400, detail="Cannot create tasks on a closed issue")
 
+    from app.core.task_helpers import _require_issue_operator
+    _require_issue_operator(issue, current_user)
+
     require_project_access(issue.project_id, access_scope)
 
     prompt = request.user_prompt or issue.description

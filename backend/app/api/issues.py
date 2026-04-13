@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import get_effective_settings
+from app.core.task_helpers import _require_issue_operator
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_user
 from app.models import Issue, IssueStatus, Task, TaskStatus, User
@@ -245,6 +246,7 @@ async def update_issue(
             status_code=404,
             detail=f"Issue {issue_id} not found",
         )
+    _require_issue_operator(issue, current_user)
 
     if body.title is not None:
         issue.title = body.title
@@ -283,6 +285,7 @@ async def close_issue(
             status_code=404,
             detail=f"Issue {issue_id} not found",
         )
+    _require_issue_operator(issue, current_user)
 
     issue.status = IssueStatus.CLOSED.value
     await db.commit()
@@ -307,6 +310,7 @@ async def delete_issue(
             status_code=404,
             detail=f"Issue {issue_id} not found",
         )
+    _require_issue_operator(issue, current_user)
 
     # Check for active tasks
     active_statuses = [TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING]

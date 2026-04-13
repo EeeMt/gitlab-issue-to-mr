@@ -469,5 +469,133 @@ class DeleteIssueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.exception.status_code, 404)
 
 
+# ---------------------------------------------------------------------------
+# Ownership permission checks (OIDC enabled)
+# ---------------------------------------------------------------------------
+
+
+class IssueOwnershipTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for issue ownership enforcement when OIDC is enabled."""
+
+    def _mock_settings(self, oidc_enabled=True):
+        settings = MagicMock()
+        settings.oidc_enabled = oidc_enabled
+        return settings
+
+    def _mock_user(self, id=1, platform_role="platform_user"):
+        user = MagicMock()
+        user.id = id
+        user.platform_role = platform_role
+        return user
+
+    async def test_update_issue_forbidden_for_non_owner(self):
+        """Should raise 403 when non-owner tries to update issue."""
+        from fastapi import HTTPException
+        from app.api.issues import update_issue, UpdateIssueRequest
+
+        issue = _make_issue(id=1, initiator_user_id=10)
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+
+        non_owner = self._mock_user(id=99)
+        body = UpdateIssueRequest(title="Hacked")
+
+        with patch("app.core.task_helpers.get_effective_settings", return_value=self._mock_settings()):
+            with self.assertRaises(HTTPException) as ctx:
+                await update_issue(issue_id=1, body=body, db=mock_db, current_user=non_owner)
+
+        self.assertEqual(ctx.exception.status_code, 403)
+
+    async def test_update_issue_allowed_for_owner(self):
+        """Should allow owner to update issue."""
+        from app.api.issues import update_issue, UpdateIssueRequest
+
+        issue = _make_issue(id=1, initiator_user_id=10)
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        owner = self._mock_user(id=10)
+        body = UpdateIssueRequest(title="Updated")
+
+        with patch("app.core.task_helpers.get_effective_settings", return_value=self._mock_settings()):
+            result = await update_issue(issue_id=1, body=body, db=mock_db, current_user=owner)
+
+        self.assertEqual(issue.title, "Updated")
+
+    async def test_update_issue_allowed_for_admin(self):
+        """Should allow admin to update any issue."""
+        from app.api.issues import update_issue, UpdateIssueRequest
+
+        issue = _make_issue(id=1, initiator_user_id=10)
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        admin = self._mock_user(id=99, platform_role="platform_admin")
+        body = UpdateIssueRequest(title="Admin Update")
+
+        with patch("app.core.task_helpers.get_effective_settings", return_value=self._mock_settings()):
+            result = await update_issue(issue_id=1, body=body, db=mock_db, current_user=admin)
+
+        self.assertEqual(issue.title, "Admin Update")
+
+    async def test_close_issue_forbidden_for_non_owner(self):
+        """Should raise 403 when non-owner tries to close issue."""
+        from fastapi import HTTPException
+        from app.api.issues import close_issue
+
+        issue = _make_issue(id=1, initiator_user_id=10)
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+
+        non_owner = self._mock_user(id=99)
+
+        with patch("app.core.task_helpers.get_effective_settings", return_value=self._mock_settings()):
+            with self.assertRaises(HTTPException) as ctx:
+                await close_issue(issue_id=1, db=mock_db, current_user=non_owner)
+
+        self.assertEqual(ctx.exception.status_code, 403)
+
+    async def test_delete_issue_forbidden_for_non_owner(self):
+        """Should raise 403 when non-owner tries to delete issue."""
+        from fastapi import HTTPException
+        from app.api.issues import delete_issue
+
+        issue = _make_issue(id=1, initiator_user_id=10)
+
+        issue_result = MagicMock()
+        issue_result.scalar_one_or_none.return_value = issue
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=issue_result)
+
+        non_owner = self._mock_user(id=99)
+
+        with patch("app.core.task_helpers.get_effective_settings", return_value=self._mock_settings()):
+            with self.assertRaises(HTTPException) as ctx:
+                await delete_issue(issue_id=1, db=mock_db, current_user=non_owner)
+
+        self.assertEqual(ctx.exception.status_code, 403)
+
+
 if __name__ == "__main__":
     unittest.main()

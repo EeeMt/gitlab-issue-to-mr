@@ -1,4 +1,4 @@
-"""Task helper utilities for API responses and authorization."""
+"""Task and Issue helper utilities for API responses and authorization."""
 
 from typing import Any, Optional
 
@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import inspect as sa_inspect
 
 from app.config import get_effective_settings
-from app.models import Task, User
+from app.models import Issue, Task, User
 
 
 def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -103,4 +103,33 @@ def _require_task_operator(task: Task, current_user: Optional[User]) -> None:
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="You may only operate on your own tasks unless you are an admin",
+    )
+
+
+def _can_manage_issue(issue: Issue, current_user: Optional[User]) -> bool:
+    """Return whether the current user may operate on an issue."""
+    settings = get_effective_settings()
+    if not settings.oidc_enabled:
+        return True
+
+    if current_user is None:
+        return False
+
+    if current_user.platform_role == "platform_admin":
+        return True
+
+    if issue.initiator_user_id is not None and issue.initiator_user_id == current_user.id:
+        return True
+
+    return False
+
+
+def _require_issue_operator(issue: Issue, current_user: Optional[User]) -> None:
+    """Ensure the current user may operate on an issue."""
+    if _can_manage_issue(issue, current_user):
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You may only operate on your own issues unless you are an admin",
     )
