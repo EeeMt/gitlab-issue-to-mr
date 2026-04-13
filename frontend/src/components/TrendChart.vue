@@ -117,7 +117,7 @@ const option = computed(() => {
       padding: [6, 10],
     },
     legend: {
-      bottom: 0,
+      bottom: 10,
       left: 'center',
       itemWidth: 12,
       itemHeight: 8,
@@ -127,7 +127,7 @@ const option = computed(() => {
       top: 8,
       left: 40,
       right: 12,
-      bottom: 46,
+      bottom: 56,
     },
     xAxis: {
       type: 'category',
