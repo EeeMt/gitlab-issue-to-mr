@@ -51,3 +51,6 @@ deploy/.env.test
 
 # Temporary screenshots
 heatmap-check.png
+
+# Temporary images
+temporary/*.png

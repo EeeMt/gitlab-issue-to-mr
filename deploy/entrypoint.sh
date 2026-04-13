@@ -422,6 +422,10 @@ EOF
 
 chmod 644 /tmp/claude_prompt.txt
 chown -R codify:codify /workspace /tmp/claude_prompt.txt
+# Ensure session storage directory is writable by the codify user
+if [ -d /home/codify/.claude ]; then
+    chown -R codify:codify /home/codify/.claude
+fi
 
 export ANTHROPIC_BASE_URL
 export ANTHROPIC_API_KEY

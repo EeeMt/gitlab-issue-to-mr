@@ -86,6 +86,8 @@ services:
         condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Session storage — shared with worker containers via host path
+      - /var/codify/sessions:/var/codify/sessions
       # Mount CA cert (local-only, not in git — place /opt/ca.crt on Docker host)
       - type: bind
         source: /opt/ca.crt
