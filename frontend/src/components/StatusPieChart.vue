@@ -3,10 +3,10 @@ import { computed } from 'vue'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { PieChart } from 'echarts/charts'
-import { TooltipComponent } from 'echarts/components'
+import { TooltipComponent, LegendComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 
-use([PieChart, TooltipComponent, CanvasRenderer])
+use([PieChart, TooltipComponent, LegendComponent, CanvasRenderer])
 
 const props = defineProps<{
   data: { name: string; value: number; color: string }[]
@@ -18,12 +18,20 @@ const option = computed(() => ({
     formatter: '{b}: {c} ({d}%)',
     appendTo: 'body',
     textStyle: { fontSize: 12 },
+    padding: [4, 8],
+  },
+  legend: {
+    bottom: 0,
+    left: 'center',
+    itemWidth: 10,
+    itemHeight: 10,
+    textStyle: { fontSize: 11, color: '#666' },
   },
   series: [
     {
       type: 'pie',
       radius: ['40%', '70%'],
-      center: ['50%', '50%'],
+      center: ['50%', '45%'],
       avoidLabelOverlap: false,
       itemStyle: { borderRadius: 4, borderColor: '#fff', borderWidth: 2 },
       label: { show: false },
