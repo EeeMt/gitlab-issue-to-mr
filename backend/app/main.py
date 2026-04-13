@@ -272,7 +272,7 @@ app.include_router(
     prompt_templates.router,
     prefix="/api",
     tags=["prompt-templates"],
-    dependencies=[Depends(require_admin_user)],
+    dependencies=[Depends(require_authenticated_user)],
 )
 app.include_router(
     admin_users.router,

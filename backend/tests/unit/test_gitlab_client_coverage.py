@@ -666,6 +666,7 @@ class TestGetBranches(unittest.TestCase):
         client.gl.http_list.assert_called_once_with(
             "/projects/42/repository/branches",
             per_page=100,
+            get_all=True,
         )
 
 

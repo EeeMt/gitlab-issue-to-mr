@@ -385,12 +385,12 @@ class GitLabClient:
             List of branch dicts with name
         """
         logger.info(f"Fetching branches for project: {project_id}")
-        # Use http_list with iterator to get all branches
-        # The correct endpoint is /projects/:id/repository/branches
-        all_branches = list(self.gl.http_list(
+        # Use http_list with get_all=True to ensure all pages are fetched
+        all_branches = self.gl.http_list(
             f"/projects/{project_id}/repository/branches",
-            per_page=100
-        ))
+            per_page=100,
+            get_all=True,
+        )
         return [{"name": b["name"]} for b in all_branches]
 
     def get_project_hooks(self, project_id: int) -> list[dict[str, Any]]:
