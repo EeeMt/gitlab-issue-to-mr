@@ -317,6 +317,7 @@ import { useI18n } from 'vue-i18n'
 import {
   getAnalytics,
   getProjects,
+  getStats,
   type AnalyticsErrorRow,
   type AnalyticsInitiatorOption,
   type AnalyticsInitiatorRow,
@@ -349,6 +350,7 @@ const availableProjects = ref<Project[]>([])
 const loading = ref(false)
 const projectsLoading = ref(false)
 const hasLoadedOnce = ref(false)
+const issueTotal = ref(0)
 const windowDays = ref<number>(30)
 const selectedProjectId = ref<number | null>(null)
 const selectedInitiatorUsername = ref<string | null>(null)
@@ -440,11 +442,19 @@ function buildTrendBars(values: { key: string; label: string; value: number; dis
 
 const summaryItems = computed(() => {
   const summary = analytics.value?.summary
+  const items: Array<{ label: string; value: string; note?: string }> = []
+
+  // Always show Issues card
+  items.push({
+    label: t('analytics.issues'),
+    value: String(issueTotal.value)
+  })
+
   if (!summary) {
-    return []
+    return items
   }
 
-  return [
+  items.push(
     { label: t('analytics.tasks'), value: String(summary.total_tasks), note: t('analytics.dayWindow', { days: windowDays.value }) },
     {
       label: t('analytics.successRate'),
@@ -498,7 +508,9 @@ const summaryItems = computed(() => {
         ? t('analytics.since', { time: formatDateTime(summary.initiator_tracking_started_at) })
         : t('analytics.noTrackedInitiators')
     }
-  ]
+  )
+
+  return items
 })
 
 const taskTrendBars = computed(() =>
@@ -753,8 +765,18 @@ async function fetchProjects() {
   }
 }
 
+async function fetchIssueStats() {
+  try {
+    const stats = await getStats()
+    issueTotal.value = stats.issues?.total ?? 0
+  } catch {
+    // Non-critical — don't block analytics
+  }
+}
+
 function refresh() {
   fetchAnalytics()
+  fetchIssueStats()
 }
 
 watch(windowDays, () => {
@@ -787,6 +809,7 @@ watch(selectedInitiatorUsername, () => {
 onMounted(() => {
   fetchProjects()
   fetchAnalytics()
+  fetchIssueStats()
 })
 </script>
 
