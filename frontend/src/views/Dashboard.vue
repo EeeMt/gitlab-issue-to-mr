@@ -398,6 +398,14 @@ onMounted(() => {
 .dashboard-metric-card {
   height: 240px;
   border-radius: var(--app-card-radius);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.03);
+  border-color: rgba(15, 23, 42, 0.06) !important;
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
+}
+
+.dashboard-metric-card:hover {
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06), 0 8px 20px rgba(15, 23, 42, 0.05);
+  transform: translateY(-1px);
 }
 
 .dashboard-metric-card--wide {
