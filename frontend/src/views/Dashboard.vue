@@ -133,6 +133,7 @@ import { useBreakpoints } from '../composables/useBreakpoints'
 import { usePolling } from '../composables/usePolling'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
 import { formatPriority } from '../utils/format'
+import { authState } from '../auth'
 
 const router = useRouter()
 const message = useMessage()
@@ -245,10 +246,12 @@ async function fetchData() {
   if (loading.value) return
   loading.value = true
   try {
+    const userId = authState.user?.id
+    const username = authState.user?.username
     const [issuesRes, runningRes, queuedRes] = await Promise.all([
-      getIssues({ page: 1, page_size: 5 }),
-      getTasksPaginated({ status: 'running', page: 1, page_size: 10 }),
-      getTasksPaginated({ status: 'queued', page: 1, page_size: 10 }),
+      getIssues({ page: 1, page_size: 5, ...(userId ? { initiator_user_id: userId } : {}) }),
+      getTasksPaginated({ status: 'running', page: 1, page_size: 10, ...(username ? { initiator_username: username } : {}) }),
+      getTasksPaginated({ status: 'queued', page: 1, page_size: 10, ...(username ? { initiator_username: username } : {}) }),
     ])
     recentIssues.value = issuesRes.items
     runningTasks.value = runningRes.items

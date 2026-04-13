@@ -141,6 +141,7 @@ async def create_issue(
 async def list_issues(
     status: Optional[str] = None,
     project_id: Optional[int] = None,
+    initiator_user_id: Optional[int] = None,
     page: int = 1,
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
@@ -178,6 +179,9 @@ async def list_issues(
 
     if project_id is not None:
         query = query.where(Issue.project_id == project_id)
+
+    if initiator_user_id is not None:
+        query = query.where(Issue.initiator_user_id == initiator_user_id)
 
     # Total count
     count_q = select(func.count()).select_from(

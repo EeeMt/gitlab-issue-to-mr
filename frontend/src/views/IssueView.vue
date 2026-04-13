@@ -14,22 +14,24 @@
           </n-tag>
         </template>
         <template #actions>
-          <n-button data-testid="issue-edit-button" :disabled="issue.status === 'closed'" @click="openEditModal">
-            {{ t('issue.edit') }}
-          </n-button>
-          <n-popconfirm @positive-click="handleClose">
-            <template #trigger>
-              <n-button
-                type="error"
-                secondary
-                :disabled="issue.status === 'closed'"
-                data-testid="issue-close-button"
-              >
-                {{ t('issue.close') }}
-              </n-button>
-            </template>
-            {{ t('issue.confirmClose') }}
-          </n-popconfirm>
+          <template v-if="isOwner">
+            <n-button data-testid="issue-edit-button" :disabled="issue.status === 'closed'" @click="openEditModal">
+              {{ t('issue.edit') }}
+            </n-button>
+            <n-popconfirm @positive-click="handleClose">
+              <template #trigger>
+                <n-button
+                  type="error"
+                  secondary
+                  :disabled="issue.status === 'closed'"
+                  data-testid="issue-close-button"
+                >
+                  {{ t('issue.close') }}
+                </n-button>
+              </template>
+              {{ t('issue.confirmClose') }}
+            </n-popconfirm>
+          </template>
         </template>
       </PageHeader>
 
@@ -173,7 +175,7 @@
               {{ t('issue.taskCount', { count: issue.tasks?.length ?? 0 }) }}
             </div>
             <n-button
-              v-if="issue.status !== 'closed'"
+              v-if="isOwner && issue.status !== 'closed'"
               size="small"
               type="primary"
               @click="showCreateDrawer = true"
@@ -420,6 +422,7 @@ import {
 import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
+import { authState, isAdmin } from '../auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -428,6 +431,14 @@ const { t } = useI18n()
 const { isMobile } = useBreakpoints()
 
 const issueId = computed(() => Number(route.params.id))
+
+const isOwner = computed(() => {
+  if (!issue.value) return false
+  if (!authState.oidcEnabled) return true
+  if (!authState.user) return false
+  if (isAdmin.value) return true
+  return issue.value.initiator_user_id === authState.user.id
+})
 
 // --- State ---
 const issue = ref<Issue | null>(null)
@@ -593,6 +604,7 @@ const taskColumns = computed<DataTableColumns<Task>>(() => {
           ])
         }
         if (!['failed', 'cancelled'].includes(row.status)) return ''
+        if (!isOwner.value) return ''
         return h(
           NButton,
           {

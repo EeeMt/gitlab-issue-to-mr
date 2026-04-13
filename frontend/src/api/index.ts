@@ -1042,6 +1042,7 @@ export async function deletePromptTemplate(templateId: number): Promise<void> {
 export async function getIssues(params?: {
   status?: string
   project_id?: number
+  initiator_user_id?: number
   page?: number
   page_size?: number
 }): Promise<IssueListResponse> {
