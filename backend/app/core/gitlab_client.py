@@ -41,6 +41,7 @@ class GitLabClient:
             self.base_url,
             private_token=self.private_token,
             ssl_verify=get_ssl_verify(self.settings),
+            keep_base_url=True,
         )
         logger.info(f"GitLab client initialized: {self.base_url}")
 
