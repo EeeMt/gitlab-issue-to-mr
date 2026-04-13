@@ -243,8 +243,8 @@ function buildMenuSection(labelKey: string, children: MenuOption[]): MenuOption[
 const menuOptions = computed<MenuOption[]>(() => {
   const workspaceItems: MenuOption[] = [
     buildMenuItem('nav.dashboard', 'Dashboard', GridOutline),
-    buildMenuItem('nav.tasks', 'TaskList', ListOutline),
     buildMenuItem('nav.issues', 'Issues', DocumentTextOutline),
+    buildMenuItem('nav.tasks', 'TaskList', ListOutline),
   ]
 
   if (authState.authenticated) {
