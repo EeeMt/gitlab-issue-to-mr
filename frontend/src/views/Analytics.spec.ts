@@ -255,13 +255,15 @@ describe('Analytics', () => {
     await flushPromises()
 
     const items = wrapper.vm.summaryItems as any[]
-    expect(items).toHaveLength(8)
-    // First item: total_tasks = 42
-    expect(items[0].value).toBe('42')
-    // Second item: success_rate = 0.857 → 85.7%
-    expect(items[1].value).toBe('85.7%')
-    // Fifth item: total_changes = 1500
-    expect(items[4].value).toBe('1500')
+    expect(items).toHaveLength(9)
+    // First item: Issues (issueTotal = 0, getStats not mocked)
+    expect(items[0].value).toBe('0')
+    // Second item: total_tasks = 42
+    expect(items[1].value).toBe('42')
+    // Third item: success_rate = 0.857 → 85.7%
+    expect(items[2].value).toBe('85.7%')
+    // Sixth item: total_changes = 1500
+    expect(items[5].value).toBe('1500')
   })
 
   it('does not show summary when hasLoadedOnce is false', async () => {

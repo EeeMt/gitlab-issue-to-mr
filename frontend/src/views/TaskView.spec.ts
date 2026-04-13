@@ -19,7 +19,8 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     getAuthStatus: vi.fn<() => Promise<any>>(),
     streamTaskLogs: vi.fn<() => any>(),
     getScheduledTasks: vi.fn<() => Promise<any[]>>(),
-    getConfig: vi.fn<() => Promise<any>>()
+    getConfig: vi.fn<() => Promise<any>>(),
+    getIssue: vi.fn<() => Promise<any>>()
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => {
@@ -70,7 +71,8 @@ vi.mock('../api', () => ({
   getAuthStatus: mockApi.getAuthStatus,
   streamTaskLogs: mockApi.streamTaskLogs,
   getScheduledTasks: mockApi.getScheduledTasks,
-  getConfig: mockApi.getConfig
+  getConfig: mockApi.getConfig,
+  getIssue: mockApi.getIssue
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -467,6 +469,7 @@ describe('TaskView', () => {
     })
     ;(mockApi.getScheduledTasks as Mock).mockResolvedValue([])
     ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: {} })
+    ;(mockApi.getIssue as Mock).mockResolvedValue({ tasks: [] })
 
     wrapper = mount(TaskView, {
       global: {
@@ -748,9 +751,8 @@ describe('TaskView', () => {
         return (mockApi.getTaskLogs as Mock).mock.calls.length > 0
       })
 
-      await vi.waitFor(() => {
-        return wrapper.find('.log-content').exists()
-      })
+      await flushPromises()
+      await nextTick()
 
       expect(wrapper.find('.log-content').exists()).toBe(true)
     })
@@ -776,9 +778,8 @@ describe('TaskView', () => {
         return (mockApi.getTaskLogs as Mock).mock.calls.length > 0
       })
 
-      await vi.waitFor(() => {
-        return wrapper.find('.log-content').exists()
-      })
+      await flushPromises()
+      await nextTick()
 
       const logContent = wrapper.find('.log-content')
       expect(logContent.exists()).toBe(true)

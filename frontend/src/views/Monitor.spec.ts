@@ -1075,12 +1075,13 @@ describe('Monitor', () => {
       expect(wrapper.vm.kanbanProjectLabel({ project_name: null, project_path_with_namespace: null })).toBe('—')
     })
 
-    it('kanbanIssueLabel returns #iid or kanbanManual', async () => {
+    it('kanbanIssueLabel returns #id title or dash', async () => {
       wrapper = mountComponent()
       await flushPromises()
 
-      expect(wrapper.vm.kanbanIssueLabel({ issue_iid: 42 })).toBe('#42')
-      expect(wrapper.vm.kanbanIssueLabel({ issue_iid: null })).toBe('monitor.kanbanManual')
+      expect(wrapper.vm.kanbanIssueLabel({ issue: { id: 42, title: 'Login bug' } })).toBe('#42 Login bug')
+      expect(wrapper.vm.kanbanIssueLabel({ issue: null })).toBe('—')
+      expect(wrapper.vm.kanbanIssueLabel({})).toBe('—')
     })
 
     it('getExecutionDuration returns "-" when started_at or completed_at is missing', async () => {
