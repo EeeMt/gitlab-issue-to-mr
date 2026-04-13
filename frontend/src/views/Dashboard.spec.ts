@@ -314,11 +314,6 @@ describe('Dashboard', () => {
       await mountDashboard()
       expect(wrapper.find('[data-testid="dashboard-activity-heatmap"]').exists()).toBe(true)
     })
-
-    it('shows recent-activity section', async () => {
-      await mountDashboard()
-      expect(wrapper.find('[data-testid="dashboard-recent-activity"]').exists()).toBe(true)
-    })
   })
 
   // -----------------------------------------------------------------------
@@ -370,31 +365,6 @@ describe('Dashboard', () => {
     it('populates heatmapData from response', async () => {
       await mountDashboard()
       expect(wrapper.vm.heatmapData).toEqual(mockHeatmapData)
-    })
-  })
-
-  // -----------------------------------------------------------------------
-  // 3. Recent activity fetching (completed + failed)
-  // -----------------------------------------------------------------------
-  describe('recent activity fetching', () => {
-    it('calls getTasksPaginated for completed and failed', async () => {
-      await mountDashboard()
-      const calls = mockApi.getTasksPaginated.mock.calls
-      expect(calls).toEqual(
-        expect.arrayContaining([
-          [expect.objectContaining({ status: 'completed', page: 1, page_size: 5 })],
-          [expect.objectContaining({ status: 'failed', page: 1, page_size: 5 })],
-        ]),
-      )
-    })
-
-    it('merges and sorts activity by time descending', async () => {
-      await mountDashboard()
-      const activity = wrapper.vm.recentActivity as Task[]
-      expect(activity.length).toBe(2)
-      // id=30 completed_at 09:00 comes before id=40 completed_at 08:00
-      expect(activity[0].id).toBe(30)
-      expect(activity[1].id).toBe(40)
     })
   })
 
@@ -591,20 +561,6 @@ describe('Dashboard', () => {
       await flushPromises()
 
       expect(wrapper.vm.heatmapData).toEqual([])
-    })
-
-    it('handles activity fetch failure silently', async () => {
-      setupDefaultMocks()
-      mockApi.getTasksPaginated.mockImplementation((params: any) => {
-        if (params.status === 'running') return Promise.resolve({ items: mockRunningTasks, total: 1, page: 1, page_size: 10 })
-        if (params.status === 'queued') return Promise.resolve({ items: mockQueuedTasks, total: 1, page: 1, page_size: 10 })
-        return Promise.reject(new Error('Activity down'))
-      })
-
-      wrapper = mount(Dashboard, { global: { plugins: [router] } })
-      await flushPromises()
-
-      expect(wrapper.vm.recentActivityTasks).toEqual([])
     })
   })
 

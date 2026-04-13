@@ -108,21 +108,6 @@
           <ActivityHeatmap :data="heatmapData" />
         </n-card>
 
-        <n-card
-          :title="t('dashboard.recentActivity')"
-          :bordered="false"
-          class="dashboard-table-card"
-          data-testid="dashboard-recent-activity"
-        >
-          <n-data-table
-            :columns="activityColumns"
-            :data="recentActivity"
-            :loading="loading"
-            :row-key="(row: Task) => row.id"
-            :row-props="taskRowProps"
-            :bordered="false"
-          />
-        </n-card>
       </n-space>
     </n-spin>
   </div>
@@ -165,7 +150,6 @@ function taskRowProps(row: Task) {
 const recentIssues = ref<Issue[]>([])
 const runningTasks = ref<Task[]>([])
 const queuedTasks = ref<Task[]>([])
-const recentActivityTasks = ref<Task[]>([])
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
 
@@ -178,8 +162,6 @@ const statsFailed = ref(0)
 const heatmapData = ref<ActivityHeatmapEntry[]>([])
 
 const runningAndQueuedTasks = computed(() => [...runningTasks.value, ...queuedTasks.value])
-
-const recentActivity = computed(() => recentActivityTasks.value)
 
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
@@ -206,19 +188,6 @@ const issueColumns = computed<DataTableColumns<Issue>>(() => [
     title: t('issue.field.title'),
     key: 'title',
     ellipsis: { tooltip: true },
-    render: (row) =>
-      h(
-        NButton,
-        {
-          text: true,
-          type: 'primary',
-          onClick: (e: MouseEvent) => {
-            e.stopPropagation()
-            router.push(`/issues/${row.id}`)
-          },
-        },
-        () => row.title,
-      ),
   },
   {
     title: t('dashboard.status'),
@@ -255,21 +224,6 @@ const taskColumns = computed<DataTableColumns<Task>>(() => [
     title: t('dashboard.task'),
     key: 'user_prompt',
     ellipsis: { tooltip: true },
-    render: (row) => {
-      const label = row.user_prompt || '-'
-      return h(
-        NButton,
-        {
-          text: true,
-          type: 'primary',
-          onClick: (e: MouseEvent) => {
-            e.stopPropagation()
-            router.push(`/tasks/${row.id}`)
-          },
-        },
-        () => label,
-      )
-    },
   },
   {
     title: t('dashboard.priority'),
@@ -285,57 +239,6 @@ const taskColumns = computed<DataTableColumns<Task>>(() => [
   },
 ])
 
-const activityColumns = computed<DataTableColumns<Task>>(() => [
-  {
-    title: t('dashboard.id'),
-    key: 'id',
-    width: 60,
-  },
-  {
-    title: t('dashboard.task'),
-    key: 'user_prompt',
-    ellipsis: { tooltip: true },
-    render: (row) => {
-      const label = row.user_prompt || '-'
-      return h(
-        NButton,
-        {
-          text: true,
-          type: 'primary',
-          onClick: (e: MouseEvent) => {
-            e.stopPropagation()
-            router.push(`/tasks/${row.id}`)
-          },
-        },
-        () => label,
-      )
-    },
-  },
-  {
-    title: t('dashboard.status'),
-    key: 'status',
-    width: 100,
-    render: (row) => {
-      const statusColors: Record<string, 'default' | 'success' | 'error'> = {
-        completed: 'success',
-        failed: 'error',
-        cancelled: 'default',
-      }
-      return h(
-        NTag,
-        { type: statusColors[row.status] || 'default', size: 'small' },
-        () => row.status,
-      )
-    },
-  },
-  {
-    title: t('common.completed'),
-    key: 'completed_at',
-    width: 140,
-    render: (row) => (row.completed_at ? formatDateTimeUtc8Compact(row.completed_at) : '-'),
-  },
-])
-
 async function fetchData() {
   if (loading.value) return
   loading.value = true
@@ -348,23 +251,6 @@ async function fetchData() {
     recentIssues.value = issuesRes.items
     runningTasks.value = runningRes.items
     queuedTasks.value = queuedRes.items
-
-    // Fetch recent activity (completed/failed/cancelled)
-    try {
-      const [completedRes, failedRes] = await Promise.all([
-        getTasksPaginated({ status: 'completed', page: 1, page_size: 5 }),
-        getTasksPaginated({ status: 'failed', page: 1, page_size: 5 }),
-      ])
-      const allActivity = [...completedRes.items, ...failedRes.items]
-      allActivity.sort((a, b) => {
-        const aTime = a.completed_at || a.created_at
-        const bTime = b.completed_at || b.created_at
-        return new Date(bTime).getTime() - new Date(aTime).getTime()
-      })
-      recentActivityTasks.value = allActivity.slice(0, 10)
-    } catch {
-      // Activity is supplementary
-    }
   } catch {
     message.error(t('dashboard.failedToFetchTasks'))
   } finally {

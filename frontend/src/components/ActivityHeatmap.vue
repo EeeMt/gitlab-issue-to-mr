@@ -1,7 +1,8 @@
 <template>
   <div class="activity-heatmap" data-testid="activity-heatmap">
-    <div class="activity-heatmap__grid">
-      <div class="activity-heatmap__months">
+    <div class="activity-heatmap__wrapper">
+      <!-- Row 1: month labels (above cells, offset by day-label width) -->
+      <div class="activity-heatmap__months" :style="{ gridTemplateColumns: `repeat(${weeks.length}, 13px)` }">
         <span
           v-for="m in monthLabels"
           :key="m.key"
@@ -9,26 +10,29 @@
           :style="{ gridColumnStart: m.col }"
         >{{ m.label }}</span>
       </div>
-      <div class="activity-heatmap__days">
-        <span class="activity-heatmap__day-label">{{ t('common.mon') }}</span>
-        <span class="activity-heatmap__day-label"></span>
-        <span class="activity-heatmap__day-label">{{ t('common.wed') }}</span>
-        <span class="activity-heatmap__day-label"></span>
-        <span class="activity-heatmap__day-label">{{ t('common.fri') }}</span>
-        <span class="activity-heatmap__day-label"></span>
-        <span class="activity-heatmap__day-label"></span>
-      </div>
-      <div class="activity-heatmap__cells" :style="{ gridTemplateColumns: `repeat(${weeks.length}, 13px)` }">
-        <template v-for="(week, wi) in weeks" :key="wi">
-          <div
-            v-for="(day, di) in week"
-            :key="`${wi}-${di}`"
-            class="activity-heatmap__cell"
-            :class="day ? `activity-heatmap__cell--level-${getLevel(day.count)}` : 'activity-heatmap__cell--empty'"
-            :title="day ? `${day.count} ${day.count === 1 ? 'task' : 'tasks'} on ${day.date}` : ''"
-            :style="{ gridRow: di + 1, gridColumn: wi + 1 }"
-          />
-        </template>
+      <!-- Row 2: day labels + cell grid -->
+      <div class="activity-heatmap__body">
+        <div class="activity-heatmap__days">
+          <span class="activity-heatmap__day-label">{{ t('common.mon') }}</span>
+          <span class="activity-heatmap__day-label"></span>
+          <span class="activity-heatmap__day-label">{{ t('common.wed') }}</span>
+          <span class="activity-heatmap__day-label"></span>
+          <span class="activity-heatmap__day-label">{{ t('common.fri') }}</span>
+          <span class="activity-heatmap__day-label"></span>
+          <span class="activity-heatmap__day-label"></span>
+        </div>
+        <div class="activity-heatmap__cells" :style="{ gridTemplateColumns: `repeat(${weeks.length}, 13px)` }">
+          <template v-for="(week, wi) in weeks" :key="wi">
+            <div
+              v-for="(day, di) in week"
+              :key="`${wi}-${di}`"
+              class="activity-heatmap__cell"
+              :class="day ? `activity-heatmap__cell--level-${getLevel(day.count)}` : 'activity-heatmap__cell--empty'"
+              :title="day ? `${day.count} ${day.count === 1 ? 'task' : 'tasks'} on ${day.date}` : ''"
+              :style="{ gridRow: di + 1, gridColumn: wi + 1 }"
+            />
+          </template>
+        </div>
       </div>
     </div>
     <div class="activity-heatmap__legend">
@@ -131,9 +135,7 @@ function getLevel(count: number): number {
 </script>
 
 <style scoped>
-.activity-heatmap__grid {
-  display: flex;
-  gap: 4px;
+.activity-heatmap__wrapper {
   overflow-x: auto;
 }
 
@@ -142,19 +144,24 @@ function getLevel(count: number): number {
   grid-template-rows: 1fr;
   font-size: 10px;
   color: var(--n-text-color-3);
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   margin-left: 32px;
+  gap: 2px;
 }
 
 .activity-heatmap__month-label {
   white-space: nowrap;
 }
 
+.activity-heatmap__body {
+  display: flex;
+  gap: 4px;
+}
+
 .activity-heatmap__days {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin-right: 4px;
   justify-content: flex-start;
 }
 
@@ -177,6 +184,12 @@ function getLevel(count: number): number {
   width: 11px;
   height: 11px;
   border-radius: 2px;
+  transition: outline 0.15s ease;
+}
+
+.activity-heatmap__cell:hover:not(.activity-heatmap__cell--empty) {
+  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline-offset: -1px;
 }
 
 .activity-heatmap__cell--empty {
