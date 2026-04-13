@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Set
 
-from sqlalchemy import case, select, func
+from sqlalchemy import case, select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings as get_settings
@@ -77,6 +77,10 @@ class Scheduler:
         async with AsyncSessionLocal() as db:
             await load_runtime_config_from_db(db)
             await self._maybe_cleanup_sessions(db)
+
+            # Transition eligible PENDING tasks → QUEUED
+            await self._mark_eligible_as_queued(db)
+
             settings = get_settings()
             # Count running tasks for concurrency control
             running_count = await self._get_running_count(db)
@@ -113,6 +117,34 @@ class Scheduler:
             logger.info("Cleaned up %s stale dashboard sessions", deleted_count)
         self._last_session_cleanup_at = now
 
+    async def _mark_eligible_as_queued(self, db: AsyncSession) -> None:
+        """Mark eligible PENDING tasks as QUEUED.
+
+        A PENDING task becomes QUEUED when:
+        - scheduled_at is NULL (immediate) or scheduled_at <= now
+        - Its issue is not already running (issue mutex)
+        """
+        now = utcnow()
+        # Build list of issue_ids that are currently running (mutex-blocked)
+        blocked_issue_ids = list(self._running_issues) if self._running_issues else []
+
+        stmt = (
+            update(Task)
+            .where(
+                Task.status == TaskStatus.PENDING,
+                (Task.scheduled_at == None) | (Task.scheduled_at <= now),
+            )
+            .values(status=TaskStatus.QUEUED)
+        )
+        if blocked_issue_ids:
+            stmt = stmt.where(
+                (Task.issue_id == None) | (~Task.issue_id.in_(blocked_issue_ids))
+            )
+        result = await db.execute(stmt)
+        if result.rowcount > 0:
+            await db.commit()
+            logger.debug(f"Marked {result.rowcount} eligible task(s) as QUEUED")
+
     async def _get_running_count(self, db: AsyncSession) -> int:
         """Get count of currently running tasks."""
         result = await db.execute(
@@ -121,7 +153,10 @@ class Scheduler:
         return result.scalar() or 0
 
     async def _get_next_task(self, db: AsyncSession) -> Task | None:
-        """Get the next task to execute based on priority and scheduled time.
+        """Get the next QUEUED task to execute based on priority.
+
+        Only picks QUEUED tasks — eligible PENDING tasks are transitioned
+        to QUEUED by _mark_eligible_as_queued() earlier in the cycle.
 
         Ordering:
         1. priority ASC — P0(0) runs before P1(1) before P2(2)
@@ -130,14 +165,9 @@ class Scheduler:
         3. scheduled_at ASC — earlier due times first
         4. created_at ASC — FIFO tiebreaker
         """
-        now = utcnow()
-
         result = await db.execute(
             select(Task)
-            .where(
-                Task.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED]),
-                (Task.scheduled_at == None) | (Task.scheduled_at <= now)
-            )
+            .where(Task.status == TaskStatus.QUEUED)
             .order_by(
                 Task.priority.asc(),
                 case((Task.scheduled_at.is_not(None), 0), else_=1),

@@ -347,7 +347,7 @@ class TestRescheduleTask:
         db.execute.return_value = MagicMock(scalar_one_or_none=lambda: task)
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
-        with pytest.raises(HTTPException, match="Task must be in PENDING status to reschedule"):
+        with pytest.raises(HTTPException, match="Task must be in PENDING or QUEUED status to reschedule"):
             await reschedule_task(
                 task_id=1,
                 request=request,
@@ -372,7 +372,7 @@ class TestRescheduleTask:
         db.execute.return_value = MagicMock(scalar_one_or_none=lambda: task)
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
-        with pytest.raises(HTTPException, match="Only scheduled tasks can update their scheduled time"):
+        with pytest.raises(HTTPException, match="Only scheduled or queued tasks can update their scheduled time"):
             await reschedule_task(
                 task_id=1,
                 request=request,

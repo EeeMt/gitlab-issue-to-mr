@@ -144,6 +144,7 @@ class TestRunCycleManualTask(unittest.IsolatedAsyncioTestCase):
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
              patch("app.scheduler.load_runtime_config_from_db", new_callable=AsyncMock), \
              patch.object(scheduler, "_maybe_cleanup_sessions", new_callable=AsyncMock), \
+             patch.object(scheduler, "_mark_eligible_as_queued", new_callable=AsyncMock), \
              patch("app.scheduler.get_settings") as mock_settings, \
              patch.object(scheduler, "_get_running_count", new_callable=AsyncMock, return_value=0), \
              patch.object(scheduler, "_get_next_task", new_callable=AsyncMock, return_value=task), \

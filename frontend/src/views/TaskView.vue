@@ -225,6 +225,20 @@
                     </n-button>
                   </div>
 
+                  <!-- QUEUED info -->
+                  <div
+                    v-if="task && task.status === 'queued'"
+                    class="task-actions__item task-actions__item--info"
+                  >
+                    <div class="task-actions__meta">
+                      <div class="task-actions__label">{{ t('taskView.queuedStatus') }}</div>
+                      <div class="task-actions__description">
+                        {{ t('taskView.queuedStatusDescription') }}
+                      </div>
+                    </div>
+                    <n-tag type="info" round>{{ t('status.queued') }}</n-tag>
+                  </div>
+
                   <div v-if="!hasActions" class="task-actions__empty">
                     {{ t('taskView.noManualAction') }}
                   </div>
@@ -348,7 +362,11 @@ const hasActions = computed(() => {
   return ['pending', 'queued', 'running', 'failed', 'cancelled'].includes(task.value.status)
 })
 
-const canReschedule = computed(() => task.value?.status === 'pending' && !!task.value?.scheduled_at)
+const canReschedule = computed(() => {
+  const s = task.value?.status
+  if (s === 'queued') return true
+  return s === 'pending' && !!task.value?.scheduled_at
+})
 const canManageTask = computed(() => {
   if (!task.value) return false
   if (!authState.oidcEnabled) return true

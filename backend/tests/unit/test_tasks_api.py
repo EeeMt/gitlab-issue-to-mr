@@ -82,12 +82,13 @@ class ValidateExecuteTests(unittest.TestCase):
     """Tests for validate_task_status_for_execute."""
 
     def test_execute_valid_status(self) -> None:
-        """PENDING task can be executed immediately."""
+        """PENDING and QUEUED tasks can be executed immediately."""
         validate_task_status_for_execute(_make_task(TaskStatus.PENDING))
+        validate_task_status_for_execute(_make_task(TaskStatus.QUEUED))
 
     def test_execute_invalid_statuses(self) -> None:
-        """Non-PENDING tasks cannot be executed immediately."""
-        for status in [TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.FAILED,
+        """Non-PENDING/QUEUED tasks cannot be executed immediately."""
+        for status in [TaskStatus.RUNNING, TaskStatus.FAILED,
                        TaskStatus.CANCELLED, TaskStatus.COMPLETED]:
             with self.subTest(status=status):
                 with self.assertRaises(HTTPException) as ctx:
@@ -102,13 +103,17 @@ class ValidateExecuteTests(unittest.TestCase):
 class ValidateRescheduleTests(unittest.TestCase):
     """Tests for validate_task_status_for_reschedule."""
 
-    def test_reschedule_valid(self) -> None:
+    def test_reschedule_valid_pending(self) -> None:
         """PENDING task with a scheduled_at can be rescheduled."""
         future = datetime.now(UTC) + timedelta(hours=1)
         validate_task_status_for_reschedule(_make_task(TaskStatus.PENDING, scheduled_at=future))
 
+    def test_reschedule_valid_queued(self) -> None:
+        """QUEUED task can be rescheduled (pushes it back to PENDING)."""
+        validate_task_status_for_reschedule(_make_task(TaskStatus.QUEUED))
+
     def test_reschedule_invalid_status(self) -> None:
-        """Non-PENDING tasks cannot be rescheduled."""
+        """Non-PENDING/QUEUED tasks cannot be rescheduled."""
         future = datetime.now(UTC) + timedelta(hours=1)
         for status in [TaskStatus.RUNNING, TaskStatus.FAILED, TaskStatus.COMPLETED]:
             with self.subTest(status=status):
@@ -116,8 +121,8 @@ class ValidateRescheduleTests(unittest.TestCase):
                     validate_task_status_for_reschedule(_make_task(status, scheduled_at=future))
                 self.assertEqual(ctx.exception.status_code, 400)
 
-    def test_reschedule_raises_when_scheduled_at_is_none(self) -> None:
-        """PENDING task without scheduled_at (manual task) cannot be rescheduled."""
+    def test_reschedule_raises_when_pending_no_scheduled_at(self) -> None:
+        """PENDING task without scheduled_at (immediate task) cannot be rescheduled."""
         with self.assertRaises(HTTPException) as ctx:
             validate_task_status_for_reschedule(_make_task(TaskStatus.PENDING, scheduled_at=None))
         self.assertEqual(ctx.exception.status_code, 400)

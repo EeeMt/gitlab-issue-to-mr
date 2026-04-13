@@ -266,6 +266,9 @@ const en = {
     executeNow: 'Execute Now',
     executeNowDescription:
       'Remove scheduling delay and send the task straight to execution as soon as the worker is available.',
+    queuedStatus: 'Queued for Execution',
+    queuedStatusDescription:
+      'This task is eligible and waiting for a concurrency slot. It will start automatically when capacity becomes available.',
     noManualAction: 'No manual action is available for the current task state.',
     error: 'Error',
     errorSubtitle: 'Most recent failure reported by the task runner',
@@ -510,7 +513,7 @@ const en = {
     runningNowLabel: 'Running Now',
     runningNowHelp: '{containers} worker container(s) currently visible for live work.',
     backlogLabel: 'Queue Pressure',
-    backlogHelp: '{count} tasks waiting behind active execution.',
+    backlogHelp: '{queued} queued, {pending} pending.',
     activeContainersLabel: 'Active Containers',
     activeContainersHelp: '{linked} running container(s) map cleanly to live tasks.',
     healthSummaryLabel: 'System Health',

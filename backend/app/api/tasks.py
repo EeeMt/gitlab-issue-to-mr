@@ -630,6 +630,9 @@ async def reschedule_task(
 
     previous_scheduled_at = task.scheduled_at
     task.scheduled_at = normalized_scheduled
+    # Rescheduling to a future time resets QUEUED → PENDING
+    if task.status == TaskStatus.QUEUED:
+        task.status = TaskStatus.PENDING
     await db.commit()
     await db.refresh(task)
 

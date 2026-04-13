@@ -520,7 +520,7 @@
                           <span>{{ item.value }}</span>
                         </div>
                         <div class="status-breakdown__track">
-                          <div class="status-breakdown__fill" :style="{ width: `${item.percent}%` }"></div>
+                          <div class="status-breakdown__fill" :class="`status-breakdown__fill--${item.key}`" :style="{ width: `${item.percent}%` }"></div>
                         </div>
                       </div>
                     </div>
@@ -823,7 +823,8 @@ const statusBreakdown = computed(() => {
   const total = Math.max(stats.value.total, 1)
 
   return [
-    { key: 'pending', label: t('monitor.pending'), value: stats.value.pending + stats.value.queued, percent: ((stats.value.pending + stats.value.queued) / total) * 100 },
+    { key: 'pending', label: t('monitor.pending'), value: stats.value.pending, percent: (stats.value.pending / total) * 100 },
+    { key: 'queued', label: t('monitor.queued'), value: stats.value.queued, percent: (stats.value.queued / total) * 100 },
     { key: 'running', label: t('monitor.running'), value: stats.value.running, percent: (stats.value.running / total) * 100 },
     { key: 'completed', label: t('monitor.completed'), value: stats.value.completed, percent: (stats.value.completed / total) * 100 },
     { key: 'failed', label: t('monitor.failed'), value: stats.value.failed, percent: (stats.value.failed / total) * 100 },
@@ -918,7 +919,7 @@ const overviewCards = computed<MonitorCard[]>(() => [
     key: 'backlog',
     label: t('monitor.backlogLabel'),
     value: String(pendingQueuedTasks.value.length),
-    help: t('monitor.backlogHelp', { count: stats.value.pending + stats.value.queued }),
+    help: t('monitor.backlogHelp', { pending: stats.value.pending, queued: stats.value.queued }),
     tag: pendingQueuedTasks.value.length > 0 ? t('monitor.waiting') : t('monitor.clear'),
     tagType: pendingQueuedTasks.value.length > 6 ? 'warning' : 'info'
   },
@@ -1713,6 +1714,12 @@ onBeforeUnmount(() => {
   border-radius: inherit;
   background: linear-gradient(90deg, #2563eb, #60a5fa);
 }
+.status-breakdown__fill--pending { background: linear-gradient(90deg, #94a3b8, #b0bec5); }
+.status-breakdown__fill--queued { background: linear-gradient(90deg, #2563eb, #60a5fa); }
+.status-breakdown__fill--running { background: linear-gradient(90deg, #d97706, #fbbf24); }
+.status-breakdown__fill--completed { background: linear-gradient(90deg, #16a34a, #4ade80); }
+.status-breakdown__fill--failed { background: linear-gradient(90deg, #dc2626, #f87171); }
+.status-breakdown__fill--cancelled { background: linear-gradient(90deg, #64748b, #94a3b8); }
 
 /* ----- Kanban View ----- */
 .queue-kanban {

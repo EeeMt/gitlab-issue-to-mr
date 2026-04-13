@@ -258,7 +258,7 @@ describe('API functions', () => {
       const result = await getStats()
 
       expect(result).toEqual(mockStats)
-      expect(mockAxiosGet).toHaveBeenCalledWith('/stats')
+      expect(mockAxiosGet).toHaveBeenCalledWith('/stats', { params: undefined })
     })
   })
 

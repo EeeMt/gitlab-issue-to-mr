@@ -110,10 +110,10 @@ def validate_task_status_for_execute(task: Task) -> None:
     Raises:
         HTTPException: If task cannot be executed
     """
-    if task.status != TaskStatus.PENDING:
+    if task.status not in (TaskStatus.PENDING, TaskStatus.QUEUED):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Task must be in PENDING status to execute immediately, current: {task.status.value}",
+            detail=f"Task must be in PENDING or QUEUED status to execute immediately, current: {task.status.value}",
         )
 
 
@@ -126,16 +126,16 @@ def validate_task_status_for_reschedule(task: Task) -> None:
     Raises:
         HTTPException: If task cannot be rescheduled
     """
-    if task.status != TaskStatus.PENDING:
+    if task.status not in (TaskStatus.PENDING, TaskStatus.QUEUED):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Task must be in PENDING status to reschedule, current: {task.status.value}",
+            detail=f"Task must be in PENDING or QUEUED status to reschedule, current: {task.status.value}",
         )
 
-    if task.scheduled_at is None:
+    if task.status == TaskStatus.PENDING and task.scheduled_at is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only scheduled tasks can update their scheduled time",
+            detail="Only scheduled or queued tasks can update their scheduled time",
         )
 
 
