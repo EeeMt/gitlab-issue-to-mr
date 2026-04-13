@@ -148,7 +148,7 @@ const zhCN = {
     },
   },
   dashboard: {
-    title: '任务仪表盘',
+    title: '任务',
     subtitle: '在一个视图中跟踪排队任务、运行中的任务和已完成的合并请求任务。',
     visibleTasks: '可见任务',
     running: '执行中',
@@ -224,6 +224,10 @@ const zhCN = {
     createMergeRequest: '创建合并请求',
     mrEnabled: '将创建 MR',
     mrDisabled: '不创建 MR',
+    totalIssues: '需求总数',
+    openCount: '待处理',
+    inProgressCount: '进行中',
+    completedCount: '已完成',
     status: {
       open: '待处理',
       in_progress: '进行中',

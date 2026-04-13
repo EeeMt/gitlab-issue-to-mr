@@ -150,7 +150,7 @@ const en = {
     },
   },
   dashboard: {
-    title: 'Task Dashboard',
+    title: 'Tasks',
     subtitle:
       'Track queued work, running jobs, and completed merge request tasks from a single view.',
     visibleTasks: 'Visible Tasks',
@@ -227,6 +227,10 @@ const en = {
     createMergeRequest: 'Create Merge Request',
     mrEnabled: 'MR will be created',
     mrDisabled: 'No MR',
+    totalIssues: 'Total Issues',
+    openCount: 'Open',
+    inProgressCount: 'In Progress',
+    completedCount: 'Completed',
     status: {
       open: 'Open',
       in_progress: 'In Progress',

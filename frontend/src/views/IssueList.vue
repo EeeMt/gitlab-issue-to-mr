@@ -36,6 +36,25 @@
           </template>
         </PageHeader>
 
+        <n-grid
+          v-if="hasLoadedOnce"
+          data-testid="issue-summary"
+          :cols="isMobile ? 2 : 4"
+          :x-gap="16"
+          :y-gap="16"
+        >
+          <n-gi v-for="item in summaryItems" :key="item.label">
+            <SummaryCard
+              :label="item.label"
+              :value="item.value"
+              data-testid="issue-summary-card"
+              card-class="issue-summary-card"
+              label-class="issue-summary-card__label"
+              value-class="issue-summary-card__value"
+            />
+          </n-gi>
+        </n-grid>
+
         <n-card class="issue-list__table-card" :bordered="false" data-testid="issue-list-table-card">
           <n-data-table
             data-testid="issue-list-table"
@@ -56,16 +75,19 @@
 
 <script setup lang="ts">
 import { ref, onMounted, h, watch, computed } from 'vue'
-import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, NSpin, useMessage, type DataTableColumns } from 'naive-ui'
+import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, type DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getIssues, getProjects, type Issue, type IssueStatus, type Project } from '../api'
+import { getIssues, getProjects, getStats, type Issue, type IssueStatus, type Project } from '../api'
 import PageHeader from '../components/PageHeader.vue'
+import SummaryCard from '../components/SummaryCard.vue'
+import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
 
 const router = useRouter()
 const message = useMessage()
 const { t } = useI18n()
+const { isMobile } = useBreakpoints()
 
 const issues = ref<Issue[]>([])
 const projects = ref<Project[]>([])
@@ -73,6 +95,18 @@ const loading = ref(false)
 const hasLoadedOnce = ref(false)
 const statusFilter = ref<string | null>(null)
 const projectFilter = ref<number | null>(null)
+
+const statsTotal = ref(0)
+const statsOpen = ref(0)
+const statsInProgress = ref(0)
+const statsCompleted = ref(0)
+
+const summaryItems = computed(() => [
+  { label: t('issue.totalIssues'), value: String(statsTotal.value) },
+  { label: t('issue.openCount'), value: String(statsOpen.value) },
+  { label: t('issue.inProgressCount'), value: String(statsInProgress.value) },
+  { label: t('issue.completedCount'), value: String(statsCompleted.value) },
+])
 
 const currentPage = ref(1)
 const pageSize = ref(20)
@@ -272,6 +306,21 @@ async function fetchProjects() {
   }
 }
 
+async function fetchStats() {
+  try {
+    const stats = await getStats()
+    const issueStats = stats.issues
+    if (issueStats) {
+      statsTotal.value = issueStats.total
+      statsOpen.value = issueStats.by_status?.open ?? 0
+      statsInProgress.value = issueStats.by_status?.in_progress ?? 0
+      statsCompleted.value = issueStats.by_status?.completed ?? 0
+    }
+  } catch {
+    // Stats are supplementary; don't block UI
+  }
+}
+
 watch([statusFilter, projectFilter], () => {
   currentPage.value = 1
   fetchIssues()
@@ -280,6 +329,7 @@ watch([statusFilter, projectFilter], () => {
 onMounted(() => {
   fetchProjects()
   fetchIssues()
+  fetchStats()
 })
 </script>
 
@@ -306,6 +356,10 @@ onMounted(() => {
 
 .issue-list__table-card {
   border-radius: var(--app-card-radius);
+}
+
+.issue-summary-card {
+  min-height: 100%;
 }
 
 @media (max-width: 768px) {
