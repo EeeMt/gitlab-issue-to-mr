@@ -76,9 +76,9 @@ const weeks = computed(() => {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  // Find the start: go back ~52 weeks to the nearest Sunday
-  const dayOfWeek = today.getDay() // 0=Sun
-  const daysBack = 364 + dayOfWeek
+  // Find the start: go back ~13 weeks to the nearest Monday
+  const dayOfWeek = (today.getDay() + 6) % 7 // 0=Mon
+  const daysBack = 90 + dayOfWeek
   const start = new Date(today)
   start.setDate(start.getDate() - daysBack)
 
