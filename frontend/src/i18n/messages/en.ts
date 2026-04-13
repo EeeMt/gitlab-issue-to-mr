@@ -410,7 +410,10 @@ const en = {
       'Source branch and target branch must be different for manual tasks',
     failedToCreateTask: 'Failed to create task',
     createMR: 'Create Merge Request',
-    createMRTooltip: 'When disabled, only pushes the branch without creating an MR'
+    createMRTooltip: 'When disabled, only pushes the branch without creating an MR',
+    priorityP0Desc: 'Urgent',
+    priorityP1Desc: 'Normal',
+    priorityP2Desc: 'Low'
   },
   sessions: {
     title: 'Sessions',

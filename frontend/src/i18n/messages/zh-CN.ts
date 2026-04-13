@@ -397,7 +397,10 @@ const zhCN = {
     manualTaskBranchConflict: '手动任务的源分支和目标分支必须不同',
     failedToCreateTask: '创建任务失败',
     createMR: '创建合并请求',
-    createMRTooltip: '禁用时仅推送分支，不创建 MR'
+    createMRTooltip: '禁用时仅推送分支，不创建 MR',
+    priorityP0Desc: '紧急',
+    priorityP1Desc: '普通',
+    priorityP2Desc: '低优先级'
   },
   sessions: {
     title: '会话',

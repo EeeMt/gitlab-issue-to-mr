@@ -164,7 +164,7 @@
             <n-button
               size="small"
               type="primary"
-              @click="showCreateModal = true"
+              @click="showCreateDrawer = true"
               data-testid="issue-toggle-create-task"
             >
               {{ t('issue.createTask') }}
@@ -225,93 +225,100 @@
       </template>
     </n-modal>
 
-    <!-- Create Task Modal -->
-    <n-modal
-      v-model:show="showCreateModal"
-      preset="card"
-      :title="t('issue.createTask')"
-      style="width: 680px; max-width: 90vw;"
-      data-testid="issue-create-task-modal"
+    <!-- Create Task Drawer -->
+    <n-drawer
+      v-model:show="showCreateDrawer"
+      :width="isMobile ? '100%' : 640"
+      placement="right"
+      data-testid="issue-create-task-drawer"
     >
-      <div class="prompt-label-row">
-        <span class="prompt-label">{{ t('issue.field.description') }}</span>
-        <n-button
-          size="small"
-          :disabled="promptTemplatesLoading || promptTemplates.length === 0"
-          :loading="promptTemplatesLoading"
-          type="default"
-          @click="showTemplateDrawer = true"
-        >
-          <template #icon>
-            <n-icon :component="DocumentTextOutline" />
-          </template>
-          {{ t('createTask.useTemplate') }}
-        </n-button>
-      </div>
-      <n-form label-placement="top" class="issue-view__create-form">
-        <n-form-item :show-label="false">
-          <VariableEditor
-            v-model="newTaskPrompt"
-            :variable-tips="promptVariableTips"
-            :placeholder="issue?.description || t('issue.promptPlaceholder')"
-          />
-          <template #feedback>
-            <div v-if="unreplacedVariables.length > 0" class="prompt-variable-warning">
-              <n-icon :component="WarningOutline" size="14" />
-              <span>{{ t('createTask.unreplacedVariablesHint') }}: {{ unreplacedVariables.join(', ') }}</span>
-            </div>
-          </template>
-        </n-form-item>
-        <n-grid :cols="isMobile ? 1 : 4" :x-gap="16" :y-gap="12">
-          <n-gi>
-            <n-form-item :label="t('common.priority')">
-              <n-select
-                v-model:value="newTaskPriority"
-                :options="priorityOptions"
-              />
-            </n-form-item>
-          </n-gi>
-          <n-gi>
-            <n-form-item :label="t('issue.scheduleDelayed')">
-              <n-date-picker
-                v-model:value="newTaskSchedule"
-                type="datetime"
-                clearable
-                style="width: 100%"
-                :is-date-disabled="isScheduleDateDisabled"
-              />
-            </n-form-item>
-          </n-gi>
-          <n-gi>
-            <n-form-item label="&nbsp;">
-              <n-button
-                size="small"
-                secondary
-                :loading="scheduledTasksLoading"
-                @click="openScheduleDrawer"
+      <n-drawer-content :title="t('issue.createTask')" closable>
+        <n-form label-placement="top" class="issue-view__create-form">
+          <!-- Prompt -->
+          <n-form-item>
+            <template #label>
+              <div class="prompt-label-row">
+                <span>{{ t('issue.field.description') }}</span>
+                <n-button
+                  size="small"
+                  :disabled="promptTemplatesLoading || promptTemplates.length === 0"
+                  :loading="promptTemplatesLoading"
+                  type="default"
+                  @click="showTemplateDrawer = true"
+                >
+                  <template #icon>
+                    <n-icon :component="DocumentTextOutline" />
+                  </template>
+                  {{ t('createTask.useTemplate') }}
+                </n-button>
+              </div>
+            </template>
+            <VariableEditor
+              v-model="newTaskPrompt"
+              :variable-tips="promptVariableTips"
+              :placeholder="issue?.description || t('issue.promptPlaceholder')"
+            />
+            <template #feedback>
+              <div v-if="unreplacedVariables.length > 0" class="prompt-variable-warning">
+                <n-icon :component="WarningOutline" size="14" />
+                <span>{{ t('createTask.unreplacedVariablesHint') }}: {{ unreplacedVariables.join(', ') }}</span>
+              </div>
+            </template>
+          </n-form-item>
+
+          <!-- Priority cards -->
+          <n-form-item :label="t('common.priority')">
+            <n-radio-group v-model:value="newTaskPriority" class="priority-selector">
+              <div
+                v-for="opt in priorityOptions"
+                :key="opt.value"
+                class="priority-card"
+                :class="{ 'priority-card--active': newTaskPriority === opt.value }"
+                @click="newTaskPriority = opt.value"
               >
-                <template #icon><n-icon :component="CalendarOutline" /></template>
-                {{ t('createTask.viewScheduleHeatmap') }}
-              </n-button>
-            </n-form-item>
-          </n-gi>
-          <n-gi>
-            <n-form-item label="&nbsp;">
-              <n-button
-                type="primary"
-                :loading="createTaskLoading"
-                data-testid="issue-create-task-button"
-                @click="handleCreateTask"
-              >
-                {{ t('issue.createTask') }}
-              </n-button>
-            </n-form-item>
-          </n-gi>
-        </n-grid>
+                <n-radio :value="opt.value" />
+                <div>
+                  <div class="priority-card__label">{{ opt.label }}</div>
+                  <div class="priority-card__desc">{{ opt.desc }}</div>
+                </div>
+              </div>
+            </n-radio-group>
+          </n-form-item>
+
+          <!-- Schedule -->
+          <n-form-item :label="t('createTask.schedule')">
+            <n-space vertical :size="12" style="width: 100%">
+              <n-radio-group v-model:value="scheduleType">
+                <n-radio value="now">{{ t('createTask.executeNow') }}</n-radio>
+                <n-radio value="scheduled">{{ t('createTask.scheduleAt') }}</n-radio>
+              </n-radio-group>
+              <div v-if="scheduleType === 'scheduled'" class="schedule-row">
+                <n-date-picker
+                  v-model:value="newTaskSchedule"
+                  type="datetime"
+                  clearable
+                  style="flex: 1"
+                  :is-date-disabled="isScheduleDateDisabled"
+                />
+                <n-button
+                  size="small"
+                  secondary
+                  :loading="scheduledTasksLoading"
+                  @click="openScheduleDrawer"
+                >
+                  <template #icon><n-icon :component="CalendarOutline" /></template>
+                  {{ t('createTask.viewScheduleHeatmap') }}
+                </n-button>
+              </div>
+            </n-space>
+          </n-form-item>
+        </n-form>
+
+        <!-- Slot capacity alert -->
         <n-alert
           v-if="slotCapacity?.is_full"
           :type="slotCapacity.enforce ? 'error' : 'warning'"
-          style="margin-top: 8px;"
+          style="margin-bottom: 16px;"
         >
           {{ slotCapacity.enforce
             ? t('createTask.slotFullError', {
@@ -328,8 +335,21 @@
               })
           }}
         </n-alert>
-      </n-form>
-    </n-modal>
+
+        <template #footer>
+          <div style="display: flex; justify-content: flex-end;">
+            <n-button
+              type="primary"
+              :loading="createTaskLoading"
+              data-testid="issue-create-task-button"
+              @click="handleCreateTask"
+            >
+              {{ t('issue.createTask') }}
+            </n-button>
+          </div>
+        </template>
+      </n-drawer-content>
+    </n-drawer>
 
     <!-- Schedule Heatmap Drawer -->
     <n-drawer v-model:show="showScheduleDrawer" :width="isMobile ? '100%' : 580" placement="right">
@@ -361,7 +381,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin,
   NIcon, NDataTable, NInput, NDrawer, NDrawerContent,
-  NSelect, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NAlert,
+  NRadio, NRadioGroup, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NAlert,
   useMessage,
   type DataTableColumns
 } from 'naive-ui'
@@ -401,7 +421,7 @@ const issue = ref<Issue | null>(null)
 const loading = ref(false)
 
 // Create task form
-const showCreateModal = ref(false)
+const showCreateDrawer = ref(false)
 const newTaskPrompt = ref('')
 const newTaskPriority = ref(1)
 const newTaskSchedule = ref<number | null>(null)
@@ -410,6 +430,7 @@ const promptTemplates = ref<PromptTemplate[]>([])
 const promptTemplatesLoading = ref(false)
 const promptVariableTips = ref<Record<string, string> | undefined>(undefined)
 const showTemplateDrawer = ref(false)
+const scheduleType = ref<'now' | 'scheduled'>('now')
 
 // Schedule heatmap
 const scheduledTasksForPreview = ref<Task[]>([])
@@ -448,9 +469,9 @@ const taskStatusColors: Record<string, 'default' | 'info' | 'warning' | 'success
 }
 
 const priorityOptions = [
-  { label: 'P0', value: 0 },
-  { label: 'P1', value: 1 },
-  { label: 'P2', value: 2 }
+  { label: 'P0', value: 0, desc: t('createTask.priorityP0Desc') },
+  { label: 'P1', value: 1, desc: t('createTask.priorityP1Desc') },
+  { label: 'P2', value: 2, desc: t('createTask.priorityP2Desc') }
 ]
 
 const unreplacedVariables = computed(() => {
@@ -624,6 +645,18 @@ function checkSlotCapacity() {
 
 watch(heatmapSelectedMs, () => checkSlotCapacity())
 
+watch(scheduleType, (val) => {
+  if (val === 'now') {
+    newTaskSchedule.value = null
+  }
+})
+
+watch(showCreateDrawer, (val) => {
+  if (val && !newTaskPrompt.value && issue.value?.description) {
+    newTaskPrompt.value = issue.value.description
+  }
+})
+
 onUnmounted(() => {
   if (slotCheckTimeout) clearTimeout(slotCheckTimeout)
   slotCheckGeneration++
@@ -707,7 +740,7 @@ async function handleCreateTask() {
     message.success('Task created')
     newTaskPrompt.value = ''
     newTaskSchedule.value = null
-    showCreateModal.value = false
+    showCreateDrawer.value = false
     await fetchIssue()
   } catch {
     message.error('Failed to create task')
@@ -809,23 +842,47 @@ onMounted(() => {
 }
 
 .issue-view__create-form {
-  max-width: 800px;
-}
-
-.issue-view__create-section {
-  margin-top: 8px;
+  max-width: 100%;
 }
 
 .prompt-label-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 4px;
+  width: 100%;
 }
 
-.prompt-label {
-  font-size: 14px;
-  font-weight: 500;
+.priority-selector {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+.priority-card {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.priority-card:hover {
+  border-color: var(--n-primary-color);
+}
+.priority-card--active {
+  border-color: var(--n-primary-color);
+  background: rgba(99, 226, 183, 0.06);
+}
+.priority-card__label { font-weight: 600; font-size: 13px; }
+.priority-card__desc { font-size: 11px; color: var(--n-text-color-3); }
+
+.schedule-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
 }
 
 .prompt-variable-warning {
