@@ -1,6 +1,6 @@
 # Issue→Task→MR Refactoring Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Refactor Codify from a flat Task→MR model to a three-layer Issue→Task→MR model where Issues are requirement containers, Tasks are execution units (one `claude -p` call), and MRs belong to Issues.
 
@@ -61,7 +61,7 @@
 - Modify: `backend/app/models.py`
 - Create: `backend/alembic/versions/022_issue_task_mr_refactoring.py`
 
-- [ ] **Step 1: Add IssueStatus enum and Issue model to models.py**
+- [x] **Step 1: Add IssueStatus enum and Issue model to models.py**
 
 Add after the existing `TaskStatus` enum (around line 30):
 
@@ -109,7 +109,7 @@ class Issue(Base):
     )
 ```
 
-- [ ] **Step 2: Modify Task model — add issue_id FK and retry fields**
+- [x] **Step 2: Modify Task model — add issue_id FK and retry fields**
 
 Add these columns to the Task class (around line 40, after `project_id`):
 
@@ -126,7 +126,7 @@ Add relationships:
     retry_source = relationship("Task", remote_side="Task.id", foreign_keys="Task.retry_source_task_id")
 ```
 
-- [ ] **Step 3: Remove deprecated fields from Task model**
+- [x] **Step 3: Remove deprecated fields from Task model**
 
 Remove these columns from the Task class:
 - `issue_iid` (line ~41)
@@ -141,7 +141,7 @@ Remove these columns from the Task class:
 
 Also update the `__table_args__` indexes to remove references to deleted columns and add `issue_id` index.
 
-- [ ] **Step 4: Create Alembic migration**
+- [x] **Step 4: Create Alembic migration**
 
 Create `backend/alembic/versions/022_issue_task_mr_refactoring.py`:
 
@@ -232,11 +232,11 @@ def downgrade() -> None:
     op.drop_table("issues")
 ```
 
-- [ ] **Step 5: Verify migration compiles**
+- [x] **Step 5: Verify migration compiles**
 
 Run: `cd backend && python -c "from alembic.versions import *; print('OK')"`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/models.py backend/alembic/versions/022_issue_task_mr_refactoring.py
@@ -250,7 +250,7 @@ git commit -m "feat: add Issue model and migration for Issue→Task→MR refacto
 **Files:**
 - Modify: `backend/app/config.py`
 
-- [ ] **Step 1: Add session storage config to Settings class**
+- [x] **Step 1: Add session storage config to Settings class**
 
 In `backend/app/config.py`, add to the Settings class (around line 140, near other path settings like `worker_ca_cert_host_path`):
 
@@ -261,7 +261,7 @@ In `backend/app/config.py`, add to the Settings class (around line 140, near oth
     )
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add backend/app/config.py
@@ -277,7 +277,7 @@ git commit -m "feat: add SESSION_STORAGE_ROOT config for session persistence"
 - Modify: `backend/app/main.py`
 - Create: `backend/tests/unit/test_issues_api.py`
 
-- [ ] **Step 1: Write tests for Issue API**
+- [x] **Step 1: Write tests for Issue API**
 
 Create `backend/tests/unit/test_issues_api.py`:
 
@@ -371,12 +371,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd backend && python -m pytest tests/unit/test_issues_api.py -v`
 Expected: ImportError — `app.api.issues` does not exist yet.
 
-- [ ] **Step 3: Implement Issue API**
+- [x] **Step 3: Implement Issue API**
 
 Create `backend/app/api/issues.py`:
 
@@ -611,7 +611,7 @@ async def delete_issue(
     return {"detail": "Issue deleted"}
 ```
 
-- [ ] **Step 4: Register issues router in main.py**
+- [x] **Step 4: Register issues router in main.py**
 
 In `backend/app/main.py`, add the import and router include alongside existing routers (around line 202-277):
 
@@ -621,12 +621,12 @@ from app.api.issues import router as issues_router
 app.include_router(issues_router, prefix="/api")
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `cd backend && python -m pytest tests/unit/test_issues_api.py -v`
 Expected: Tests pass (may need adjustments for import paths).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/api/issues.py backend/app/main.py backend/tests/unit/test_issues_api.py
@@ -640,7 +640,7 @@ git commit -m "feat: add Issue CRUD API endpoints"
 **Files:**
 - Modify: `backend/app/api/tasks.py`
 
-- [ ] **Step 1: Update CreateTaskRequest to require issue_id**
+- [x] **Step 1: Update CreateTaskRequest to require issue_id**
 
 In `backend/app/api/tasks.py`, find the `CreateTaskRequest` Pydantic model and update it:
 
@@ -655,7 +655,7 @@ class CreateTaskRequest(BaseModel):
 
 Remove fields that are now on Issue: `project_id`, `branch_name`, `base_branch`, `target_branch`.
 
-- [ ] **Step 2: Update create_task endpoint**
+- [x] **Step 2: Update create_task endpoint**
 
 Update the `create_task()` function (around line 628) to:
 1. Load the Issue by `issue_id`
@@ -697,7 +697,7 @@ async def create_task(
     return _serialize_task(task)
 ```
 
-- [ ] **Step 3: Update retry_task endpoint**
+- [x] **Step 3: Update retry_task endpoint**
 
 Update the `retry_task()` function (around line 514) to create a new task instead of resetting the old one:
 
@@ -735,7 +735,7 @@ async def retry_task(
     return _serialize_task(new_task)
 ```
 
-- [ ] **Step 4: Update task serialization**
+- [x] **Step 4: Update task serialization**
 
 Update `_serialize_task()` to include `issue_id`, `is_retry`, `retry_source_task_id` and remove deleted fields (`branch_name`, `base_branch`, etc.). Add issue info if available:
 
@@ -777,7 +777,7 @@ def _serialize_task(task, issue=None):
     return data
 ```
 
-- [ ] **Step 5: Update list_tasks to support issue_id filter**
+- [x] **Step 5: Update list_tasks to support issue_id filter**
 
 Add `issue_id` query parameter to `list_tasks()`:
 
@@ -793,16 +793,16 @@ async def list_tasks(
         query = query.where(Task.issue_id == issue_id)
 ```
 
-- [ ] **Step 6: Update get_task to include issue info**
+- [x] **Step 6: Update get_task to include issue info**
 
 In `get_task()`, also load the related Issue and include it in the response.
 
-- [ ] **Step 7: Run existing tests and fix breakages**
+- [x] **Step 7: Run existing tests and fix breakages**
 
 Run: `cd backend && python -m pytest tests/unit/test_task*.py -v`
 Fix any tests broken by model changes. Many tests reference `is_manual`, `branch_name`, etc. — update them.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/app/api/tasks.py
@@ -816,7 +816,7 @@ git commit -m "feat: update Task API for Issue→Task model"
 **Files:**
 - Modify: `backend/app/scheduler.py`
 
-- [ ] **Step 1: Update Issue mutex from string to int**
+- [x] **Step 1: Update Issue mutex from string to int**
 
 In `__init__` (line ~46), change:
 ```python
@@ -826,7 +826,7 @@ self._running_issues: Set[str] = set()  # "project_id:issue_iid"
 self._running_issues: Set[int] = set()  # issue_id
 ```
 
-- [ ] **Step 2: Update _get_next_task to use issue_id for mutex**
+- [x] **Step 2: Update _get_next_task to use issue_id for mutex**
 
 In `_get_next_task()` (line ~126), update the issue key extraction:
 
@@ -839,7 +839,7 @@ if task.issue_id:
     issue_key = task.issue_id
 ```
 
-- [ ] **Step 3: Update _execute_task for Issue status transition**
+- [x] **Step 3: Update _execute_task for Issue status transition**
 
 In `_execute_task()` (line ~154), after setting task to RUNNING, add Issue status transition:
 
@@ -854,7 +854,7 @@ if task.issue_id:
         await db.commit()
 ```
 
-- [ ] **Step 4: Add _on_task_completed for Issue status auto-transition**
+- [x] **Step 4: Add _on_task_completed for Issue status auto-transition**
 
 Add a method to check if all tasks in an Issue are done and update Issue status:
 
@@ -887,7 +887,7 @@ async def _update_issue_on_task_complete(self, db: AsyncSession, task):
 
 Call this method in `_run_worker_task()` after task completion.
 
-- [ ] **Step 5: Update container naming pattern**
+- [x] **Step 5: Update container naming pattern**
 
 In `backend/app/scheduler.py` (line ~31), update the container pattern:
 
@@ -900,16 +900,16 @@ WORKER_CONTAINER_PATTERN = re.compile(r"codify-(\d+)-issue(\d+)")
 
 Update `_extract_task_id()` accordingly.
 
-- [ ] **Step 6: Update crash recovery**
+- [x] **Step 6: Update crash recovery**
 
 Update `_crash_recovery()` (line ~222) to match the new container naming pattern and use `issue_id` for the issue key.
 
-- [ ] **Step 7: Run scheduler tests**
+- [x] **Step 7: Run scheduler tests**
 
 Run: `cd backend && python -m pytest tests/unit/test_scheduler*.py -v`
 Fix any broken tests.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/app/scheduler.py
@@ -923,7 +923,7 @@ git commit -m "feat: update scheduler for Issue-based mutex and status transitio
 **Files:**
 - Modify: `backend/app/core/worker.py`
 
-- [ ] **Step 1: Update execute_task to read from Issue**
+- [x] **Step 1: Update execute_task to read from Issue**
 
 In `execute_task()` (line ~866), load the Issue and use its branch/MR info:
 
@@ -946,7 +946,7 @@ async def execute_task(self, db, task_id):
     session_storage_path = issue.session_storage_path
 ```
 
-- [ ] **Step 2: Update container environment variables**
+- [x] **Step 2: Update container environment variables**
 
 In the env var building section (line ~503), add session-related vars and remove task-level branch vars:
 
@@ -962,7 +962,7 @@ env = {
 }
 ```
 
-- [ ] **Step 3: Add session storage volume mount**
+- [x] **Step 3: Add session storage volume mount**
 
 In the volume building section (line ~556), add:
 
@@ -974,7 +974,7 @@ if session_storage_path:
     volumes[session_storage_path] = {"bind": "/home/codify/.claude", "mode": "rw"}
 ```
 
-- [ ] **Step 4: Update container naming**
+- [x] **Step 4: Update container naming**
 
 Update the container name generation:
 
@@ -985,7 +985,7 @@ container_name = f"codify-{task_id}-p{project_id}-{'i' + str(issue_iid) if issue
 container_name = f"codify-{task_id}-issue{issue.id}"
 ```
 
-- [ ] **Step 5: Parse CODIFY_SESSION_ID from container output**
+- [x] **Step 5: Parse CODIFY_SESSION_ID from container output**
 
 In the result parsing section (line ~963), add session ID extraction:
 
@@ -999,7 +999,7 @@ if session_match:
         await db.commit()
 ```
 
-- [ ] **Step 6: Update MR creation to use Issue**
+- [x] **Step 6: Update MR creation to use Issue**
 
 In `_create_mr_if_needed()`, update to read/write MR info from the Issue instead of the Task:
 
@@ -1010,12 +1010,12 @@ issue.merge_request_url = mr_url
 await db.commit()
 ```
 
-- [ ] **Step 7: Run worker tests**
+- [x] **Step 7: Run worker tests**
 
 Run: `cd backend && python -m pytest tests/unit/test_worker*.py -v`
 Fix any broken tests.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/app/core/worker.py
@@ -1029,7 +1029,7 @@ git commit -m "feat: update worker for Issue-based execution and session managem
 **Files:**
 - Modify: `deploy/entrypoint.sh`
 
-- [ ] **Step 1: Add CLAUDE_SESSION_ID environment variable handling**
+- [x] **Step 1: Add CLAUDE_SESSION_ID environment variable handling**
 
 Near the top of the script (after existing env var validation), add:
 
@@ -1039,7 +1039,7 @@ CLAUDE_SESSION_ID="${CLAUDE_SESSION_ID:-}"
 ISSUE_ID="${ISSUE_ID:-}"
 ```
 
-- [ ] **Step 2: Update Claude CLI invocation for session resume**
+- [x] **Step 2: Update Claude CLI invocation for session resume**
 
 Find the main Claude CLI invocation (around line 443) and wrap it with session logic:
 
@@ -1058,7 +1058,7 @@ fi
 # Remove --no-session-persistence from the command (delete it if present)
 ```
 
-- [ ] **Step 3: Add session ID extraction after Claude execution**
+- [x] **Step 3: Add session ID extraction after Claude execution**
 
 After the Claude CLI execution completes, add:
 
@@ -1072,16 +1072,16 @@ if [ -n "${SESSION_FILE}" ]; then
 fi
 ```
 
-- [ ] **Step 4: Remove --no-session-persistence from all claude invocations**
+- [x] **Step 4: Remove --no-session-persistence from all claude invocations**
 
 Find all instances of `--no-session-persistence` in the file (lines 566, 648) and remove them. For the commit message and MR title generation calls, keep `--no-session-persistence` since those are utility calls that shouldn't pollute the main session.
 
-- [ ] **Step 5: Test entrypoint locally**
+- [x] **Step 5: Test entrypoint locally**
 
 Run: `bash -n deploy/entrypoint.sh` (syntax check)
 Expected: No errors.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add deploy/entrypoint.sh
@@ -1095,7 +1095,7 @@ git commit -m "feat: add session resume support to worker entrypoint"
 **Files:**
 - Modify: `backend/app/main.py`
 
-- [ ] **Step 1: Remove webhook router registration**
+- [x] **Step 1: Remove webhook router registration**
 
 In `backend/app/main.py`, comment out or remove the webhook router include:
 
@@ -1106,12 +1106,12 @@ In `backend/app/main.py`, comment out or remove the webhook router include:
 
 Keep `backend/app/api/webhook.py` file intact for future use but don't register the routes.
 
-- [ ] **Step 2: Run the app to verify startup**
+- [x] **Step 2: Run the app to verify startup**
 
 Run: `cd backend && python -c "from app.main import app; print('OK')"`
 Expected: No import errors.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add backend/app/main.py
@@ -1125,7 +1125,7 @@ git commit -m "feat: disable webhook routes (to be re-implemented later)"
 **Files:**
 - Modify: `backend/app/api/stats.py`
 
-- [ ] **Step 1: Add issue statistics to stats endpoint**
+- [x] **Step 1: Add issue statistics to stats endpoint**
 
 In the `GET /stats` endpoint, add Issue counts:
 
@@ -1152,7 +1152,7 @@ recent_issues = (await db.execute(recent_issues_q)).scalars().all()
 
 Include in response: `issue_total`, `issue_by_status`, `recent_issues`.
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add backend/app/api/stats.py
@@ -1166,7 +1166,7 @@ git commit -m "feat: add issue statistics to stats API"
 **Files:**
 - Modify: `frontend/src/api/index.ts`
 
-- [ ] **Step 1: Add Issue types**
+- [x] **Step 1: Add Issue types**
 
 Add after the Task interface definition (around line 104):
 
@@ -1209,7 +1209,7 @@ export interface IssueListResponse {
 }
 ```
 
-- [ ] **Step 2: Update Task interface**
+- [x] **Step 2: Update Task interface**
 
 Update the Task interface to reflect model changes:
 
@@ -1250,7 +1250,7 @@ export interface Task {
 
 Remove: `issue_iid`, `issue_id` (old GitLab one), `note_id`, `is_manual`, `branch_name`, `base_branch`, `target_branch`, `merge_request_iid`, `merge_request_url`.
 
-- [ ] **Step 3: Update CreateTaskRequest**
+- [x] **Step 3: Update CreateTaskRequest**
 
 ```typescript
 export interface CreateTaskRequest {
@@ -1264,7 +1264,7 @@ export interface CreateTaskRequest {
 
 Remove: `project_id`, `branch_name`, `base_branch`, `target_branch`.
 
-- [ ] **Step 4: Add Issue API functions**
+- [x] **Step 4: Add Issue API functions**
 
 ```typescript
 export function getIssues(params?: {
@@ -1301,12 +1301,12 @@ export function deleteIssue(id: number): Promise<AxiosResponse<void>> {
 }
 ```
 
-- [ ] **Step 5: Build to verify types compile**
+- [x] **Step 5: Build to verify types compile**
 
 Run: `cd frontend && npm run build`
 Expected: Type errors from components referencing deleted Task fields. These will be fixed in subsequent tasks.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/src/api/index.ts
@@ -1321,7 +1321,7 @@ git commit -m "feat: add Issue types and API functions to frontend client"
 - Modify: `frontend/src/router/index.ts`
 - Modify: `frontend/src/App.vue`
 
-- [ ] **Step 1: Add Issue routes**
+- [x] **Step 1: Add Issue routes**
 
 In `frontend/src/router/index.ts`, add routes:
 
@@ -1346,7 +1346,7 @@ In `frontend/src/router/index.ts`, add routes:
 },
 ```
 
-- [ ] **Step 2: Add Issues to navigation menu**
+- [x] **Step 2: Add Issues to navigation menu**
 
 In `frontend/src/App.vue`, in the `menuOptions` computed property (around line 240), add the Issues menu item after Dashboard:
 
@@ -1360,7 +1360,7 @@ In `frontend/src/App.vue`, in the `menuOptions` computed property (around line 2
 
 Also add a "Create Issue" quick-access item if desired.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src/router/index.ts frontend/src/App.vue
@@ -1375,7 +1375,7 @@ git commit -m "feat: add Issue routes and navigation"
 - Modify: `frontend/src/i18n/messages/en.ts`
 - Modify: `frontend/src/i18n/messages/zh-CN.ts`
 
-- [ ] **Step 1: Add English Issue messages**
+- [x] **Step 1: Add English Issue messages**
 
 In `en.ts`, add to the `nav` object:
 
@@ -1436,7 +1436,7 @@ createIssue: 'New Issue',
 issueCount: 'Issues',
 ```
 
-- [ ] **Step 2: Add Chinese Issue messages**
+- [x] **Step 2: Add Chinese Issue messages**
 
 Mirror the same structure in `zh-CN.ts`:
 
@@ -1492,11 +1492,11 @@ createIssue: '新建需求',
 issueCount: '需求数',
 ```
 
-- [ ] **Step 3: Build to verify i18n**
+- [x] **Step 3: Build to verify i18n**
 
 Run: `cd frontend && npm run build`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add frontend/src/i18n/messages/en.ts frontend/src/i18n/messages/zh-CN.ts
@@ -1510,7 +1510,7 @@ git commit -m "feat: add Issue i18n messages for en and zh-CN"
 **Files:**
 - Create: `frontend/src/views/CreateIssue.vue`
 
-- [ ] **Step 1: Create CreateIssue.vue**
+- [x] **Step 1: Create CreateIssue.vue**
 
 ```vue
 <template>
@@ -1650,11 +1650,11 @@ async function handleSubmit() {
 </script>
 ```
 
-- [ ] **Step 2: Build to verify**
+- [x] **Step 2: Build to verify**
 
 Run: `cd frontend && npm run build`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src/views/CreateIssue.vue
@@ -1668,7 +1668,7 @@ git commit -m "feat: add CreateIssue page"
 **Files:**
 - Create: `frontend/src/views/IssueList.vue`
 
-- [ ] **Step 1: Create IssueList.vue**
+- [x] **Step 1: Create IssueList.vue**
 
 ```vue
 <template>
@@ -1831,7 +1831,7 @@ onMounted(async () => {
 </script>
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add frontend/src/views/IssueList.vue
@@ -1845,7 +1845,7 @@ git commit -m "feat: add IssueList page"
 **Files:**
 - Create: `frontend/src/views/IssueView.vue`
 
-- [ ] **Step 1: Create IssueView.vue**
+- [x] **Step 1: Create IssueView.vue**
 
 This is the most complex new component. It contains:
 1. Issue metadata header
@@ -2145,11 +2145,11 @@ onMounted(loadIssue)
 </script>
 ```
 
-- [ ] **Step 2: Build to verify**
+- [x] **Step 2: Build to verify**
 
 Run: `cd frontend && npm run build`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src/views/IssueView.vue
@@ -2163,7 +2163,7 @@ git commit -m "feat: add IssueView page with embedded task creation"
 **Files:**
 - Modify: `frontend/src/views/Dashboard.vue`
 
-- [ ] **Step 1: Redesign Dashboard layout**
+- [x] **Step 1: Redesign Dashboard layout**
 
 Replace the current task-centric Dashboard with the Overview design:
 
@@ -2179,11 +2179,11 @@ Key changes:
 - Rearrange template sections to match the new layout order
 - Add "New Issue" button in stats area linking to `/issues/create`
 
-- [ ] **Step 2: Build and verify**
+- [x] **Step 2: Build and verify**
 
 Run: `cd frontend && npm run build`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src/views/Dashboard.vue
@@ -2197,7 +2197,7 @@ git commit -m "feat: redesign Dashboard with Issue overview style"
 **Files:**
 - Modify: `frontend/src/views/TaskView.vue`
 
-- [ ] **Step 1: Add Issue link to TaskView metadata**
+- [x] **Step 1: Add Issue link to TaskView metadata**
 
 In the task metadata section of TaskView.vue, add an Issue reference:
 
@@ -2212,7 +2212,7 @@ In the task metadata section of TaskView.vue, add an Issue reference:
 
 Remove or guard references to `task.branch_name`, `task.merge_request_url` — these now come from the Issue. Use `task.issue.branch_name` and `task.issue.merge_request_url`.
 
-- [ ] **Step 2: Update task list table (if Dashboard still has one)**
+- [x] **Step 2: Update task list table (if Dashboard still has one)**
 
 Add an "Issue" column to any remaining task table:
 
@@ -2226,11 +2226,11 @@ Add an "Issue" column to any remaining task table:
 },
 ```
 
-- [ ] **Step 3: Build and verify**
+- [x] **Step 3: Build and verify**
 
 Run: `cd frontend && npm run build`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add frontend/src/views/TaskView.vue
@@ -2241,22 +2241,22 @@ git commit -m "feat: add Issue link to TaskView and task tables"
 
 ## Task 18: Integration Verification
 
-- [ ] **Step 1: Full backend test run**
+- [x] **Step 1: Full backend test run**
 
 Run: `cd backend && python -m pytest tests/unit/ -v --tb=short`
 Fix any remaining test failures.
 
-- [ ] **Step 2: Full frontend build**
+- [x] **Step 2: Full frontend build**
 
 Run: `cd frontend && npm run build`
 Fix any remaining TypeScript errors.
 
-- [ ] **Step 3: Verify Docker build**
+- [x] **Step 3: Verify Docker build**
 
 Run: `docker build -f deploy/Dockerfile.backend -t deploy-backend . && echo "Backend OK"`
 Run: `docker build -f deploy/Dockerfile.worker -t codify-worker:latest . && echo "Worker OK"`
 
-- [ ] **Step 4: Final commit**
+- [x] **Step 4: Final commit**
 
 ```bash
 git add -A
