@@ -113,6 +113,7 @@
           :columns="taskColumns"
           :data="issue.tasks || []"
           :row-key="(row: Task) => row.id"
+          :row-props="taskRowProps"
           :bordered="false"
         />
       </n-card>
@@ -267,6 +268,14 @@ const priorityOptions = [
   { label: 'P2', value: 2 }
 ]
 
+// --- Task Table Row Props ---
+function taskRowProps(row: Task) {
+  return {
+    style: 'cursor: pointer',
+    onClick: () => router.push({ name: 'TaskView', params: { id: row.id } })
+  }
+}
+
 // --- Task Table Columns ---
 const taskColumns = computed<DataTableColumns<Task>>(() => {
   const renderTaskStatus = (row: Task) =>
@@ -331,8 +340,13 @@ const taskColumns = computed<DataTableColumns<Task>>(() => {
           {
             size: 'small',
             secondary: true,
-            type: 'warning',
-            onClick: () => handleRetryTask(row.id)
+            strong: true,
+            round: true,
+            type: 'default',
+            onClick: (e: MouseEvent) => {
+              e.stopPropagation()
+              handleRetryTask(row.id)
+            }
           },
           () => t('issue.retryTask')
         )
