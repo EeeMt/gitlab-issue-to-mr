@@ -165,7 +165,8 @@ const zhCN = {
     projectFallback: '项目 #{id}',
     recentIssues: '最近的需求',
     createIssue: '新建需求',
-    issueCount: '需求数'
+    issueCount: '需求数',
+    recentActivity: '最近活动'
   },
   issue: {
     title: '需求',

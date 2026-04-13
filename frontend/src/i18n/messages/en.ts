@@ -168,7 +168,8 @@ const en = {
     projectFallback: 'Project #{id}',
     recentIssues: 'Recent Issues',
     createIssue: 'New Issue',
-    issueCount: 'Issues'
+    issueCount: 'Issues',
+    recentActivity: 'Recent Activity'
   },
   issue: {
     title: 'Issues',
