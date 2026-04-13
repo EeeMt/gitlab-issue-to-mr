@@ -53,19 +53,38 @@
                 />
               </n-form-item>
 
-              <n-form-item :label="t('issue.field.description')" path="description">
-                <n-input
-                  v-model:value="formValue.description"
-                  type="textarea"
-                  :rows="6"
-                  :placeholder="t('issue.field.description')"
+              <div class="prompt-label-row">
+                <span class="prompt-label">{{ t('issue.field.description') }}</span>
+                <n-button
+                  size="small"
+                  :disabled="promptTemplatesLoading || promptTemplates.length === 0"
+                  :loading="promptTemplatesLoading"
+                  type="default"
+                  @click="showTemplateDrawer = true"
+                >
+                  <template #icon>
+                    <n-icon :component="DocumentTextOutline" />
+                  </template>
+                  {{ t('createTask.useTemplate') }}
+                </n-button>
+              </div>
+              <n-form-item path="description" :show-label="false">
+                <VariableEditor
+                  v-model="formValue.description"
+                  :variable-tips="promptVariableTips"
                 />
+                <template #feedback>
+                  <div v-if="unreplacedVariables.length > 0" class="prompt-variable-warning">
+                    <n-icon :component="WarningOutline" size="14" />
+                    <span>{{ t('createTask.unreplacedVariablesHint') }}: {{ unreplacedVariables.join(', ') }}</span>
+                  </div>
+                </template>
               </n-form-item>
             </div>
 
             <div class="create-issue-form__section">
               <div class="create-issue-form__section-title">{{ t('issue.field.baseBranch') }}</div>
-              <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+              <n-grid :cols="isMobile ? 1 : 3" :x-gap="16" :y-gap="8">
                 <n-gi>
                   <n-form-item :label="t('issue.field.baseBranch')" path="base_branch">
                     <n-select
@@ -79,6 +98,16 @@
                   </n-form-item>
                 </n-gi>
                 <n-gi>
+                  <n-form-item :label="t('issue.createMergeRequest')" path="create_mr">
+                    <n-space align="center" :size="8">
+                      <n-switch v-model:value="formValue.create_mr" :disabled="!formValue.project_id" />
+                      <span style="font-size: 13px; color: var(--n-text-color-2)">
+                        {{ formValue.create_mr ? t('issue.mrEnabled') : t('issue.mrDisabled') }}
+                      </span>
+                    </n-space>
+                  </n-form-item>
+                </n-gi>
+                <n-gi v-if="formValue.create_mr">
                   <n-form-item :label="t('issue.field.targetBranch')" path="target_branch">
                     <n-select
                       v-model:value="formValue.target_branch"
@@ -114,6 +143,26 @@
           </n-form>
         </n-spin>
       </n-card>
+
+      <!-- Template Picker Drawer -->
+      <n-drawer v-model:show="showTemplateDrawer" :width="isMobile ? '100%' : 480" placement="right">
+        <n-drawer-content :title="t('createTask.selectTemplate')" closable>
+          <div style="overflow-y: auto;">
+            <div v-if="promptTemplates.length === 0" class="prompt-template-dropdown__empty">
+              {{ t('createTask.noPromptTemplates') }}
+            </div>
+            <div
+              v-for="tmpl in promptTemplates"
+              :key="tmpl.id"
+              class="prompt-template-dropdown__item"
+              @click="applyPromptTemplate(tmpl); showTemplateDrawer = false"
+            >
+              <div class="prompt-template-dropdown__item-name">{{ tmpl.name }}</div>
+              <div class="prompt-template-dropdown__item-preview">{{ tmpl.content.substring(0, 80) }}...</div>
+            </div>
+          </div>
+        </n-drawer-content>
+      </n-drawer>
     </n-space>
   </div>
 </template>
@@ -133,12 +182,18 @@ import {
   NSelect,
   NSpace,
   NSpin,
+  NSwitch,
+  NDrawer,
+  NDrawerContent,
+  NIcon,
   useMessage,
   type FormInst,
   type FormRules,
 } from 'naive-ui'
+import { DocumentTextOutline, WarningOutline } from '@vicons/ionicons5'
 import PageHeader from '../components/PageHeader.vue'
-import { createIssue, getProjects, getBranches, type Project, type Branch, type CreateIssueRequest } from '../api'
+import VariableEditor from '../components/VariableEditor.vue'
+import { createIssue, getProjects, getBranches, getPromptTemplates, type Project, type Branch, type CreateIssueRequest, type PromptTemplate } from '../api'
 import { useBreakpoints } from '../composables/useBreakpoints'
 
 const router = useRouter()
@@ -151,10 +206,24 @@ const loading = ref(false)
 const projectsLoading = ref(false)
 const branchesLoading = ref(false)
 const submitting = ref(false)
+const promptTemplatesLoading = ref(false)
 
 // Data
 const projects = ref<Project[]>([])
 const branches = ref<Branch[]>([])
+const promptTemplates = ref<PromptTemplate[]>([])
+
+// Template picker state
+const promptVariableTips = ref<Record<string, string> | undefined>(undefined)
+const showTemplateDrawer = ref(false)
+
+// Detect unreplaced variables in description
+const unreplacedVariables = computed(() => {
+  const content = formValue.value.description || ''
+  const matches = content.match(/\{\{([^}]+)\}\}/g)
+  if (!matches) return []
+  return matches.map(m => m.replace(/\{\{|\}\}/g, ''))
+})
 
 // Form
 const formRef = ref<FormInst | null>(null)
@@ -165,6 +234,7 @@ function createInitialFormValue(): {
   project_id: number | undefined
   base_branch: string | undefined
   target_branch: string | undefined
+  create_mr: boolean
 } {
   return {
     title: '',
@@ -172,6 +242,7 @@ function createInitialFormValue(): {
     project_id: undefined,
     base_branch: undefined,
     target_branch: undefined,
+    create_mr: false,
   }
 }
 
@@ -230,6 +301,10 @@ async function fetchBranches(projectId: number) {
     const defaultBranch = project?.default_branch
     if (defaultBranch && branches.value.some(b => b.name === defaultBranch)) {
       formValue.value.base_branch = defaultBranch
+      // Also set target_branch if create_mr is enabled
+      if (formValue.value.create_mr) {
+        formValue.value.target_branch = defaultBranch
+      }
     }
   } catch {
     message.error(t('createTask.failedToFetchBranches'))
@@ -243,6 +318,25 @@ function handleProjectChange(projectId: number) {
     formValue.value.base_branch = undefined
     formValue.value.target_branch = undefined
     fetchBranches(projectId)
+  }
+}
+
+// Fetch prompt templates
+async function fetchPromptTemplates() {
+  promptTemplatesLoading.value = true
+  try {
+    promptTemplates.value = await getPromptTemplates()
+  } catch {
+    // Non-critical
+  } finally {
+    promptTemplatesLoading.value = false
+  }
+}
+
+function applyPromptTemplate(tmpl: PromptTemplate) {
+  formValue.value.description = tmpl.content
+  if (tmpl.variable_tips) {
+    promptVariableTips.value = tmpl.variable_tips
   }
 }
 
@@ -269,7 +363,7 @@ async function handleSubmit() {
       project_id: formValue.value.project_id!,
       description: formValue.value.description || undefined,
       base_branch: formValue.value.base_branch || undefined,
-      target_branch: formValue.value.target_branch || undefined,
+      target_branch: formValue.value.create_mr ? formValue.value.target_branch || undefined : undefined,
     }
 
     const issue = await createIssue(request)
@@ -285,6 +379,7 @@ async function handleSubmit() {
 
 onMounted(() => {
   fetchProjects()
+  fetchPromptTemplates()
 })
 </script>
 
@@ -314,5 +409,51 @@ onMounted(() => {
 .create-issue-form__actions {
   padding-top: 16px;
   border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.prompt-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.prompt-label {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.prompt-variable-warning {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #f0a020;
+  font-size: 12px;
+}
+
+.prompt-template-dropdown__empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--n-text-color-3);
+}
+
+.prompt-template-dropdown__item {
+  padding: 12px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.1);
+}
+
+.prompt-template-dropdown__item:hover {
+  background: rgba(128, 128, 128, 0.05);
+}
+
+.prompt-template-dropdown__item-name {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.prompt-template-dropdown__item-preview {
+  font-size: 12px;
+  color: var(--n-text-color-3);
 }
 </style>

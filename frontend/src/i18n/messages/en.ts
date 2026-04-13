@@ -190,6 +190,9 @@ const en = {
     scheduleDelayed: 'Schedule',
     confirmClose: 'Are you sure you want to close this issue?',
     confirmDelete: 'Are you sure you want to delete this issue? This cannot be undone.',
+    createMergeRequest: 'Create Merge Request',
+    mrEnabled: 'MR will be created',
+    mrDisabled: 'No MR',
     status: {
       open: 'Open',
       in_progress: 'In Progress',

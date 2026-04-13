@@ -187,6 +187,9 @@ const zhCN = {
     scheduleDelayed: '预约执行',
     confirmClose: '确定要关闭此需求吗？',
     confirmDelete: '确定要删除此需求吗？此操作不可撤销。',
+    createMergeRequest: '创建合并请求',
+    mrEnabled: '将创建 MR',
+    mrDisabled: '不创建 MR',
     status: {
       open: '待处理',
       in_progress: '进行中',
