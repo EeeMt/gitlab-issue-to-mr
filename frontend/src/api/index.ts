@@ -813,6 +813,16 @@ export async function getStats(): Promise<Stats> {
   return response.data
 }
 
+export interface ActivityHeatmapEntry {
+  date: string
+  count: number
+}
+
+export async function getActivityHeatmap(days = 365): Promise<ActivityHeatmapEntry[]> {
+  const res = await api.get<ActivityHeatmapEntry[]>('/stats/activity-heatmap', { params: { days } })
+  return res.data
+}
+
 export async function getAnalytics(
   days: number,
   projectId?: number | null,

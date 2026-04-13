@@ -672,6 +672,40 @@ async def get_analytics(
     }
 
 
+@router.get("/stats/activity-heatmap")
+async def get_activity_heatmap(
+    days: int = Query(default=365, ge=1, le=730),
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+    _user=Depends(require_page_access),
+):
+    """Return daily completed-task counts for the heatmap."""
+    now = utcnow()
+    since = now - timedelta(days=days)
+
+    query = (
+        select(
+            func.date(Task.completed_at).label("date"),
+            func.count().label("count"),
+        )
+        .where(Task.status == TaskStatus.COMPLETED)
+        .where(Task.completed_at >= since)
+        .group_by(func.date(Task.completed_at))
+        .order_by(func.date(Task.completed_at))
+    )
+
+    if not access_scope.is_unrestricted:
+        allowed_project_ids = access_scope.accessible_project_ids
+        if not allowed_project_ids:
+            return []
+        query = query.where(Task.project_id.in_(allowed_project_ids))
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    return [{"date": str(row.date), "count": row.count} for row in rows]
+
+
 @router.get("/stats/scheduled")
 async def get_scheduled_stats(
     project_id: Optional[int] = None,
