@@ -126,8 +126,16 @@ process_stream() {
     [[ -z "$line" ]] && continue
 
     local type
-    type=$(printf '%s' "$line" | jq -r '.type // empty' 2>/dev/null) || continue
-    [[ -z "$type" ]] && continue
+    type=$(printf '%s' "$line" | jq -r '.type // empty' 2>/dev/null) || {
+      # Non-JSON line (e.g. plain-text error from CLI) — pass through to stderr
+      _e "%s\n" "$line"
+      continue
+    }
+    if [[ -z "$type" ]]; then
+      # JSON but no .type field — pass through to stderr
+      _e "%s\n" "$line"
+      continue
+    fi
 
     case "$type" in
 
@@ -326,6 +334,23 @@ process_stream() {
 
 # ── Run claude and stream-process its output ──────────────────────────────────
 /usr/local/bin/claude "${CLAUDE_ARGS[@]}" 2>&1 | process_stream
+
+# ── Fallback: if --resume was used and produced no result, retry without it ───
+if [[ -n "$RESUME" && ! -s "$RESULT_FILE" ]]; then
+  fail "Session resume failed (session $RESUME not found in container). Retrying without --resume..."
+  # Remove --resume from CLAUDE_ARGS
+  NEW_ARGS=()
+  skip_next=false
+  for arg in "${CLAUDE_ARGS[@]}"; do
+    if $skip_next; then skip_next=false; continue; fi
+    if [[ "$arg" == "--resume" ]]; then skip_next=true; continue; fi
+    NEW_ARGS+=("$arg")
+  done
+  # Reset temp files
+  : > "$TOOL_CALLS_FILE"
+  : > "$RESULT_FILE"
+  /usr/local/bin/claude "${NEW_ARGS[@]}" 2>&1 | process_stream
+fi
 
 # ── Build and emit structured JSON to stdout ──────────────────────────────────
 if [[ ! -s "$RESULT_FILE" ]]; then
