@@ -164,7 +164,7 @@ const router = useRouter()
 const message = useMessage()
 const { t } = useI18n()
 const { isMobile } = useBreakpoints()
-const tooltipStyle = { fontSize: '12px', borderRadius: '6px', padding: '6px 12px', maxWidth: '280px' }
+const tooltipStyle = { fontSize: '11px', borderRadius: '6px', padding: '6px 12px', maxWidth: '280px' }
 
 function issueRowProps(row: Issue) {
   return { style: 'cursor: pointer', onClick: () => router.push(`/issues/${row.id}`) }
