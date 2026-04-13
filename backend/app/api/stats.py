@@ -677,7 +677,6 @@ async def get_activity_heatmap(
     days: int = Query(default=365, ge=1, le=730),
     db: AsyncSession = Depends(get_db),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
-    _user=Depends(require_page_access),
 ):
     """Return daily completed-task counts for the heatmap."""
     now = utcnow()
