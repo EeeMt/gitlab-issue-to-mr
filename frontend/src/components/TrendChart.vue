@@ -124,7 +124,7 @@ const option = computed(() => {
       top: 8,
       left: 40,
       right: 12,
-      bottom: 30,
+      bottom: 46,
     },
     xAxis: {
       type: 'category',
@@ -207,6 +207,6 @@ const option = computed(() => {
 
 .trend-chart__chart {
   width: 100%;
-  height: 200px;
+  height: 220px;
 }
 </style>
