@@ -12,7 +12,7 @@
 |---|------------|-------|
 | 1 | Dashboard summary cards — Grafana-style stat panels, 5 metrics | Frontend |
 | 2 | Dashboard — title column truncation with tooltip | Frontend |
-| 3 | IssueList — row-click navigation | Already done — skip |
+| 3 | IssueList — row-click navigation (any position) | Frontend |
 | 4 | IssueView — side-by-side Detail + Description layout | Frontend |
 | 5 | Failed task retry — hide retry when retried, show link to new task | Frontend |
 | 6 | TaskView — retry source link navigation bug (same-route) | Frontend |
@@ -122,7 +122,19 @@ No other changes needed — NDataTable handles tooltip rendering automatically.
 
 ---
 
-## Section C: Other Pages (#6, #7)
+## Section C: Other Pages (#3, #6, #7)
+
+### C0: IssueList Row-Click Navigation (#3)
+
+**Current:** Only the Title column NButton is clickable. Clicking elsewhere on the row does nothing.
+
+**Fix:** Add `row-props` to `n-data-table`:
+```typescript
+function issueRowProps(row: Issue) {
+  return { style: 'cursor: pointer', onClick: () => router.push(`/issues/${row.id}`) }
+}
+```
+Add `:row-props="issueRowProps"` to the data-table element.
 
 ### C1: TaskView Navigation Bug (#6)
 
@@ -194,6 +206,7 @@ issue.createTaskModal: '创建任务'
 | `frontend/src/components/StatCard.vue` | **NEW** — Grafana-style stat card |
 | `frontend/src/components/ActivityHeatmap.vue` | **NEW** — 365-day heatmap |
 | `frontend/src/views/Dashboard.vue` | Summary cards → StatCard, truncation, heatmap |
+| `frontend/src/views/IssueList.vue` | Add row-props for row-click navigation |
 | `frontend/src/views/IssueView.vue` | Side-by-side, retry rework, "No MR", modal |
 | `frontend/src/views/TaskView.vue` | Watch route params fix |
 | `frontend/src/views/CreateIssue.vue` | Auto-fill target branch |
