@@ -13,7 +13,7 @@
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
               <div class="metric-title">
                 <span>{{ t('dashboard.issueStatus') }}</span>
-                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.last90days') }}</n-tooltip>
+                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.issueStatusTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
                 <StatusPieChart :data="issueChartData" />
@@ -24,7 +24,7 @@
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
               <div class="metric-title">
                 <span>{{ t('dashboard.taskStatus') }}</span>
-                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.last90days') }}</n-tooltip>
+                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.taskStatusTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
                 <StatusPieChart :data="taskChartData" />
@@ -35,7 +35,7 @@
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
               <div class="metric-title">
                 <span>{{ t('dashboard.linesChanged') }}</span>
-                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.last90days') }}</n-tooltip>
+                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.linesChangedTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
                 <div class="dashboard-stat__value">{{ formatNumber(analyticsTotalChanges) }}</div>
@@ -50,7 +50,7 @@
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
               <div class="metric-title">
                 <span>{{ t('dashboard.tokensUsed') }}</span>
-                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.last90days') }}</n-tooltip>
+                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.tokensUsedTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
                 <div class="dashboard-stat__value">{{ formatNumber(analyticsTotalTokens) }}</div>
@@ -73,7 +73,7 @@
             <n-card size="small" class="dashboard-metric-card dashboard-metric-card--wide" data-testid="dashboard-activity-heatmap">
               <div class="metric-title">
                 <span>{{ t('dashboard.activity') }}</span>
-                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.last90days') }}</n-tooltip>
+                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.activityTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
                 <ActivityHeatmap :data="heatmapData" />
@@ -84,7 +84,7 @@
             <n-card size="small" class="dashboard-metric-card dashboard-metric-card--wide dashboard-metric-card--trend" data-testid="dashboard-trend-chart">
               <div class="metric-title">
                 <span>{{ t('dashboard.trend') }}</span>
-                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.last90days') }}</n-tooltip>
+                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.trendTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
                 <TrendChart :data="trendData" />
@@ -164,7 +164,7 @@ const router = useRouter()
 const message = useMessage()
 const { t } = useI18n()
 const { isMobile } = useBreakpoints()
-const tooltipStyle = { fontSize: '12px', borderRadius: '6px', padding: '4px 10px' }
+const tooltipStyle = { fontSize: '12px', borderRadius: '6px', padding: '6px 12px', maxWidth: '280px' }
 
 function issueRowProps(row: Issue) {
   return { style: 'cursor: pointer', onClick: () => router.push(`/issues/${row.id}`) }

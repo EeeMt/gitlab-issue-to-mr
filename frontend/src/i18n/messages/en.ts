@@ -185,6 +185,12 @@ const en = {
     tokensUsed: 'Tokens Used',
     last90days: 'Last 90 days',
     trend: 'Trend',
+    issueStatusTip: 'Distribution of your issues by status (open / in progress / completed / closed) over the last 90 days',
+    taskStatusTip: 'Distribution of your tasks by status (pending / queued / running / completed / failed / cancelled) over the last 90 days',
+    linesChangedTip: 'Total lines added and deleted by your tasks in the last 90 days',
+    tokensUsedTip: 'Total input and output tokens consumed by your tasks in the last 90 days',
+    activityTip: 'Number of tasks completed per day over the last 90 days',
+    trendTip: 'Daily trends of your task completions, code changes, and token usage over the last 90 days',
   },
   trend: {
     tasks: 'Tasks',

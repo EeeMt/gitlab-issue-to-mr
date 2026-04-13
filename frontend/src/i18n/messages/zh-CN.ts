@@ -182,6 +182,12 @@ const zhCN = {
     tokensUsed: 'Token 用量',
     last90days: '最近 90 天',
     trend: '趋势',
+    issueStatusTip: '最近 90 天内你的需求按状态（打开 / 进行中 / 已完成 / 已关闭）的分布',
+    taskStatusTip: '最近 90 天内你的任务按状态（待处理 / 已入队 / 运行中 / 已完成 / 失败 / 已取消）的分布',
+    linesChangedTip: '最近 90 天内你的任务产生的代码新增和删除总行数',
+    tokensUsedTip: '最近 90 天内你的任务消耗的输入和输出 Token 总量',
+    activityTip: '最近 90 天内每天完成的任务数量',
+    trendTip: '最近 90 天内任务完成数、代码变更量和 Token 消耗的每日趋势',
   },
   trend: {
     tasks: '任务',
