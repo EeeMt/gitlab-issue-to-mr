@@ -427,6 +427,19 @@ if [ -d /home/codify/.claude ]; then
     chown -R codify:codify /home/codify/.claude
 fi
 
+# Restore .claude.json if missing (volume mount persists backups but not the config file)
+if [ ! -f /home/codify/.claude.json ]; then
+    LATEST_BACKUP=$(ls -t /home/codify/.claude/backups/.claude.json.backup.* 2>/dev/null | head -1)
+    if [ -n "$LATEST_BACKUP" ]; then
+        echo "Restoring .claude.json from backup: $LATEST_BACKUP"
+        cp "$LATEST_BACKUP" /home/codify/.claude.json
+    else
+        echo "Creating minimal .claude.json"
+        echo '{}' > /home/codify/.claude.json
+    fi
+    chown codify:codify /home/codify/.claude.json
+fi
+
 export ANTHROPIC_BASE_URL
 export ANTHROPIC_API_KEY
 export ANTHROPIC_AUTH_TOKEN="${ANTHROPIC_AUTH_TOKEN:-${ANTHROPIC_API_KEY}}"
