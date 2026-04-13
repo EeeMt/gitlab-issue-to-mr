@@ -87,6 +87,8 @@ class TestIssueViewPage:
     def test_create_task_card_visible(self, logged_in_page: Page, test_issue_id):
         logged_in_page.goto(f"/issues/{test_issue_id}")
         logged_in_page.wait_for_load_state("domcontentloaded")
+        # Create task form is collapsed by default; toggle it open first
+        logged_in_page.get_by_test_id("issue-toggle-create-task").click()
         expect(logged_in_page.get_by_test_id("issue-create-task-card")).to_be_visible()
 
 
@@ -101,13 +103,17 @@ class TestIssueViewCreateTaskForm:
     def test_task_prompt_input_visible(self, logged_in_page: Page, test_issue_id):
         logged_in_page.goto(f"/issues/{test_issue_id}")
         logged_in_page.wait_for_load_state("networkidle")
-        # Task prompt textarea inside the create task form
-        textarea = logged_in_page.get_by_test_id("issue-create-task-card").locator("textarea")
-        expect(textarea).to_be_visible()
+        # Toggle create task form open
+        logged_in_page.get_by_test_id("issue-toggle-create-task").click()
+        # VariableEditor uses CodeMirror; look for .cm-editor inside the form
+        editor = logged_in_page.get_by_test_id("issue-create-task-card").locator(".cm-editor")
+        expect(editor).to_be_visible()
 
     def test_create_task_button_visible(self, logged_in_page: Page, test_issue_id):
         logged_in_page.goto(f"/issues/{test_issue_id}")
         logged_in_page.wait_for_load_state("domcontentloaded")
+        # Toggle create task form open first
+        logged_in_page.get_by_test_id("issue-toggle-create-task").click()
         expect(logged_in_page.get_by_test_id("issue-create-task-button")).to_be_visible()
 
     def test_edit_button_visible(self, logged_in_page: Page, test_issue_id):
@@ -134,9 +140,13 @@ class TestIssueViewCreateTask:
         logged_in_page.goto(f"/issues/{test_issue_id}")
         logged_in_page.wait_for_load_state("networkidle")
 
-        # Fill prompt textarea
-        prompt = logged_in_page.get_by_test_id("issue-create-task-card").locator("textarea")
-        prompt.fill("E2E form-created task prompt")
+        # Toggle create task form open
+        logged_in_page.get_by_test_id("issue-toggle-create-task").click()
+
+        # Fill prompt via CodeMirror editor (VariableEditor)
+        editor = logged_in_page.get_by_test_id("issue-create-task-card").locator(".cm-content")
+        editor.click()
+        editor.fill("E2E form-created task prompt")
 
         # Click create task
         logged_in_page.get_by_test_id("issue-create-task-button").click()

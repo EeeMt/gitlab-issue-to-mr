@@ -55,7 +55,9 @@ class TestCreateIssuePage:
     def test_description_input_visible(self, class_page: Page):
         class_page.goto("/issues/create")
         class_page.wait_for_load_state("networkidle")
-        expect(class_page.get_by_placeholder("Description")).to_be_visible()
+        # Description uses VariableEditor (CodeMirror), not a plain input
+        editor = class_page.locator(".variable-editor .cm-editor")
+        expect(editor).to_be_visible()
 
     def test_base_branch_select_visible(self, class_page: Page):
         class_page.goto("/issues/create")
@@ -66,8 +68,19 @@ class TestCreateIssuePage:
     def test_target_branch_select_visible(self, class_page: Page):
         class_page.goto("/issues/create")
         class_page.wait_for_load_state("networkidle")
+        # Target branch requires: 1) project selected (to enable MR toggle), 2) MR toggle ON
+        # Select a project first
+        project_sel = class_page.locator(".n-base-selection").first
+        project_sel.click()
+        class_page.locator(".n-base-select-option").first.wait_for(state="visible", timeout=5000)
+        class_page.locator(".n-base-select-option").first.click()
+        class_page.wait_for_timeout(1000)
+        # Enable MR toggle
+        mr_switch = class_page.locator(".n-switch")
+        mr_switch.click()
+        class_page.wait_for_timeout(1000)
         target_sel = class_page.locator(".n-base-selection").filter(has_text="Select target branch")
-        expect(target_sel).to_be_visible()
+        expect(target_sel).to_be_visible(timeout=10000)
 
     def test_submit_button_visible(self, class_page: Page):
         class_page.goto("/issues/create")
@@ -170,8 +183,10 @@ class TestCreateIssueSubmission:
         # Fill title
         logged_in_page.get_by_placeholder("Title").fill("E2E Test Issue Submission")
 
-        # Fill description
-        logged_in_page.get_by_placeholder("Description").fill("Automated E2E test issue description")
+        # Fill description via CodeMirror (VariableEditor)
+        editor = logged_in_page.locator(".variable-editor .cm-content")
+        editor.click()
+        editor.fill("Automated E2E test issue description")
 
         # Submit
         logged_in_page.get_by_test_id("create-issue-submit").click()
