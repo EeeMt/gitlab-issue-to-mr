@@ -65,6 +65,7 @@ const option = computed(() => ({
   font-weight: 600;
   color: #666;
   margin-bottom: 4px;
+  text-align: center;
 }
 
 .status-pie__chart {

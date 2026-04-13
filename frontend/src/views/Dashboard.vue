@@ -302,7 +302,7 @@ async function fetchHeatmap() {
 async function fetchAnalytics() {
   try {
     const username = authState.user?.username
-    const res = await getAnalytics(365, null, username || null)
+    const res = await getAnalytics(90, null, username || null)
     const s = res.summary
     analyticsTotalAdditions.value = s.total_additions
     analyticsTotalDeletions.value = s.total_deletions
@@ -356,10 +356,10 @@ onMounted(() => {
   border-radius: var(--app-card-radius);
 }
 
-.dashboard-metric-card--stat {
+.dashboard-metric-card :deep(.n-card__content) {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  height: 100%;
 }
 
 .dashboard-stat {
@@ -368,7 +368,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 24px 0;
+  flex: 1;
   text-align: center;
 }
 
