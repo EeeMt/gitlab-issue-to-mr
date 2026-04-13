@@ -184,6 +184,7 @@ const en = {
     linesChanged: 'Lines Changed',
     tokensUsed: 'Tokens Used',
     last90days: 'Last 90 days',
+    trend: 'Trend',
   },
   issue: {
     title: 'Issues',

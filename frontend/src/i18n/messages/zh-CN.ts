@@ -181,6 +181,7 @@ const zhCN = {
     linesChanged: '变更行数',
     tokensUsed: 'Token 用量',
     last90days: '最近 90 天',
+    trend: '趋势',
   },
   issue: {
     title: '需求',

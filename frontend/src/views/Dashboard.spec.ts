@@ -176,6 +176,16 @@ vi.mock('../components/ActivityHeatmap.vue', () => ({
   },
 }))
 
+vi.mock('../components/TrendChart.vue', () => ({
+  default: {
+    name: 'TrendChart',
+    props: ['data'],
+    setup() {
+      return () => h('div', { class: 'trend-chart', 'data-testid': 'trend-chart' })
+    },
+  },
+}))
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------

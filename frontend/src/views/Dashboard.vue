@@ -105,14 +105,28 @@
           />
         </n-card>
 
-        <n-card
-          :title="t('dashboard.activity')"
-          :bordered="false"
-          class="dashboard-table-card"
-          data-testid="dashboard-activity-heatmap"
-        >
-          <ActivityHeatmap :data="heatmapData" />
-        </n-card>
+        <n-grid :cols="isMobile ? 1 : 2" :x-gap="12" :y-gap="12">
+          <n-gi>
+            <n-card
+              :title="t('dashboard.activity')"
+              :bordered="false"
+              class="dashboard-table-card"
+              data-testid="dashboard-activity-heatmap"
+            >
+              <ActivityHeatmap :data="heatmapData" />
+            </n-card>
+          </n-gi>
+          <n-gi>
+            <n-card
+              :title="t('dashboard.trend')"
+              :bordered="false"
+              class="dashboard-table-card"
+              data-testid="dashboard-trend-chart"
+            >
+              <TrendChart :data="trendData" />
+            </n-card>
+          </n-gi>
+        </n-grid>
 
       </n-space>
     </n-spin>
@@ -124,7 +138,7 @@ import { ref, onMounted, h, computed } from 'vue'
 import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, NIcon, NTooltip, useMessage, type DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getIssues, getTasksPaginated, getStats, getAnalytics, getActivityHeatmap, type Issue, type Task, type ActivityHeatmapEntry } from '../api'
+import { getIssues, getTasksPaginated, getStats, getAnalytics, getActivityHeatmap, type Issue, type Task, type ActivityHeatmapEntry, type AnalyticsTrendPoint } from '../api'
 import {
   FlashOutline,
   InformationCircleOutline,
@@ -132,6 +146,7 @@ import {
 
 import StatusPieChart from '../components/StatusPieChart.vue'
 import ActivityHeatmap from '../components/ActivityHeatmap.vue'
+import TrendChart from '../components/TrendChart.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { usePolling } from '../composables/usePolling'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
@@ -172,6 +187,7 @@ const analyticsInputTokens = ref(0)
 const analyticsOutputTokens = ref(0)
 const analyticsTotalTokens = ref(0)
 const heatmapData = ref<ActivityHeatmapEntry[]>([])
+const trendData = ref<AnalyticsTrendPoint[]>([])
 
 const runningAndQueuedTasks = computed(() => [...runningTasks.value, ...queuedTasks.value])
 
@@ -330,6 +346,7 @@ async function fetchAnalytics() {
     analyticsInputTokens.value = s.total_input_tokens
     analyticsOutputTokens.value = s.total_output_tokens
     analyticsTotalTokens.value = s.total_tokens
+    trendData.value = res.trends
   } catch {
     // Analytics are supplementary
   }
