@@ -4,6 +4,8 @@
 
 **Goal:** Implement 12 UI/UX improvements: Dashboard restyle with Grafana stat cards + GitHub-style 365-day activity heatmap, IssueView layout overhaul (side-by-side, modal create task, retry rework, "No MR"), IssueList row-click, TaskView navigation fix, CreateIssue auto-fill, plus housekeeping.
 
+**Status:** ✅ All 10 tasks completed and verified.
+
 **Architecture:** New components (StatCard, ActivityHeatmap) + new backend endpoint for daily activity data + modifications to 6 existing Vue pages. All i18n keys added inline per task.
 
 **Tech Stack:** Vue 3 / Naive UI / TypeScript / Python FastAPI / SQLAlchemy
@@ -40,7 +42,7 @@
 **Files:**
 - Create: `frontend/src/components/StatCard.vue`
 
-- [ ] **Step 1: Create StatCard.vue**
+- [x] **Step 1: Create StatCard.vue**
 
 ```vue
 <template>
@@ -116,12 +118,12 @@ defineProps<{
 </style>
 ```
 
-- [ ] **Step 2: Build to verify**
+- [x] **Step 2: Build to verify**
 
 Run: `cd frontend && npx vue-tsc --noEmit`
 Expected: No errors related to StatCard.vue
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src/components/StatCard.vue
@@ -139,7 +141,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 - Modify: `frontend/src/api/index.ts`
 - Modify: `backend/app/api/stats.py`
 
-- [ ] **Step 1: Add backend endpoint**
+- [x] **Step 1: Add backend endpoint**
 
 Add to `backend/app/api/stats.py` after the existing `get_stats` endpoint:
 
@@ -175,7 +177,7 @@ async def get_activity_heatmap(
     return [{"date": str(row.date), "count": row.count} for row in rows]
 ```
 
-- [ ] **Step 2: Add frontend API function**
+- [x] **Step 2: Add frontend API function**
 
 In `frontend/src/api/index.ts`, add after the `Stats` interface (around line 217):
 
@@ -195,7 +197,7 @@ export async function getActivityHeatmap(days = 365): Promise<ActivityHeatmapEnt
 }
 ```
 
-- [ ] **Step 3: Create ActivityHeatmap.vue**
+- [x] **Step 3: Create ActivityHeatmap.vue**
 
 ```vue
 <template>
@@ -419,12 +421,12 @@ function getLevel(count: number): number {
 </style>
 ```
 
-- [ ] **Step 4: Build to verify**
+- [x] **Step 4: Build to verify**
 
 Run: `cd frontend && npx vue-tsc --noEmit`
 Expected: No errors
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/components/ActivityHeatmap.vue frontend/src/api/index.ts backend/app/api/stats.py
@@ -444,7 +446,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 
 **Depends on:** Task 1 (StatCard), Task 2 (ActivityHeatmap + API)
 
-- [ ] **Step 1: Add i18n keys**
+- [x] **Step 1: Add i18n keys**
 
 In `en.ts`, add to the `dashboard` section:
 
@@ -484,7 +486,7 @@ less: '少',
 more: '多',
 ```
 
-- [ ] **Step 2: Update Dashboard.vue imports**
+- [x] **Step 2: Update Dashboard.vue imports**
 
 Replace the import block to use StatCard + ActivityHeatmap instead of SummaryCard:
 
@@ -511,7 +513,7 @@ import {
 } from '@vicons/ionicons5'
 ```
 
-- [ ] **Step 3: Update Dashboard.vue state**
+- [x] **Step 3: Update Dashboard.vue state**
 
 Add new state variables:
 
@@ -582,7 +584,7 @@ const successRate = computed(() => {
 })
 ```
 
-- [ ] **Step 4: Update Dashboard.vue template — Summary Cards**
+- [x] **Step 4: Update Dashboard.vue template — Summary Cards**
 
 Replace the summary cards section (lines 15-32) with:
 
@@ -643,7 +645,7 @@ Replace the summary cards section (lines 15-32) with:
 </n-grid>
 ```
 
-- [ ] **Step 5: Replace Recent Activity with ActivityHeatmap**
+- [x] **Step 5: Replace Recent Activity with ActivityHeatmap**
 
 Replace the Recent Activity card (lines 66-80) with:
 
@@ -660,16 +662,16 @@ Replace the Recent Activity card (lines 66-80) with:
 
 Remove `activityColumns`, `recentActivityTasks`, `recentActivity` computed, and the activity fetch code from `fetchData()` (lines 297-312).
 
-- [ ] **Step 6: Remove stale summaryItems computed**
+- [x] **Step 6: Remove stale summaryItems computed**
 
 Delete the `summaryItems` computed (lines 130-135) — no longer used.
 
-- [ ] **Step 7: Build to verify**
+- [x] **Step 7: Build to verify**
 
 Run: `cd frontend && npm run build`
 Expected: Build succeeds
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add frontend/src/views/Dashboard.vue frontend/src/i18n/messages/en.ts frontend/src/i18n/messages/zh-CN.ts
@@ -689,7 +691,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 **Files:**
 - Modify: `frontend/src/views/IssueList.vue`
 
-- [ ] **Step 1: Add row-props function**
+- [x] **Step 1: Add row-props function**
 
 Add after line 109 (after `projectOptions` computed):
 
@@ -702,7 +704,7 @@ function issueRowProps(row: Issue) {
 }
 ```
 
-- [ ] **Step 2: Add row-props to data-table**
+- [x] **Step 2: Add row-props to data-table**
 
 Change line 40-49 (the `n-data-table` element) to include `:row-props="issueRowProps"`:
 
@@ -720,7 +722,7 @@ Change line 40-49 (the `n-data-table` element) to include `:row-props="issueRowP
 />
 ```
 
-- [ ] **Step 3: Add stopPropagation to Title column click**
+- [x] **Step 3: Add stopPropagation to Title column click**
 
 Update the Title column render function (lines 138-147) to add `e.stopPropagation()`:
 
@@ -740,12 +742,12 @@ render: (row) =>
   ),
 ```
 
-- [ ] **Step 4: Build to verify**
+- [x] **Step 4: Build to verify**
 
 Run: `cd frontend && npx vue-tsc --noEmit`
 Expected: No errors
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/views/IssueList.vue
@@ -763,7 +765,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 - Modify: `frontend/src/i18n/messages/en.ts`
 - Modify: `frontend/src/i18n/messages/zh-CN.ts`
 
-- [ ] **Step 1: Add i18n keys**
+- [x] **Step 1: Add i18n keys**
 
 In `en.ts`, add to `issue` section:
 
@@ -779,7 +781,7 @@ noMergeRequest: '无合并请求',
 retriedAs: '已重试 →',
 ```
 
-- [ ] **Step 2: Side-by-side layout for Detail + Description**
+- [x] **Step 2: Side-by-side layout for Detail + Description**
 
 Wrap the metadata card (lines 37-135) and description card (lines 138-150) in an `NGrid`:
 
@@ -801,7 +803,7 @@ Wrap the metadata card (lines 37-135) and description card (lines 138-150) in an
 </n-grid>
 ```
 
-- [ ] **Step 3: Replace "No MR" dash with explicit text**
+- [x] **Step 3: Replace "No MR" dash with explicit text**
 
 In the Merge Request metadata row (line 100), change:
 
@@ -815,7 +817,7 @@ To:
 <span v-else class="metadata-muted">{{ t('issue.noMergeRequest') }}</span>
 ```
 
-- [ ] **Step 4: Implement retry rework in task columns**
+- [x] **Step 4: Implement retry rework in task columns**
 
 Add a computed to build the retried-task lookup map:
 
@@ -880,7 +882,7 @@ Update the actions column render function (currently lines 448-470) in `taskColu
 }
 ```
 
-- [ ] **Step 5: Convert create task to modal**
+- [x] **Step 5: Convert create task to modal**
 
 Replace the inline create task section (currently lines 177-243) with a modal trigger button and a separate NModal.
 
@@ -990,12 +992,12 @@ Remove the old inline create section from the tasks card body. The `n-data-table
 
 Remove the `NDivider` import if it was only used for the create task section separator.
 
-- [ ] **Step 6: Build to verify**
+- [x] **Step 6: Build to verify**
 
 Run: `cd frontend && npm run build`
 Expected: Build succeeds
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add frontend/src/views/IssueView.vue frontend/src/i18n/messages/en.ts frontend/src/i18n/messages/zh-CN.ts
@@ -1016,7 +1018,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 **Files:**
 - Modify: `frontend/src/views/TaskView.vue`
 
-- [ ] **Step 1: Add watch on route params**
+- [x] **Step 1: Add watch on route params**
 
 Add `watch` to the imports from vue (line 241):
 
@@ -1041,12 +1043,12 @@ watch(
 )
 ```
 
-- [ ] **Step 2: Build to verify**
+- [x] **Step 2: Build to verify**
 
 Run: `cd frontend && npx vue-tsc --noEmit`
 Expected: No errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src/views/TaskView.vue
@@ -1065,7 +1067,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 **Files:**
 - Modify: `frontend/src/views/CreateIssue.vue`
 
-- [ ] **Step 1: Update MR toggle handler**
+- [x] **Step 1: Update MR toggle handler**
 
 The auto-fill logic is already partially implemented in `fetchBranches()` (lines 299-308). But when the user toggles MR ON after project is already selected and branches are loaded, the target_branch isn't set. Add a watch or update the switch handler.
 
@@ -1093,12 +1095,12 @@ Add `watch` to the imports from vue:
 import { ref, computed, onMounted, watch } from 'vue'
 ```
 
-- [ ] **Step 2: Build to verify**
+- [x] **Step 2: Build to verify**
 
 Run: `cd frontend && npx vue-tsc --noEmit`
 Expected: No errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src/views/CreateIssue.vue
@@ -1114,11 +1116,11 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-04-12-issue-task-mr-refactoring.md`
 
-- [ ] **Step 1: Update all task statuses to Complete**
+- [x] **Step 1: Update all task statuses to Complete**
 
 Read the document and change all "Not Started" statuses to "Complete". Update all progress percentages to 100%.
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add docs/superpowers/plans/2026-04-12-issue-task-mr-refactoring.md
@@ -1133,7 +1135,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 
 Dispatch code-reviewer agent on changes since commit d8100d6.
 
-- [ ] **Step 1: Run code review**
+- [x] **Step 1: Run code review**
 
 Review all changes from commit d8100d6 to HEAD for:
 - Logic bugs
@@ -1141,7 +1143,7 @@ Review all changes from commit d8100d6 to HEAD for:
 - Missing error handling
 - Type mismatches
 
-- [ ] **Step 2: Address findings**
+- [x] **Step 2: Address findings**
 
 Fix any critical issues found by the reviewer.
 
@@ -1149,26 +1151,26 @@ Fix any critical issues found by the reviewer.
 
 ## Task 10: Full Verification
 
-- [ ] **Step 1: Build frontend**
+- [x] **Step 1: Build frontend**
 
 Run: `cd frontend && npm run build`
 Expected: Build succeeds (includes vue-tsc type checking)
 
-- [ ] **Step 2: Run backend unit tests**
+- [x] **Step 2: Run backend unit tests**
 
 Run: `cd backend && pytest tests/unit/ -v --tb=short`
 Expected: All tests pass
 
-- [ ] **Step 3: Rebuild E2E test images**
+- [x] **Step 3: Rebuild E2E test images**
 
 Run: `cd deploy && docker-compose -f docker-compose.e2e.yml build --no-cache nginx e2e`
 
-- [ ] **Step 4: Run E2E tests**
+- [x] **Step 4: Run E2E tests**
 
 Run: `make test-e2e-down && make test-e2e-up && make test-e2e-run`
 Expected: All tests pass (may need fixes for Dashboard/IssueView UI changes)
 
-- [ ] **Step 5: Fix any test failures**
+- [x] **Step 5: Fix any test failures**
 
 Update E2E test selectors/assertions for:
 - Dashboard: `dashboard-summary-card` data-testid still present on StatCard
@@ -1176,7 +1178,7 @@ Update E2E test selectors/assertions for:
 - IssueView: create task button opens modal instead of inline section
 - IssueView: retry column may show "Retried →" text
 
-- [ ] **Step 6: Final commit**
+- [x] **Step 6: Final commit**
 
 ```bash
 git add -A
