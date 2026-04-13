@@ -80,6 +80,13 @@ export interface Issue {
   updated_at: string
   task_count?: number
   tasks?: Task[]
+  totals?: {
+    additions: number
+    deletions: number
+    total_changes: number
+    input_tokens: number
+    output_tokens: number
+  }
 }
 
 export interface CreateIssueRequest {

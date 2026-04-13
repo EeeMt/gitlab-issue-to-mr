@@ -223,6 +223,12 @@ const en = {
       updatedAt: 'Updated',
       creator: 'Creator',
     },
+    totals: {
+      additions: 'Additions',
+      deletions: 'Deletions',
+      inputTokens: 'Input Tokens',
+      outputTokens: 'Output Tokens',
+    },
   },
   taskView: {
     title: 'Task #{id}',

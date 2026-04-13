@@ -167,6 +167,40 @@
         </n-gi>
       </n-grid>
 
+      <!-- Aggregated Stats -->
+      <n-grid
+        v-if="issue.totals && (issue.totals.total_changes > 0 || issue.totals.input_tokens > 0)"
+        :cols="isMobile ? 2 : 4"
+        :x-gap="12"
+        :y-gap="12"
+        data-testid="issue-totals"
+      >
+        <n-gi>
+          <n-card :bordered="false" class="issue-stat-card">
+            <n-statistic :label="t('issue.totals.additions')" :value="issue.totals.additions">
+              <template #prefix><span class="stat-prefix stat-prefix--add">+</span></template>
+            </n-statistic>
+          </n-card>
+        </n-gi>
+        <n-gi>
+          <n-card :bordered="false" class="issue-stat-card">
+            <n-statistic :label="t('issue.totals.deletions')" :value="issue.totals.deletions">
+              <template #prefix><span class="stat-prefix stat-prefix--del">-</span></template>
+            </n-statistic>
+          </n-card>
+        </n-gi>
+        <n-gi>
+          <n-card :bordered="false" class="issue-stat-card">
+            <n-statistic :label="t('issue.totals.inputTokens')" :value="issue.totals.input_tokens" />
+          </n-card>
+        </n-gi>
+        <n-gi>
+          <n-card :bordered="false" class="issue-stat-card">
+            <n-statistic :label="t('issue.totals.outputTokens')" :value="issue.totals.output_tokens" />
+          </n-card>
+        </n-gi>
+      </n-grid>
+
       <!-- Task List + Create Task -->
       <n-card class="issue-card" :bordered="false" data-testid="issue-tasks-card">
         <template #header>
@@ -396,6 +430,7 @@ import {
   NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin,
   NIcon, NDataTable, NInput, NDrawer, NDrawerContent,
   NRadio, NRadioGroup, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NAlert,
+  NStatistic,
   useMessage,
   type DataTableColumns
 } from 'naive-ui'
@@ -837,6 +872,24 @@ onMounted(() => {
 
 .issue-card {
   border-radius: var(--app-card-radius);
+}
+
+.issue-stat-card {
+  border-radius: var(--app-card-radius);
+  text-align: center;
+}
+
+.stat-prefix {
+  font-weight: 700;
+  margin-right: 2px;
+}
+
+.stat-prefix--add {
+  color: #18a058;
+}
+
+.stat-prefix--del {
+  color: #d03050;
 }
 
 .issue-card__header {

@@ -76,6 +76,7 @@ def _serialize_issue(issue: Issue, task_count: Optional[int] = None) -> dict:
 def _serialize_issue_detail(issue: Issue) -> dict:
     """Serialize an Issue with its eagerly-loaded tasks."""
     data = _serialize_issue(issue)
+    tasks = issue.tasks or []
     data["tasks"] = [
         {
             "id": t.id,
@@ -98,8 +99,15 @@ def _serialize_issue_detail(issue: Issue) -> dict:
             "started_at": t.started_at.isoformat() if t.started_at else None,
             "completed_at": t.completed_at.isoformat() if t.completed_at else None,
         }
-        for t in (issue.tasks or [])
+        for t in tasks
     ]
+    data["totals"] = {
+        "additions": sum(t.additions or 0 for t in tasks),
+        "deletions": sum(t.deletions or 0 for t in tasks),
+        "total_changes": sum(t.total_changes or 0 for t in tasks),
+        "input_tokens": sum(t.input_tokens or 0 for t in tasks),
+        "output_tokens": sum(t.output_tokens or 0 for t in tasks),
+    }
     return data
 
 

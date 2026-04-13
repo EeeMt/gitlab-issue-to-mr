@@ -220,6 +220,12 @@ const zhCN = {
       updatedAt: '更新时间',
       creator: '创建人',
     },
+    totals: {
+      additions: '新增行数',
+      deletions: '删除行数',
+      inputTokens: '输入 Token',
+      outputTokens: '输出 Token',
+    },
   },
   taskView: {
     title: '任务 #{id}',

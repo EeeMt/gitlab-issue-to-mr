@@ -2,16 +2,6 @@
   <div class="dashboard" data-testid="dashboard-page">
     <n-spin :show="initialLoading" :description="t('common.loadingTasks')">
       <n-space vertical :size="16">
-        <div class="dashboard__top-bar" data-testid="dashboard-header">
-          <n-button
-            type="primary"
-            data-testid="dashboard-new-issue-button"
-            @click="router.push('/issues/create')"
-          >
-            {{ t('dashboard.createIssue') }}
-          </n-button>
-        </div>
-
         <n-grid
           v-if="hasLoadedOnce"
           data-testid="dashboard-summary"
@@ -73,6 +63,16 @@
           class="dashboard-table-card"
           data-testid="dashboard-recent-issues"
         >
+          <template #header-extra>
+            <n-button
+              type="primary"
+              size="small"
+              data-testid="dashboard-new-issue-button"
+              @click="router.push('/issues/create')"
+            >
+              {{ t('dashboard.createIssue') }}
+            </n-button>
+          </template>
           <n-data-table
             :columns="issueColumns"
             :data="recentIssues"
