@@ -178,7 +178,11 @@ const en = {
     tasks: 'Tasks',
     successRate: 'Success Rate',
     activity: 'Activity',
-    recentActivity: 'Recent Activity'
+    recentActivity: 'Recent Activity',
+    issueStatus: 'Issue Status',
+    taskStatus: 'Task Status',
+    linesChanged: 'Lines Changed',
+    tokensUsed: 'Tokens Used',
   },
   issue: {
     title: 'Issues',

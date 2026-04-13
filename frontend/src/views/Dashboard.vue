@@ -5,55 +5,43 @@
         <n-grid
           v-if="hasLoadedOnce"
           data-testid="dashboard-summary"
-          :cols="isMobile ? 2 : 5"
+          :cols="isMobile ? 2 : 4"
           :x-gap="12"
           :y-gap="12"
         >
           <n-gi>
-            <StatCard
-              :label="t('dashboard.issueCount')"
-              :value="statsIssueTotal"
-              :icon="FolderOpenOutline"
-              color="#2080f0"
-              data-testid="dashboard-summary-card"
-            />
+            <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
+              <StatusPieChart :title="t('dashboard.issueStatus')" :data="issueChartData" />
+            </n-card>
           </n-gi>
           <n-gi>
-            <StatCard
-              :label="t('dashboard.openIssues')"
-              :value="statsOpenIssues"
-              :icon="AlertCircleOutline"
-              color="#f0a020"
-              data-testid="dashboard-summary-card"
-            />
+            <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
+              <StatusPieChart :title="t('dashboard.taskStatus')" :data="taskChartData" />
+            </n-card>
           </n-gi>
           <n-gi>
-            <StatCard
-              :label="t('dashboard.tasks')"
-              :value="statsTotal"
-              :icon="CodeOutline"
-              color="#2080f0"
-              data-testid="dashboard-summary-card"
-            />
+            <n-card size="small" class="dashboard-metric-card dashboard-metric-card--stat" data-testid="dashboard-summary-card">
+              <div class="dashboard-stat">
+                <div class="dashboard-stat__title">{{ t('dashboard.linesChanged') }}</div>
+                <div class="dashboard-stat__value">{{ formatNumber(analyticsTotalChanges) }}</div>
+                <div class="dashboard-stat__detail">
+                  <span class="dashboard-stat__add">+{{ formatNumber(analyticsTotalAdditions) }}</span>
+                  <span class="dashboard-stat__del">-{{ formatNumber(analyticsTotalDeletions) }}</span>
+                </div>
+              </div>
+            </n-card>
           </n-gi>
           <n-gi>
-            <StatCard
-              :label="t('dashboard.running')"
-              :value="statsRunning"
-              :icon="PlayOutline"
-              color="#18a058"
-              data-testid="dashboard-summary-card"
-            />
-          </n-gi>
-          <n-gi>
-            <StatCard
-              :label="t('dashboard.successRate')"
-              :value="successRate"
-              :icon="CheckmarkCircleOutline"
-              suffix="%"
-              color="#18a058"
-              data-testid="dashboard-summary-card"
-            />
+            <n-card size="small" class="dashboard-metric-card dashboard-metric-card--stat" data-testid="dashboard-summary-card">
+              <div class="dashboard-stat">
+                <div class="dashboard-stat__title">{{ t('dashboard.tokensUsed') }}</div>
+                <div class="dashboard-stat__value">{{ formatNumber(analyticsTotalTokens) }}</div>
+                <div class="dashboard-stat__detail">
+                  <n-icon size="12" :component="FlashOutline" style="margin-right:2px" />
+                  <span>{{ formatNumber(analyticsInputTokens) }} in / {{ formatNumber(analyticsOutputTokens) }} out</span>
+                </div>
+              </div>
+            </n-card>
           </n-gi>
         </n-grid>
 
@@ -115,19 +103,15 @@
 
 <script setup lang="ts">
 import { ref, onMounted, h, computed } from 'vue'
-import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, type DataTableColumns } from 'naive-ui'
+import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, NIcon, useMessage, type DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getIssues, getTasksPaginated, getStats, getActivityHeatmap, type Issue, type Task, type ActivityHeatmapEntry } from '../api'
+import { getIssues, getTasksPaginated, getStats, getAnalytics, getActivityHeatmap, type Issue, type Task, type ActivityHeatmapEntry } from '../api'
 import {
-  FolderOpenOutline,
-  AlertCircleOutline,
-  CodeOutline,
-  PlayOutline,
-  CheckmarkCircleOutline
+  FlashOutline,
 } from '@vicons/ionicons5'
 
-import StatCard from '../components/StatCard.vue'
+import StatusPieChart from '../components/StatusPieChart.vue'
 import ActivityHeatmap from '../components/ActivityHeatmap.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { usePolling } from '../composables/usePolling'
@@ -154,22 +138,50 @@ const queuedTasks = ref<Task[]>([])
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
 
-const statsIssueTotal = ref(0)
-const statsOpenIssues = ref(0)
-const statsTotal = ref(0)
+const statsIssueByStatus = ref<Record<string, number>>({})
+const statsPending = ref(0)
+const statsQueued = ref(0)
 const statsRunning = ref(0)
 const statsCompleted = ref(0)
 const statsFailed = ref(0)
+const statsCancelled = ref(0)
+const analyticsTotalAdditions = ref(0)
+const analyticsTotalDeletions = ref(0)
+const analyticsTotalChanges = ref(0)
+const analyticsInputTokens = ref(0)
+const analyticsOutputTokens = ref(0)
+const analyticsTotalTokens = ref(0)
 const heatmapData = ref<ActivityHeatmapEntry[]>([])
 
 const runningAndQueuedTasks = computed(() => [...runningTasks.value, ...queuedTasks.value])
 
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
-const successRate = computed(() => {
-  const total = statsCompleted.value + statsFailed.value
-  if (total === 0) return 0
-  return Math.round((statsCompleted.value / total) * 100)
+function formatNumber(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K'
+  return String(n)
+}
+
+const issueChartData = computed(() => {
+  const s = statsIssueByStatus.value
+  return [
+    { name: t('issue.status.open'), value: s.open ?? 0, color: '#2080f0' },
+    { name: t('issue.status.in_progress'), value: s.in_progress ?? 0, color: '#f0a020' },
+    { name: t('issue.status.completed'), value: s.completed ?? 0, color: '#18a058' },
+    { name: t('issue.status.closed'), value: s.closed ?? 0, color: '#909399' },
+  ].filter((d) => d.value > 0)
+})
+
+const taskChartData = computed(() => {
+  return [
+    { name: t('status.pending'), value: statsPending.value, color: '#909399' },
+    { name: t('status.queued'), value: statsQueued.value, color: '#2080f0' },
+    { name: t('status.running'), value: statsRunning.value, color: '#f0a020' },
+    { name: t('status.completed'), value: statsCompleted.value, color: '#18a058' },
+    { name: t('status.failed'), value: statsFailed.value, color: '#d03050' },
+    { name: t('status.cancelled'), value: statsCancelled.value, color: '#909399' },
+  ].filter((d) => d.value > 0)
 })
 
 const issueStatusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
@@ -267,13 +279,13 @@ async function fetchData() {
 async function fetchStats() {
   try {
     const stats = await getStats({ my: true })
-    statsTotal.value = stats.total
+    statsPending.value = stats.pending
+    statsQueued.value = stats.queued
     statsRunning.value = stats.running
     statsCompleted.value = stats.completed
     statsFailed.value = stats.failed ?? 0
-    statsIssueTotal.value = stats.issues?.total ?? 0
-    const byStatus = stats.issues?.by_status ?? {}
-    statsOpenIssues.value = (byStatus.open ?? 0) + (byStatus.in_progress ?? 0)
+    statsCancelled.value = stats.cancelled ?? 0
+    statsIssueByStatus.value = stats.issues?.by_status ?? {}
   } catch {
     // Stats are supplementary; don't block UI
   }
@@ -287,10 +299,27 @@ async function fetchHeatmap() {
   }
 }
 
+async function fetchAnalytics() {
+  try {
+    const username = authState.user?.username
+    const res = await getAnalytics(365, null, username || null)
+    const s = res.summary
+    analyticsTotalAdditions.value = s.total_additions
+    analyticsTotalDeletions.value = s.total_deletions
+    analyticsTotalChanges.value = s.total_changes
+    analyticsInputTokens.value = s.total_input_tokens
+    analyticsOutputTokens.value = s.total_output_tokens
+    analyticsTotalTokens.value = s.total_tokens
+  } catch {
+    // Analytics are supplementary
+  }
+}
+
 function refreshAll() {
   fetchData()
   fetchStats()
   fetchHeatmap()
+  fetchAnalytics()
 }
 
 const { start: startPolling } = usePolling(
@@ -301,6 +330,7 @@ const { start: startPolling } = usePolling(
 onMounted(() => {
   fetchStats()
   fetchHeatmap()
+  fetchAnalytics()
   fetchData()
   startPolling()
 })
@@ -311,10 +341,6 @@ onMounted(() => {
   max-width: var(--app-page-max-width);
 }
 
-.dashboard-summary-card {
-  min-height: 100%;
-}
-
 .dashboard__top-bar {
   display: flex;
   justify-content: flex-end;
@@ -323,5 +349,57 @@ onMounted(() => {
 
 .dashboard-table-card {
   border-radius: var(--app-card-radius);
+}
+
+.dashboard-metric-card {
+  height: 100%;
+  border-radius: var(--app-card-radius);
+}
+
+.dashboard-metric-card--stat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dashboard-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px 0;
+  text-align: center;
+}
+
+.dashboard-stat__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #666;
+}
+
+.dashboard-stat__value {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--n-text-color, #333);
+  line-height: 1.1;
+}
+
+.dashboard-stat__detail {
+  font-size: 12px;
+  color: #999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboard-stat__add {
+  color: #18a058;
+  font-weight: 600;
+}
+
+.dashboard-stat__del {
+  color: #d03050;
+  font-weight: 600;
 }
 </style>

@@ -175,7 +175,11 @@ const zhCN = {
     tasks: '任务总数',
     successRate: '成功率',
     activity: '活动',
-    recentActivity: '最近活动'
+    recentActivity: '最近活动',
+    issueStatus: '需求状态',
+    taskStatus: '任务状态',
+    linesChanged: '变更行数',
+    tokensUsed: 'Token 用量',
   },
   issue: {
     title: '需求',

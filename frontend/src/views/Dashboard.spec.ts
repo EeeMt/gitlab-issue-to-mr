@@ -15,6 +15,7 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     getTasksPaginated: vi.fn<() => Promise<any>>(),
     getStats: vi.fn<() => Promise<any>>(),
     getActivityHeatmap: vi.fn<() => Promise<any>>(),
+    getAnalytics: vi.fn<() => Promise<any>>(),
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => fn.mockReset())
@@ -41,6 +42,7 @@ vi.mock('../api', () => ({
   getTasksPaginated: mockApi.getTasksPaginated,
   getStats: mockApi.getStats,
   getActivityHeatmap: mockApi.getActivityHeatmap,
+  getAnalytics: mockApi.getAnalytics,
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -139,21 +141,20 @@ vi.mock('naive-ui', () => ({
 // ---------------------------------------------------------------------------
 // Child component stubs
 // ---------------------------------------------------------------------------
-vi.mock('../components/StatCard.vue', () => ({
+vi.mock('../components/StatusPieChart.vue', () => ({
   default: {
-    name: 'StatCard',
-    props: ['label', 'value', 'icon', 'color', 'suffix'],
+    name: 'StatusPieChart',
+    props: ['title', 'data'],
     setup(props: any) {
       return () =>
         h(
           'div',
           {
-            class: 'dashboard-summary-card',
-            'data-testid': 'dashboard-summary-card',
-            'data-label': props.label,
-            'data-value': String(props.value),
+            class: 'status-pie-chart',
+            'data-testid': 'status-pie-chart',
+            'data-title': props.title,
           },
-          `${props.value}${props.suffix || ''}`,
+          `PieChart: ${props.title}`,
         )
     },
   },
@@ -223,6 +224,21 @@ const mockStats = {
 
 const mockHeatmapData = [{ date: '2024-01-01', count: 3 }]
 
+const mockAnalyticsResponse = {
+  window_days: 365,
+  generated_at: '2024-01-10T00:00:00Z',
+  summary: {
+    total_tasks: 50, total_additions: 1234, total_deletions: 567, total_changes: 1801,
+    total_input_tokens: 50000, total_output_tokens: 30000, total_tokens: 80000,
+    completed_tasks: 30, failed_tasks: 10, cancelled_tasks: 0, finished_tasks: 40,
+    success_rate: 75, failure_rate: 25, tracked_initiator_tasks: 50, token_tracked_tasks: 40,
+    initiator_tracking_started_at: null, avg_execution_seconds: null, max_execution_seconds: null,
+    avg_queue_wait_seconds: null, max_queue_wait_seconds: null,
+    avg_total_tokens_per_tracked_task: null, max_total_tokens_per_tracked_task: null,
+  },
+  available_initiators: [], projects: [], initiators: [], trends: [], priority_waits: [], error_breakdown: [],
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -230,6 +246,7 @@ function setupDefaultMocks() {
   mockApi.getIssues.mockResolvedValue({ items: mockIssues, total: mockIssues.length, page: 1, page_size: 5 })
   mockApi.getStats.mockResolvedValue(mockStats)
   mockApi.getActivityHeatmap.mockResolvedValue(mockHeatmapData)
+  mockApi.getAnalytics.mockResolvedValue(mockAnalyticsResponse)
   mockApi.getTasksPaginated.mockImplementation((params: any) => {
     if (params.status === 'running') return Promise.resolve({ items: mockRunningTasks, total: 1, page: 1, page_size: 10 })
     if (params.status === 'queued') return Promise.resolve({ items: mockQueuedTasks, total: 1, page: 1, page_size: 10 })
@@ -286,18 +303,18 @@ describe('Dashboard', () => {
       expect(wrapper.find('[data-testid="dashboard-page"]').exists()).toBe(true)
     })
 
-    it('shows 5 stat cards after loading', async () => {
+    it('shows 4 summary cards after loading', async () => {
       await mountDashboard()
       const cards = wrapper.findAll('[data-testid="dashboard-summary-card"]')
-      expect(cards.length).toBe(5)
+      expect(cards.length).toBe(4)
     })
 
-    it('displays correct stat values', async () => {
+    it('renders pie charts and stat cards', async () => {
       await mountDashboard()
-      const cards = wrapper.findAll('[data-testid="dashboard-summary-card"]')
-      const values = cards.map(c => c.attributes('data-value'))
-      // Issues=15, Open=8 (5+3), Tasks=50, Running=3, SuccessRate=75
-      expect(values).toEqual(['15', '8', '50', '3', '75'])
+      const pieCharts = wrapper.findAll('[data-testid="status-pie-chart"]')
+      expect(pieCharts.length).toBe(2)
+      expect(pieCharts[0].attributes('data-title')).toBe('dashboard.issueStatus')
+      expect(pieCharts[1].attributes('data-title')).toBe('dashboard.taskStatus')
     })
 
     it('shows recent-issues section', async () => {
@@ -354,12 +371,18 @@ describe('Dashboard', () => {
 
     it('populates stats refs from response', async () => {
       await mountDashboard()
-      expect(wrapper.vm.statsIssueTotal).toBe(15)
-      expect(wrapper.vm.statsOpenIssues).toBe(8) // open=5 + in_progress=3
-      expect(wrapper.vm.statsTotal).toBe(50)
+      expect(wrapper.vm.statsPending).toBe(0)
+      expect(wrapper.vm.statsQueued).toBe(1)
       expect(wrapper.vm.statsRunning).toBe(3)
       expect(wrapper.vm.statsCompleted).toBe(30)
       expect(wrapper.vm.statsFailed).toBe(10)
+    })
+
+    it('populates analytics refs from response', async () => {
+      await mountDashboard()
+      expect(wrapper.vm.analyticsTotalAdditions).toBe(1234)
+      expect(wrapper.vm.analyticsTotalDeletions).toBe(567)
+      expect(wrapper.vm.analyticsTotalTokens).toBe(80000)
     })
 
     it('populates heatmapData from response', async () => {
@@ -369,37 +392,34 @@ describe('Dashboard', () => {
   })
 
   // -----------------------------------------------------------------------
-  // 4. successRate computed
+  // 4. Chart data computed
   // -----------------------------------------------------------------------
-  describe('successRate computed', () => {
-    it('returns correct percentage', async () => {
+  describe('chart data computed', () => {
+    it('issueChartData filters out zero-value entries', async () => {
+      setupDefaultMocks()
+      mockApi.getStats.mockResolvedValue({
+        ...mockStats,
+        issues: { total: 5, by_status: { open: 5, in_progress: 0, completed: 0, closed: 0 } },
+      })
+      wrapper = mount(Dashboard, { global: { plugins: [router] } })
+      await flushPromises()
+      const data = wrapper.vm.issueChartData
+      expect(data.length).toBe(1)
+      expect(data[0].value).toBe(5)
+    })
+
+    it('taskChartData includes all non-zero statuses', async () => {
       await mountDashboard()
-      // completed=30, failed=10 -> 30/40*100 = 75
-      expect(wrapper.vm.successRate).toBe(75)
+      const data = wrapper.vm.taskChartData
+      // From mockStats: queued=1, running=3, completed=30, failed=10 (pending=0, cancelled=0 filtered out)
+      expect(data.length).toBe(4)
     })
 
-    it('returns 0 when no completed or failed tasks', async () => {
-      setupDefaultMocks()
-      mockApi.getStats.mockResolvedValue({ ...mockStats, completed: 0, failed: 0 })
-      wrapper = mount(Dashboard, { global: { plugins: [router] } })
-      await flushPromises()
-      expect(wrapper.vm.successRate).toBe(0)
-    })
-
-    it('returns 100 when all tasks completed', async () => {
-      setupDefaultMocks()
-      mockApi.getStats.mockResolvedValue({ ...mockStats, completed: 10, failed: 0 })
-      wrapper = mount(Dashboard, { global: { plugins: [router] } })
-      await flushPromises()
-      expect(wrapper.vm.successRate).toBe(100)
-    })
-
-    it('rounds to nearest integer', async () => {
-      setupDefaultMocks()
-      mockApi.getStats.mockResolvedValue({ ...mockStats, completed: 2, failed: 1 })
-      wrapper = mount(Dashboard, { global: { plugins: [router] } })
-      await flushPromises()
-      expect(wrapper.vm.successRate).toBe(67)
+    it('formatNumber abbreviates thousands', async () => {
+      await mountDashboard()
+      expect(wrapper.vm.$.setupState.formatNumber(1500)).toBe('1.5K')
+      expect(wrapper.vm.$.setupState.formatNumber(2_500_000)).toBe('2.5M')
+      expect(wrapper.vm.$.setupState.formatNumber(42)).toBe('42')
     })
   })
 
@@ -549,8 +569,18 @@ describe('Dashboard', () => {
       wrapper = mount(Dashboard, { global: { plugins: [router] } })
       await flushPromises()
 
-      expect(wrapper.vm.statsTotal).toBe(0)
       expect(wrapper.vm.statsRunning).toBe(0)
+      expect(wrapper.vm.statsCompleted).toBe(0)
+    })
+
+    it('handles analytics failure silently', async () => {
+      setupDefaultMocks()
+      mockApi.getAnalytics.mockRejectedValue(new Error('Analytics down'))
+
+      wrapper = mount(Dashboard, { global: { plugins: [router] } })
+      await flushPromises()
+
+      expect(wrapper.vm.analyticsTotalTokens).toBe(0)
     })
 
     it('handles heatmap failure silently', async () => {
