@@ -261,6 +261,7 @@ class GetIssueTests(unittest.IsolatedAsyncioTestCase):
         """Should raise 404 when issue does not exist."""
         from fastapi import HTTPException
         from app.api.issues import get_issue
+        from app.dependencies.project_access import ProjectAccessScope
 
         result_mock = MagicMock()
         result_mock.scalar_one_or_none.return_value = None
@@ -268,15 +269,17 @@ class GetIssueTests(unittest.IsolatedAsyncioTestCase):
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=result_mock)
         mock_user = MagicMock()
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
         with self.assertRaises(HTTPException) as ctx:
-            await get_issue(issue_id=999, db=mock_db, current_user=mock_user)
+            await get_issue(issue_id=999, db=mock_db, current_user=mock_user, access_scope=access_scope)
 
         self.assertEqual(ctx.exception.status_code, 404)
 
     async def test_get_issue_with_tasks(self):
         """Should return issue with serialized tasks list."""
         from app.api.issues import get_issue
+        from app.dependencies.project_access import ProjectAccessScope
 
         task1 = _make_task(id=100, user_prompt="Fix bug")
         task2 = _make_task(id=101, user_prompt="Add tests")
@@ -288,8 +291,9 @@ class GetIssueTests(unittest.IsolatedAsyncioTestCase):
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=result_mock)
         mock_user = MagicMock()
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
-        result = await get_issue(issue_id=5, db=mock_db, current_user=mock_user)
+        result = await get_issue(issue_id=5, db=mock_db, current_user=mock_user, access_scope=access_scope)
 
         self.assertEqual(result["id"], 5)
         self.assertEqual(result["title"], "Feature Y")

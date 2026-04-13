@@ -213,6 +213,7 @@ async def get_slot_capacity(
 async def get_task(
     task_id: int,
     db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Get task by ID.
 
@@ -235,6 +236,8 @@ async def get_task(
             detail=f"Task {task_id} not found",
         )
 
+    require_project_access(task.project_id, access_scope)
+
     t2 = time.time()
     metadata = await get_project_metadata(task.project_id)
     t3 = time.time()
@@ -256,6 +259,7 @@ async def get_task(
 async def get_task_logs(
     task_id: int,
     db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Get task logs."""
     result = await db.execute(select(Task).where(Task.id == task_id))
@@ -266,6 +270,8 @@ async def get_task_logs(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task {task_id} not found",
         )
+
+    require_project_access(task.project_id, access_scope)
 
     result = await db.execute(
         select(TaskLog)

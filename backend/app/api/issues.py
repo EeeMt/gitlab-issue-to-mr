@@ -13,7 +13,7 @@ from app.config import get_effective_settings
 from app.core.task_helpers import _require_issue_operator
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_user
-from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+from app.dependencies.project_access import ProjectAccessScope, require_project_access, require_project_access_scope
 from app.models import Issue, IssueStatus, Task, TaskStatus, User
 
 logger = logging.getLogger(__name__)
@@ -219,6 +219,7 @@ async def get_issue(
     issue_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_authenticated_user),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Get issue detail with tasks."""
     result = await db.execute(
@@ -232,6 +233,7 @@ async def get_issue(
             status_code=404,
             detail=f"Issue {issue_id} not found",
         )
+    require_project_access(issue.project_id, access_scope)
     return _serialize_issue_detail(issue)
 
 
