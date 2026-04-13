@@ -10,7 +10,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies.auth import require_admin_user
+from app.dependencies.auth import require_admin_user, require_authenticated_user
 from app.models import PromptTemplate
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ class DeleteResponse(BaseModel):
 @router.get("/prompt-templates", response_model=list[PromptTemplateResponse])
 async def list_prompt_templates(
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_admin_user),
+    _current_user=Depends(require_authenticated_user),
 ):
     """List all prompt templates."""
     result = await db.execute(
@@ -101,7 +101,7 @@ async def create_prompt_template(
 async def get_prompt_template(
     template_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_admin_user),
+    _current_user=Depends(require_authenticated_user),
 ):
     """Get a single prompt template by ID."""
     result = await db.execute(

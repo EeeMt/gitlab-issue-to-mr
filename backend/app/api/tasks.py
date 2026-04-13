@@ -9,7 +9,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import delete, func, select, false
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -54,7 +54,6 @@ async def list_tasks(
     page: Optional[int] = None,
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
-    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """List tasks with optional filtering and pagination.
 
@@ -78,14 +77,7 @@ async def list_tasks(
             query = query.where(Task.status.in_(valid_statuses))
 
     if project_id:
-        require_project_access(project_id, access_scope)
         query = query.where(Task.project_id == project_id)
-    elif not access_scope.is_unrestricted:
-        allowed_project_ids = access_scope.accessible_project_ids
-        if not allowed_project_ids:
-            query = query.where(false())
-        else:
-            query = query.where(Task.project_id.in_(allowed_project_ids))
 
     if initiator_username:
         query = query.where(Task.initiator_username == initiator_username)
@@ -93,10 +85,7 @@ async def list_tasks(
     if issue_id:
         query = query.where(Task.issue_id == issue_id)
 
-    project_lookup = await build_project_lookup(
-        accessible_projects=access_scope.accessible_projects,
-        is_unrestricted=access_scope.is_unrestricted,
-    )
+    project_lookup = await build_project_lookup()
 
     # Paginated mode: return { items, total, page, page_size }
     if page is not None:
@@ -138,7 +127,6 @@ async def list_scheduled_tasks(
     hour_start: Optional[str] = Query(None, description="ISO datetime; filter tasks in this 1-hour window"),
     db: AsyncSession = Depends(get_db),
     _current_user=Depends(require_page_access("schedule_overview")),
-    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """List active scheduled tasks for queue analytics views.
 
@@ -169,21 +157,11 @@ async def list_scheduled_tasks(
         query = query.where(Task.scheduled_at >= window_start, Task.scheduled_at < window_end)
 
     if project_id:
-        require_project_access(project_id, access_scope)
         query = query.where(Task.project_id == project_id)
-    elif not access_scope.is_unrestricted:
-        allowed_project_ids = access_scope.accessible_project_ids
-        if not allowed_project_ids:
-            query = query.where(false())
-        else:
-            query = query.where(Task.project_id.in_(allowed_project_ids))
 
     result = await db.execute(query)
     tasks = result.scalars().all()
-    project_lookup = await build_project_lookup(
-        accessible_projects=access_scope.accessible_projects,
-        is_unrestricted=access_scope.is_unrestricted,
-    )
+    project_lookup = await build_project_lookup()
 
     return [
         _serialize_task(task, project_lookup.get(task.project_id))
@@ -215,7 +193,6 @@ async def get_slot_capacity(
 async def get_task(
     task_id: int,
     db: AsyncSession = Depends(get_db),
-    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Get task by ID.
 
@@ -237,7 +214,6 @@ async def get_task(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task {task_id} not found",
         )
-    require_project_access(task.project_id, access_scope)
 
     t2 = time.time()
     metadata = await get_project_metadata(task.project_id)
@@ -260,7 +236,6 @@ async def get_task(
 async def get_task_logs(
     task_id: int,
     db: AsyncSession = Depends(get_db),
-    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Get task logs."""
     result = await db.execute(select(Task).where(Task.id == task_id))
@@ -271,7 +246,6 @@ async def get_task_logs(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task {task_id} not found",
         )
-    require_project_access(task.project_id, access_scope)
 
     result = await db.execute(
         select(TaskLog)

@@ -44,7 +44,7 @@ async def test_list_scheduled_tasks_serializes_active_scheduled_rows():
             "project_path_with_namespace": "group/project-alpha",
         }
     })):
-        result = await list_scheduled_tasks(db=db, access_scope=access_scope, hour_start=None)
+        result = await list_scheduled_tasks(db=db, hour_start=None)
 
     assert len(result) == 1
     assert result[0]["id"] == 1
@@ -55,20 +55,16 @@ async def test_list_scheduled_tasks_serializes_active_scheduled_rows():
 
 
 @pytest.mark.asyncio
-async def test_list_scheduled_tasks_uses_accessible_project_scope():
+async def test_list_scheduled_tasks_filters_by_project_id():
     task = _make_task(2, 202, datetime.now(UTC) + timedelta(hours=1), TaskStatus.QUEUED)
     db = AsyncMock()
     db.execute.return_value = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [task]))
-    access_scope = ProjectAccessScope(
-        is_unrestricted=False,
-        accessible_projects=[{"id": 202, "name": "Project Beta"}],
-    )
 
     with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
-        result = await list_scheduled_tasks(db=db, access_scope=access_scope, hour_start=None)
+        result = await list_scheduled_tasks(db=db, project_id=202, hour_start=None)
 
     executed_query = db.execute.await_args.args[0]
 
     assert len(result) == 1
     assert "scheduled_at IS NOT NULL" in str(executed_query)
-    assert "tasks.project_id IN" in str(executed_query)
+    assert "tasks.project_id =" in str(executed_query)
