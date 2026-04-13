@@ -129,6 +129,38 @@
                 </span>
               </div>
 
+              <!-- Changes -->
+              <div v-if="issue.totals && (issue.totals.total_changes > 0 || issue.totals.input_tokens > 0)" class="metadata-row">
+                <span class="metadata-label">
+                  <n-icon size="14" class="metadata-label-icon"><CodeOutline /></n-icon>
+                  {{ t('common.changes') }}
+                </span>
+                <span class="metadata-value">
+                  <span v-if="issue.totals.total_changes > 0">
+                    {{ issue.totals.total_changes }}
+                    <span class="metadata-secondary">
+                      (<span class="stat-add">+{{ issue.totals.additions }}</span> / <span class="stat-del">-{{ issue.totals.deletions }}</span>)
+                    </span>
+                  </span>
+                  <span v-else class="metadata-muted">—</span>
+                </span>
+              </div>
+
+              <!-- Tokens -->
+              <div v-if="issue.totals && (issue.totals.input_tokens > 0 || issue.totals.output_tokens > 0)" class="metadata-row">
+                <span class="metadata-label">
+                  <n-icon size="14" class="metadata-label-icon"><CodeOutline /></n-icon>
+                  {{ t('analytics.tokens') }}
+                </span>
+                <span class="metadata-value">
+                  {{ formatNumber(issue.totals.input_tokens + issue.totals.output_tokens) }}
+                  <span class="metadata-secondary">
+                    ({{ t('analytics.tokenInputLine', { value: formatNumber(issue.totals.input_tokens) }) }} /
+                    {{ t('analytics.tokenOutputLine', { value: formatNumber(issue.totals.output_tokens) }) }})
+                  </span>
+                </span>
+              </div>
+
               <!-- Timeline -->
               <div class="metadata-row">
                 <span class="metadata-label">
@@ -163,40 +195,6 @@
               </div>
             </template>
             <div class="issue-view__description">{{ issue.description }}</div>
-          </n-card>
-        </n-gi>
-      </n-grid>
-
-      <!-- Aggregated Stats -->
-      <n-grid
-        v-if="issue.totals && (issue.totals.total_changes > 0 || issue.totals.input_tokens > 0)"
-        :cols="isMobile ? 2 : 4"
-        :x-gap="12"
-        :y-gap="12"
-        data-testid="issue-totals"
-      >
-        <n-gi>
-          <n-card :bordered="false" class="issue-stat-card">
-            <n-statistic :label="t('issue.totals.additions')" :value="issue.totals.additions">
-              <template #prefix><span class="stat-prefix stat-prefix--add">+</span></template>
-            </n-statistic>
-          </n-card>
-        </n-gi>
-        <n-gi>
-          <n-card :bordered="false" class="issue-stat-card">
-            <n-statistic :label="t('issue.totals.deletions')" :value="issue.totals.deletions">
-              <template #prefix><span class="stat-prefix stat-prefix--del">-</span></template>
-            </n-statistic>
-          </n-card>
-        </n-gi>
-        <n-gi>
-          <n-card :bordered="false" class="issue-stat-card">
-            <n-statistic :label="t('issue.totals.inputTokens')" :value="issue.totals.input_tokens" />
-          </n-card>
-        </n-gi>
-        <n-gi>
-          <n-card :bordered="false" class="issue-stat-card">
-            <n-statistic :label="t('issue.totals.outputTokens')" :value="issue.totals.output_tokens" />
           </n-card>
         </n-gi>
       </n-grid>
@@ -430,7 +428,6 @@ import {
   NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin,
   NIcon, NDataTable, NInput, NDrawer, NDrawerContent,
   NRadio, NRadioGroup, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NAlert,
-  NStatistic,
   useMessage,
   type DataTableColumns
 } from 'naive-ui'
@@ -666,6 +663,11 @@ function formatCompactDateTime(value?: string | null): string {
   return formatDateTimeUtc8Compact(value)
 }
 
+function formatNumber(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—'
+  return Math.round(value).toLocaleString()
+}
+
 function isScheduleDateDisabled(timestamp: number): boolean {
   const candidate = new Date(timestamp)
   const today = new Date()
@@ -874,22 +876,20 @@ onMounted(() => {
   border-radius: var(--app-card-radius);
 }
 
-.issue-stat-card {
-  border-radius: var(--app-card-radius);
-  text-align: center;
-}
-
-.stat-prefix {
-  font-weight: 700;
-  margin-right: 2px;
-}
-
-.stat-prefix--add {
+.stat-add {
   color: #18a058;
+  font-weight: 500;
 }
 
-.stat-prefix--del {
+.stat-del {
   color: #d03050;
+  font-weight: 500;
+}
+
+.metadata-secondary {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.45);
+  margin-left: 4px;
 }
 
 .issue-card__header {

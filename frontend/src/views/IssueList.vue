@@ -133,6 +133,13 @@ function formatCompactDateTime(value?: string | null): string {
   return formatDateTimeUtc8Compact(value)
 }
 
+const secondaryTextStyle = { fontSize: '11px', color: 'rgba(15,23,42,0.45)', marginTop: '2px', lineHeight: '1.4' }
+
+function formatNumber(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—'
+  return Math.round(value).toLocaleString()
+}
+
 const columns = computed<DataTableColumns<Issue>>(() => [
   {
     title: 'ID',
@@ -178,8 +185,36 @@ const columns = computed<DataTableColumns<Issue>>(() => [
   {
     title: t('issue.taskCount', { count: '' }).trim(),
     key: 'task_count',
-    width: 100,
-    render: (row) => t('issue.taskCount', { count: row.task_count ?? 0 }),
+    width: 80,
+    render: (row) => String(row.task_count ?? 0),
+  },
+  {
+    title: t('common.changes'),
+    key: 'total_changes',
+    width: 110,
+    render: (row) => {
+      const totals = row.totals
+      if (!totals || totals.total_changes === 0) return '—'
+      return h('div', [
+        h('div', String(totals.total_changes)),
+        h('div', { style: secondaryTextStyle }, t('analytics.changeBreakdown', { additions: totals.additions, deletions: totals.deletions })),
+      ])
+    },
+  },
+  {
+    title: t('analytics.tokens'),
+    key: 'total_tokens',
+    width: 140,
+    render: (row) => {
+      const totals = row.totals
+      if (!totals || (totals.input_tokens === 0 && totals.output_tokens === 0)) return '—'
+      const total = totals.input_tokens + totals.output_tokens
+      return h('div', [
+        h('div', formatNumber(total)),
+        h('div', { style: secondaryTextStyle }, t('analytics.tokenInputLine', { value: formatNumber(totals.input_tokens) })),
+        h('div', { style: secondaryTextStyle }, t('analytics.tokenOutputLine', { value: formatNumber(totals.output_tokens) })),
+      ])
+    },
   },
   {
     title: t('issue.field.creator'),

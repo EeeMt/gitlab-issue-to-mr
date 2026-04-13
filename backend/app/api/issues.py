@@ -163,16 +163,32 @@ async def list_issues(
     page_size = max(1, min(100, page_size))
     offset = (page - 1) * page_size
 
-    # Build a subquery for task_count
-    task_count_subq = (
-        select(Task.issue_id, func.count(Task.id).label("task_count"))
+    # Build a subquery for task_count and totals
+    task_agg_subq = (
+        select(
+            Task.issue_id,
+            func.count(Task.id).label("task_count"),
+            func.coalesce(func.sum(Task.additions), 0).label("total_additions"),
+            func.coalesce(func.sum(Task.deletions), 0).label("total_deletions"),
+            func.coalesce(func.sum(Task.total_changes), 0).label("total_changes"),
+            func.coalesce(func.sum(Task.input_tokens), 0).label("total_input_tokens"),
+            func.coalesce(func.sum(Task.output_tokens), 0).label("total_output_tokens"),
+        )
         .group_by(Task.issue_id)
         .subquery()
     )
 
     query = (
-        select(Issue, task_count_subq.c.task_count)
-        .outerjoin(task_count_subq, Issue.id == task_count_subq.c.issue_id)
+        select(
+            Issue,
+            task_agg_subq.c.task_count,
+            task_agg_subq.c.total_additions,
+            task_agg_subq.c.total_deletions,
+            task_agg_subq.c.total_changes,
+            task_agg_subq.c.total_input_tokens,
+            task_agg_subq.c.total_output_tokens,
+        )
+        .outerjoin(task_agg_subq, Issue.id == task_agg_subq.c.issue_id)
         .order_by(Issue.created_at.desc())
     )
 
@@ -210,7 +226,16 @@ async def list_issues(
     rows = result.all()
 
     items = [
-        _serialize_issue(row[0], task_count=row[1] or 0)
+        {
+            **_serialize_issue(row[0], task_count=row[1] or 0),
+            "totals": {
+                "additions": row[2] or 0,
+                "deletions": row[3] or 0,
+                "total_changes": row[4] or 0,
+                "input_tokens": row[5] or 0,
+                "output_tokens": row[6] or 0,
+            },
+        }
         for row in rows
     ]
 
