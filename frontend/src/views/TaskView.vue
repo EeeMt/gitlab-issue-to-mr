@@ -380,10 +380,10 @@ async function checkActiveRetry() {
     if (issueId) {
       const issueData = await getIssue(issueId)
       if (issueData.tasks) {
-        const retryMatch = issueData.tasks.find(
-          t => t.retry_source_task_id === task.value!.id
-            && ['pending', 'queued', 'running'].includes(t.status)
-        )
+        // Find the latest retry task for this task (any status)
+        const retryMatch = issueData.tasks
+          .filter(t => t.retry_source_task_id === task.value!.id)
+          .sort((a, b) => b.id - a.id)[0]
         activeRetryTask.value = retryMatch ?? null
       } else {
         activeRetryTask.value = null

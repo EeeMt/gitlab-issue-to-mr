@@ -3,6 +3,7 @@
 from typing import Any, Optional
 
 from fastapi import HTTPException, status
+from sqlalchemy import inspect as sa_inspect
 
 from app.config import get_effective_settings
 from app.models import Task, User
@@ -50,7 +51,14 @@ def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = Non
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
     }
-    issue = getattr(task, "issue", None)
+    # Safely check if issue relationship is loaded (avoid lazy load / MissingGreenlet)
+    issue = None
+    try:
+        insp = sa_inspect(task)
+        if "issue" not in insp.unloaded:
+            issue = task.issue
+    except Exception:
+        pass
     if issue is not None:
         data["issue"] = {
             "id": issue.id,

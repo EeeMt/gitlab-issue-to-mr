@@ -45,3 +45,9 @@ deploy/e2e-videos/*.webm
 # Local-only deployment files (not committed; place on Docker host manually)
 deploy/ca.crt
 deploy/.env.test
+
+# Playwright CLI snapshots
+.playwright-cli/
+
+# Temporary screenshots
+heatmap-check.png
