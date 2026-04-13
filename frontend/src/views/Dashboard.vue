@@ -404,10 +404,6 @@ onMounted(() => {
   height: 320px;
 }
 
-.dashboard-metric-card--trend .metric-body {
-  justify-content: flex-start;
-  padding-bottom: 8px;
-}
 
 .dashboard-metric-card :deep(.n-card-content) {
   display: grid;
