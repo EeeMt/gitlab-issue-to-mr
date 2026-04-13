@@ -65,7 +65,11 @@
                   <n-icon size="14" class="metadata-label-icon"><FolderOpenOutline /></n-icon>
                   {{ t('issue.field.project') }}
                 </span>
-                <span class="metadata-value">{{ issue.project_id }}</span>
+                <span class="metadata-value">
+                  <router-link :to="{ path: '/issues', query: { project_id: issue.project_id } }" class="app-link">
+                    {{ projectName }}
+                  </router-link>
+                </span>
               </div>
 
               <!-- Creator -->
@@ -448,8 +452,8 @@ import VariableEditor from '../components/VariableEditor.vue'
 import HeatmapChart from '../components/HeatmapChart.vue'
 import {
   getIssue, updateIssue, closeIssue, createTask, retryTask, getPromptTemplates,
-  getScheduledTasks, getSlotCapacity, getConfig,
-  type Issue, type Task, type PromptTemplate, type SlotCapacityInfo
+  getScheduledTasks, getSlotCapacity, getConfig, getProjects,
+  type Issue, type Task, type PromptTemplate, type SlotCapacityInfo, type Project
 } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
@@ -475,6 +479,13 @@ const isOwner = computed(() => {
 // --- State ---
 const issue = ref<Issue | null>(null)
 const loading = ref(false)
+const projects = ref<Project[]>([])
+
+const projectName = computed(() => {
+  if (!issue.value) return '-'
+  const project = projects.value.find(p => p.id === issue.value!.project_id)
+  return project ? project.path_with_namespace : `Project #${issue.value.project_id}`
+})
 
 // Create task form
 const showCreateDrawer = ref(false)
@@ -850,6 +861,7 @@ function openEditModal() {
 onMounted(() => {
   fetchIssue()
   fetchPromptTemplates()
+  getProjects().then(p => { projects.value = p }).catch(() => {})
 })
 </script>
 
