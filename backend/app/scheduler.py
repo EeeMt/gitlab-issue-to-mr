@@ -184,10 +184,10 @@ class Scheduler:
                 self._running_issues.discard(task.issue_id)
 
     async def _transition_issue_to_in_progress(self, db: AsyncSession, issue_id: int) -> None:
-        """Auto-transition issue OPEN → IN_PROGRESS when first task starts running."""
+        """Auto-transition issue OPEN/COMPLETED → IN_PROGRESS when a task starts running."""
         try:
             issue = await db.get(Issue, issue_id)
-            if issue and issue.status == IssueStatus.OPEN.value:
+            if issue and issue.status in (IssueStatus.OPEN.value, IssueStatus.COMPLETED.value):
                 issue.status = IssueStatus.IN_PROGRESS.value
                 await db.commit()
                 logger.info(f"Issue {issue_id} auto-transitioned to IN_PROGRESS")
