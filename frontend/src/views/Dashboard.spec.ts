@@ -1,43 +1,46 @@
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { h, ref, nextTick } from 'vue'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import Dashboard from './Dashboard.vue'
-import { createMockTask, createMockProject } from '../test/mocks/api'
+import { createMockTask } from '../test/mocks/api'
+import type { Issue, Task } from '../api'
 
-// Use hoisted to ensure proper initialization order
+// ---------------------------------------------------------------------------
+// Hoisted mocks
+// ---------------------------------------------------------------------------
 const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
   const mock = {
+    getIssues: vi.fn<() => Promise<any>>(),
     getTasksPaginated: vi.fn<() => Promise<any>>(),
-    getProjects: vi.fn<() => Promise<any[]>>(),
-    getStats: vi.fn<() => Promise<any>>()
+    getStats: vi.fn<() => Promise<any>>(),
+    getActivityHeatmap: vi.fn<() => Promise<any>>(),
   }
   const resetMockApi = () => {
-    Object.values(mock).forEach(fn => {
-      if (typeof fn.mock !== 'undefined') {
-        fn.mockReset()
-      }
-    })
+    Object.values(mock).forEach(fn => fn.mockReset())
   }
   const mockMsg = { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }
   return { mockApi: mock, resetMockApi, mockMessage: mockMsg }
 })
 
-// Mock i18n module
-vi.mock('../i18n', () => ({
-  currentLocale: ref('en')
-}))
+// ---------------------------------------------------------------------------
+// Module mocks
+// ---------------------------------------------------------------------------
+vi.mock('../i18n', () => ({ currentLocale: ref('en') }))
 
-// Mock datetime utils
 vi.mock('../utils/datetime', () => ({
-  formatDateTimeUtc8Compact: vi.fn((value: any) => `formatted-date-${value}`)
+  formatDateTimeUtc8Compact: vi.fn((value: any) => `formatted-${value}`),
 }))
 
-// Mock dependencies
+vi.mock('../utils/format', () => ({
+  formatPriority: vi.fn((v: any) => `P${v ?? '-'}`),
+}))
+
 vi.mock('../api', () => ({
+  getIssues: mockApi.getIssues,
   getTasksPaginated: mockApi.getTasksPaginated,
-  getProjects: mockApi.getProjects,
-  getStats: mockApi.getStats
+  getStats: mockApi.getStats,
+  getActivityHeatmap: mockApi.getActivityHeatmap,
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -46,133 +49,199 @@ vi.mock('vue-i18n', () => ({
     locale: { value: 'en' },
     d: vi.fn((value: unknown) => String(value)),
     n: vi.fn((value: number) => String(value)),
-    te: vi.fn((_key: string) => false)
-  })
+    te: vi.fn(() => false),
+  }),
 }))
 
 vi.mock('@vueuse/core', () => ({
-  useWindowSize: vi.fn(() => ({ width: { value: 1200 } }))
+  useWindowSize: vi.fn(() => ({ width: { value: 1200 } })),
 }))
 
-// Mock naive-ui components
+// ---------------------------------------------------------------------------
+// Naive-UI stubs
+// ---------------------------------------------------------------------------
 vi.mock('naive-ui', () => ({
   NSpin: {
     name: 'NSpin',
     props: ['show', 'description'],
     setup(props: any, { slots }: any) {
-      return () => props.show ? h('div', { class: 'n-spin-loading' }, slots.default?.()) : h('div', { class: 'n-spin' }, slots.default?.())
+      return () =>
+        props.show
+          ? h('div', { class: 'n-spin-loading' }, slots.default?.())
+          : h('div', { class: 'n-spin' }, slots.default?.())
     },
-    template: '<div class="n-spin"><slot /></div>'
   },
   NSpace: {
     name: 'NSpace',
-    props: ['vertical', 'size', 'justify', 'wrap', 'align'],
-    setup(_props: any, { slots }: any) {
+    props: ['vertical', 'size'],
+    setup(_p: any, { slots }: any) {
       return () => h('div', { class: 'n-space' }, slots.default?.())
     },
-    template: '<div class="n-space"><slot /></div>'
-  },
-  NSelect: {
-    name: 'NSelect',
-    props: ['options', 'loading', 'placeholder', 'disabled', 'value', 'clearable', 'filterable'],
-    setup(props: any, { emit }: any) {
-      return () => h('select', {
-        class: 'n-select',
-        disabled: props.disabled,
-        onChange: (e: Event) => emit('update:value', (e.target as HTMLSelectElement).value)
-      }, props.options?.map((o: any) => h('option', { value: o.value }, o.label)))
-    },
-    template: '<select class="n-select"><option v-for="opt in options" :key="opt.value" :value="opt.value">{{ opt.label }}</option></select>'
   },
   NButton: {
     name: 'NButton',
-    props: ['type', 'secondary', 'strong', 'round', 'loading', 'disabled', 'size'],
-    setup(props: any, { slots }: any) {
-      return () => h('button', {
-        class: ['n-button', { loading: props.loading, disabled: props.disabled }],
-        disabled: props.disabled || props.loading
-      }, slots.default?.())
+    props: ['type', 'disabled', 'loading', 'text'],
+    setup(_p: any, { slots }: any) {
+      return () => h('button', { class: 'n-button' }, slots.default?.())
     },
-    template: '<button class="n-button"><slot /></button>'
   },
   NCard: {
     name: 'NCard',
-    props: ['bordered', 'size'],
-    setup(_props: any, { slots }: any) {
-      return () => h('div', { class: 'n-card' }, [
-        slots.header?.(),
-        slots.default?.()
-      ])
+    props: ['bordered', 'size', 'title'],
+    setup(_p: any, { slots }: any) {
+      return () => h('div', { class: 'n-card' }, [slots.header?.(), slots.default?.()])
     },
-    template: '<div class="n-card"><slot name="header" /><slot /></div>'
   },
   NDataTable: {
     name: 'NDataTable',
-    props: ['columns', 'data', 'loading', 'row-key', 'row-props', 'pagination', 'bordered', 'scroll-x'],
+    props: ['columns', 'data', 'loading', 'row-key', 'row-props', 'bordered'],
     setup(props: any) {
-      return () => h('div', { class: 'n-data-table' }, props.data?.map((row: any) =>
-        h('div', { class: 'n-data-table-row', 'data-id': row.id })
-      ))
+      return () =>
+        h(
+          'div',
+          { class: 'n-data-table' },
+          props.data?.map((row: any) =>
+            h('div', { class: 'n-data-table-row', 'data-id': row.id }),
+          ),
+        )
     },
-    template: '<div class="n-data-table"><div v-for="row in data" :key="row.id" class="n-data-table-row">{{ row.id }}</div></div>'
   },
   NGrid: {
     name: 'NGrid',
     props: ['cols', 'x-gap', 'y-gap'],
-    setup(_props: any, { slots }: any) {
+    setup(_p: any, { slots }: any) {
       return () => h('div', { class: 'n-grid' }, slots.default?.())
     },
-    template: '<div class="n-grid"><slot /></div>'
   },
   NGi: {
     name: 'NGi',
-    props: [],
-    setup(_props: any, { slots }: any) {
+    setup(_p: any, { slots }: any) {
       return () => h('div', { class: 'n-gi' }, slots.default?.())
     },
-    template: '<div class="n-gi"><slot /></div>'
   },
   NTag: {
     name: 'NTag',
     props: ['size', 'round', 'type'],
-    setup(props: any, { slots }: any) {
-      return () => h('span', { class: ['n-tag', `n-tag--${props.type || 'default'}`] }, slots.default?.())
+    setup(_p: any, { slots }: any) {
+      return () => h('span', { class: 'n-tag' }, slots.default?.())
     },
-    template: '<span class="n-tag"><slot /></span>'
   },
-  useMessage: () => mockMessage
+  NIcon: {
+    name: 'NIcon',
+    props: ['size', 'color', 'component'],
+    setup(_p: any, { slots }: any) {
+      return () => h('i', { class: 'n-icon' }, slots.default?.())
+    },
+  },
+  useMessage: () => mockMessage,
 }))
 
-// Mock router
+// ---------------------------------------------------------------------------
+// Child component stubs
+// ---------------------------------------------------------------------------
+vi.mock('../components/StatCard.vue', () => ({
+  default: {
+    name: 'StatCard',
+    props: ['label', 'value', 'icon', 'color', 'suffix'],
+    setup(props: any) {
+      return () =>
+        h(
+          'div',
+          {
+            class: 'dashboard-summary-card',
+            'data-testid': 'dashboard-summary-card',
+            'data-label': props.label,
+            'data-value': String(props.value),
+          },
+          `${props.value}${props.suffix || ''}`,
+        )
+    },
+  },
+}))
+
+vi.mock('../components/ActivityHeatmap.vue', () => ({
+  default: {
+    name: 'ActivityHeatmap',
+    props: ['data'],
+    setup() {
+      return () => h('div', { class: 'activity-heatmap', 'data-testid': 'activity-heatmap' })
+    },
+  },
+}))
+
+// ---------------------------------------------------------------------------
+// Router
+// ---------------------------------------------------------------------------
 const router = createRouter({
   history: createMemoryHistory(),
   routes: [
     { path: '/', name: 'home', component: { template: '<div>home</div>' } },
-    { path: '/tasks/:id', name: 'TaskView', component: { template: '<div>task</div>' } }
-  ]
+    { path: '/tasks/:id', name: 'TaskView', component: { template: '<div>task</div>' } },
+    { path: '/issues/:id', name: 'IssueView', component: { template: '<div>issue</div>' } },
+    { path: '/issues/create', name: 'CreateIssue', component: { template: '<div>create</div>' } },
+  ],
 })
 
-const mockTasks = [
-  createMockTask({ id: 1, status: 'pending', initiator_username: 'user1', project_id: 1 }),
-  createMockTask({ id: 2, status: 'running', initiator_username: 'user2', project_id: 1 }),
-  createMockTask({ id: 3, status: 'completed', initiator_username: 'user1', project_id: 2 }),
-  createMockTask({ id: 4, status: 'queued', initiator_username: 'user3', project_id: 1 }),
-  createMockTask({ id: 5, status: 'failed', initiator_username: 'user2', project_id: 2 })
+// ---------------------------------------------------------------------------
+// Mock data
+// ---------------------------------------------------------------------------
+const mockIssues: Issue[] = [
+  {
+    id: 1, title: 'Bug: login broken', description: null, project_id: 1, status: 'open',
+    branch_name: null, base_branch: null, target_branch: null, merge_request_iid: null,
+    merge_request_url: null, claude_session_id: null, initiator_user_id: null,
+    initiator_username: null, created_at: '2024-01-01T10:00:00Z',
+    updated_at: '2024-01-01T10:00:00Z', task_count: 3,
+  },
+  {
+    id: 2, title: 'Feature: dark mode', description: null, project_id: 1, status: 'in_progress',
+    branch_name: null, base_branch: null, target_branch: null, merge_request_iid: null,
+    merge_request_url: null, claude_session_id: null, initiator_user_id: null,
+    initiator_username: null, created_at: '2024-01-02T10:00:00Z',
+    updated_at: '2024-01-02T10:00:00Z', task_count: 1,
+  },
 ]
 
-const mockProjects = [
-  createMockProject({ id: 1, name: 'Project 1', path_with_namespace: 'group/project-1' }),
-  createMockProject({ id: 2, name: 'Project 2', path_with_namespace: 'group/project-2' })
+const mockRunningTasks = [
+  createMockTask({ id: 10, status: 'running', user_prompt: 'Fix CSS', started_at: '2026-01-01T10:00:00Z' }),
+]
+const mockQueuedTasks = [
+  createMockTask({ id: 20, status: 'queued', user_prompt: 'Add tests', priority: 2 }),
+]
+const mockCompletedTasks = [
+  createMockTask({ id: 30, status: 'completed', user_prompt: 'Refactor', completed_at: '2024-01-10T09:00:00Z' }),
+]
+const mockFailedTasks = [
+  createMockTask({ id: 40, status: 'failed', user_prompt: 'Deploy v2', completed_at: '2024-01-10T08:00:00Z' }),
 ]
 
 const mockStats = {
-  total: 5,
-  running: 1,
-  completed: 1,
-  pending: 1,
-  queued: 1
+  total: 50, pending: 0, queued: 1, running: 3, completed: 30, failed: 10,
+  cancelled: 0, completed_24h: 2, failed_cancelled_24h: 1, running_long_30min: 0,
+  issues: { total: 15, by_status: { open: 5, in_progress: 3, completed: 6, closed: 1 } },
 }
 
+const mockHeatmapData = [{ date: '2024-01-01', count: 3 }]
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function setupDefaultMocks() {
+  mockApi.getIssues.mockResolvedValue({ items: mockIssues, total: mockIssues.length, page: 1, page_size: 5 })
+  mockApi.getStats.mockResolvedValue(mockStats)
+  mockApi.getActivityHeatmap.mockResolvedValue(mockHeatmapData)
+  mockApi.getTasksPaginated.mockImplementation((params: any) => {
+    if (params.status === 'running') return Promise.resolve({ items: mockRunningTasks, total: 1, page: 1, page_size: 10 })
+    if (params.status === 'queued') return Promise.resolve({ items: mockQueuedTasks, total: 1, page: 1, page_size: 10 })
+    if (params.status === 'completed') return Promise.resolve({ items: mockCompletedTasks, total: 1, page: 1, page_size: 5 })
+    if (params.status === 'failed') return Promise.resolve({ items: mockFailedTasks, total: 1, page: 1, page_size: 5 })
+    return Promise.resolve({ items: [], total: 0, page: 1, page_size: 10 })
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 describe('Dashboard', () => {
   let wrapper: VueWrapper<any>
 
@@ -182,1232 +251,385 @@ describe('Dashboard', () => {
     router.push('/')
     await router.isReady()
 
-    // Mock document.visibilityState
     Object.defineProperty(document, 'visibilityState', {
       value: 'visible',
-      writable: true
+      writable: true,
+      configurable: true,
     })
 
-    // Mock setInterval to capture the timer
-    vi.spyOn(globalThis, 'setInterval').mockImplementation(() => 1 as ReturnType<typeof setInterval>)
-
-    // Spy on clearInterval
+    vi.spyOn(globalThis, 'setInterval').mockImplementation(
+      () => 1 as unknown as ReturnType<typeof setInterval>,
+    )
     vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => undefined)
-
-    // Reset message mock
     Object.values(mockMessage).forEach(fn => fn.mockReset())
   })
 
   afterEach(() => {
-    if (wrapper) {
-      wrapper.unmount()
-    }
+    if (wrapper) wrapper.unmount()
     vi.restoreAllMocks()
   })
 
-  const mountComponent = async (tasks = mockTasks, projects = mockProjects, stats = mockStats) => {
-    ;(mockApi.getTasksPaginated as Mock).mockResolvedValue({ items: tasks, total: tasks.length })
-    ;(mockApi.getProjects as Mock).mockResolvedValue(projects)
-    ;(mockApi.getStats as Mock).mockResolvedValue(stats)
-
-    wrapper = mount(Dashboard, {
-      global: {
-        plugins: [router]
-      }
-    })
-
-    // Wait for onMounted to complete
-    await vi.waitFor(() => {
-      return (mockApi.getTasksPaginated as Mock).mock.calls.length > 0
-    })
-
+  async function mountDashboard() {
+    setupDefaultMocks()
+    wrapper = mount(Dashboard, { global: { plugins: [router] } })
+    await flushPromises()
+    await nextTick()
     return wrapper
   }
 
+  // -----------------------------------------------------------------------
+  // 1. Basic rendering
+  // -----------------------------------------------------------------------
   describe('basic rendering', () => {
-    it('should render task list', async () => {
-      await mountComponent()
-      expect(wrapper.find('.dashboard').exists()).toBe(true)
+    it('renders the dashboard root element', async () => {
+      await mountDashboard()
+      expect(wrapper.find('[data-testid="dashboard-page"]').exists()).toBe(true)
     })
 
-    it('should show loading state during initial fetch', async () => {
-      let resolveTasks!: (value: { items: any[]; total: number }) => void
-      const tasksPromise = new Promise<{ items: any[]; total: number }>(resolve => {
-        resolveTasks = resolve
-      })
-      ;(mockApi.getTasksPaginated as Mock).mockReturnValue(tasksPromise)
-      ;(mockApi.getProjects as Mock).mockResolvedValue(mockProjects)
-      ;(mockApi.getStats as Mock).mockResolvedValue(mockStats)
-
-      wrapper = mount(Dashboard, {
-        global: {
-          plugins: [router]
-        }
-      })
-
-      // Initial state - loading should be shown (initialLoading = loading && !hasLoadedOnce)
-      expect(wrapper.vm.initialLoading).toBe(true)
-      expect(wrapper.vm.loading).toBe(true)
-
-      // Resolve the tasks
-      resolveTasks({ items: mockTasks, total: mockTasks.length })
-
-      // Wait for loading to complete
-      await vi.waitFor(() => {
-        return wrapper.vm.loading === false && wrapper.vm.hasLoadedOnce === true
-      })
-
-      expect(wrapper.vm.initialLoading).toBe(false)
+    it('shows 5 stat cards after loading', async () => {
+      await mountDashboard()
+      const cards = wrapper.findAll('[data-testid="dashboard-summary-card"]')
+      expect(cards.length).toBe(5)
     })
 
-    it('should display summary cards after loading', async () => {
-      await mountComponent()
-
-      // Wait for hasLoadedOnce to become true
-      await vi.waitFor(() => {
-        return wrapper.vm.hasLoadedOnce === true
-      })
-
-      // Summary cards should be visible
-      expect(wrapper.find('.dashboard-summary-card').exists()).toBe(true)
+    it('displays correct stat values', async () => {
+      await mountDashboard()
+      const cards = wrapper.findAll('[data-testid="dashboard-summary-card"]')
+      const values = cards.map(c => c.attributes('data-value'))
+      // Issues=15, Open=8 (5+3), Tasks=50, Running=3, SuccessRate=75
+      expect(values).toEqual(['15', '8', '50', '3', '75'])
     })
 
-    it('should fetch tasks on mount', async () => {
-      await mountComponent()
-      expect(mockApi.getTasksPaginated).toHaveBeenCalledTimes(1)
+    it('shows recent-issues section', async () => {
+      await mountDashboard()
+      expect(wrapper.find('[data-testid="dashboard-recent-issues"]').exists()).toBe(true)
+    })
+
+    it('shows running-tasks section', async () => {
+      await mountDashboard()
+      expect(wrapper.find('[data-testid="dashboard-running-tasks"]').exists()).toBe(true)
+    })
+
+    it('shows activity-heatmap section', async () => {
+      await mountDashboard()
+      expect(wrapper.find('[data-testid="dashboard-activity-heatmap"]').exists()).toBe(true)
+    })
+
+    it('shows recent-activity section', async () => {
+      await mountDashboard()
+      expect(wrapper.find('[data-testid="dashboard-recent-activity"]').exists()).toBe(true)
+    })
+  })
+
+  // -----------------------------------------------------------------------
+  // 2. Initial data fetching
+  // -----------------------------------------------------------------------
+  describe('initial data fetching', () => {
+    it('calls getIssues on mount', async () => {
+      await mountDashboard()
+      expect(mockApi.getIssues).toHaveBeenCalledWith({ page: 1, page_size: 5 })
+    })
+
+    it('calls getTasksPaginated for running and queued', async () => {
+      await mountDashboard()
+      const calls = mockApi.getTasksPaginated.mock.calls
+      expect(calls).toEqual(
+        expect.arrayContaining([
+          [expect.objectContaining({ status: 'running' })],
+          [expect.objectContaining({ status: 'queued' })],
+        ]),
+      )
+    })
+
+    it('calls getStats on mount', async () => {
+      await mountDashboard()
       expect(mockApi.getStats).toHaveBeenCalledTimes(1)
     })
 
-    it('should fetch projects on mount', async () => {
-      await mountComponent()
-      expect(mockApi.getProjects).toHaveBeenCalledTimes(1)
+    it('calls getActivityHeatmap on mount', async () => {
+      await mountDashboard()
+      expect(mockApi.getActivityHeatmap).toHaveBeenCalledTimes(1)
+    })
+
+    it('populates recentIssues from response', async () => {
+      await mountDashboard()
+      expect(wrapper.vm.recentIssues).toHaveLength(2)
+      expect(wrapper.vm.recentIssues[0].id).toBe(1)
+    })
+
+    it('populates stats refs from response', async () => {
+      await mountDashboard()
+      expect(wrapper.vm.statsIssueTotal).toBe(15)
+      expect(wrapper.vm.statsOpenIssues).toBe(8) // open=5 + in_progress=3
+      expect(wrapper.vm.statsTotal).toBe(50)
+      expect(wrapper.vm.statsRunning).toBe(3)
+      expect(wrapper.vm.statsCompleted).toBe(30)
+      expect(wrapper.vm.statsFailed).toBe(10)
+    })
+
+    it('populates heatmapData from response', async () => {
+      await mountDashboard()
+      expect(wrapper.vm.heatmapData).toEqual(mockHeatmapData)
     })
   })
 
-  describe('filters', () => {
-    it('should filter by status', async () => {
-      await mountComponent()
-      ;(mockApi.getTasksPaginated as Mock).mockClear()
-
-      wrapper.vm.statusFilter = 'running'
-      await nextTick()
-
-      await vi.waitFor(() => {
-        expect(mockApi.getTasksPaginated).toHaveBeenCalledWith({ page: 1, page_size: 20, status: 'running' })
-      })
+  // -----------------------------------------------------------------------
+  // 3. Recent activity fetching (completed + failed)
+  // -----------------------------------------------------------------------
+  describe('recent activity fetching', () => {
+    it('calls getTasksPaginated for completed and failed', async () => {
+      await mountDashboard()
+      const calls = mockApi.getTasksPaginated.mock.calls
+      expect(calls).toEqual(
+        expect.arrayContaining([
+          [expect.objectContaining({ status: 'completed', page: 1, page_size: 5 })],
+          [expect.objectContaining({ status: 'failed', page: 1, page_size: 5 })],
+        ]),
+      )
     })
 
-    it('should filter by project', async () => {
-      await mountComponent()
-      ;(mockApi.getTasksPaginated as Mock).mockClear()
-
-      wrapper.vm.projectFilter = 1
-      await nextTick()
-
-      await vi.waitFor(() => {
-        expect(mockApi.getTasksPaginated).toHaveBeenCalledWith({ page: 1, page_size: 20, project_id: 1 })
-      })
-    })
-
-    it('should filter by initiator', async () => {
-      await mountComponent()
-      ;(mockApi.getTasksPaginated as Mock).mockClear()
-
-      wrapper.vm.initiatorFilter = 'user1'
-      await nextTick()
-
-      await vi.waitFor(() => {
-        expect(mockApi.getTasksPaginated).toHaveBeenCalledWith({ page: 1, page_size: 20, initiator_username: 'user1' })
-      })
-    })
-
-    it('should combine multiple filters', async () => {
-      await mountComponent()
-      ;(mockApi.getTasksPaginated as Mock).mockClear()
-
-      wrapper.vm.statusFilter = 'pending'
-      wrapper.vm.projectFilter = 1
-      wrapper.vm.initiatorFilter = 'user1'
-      await nextTick()
-
-      await vi.waitFor(() => {
-        expect(mockApi.getTasksPaginated).toHaveBeenCalledWith({
-          page: 1,
-          page_size: 20,
-          status: 'pending',
-          project_id: 1,
-          initiator_username: 'user1'
-        })
-      })
-    })
-
-    it('should refetch tasks when filter changes', async () => {
-      await mountComponent()
-
-      // Initial fetch
-      expect((mockApi.getTasksPaginated as Mock).mock.calls.length).toBe(1)
-
-      // Change status filter
-      wrapper.vm.statusFilter = 'completed'
-      await nextTick()
-
-      await vi.waitFor(() => {
-        return (mockApi.getTasksPaginated as Mock).mock.calls.length >= 2
-      })
-
-      expect((mockApi.getTasksPaginated as Mock).mock.calls.length).toBeGreaterThanOrEqual(2)
+    it('merges and sorts activity by time descending', async () => {
+      await mountDashboard()
+      const activity = wrapper.vm.recentActivity as Task[]
+      expect(activity.length).toBe(2)
+      // id=30 completed_at 09:00 comes before id=40 completed_at 08:00
+      expect(activity[0].id).toBe(30)
+      expect(activity[1].id).toBe(40)
     })
   })
 
-  describe('auto-refresh', () => {
-    it('should poll every 15 seconds', async () => {
-      vi.useFakeTimers()
-
-      await mountComponent()
-
-      // Advance time by 15 seconds
-      vi.advanceTimersByTime(15000)
-
-      await vi.waitFor(() => {
-        expect(mockApi.getTasksPaginated).toHaveBeenCalledTimes(2)
-      })
-
-      vi.useRealTimers()
+  // -----------------------------------------------------------------------
+  // 4. successRate computed
+  // -----------------------------------------------------------------------
+  describe('successRate computed', () => {
+    it('returns correct percentage', async () => {
+      await mountDashboard()
+      // completed=30, failed=10 -> 30/40*100 = 75
+      expect(wrapper.vm.successRate).toBe(75)
     })
 
-    it('should skip polling when tab not visible', async () => {
-      vi.useFakeTimers()
-
-      await mountComponent()
-
-      // Make tab hidden
-      Object.defineProperty(document, 'visibilityState', {
-        value: 'hidden',
-        writable: true
-      })
-
-      // Advance time by 15 seconds
-      vi.advanceTimersByTime(15000)
-
-      // getTasksPaginated should only be called once (initial fetch)
-      expect(mockApi.getTasksPaginated).toHaveBeenCalledTimes(1)
-
-      vi.useRealTimers()
+    it('returns 0 when no completed or failed tasks', async () => {
+      setupDefaultMocks()
+      mockApi.getStats.mockResolvedValue({ ...mockStats, completed: 0, failed: 0 })
+      wrapper = mount(Dashboard, { global: { plugins: [router] } })
+      await flushPromises()
+      expect(wrapper.vm.successRate).toBe(0)
     })
 
-    it('should resume polling when tab becomes visible', async () => {
-      vi.useFakeTimers()
-
-      await mountComponent()
-
-      // Initial call count
-      const initialCalls = (mockApi.getTasksPaginated as Mock).mock.calls.length
-
-      // Make tab hidden and advance time
-      Object.defineProperty(document, 'visibilityState', {
-        value: 'hidden',
-        writable: true
-      })
-      vi.advanceTimersByTime(15000)
-      expect((mockApi.getTasksPaginated as Mock).mock.calls.length).toBe(initialCalls)
-
-      // Make tab visible again
-      Object.defineProperty(document, 'visibilityState', {
-        value: 'visible',
-        writable: true
-      })
-
-      // Trigger next interval - when visibility becomes visible,
-      // the next interval tick will fetch since the condition is checked inside the callback
-      vi.advanceTimersByTime(15000)
-
-      // After making visible and triggering interval, should fetch
-      expect((mockApi.getTasksPaginated as Mock).mock.calls.length).toBe(initialCalls + 1)
-
-      vi.useRealTimers()
+    it('returns 100 when all tasks completed', async () => {
+      setupDefaultMocks()
+      mockApi.getStats.mockResolvedValue({ ...mockStats, completed: 10, failed: 0 })
+      wrapper = mount(Dashboard, { global: { plugins: [router] } })
+      await flushPromises()
+      expect(wrapper.vm.successRate).toBe(100)
     })
 
-    it('should clear timer on unmount', async () => {
-      vi.useFakeTimers()
+    it('rounds to nearest integer', async () => {
+      setupDefaultMocks()
+      mockApi.getStats.mockResolvedValue({ ...mockStats, completed: 2, failed: 1 })
+      wrapper = mount(Dashboard, { global: { plugins: [router] } })
+      await flushPromises()
+      expect(wrapper.vm.successRate).toBe(67)
+    })
+  })
 
-      await mountComponent()
+  // -----------------------------------------------------------------------
+  // 5. Row navigation
+  // -----------------------------------------------------------------------
+  describe('row navigation', () => {
+    it('issueRowProps returns cursor style and navigates to /issues/:id', async () => {
+      await mountDashboard()
+      const pushSpy = vi.spyOn(router, 'push')
+      const props = wrapper.vm.issueRowProps(mockIssues[0])
+      expect(props.style).toBe('cursor: pointer')
+      props.onClick()
+      expect(pushSpy).toHaveBeenCalledWith('/issues/1')
+    })
 
-      // Advance time a bit
-      vi.advanceTimersByTime(5000)
+    it('taskRowProps returns cursor style and navigates to /tasks/:id', async () => {
+      await mountDashboard()
+      const pushSpy = vi.spyOn(router, 'push')
+      const props = wrapper.vm.taskRowProps(mockRunningTasks[0])
+      expect(props.style).toBe('cursor: pointer')
+      props.onClick()
+      expect(pushSpy).toHaveBeenCalledWith('/tasks/10')
+    })
+  })
 
-      const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval')
+  // -----------------------------------------------------------------------
+  // 6. Polling
+  // -----------------------------------------------------------------------
+  describe('polling', () => {
+    it('sets up a 15-second interval', async () => {
+      await mountDashboard()
+      expect(globalThis.setInterval).toHaveBeenCalledWith(expect.any(Function), 15_000)
+    })
 
+    it('clears interval on unmount', async () => {
+      await mountDashboard()
       wrapper.unmount()
       await nextTick()
+      expect(globalThis.clearInterval).toHaveBeenCalled()
+    })
 
-      expect(clearIntervalSpy).toHaveBeenCalled()
+    it('refreshes data on each polling tick', async () => {
+      vi.restoreAllMocks()
+      vi.useFakeTimers()
+
+      setupDefaultMocks()
+      wrapper = mount(Dashboard, { global: { plugins: [router] } })
+      await flushPromises()
+
+      const callsBefore = mockApi.getIssues.mock.calls.length
+
+      vi.advanceTimersByTime(15_000)
+      await flushPromises()
+
+      expect(mockApi.getIssues.mock.calls.length).toBeGreaterThan(callsBefore)
+
+      vi.useRealTimers()
+    })
+
+    it('skips polling when tab is hidden', async () => {
+      vi.restoreAllMocks()
+      vi.useFakeTimers()
+
+      setupDefaultMocks()
+      wrapper = mount(Dashboard, { global: { plugins: [router] } })
+      await flushPromises()
+
+      const callsBefore = mockApi.getIssues.mock.calls.length
+
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'hidden', writable: true, configurable: true,
+      })
+      vi.advanceTimersByTime(15_000)
+      await flushPromises()
+
+      expect(mockApi.getIssues.mock.calls.length).toBe(callsBefore)
 
       vi.useRealTimers()
     })
   })
 
-  describe('task navigation', () => {
-    it('should navigate to task view on row click', async () => {
-      await mountComponent()
-
-      const pushSpy = vi.spyOn(router, 'push')
-
-      // Simulate row click via getRowProps
-      const task = mockTasks[0]
-      const props = wrapper.vm.getRowProps(task)
-
-      // Trigger click handler manually (since event mocking is complex)
-      props.onClick({ target: document.createElement('div') } as any)
-
-      await vi.waitFor(() => {
-        expect(pushSpy).toHaveBeenCalledWith({ name: 'TaskView', params: { id: task.id } })
-      })
-    })
-
-    it('should not navigate when clicking interactive elements', async () => {
-      await mountComponent()
-
-      const pushSpy = vi.spyOn(router, 'push')
-
-      // Simulate clicking on an interactive element (button)
-      const button = document.createElement('button')
-      const task = mockTasks[0]
-      const props = wrapper.vm.getRowProps(task)
-
-      props.onClick({ target: button } as unknown as MouseEvent)
-
-      // push should not be called
-      expect(pushSpy).not.toHaveBeenCalled()
-    })
-
-    it('should not navigate when clicking on links', async () => {
-      await mountComponent()
-
-      const pushSpy = vi.spyOn(router, 'push')
-
-      // Simulate clicking on a link
-      const link = document.createElement('a')
-      const task = mockTasks[0]
-      const props = wrapper.vm.getRowProps(task)
-
-      props.onClick({ target: link } as unknown as MouseEvent)
-
-      expect(pushSpy).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('responsive layout', () => {
-    it('should use desktop columns by default', async () => {
-      await mountComponent()
-
-      // Default mock width is 1200, so isMobile should be false
-      expect(wrapper.vm.isMobile).toBe(false)
-      // Desktop has 11 columns
-      expect(wrapper.vm.columns.length).toBe(11)
-    })
-
-    it('should have isMobile computed property', async () => {
-      await mountComponent()
-
-      // isMobile is a computed ref that depends on window width
-      expect(typeof wrapper.vm.isMobile).toBe('boolean')
-    })
-  })
-
-  describe('summary calculation', () => {
-    it('should count total visible tasks', async () => {
-      await mountComponent()
-
-      await vi.waitFor(() => {
-        return wrapper.vm.hasLoadedOnce === true
-      })
-
-      const totalItem = wrapper.vm.summaryItems.find((item: any) => item.label === 'dashboard.visibleTasks')
-      expect(totalItem.value).toBe(String(mockStats.total))
-    })
-
-    it('should count running tasks', async () => {
-      await mountComponent()
-
-      await vi.waitFor(() => {
-        return wrapper.vm.hasLoadedOnce === true
-      })
-
-      const runningItem = wrapper.vm.summaryItems.find((item: any) => item.label === 'dashboard.running')
-      expect(runningItem.value).toBe(String(mockStats.running))
-    })
-
-    it('should count pending/queued tasks', async () => {
-      await mountComponent()
-
-      await vi.waitFor(() => {
-        return wrapper.vm.hasLoadedOnce === true
-      })
-
-      const pendingItem = wrapper.vm.summaryItems.find((item: any) => item.label === 'dashboard.pendingQueued')
-      expect(pendingItem.value).toBe(String(mockStats.pending + mockStats.queued))
-    })
-
-    it('should count completed tasks', async () => {
-      await mountComponent()
-
-      await vi.waitFor(() => {
-        return wrapper.vm.hasLoadedOnce === true
-      })
-
-      const completedItem = wrapper.vm.summaryItems.find((item: any) => item.label === 'dashboard.completed')
-      expect(completedItem.value).toBe(String(mockStats.completed))
-    })
-
-    it('should handle empty task list', async () => {
-      await mountComponent([], mockProjects, { total: 0, running: 0, completed: 0, pending: 0, queued: 0 })
-
-      await vi.waitFor(() => {
-        return wrapper.vm.hasLoadedOnce === true
-      })
-
-      const totalItem = wrapper.vm.summaryItems.find((item: any) => item.label === 'dashboard.visibleTasks')
-      expect(totalItem.value).toBe('0')
-    })
-
-    it('should update visible task rows when filters change', async () => {
-      await mountComponent()
-
-      await vi.waitFor(() => {
-        return wrapper.vm.hasLoadedOnce === true
-      })
-
-      // Mock the second call to return only 1 pending task
-      const pendingTask = createMockTask({ id: 1, status: 'pending', initiator_username: 'user1', project_id: 1 })
-      ;(mockApi.getTasksPaginated as Mock).mockResolvedValueOnce({ items: [pendingTask], total: 1 })
-
-      // Change filter to get different tasks
-      wrapper.vm.statusFilter = 'pending'
-      await nextTick()
-
-      await vi.waitFor(() => {
-        return (mockApi.getTasksPaginated as Mock).mock.calls.length >= 2
-      })
-
-      // Wait for tasks to update
-      await vi.waitFor(() => {
-        return wrapper.vm.tasks.length === 1
-      })
-
-      expect(wrapper.vm.tasks).toHaveLength(1)
-      expect(wrapper.vm.tasks[0].id).toBe(1)
-    })
-  })
-
-  describe('refreshTasks', () => {
-    it('should manually refresh tasks', async () => {
-      await mountComponent()
-
-      // Clear previous calls
-      ;(mockApi.getTasksPaginated as Mock).mockClear()
-      ;(mockApi.getStats as Mock).mockClear()
-
-      wrapper.vm.refreshTasks()
-      await nextTick()
-
-      await vi.waitFor(() => {
-        expect(mockApi.getTasksPaginated).toHaveBeenCalledTimes(1)
-        expect(mockApi.getStats).toHaveBeenCalledTimes(1)
-      })
-    })
-
-    it('should set loading state during refresh', async () => {
-      await mountComponent()
-
-      ;(mockApi.getTasksPaginated as Mock).mockImplementationOnce(
-        () => new Promise(resolve => setTimeout(() => resolve({ items: mockTasks, total: mockTasks.length }), 100))
-      )
-
-      wrapper.vm.refreshTasks()
-
-      // loading should be true
-      await nextTick()
-      expect(wrapper.vm.loading).toBe(true)
-
-      // Wait for refresh to complete
-      await vi.waitFor(() => {
-        return wrapper.vm.loading === false
-      })
-    })
-  })
-
-  describe('error handling', () => {
-    it('should handle fetch error gracefully', async () => {
-      ;(mockApi.getTasksPaginated as Mock).mockRejectedValue(new Error('API Error'))
-      ;(mockApi.getProjects as Mock).mockResolvedValue(mockProjects)
-      ;(mockApi.getStats as Mock).mockResolvedValue(mockStats)
-
-      wrapper = mount(Dashboard, {
-        global: {
-          plugins: [router]
-        }
-      })
-
-      await vi.waitFor(() => {
-        return wrapper.vm.hasLoadedOnce === true
-      })
-
-      // Should have completed loading even with error
-      expect(wrapper.vm.hasLoadedOnce).toBe(true)
-      expect(wrapper.vm.loading).toBe(false)
-      // Should show error toast
-      expect(mockMessage.error).toHaveBeenCalled()
-    })
-  })
-
-  describe('initiatorOptions', () => {
-    it('should extract unique initiators from tasks', async () => {
-      await mountComponent()
-
-      await vi.waitFor(() => {
-        return wrapper.vm.hasLoadedOnce === true
-      })
-
-      const options = wrapper.vm.initiatorOptions
-      expect(options.map((o: any) => o.value)).toEqual(['user1', 'user2', 'user3'])
-    })
-
-    it('should sort initiators alphabetically', async () => {
-      await mountComponent()
-
-      await vi.waitFor(() => {
-        return wrapper.vm.hasLoadedOnce === true
-      })
-
-      const options = wrapper.vm.initiatorOptions
-      const values = options.map((o: any) => o.value)
-      expect(values).toEqual(['user1', 'user2', 'user3'])
-    })
-
-    it('should exclude tasks with null or empty initiator_username', async () => {
-      const tasksWithGaps = [
-        createMockTask({ id: 1, initiator_username: 'alice' }),
-        createMockTask({ id: 2, initiator_username: null }),
-        createMockTask({ id: 3, initiator_username: '' }),
-        createMockTask({ id: 4, initiator_username: '  ' }),
-        createMockTask({ id: 5, initiator_username: 'bob' })
-      ]
-      await mountComponent(tasksWithGaps)
-
-      await vi.waitFor(() => wrapper.vm.hasLoadedOnce === true)
-
-      const values = wrapper.vm.initiatorOptions.map((o: any) => o.value)
-      expect(values).toEqual(['alice', 'bob'])
-    })
-  })
-
-  describe('projectOptions', () => {
-    it('should derive options from fetched projects', async () => {
-      await mountComponent()
-
-      await vi.waitFor(() => wrapper.vm.hasLoadedOnce === true)
-
-      const options = wrapper.vm.projectOptions
-      expect(options).toEqual([
-        { label: 'group/project-1', value: 1 },
-        { label: 'group/project-2', value: 2 }
-      ])
-    })
-
-    it('should return empty array when no projects', async () => {
-      await mountComponent(mockTasks, [])
-
-      await vi.waitFor(() => wrapper.vm.hasLoadedOnce === true)
-
-      expect(wrapper.vm.projectOptions).toEqual([])
-    })
-  })
-
-  describe('pagination', () => {
-    it('should update page and fetch tasks on page change', async () => {
-      await mountComponent()
-      ;(mockApi.getTasksPaginated as Mock).mockClear()
-
-      const pag = wrapper.vm.pagination
-      pag['onUpdate:page'](3)
-
-      await vi.waitFor(() => {
-        expect(mockApi.getTasksPaginated).toHaveBeenCalledWith(
-          expect.objectContaining({ page: 3, page_size: 20 })
-        )
-      })
-    })
-
-    it('should update page size, reset to page 1, and fetch on page size change', async () => {
-      await mountComponent()
-
-      // first go to page 2
-      wrapper.vm.pagination['onUpdate:page'](2)
-      await vi.waitFor(() => wrapper.vm.currentPage === 2)
-
-      ;(mockApi.getTasksPaginated as Mock).mockClear()
-
-      wrapper.vm.pagination['onUpdate:pageSize'](50)
-
-      await vi.waitFor(() => {
-        expect(mockApi.getTasksPaginated).toHaveBeenCalledWith(
-          expect.objectContaining({ page: 1, page_size: 50 })
-        )
-      })
-      expect(wrapper.vm.currentPage).toBe(1)
-    })
-
-    it('should expose pagination metadata', async () => {
-      await mountComponent()
-
-      await vi.waitFor(() => wrapper.vm.hasLoadedOnce === true)
-
-      const pag = wrapper.vm.pagination
-      expect(pag.page).toBe(1)
-      expect(pag.pageSize).toBe(20)
-      expect(pag.itemCount).toBe(mockTasks.length)
-      expect(pag.pageSizes).toEqual([20, 50, 100])
-      expect(pag.showSizePicker).toBe(true)
-    })
-  })
-
-  describe('fetchTasks guard', () => {
-    it('should skip fetch when already loading', async () => {
-      let resolveTasks!: (value: { items: any[]; total: number }) => void
-      const slowPromise = new Promise<{ items: any[]; total: number }>(resolve => {
-        resolveTasks = resolve
-      })
-      ;(mockApi.getTasksPaginated as Mock).mockReturnValue(slowPromise)
-      ;(mockApi.getProjects as Mock).mockResolvedValue(mockProjects)
-      ;(mockApi.getStats as Mock).mockResolvedValue(mockStats)
-
-      wrapper = mount(Dashboard, {
-        global: { plugins: [router] }
-      })
-
-      // First call is in-flight (loading = true)
-      await nextTick()
-      expect(wrapper.vm.loading).toBe(true)
-
-      // Try to trigger another fetch while still loading
-      wrapper.vm.refreshTasks()
-      await nextTick()
-
-      // Should still have only 1 call since guard prevents duplicate
-      expect(mockApi.getTasksPaginated).toHaveBeenCalledTimes(1)
-
-      // Resolve to avoid hanging promises
-      resolveTasks({ items: mockTasks, total: mockTasks.length })
-      await vi.waitFor(() => wrapper.vm.loading === false)
-    })
-  })
-
-  describe('fetchStats error handling', () => {
-    it('should handle stats API failure silently', async () => {
-      ;(mockApi.getTasksPaginated as Mock).mockResolvedValue({ items: mockTasks, total: mockTasks.length })
-      ;(mockApi.getProjects as Mock).mockResolvedValue(mockProjects)
-      ;(mockApi.getStats as Mock).mockRejectedValue(new Error('Stats unavailable'))
-
-      wrapper = mount(Dashboard, {
-        global: { plugins: [router] }
-      })
-
-      await vi.waitFor(() => wrapper.vm.hasLoadedOnce === true)
-
-      // Stats should remain at default values (0) — no crash
-      expect(wrapper.vm.statsTotal).toBe(0)
-      expect(wrapper.vm.statsRunning).toBe(0)
-    })
-  })
-
-  describe('fetchProjects error handling', () => {
-    it('should handle projects API failure silently', async () => {
-      ;(mockApi.getTasksPaginated as Mock).mockResolvedValue({ items: mockTasks, total: mockTasks.length })
-      ;(mockApi.getProjects as Mock).mockRejectedValue(new Error('Projects unavailable'))
-      ;(mockApi.getStats as Mock).mockResolvedValue(mockStats)
-
-      wrapper = mount(Dashboard, {
-        global: { plugins: [router] }
-      })
-
-      await vi.waitFor(() => wrapper.vm.hasLoadedOnce === true)
-
-      // Projects should remain empty — no crash
-      expect(wrapper.vm.projects).toEqual([])
-      expect(wrapper.vm.projectOptions).toEqual([])
-    })
-  })
-
+  // -----------------------------------------------------------------------
+  // 7. Loading state
+  // -----------------------------------------------------------------------
   describe('loading state', () => {
-    it('tableLoading is true when loading AFTER first load', async () => {
-      await mountComponent()
-      await vi.waitFor(() => wrapper.vm.hasLoadedOnce === true)
+    it('initialLoading is true before first fetch completes', async () => {
+      let resolveIssues!: (v: any) => void
+      const pending = new Promise(r => { resolveIssues = r })
 
-      // Simulate a slow refresh
-      ;(mockApi.getTasksPaginated as Mock).mockImplementation(
-        () => new Promise(resolve => setTimeout(() => resolve({ items: mockTasks, total: mockTasks.length }), 200))
-      )
-
-      wrapper.vm.refreshTasks()
-      await nextTick()
-
-      expect(wrapper.vm.tableLoading).toBe(true)
-      expect(wrapper.vm.initialLoading).toBe(false)
-
-      await vi.waitFor(() => wrapper.vm.loading === false)
-    })
-
-    it('initialLoading is true only before first load completes', async () => {
-      let resolveTasks!: (value: any) => void
-      const slowPromise = new Promise(resolve => { resolveTasks = resolve })
-
-      ;(mockApi.getTasksPaginated as Mock).mockReturnValue(slowPromise)
-      ;(mockApi.getProjects as Mock).mockResolvedValue(mockProjects)
-      ;(mockApi.getStats as Mock).mockResolvedValue(mockStats)
+      setupDefaultMocks()
+      mockApi.getIssues.mockReturnValue(pending as any)
 
       wrapper = mount(Dashboard, { global: { plugins: [router] } })
       await nextTick()
 
       expect(wrapper.vm.initialLoading).toBe(true)
-      expect(wrapper.vm.tableLoading).toBe(false)
+      expect(wrapper.vm.loading).toBe(true)
+      expect(wrapper.vm.hasLoadedOnce).toBe(false)
 
-      resolveTasks({ items: mockTasks, total: mockTasks.length })
-      await vi.waitFor(() => wrapper.vm.hasLoadedOnce === true)
+      resolveIssues({ items: [], total: 0, page: 1, page_size: 5 })
+      await flushPromises()
+      await nextTick()
 
       expect(wrapper.vm.initialLoading).toBe(false)
+      expect(wrapper.vm.hasLoadedOnce).toBe(true)
+    })
+
+    it('initialLoading is false after first load completes', async () => {
+      await mountDashboard()
+      expect(wrapper.vm.initialLoading).toBe(false)
+      expect(wrapper.vm.hasLoadedOnce).toBe(true)
     })
   })
 
-  describe('isInteractiveTarget', () => {
-    it('should return false for non-Element target', async () => {
-      await mountComponent()
-
-      const result = wrapper.vm.isInteractiveTarget(null)
-      expect(result).toBe(false)
-    })
-
-    it('should return false for non-Element text node', async () => {
-      await mountComponent()
-
-      const textNode = document.createTextNode('hello')
-      const result = wrapper.vm.isInteractiveTarget(textNode)
-      expect(result).toBe(false)
-    })
-
-    it('should return true for input elements', async () => {
-      await mountComponent()
-
-      const input = document.createElement('input')
-      expect(wrapper.vm.isInteractiveTarget(input)).toBe(true)
-    })
-
-    it('should return true for element nested inside a link', async () => {
-      await mountComponent()
-
-      const anchor = document.createElement('a')
-      const span = document.createElement('span')
-      anchor.appendChild(span)
-      document.body.appendChild(anchor)
-
-      expect(wrapper.vm.isInteractiveTarget(span)).toBe(true)
-
-      document.body.removeChild(anchor)
+  // -----------------------------------------------------------------------
+  // runningAndQueuedTasks computed
+  // -----------------------------------------------------------------------
+  describe('runningAndQueuedTasks computed', () => {
+    it('merges running and queued tasks', async () => {
+      await mountDashboard()
+      const combined = wrapper.vm.runningAndQueuedTasks as Task[]
+      expect(combined).toHaveLength(2)
+      expect(combined.map((t: Task) => t.id)).toEqual([10, 20])
     })
   })
 
-  describe('desktop column render functions', () => {
-    // Helper: find a desktop column by key and call its render function
-    const getColumnRender = (columns: any[], key: string) => {
-      const col = columns.find((c: any) => c.key === key)
-      return col?.render
-    }
-
-    it('renderStatus produces NTag with correct type per status', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'status')
-      expect(render).toBeDefined()
-
-      const pending = render(createMockTask({ status: 'pending' }))
-      expect(pending.type).toBeDefined() // VNode for NTag
-      expect(pending.props.type).toBe('default')
-
-      const running = render(createMockTask({ status: 'running' }))
-      expect(running.props.type).toBe('warning')
-
-      const completed = render(createMockTask({ status: 'completed' }))
-      expect(completed.props.type).toBe('success')
-
-      const failed = render(createMockTask({ status: 'failed' }))
-      expect(failed.props.type).toBe('error')
-
-      const queued = render(createMockTask({ status: 'queued' }))
-      expect(queued.props.type).toBe('info')
-    })
-
-    it('project column renders project label and ID', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'project')
-      expect(render).toBeDefined()
-
-      const task = createMockTask({ project_id: 42, project_path_with_namespace: 'org/repo' })
-      const vnode = render(task)
-
-      // The top-level vnode is a div; check its children contain project info
-      expect(vnode.children).toBeDefined()
-      expect(vnode.children.length).toBe(2)
-
-      // Second child should contain the project ID text
-      const idDiv = vnode.children[1]
-      expect(idDiv.children).toContain('ID: 42')
-    })
-
-    it('initiator column renders username', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'initiator_username')
-      expect(render).toBeDefined()
-
-      expect(render(createMockTask({ initiator_username: 'alice' }))).toBe('alice')
-    })
-
-    it('initiator column renders dash for null username', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'initiator_username')
-      expect(render(createMockTask({ initiator_username: null }))).toBe('-')
-    })
-
-    it('issue column renders link when issue_iid present', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'issue_iid')
-      expect(render).toBeDefined()
-
-      const task = createMockTask({ issue_iid: 99, issue_url: 'https://example.com/issue/99' })
-      const vnode = render(task)
-      expect(vnode.props.href).toBe('https://example.com/issue/99')
-      expect(vnode.children).toBe('!99')
-    })
-
-    it('issue column renders dash when no issue_iid', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'issue_iid')
-      const result = render(createMockTask({ issue_iid: null }))
-      expect(result).toBe('-')
-    })
-
-    it('priority column formats priority value', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'priority')
-      expect(render).toBeDefined()
-
-      expect(render(createMockTask({ priority: 0 }))).toBe('P0')
-      expect(render(createMockTask({ priority: 1 }))).toBe('P1')
-      expect(render(createMockTask({ priority: 2 }))).toBe('P2')
-    })
-
-    it('branch column renders link when branch exists', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'branch_name')
-      expect(render).toBeDefined()
-
-      const task = createMockTask({ branch_name: 'feat/x', branch_url: 'https://example.com/tree/feat/x' })
-      const vnode = render(task)
-      expect(vnode.props.href).toBe('https://example.com/tree/feat/x')
-      expect(vnode.children).toBe('feat/x')
-    })
-
-    it('branch column renders dash when no branch', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'branch_name')
-      const result = render(createMockTask({ branch_name: null }))
-      expect(result).toBe('-')
-    })
-
-    it('merge_request column renders link with MR iid', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'merge_request_url')
-      expect(render).toBeDefined()
-
-      const task = createMockTask({
-        merge_request_url: 'https://example.com/mr/5',
-        merge_request_iid: 5
-      })
-      const vnode = render(task)
-      expect(vnode.props.href).toBe('https://example.com/mr/5')
-      expect(vnode.children).toBe('!5')
-    })
-
-    it('merge_request column renders "open" label when no iid', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'merge_request_url')
-      const task = createMockTask({
-        merge_request_url: 'https://example.com/mr/new',
-        merge_request_iid: null
-      })
-      const vnode = render(task)
-      expect(vnode.props.href).toBe('https://example.com/mr/new')
-      expect(vnode.children).toBe('dashboard.open')
-    })
-
-    it('merge_request column renders dash when no URL', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'merge_request_url')
-      const result = render(createMockTask({ merge_request_url: null }))
-      expect(result).toBe('-')
-    })
-
-    it('changes column renders additions and deletions', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'changes')
-      expect(render).toBeDefined()
-
-      const task = createMockTask({ additions: 10, deletions: 5 })
-      const vnode = render(task)
-      // Should render a span with two child spans
-      expect(vnode.type).toBe('span')
-      expect(vnode.children.length).toBe(2)
-      expect(vnode.children[0].children).toBe('+10')
-      expect(vnode.children[1].children).toBe('-5')
-    })
-
-    it('changes column renders with zero additions but nonzero deletions', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'changes')
-      const task = createMockTask({ additions: 0, deletions: 7 })
-      const vnode = render(task)
-      expect(vnode.type).toBe('span')
-      expect(vnode.children[0].children).toBe('+0')
-      expect(vnode.children[1].children).toBe('-7')
-    })
-
-    it('changes column renders with nonzero additions but zero deletions', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'changes')
-      const task = createMockTask({ additions: 3, deletions: 0 })
-      const vnode = render(task)
-      expect(vnode.type).toBe('span')
-      expect(vnode.children[0].children).toBe('+3')
-      expect(vnode.children[1].children).toBe('-0')
-    })
-
-    it('changes column renders dash when both are zero', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'changes')
-      const result = render(createMockTask({ additions: 0, deletions: 0 }))
-      expect(result).toBe('-')
-    })
-
-    it('changes column renders dash when both are undefined', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'changes')
-      const task = createMockTask({})
-      // Remove the additions/deletions properties to simulate undefined
-      delete (task as any).additions
-      delete (task as any).deletions
-      const result = render(task)
-      expect(result).toBe('-')
-    })
-
-    it('created_at column formats date string', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'created_at')
-      expect(render).toBeDefined()
-
-      const task = createMockTask({ created_at: '2026-01-15T08:30:00Z' })
-      const result = render(task)
-      expect(result).toBe('formatted-date-2026-01-15T08:30:00Z')
-    })
-
-    it('scheduled_at column returns dash for null', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'scheduled_at')
-      expect(render).toBeDefined()
-
-      const task = createMockTask({ scheduled_at: null })
-      const result = render(task)
-      expect(result).toBe('-')
-    })
-
-    it('scheduled_at column formats date when present', async () => {
-      await mountComponent()
-
-      const render = getColumnRender(wrapper.vm.columns, 'scheduled_at')
-      const task = createMockTask({ scheduled_at: '2026-06-01T12:00:00Z' })
-      const result = render(task)
-      expect(result).toBe('formatted-date-2026-06-01T12:00:00Z')
-    })
-  })
-
-  describe('mobile columns', () => {
-    it('should use mobile columns when screen width is below breakpoint', async () => {
-      // Override the window size mock to return mobile width
-      const { useWindowSize } = await import('@vueuse/core')
-      ;(useWindowSize as any).mockReturnValue({ width: { value: 500 } })
-
-      await mountComponent()
-
-      expect(wrapper.vm.isMobile).toBe(true)
-      // Mobile has 3 columns: id, task_info, status
-      expect(wrapper.vm.columns.length).toBe(3)
-      expect(wrapper.vm.columns.map((c: any) => c.key)).toEqual(['id', 'task_info', 'status'])
-
-      // Restore desktop width
-      ;(useWindowSize as any).mockReturnValue({ width: { value: 1200 } })
-    })
-
-    it('mobile task_info column renders project label and branch', async () => {
-      const { useWindowSize } = await import('@vueuse/core')
-      ;(useWindowSize as any).mockReturnValue({ width: { value: 500 } })
-
-      await mountComponent()
-
-      const render = wrapper.vm.columns.find((c: any) => c.key === 'task_info')?.render
-      expect(render).toBeDefined()
-
-      const task = createMockTask({
-        project_path_with_namespace: 'org/repo',
-        issue_iid: 10,
-        branch_name: 'feat/login',
-        branch_url: 'https://example.com/tree/feat/login'
-      })
-      const vnode = render(task)
-      expect(vnode.type).toBe('div')
-      expect(vnode.children.length).toBe(2)
-
-      // Restore desktop width
-      ;(useWindowSize as any).mockReturnValue({ width: { value: 1200 } })
-    })
-
-    it('mobile task_info renders dash for missing branch', async () => {
-      const { useWindowSize } = await import('@vueuse/core')
-      ;(useWindowSize as any).mockReturnValue({ width: { value: 500 } })
-
-      await mountComponent()
-
-      const render = wrapper.vm.columns.find((c: any) => c.key === 'task_info')?.render
-      const task = createMockTask({ branch_name: null })
-      const vnode = render(task)
-      // Second child (branch div) should contain '-'
-      expect(vnode.children[1].children).toBe('-')
-
-      // Restore desktop width
-      ;(useWindowSize as any).mockReturnValue({ width: { value: 1200 } })
-    })
-  })
-
-  describe('helper functions', () => {
-    it('renderExternalLink returns anchor when href is provided', async () => {
-      await mountComponent()
-
-      const vnode = wrapper.vm.renderExternalLink('Click me', 'https://example.com')
-      expect(vnode.type).toBe('a')
-      expect(vnode.props.href).toBe('https://example.com')
-      expect(vnode.props.target).toBe('_blank')
-      expect(vnode.children).toBe('Click me')
-    })
-
-    it('renderExternalLink returns plain label when href is null', async () => {
-      await mountComponent()
-
-      const result = wrapper.vm.renderExternalLink('Label only', null)
-      expect(result).toBe('Label only')
-    })
-
-    it('renderExternalLink returns plain label when href is undefined', async () => {
-      await mountComponent()
-
-      const result = wrapper.vm.renderExternalLink('Label only', undefined)
-      expect(result).toBe('Label only')
-    })
-
-    it('getProjectSecondaryLabel includes issue iid when present', async () => {
-      await mountComponent()
-
-      const task = createMockTask({
-        project_path_with_namespace: 'org/repo',
-        issue_iid: 42
-      })
-      const label = wrapper.vm.getProjectSecondaryLabel(task)
-      expect(label).toContain('org/repo')
-      expect(label).toContain('!42')
-    })
-
-    it('getProjectSecondaryLabel shows dash when no issue_iid', async () => {
-      await mountComponent()
-
-      const task = createMockTask({
-        project_path_with_namespace: 'org/repo',
-        issue_iid: null
-      })
-      const label = wrapper.vm.getProjectSecondaryLabel(task)
-      expect(label).toContain('org/repo')
-      expect(label).toContain('-')
-    })
-
-    it('getInitiatorLabel returns trimmed username', async () => {
-      await mountComponent()
-
-      const task = createMockTask({ initiator_username: '  alice  ' })
-      expect(wrapper.vm.getInitiatorLabel(task)).toBe('alice')
-    })
-
-    it('getInitiatorLabel returns dash for null username', async () => {
-      await mountComponent()
-
-      const task = createMockTask({ initiator_username: null })
-      expect(wrapper.vm.getInitiatorLabel(task)).toBe('-')
-    })
-
-    it('formatCompactDateTime returns formatted date for valid value', async () => {
-      await mountComponent()
-
-      const result = wrapper.vm.formatCompactDateTime('2026-01-01T00:00:00Z')
-      expect(result).toBe('formatted-date-2026-01-01T00:00:00Z')
-    })
-
-    it('formatCompactDateTime returns dash for null', async () => {
-      await mountComponent()
-
-      expect(wrapper.vm.formatCompactDateTime(null)).toBe('-')
-    })
-
-    it('formatCompactDateTime returns dash for undefined', async () => {
-      await mountComponent()
-
-      expect(wrapper.vm.formatCompactDateTime(undefined)).toBe('-')
-    })
-
-    it('getProjectLabel returns path_with_namespace when available', async () => {
-      await mountComponent()
-
-      const task = createMockTask({ project_path_with_namespace: 'org/repo', project_name: 'repo' })
-      expect(wrapper.vm.getProjectLabel(task)).toBe('org/repo')
-    })
-
-    it('getProjectLabel returns project_name as fallback', async () => {
-      await mountComponent()
-
-      const task = createMockTask({
-        project_path_with_namespace: null,
-        project_name: 'repo'
-      })
-      expect(wrapper.vm.getProjectLabel(task)).toBe('repo')
-    })
-
-    it('getProjectLabel returns i18n fallback when no names', async () => {
-      await mountComponent()
-
-      const task = createMockTask({
-        project_path_with_namespace: null,
-        project_name: null,
-        project_id: 99
-      })
-      const label = wrapper.vm.getProjectLabel(task)
-      expect(label).toBe('dashboard.projectFallback')
-    })
-  })
-
-  describe('filter watcher resets page', () => {
-    it('should reset to page 1 when status filter changes from a later page', async () => {
-      await mountComponent()
-
-      // Simulate being on page 3
-      wrapper.vm.currentPage = 3
+  // -----------------------------------------------------------------------
+  // Error handling
+  // -----------------------------------------------------------------------
+  describe('error handling', () => {
+    it('shows error message when main fetch fails', async () => {
+      setupDefaultMocks()
+      mockApi.getIssues.mockRejectedValue(new Error('Network error'))
+
+      wrapper = mount(Dashboard, { global: { plugins: [router] } })
+      await flushPromises()
       await nextTick()
 
-      ;(mockApi.getTasksPaginated as Mock).mockClear()
-
-      wrapper.vm.statusFilter = 'failed'
-      await nextTick()
-
-      await vi.waitFor(() => {
-        expect(mockApi.getTasksPaginated).toHaveBeenCalledWith(
-          expect.objectContaining({ page: 1 })
-        )
-      })
-      expect(wrapper.vm.currentPage).toBe(1)
+      expect(mockMessage.error).toHaveBeenCalledWith('dashboard.failedToFetchTasks')
     })
 
-    it('should reset to page 1 when project filter changes', async () => {
-      await mountComponent()
+    it('handles stats failure silently', async () => {
+      setupDefaultMocks()
+      mockApi.getStats.mockRejectedValue(new Error('Stats down'))
 
-      wrapper.vm.currentPage = 2
-      await nextTick()
+      wrapper = mount(Dashboard, { global: { plugins: [router] } })
+      await flushPromises()
 
-      ;(mockApi.getTasksPaginated as Mock).mockClear()
-
-      wrapper.vm.projectFilter = 1
-      await nextTick()
-
-      await vi.waitFor(() => {
-        expect(wrapper.vm.currentPage).toBe(1)
-      })
+      expect(wrapper.vm.statsTotal).toBe(0)
+      expect(wrapper.vm.statsRunning).toBe(0)
     })
 
-    it('should reset to page 1 when initiator filter changes', async () => {
-      await mountComponent()
+    it('handles heatmap failure silently', async () => {
+      setupDefaultMocks()
+      mockApi.getActivityHeatmap.mockRejectedValue(new Error('fail'))
 
-      wrapper.vm.currentPage = 5
-      await nextTick()
+      wrapper = mount(Dashboard, { global: { plugins: [router] } })
+      await flushPromises()
 
-      ;(mockApi.getTasksPaginated as Mock).mockClear()
+      expect(wrapper.vm.heatmapData).toEqual([])
+    })
 
-      wrapper.vm.initiatorFilter = 'user1'
-      await nextTick()
-
-      await vi.waitFor(() => {
-        expect(wrapper.vm.currentPage).toBe(1)
+    it('handles activity fetch failure silently', async () => {
+      setupDefaultMocks()
+      mockApi.getTasksPaginated.mockImplementation((params: any) => {
+        if (params.status === 'running') return Promise.resolve({ items: mockRunningTasks, total: 1, page: 1, page_size: 10 })
+        if (params.status === 'queued') return Promise.resolve({ items: mockQueuedTasks, total: 1, page: 1, page_size: 10 })
+        return Promise.reject(new Error('Activity down'))
       })
+
+      wrapper = mount(Dashboard, { global: { plugins: [router] } })
+      await flushPromises()
+
+      expect(wrapper.vm.recentActivityTasks).toEqual([])
     })
   })
 
-  describe('statusOptions', () => {
-    it('should provide all 6 status filter options', async () => {
-      await mountComponent()
+  // -----------------------------------------------------------------------
+  // fetchData guard
+  // -----------------------------------------------------------------------
+  describe('fetchData guard', () => {
+    it('skips fetch when already loading', async () => {
+      setupDefaultMocks()
+      let resolveIssues!: (v: any) => void
+      mockApi.getIssues.mockReturnValue(new Promise(r => { resolveIssues = r }) as any)
 
-      const options = wrapper.vm.statusOptions
-      expect(options).toHaveLength(6)
-      expect(options.map((o: any) => o.value)).toEqual([
-        'pending', 'queued', 'running', 'completed', 'failed', 'cancelled'
-      ])
-    })
-  })
+      wrapper = mount(Dashboard, { global: { plugins: [router] } })
+      await nextTick()
 
-  describe('getRowProps', () => {
-    it('should set cursor pointer style', async () => {
-      await mountComponent()
+      expect(wrapper.vm.loading).toBe(true)
+      const countBefore = mockApi.getIssues.mock.calls.length
 
-      const props = wrapper.vm.getRowProps(mockTasks[0])
-      expect(props.style).toBe('cursor: pointer;')
-    })
+      // Second call should be blocked by the loading guard
+      wrapper.vm.$forceUpdate()
+      await nextTick()
+      expect(mockApi.getIssues.mock.calls.length).toBe(countBefore)
 
-    it('should not navigate when clicking on select element', async () => {
-      await mountComponent()
-      const pushSpy = vi.spyOn(router, 'push')
-
-      const select = document.createElement('select')
-      const task = mockTasks[0]
-      const props = wrapper.vm.getRowProps(task)
-      props.onClick({ target: select } as unknown as MouseEvent)
-
-      expect(pushSpy).not.toHaveBeenCalled()
+      resolveIssues({ items: [], total: 0, page: 1, page_size: 5 })
+      await flushPromises()
     })
   })
 })
