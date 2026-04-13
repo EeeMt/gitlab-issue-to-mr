@@ -50,6 +50,19 @@
         </span>
       </div>
 
+      <!-- Retry Source -->
+      <div v-if="task.is_retry && task.retry_source_task_id" class="metadata-row">
+        <span class="metadata-label">
+          <n-icon size="14" class="metadata-label-icon"><RefreshOutline /></n-icon>
+          {{ t('taskView.retryOf') }}
+        </span>
+        <span class="metadata-value">
+          <router-link :to="`/tasks/${task.retry_source_task_id}`" class="app-link">
+            Task #{{ task.retry_source_task_id }}
+          </router-link>
+        </span>
+      </div>
+
       <!-- Branch flow -->
       <div class="metadata-row">
         <span class="metadata-label">
@@ -150,7 +163,8 @@ import {
   GitBranchOutline,
   ChatbubbleOutline,
   TimeOutline,
-  GitPullRequest
+  GitPullRequest,
+  RefreshOutline
 } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import type { Task } from '../api'

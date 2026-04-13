@@ -273,6 +273,7 @@ const zhCN = {
     toolOutput: '输出',
     timelineRunning: '运行中…',
     taskMetadata: '任务元数据',
+    retryOf: '重试自',
     taskProcess: '任务进程',
     taskResult: '任务结果',
     branchFlow: '分支配置',

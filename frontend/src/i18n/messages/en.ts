@@ -283,6 +283,7 @@ const en = {
     toolOutput: 'Output',
     timelineRunning: 'Running…',
     taskMetadata: 'Task Metadata',
+    retryOf: 'Retry of',
     taskProcess: 'Task Process',
     taskResult: 'Task Result',
     branchFlow: 'Branch Config',
