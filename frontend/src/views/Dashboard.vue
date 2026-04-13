@@ -12,15 +12,17 @@
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
               <StatusPieChart :title="t('dashboard.issueStatus')" :data="issueChartData" />
+              <div class="dashboard-metric-card__period">{{ t('dashboard.last90days') }}</div>
             </n-card>
           </n-gi>
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
               <StatusPieChart :title="t('dashboard.taskStatus')" :data="taskChartData" />
+              <div class="dashboard-metric-card__period">{{ t('dashboard.last90days') }}</div>
             </n-card>
           </n-gi>
           <n-gi>
-            <n-card size="small" class="dashboard-metric-card dashboard-metric-card--stat" data-testid="dashboard-summary-card">
+            <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
               <div class="dashboard-stat">
                 <div class="dashboard-stat__title">{{ t('dashboard.linesChanged') }}</div>
                 <div class="dashboard-stat__value">{{ formatNumber(analyticsTotalChanges) }}</div>
@@ -29,10 +31,11 @@
                   <span class="dashboard-stat__del">-{{ formatNumber(analyticsTotalDeletions) }}</span>
                 </div>
               </div>
+              <div class="dashboard-metric-card__period">{{ t('dashboard.last90days') }}</div>
             </n-card>
           </n-gi>
           <n-gi>
-            <n-card size="small" class="dashboard-metric-card dashboard-metric-card--stat" data-testid="dashboard-summary-card">
+            <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
               <div class="dashboard-stat">
                 <div class="dashboard-stat__title">{{ t('dashboard.tokensUsed') }}</div>
                 <div class="dashboard-stat__value">{{ formatNumber(analyticsTotalTokens) }}</div>
@@ -41,6 +44,7 @@
                   <span>{{ formatNumber(analyticsInputTokens) }} in / {{ formatNumber(analyticsOutputTokens) }} out</span>
                 </div>
               </div>
+              <div class="dashboard-metric-card__period">{{ t('dashboard.last90days') }}</div>
             </n-card>
           </n-gi>
         </n-grid>
@@ -360,6 +364,13 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+
+.dashboard-metric-card__period {
+  text-align: center;
+  font-size: 11px;
+  color: #aaa;
+  padding-top: 4px;
 }
 
 .dashboard-stat {

@@ -183,6 +183,7 @@ const en = {
     taskStatus: 'Task Status',
     linesChanged: 'Lines Changed',
     tokensUsed: 'Tokens Used',
+    last90days: 'Last 90 days',
   },
   issue: {
     title: 'Issues',

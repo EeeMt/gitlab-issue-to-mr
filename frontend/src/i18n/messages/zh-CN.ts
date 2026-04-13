@@ -180,6 +180,7 @@ const zhCN = {
     taskStatus: '任务状态',
     linesChanged: '变更行数',
     tokensUsed: 'Token 用量',
+    last90days: '最近 90 天',
   },
   issue: {
     title: '需求',
