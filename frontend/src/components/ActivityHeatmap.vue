@@ -76,9 +76,9 @@ const weeks = computed(() => {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  // Find the start: go back ~13 weeks to the nearest Monday
-  const dayOfWeek = (today.getDay() + 6) % 7 // 0=Mon
-  const daysBack = 90 + dayOfWeek
+  // Find the start: go back 13 complete weeks aligned to Monday
+  const dayOfWeek = (today.getDay() + 6) % 7 // 0=Mon, 6=Sun
+  const daysBack = dayOfWeek + 12 * 7 // back to start of current week + 12 full weeks
   const start = new Date(today)
   start.setDate(start.getDate() - daysBack)
 
@@ -86,7 +86,8 @@ const weeks = computed(() => {
   const d = new Date(start)
 
   while (d <= today) {
-    const dateStr = d.toISOString().slice(0, 10)
+    // Format as local date string YYYY-MM-DD (avoid UTC shift from toISOString)
+    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     const count = countMap.value.get(dateStr) ?? 0
     currentWeek.push({ date: dateStr, count })
 
