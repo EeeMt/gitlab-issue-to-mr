@@ -149,13 +149,21 @@
         <div class="issue-view__description">{{ issue.description }}</div>
       </n-card>
 
-      <!-- Task List -->
+      <!-- Task List + Create Task -->
       <n-card class="issue-card" :bordered="false" data-testid="issue-tasks-card">
         <template #header>
           <div class="issue-card__header">
             <div class="issue-card__title">
               {{ t('issue.taskCount', { count: issue.tasks?.length ?? 0 }) }}
             </div>
+            <n-button
+              size="small"
+              :type="showCreateForm ? 'default' : 'primary'"
+              @click="showCreateForm = !showCreateForm"
+              data-testid="issue-toggle-create-task"
+            >
+              {{ showCreateForm ? t('common.cancel') : t('issue.createTask') }}
+            </n-button>
           </div>
         </template>
         <n-data-table
@@ -165,60 +173,96 @@
           :row-props="taskRowProps"
           :bordered="false"
         />
-      </n-card>
 
-      <!-- Create Task Form -->
-      <n-card class="issue-card" :bordered="false" data-testid="issue-create-task-card">
-        <template #header>
-          <div class="issue-card__header">
-            <div class="issue-card__title">{{ t('issue.createTask') }}</div>
+        <!-- Inline Create Task Form -->
+        <div v-if="showCreateForm" class="issue-view__create-section" data-testid="issue-create-task-card">
+          <n-divider />
+          <div class="prompt-label-row">
+            <span class="prompt-label">{{ t('issue.field.description') }}</span>
+            <n-button
+              size="small"
+              :disabled="promptTemplatesLoading || promptTemplates.length === 0"
+              :loading="promptTemplatesLoading"
+              type="default"
+              @click="showTemplateDrawer = true"
+            >
+              <template #icon>
+                <n-icon :component="DocumentTextOutline" />
+              </template>
+              {{ t('createTask.useTemplate') }}
+            </n-button>
           </div>
-        </template>
-        <n-form label-placement="top" class="issue-view__create-form">
-          <n-form-item :label="t('issue.field.description')">
-            <n-input
-              v-model:value="newTaskPrompt"
-              type="textarea"
-              :placeholder="issue.description || t('issue.promptPlaceholder')"
-              :rows="4"
-            />
-          </n-form-item>
-          <n-grid :cols="isMobile ? 1 : 3" :x-gap="16" :y-gap="12">
-            <n-gi>
-              <n-form-item :label="t('common.priority')">
-                <n-select
-                  v-model:value="newTaskPriority"
-                  :options="priorityOptions"
-                />
-              </n-form-item>
-            </n-gi>
-            <n-gi>
-              <n-form-item :label="t('issue.scheduleDelayed')">
-                <n-date-picker
-                  v-model:value="newTaskSchedule"
-                  type="datetime"
-                  clearable
-                  style="width: 100%"
-                  :is-date-disabled="isScheduleDateDisabled"
-                />
-              </n-form-item>
-            </n-gi>
-            <n-gi>
-              <n-form-item label="&nbsp;">
-                <n-button
-                  type="primary"
-                  :loading="createTaskLoading"
-                  data-testid="issue-create-task-button"
-                  @click="handleCreateTask"
-                >
-                  {{ t('issue.createTask') }}
-                </n-button>
-              </n-form-item>
-            </n-gi>
-          </n-grid>
-        </n-form>
+          <n-form label-placement="top" class="issue-view__create-form">
+            <n-form-item :show-label="false">
+              <VariableEditor
+                v-model="newTaskPrompt"
+                :variable-tips="promptVariableTips"
+                :placeholder="issue.description || t('issue.promptPlaceholder')"
+              />
+              <template #feedback>
+                <div v-if="unreplacedVariables.length > 0" class="prompt-variable-warning">
+                  <n-icon :component="WarningOutline" size="14" />
+                  <span>{{ t('createTask.unreplacedVariablesHint') }}: {{ unreplacedVariables.join(', ') }}</span>
+                </div>
+              </template>
+            </n-form-item>
+            <n-grid :cols="isMobile ? 1 : 3" :x-gap="16" :y-gap="12">
+              <n-gi>
+                <n-form-item :label="t('common.priority')">
+                  <n-select
+                    v-model:value="newTaskPriority"
+                    :options="priorityOptions"
+                  />
+                </n-form-item>
+              </n-gi>
+              <n-gi>
+                <n-form-item :label="t('issue.scheduleDelayed')">
+                  <n-date-picker
+                    v-model:value="newTaskSchedule"
+                    type="datetime"
+                    clearable
+                    style="width: 100%"
+                    :is-date-disabled="isScheduleDateDisabled"
+                  />
+                </n-form-item>
+              </n-gi>
+              <n-gi>
+                <n-form-item label="&nbsp;">
+                  <n-button
+                    type="primary"
+                    :loading="createTaskLoading"
+                    data-testid="issue-create-task-button"
+                    @click="handleCreateTask"
+                  >
+                    {{ t('issue.createTask') }}
+                  </n-button>
+                </n-form-item>
+              </n-gi>
+            </n-grid>
+          </n-form>
+        </div>
       </n-card>
     </n-space>
+
+    <!-- Template Picker Drawer -->
+    <n-drawer v-model:show="showTemplateDrawer" :width="isMobile ? '100%' : 480" placement="right">
+      <n-drawer-content :title="t('createTask.selectTemplate')" closable>
+        <div style="overflow-y: auto;">
+          <div v-if="promptTemplates.length === 0" class="prompt-template-dropdown__empty">
+            {{ t('createTask.noPromptTemplates') }}
+          </div>
+          <div
+            v-for="tmpl in promptTemplates"
+            :key="tmpl.id"
+            class="prompt-template-dropdown__item"
+            @click="applyPromptTemplate(tmpl); showTemplateDrawer = false"
+          >
+            <div class="prompt-template-dropdown__item-name">{{ tmpl.name }}</div>
+            <div class="prompt-template-dropdown__item-preview">{{ tmpl.content.substring(0, 80) }}...</div>
+          </div>
+        </div>
+      </n-drawer-content>
+    </n-drawer>
 
     <!-- Edit Modal -->
     <n-modal v-model:show="showEditModal" preset="card" :title="t('issue.edit')" style="width: 600px; max-width: 90vw;">
@@ -254,7 +298,7 @@ import { ref, computed, h, onMounted, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin,
-  NIcon, NDataTable, NInput,
+  NIcon, NDataTable, NInput, NDivider, NDrawer, NDrawerContent,
   NSelect, NForm, NFormItem, NDatePicker, NModal, NPopconfirm,
   useMessage,
   type DataTableColumns
@@ -267,10 +311,13 @@ import {
   CodeOutline,
   TimeOutline,
   InformationCircleOutline,
+  DocumentTextOutline,
+  WarningOutline
 } from '@vicons/ionicons5'
+import VariableEditor from '../components/VariableEditor.vue'
 import {
-  getIssue, updateIssue, closeIssue, createTask, retryTask,
-  type Issue, type Task
+  getIssue, updateIssue, closeIssue, createTask, retryTask, getPromptTemplates,
+  type Issue, type Task, type PromptTemplate
 } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
@@ -289,10 +336,15 @@ const issue = ref<Issue | null>(null)
 const loading = ref(false)
 
 // Create task form
+const showCreateForm = ref(false)
 const newTaskPrompt = ref('')
 const newTaskPriority = ref(1)
 const newTaskSchedule = ref<number | null>(null)
 const createTaskLoading = ref(false)
+const promptTemplates = ref<PromptTemplate[]>([])
+const promptTemplatesLoading = ref(false)
+const promptVariableTips = ref<Record<string, string> | undefined>(undefined)
+const showTemplateDrawer = ref(false)
 
 // Edit modal
 const showEditModal = ref(false)
@@ -324,6 +376,13 @@ const priorityOptions = [
   { label: 'P1', value: 1 },
   { label: 'P2', value: 2 }
 ]
+
+const unreplacedVariables = computed(() => {
+  const content = newTaskPrompt.value || ''
+  const matches = content.match(/\{\{([^}]+)\}\}/g)
+  if (!matches) return []
+  return matches.map(m => m.replace(/\{\{|\}\}/g, ''))
+})
 
 // --- Task Table Row Props ---
 function taskRowProps(row: Task) {
@@ -480,6 +539,7 @@ async function handleCreateTask() {
     message.success('Task created')
     newTaskPrompt.value = ''
     newTaskSchedule.value = null
+    showCreateForm.value = false
     await fetchIssue()
   } catch {
     message.error('Failed to create task')
@@ -498,6 +558,24 @@ async function handleRetryTask(taskId: number) {
   }
 }
 
+async function fetchPromptTemplates() {
+  promptTemplatesLoading.value = true
+  try {
+    promptTemplates.value = await getPromptTemplates()
+  } catch {
+    // Non-critical
+  } finally {
+    promptTemplatesLoading.value = false
+  }
+}
+
+function applyPromptTemplate(tmpl: PromptTemplate) {
+  newTaskPrompt.value = tmpl.content
+  if (tmpl.variable_tips) {
+    promptVariableTips.value = tmpl.variable_tips
+  }
+}
+
 // --- Lifecycle ---
 function openEditModal() {
   if (!issue.value) return
@@ -508,6 +586,7 @@ function openEditModal() {
 
 onMounted(() => {
   fetchIssue()
+  fetchPromptTemplates()
 })
 </script>
 
@@ -563,6 +642,56 @@ onMounted(() => {
 
 .issue-view__create-form {
   max-width: 800px;
+}
+
+.issue-view__create-section {
+  margin-top: 8px;
+}
+
+.prompt-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.prompt-label {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.prompt-variable-warning {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #f0a020;
+  font-size: 12px;
+}
+
+.prompt-template-dropdown__empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--n-text-color-3);
+}
+
+.prompt-template-dropdown__item {
+  padding: 12px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.1);
+}
+
+.prompt-template-dropdown__item:hover {
+  background: rgba(128, 128, 128, 0.05);
+}
+
+.prompt-template-dropdown__item-name {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.prompt-template-dropdown__item-preview {
+  font-size: 12px;
+  color: var(--n-text-color-3);
 }
 
 .metadata-body {
