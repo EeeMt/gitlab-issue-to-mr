@@ -63,6 +63,36 @@
           </n-gi>
         </n-grid>
 
+        <n-grid
+          v-if="hasLoadedOnce"
+          :cols="isMobile ? 1 : 2"
+          :x-gap="12"
+          :y-gap="12"
+        >
+          <n-gi>
+            <n-card size="small" class="dashboard-metric-card dashboard-metric-card--wide" data-testid="dashboard-activity-heatmap">
+              <div class="metric-title">
+                <span>{{ t('dashboard.activity') }}</span>
+                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.last90days') }}</n-tooltip>
+              </div>
+              <div class="metric-body">
+                <ActivityHeatmap :data="heatmapData" />
+              </div>
+            </n-card>
+          </n-gi>
+          <n-gi>
+            <n-card size="small" class="dashboard-metric-card dashboard-metric-card--wide" data-testid="dashboard-trend-chart">
+              <div class="metric-title">
+                <span>{{ t('dashboard.trend') }}</span>
+                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.last90days') }}</n-tooltip>
+              </div>
+              <div class="metric-body">
+                <TrendChart :data="trendData" />
+              </div>
+            </n-card>
+          </n-gi>
+        </n-grid>
+
         <n-card
           :title="t('dashboard.recentIssues')"
           :bordered="false"
@@ -104,29 +134,6 @@
             :bordered="false"
           />
         </n-card>
-
-        <n-grid :cols="isMobile ? 1 : 2" :x-gap="12" :y-gap="12">
-          <n-gi>
-            <n-card
-              :title="t('dashboard.activity')"
-              :bordered="false"
-              class="dashboard-table-card"
-              data-testid="dashboard-activity-heatmap"
-            >
-              <ActivityHeatmap :data="heatmapData" />
-            </n-card>
-          </n-gi>
-          <n-gi>
-            <n-card
-              :title="t('dashboard.trend')"
-              :bordered="false"
-              class="dashboard-table-card"
-              data-testid="dashboard-trend-chart"
-            >
-              <TrendChart :data="trendData" />
-            </n-card>
-          </n-gi>
-        </n-grid>
 
       </n-space>
     </n-spin>
@@ -391,6 +398,10 @@ onMounted(() => {
 .dashboard-metric-card {
   height: 240px;
   border-radius: var(--app-card-radius);
+}
+
+.dashboard-metric-card--wide {
+  height: 280px;
 }
 
 .dashboard-metric-card :deep(.n-card-content) {
