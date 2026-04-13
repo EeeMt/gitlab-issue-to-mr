@@ -224,6 +224,7 @@ const en = {
     retryTask: 'Retry Task',
     retryTaskDescription:
       'Re-queue the task with the same prompt and branch configuration to run it again.',
+    retryAlreadyExists: 'A retry task already exists for this task',
     retryWithSchedule: 'Schedule Retry',
     retryWithScheduleDescription:
       'Pick a future time for the retry instead of queuing it immediately.',

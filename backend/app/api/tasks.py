@@ -533,6 +533,19 @@ async def retry_task(
     original_task = await get_task_with_access_check(task_id, db, access_scope, current_user)
     validate_task_status_for_retry(original_task)
 
+    # Check for existing active retry
+    existing_retry_query = select(Task).where(
+        Task.retry_source_task_id == task_id,
+        Task.status.in_(["pending", "queued", "running"]),
+    )
+    existing_retry_result = await db.execute(existing_retry_query)
+    existing_retry = existing_retry_result.scalar_one_or_none()
+    if existing_retry:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"An active retry task (#{existing_retry.id}) already exists for task #{task_id}",
+        )
+
     scheduled_at: Optional[datetime] = None
     if request and request.scheduled_datetime is not None:
         scheduled_at = validate_scheduled_datetime_in_future(request.scheduled_datetime)
