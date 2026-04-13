@@ -234,6 +234,8 @@ const zhCN = {
     retryTask: '重试任务',
     retryTaskDescription: '使用相同的提示词和分支配置将任务重新放回队列执行。',
     retryAlreadyExists: '该任务已有重试任务',
+    retryExists: '已有重试任务',
+    retryExistsDescription: '该任务已有正在执行的重试任务。',
     retryWithSchedule: '预约重试',
     retryWithScheduleDescription: '选择一个未来时间执行重试，而不是立即入队。',
     scheduleRetry: '预约重试',

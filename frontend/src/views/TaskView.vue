@@ -69,8 +69,28 @@
                     </n-button>
                   </div>
 
+                  <!-- Existing active retry — link to it instead of showing retry buttons -->
                   <div
-                    v-if="task && ['failed', 'cancelled'].includes(task.status)"
+                    v-if="task && ['failed', 'cancelled'].includes(task.status) && activeRetryTask"
+                    class="task-actions__item task-actions__item--info"
+                  >
+                    <div class="task-actions__meta">
+                      <div class="task-actions__label">{{ t('taskView.retryExists') }}</div>
+                      <div class="task-actions__description">
+                        {{ t('taskView.retryExistsDescription') }}
+                      </div>
+                    </div>
+                    <n-button
+                      type="primary"
+                      text
+                      @click="router.push(`/tasks/${activeRetryTask.id}`)"
+                    >
+                      Task #{{ activeRetryTask.id }}
+                    </n-button>
+                  </div>
+
+                  <div
+                    v-if="task && ['failed', 'cancelled'].includes(task.status) && !activeRetryTask"
                     class="task-actions__item task-actions__item--warning"
                   >
                     <div class="task-actions__meta">
@@ -93,7 +113,7 @@
                   </div>
 
                   <div
-                    v-if="task && ['failed', 'cancelled'].includes(task.status)"
+                    v-if="task && ['failed', 'cancelled'].includes(task.status) && !activeRetryTask"
                     class="task-actions__item task-actions__item--info"
                   >
                     <div class="task-actions__meta">
@@ -239,10 +259,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin, NDatePicker, NDrawer, NDrawerContent, NIcon, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, streamTaskLogs, getScheduledTasks, getConfig, type Task, type TaskLog } from '../api'
+import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, streamTaskLogs, getScheduledTasks, getConfig, getIssue, type Task, type TaskLog } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
 import PageHeader from '../components/PageHeader.vue'
 import TaskMetadataPanel from '../components/TaskMetadataPanel.vue'
@@ -258,6 +278,7 @@ import AnsiToHtml from 'ansi-to-html'
 const ansiConverter = new AnsiToHtml({ escapeXML: true })
 
 const route = useRoute()
+const router = useRouter()
 const message = useMessage()
 const { t } = useI18n()
 const { isMobile } = useBreakpoints()
@@ -282,6 +303,7 @@ const scheduledTasksLoading = ref(false)
 const slotMaxTasks = ref(0)
 const slotEnforce = ref(false)
 const taskLogs = ref<TaskLog[]>([])
+const activeRetryTask = ref<Task | null>(null)
 let pollTimer: number | null = null
 let logEventSource: EventSource | null = null
 let logStreamContainerId: string | null = null
@@ -346,6 +368,32 @@ function isScheduledDateDisabled(timestamp: number): boolean {
 
 function isActiveTaskStatus(status?: string | null): boolean {
   return status === 'running' || status === 'pending' || status === 'queued'
+}
+
+async function checkActiveRetry() {
+  if (!task.value || !['failed', 'cancelled'].includes(task.value.status)) {
+    activeRetryTask.value = null
+    return
+  }
+  try {
+    const issueId = task.value.issue?.id
+    if (issueId) {
+      const issueData = await getIssue(issueId)
+      if (issueData.tasks) {
+        const retryMatch = issueData.tasks.find(
+          t => t.retry_source_task_id === task.value!.id
+            && ['pending', 'queued', 'running'].includes(t.status)
+        )
+        activeRetryTask.value = retryMatch ?? null
+      } else {
+        activeRetryTask.value = null
+      }
+    } else {
+      activeRetryTask.value = null
+    }
+  } catch {
+    activeRetryTask.value = null
+  }
 }
 
 function trimLogBuffer(content: string): string {
@@ -462,6 +510,8 @@ async function fetchTask() {
       resetLogsState()
       connectStructuredLogStream()
     }
+
+    await checkActiveRetry()
   } catch (error) {
     message.error(t('taskView.failedToFetchTask'))
   } finally {
@@ -561,12 +611,17 @@ function resetLogsState() {
 async function handleRetry() {
   actionLoading.value = true
   try {
-    await retryTask(taskId.value)
+    const newTask = await retryTask(taskId.value)
     resetLogsState()
     message.success(t('taskView.taskRetryScheduled'))
-    refreshTask()
-  } catch (error) {
-    message.error(t('taskView.failedToRetryTask'))
+    router.push(`/tasks/${newTask.id}`)
+  } catch (error: any) {
+    if (error?.response?.status === 409) {
+      message.warning(t('taskView.retryAlreadyExists'))
+      await checkActiveRetry()
+    } else {
+      message.error(t('taskView.failedToRetryTask'))
+    }
   } finally {
     actionLoading.value = false
   }
@@ -583,13 +638,18 @@ async function handleRetryWithSchedule() {
   }
   actionLoading.value = true
   try {
-    await retryTask(taskId.value, new Date(retryScheduleDatetime.value).toISOString())
+    const newTask = await retryTask(taskId.value, new Date(retryScheduleDatetime.value).toISOString())
     retryScheduleDatetime.value = null
     resetLogsState()
     message.success(t('taskView.taskRetryRescheduled'))
-    refreshTask()
-  } catch (error) {
-    message.error(t('taskView.failedToRetryTask'))
+    router.push(`/tasks/${newTask.id}`)
+  } catch (error: any) {
+    if (error?.response?.status === 409) {
+      message.warning(t('taskView.retryAlreadyExists'))
+      await checkActiveRetry()
+    } else {
+      message.error(t('taskView.failedToRetryTask'))
+    }
   } finally {
     actionLoading.value = false
   }
@@ -681,6 +741,7 @@ watch(
     if (newId && newId !== oldId) {
       resetLogsState()
       task.value = null
+      activeRetryTask.value = null
       hasLoadedOnce.value = false
       fetchTask()
     }
