@@ -28,7 +28,7 @@
               :key="`${wi}-${di}`"
               class="activity-heatmap__cell"
               :class="day ? `activity-heatmap__cell--level-${getLevel(day.count)}` : 'activity-heatmap__cell--empty'"
-              :title="day ? `${day.count} ${day.count === 1 ? 'task' : 'tasks'} on ${day.date}` : ''"
+              :data-tooltip="day ? `${day.count} ${day.count === 1 ? 'task' : 'tasks'} on ${day.date}` : undefined"
               :style="{ gridRow: di + 1, gridColumn: wi + 1 }"
             />
           </template>
@@ -136,7 +136,8 @@ function getLevel(count: number): number {
 
 <style scoped>
 .activity-heatmap__wrapper {
-  overflow-x: auto;
+  width: fit-content;
+  overflow: visible;
 }
 
 .activity-heatmap__months {
@@ -184,11 +185,29 @@ function getLevel(count: number): number {
   width: 11px;
   height: 11px;
   border-radius: 2px;
+  position: relative;
 }
 
-.activity-heatmap__cell:hover:not(.activity-heatmap__cell--empty) {
-  outline: 2px solid rgba(0, 0, 0, 0.4);
-  outline-offset: -1px;
+.activity-heatmap__cell[data-tooltip]:hover {
+  transform: scale(1.2);
+  z-index: 10;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+  border-radius: 2px;
+}
+
+.activity-heatmap__cell[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: 0;
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 9px;
+  border-radius: 3px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 100;
 }
 
 .activity-heatmap__cell--empty {
@@ -220,7 +239,6 @@ function getLevel(count: number): number {
   align-items: center;
   gap: 3px;
   margin-top: 8px;
-  margin-left: 32px;
   justify-content: flex-end;
 }
 
