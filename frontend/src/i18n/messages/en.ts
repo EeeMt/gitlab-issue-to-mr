@@ -623,7 +623,7 @@ const en = {
     noSlotsAtCapacity: 'Slot capacity: {capacity} per hour · None full',
   },
   analytics: {
-    title: 'Task Analytics',
+    title: 'Analytics',
     subtitle:
       'Track workload, reliability, execution speed, queueing pressure, and failure patterns over recent time windows.',
     loading: 'Loading analytics...',
@@ -648,6 +648,7 @@ const en = {
     failureBreakdown: 'Failure Breakdown',
     failureBreakdownSubtitle: 'Categorized from failed task error messages in the selected window',
     tasks: 'Tasks',
+    issues: 'Issues',
     dayWindow: '{days}-day window',
     successRate: 'Success Rate',
     finishedBreakdown: '{completed} completed / {failed} failed / {cancelled} cancelled',

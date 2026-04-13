@@ -607,7 +607,7 @@ const zhCN = {
     noSlotsAtCapacity: '时段容量：每小时 {capacity} 个 · 暂无满载',
   },
   analytics: {
-    title: '任务统计分析',
+    title: '分析',
     subtitle: '跟踪近期窗口内的工作量、稳定性、执行速度、排队压力和失败模式。',
     loading: '正在加载统计...',
     projectInfo: '项目统计包含历史任务。发起人统计仅包含引入发起人追踪之后创建的任务。',
@@ -630,6 +630,7 @@ const zhCN = {
     failureBreakdown: '失败分类',
     failureBreakdownSubtitle: '按所选窗口内失败任务的错误信息进行分类',
     tasks: '任务数',
+    issues: '需求',
     dayWindow: '{days} 天窗口',
     successRate: '成功率',
     finishedBreakdown: '{completed} 完成 / {failed} 失败 / {cancelled} 取消',
