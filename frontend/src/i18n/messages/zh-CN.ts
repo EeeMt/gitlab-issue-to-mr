@@ -182,6 +182,8 @@ const zhCN = {
     createFirstTask: '创建首个任务',
     createTask: '创建任务',
     retryTask: '重试',
+    noMergeRequest: '无合并请求',
+    retriedAs: '已重试 →',
     promptPlaceholder: '输入任务提示词（默认使用需求描述）',
     scheduleImmediate: '立即执行',
     scheduleDelayed: '预约执行',

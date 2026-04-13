@@ -185,6 +185,8 @@ const en = {
     createFirstTask: 'Create First Task',
     createTask: 'Create Task',
     retryTask: 'Retry',
+    noMergeRequest: 'No MR',
+    retriedAs: 'Retried →',
     promptPlaceholder: 'Enter task prompt (defaults to issue description)',
     scheduleImmediate: 'Execute Immediately',
     scheduleDelayed: 'Schedule',

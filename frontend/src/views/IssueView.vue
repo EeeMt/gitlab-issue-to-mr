@@ -33,121 +33,126 @@
         </template>
       </PageHeader>
 
-      <!-- Metadata -->
-      <n-card class="issue-card" :bordered="false" data-testid="issue-metadata-card">
-        <template #header>
-          <div class="issue-card__header">
-            <div class="issue-card__title">{{ t('issue.detail') }}</div>
-          </div>
-        </template>
-        <div class="metadata-body">
-          <!-- Status -->
-          <div class="metadata-row">
-            <span class="metadata-label">
-              <n-icon size="14" class="metadata-label-icon"><InformationCircleOutline /></n-icon>
-              {{ t('common.status') }}
-            </span>
-            <span class="metadata-value">
-              <n-tag :type="issueStatusColors[issue.status]" size="small" round>
-                {{ t(`issue.status.${issue.status}`) }}
-              </n-tag>
-            </span>
-          </div>
-
-          <!-- Project -->
-          <div class="metadata-row">
-            <span class="metadata-label">
-              <n-icon size="14" class="metadata-label-icon"><FolderOpenOutline /></n-icon>
-              {{ t('issue.field.project') }}
-            </span>
-            <span class="metadata-value">{{ issue.project_id }}</span>
-          </div>
-
-          <!-- Branch flow -->
-          <div class="metadata-row">
-            <span class="metadata-label">
-              <n-icon size="14" class="metadata-label-icon"><GitBranchOutline /></n-icon>
-              {{ t('taskView.branchFlow') }}
-            </span>
-            <span class="metadata-value">
-              <span class="branch-flow">
-                <span v-if="issue.base_branch" class="branch-item branch-item--base">{{ issue.base_branch }}</span>
-                <span v-if="issue.base_branch && issue.branch_name" class="branch-arrow">➜</span>
-                <span v-if="issue.branch_name" class="branch-item branch-item--work">{{ issue.branch_name }}</span>
-                <span v-if="issue.branch_name && issue.target_branch" class="branch-arrow">➜</span>
-                <span v-if="issue.target_branch" class="branch-item branch-item--target">{{ issue.target_branch }}</span>
-                <span v-if="!issue.branch_name && !issue.base_branch && !issue.target_branch">-</span>
-              </span>
-            </span>
-          </div>
-
-          <!-- Merge Request -->
-          <div class="metadata-row">
-            <span class="metadata-label">
-              <n-icon size="14" class="metadata-label-icon"><GitPullRequest /></n-icon>
-              {{ t('issue.field.mergeRequest') }}
-            </span>
-            <span class="metadata-value">
-              <a
-                v-if="issue.merge_request_url"
-                :href="issue.merge_request_url"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="app-link"
-              >
-                !{{ issue.merge_request_iid }}
-              </a>
-              <span v-else class="metadata-muted">-</span>
-            </span>
-          </div>
-
-          <!-- Session ID -->
-          <div class="metadata-row">
-            <span class="metadata-label">
-              <n-icon size="14" class="metadata-label-icon"><CodeOutline /></n-icon>
-              {{ t('issue.field.sessionId') }}
-            </span>
-            <span class="metadata-value">
-              <code v-if="issue.claude_session_id" class="issue-view__code">{{ issue.claude_session_id }}</code>
-              <span v-else class="metadata-muted">-</span>
-            </span>
-          </div>
-
-          <!-- Timeline -->
-          <div class="metadata-row">
-            <span class="metadata-label">
-              <n-icon size="14" class="metadata-label-icon"><TimeOutline /></n-icon>
-              {{ t('common.timeline') }}
-            </span>
-            <div class="time-axis">
-              <div class="time-point">
-                <span class="time-point__label">{{ t('common.created') }}</span>
-                <span class="time-point__value">{{ formatCompactDateTime(issue.created_at) }}</span>
+      <!-- Metadata + Description side by side -->
+      <n-grid :cols="issue.description ? (isMobile ? 1 : 2) : 1" :x-gap="16" :y-gap="16">
+        <n-gi>
+          <!-- Metadata -->
+          <n-card class="issue-card" :bordered="false" data-testid="issue-metadata-card">
+            <template #header>
+              <div class="issue-card__header">
+                <div class="issue-card__title">{{ t('issue.detail') }}</div>
               </div>
-              <div class="time-axis__sep">→</div>
-              <div class="time-point">
-                <span class="time-point__label">{{ t('issue.field.updatedAt') }}</span>
-                <span class="time-point__value">{{ formatCompactDateTime(issue.updated_at) }}</span>
+            </template>
+            <div class="metadata-body">
+              <!-- Status -->
+              <div class="metadata-row">
+                <span class="metadata-label">
+                  <n-icon size="14" class="metadata-label-icon"><InformationCircleOutline /></n-icon>
+                  {{ t('common.status') }}
+                </span>
+                <span class="metadata-value">
+                  <n-tag :type="issueStatusColors[issue.status]" size="small" round>
+                    {{ t(`issue.status.${issue.status}`) }}
+                  </n-tag>
+                </span>
+              </div>
+
+              <!-- Project -->
+              <div class="metadata-row">
+                <span class="metadata-label">
+                  <n-icon size="14" class="metadata-label-icon"><FolderOpenOutline /></n-icon>
+                  {{ t('issue.field.project') }}
+                </span>
+                <span class="metadata-value">{{ issue.project_id }}</span>
+              </div>
+
+              <!-- Branch flow -->
+              <div class="metadata-row">
+                <span class="metadata-label">
+                  <n-icon size="14" class="metadata-label-icon"><GitBranchOutline /></n-icon>
+                  {{ t('taskView.branchFlow') }}
+                </span>
+                <span class="metadata-value">
+                  <span class="branch-flow">
+                    <span v-if="issue.base_branch" class="branch-item branch-item--base">{{ issue.base_branch }}</span>
+                    <span v-if="issue.base_branch && issue.branch_name" class="branch-arrow">➜</span>
+                    <span v-if="issue.branch_name" class="branch-item branch-item--work">{{ issue.branch_name }}</span>
+                    <span v-if="issue.branch_name && issue.target_branch" class="branch-arrow">➜</span>
+                    <span v-if="issue.target_branch" class="branch-item branch-item--target">{{ issue.target_branch }}</span>
+                    <span v-if="!issue.branch_name && !issue.base_branch && !issue.target_branch">-</span>
+                  </span>
+                </span>
+              </div>
+
+              <!-- Merge Request -->
+              <div class="metadata-row">
+                <span class="metadata-label">
+                  <n-icon size="14" class="metadata-label-icon"><GitPullRequest /></n-icon>
+                  {{ t('issue.field.mergeRequest') }}
+                </span>
+                <span class="metadata-value">
+                  <a
+                    v-if="issue.merge_request_url"
+                    :href="issue.merge_request_url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="app-link"
+                  >
+                    !{{ issue.merge_request_iid }}
+                  </a>
+                  <span v-else class="metadata-muted">{{ t('issue.noMergeRequest') }}</span>
+                </span>
+              </div>
+
+              <!-- Session ID -->
+              <div class="metadata-row">
+                <span class="metadata-label">
+                  <n-icon size="14" class="metadata-label-icon"><CodeOutline /></n-icon>
+                  {{ t('issue.field.sessionId') }}
+                </span>
+                <span class="metadata-value">
+                  <code v-if="issue.claude_session_id" class="issue-view__code">{{ issue.claude_session_id }}</code>
+                  <span v-else class="metadata-muted">-</span>
+                </span>
+              </div>
+
+              <!-- Timeline -->
+              <div class="metadata-row">
+                <span class="metadata-label">
+                  <n-icon size="14" class="metadata-label-icon"><TimeOutline /></n-icon>
+                  {{ t('common.timeline') }}
+                </span>
+                <div class="time-axis">
+                  <div class="time-point">
+                    <span class="time-point__label">{{ t('common.created') }}</span>
+                    <span class="time-point__value">{{ formatCompactDateTime(issue.created_at) }}</span>
+                  </div>
+                  <div class="time-axis__sep">→</div>
+                  <div class="time-point">
+                    <span class="time-point__label">{{ t('issue.field.updatedAt') }}</span>
+                    <span class="time-point__value">{{ formatCompactDateTime(issue.updated_at) }}</span>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      </n-card>
-
-      <!-- Description -->
-      <n-card
-        v-if="issue.description"
-        class="issue-card"
-        :bordered="false"
-        data-testid="issue-description-card"
-      >
-        <template #header>
-          <div class="issue-card__header">
-            <div class="issue-card__title">{{ t('issue.field.description') }}</div>
-          </div>
-        </template>
-        <div class="issue-view__description">{{ issue.description }}</div>
-      </n-card>
+          </n-card>
+        </n-gi>
+        <n-gi v-if="issue.description">
+          <!-- Description -->
+          <n-card
+            class="issue-card"
+            :bordered="false"
+            data-testid="issue-description-card"
+          >
+            <template #header>
+              <div class="issue-card__header">
+                <div class="issue-card__title">{{ t('issue.field.description') }}</div>
+              </div>
+            </template>
+            <div class="issue-view__description">{{ issue.description }}</div>
+          </n-card>
+        </n-gi>
+      </n-grid>
 
       <!-- Task List + Create Task -->
       <n-card class="issue-card" :bordered="false" data-testid="issue-tasks-card">
@@ -158,11 +163,11 @@
             </div>
             <n-button
               size="small"
-              :type="showCreateForm ? 'default' : 'primary'"
-              @click="showCreateForm = !showCreateForm"
+              type="primary"
+              @click="showCreateModal = true"
               data-testid="issue-toggle-create-task"
             >
-              {{ showCreateForm ? t('common.cancel') : t('issue.createTask') }}
+              {{ t('issue.createTask') }}
             </n-button>
           </div>
         </template>
@@ -173,74 +178,6 @@
           :row-props="taskRowProps"
           :bordered="false"
         />
-
-        <!-- Inline Create Task Form -->
-        <div v-if="showCreateForm" class="issue-view__create-section" data-testid="issue-create-task-card">
-          <n-divider />
-          <div class="prompt-label-row">
-            <span class="prompt-label">{{ t('issue.field.description') }}</span>
-            <n-button
-              size="small"
-              :disabled="promptTemplatesLoading || promptTemplates.length === 0"
-              :loading="promptTemplatesLoading"
-              type="default"
-              @click="showTemplateDrawer = true"
-            >
-              <template #icon>
-                <n-icon :component="DocumentTextOutline" />
-              </template>
-              {{ t('createTask.useTemplate') }}
-            </n-button>
-          </div>
-          <n-form label-placement="top" class="issue-view__create-form">
-            <n-form-item :show-label="false">
-              <VariableEditor
-                v-model="newTaskPrompt"
-                :variable-tips="promptVariableTips"
-                :placeholder="issue.description || t('issue.promptPlaceholder')"
-              />
-              <template #feedback>
-                <div v-if="unreplacedVariables.length > 0" class="prompt-variable-warning">
-                  <n-icon :component="WarningOutline" size="14" />
-                  <span>{{ t('createTask.unreplacedVariablesHint') }}: {{ unreplacedVariables.join(', ') }}</span>
-                </div>
-              </template>
-            </n-form-item>
-            <n-grid :cols="isMobile ? 1 : 3" :x-gap="16" :y-gap="12">
-              <n-gi>
-                <n-form-item :label="t('common.priority')">
-                  <n-select
-                    v-model:value="newTaskPriority"
-                    :options="priorityOptions"
-                  />
-                </n-form-item>
-              </n-gi>
-              <n-gi>
-                <n-form-item :label="t('issue.scheduleDelayed')">
-                  <n-date-picker
-                    v-model:value="newTaskSchedule"
-                    type="datetime"
-                    clearable
-                    style="width: 100%"
-                    :is-date-disabled="isScheduleDateDisabled"
-                  />
-                </n-form-item>
-              </n-gi>
-              <n-gi>
-                <n-form-item label="&nbsp;">
-                  <n-button
-                    type="primary"
-                    :loading="createTaskLoading"
-                    data-testid="issue-create-task-button"
-                    @click="handleCreateTask"
-                  >
-                    {{ t('issue.createTask') }}
-                  </n-button>
-                </n-form-item>
-              </n-gi>
-            </n-grid>
-          </n-form>
-        </div>
       </n-card>
     </n-space>
 
@@ -287,6 +224,79 @@
         </n-space>
       </template>
     </n-modal>
+
+    <!-- Create Task Modal -->
+    <n-modal
+      v-model:show="showCreateModal"
+      preset="card"
+      :title="t('issue.createTask')"
+      style="width: 680px; max-width: 90vw;"
+      data-testid="issue-create-task-modal"
+    >
+      <div class="prompt-label-row">
+        <span class="prompt-label">{{ t('issue.field.description') }}</span>
+        <n-button
+          size="small"
+          :disabled="promptTemplatesLoading || promptTemplates.length === 0"
+          :loading="promptTemplatesLoading"
+          type="default"
+          @click="showTemplateDrawer = true"
+        >
+          <template #icon>
+            <n-icon :component="DocumentTextOutline" />
+          </template>
+          {{ t('createTask.useTemplate') }}
+        </n-button>
+      </div>
+      <n-form label-placement="top" class="issue-view__create-form">
+        <n-form-item :show-label="false">
+          <VariableEditor
+            v-model="newTaskPrompt"
+            :variable-tips="promptVariableTips"
+            :placeholder="issue?.description || t('issue.promptPlaceholder')"
+          />
+          <template #feedback>
+            <div v-if="unreplacedVariables.length > 0" class="prompt-variable-warning">
+              <n-icon :component="WarningOutline" size="14" />
+              <span>{{ t('createTask.unreplacedVariablesHint') }}: {{ unreplacedVariables.join(', ') }}</span>
+            </div>
+          </template>
+        </n-form-item>
+        <n-grid :cols="isMobile ? 1 : 3" :x-gap="16" :y-gap="12">
+          <n-gi>
+            <n-form-item :label="t('common.priority')">
+              <n-select
+                v-model:value="newTaskPriority"
+                :options="priorityOptions"
+              />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item :label="t('issue.scheduleDelayed')">
+              <n-date-picker
+                v-model:value="newTaskSchedule"
+                type="datetime"
+                clearable
+                style="width: 100%"
+                :is-date-disabled="isScheduleDateDisabled"
+              />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item label="&nbsp;">
+              <n-button
+                type="primary"
+                :loading="createTaskLoading"
+                data-testid="issue-create-task-button"
+                @click="handleCreateTask"
+              >
+                {{ t('issue.createTask') }}
+              </n-button>
+            </n-form-item>
+          </n-gi>
+        </n-grid>
+      </n-form>
+    </n-modal>
   </div>
 
   <!-- Loading state before issue is loaded -->
@@ -298,7 +308,7 @@ import { ref, computed, h, onMounted, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin,
-  NIcon, NDataTable, NInput, NDivider, NDrawer, NDrawerContent,
+  NIcon, NDataTable, NInput, NDrawer, NDrawerContent,
   NSelect, NForm, NFormItem, NDatePicker, NModal, NPopconfirm,
   useMessage,
   type DataTableColumns
@@ -336,7 +346,7 @@ const issue = ref<Issue | null>(null)
 const loading = ref(false)
 
 // Create task form
-const showCreateForm = ref(false)
+const showCreateModal = ref(false)
 const newTaskPrompt = ref('')
 const newTaskPriority = ref(1)
 const newTaskSchedule = ref<number | null>(null)
@@ -382,6 +392,18 @@ const unreplacedVariables = computed(() => {
   const matches = content.match(/\{\{([^}]+)\}\}/g)
   if (!matches) return []
   return matches.map(m => m.replace(/\{\{|\}\}/g, ''))
+})
+
+// --- Retry lookup ---
+const retriedTaskMap = computed(() => {
+  const map = new Map<number, Task>()
+  if (!issue.value?.tasks) return map
+  for (const task of issue.value.tasks) {
+    if (task.is_retry && task.retry_source_task_id) {
+      map.set(task.retry_source_task_id, task)
+    }
+  }
+  return map
 })
 
 // --- Task Table Row Props ---
@@ -448,8 +470,28 @@ const taskColumns = computed<DataTableColumns<Task>>(() => {
     {
       title: '',
       key: 'actions',
-      width: 80,
+      width: 120,
       render: (row) => {
+        const retryTask = retriedTaskMap.value.get(row.id)
+        if (retryTask) {
+          return h('span', { style: 'font-size: 12px; color: var(--n-text-color-3)' }, [
+            t('issue.retriedAs'),
+            ' ',
+            h(
+              NButton,
+              {
+                text: true,
+                type: 'primary',
+                size: 'small',
+                onClick: (e: MouseEvent) => {
+                  e.stopPropagation()
+                  router.push({ name: 'TaskView', params: { id: retryTask.id } })
+                }
+              },
+              () => `Task #${retryTask.id}`
+            )
+          ])
+        }
         if (!['failed', 'cancelled'].includes(row.status)) return ''
         return h(
           NButton,
@@ -539,7 +581,7 @@ async function handleCreateTask() {
     message.success('Task created')
     newTaskPrompt.value = ''
     newTaskSchedule.value = null
-    showCreateForm.value = false
+    showCreateModal.value = false
     await fetchIssue()
   } catch {
     message.error('Failed to create task')
