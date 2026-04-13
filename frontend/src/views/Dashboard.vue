@@ -187,12 +187,13 @@ const issueColumns = computed<DataTableColumns<Issue>>(() => [
   {
     title: t('issue.field.title'),
     key: 'title',
+    width: 200,
     ellipsis: { tooltip: true },
   },
   {
     title: t('dashboard.status'),
     key: 'status',
-    width: 100,
+    width: 90,
     render: (row) =>
       h(
         NTag,
@@ -223,6 +224,7 @@ const taskColumns = computed<DataTableColumns<Task>>(() => [
   {
     title: t('dashboard.task'),
     key: 'user_prompt',
+    width: 200,
     ellipsis: { tooltip: true },
   },
   {
