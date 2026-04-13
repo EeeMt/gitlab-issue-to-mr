@@ -919,12 +919,15 @@ class WorkerExecutor:
             scrubbed_logs = scrub_sensitive_data(logs)
             if exit_code != 0:
                 task.error_message = sanitize_sensitive_data(logs)[-1000:]
-                log_entry = TaskLog(
-                    task_id=task.id,
-                    log_level="ERROR",
-                    message=f"[Exit code: {exit_code}]\n{scrubbed_logs[-2000:]}",
-                )
-                db.add(log_entry)
+                if log_chunks_saved == 0:
+                    # No streaming chunks saved — store full log as error entry
+                    log_entry = TaskLog(
+                        task_id=task.id,
+                        log_level="ERROR",
+                        message=f"[Exit code: {exit_code}]\n{scrubbed_logs[-2000:]}",
+                    )
+                    db.add(log_entry)
+                # When streaming chunks exist, error_message is sufficient — no duplicate log
             elif log_chunks_saved == 0:
                 log_entry = TaskLog(
                     task_id=task.id,
@@ -1045,8 +1048,9 @@ class WorkerExecutor:
             scrubbed_logs = scrub_sensitive_data(logs)
             if exit_code != 0:
                 task.error_message = sanitize_sensitive_data(logs)[-1000:]
-                db.add(TaskLog(task_id=task.id, log_level="ERROR",
-                               message=f"[Exit code: {exit_code}]\n{scrubbed_logs[-2000:]}"))
+                if log_chunks_saved == 0:
+                    db.add(TaskLog(task_id=task.id, log_level="ERROR",
+                                   message=f"[Exit code: {exit_code}]\n{scrubbed_logs[-2000:]}"))
             elif log_chunks_saved == 0:
                 db.add(TaskLog(task_id=task.id, log_level="INFO",
                                message=scrubbed_logs[-4000:] or "[No output]"))
