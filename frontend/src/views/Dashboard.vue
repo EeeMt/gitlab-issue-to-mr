@@ -293,7 +293,7 @@ async function fetchStats() {
 
 async function fetchHeatmap() {
   try {
-    heatmapData.value = await getActivityHeatmap(365, true)
+    heatmapData.value = await getActivityHeatmap(90, true)
   } catch {
     // Heatmap is supplementary
   }
