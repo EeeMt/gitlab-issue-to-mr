@@ -10,22 +10,6 @@
           :subtitle="t('issue.subtitle')"
         >
           <template #actions>
-            <n-select
-              v-model:value="statusFilter"
-              :options="statusOptions"
-              :placeholder="t('common.status')"
-              clearable
-              class="issue-list__filter issue-list__filter--status"
-              data-testid="issue-list-status-filter"
-            />
-            <n-select
-              v-model:value="projectFilter"
-              :options="projectOptions"
-              :placeholder="t('issue.field.project')"
-              clearable
-              filterable
-              class="issue-list__filter issue-list__filter--project"
-            />
             <n-button
               type="primary"
               data-testid="issue-list-create-button"
@@ -35,6 +19,25 @@
             </n-button>
           </template>
         </PageHeader>
+
+        <FilterToolbar
+          :config="filterConfig"
+          :filters="filterState.filters.value"
+          :sort="filterState.sort.value"
+          :visible-columns="filterState.visibleColumns.value"
+          :active-filter-count="filterState.activeFilterCount.value"
+          :has-active-filters="filterState.hasActiveFilters.value"
+          :result-count="totalIssues"
+          :search-placeholder="t('filter.search')"
+          @add-filter="filterState.addFilter"
+          @remove-filter="filterState.removeFilter"
+          @clear-all-filters="filterState.clearAllFilters"
+          @set-sort="filterState.setSort"
+          @reset-sort="filterState.resetSort"
+          @toggle-column="filterState.toggleColumn"
+          @reset-columns="filterState.resetColumns"
+          @search="onSearch"
+        />
 
         <n-grid
           v-if="hasLoadedOnce"
@@ -75,14 +78,17 @@
 
 <script setup lang="ts">
 import { ref, onMounted, h, watch, computed } from 'vue'
-import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, type DataTableColumns } from 'naive-ui'
+import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, type DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getIssues, getProjects, getStats, type Issue, type IssueStatus, type Project } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
+import FilterToolbar from '../components/filter/FilterToolbar.vue'
+import { useFilterSort, type FilterSortConfig } from '../composables/useFilterSort'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
+import { EllipseOutline, FolderOpenOutline, CalendarOutline } from '@vicons/ionicons5'
 
 const router = useRouter()
 const message = useMessage()
@@ -93,8 +99,6 @@ const issues = ref<Issue[]>([])
 const projects = ref<Project[]>([])
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
-const statusFilter = ref<string | null>(null)
-const projectFilter = ref<number | null>(null)
 
 const statsTotal = ref(0)
 const statsOpen = ref(0)
@@ -112,6 +116,68 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const totalIssues = ref(0)
 
+const filterConfig: FilterSortConfig = {
+  storageKey: 'codify:filters:issues',
+  filterFields: [
+    {
+      key: 'status',
+      label: 'filter.status',
+      icon: EllipseOutline,
+      type: 'multi-select',
+      options: () => [
+        { label: t('issue.status.open'), value: 'open', color: '#18a058' },
+        { label: t('issue.status.in_progress'), value: 'in_progress', color: '#4080ff' },
+        { label: t('issue.status.in_review'), value: 'in_review', color: '#f0a020' },
+        { label: t('issue.status.closed'), value: 'closed', color: '#888' },
+      ],
+    },
+    {
+      key: 'project_id',
+      label: 'filter.project',
+      icon: FolderOpenOutline,
+      type: 'single-select',
+      options: () => projects.value.map((p) => ({ label: p.path_with_namespace, value: p.id })),
+    },
+    {
+      key: 'created',
+      label: 'filter.created',
+      icon: CalendarOutline,
+      type: 'date-range',
+      apiParam: 'created_after,created_before',
+    },
+  ],
+  sortFields: [
+    { key: 'created_at', label: 'filter.sortCreated' },
+    { key: 'status', label: 'filter.sortStatus' },
+  ],
+  columns: [
+    { key: 'id', label: 'dashboard.id', defaultVisible: true, alwaysVisible: true },
+    { key: 'title', label: 'issue.field.title', defaultVisible: true, alwaysVisible: true },
+    { key: 'project_id', label: 'issue.field.project', defaultVisible: true },
+    { key: 'status', label: 'common.status', defaultVisible: true },
+    { key: 'task_count', label: 'issue.taskCount', defaultVisible: true },
+    { key: 'total_changes', label: 'common.changes', defaultVisible: true },
+    { key: 'total_tokens', label: 'analytics.tokens', defaultVisible: true },
+    { key: 'initiator_username', label: 'issue.field.creator', defaultVisible: false },
+    { key: 'created_at', label: 'issue.field.createdAt', defaultVisible: true },
+  ],
+  defaultSort: { field: 'created_at', order: 'desc' },
+}
+
+const filterState = useFilterSort(filterConfig)
+const searchTerm = ref('')
+
+function onSearch(term: string) {
+  searchTerm.value = term
+  currentPage.value = 1
+  fetchIssues()
+}
+
+watch([() => filterState.filters.value, () => filterState.sort.value], () => {
+  currentPage.value = 1
+  fetchIssues()
+}, { deep: true })
+
 const pagination = computed(() => ({
   page: currentPage.value,
   pageSize: pageSize.value,
@@ -128,20 +194,6 @@ const pagination = computed(() => ({
     fetchIssues()
   },
 }))
-
-const statusOptions = computed(() => [
-  { label: t('issue.status.open'), value: 'open' },
-  { label: t('issue.status.in_progress'), value: 'in_progress' },
-  { label: t('issue.status.in_review'), value: 'in_review' },
-  { label: t('issue.status.closed'), value: 'closed' },
-])
-
-const projectOptions = computed(() =>
-  projects.value.map((project) => ({
-    label: project.path_with_namespace,
-    value: project.id,
-  }))
-)
 
 function issueRowProps(row: Issue) {
   return {
@@ -174,7 +226,7 @@ function formatNumber(value: number | null | undefined) {
   return Math.round(value).toLocaleString()
 }
 
-const columns = computed<DataTableColumns<Issue>>(() => [
+const allColumns = computed<DataTableColumns<Issue>>(() => [
   {
     title: 'ID',
     key: 'id',
@@ -265,6 +317,11 @@ const columns = computed<DataTableColumns<Issue>>(() => [
   },
 ])
 
+const columns = computed<DataTableColumns<Issue>>(() => {
+  const visible = filterState.visibleColumns.value
+  return allColumns.value.filter((col) => 'key' in col && visible.includes(col.key as string))
+})
+
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 
@@ -272,26 +329,19 @@ async function fetchIssues() {
   if (loading.value) return
   loading.value = true
   try {
-    const params: {
-      page: number
-      page_size: number
-      status?: string
-      project_id?: number
-    } = {
+    const params: Record<string, any> = {
       page: currentPage.value,
       page_size: pageSize.value,
+      ...filterState.apiParams.value,
     }
-    if (statusFilter.value) {
-      params.status = statusFilter.value
+    if (searchTerm.value && searchTerm.value.length >= 2) {
+      params.search = searchTerm.value
     }
-    if (projectFilter.value !== null) {
-      params.project_id = projectFilter.value
-    }
-    const result = await getIssues(params)
+    const result = await getIssues(params as Parameters<typeof getIssues>[0])
     issues.value = result.items
     totalIssues.value = result.total
   } catch {
-    message.error('Failed to fetch issues')
+    message.error(t('issue.loadFailed'))
   } finally {
     hasLoadedOnce.value = true
     loading.value = false
@@ -321,11 +371,6 @@ async function fetchStats() {
   }
 }
 
-watch([statusFilter, projectFilter], () => {
-  currentPage.value = 1
-  fetchIssues()
-})
-
 onMounted(() => {
   fetchProjects()
   fetchIssues()
@@ -346,14 +391,6 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
-.issue-list__filter--status {
-  width: 140px;
-}
-
-.issue-list__filter--project {
-  width: min(280px, 70vw);
-}
-
 .issue-list__table-card {
   border-radius: var(--app-card-radius);
 }
@@ -368,13 +405,8 @@ onMounted(() => {
     justify-content: flex-start;
   }
 
-  .issue-list__actions :deep(.n-base-selection),
   .issue-list__actions :deep(.n-button) {
     width: 100%;
-  }
-
-  .issue-list__filter--project {
-    width: min(280px, 100vw);
   }
 }
 </style>

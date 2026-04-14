@@ -12,34 +12,30 @@
           :subtitle="t('dashboard.subtitle')"
         >
           <template #actions>
-            <n-select
-              v-model:value="statusFilter"
-              :options="statusOptions"
-              :placeholder="t('dashboard.status')"
-              clearable
-              class="dashboard__filter dashboard__filter--status"
-            />
-            <n-select
-              v-model:value="projectFilter"
-              :options="projectOptions"
-              :placeholder="t('dashboard.project')"
-              clearable
-              filterable
-              class="dashboard__filter dashboard__filter--project"
-            />
-            <n-select
-              v-model:value="initiatorFilter"
-              :options="initiatorOptions"
-              :placeholder="t('dashboard.initiator')"
-              clearable
-              filterable
-              class="dashboard__filter dashboard__filter--initiator"
-            />
             <n-button @click="refreshTasks" :loading="loading" size="small" class="dashboard__refresh">
               {{ t('common.refresh') }}
             </n-button>
           </template>
         </PageHeader>
+
+        <FilterToolbar
+          :config="filterConfig"
+          :filters="filterState.filters.value"
+          :sort="filterState.sort.value"
+          :visible-columns="filterState.visibleColumns.value"
+          :active-filter-count="filterState.activeFilterCount.value"
+          :has-active-filters="filterState.hasActiveFilters.value"
+          :result-count="totalTasks"
+          :search-placeholder="t('filter.search')"
+          @add-filter="filterState.addFilter"
+          @remove-filter="filterState.removeFilter"
+          @clear-all-filters="filterState.clearAllFilters"
+          @set-sort="filterState.setSort"
+          @reset-sort="filterState.resetSort"
+          @toggle-column="filterState.toggleColumn"
+          @reset-columns="filterState.resetColumns"
+          @search="onSearch"
+        />
 
         <n-grid
           v-if="hasLoadedOnce"
@@ -80,16 +76,19 @@
 
 <script setup lang="ts">
 import { ref, onMounted, h, watch, computed } from 'vue'
-import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, DataTableColumns } from 'naive-ui'
+import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getProjects, getTasksPaginated, getStats, type Project, type Task } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
+import FilterToolbar from '../components/filter/FilterToolbar.vue'
+import { useFilterSort, type FilterSortConfig } from '../composables/useFilterSort'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { usePolling } from '../composables/usePolling'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
 import { formatPriority, getProjectLabel as _getProjectLabel } from '../utils/format'
+import { EllipseOutline, FolderOpenOutline, FlagOutline, PersonOutline, CalendarOutline } from '@vicons/ionicons5'
 
 const router = useRouter()
 const message = useMessage()
@@ -100,9 +99,6 @@ const tasks = ref<Task[]>([])
 const projects = ref<Project[]>([])
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
-const statusFilter = ref<string | null>(null)
-const projectFilter = ref<number | null>(null)
-const initiatorFilter = ref<string | null>(null)
 
 const currentPage = ref(1)
 const pageSize = ref(20)
@@ -112,6 +108,103 @@ const statsTotal = ref(0)
 const statsRunning = ref(0)
 const statsCompleted = ref(0)
 const statsPending = ref(0)
+
+const initiatorOptions = computed(() => {
+  const values = Array.from(
+    new Set(tasks.value.map((task) => task.initiator_username?.trim()).filter(Boolean) as string[])
+  ).sort((left, right) => left.localeCompare(right))
+
+  return values.map((username) => ({
+    label: username,
+    value: username
+  }))
+})
+
+const filterConfig: FilterSortConfig = {
+  storageKey: 'codify:filters:tasks',
+  filterFields: [
+    {
+      key: 'status',
+      label: 'filter.status',
+      icon: EllipseOutline,
+      type: 'multi-select',
+      options: () => [
+        { label: t('status.pending'), value: 'pending', color: '#888' },
+        { label: t('status.queued'), value: 'queued', color: '#4080ff' },
+        { label: t('status.running'), value: 'running', color: '#f0a020' },
+        { label: t('status.completed'), value: 'completed', color: '#18a058' },
+        { label: t('status.failed'), value: 'failed', color: '#d03050' },
+        { label: t('status.cancelled'), value: 'cancelled', color: '#888' },
+      ],
+    },
+    {
+      key: 'project_id',
+      label: 'filter.project',
+      icon: FolderOpenOutline,
+      type: 'single-select',
+      options: () => projects.value.map((p) => ({ label: p.path_with_namespace, value: p.id })),
+    },
+    {
+      key: 'priority',
+      label: 'filter.priority',
+      icon: FlagOutline,
+      type: 'multi-select',
+      options: () => [
+        { label: 'P0', value: '0', color: '#d03050' },
+        { label: 'P1', value: '1', color: '#f0a020' },
+        { label: 'P2', value: '2', color: '#18a058' },
+      ],
+    },
+    {
+      key: 'initiator_username',
+      label: 'filter.initiator',
+      icon: PersonOutline,
+      type: 'single-select',
+      options: () => initiatorOptions.value.map((o) => ({ label: o.label, value: o.value })),
+    },
+    {
+      key: 'created',
+      label: 'filter.created',
+      icon: CalendarOutline,
+      type: 'date-range',
+      apiParam: 'created_after,created_before',
+    },
+  ],
+  sortFields: [
+    { key: 'created_at', label: 'filter.sortCreated' },
+    { key: 'priority', label: 'filter.sortPriority' },
+    { key: 'status', label: 'filter.sortStatus' },
+  ],
+  columns: [
+    { key: 'id', label: 'dashboard.id', defaultVisible: true, alwaysVisible: true },
+    { key: 'user_prompt', label: 'dashboard.task', defaultVisible: true, alwaysVisible: true },
+    { key: 'project', label: 'dashboard.project', defaultVisible: true },
+    { key: 'initiator_username', label: 'dashboard.initiator', defaultVisible: true },
+    { key: 'issue', label: 'dashboard.issue', defaultVisible: false },
+    { key: 'status', label: 'dashboard.status', defaultVisible: true },
+    { key: 'priority', label: 'dashboard.priority', defaultVisible: true },
+    { key: 'branch_name', label: 'dashboard.branch', defaultVisible: false },
+    { key: 'merge_request_url', label: 'dashboard.mergeRequest', defaultVisible: false },
+    { key: 'changes', label: 'dashboard.changes', defaultVisible: true },
+    { key: 'created_at', label: 'common.created', defaultVisible: true },
+    { key: 'scheduled_at', label: 'dashboard.scheduled', defaultVisible: false },
+  ],
+  defaultSort: { field: 'created_at', order: 'desc' },
+}
+
+const filterState = useFilterSort(filterConfig)
+const searchTerm = ref('')
+
+function onSearch(term: string) {
+  searchTerm.value = term
+  currentPage.value = 1
+  fetchTasks()
+}
+
+watch([() => filterState.filters.value, () => filterState.sort.value], () => {
+  currentPage.value = 1
+  fetchTasks()
+}, { deep: true })
 
 const pagination = computed(() => ({
   page: currentPage.value,
@@ -129,31 +222,6 @@ const pagination = computed(() => ({
     fetchTasks()
   },
 }))
-
-const statusOptions = computed(() => [
-  { label: t('status.pending'), value: 'pending' },
-  { label: t('status.queued'), value: 'queued' },
-  { label: t('status.running'), value: 'running' },
-  { label: t('status.completed'), value: 'completed' },
-  { label: t('status.failed'), value: 'failed' },
-  { label: t('status.cancelled'), value: 'cancelled' }
-])
-const projectOptions = computed(() =>
-  projects.value.map((project) => ({
-    label: project.path_with_namespace,
-    value: project.id
-  }))
-)
-const initiatorOptions = computed(() => {
-  const values = Array.from(
-    new Set(tasks.value.map((task) => task.initiator_username?.trim()).filter(Boolean) as string[])
-  ).sort((left, right) => left.localeCompare(right))
-
-  return values.map((username) => ({
-    label: username,
-    value: username
-  }))
-})
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
   pending: 'default',
@@ -218,52 +286,21 @@ function getRowProps(row: Task) {
   }
 }
 
-const columns = computed<DataTableColumns<Task>>(() => {
+const allDesktopColumns = computed<DataTableColumns<Task>>(() => {
   const renderStatus = (row: Task) =>
     h(NTag, { type: statusColors[row.status], size: 'small' }, () => t(`status.${row.status}`))
 
-  const mobileColumns: DataTableColumns<Task> = [
-    {
-      title: t('dashboard.id'),
-      key: 'id',
-      width: 45
-    },
-    {
-      title: t('dashboard.task'),
-      key: 'task_info',
-      render: (row) =>
-        h('div', { style: 'line-height: 1.4' }, [
-          h(
-            'div',
-            {
-              style:
-                'font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px'
-            },
-            getProjectSecondaryLabel(row)
-          ),
-          h(
-            'div',
-            {
-              style:
-                'font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px'
-            },
-            row.issue?.branch_name ? renderExternalLink(row.issue.branch_name) : '-'
-          )
-        ])
-    },
-    {
-      title: t('dashboard.status'),
-      key: 'status',
-      width: 85,
-      render: renderStatus
-    }
-  ]
-
-  const desktopColumns: DataTableColumns<Task> = [
+  return [
     {
       title: t('dashboard.id'),
       key: 'id',
       width: 52
+    },
+    {
+      title: t('task.prompt'),
+      key: 'user_prompt',
+      ellipsis: { tooltip: true },
+      render: (row) => row.user_prompt || '-',
     },
     {
       title: t('dashboard.project'),
@@ -368,8 +405,53 @@ const columns = computed<DataTableColumns<Task>>(() => {
       render: (row) => formatCompactDateTime(row.scheduled_at)
     }
   ]
+})
 
-  return isMobile.value ? mobileColumns : desktopColumns
+const columns = computed<DataTableColumns<Task>>(() => {
+  if (isMobile.value) {
+    const renderStatus = (row: Task) =>
+      h(NTag, { type: statusColors[row.status], size: 'small' }, () => t(`status.${row.status}`))
+
+    return [
+      {
+        title: t('dashboard.id'),
+        key: 'id',
+        width: 45
+      },
+      {
+        title: t('dashboard.task'),
+        key: 'task_info',
+        render: (row) =>
+          h('div', { style: 'line-height: 1.4' }, [
+            h(
+              'div',
+              {
+                style:
+                  'font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px'
+              },
+              getProjectSecondaryLabel(row)
+            ),
+            h(
+              'div',
+              {
+                style:
+                  'font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px'
+              },
+              row.issue?.branch_name ? renderExternalLink(row.issue.branch_name) : '-'
+            )
+          ])
+      },
+      {
+        title: t('dashboard.status'),
+        key: 'status',
+        width: 85,
+        render: renderStatus
+      }
+    ]
+  }
+
+  const visible = filterState.visibleColumns.value
+  return allDesktopColumns.value.filter((col) => 'key' in col && visible.includes(col.key as string))
 })
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
@@ -385,26 +467,15 @@ async function fetchTasks() {
   if (loading.value) return
   loading.value = true
   try {
-    const params: {
-      page: number
-      page_size: number
-      status?: string
-      project_id?: number
-      initiator_username?: string
-    } = {
+    const params: Record<string, any> = {
       page: currentPage.value,
       page_size: pageSize.value,
+      ...filterState.apiParams.value,
     }
-    if (statusFilter.value) {
-      params.status = statusFilter.value
+    if (searchTerm.value && searchTerm.value.length >= 2) {
+      params.search = searchTerm.value
     }
-    if (projectFilter.value !== null) {
-      params.project_id = projectFilter.value
-    }
-    if (initiatorFilter.value) {
-      params.initiator_username = initiatorFilter.value
-    }
-    const result = await getTasksPaginated(params)
+    const result = await getTasksPaginated(params as Parameters<typeof getTasksPaginated>[0])
     tasks.value = result.items
     totalTasks.value = result.total
   } catch (error) {
@@ -445,11 +516,6 @@ const { start: startPolling } = usePolling(
   { interval: 15_000, immediate: false }
 )
 
-watch([statusFilter, projectFilter, initiatorFilter], () => {
-  currentPage.value = 1
-  fetchTasks()
-})
-
 onMounted(() => {
   fetchProjects()
   fetchStats()
@@ -471,18 +537,6 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
-.dashboard__filter--status {
-  width: 140px;
-}
-
-.dashboard__filter--project {
-  width: min(280px, 70vw);
-}
-
-.dashboard__filter--initiator {
-  width: 180px;
-}
-
 .dashboard-summary-card {
   min-height: 100%;
 }
@@ -497,11 +551,6 @@ onMounted(() => {
     justify-content: flex-start;
   }
 
-  .dashboard__filters :deep(.n-space-item) {
-    width: 100%;
-  }
-
-  .dashboard__filters :deep(.n-base-selection),
   .dashboard__filters :deep(.n-button) {
     width: 100%;
   }
