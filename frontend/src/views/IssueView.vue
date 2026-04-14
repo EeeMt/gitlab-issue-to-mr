@@ -244,7 +244,7 @@
             v-for="tmpl in promptTemplates"
             :key="tmpl.id"
             class="prompt-template-dropdown__item"
-            @click="applyPromptTemplate(tmpl); showTemplateDrawer = false"
+            @click="handleTemplateClick(tmpl)"
           >
             <div class="prompt-template-dropdown__item-name">{{ tmpl.name }}</div>
             <div class="prompt-template-dropdown__item-preview">{{ tmpl.content.substring(0, 80) }}...</div>
@@ -352,7 +352,7 @@
                   v-model:value="newTaskSchedule"
                   type="datetime"
                   clearable
-                  style="width: 240px; flex-shrink: 0"
+                  style="width: 200px; flex-shrink: 0"
                   :is-date-disabled="isScheduleDateDisabled"
                 />
                 <n-button
@@ -868,6 +868,16 @@ function applyPromptTemplate(tmpl: PromptTemplate) {
   if (tmpl.variable_tips) {
     promptVariableTips.value = tmpl.variable_tips
   }
+}
+
+function handleTemplateClick(tmpl: PromptTemplate) {
+  if (newTaskPrompt.value && newTaskPrompt.value.trim()) {
+    if (!window.confirm(t('createTask.templateOverwriteConfirm'))) {
+      return
+    }
+  }
+  applyPromptTemplate(tmpl)
+  showTemplateDrawer.value = false
 }
 
 // --- Lifecycle ---

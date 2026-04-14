@@ -411,6 +411,7 @@ const en = {
     noTipAvailable: 'No description available',
     noVariables: 'No variables detected',
     useTemplate: 'Use Template',
+    templateOverwriteConfirm: 'Current description will be replaced by the template. Continue?',
     selectTemplate: 'Select Template',
     prioritySchedule: 'Priority & Schedule',
     schedulePreviewTitle: 'Schedule Load (7 days)',

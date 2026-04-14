@@ -398,6 +398,7 @@ const zhCN = {
     noTipAvailable: '无描述',
     noVariables: '未检测到变量',
     useTemplate: '使用模板',
+    templateOverwriteConfirm: '当前描述内容将被模板替换，是否继续？',
     selectTemplate: '选择模板',
     prioritySchedule: '优先级与调度',
     schedulePreviewTitle: '近7日预约热力图',
