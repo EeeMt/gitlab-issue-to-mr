@@ -14,22 +14,13 @@
 
     <div class="sort-popover__section">
       <div class="sort-popover__label">{{ t('filter.direction') }}</div>
-      <n-button-group size="small" class="sort-popover__direction">
-        <n-button
-          :type="sort.order === 'asc' ? 'primary' : 'default'"
-          :secondary="sort.order !== 'asc'"
-          @click="emit('setSort', sort.field, 'asc')"
-        >
-          ↑ {{ t('filter.ascending') }}
-        </n-button>
-        <n-button
-          :type="sort.order === 'desc' ? 'primary' : 'default'"
-          :secondary="sort.order !== 'desc'"
-          @click="emit('setSort', sort.field, 'desc')"
-        >
-          ↓ {{ t('filter.descending') }}
-        </n-button>
-      </n-button-group>
+      <div
+        class="sort-popover__direction-toggle"
+        @click="emit('setSort', sort.field, sort.order === 'asc' ? 'desc' : 'asc')"
+      >
+        <span class="sort-popover__direction-icon">{{ sort.order === 'asc' ? '↑' : '↓' }}</span>
+        <span>{{ sort.order === 'asc' ? t('filter.ascending') : t('filter.descending') }}</span>
+      </div>
     </div>
 
     <div class="sort-popover__footer">
@@ -40,7 +31,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NSelect, NButtonGroup, NButton } from 'naive-ui'
+import { NSelect } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { SortField } from '../../composables/useFilterSort'
 
@@ -66,7 +57,7 @@ const fieldOptions = computed(() =>
   width: 240px;
   background: var(--n-color, #fff);
   border-radius: 12px;
-  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.1);
   border: 1px solid var(--n-border-color, #e0e0e6);
   padding: 4px 0;
 }
@@ -85,17 +76,24 @@ const fieldOptions = computed(() =>
   color: var(--n-text-color-3, #888);
   margin-bottom: 4px;
 }
-.sort-popover__direction {
-  width: 100%;
+.sort-popover__direction-toggle {
   display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.15s;
+  user-select: none;
 }
-.sort-popover__direction :deep(.n-button) {
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 0 6px;
-  min-width: 0;
+.sort-popover__direction-toggle:hover {
+  background: var(--n-color-hover, rgba(0, 0, 0, 0.04));
+}
+.sort-popover__direction-icon {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--n-primary-color, #4080ff);
 }
 .sort-popover__footer {
   padding: 8px 4px;

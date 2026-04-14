@@ -185,7 +185,7 @@ function clearCurrent() {
   overflow-y: auto;
   background: var(--n-color, #fff);
   border-radius: 12px;
-  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.1);
   border: 1px solid var(--n-border-color, #e0e0e6);
   padding: 4px 0;
 }

@@ -25,7 +25,6 @@
               <n-icon size="14"><FunnelOutline /></n-icon>
             </template>
             {{ t('filter.filter') }}
-            <span v-if="activeFilterCount > 0" class="filter-toolbar__badge">{{ activeFilterCount > 9 ? '9+' : activeFilterCount }}</span>
           </n-button>
         </template>
         <FilterPopover
@@ -199,20 +198,6 @@ const filterChips = computed(() => {
   font-size: 11px;
   color: var(--n-text-color-3, #888);
   margin-left: 4px;
-}
-.filter-toolbar__badge {
-  margin-left: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  min-width: 18px;
-  height: 18px;
-  line-height: 18px;
-  text-align: center;
-  border-radius: 9px;
-  background: var(--n-primary-color, #4080ff);
-  color: #fff;
-  display: inline-block;
-  padding: 0 5px;
 }
 .filter-toolbar__spacer {
   flex: 1;
