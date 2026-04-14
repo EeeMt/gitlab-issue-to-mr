@@ -23,7 +23,7 @@
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
               <div class="metric-title">
-                <span><n-icon size="15" :component="CheckboxOutline" class="metric-title-icon" />{{ t('dashboard.taskStatus') }}</span>
+                <span><n-icon size="15" :component="PlayCircleOutline" class="metric-title-icon" />{{ t('dashboard.taskStatus') }}</span>
                 <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.taskStatusTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
@@ -72,7 +72,7 @@
           <n-gi>
             <n-card size="small" class="dashboard-metric-card dashboard-metric-card--wide" data-testid="dashboard-activity-heatmap">
               <div class="metric-title">
-                <span>{{ t('dashboard.activity') }}</span>
+                <span><n-icon size="15" :component="CalendarOutline" class="metric-title-icon" />{{ t('dashboard.activity') }}</span>
                 <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.activityTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
@@ -83,7 +83,7 @@
           <n-gi>
             <n-card size="small" class="dashboard-metric-card dashboard-metric-card--wide dashboard-metric-card--trend" data-testid="dashboard-trend-chart">
               <div class="metric-title">
-                <span>{{ t('dashboard.trend') }}</span>
+                <span><n-icon size="15" :component="TrendingUpOutline" class="metric-title-icon" />{{ t('dashboard.trend') }}</span>
                 <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.trendTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
@@ -147,11 +147,13 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getIssues, getTasksPaginated, getStats, getAnalytics, getActivityHeatmap, type Issue, type Task, type ActivityHeatmapEntry, type AnalyticsTrendPoint } from '../api'
 import {
-  CheckboxOutline,
+  CalendarOutline,
   CodeSlashOutline,
   DocumentTextOutline,
   FlashOutline,
   InformationCircleOutline,
+  PlayCircleOutline,
+  TrendingUpOutline,
 } from '@vicons/ionicons5'
 
 import StatusPieChart from '../components/StatusPieChart.vue'
