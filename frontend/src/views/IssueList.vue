@@ -151,10 +151,10 @@ function issueRowProps(row: Issue) {
 }
 
 const statusColors: Record<IssueStatus, 'default' | 'info' | 'warning' | 'success'> = {
-  open: 'info',
+  open: 'default',
   in_progress: 'warning',
-  in_review: 'success',
-  closed: 'default',
+  in_review: 'info',
+  closed: 'success',
 }
 
 function getProjectName(projectId: number): string {

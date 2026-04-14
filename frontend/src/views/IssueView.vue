@@ -523,10 +523,10 @@ const editForm = reactive({
 
 // --- Constants ---
 const issueStatusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
-  open: 'info',
+  open: 'default',
   in_progress: 'warning',
-  in_review: 'success',
-  closed: 'default'
+  in_review: 'info',
+  closed: 'success'
 }
 
 const taskStatusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {

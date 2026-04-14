@@ -209,10 +209,10 @@ function formatNumber(n: number): string {
 const issueChartData = computed(() => {
   const s = statsIssueByStatus.value
   return [
-    { name: t('issue.status.open'), value: s.open ?? 0, color: '#2080f0' },
+    { name: t('issue.status.open'), value: s.open ?? 0, color: '#909399' },
     { name: t('issue.status.in_progress'), value: s.in_progress ?? 0, color: '#f0a020' },
-    { name: t('issue.status.in_review'), value: s.in_review ?? 0, color: '#18a058' },
-    { name: t('issue.status.closed'), value: s.closed ?? 0, color: '#909399' },
+    { name: t('issue.status.in_review'), value: s.in_review ?? 0, color: '#2080f0' },
+    { name: t('issue.status.closed'), value: s.closed ?? 0, color: '#18a058' },
   ].filter((d) => d.value > 0)
 })
 
@@ -228,10 +228,10 @@ const taskChartData = computed(() => {
 })
 
 const issueStatusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
-  open: 'info',
+  open: 'default',
   in_progress: 'warning',
-  in_review: 'success',
-  closed: 'default',
+  in_review: 'info',
+  closed: 'success',
 }
 
 const issueColumns = computed<DataTableColumns<Issue>>(() => [
