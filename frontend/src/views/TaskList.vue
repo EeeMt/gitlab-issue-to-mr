@@ -18,25 +18,6 @@
           </template>
         </PageHeader>
 
-        <FilterToolbar
-          :config="filterConfig"
-          :filters="filterState.filters.value"
-          :sort="filterState.sort.value"
-          :visible-columns="filterState.visibleColumns.value"
-          :active-filter-count="filterState.activeFilterCount.value"
-          :has-active-filters="filterState.hasActiveFilters.value"
-          :result-count="totalTasks"
-          :search-placeholder="t('filter.search')"
-          @add-filter="filterState.addFilter"
-          @remove-filter="filterState.removeFilter"
-          @clear-all-filters="filterState.clearAllFilters"
-          @set-sort="filterState.setSort"
-          @reset-sort="filterState.resetSort"
-          @toggle-column="filterState.toggleColumn"
-          @reset-columns="filterState.resetColumns"
-          @search="onSearch"
-        />
-
         <n-grid
           v-if="hasLoadedOnce"
           data-testid="tasks-summary"
@@ -55,6 +36,25 @@
             />
           </n-gi>
         </n-grid>
+
+        <FilterToolbar
+          :config="filterConfig"
+          :filters="filterState.filters.value"
+          :sort="filterState.sort.value"
+          :visible-columns="filterState.visibleColumns.value"
+          :active-filter-count="filterState.activeFilterCount.value"
+          :has-active-filters="filterState.hasActiveFilters.value"
+          :result-count="totalTasks"
+          :search-placeholder="t('filter.search')"
+          @add-filter="filterState.addFilter"
+          @remove-filter="filterState.removeFilter"
+          @clear-all-filters="filterState.clearAllFilters"
+          @set-sort="filterState.setSort"
+          @reset-sort="filterState.resetSort"
+          @toggle-column="filterState.toggleColumn"
+          @reset-columns="filterState.resetColumns"
+          @search="onSearch"
+        />
 
         <n-card class="dashboard-table-card" :bordered="false" data-testid="tasks-table-card">
           <n-data-table
