@@ -268,13 +268,13 @@ async def list_issues(
     # Date range filters
     if created_after:
         try:
-            dt = datetime.fromisoformat(created_after.replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(created_after.replace("Z", "+00:00")).replace(tzinfo=None)
             query = query.where(Issue.created_at >= dt)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid created_after: {created_after}")
     if created_before:
         try:
-            dt = datetime.fromisoformat(created_before.replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(created_before.replace("Z", "+00:00")).replace(tzinfo=None)
             query = query.where(Issue.created_at <= dt)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid created_before: {created_before}")
