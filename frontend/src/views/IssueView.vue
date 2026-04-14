@@ -768,7 +768,7 @@ async function fetchIssue() {
   try {
     issue.value = await getIssue(issueId.value)
   } catch {
-    message.error('Failed to load issue')
+    message.error(t('issue.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -777,9 +777,9 @@ async function fetchIssue() {
 async function handleClose() {
   try {
     issue.value = await closeIssue(issueId.value)
-    message.success('Issue closed')
+    message.success(t('issue.closeSuccess'))
   } catch {
-    message.error('Failed to close issue')
+    message.error(t('issue.closeFailed'))
   }
 }
 
@@ -791,9 +791,9 @@ async function handleSaveEdit() {
       description: editForm.description
     })
     showEditModal.value = false
-    message.success('Issue updated')
+    message.success(t('issue.updateSuccess'))
   } catch {
-    message.error('Failed to update issue')
+    message.error(t('issue.updateFailed'))
   } finally {
     editLoading.value = false
   }
@@ -825,7 +825,7 @@ async function handleCreateTask() {
       request.scheduled_datetime = new Date(newTaskSchedule.value).toISOString()
     }
     await createTask(request)
-    message.success(t('issue.createTask') + ' ✓')
+    message.success(t('issue.taskCreated'))
     newTaskPrompt.value = ''
     newTaskSchedule.value = null
     scheduleType.value = 'now'
@@ -841,10 +841,11 @@ async function handleCreateTask() {
 async function handleRetryTask(taskId: number) {
   try {
     await retryTask(taskId)
-    message.success('Task retried')
+    message.success(t('issue.retrySuccess'))
     await fetchIssue()
-  } catch {
-    message.error('Failed to retry task')
+  } catch (error: any) {
+    const detail = error?.response?.data?.detail
+    message.error(typeof detail === 'string' ? detail : t('issue.retryFailed'))
   }
 }
 
