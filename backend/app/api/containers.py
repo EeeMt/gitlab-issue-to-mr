@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.dependencies.auth import require_admin_user, require_page_access
+from app.dependencies.auth import require_admin_user, require_authenticated_user, require_page_access
 from app.dependencies.auth import get_optional_current_user
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
 from app.models import Task, TaskLog, User
@@ -104,7 +104,7 @@ async def list_containers(
 @router.get("/containers/{container_id}/logs")
 async def get_container_logs(
     container_id: str,
-    _current_user=Depends(require_admin_user),
+    _current_user=Depends(require_authenticated_user),
 ):
     """Stream container logs via SSE.
 

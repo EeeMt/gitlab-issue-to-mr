@@ -587,13 +587,8 @@ class ListContainersRestrictedAccessTests(unittest.TestCase):
 class ContainerLogsSSEEndpointTests(unittest.TestCase):
     """Tests for GET /api/containers/{container_id}/logs SSE streaming endpoint."""
 
-    def tearDown(self):
-        app.dependency_overrides.clear()
-
     def _setup_sse_overrides(self):
         """Common dependency overrides for SSE endpoint tests."""
-        from app.dependencies.auth import require_admin_user
-
         mock_db = MagicMock()
 
         async def override_db():
@@ -601,7 +596,9 @@ class ContainerLogsSSEEndpointTests(unittest.TestCase):
 
         app.dependency_overrides[get_db] = override_db
         app.dependency_overrides[require_authenticated_context] = _make_auth_override()
-        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
 
     def test_sse_streams_container_logs_success(self):
         """Successful log streaming should return SSE-formatted log lines."""
