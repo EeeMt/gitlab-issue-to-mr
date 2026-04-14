@@ -84,6 +84,7 @@ const en = {
     edit: 'Edit',
     delete: 'Delete',
     cancel: 'Cancel',
+    confirm: 'Confirm',
     retry: 'Retry',
     execute: 'Execute',
     revoke: 'Revoke',

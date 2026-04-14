@@ -1,6 +1,7 @@
 <template>
   <n-config-provider :locale="naiveUiLocale" :date-locale="naiveUiDateLocale">
     <n-message-provider>
+    <n-dialog-provider>
       <div v-if="!authState.initialized" class="app-loading">
         <n-spin size="large" />
       </div>
@@ -133,6 +134,7 @@
           </n-layout>
         </n-layout>
       </n-layout>
+    </n-dialog-provider>
     </n-message-provider>
   </n-config-provider>
 </template>
@@ -143,6 +145,7 @@ import {
   NAvatar,
   NButton,
   NConfigProvider,
+  NDialogProvider,
   NDrawer,
   NDrawerContent,
   NIcon,

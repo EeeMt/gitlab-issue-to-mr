@@ -84,6 +84,7 @@ const zhCN = {
     edit: '编辑',
     delete: '删除',
     cancel: '取消',
+    confirm: '确认',
     retry: '重试',
     execute: '立即执行',
     revoke: '撤销',

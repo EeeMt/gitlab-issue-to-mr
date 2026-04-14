@@ -437,7 +437,7 @@ import {
   NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin,
   NIcon, NDataTable, NInput, NDrawer, NDrawerContent,
   NRadio, NRadioGroup, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NAlert,
-  useMessage,
+  useMessage, useDialog,
   type DataTableColumns
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -469,6 +469,7 @@ import { authState, isAdmin } from '../auth'
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
+const dialog = useDialog()
 const { t } = useI18n()
 const { isMobile } = useBreakpoints()
 
@@ -872,9 +873,17 @@ function applyPromptTemplate(tmpl: PromptTemplate) {
 
 function handleTemplateClick(tmpl: PromptTemplate) {
   if (newTaskPrompt.value && newTaskPrompt.value.trim()) {
-    if (!window.confirm(t('createTask.templateOverwriteConfirm'))) {
-      return
-    }
+    dialog.warning({
+      title: t('common.confirm'),
+      content: t('createTask.templateOverwriteConfirm'),
+      positiveText: t('common.confirm'),
+      negativeText: t('common.cancel'),
+      onPositiveClick: () => {
+        applyPromptTemplate(tmpl)
+        showTemplateDrawer.value = false
+      }
+    })
+    return
   }
   applyPromptTemplate(tmpl)
   showTemplateDrawer.value = false
