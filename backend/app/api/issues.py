@@ -158,6 +158,7 @@ async def list_issues(
     project_id: Optional[str] = None,
     initiator_user_id: Optional[int] = None,
     initiator_username: Optional[str] = None,
+    has_mr: Optional[bool] = None,
     search: Optional[str] = None,
     created_after: Optional[str] = None,
     created_before: Optional[str] = None,
@@ -291,6 +292,13 @@ async def list_issues(
             query = query.where(Issue.initiator_username == usernames[0])
         elif len(usernames) > 1:
             query = query.where(Issue.initiator_username.in_(usernames))
+
+    # Has MR filter
+    if has_mr is not None:
+        if has_mr:
+            query = query.where(Issue.merge_request_iid.is_not(None))
+        else:
+            query = query.where(Issue.merge_request_iid.is_(None))
 
     # Text search on title (min 2, max 200 chars)
     if search:

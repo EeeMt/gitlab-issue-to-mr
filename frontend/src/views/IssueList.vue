@@ -88,7 +88,7 @@ import FilterToolbar from '../components/filter/FilterToolbar.vue'
 import { useFilterSort, type FilterSortConfig } from '../composables/useFilterSort'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
-import { EllipseOutline, FolderOpenOutline, CalendarOutline, PersonOutline } from '@vicons/ionicons5'
+import { EllipseOutline, FolderOpenOutline, CalendarOutline, PersonOutline, GitMergeOutline } from '@vicons/ionicons5'
 
 const router = useRouter()
 const message = useMessage()
@@ -152,6 +152,16 @@ const filterConfig: FilterSortConfig = {
       options: () => creatorOptions.value,
     },
     {
+      key: 'has_mr',
+      label: 'filter.hasMr',
+      icon: GitMergeOutline,
+      type: 'single-select',
+      options: () => [
+        { label: t('filter.hasMrYes'), value: 'true' },
+        { label: t('filter.hasMrNo'), value: 'false' },
+      ],
+    },
+    {
       key: 'created',
       label: 'filter.created',
       icon: CalendarOutline,
@@ -171,6 +181,7 @@ const filterConfig: FilterSortConfig = {
     { key: 'project_id', label: 'issue.field.project', defaultVisible: true },
     { key: 'status', label: 'common.status', defaultVisible: true },
     { key: 'task_count', label: 'issue.field.tasks', defaultVisible: true },
+    { key: 'merge_request', label: 'filter.hasMr', defaultVisible: true },
     { key: 'total_changes', label: 'common.changes', defaultVisible: true },
     { key: 'total_tokens', label: 'analytics.tokens', defaultVisible: true },
     { key: 'initiator_username', label: 'issue.field.creator', defaultVisible: false },
@@ -288,6 +299,19 @@ const allColumns = computed<DataTableColumns<Issue>>(() => [
     key: 'task_count',
     width: 80,
     render: (row) => String(row.task_count ?? 0),
+  },
+  {
+    title: t('filter.hasMr'),
+    key: 'merge_request',
+    width: 80,
+    render: (row) => {
+      if (!row.merge_request_iid) return '—'
+      const label = `!${row.merge_request_iid}`
+      if (row.merge_request_url) {
+        return h('a', { href: row.merge_request_url, target: '_blank', rel: 'noopener noreferrer', class: 'app-link' }, label)
+      }
+      return label
+    },
   },
   {
     title: t('common.changes'),
