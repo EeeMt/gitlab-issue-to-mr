@@ -11,8 +11,9 @@
         >
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
+              <n-icon size="18" :component="DocumentTextOutline" class="metric-corner-icon" />
               <div class="metric-title">
-                <span><n-icon size="15" :component="DocumentTextOutline" class="metric-title-icon" />{{ t('dashboard.issueStatus') }}</span>
+                <span>{{ t('dashboard.issueStatus') }}</span>
                 <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.issueStatusTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
@@ -22,8 +23,9 @@
           </n-gi>
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
+              <n-icon size="18" :component="PlayCircleOutline" class="metric-corner-icon" />
               <div class="metric-title">
-                <span><n-icon size="15" :component="PlayCircleOutline" class="metric-title-icon" />{{ t('dashboard.taskStatus') }}</span>
+                <span>{{ t('dashboard.taskStatus') }}</span>
                 <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.taskStatusTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
@@ -33,8 +35,9 @@
           </n-gi>
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
+              <n-icon size="18" :component="CodeSlashOutline" class="metric-corner-icon" />
               <div class="metric-title">
-                <span><n-icon size="15" :component="CodeSlashOutline" class="metric-title-icon" />{{ t('dashboard.linesChanged') }}</span>
+                <span>{{ t('dashboard.linesChanged') }}</span>
                 <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.linesChangedTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
@@ -48,8 +51,9 @@
           </n-gi>
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
+              <n-icon size="18" :component="FlashOutline" class="metric-corner-icon" />
               <div class="metric-title">
-                <span><n-icon size="15" :component="FlashOutline" class="metric-title-icon" />{{ t('dashboard.tokensUsed') }}</span>
+                <span>{{ t('dashboard.tokensUsed') }}</span>
                 <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.tokensUsedTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
@@ -71,8 +75,9 @@
         >
           <n-gi>
             <n-card size="small" class="dashboard-metric-card dashboard-metric-card--wide" data-testid="dashboard-activity-heatmap">
+              <n-icon size="18" :component="CalendarOutline" class="metric-corner-icon" />
               <div class="metric-title">
-                <span><n-icon size="15" :component="CalendarOutline" class="metric-title-icon" />{{ t('dashboard.activity') }}</span>
+                <span>{{ t('dashboard.activity') }}</span>
                 <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.activityTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
@@ -82,8 +87,9 @@
           </n-gi>
           <n-gi>
             <n-card size="small" class="dashboard-metric-card dashboard-metric-card--wide dashboard-metric-card--trend" data-testid="dashboard-trend-chart">
+              <n-icon size="18" :component="TrendingUpOutline" class="metric-corner-icon" />
               <div class="metric-title">
-                <span><n-icon size="15" :component="TrendingUpOutline" class="metric-title-icon" />{{ t('dashboard.trend') }}</span>
+                <span>{{ t('dashboard.trend') }}</span>
                 <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.trendTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
@@ -408,6 +414,10 @@ onMounted(() => {
   transition: box-shadow 0.25s ease, transform 0.25s ease;
 }
 
+.dashboard-metric-card :deep(.n-card__content) {
+  position: relative;
+}
+
 .dashboard-metric-card:hover {
   box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06), 0 8px 20px rgba(15, 23, 42, 0.05);
   transform: translateY(-1px);
@@ -437,6 +447,14 @@ onMounted(() => {
   margin-right: 4px;
   vertical-align: -2px;
   opacity: 0.7;
+}
+
+.metric-corner-icon {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  color: #aaa;
+  opacity: 0.6;
 }
 
 .metric-info-icon {
