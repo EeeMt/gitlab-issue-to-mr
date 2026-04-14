@@ -19,6 +19,7 @@ from app.core.utcnow import utcnow
 from app.core.worker import WorkerExecutor
 from app.database import AsyncSessionLocal
 from app.models import Task, TaskStatus, Issue, IssueStatus
+from app.core.task_helpers import maybe_update_issue_status
 from app.runtime_config import load_runtime_config_from_db
 
 logger = logging.getLogger(__name__)
@@ -260,34 +261,8 @@ class Scheduler:
                 pass
 
     async def _maybe_complete_issue(self, db: AsyncSession, issue_id: int) -> None:
-        """Auto-transition issue IN_PROGRESS → COMPLETED when last active task completes."""
-        try:
-            active_count = await db.execute(
-                select(func.count(Task.id)).where(
-                    Task.issue_id == issue_id,
-                    Task.status.in_([
-                        TaskStatus.PENDING,
-                        TaskStatus.QUEUED,
-                        TaskStatus.RUNNING,
-                    ]),
-                )
-            )
-            if active_count.scalar() == 0:
-                # Check if there's at least one completed task
-                completed_count = await db.execute(
-                    select(func.count(Task.id)).where(
-                        Task.issue_id == issue_id,
-                        Task.status == TaskStatus.COMPLETED,
-                    )
-                )
-                if completed_count.scalar() > 0:
-                    issue = await db.get(Issue, issue_id)
-                    if issue and issue.status == IssueStatus.IN_PROGRESS.value:
-                        issue.status = IssueStatus.COMPLETED.value
-                        await db.commit()
-                        logger.info(f"Issue {issue_id} auto-transitioned to COMPLETED")
-        except Exception as e:
-            logger.warning(f"Failed to check issue {issue_id} completion: {e}")
+        """Delegate to shared helper."""
+        await maybe_update_issue_status(db, issue_id)
 
     async def _crash_recovery(self) -> None:
         """Recover from crashes: clean up orphan containers, resume legitimate ones.

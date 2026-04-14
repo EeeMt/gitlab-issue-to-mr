@@ -1,12 +1,16 @@
 """Task and Issue helper utilities for API responses and authorization."""
 
+import logging
 from typing import Any, Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import inspect as sa_inspect, select, func
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings
-from app.models import Issue, Task, User
+from app.models import Issue, IssueStatus, Task, TaskStatus, User
+
+logger = logging.getLogger(__name__)
 
 
 def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -133,3 +137,45 @@ def _require_issue_operator(issue: Issue, current_user: Optional[User]) -> None:
         status_code=status.HTTP_403_FORBIDDEN,
         detail="You may only operate on your own issues unless you are an admin",
     )
+
+
+async def maybe_update_issue_status(db: AsyncSession, issue_id: int) -> None:
+    """Auto-transition issue status when no active tasks remain.
+
+    - Has COMPLETED tasks → issue becomes COMPLETED
+    - All tasks failed/cancelled → issue reverts to OPEN
+    """
+    try:
+        active_count_result = await db.execute(
+            select(func.count(Task.id)).where(
+                Task.issue_id == issue_id,
+                Task.status.in_([
+                    TaskStatus.PENDING,
+                    TaskStatus.QUEUED,
+                    TaskStatus.RUNNING,
+                ]),
+            )
+        )
+        if active_count_result.scalar() > 0:
+            return
+
+        issue = await db.get(Issue, issue_id)
+        if not issue or issue.status != IssueStatus.IN_PROGRESS.value:
+            return
+
+        completed_count_result = await db.execute(
+            select(func.count(Task.id)).where(
+                Task.issue_id == issue_id,
+                Task.status == TaskStatus.COMPLETED,
+            )
+        )
+        if completed_count_result.scalar() > 0:
+            issue.status = IssueStatus.COMPLETED.value
+            await db.commit()
+            logger.info(f"Issue {issue_id} auto-transitioned to COMPLETED")
+        else:
+            issue.status = IssueStatus.OPEN.value
+            await db.commit()
+            logger.info(f"Issue {issue_id} auto-transitioned to OPEN (all tasks failed/cancelled)")
+    except Exception as e:
+        logger.warning(f"Failed to update issue {issue_id} status: {e}")

@@ -16,7 +16,7 @@ from sqlalchemy.orm import selectinload
 from app.core.docker_client import get_docker_client
 from app.core.projects import build_project_lookup, get_project_metadata
 from app.core.scheduling import resolve_scheduled_at
-from app.core.task_helpers import _serialize_task
+from app.core.task_helpers import _serialize_task, maybe_update_issue_status
 from app.core.utcnow import utcnow
 from app.database import get_db
 from app.dependencies.auth import get_optional_current_user, require_page_access
@@ -519,6 +519,10 @@ async def cancel_task(
 
     await notify_task_cancelled(task)
     logger.info(f"Task {task_id} cancelled via API")
+
+    # Auto-update issue status if no active tasks remain
+    if task.issue_id:
+        await maybe_update_issue_status(db, task.issue_id)
 
     return {"status": "success", "message": f"Task {task_id} cancelled"}
 
