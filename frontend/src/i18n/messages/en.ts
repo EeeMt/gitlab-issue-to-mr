@@ -132,6 +132,7 @@ const en = {
     project: 'Project',
     priority: 'Priority',
     initiator: 'Initiator',
+    creator: 'Creator',
     issue: 'Issue',
     created: 'Created',
     sortCreated: 'Created time',

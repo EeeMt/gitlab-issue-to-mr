@@ -132,6 +132,7 @@ const zhCN = {
     project: '项目',
     priority: '优先级',
     initiator: '发起人',
+    creator: '创建者',
     issue: '需求',
     created: '创建时间',
     sortCreated: '创建时间',

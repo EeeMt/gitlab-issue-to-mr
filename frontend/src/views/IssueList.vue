@@ -88,7 +88,7 @@ import FilterToolbar from '../components/filter/FilterToolbar.vue'
 import { useFilterSort, type FilterSortConfig } from '../composables/useFilterSort'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
-import { EllipseOutline, FolderOpenOutline, CalendarOutline } from '@vicons/ionicons5'
+import { EllipseOutline, FolderOpenOutline, CalendarOutline, PersonOutline } from '@vicons/ionicons5'
 
 const router = useRouter()
 const message = useMessage()
@@ -97,6 +97,7 @@ const { isMobile } = useBreakpoints()
 
 const issues = ref<Issue[]>([])
 const projects = ref<Project[]>([])
+const knownCreators = ref<Set<string>>(new Set())
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
 
@@ -115,6 +116,11 @@ const summaryItems = computed(() => [
 const currentPage = ref(1)
 const pageSize = ref(20)
 const totalIssues = ref(0)
+
+const creatorOptions = computed(() => {
+  const values = Array.from(knownCreators.value).sort((a, b) => a.localeCompare(b))
+  return values.map((username) => ({ label: username, value: username }))
+})
 
 const filterConfig: FilterSortConfig = {
   storageKey: 'codify:filters:issues',
@@ -137,6 +143,13 @@ const filterConfig: FilterSortConfig = {
       icon: FolderOpenOutline,
       type: 'multi-select',
       options: () => projects.value.map((p) => ({ label: p.path_with_namespace, value: p.id })),
+    },
+    {
+      key: 'initiator_username',
+      label: 'filter.creator',
+      icon: PersonOutline,
+      type: 'multi-select',
+      options: () => creatorOptions.value,
     },
     {
       key: 'created',
@@ -342,6 +355,11 @@ async function fetchIssues() {
     const result = await getIssues(params as Parameters<typeof getIssues>[0])
     issues.value = result.items
     totalIssues.value = result.total
+    // Accumulate known creators for filter options (don't shrink on filter)
+    for (const issue of result.items) {
+      const username = issue.initiator_username?.trim()
+      if (username) knownCreators.value.add(username)
+    }
   } catch {
     message.error(t('issue.loadFailed'))
   } finally {

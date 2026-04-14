@@ -157,6 +157,7 @@ async def list_issues(
     status: Optional[str] = None,
     project_id: Optional[str] = None,
     initiator_user_id: Optional[int] = None,
+    initiator_username: Optional[str] = None,
     search: Optional[str] = None,
     created_after: Optional[str] = None,
     created_before: Optional[str] = None,
@@ -283,6 +284,13 @@ async def list_issues(
 
     if initiator_user_id is not None:
         query = query.where(Issue.initiator_user_id == initiator_user_id)
+
+    if initiator_username:
+        usernames = [u.strip() for u in initiator_username.split(",") if u.strip()]
+        if len(usernames) == 1:
+            query = query.where(Issue.initiator_username == usernames[0])
+        elif len(usernames) > 1:
+            query = query.where(Issue.initiator_username.in_(usernames))
 
     # Text search on title (min 2, max 200 chars)
     if search:

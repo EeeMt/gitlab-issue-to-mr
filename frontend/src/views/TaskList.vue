@@ -97,6 +97,7 @@ const { isMobile } = useBreakpoints()
 
 const tasks = ref<Task[]>([])
 const projects = ref<Project[]>([])
+const knownInitiators = ref<Set<string>>(new Set())
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
 
@@ -110,10 +111,7 @@ const statsCompleted = ref(0)
 const statsPending = ref(0)
 
 const initiatorOptions = computed(() => {
-  const values = Array.from(
-    new Set(tasks.value.map((task) => task.initiator_username?.trim()).filter(Boolean) as string[])
-  ).sort((left, right) => left.localeCompare(right))
-
+  const values = Array.from(knownInitiators.value).sort((left, right) => left.localeCompare(right))
   return values.map((username) => ({
     label: username,
     value: username
@@ -504,6 +502,11 @@ async function fetchTasks() {
     const result = await getTasksPaginated(params as Parameters<typeof getTasksPaginated>[0])
     tasks.value = result.items
     totalTasks.value = result.total
+    // Accumulate known initiators for filter options (don't shrink on filter)
+    for (const task of result.items) {
+      const username = task.initiator_username?.trim()
+      if (username) knownInitiators.value.add(username)
+    }
   } catch (error) {
     message.error(t('dashboard.failedToFetchTasks'))
   } finally {
