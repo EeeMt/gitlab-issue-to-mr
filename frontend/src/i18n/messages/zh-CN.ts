@@ -206,7 +206,7 @@ const zhCN = {
     subtitle: '管理你的开发需求',
     create: '创建需求',
     detail: '需求详情',
-    list: '需求列表',
+    list: '需求',
     edit: '编辑需求',
     close: '关闭需求',
     delete: '删除需求',

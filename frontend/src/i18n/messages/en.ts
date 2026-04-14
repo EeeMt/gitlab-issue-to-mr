@@ -209,7 +209,7 @@ const en = {
     subtitle: 'Manage your development issues',
     create: 'Create Issue',
     detail: 'Issue Detail',
-    list: 'Issue List',
+    list: 'Issues',
     edit: 'Edit Issue',
     close: 'Close Issue',
     delete: 'Delete Issue',
