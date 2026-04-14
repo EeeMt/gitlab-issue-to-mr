@@ -14,9 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
 from app.dependencies.auth import require_admin_user, require_page_access
+from app.dependencies.auth import get_optional_current_user
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
-from app.models import Task, TaskLog
+from app.models import Task, TaskLog, User
 from app.core.docker_client import get_docker_client
+from app.api.task_operations import get_task_with_access_check
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -184,7 +186,8 @@ async def get_task_container_logs(
     task_id: int,
     source: str = "auto",
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_admin_user),
+    current_user: Optional["User"] = Depends(get_optional_current_user),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Get container logs for a task (polling endpoint).
 
@@ -196,15 +199,7 @@ async def get_task_container_logs(
     Returns:
         Container logs
     """
-    # Get task to find container_id
-    result = await db.execute(select(Task).where(Task.id == task_id))
-    task = result.scalar_one_or_none()
-
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Task {task_id} not found",
-        )
+    task = await get_task_with_access_check(task_id, db, access_scope, current_user)
 
     if not task.container_id:
         return {

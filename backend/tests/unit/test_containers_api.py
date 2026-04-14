@@ -225,7 +225,9 @@ class GetContainerLogsEndpointTests(unittest.TestCase):
         from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context
+        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
 
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         mock_db = MagicMock()
@@ -236,6 +238,7 @@ class GetContainerLogsEndpointTests(unittest.TestCase):
 
         app.dependency_overrides[get_db] = override_db
         app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
         client = TestClient(app, raise_server_exceptions=False)
         response = client.get("/api/tasks/9999/container-logs")
@@ -247,8 +250,10 @@ class GetContainerLogsEndpointTests(unittest.TestCase):
         from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context
+        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
         from app.models import TaskStatus
 
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
         task = MagicMock()
         task.id = 1
         task.container_id = None
@@ -264,6 +269,7 @@ class GetContainerLogsEndpointTests(unittest.TestCase):
 
         app.dependency_overrides[get_db] = override_db
         app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
         client = TestClient(app, raise_server_exceptions=False)
         response = client.get("/api/tasks/1/container-logs")
@@ -289,9 +295,11 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
         """Should return logs when task has a container_id and docker returns logs."""
         from app.main import app
         from app.database import get_db
-        from app.dependencies.auth import require_admin_user, require_authenticated_user
+        from app.dependencies.auth import require_authenticated_context
+        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
         from app.models import TaskStatus
 
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
         task = MagicMock()
         task.id = 10
         task.container_id = "abc123def456"
@@ -313,8 +321,8 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
         mock_docker.client.containers.get.return_value = mock_container
 
         app.dependency_overrides[get_db] = override_db
-        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
-        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
         with patch("app.api.containers.get_docker_client", return_value=mock_docker):
             client = TestClient(app, raise_server_exceptions=False)
@@ -330,9 +338,11 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
         """When Docker fails, falls back to DB-stored log chunks (returns 200 with available data)."""
         from app.main import app
         from app.database import get_db
-        from app.dependencies.auth import require_admin_user, require_authenticated_user
+        from app.dependencies.auth import require_authenticated_context
+        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
         from app.models import TaskStatus
 
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
         task = MagicMock()
         task.id = 11
         task.container_id = "xyz789"
@@ -349,8 +359,8 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
             yield mock_db
 
         app.dependency_overrides[get_db] = override_db
-        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
-        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
         with patch("app.api.containers.get_docker_client", side_effect=RuntimeError("container not found")):
             client = TestClient(app, raise_server_exceptions=False)
@@ -691,9 +701,11 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
 
     def test_source_db_returns_db_chunks_directly(self):
         """When source=db, should fetch logs from DB without trying Docker."""
-        from app.dependencies.auth import require_admin_user, require_authenticated_user
+        from app.dependencies.auth import require_authenticated_context
+        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
         from app.models import TaskStatus
 
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
         task = MagicMock()
         task.id = 1
         task.container_id = "abc123"
@@ -714,8 +726,8 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
             yield mock_db
 
         app.dependency_overrides[get_db] = override_db
-        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
-        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
         client = TestClient(app, raise_server_exceptions=False)
         response = client.get("/api/tasks/1/container-logs?source=db")
@@ -728,9 +740,11 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
 
     def test_source_db_returns_empty_when_no_chunks(self):
         """When source=db and no log chunks exist, should return empty logs."""
-        from app.dependencies.auth import require_admin_user, require_authenticated_user
+        from app.dependencies.auth import require_authenticated_context
+        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
         from app.models import TaskStatus
 
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
         task = MagicMock()
         task.id = 1
         task.container_id = "abc123"
@@ -749,8 +763,8 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
             yield mock_db
 
         app.dependency_overrides[get_db] = override_db
-        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
-        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
         client = TestClient(app, raise_server_exceptions=False)
         response = client.get("/api/tasks/1/container-logs?source=db")
@@ -762,9 +776,11 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
 
     def test_source_db_multiple_chunks_concatenated(self):
         """Multiple DB log chunks should be concatenated."""
-        from app.dependencies.auth import require_admin_user, require_authenticated_user
+        from app.dependencies.auth import require_authenticated_context
+        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
         from app.models import TaskStatus
 
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
         task = MagicMock()
         task.id = 2
         task.container_id = "xyz789"
@@ -789,8 +805,8 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
             yield mock_db
 
         app.dependency_overrides[get_db] = override_db
-        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
-        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
         client = TestClient(app, raise_server_exceptions=False)
         response = client.get("/api/tasks/2/container-logs?source=db")
@@ -813,9 +829,11 @@ class TaskContainerLogsDockerFailDbFallbackTests(unittest.TestCase):
 
     def test_docker_fail_with_db_chunks_returns_db_data(self):
         """When Docker fails but DB has log chunks, should return DB data with source=db."""
-        from app.dependencies.auth import require_admin_user, require_authenticated_user
+        from app.dependencies.auth import require_authenticated_context
+        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
         from app.models import TaskStatus
 
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
         task = MagicMock()
         task.id = 15
         task.container_id = "container-gone"
@@ -838,8 +856,8 @@ class TaskContainerLogsDockerFailDbFallbackTests(unittest.TestCase):
             yield mock_db
 
         app.dependency_overrides[get_db] = override_db
-        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
-        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
         with patch("app.api.containers.get_docker_client", side_effect=RuntimeError("docker is gone")):
             client = TestClient(app, raise_server_exceptions=False)
