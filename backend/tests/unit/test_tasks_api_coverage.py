@@ -565,7 +565,7 @@ class CancelTaskDockerStopTests(unittest.TestCase):
         task = _make_serializable_task(task_status=TaskStatus.RUNNING)
         task.id = 40
         task.project_id = 1
-        task.issue_iid = 10
+        task.issue_id = 100
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = task
@@ -592,16 +592,16 @@ class CancelTaskDockerStopTests(unittest.TestCase):
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
-        # Docker should have tried to get container "codify-40-p1-i10"
-        mock_docker.client.containers.get.assert_called_once_with("codify-40-p1-i10")
+        # Docker should have tried to get container "codify-40-issue100"
+        mock_docker.client.containers.get.assert_called_once_with("codify-40-issue100")
         mock_container.stop.assert_called_once_with(timeout=5)
 
-    def test_cancel_manual_task_builds_correct_container_name(self):
-        """Lines 498-499: manual task (issue_iid=None) uses 'manual' suffix."""
+    def test_cancel_task_with_different_issue_id(self):
+        """Cancel task builds container name from issue_id."""
         task = _make_serializable_task(task_status=TaskStatus.RUNNING)
         task.id = 41
         task.project_id = 2
-        task.issue_iid = None
+        task.issue_id = 200
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = task
@@ -627,14 +627,14 @@ class CancelTaskDockerStopTests(unittest.TestCase):
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
-        mock_docker.client.containers.get.assert_called_once_with("codify-41-p2-manual")
+        mock_docker.client.containers.get.assert_called_once_with("codify-41-issue200")
 
     def test_cancel_task_docker_failure_is_silently_caught(self):
         """Lines 505-506: Docker failure during cancel should be silently caught."""
         task = _make_serializable_task(task_status=TaskStatus.RUNNING)
         task.id = 42
         task.project_id = 1
-        task.issue_iid = 5
+        task.issue_id = 50
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = task

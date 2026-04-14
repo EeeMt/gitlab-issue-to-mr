@@ -39,12 +39,13 @@ class MattermostNotificationTests(unittest.IsolatedAsyncioTestCase):
             status=TaskStatus.COMPLETED,
             initiator_username="alice",
         )
-        task.issue_iid = 34
-        task.branch_name = "feature/demo"
-        task.target_branch = "main"
-        task.is_manual = False
-        task.merge_request_iid = None
-        task.merge_request_url = None
+        task.issue_id = 34
+        task.__dict__["issue"] = SimpleNamespace(
+            branch_name="feature/demo",
+            target_branch="main",
+            merge_request_iid=None,
+            merge_request_url=None,
+        )
         profile = MattermostNotificationProfile(
             id=1,
             name="Channel",
@@ -96,12 +97,13 @@ class MattermostNotificationTests(unittest.IsolatedAsyncioTestCase):
             status=TaskStatus.FAILED,
             initiator_username=None,
         )
-        task.issue_iid = 34
-        task.branch_name = "feature/demo"
-        task.target_branch = "main"
-        task.is_manual = False
-        task.merge_request_iid = None
-        task.merge_request_url = None
+        task.issue_id = 34
+        task.__dict__["issue"] = SimpleNamespace(
+            branch_name="feature/demo",
+            target_branch="main",
+            merge_request_iid=None,
+            merge_request_url=None,
+        )
         profile = MattermostNotificationProfile(
             id=2,
             name="DM",
@@ -152,12 +154,8 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
             id=1, project_id=1, user_prompt="x",
             status=TaskStatus.COMPLETED,
         )
-        task.issue_iid = 1
-        task.is_manual = False
-        task.merge_request_iid = None
-        task.merge_request_url = None
-        task.branch_name = None
-        task.target_branch = None
+        task.issue_id = 1
+        task.__dict__["issue"] = None
         with self.assertRaises(ValueError, msg="Unsupported Mattermost event type"):
             await notify_task_event(task, "not_a_valid_event")
 
@@ -167,12 +165,8 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
             id=2, project_id=1, user_prompt="x",
             status=TaskStatus.COMPLETED,
         )
-        task.issue_iid = 1
-        task.is_manual = False
-        task.merge_request_iid = None
-        task.merge_request_url = None
-        task.branch_name = None
-        task.target_branch = None
+        task.issue_id = 1
+        task.__dict__["issue"] = None
         with patch(
             "app.core.mattermost_notifications.get_effective_settings",
             return_value=SimpleNamespace(
@@ -190,12 +184,8 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
             id=3, project_id=1, user_prompt="x",
             status=TaskStatus.COMPLETED,
         )
-        task.issue_iid = 1
-        task.is_manual = False
-        task.merge_request_iid = None
-        task.merge_request_url = None
-        task.branch_name = None
-        task.target_branch = None
+        task.issue_id = 1
+        task.__dict__["issue"] = None
         with patch(
             "app.core.mattermost_notifications.get_effective_settings",
             return_value=SimpleNamespace(
@@ -212,12 +202,8 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
             id=4, project_id=1, user_prompt="x",
             status=TaskStatus.COMPLETED,
         )
-        task.issue_iid = 1
-        task.is_manual = False
-        task.merge_request_iid = None
-        task.merge_request_url = None
-        task.branch_name = None
-        task.target_branch = None
+        task.issue_id = 1
+        task.__dict__["issue"] = None
         mock_session = MagicMock()
         mock_session.execute = AsyncMock(
             return_value=SimpleNamespace(
@@ -251,12 +237,8 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
             id=5, project_id=1, user_prompt="x",
             status=TaskStatus.COMPLETED,
         )
-        task.issue_iid = 1
-        task.is_manual = False
-        task.merge_request_iid = None
-        task.merge_request_url = None
-        task.branch_name = None
-        task.target_branch = None
+        task.issue_id = 1
+        task.__dict__["issue"] = None
         profile = MattermostNotificationProfile(
             id=1, name="C", enabled=True,
             target_type=MATTERMOST_TARGET_TYPE_CHANNEL,
@@ -293,66 +275,14 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
 
         mock_client.create_post.assert_not_called()
 
-    async def test_skips_manual_task_when_flag_off(self) -> None:
-        """Manual tasks should be skipped when send_for_manual_tasks=False."""
-        task = Task(
-            id=6, project_id=1, user_prompt="x",
-            status=TaskStatus.COMPLETED,
-        )
-        task.issue_iid = None
-        task.is_manual = True
-        task.merge_request_iid = None
-        task.merge_request_url = None
-        task.branch_name = None
-        task.target_branch = None
-        profile = MattermostNotificationProfile(
-            id=1, name="C", enabled=True,
-            target_type=MATTERMOST_TARGET_TYPE_CHANNEL,
-            team_name="t", channel_name="c",
-            mention_in_channel=False,
-            event_types_json='["task_completed"]',
-            field_keys_json='["task_id"]',
-            send_for_manual_tasks=False,
-        )
-        mock_session = MagicMock()
-        mock_session.execute = AsyncMock(
-            return_value=SimpleNamespace(
-                scalars=lambda: SimpleNamespace(all=lambda: [profile])
-            )
-        )
-        mock_session.commit = AsyncMock()
-        mock_client = AsyncMock()
-
-        with patch(
-            "app.core.mattermost_notifications.AsyncSessionLocal",
-            return_value=_SessionContext(mock_session),
-        ), patch(
-            "app.core.mattermost_notifications.MattermostClient",
-            return_value=mock_client,
-        ), patch(
-            "app.core.mattermost_notifications.get_effective_settings",
-            return_value=SimpleNamespace(
-                mattermost_server_url="https://mm",
-                mattermost_bot_token="tok",
-                dashboard_url="https://dash",
-            ),
-        ):
-            await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
-
-        mock_client.create_post.assert_not_called()
-
     async def test_dm_notification_success(self) -> None:
         """Successful DM notification should create direct channel and post."""
         task = Task(
             id=10, project_id=1, user_prompt="x",
             status=TaskStatus.FAILED, initiator_username="bob",
         )
-        task.issue_iid = 1
-        task.is_manual = False
-        task.merge_request_iid = None
-        task.merge_request_url = None
-        task.branch_name = None
-        task.target_branch = None
+        task.issue_id = 1
+        task.__dict__["issue"] = None
         profile = MattermostNotificationProfile(
             id=2, name="DM", enabled=True,
             target_type=MATTERMOST_TARGET_TYPE_INITIATOR_DM,
@@ -403,12 +333,8 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
             id=11, project_id=1, user_prompt="x",
             status=TaskStatus.COMPLETED, initiator_username="alice",
         )
-        task.issue_iid = 1
-        task.is_manual = False
-        task.merge_request_iid = None
-        task.merge_request_url = None
-        task.branch_name = None
-        task.target_branch = None
+        task.issue_id = 1
+        task.__dict__["issue"] = None
         profile = MattermostNotificationProfile(
             id=3, name="BadChan", enabled=True,
             target_type=MATTERMOST_TARGET_TYPE_CHANNEL,
@@ -456,12 +382,8 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
             id=12, project_id=1, user_prompt="x",
             status=TaskStatus.COMPLETED, initiator_username="alice",
         )
-        task.issue_iid = 1
-        task.is_manual = False
-        task.merge_request_iid = None
-        task.merge_request_url = None
-        task.branch_name = None
-        task.target_branch = None
+        task.issue_id = 1
+        task.__dict__["issue"] = None
         profile = MattermostNotificationProfile(
             id=4, name="C", enabled=True,
             target_type=MATTERMOST_TARGET_TYPE_CHANNEL,
@@ -906,8 +828,8 @@ class TestResolveMattermostUserId:
             initiator_gitlab_user_id=200,
             initiator_username="alice",
         )
-        task.issue_iid = 1
-        task.is_manual = False
+        task.issue_id = 1
+        task.__dict__["issue"] = None
         mock_client = AsyncMock()
 
         result = await _resolve_mattermost_user_id(mock_session, mock_client, task)
@@ -929,8 +851,8 @@ class TestResolveMattermostUserId:
             initiator_user_id=10,
             initiator_gitlab_user_id=20,
         )
-        task.issue_iid = 1
-        task.is_manual = False
+        task.issue_id = 1
+        task.__dict__["issue"] = None
         mock_client = AsyncMock()
         mock_client.get_user_by_username.return_value = {"id": "mm-new-id", "username": "bob"}
 
@@ -954,8 +876,8 @@ class TestResolveMattermostUserId:
             initiator_username="",
             initiator_user_id=10,
         )
-        task.issue_iid = 1
-        task.is_manual = False
+        task.issue_id = 1
+        task.__dict__["issue"] = None
         mock_client = AsyncMock()
 
         result = await _resolve_mattermost_user_id(mock_session, mock_client, task)
@@ -975,8 +897,8 @@ class TestResolveMattermostUserId:
             initiator_username="charlie",
             initiator_user_id=10,
         )
-        task.issue_iid = 1
-        task.is_manual = False
+        task.issue_id = 1
+        task.__dict__["issue"] = None
         mock_client = AsyncMock()
         mock_client.get_user_by_username.return_value = {"id": "", "username": "charlie"}
 
@@ -996,8 +918,8 @@ class TestResolveMattermostUserId:
             initiator_user_id=None,
             initiator_gitlab_user_id=None,
         )
-        task.issue_iid = 1
-        task.is_manual = False
+        task.issue_id = 1
+        task.__dict__["issue"] = None
         mock_client = AsyncMock()
 
         result = await _resolve_mattermost_user_id(mock_session, mock_client, task)
@@ -1022,12 +944,13 @@ class TestBuildAttachmentFields:
             status=TaskStatus.COMPLETED,
             initiator_username="alice",
         )
-        task.issue_iid = 20
-        task.merge_request_iid = 30
-        task.merge_request_url = None
-        task.branch_name = "feat"
-        task.target_branch = "main"
-        task.is_manual = False
+        task.issue_id = 20
+        task.__dict__["issue"] = SimpleNamespace(
+            merge_request_iid=30,
+            merge_request_url=None,
+            branch_name="feat",
+            target_branch="main",
+        )
         with self._settings_patch():
             fields = _build_attachment_fields(
                 task,
@@ -1051,12 +974,13 @@ class TestBuildAttachmentFields:
             id=1, project_id=10, user_prompt="x",
             status=TaskStatus.COMPLETED,
         )
-        task.issue_iid = 20
-        task.is_manual = False
-        task.merge_request_iid = None
-        task.merge_request_url = None
-        task.branch_name = None
-        task.target_branch = None
+        task.issue_id = 20
+        task.__dict__["issue"] = SimpleNamespace(
+            merge_request_iid=None,
+            merge_request_url=None,
+            branch_name=None,
+            target_branch=None,
+        )
         with self._settings_patch():
             fields = _build_attachment_fields(
                 task,
@@ -1075,12 +999,13 @@ class TestBuildAttachmentFields:
             status=TaskStatus.COMPLETED,
             initiator_username=None,
         )
-        task.issue_iid = 20
-        task.is_manual = False
-        task.merge_request_iid = None
-        task.merge_request_url = None
-        task.branch_name = None
-        task.target_branch = None
+        task.issue_id = 20
+        task.__dict__["issue"] = SimpleNamespace(
+            merge_request_iid=None,
+            merge_request_url=None,
+            branch_name=None,
+            target_branch=None,
+        )
         with self._settings_patch():
             fields = _build_attachment_fields(
                 task,
@@ -1099,12 +1024,8 @@ class TestBuildAttachmentFields:
             id=1, project_id=10, user_prompt="x",
             status=TaskStatus.COMPLETED,
         )
-        task.issue_iid = None
-        task.is_manual = False
-        task.merge_request_iid = None
-        task.merge_request_url = None
-        task.branch_name = None
-        task.target_branch = None
+        task.issue_id = None
+        task.__dict__["issue"] = None
         with self._settings_patch():
             fields = _build_attachment_fields(
                 task,
@@ -1116,18 +1037,14 @@ class TestBuildAttachmentFields:
         assert len(fields) == 1
         assert fields[0]["value"] == "-"
 
-    def test_manual_task_issue_shows_label(self):
-        """For manual tasks with no issue_iid, issue should show '手工任务'."""
+    def test_no_issue_shows_dash(self):
+        """For tasks with no issue_id, issue should show '-'."""
         task = Task(
             id=1, project_id=10, user_prompt="x",
             status=TaskStatus.COMPLETED,
         )
-        task.issue_iid = None
-        task.is_manual = True
-        task.merge_request_iid = None
-        task.merge_request_url = None
-        task.branch_name = None
-        task.target_branch = None
+        task.issue_id = None
+        task.__dict__["issue"] = None
         with self._settings_patch():
             fields = _build_attachment_fields(
                 task,
@@ -1136,7 +1053,7 @@ class TestBuildAttachmentFields:
                 {},
             )
 
-        assert fields[0]["value"] == "手工任务"
+        assert fields[0]["value"] == "-"
 
     def test_schedule_change_field(self):
         """When context has schedule change info, the field should be populated."""
@@ -1144,12 +1061,13 @@ class TestBuildAttachmentFields:
             id=1, project_id=10, user_prompt="x",
             status=TaskStatus.COMPLETED,
         )
-        task.issue_iid = 20
-        task.is_manual = False
-        task.merge_request_iid = None
-        task.merge_request_url = None
-        task.branch_name = None
-        task.target_branch = None
+        task.issue_id = 20
+        task.__dict__["issue"] = SimpleNamespace(
+            merge_request_iid=None,
+            merge_request_url=None,
+            branch_name=None,
+            target_branch=None,
+        )
         ctx = {
             "previous_scheduled_at": datetime(2024, 1, 1, tzinfo=timezone.utc),
             "scheduled_at": datetime(2024, 1, 2, tzinfo=timezone.utc),
@@ -1172,12 +1090,13 @@ class TestBuildAttachmentFields:
             status=TaskStatus.FAILED,
             error_message="Something went wrong",
         )
-        task.issue_iid = 20
-        task.is_manual = False
-        task.merge_request_iid = None
-        task.merge_request_url = None
-        task.branch_name = None
-        task.target_branch = None
+        task.issue_id = 20
+        task.__dict__["issue"] = SimpleNamespace(
+            merge_request_iid=None,
+            merge_request_url=None,
+            branch_name=None,
+            target_branch=None,
+        )
         with self._settings_patch():
             fields = _build_attachment_fields(
                 task,
@@ -1195,12 +1114,13 @@ class TestBuildAttachmentFields:
             id=1, project_id=10, user_prompt="x",
             status=TaskStatus.COMPLETED,
         )
-        task.issue_iid = 20
-        task.is_manual = False
-        task.merge_request_iid = None
-        task.merge_request_url = "https://gitlab.example.com/mr/1"
-        task.branch_name = None
-        task.target_branch = None
+        task.issue_id = 20
+        task.__dict__["issue"] = SimpleNamespace(
+            merge_request_iid=None,
+            merge_request_url="https://gitlab.example.com/mr/1",
+            branch_name=None,
+            target_branch=None,
+        )
         with self._settings_patch():
             fields = _build_attachment_fields(
                 task,
@@ -1227,12 +1147,13 @@ class TestBuildCardMarkdown:
             id=1, project_id=10, user_prompt="x",
             status=TaskStatus.COMPLETED,
         )
-        task.issue_iid = 20
-        task.is_manual = False
-        task.merge_request_iid = None
-        task.merge_request_url = None
-        task.branch_name = None
-        task.target_branch = None
+        task.issue_id = 20
+        task.__dict__["issue"] = SimpleNamespace(
+            merge_request_iid=None,
+            merge_request_url=None,
+            branch_name=None,
+            target_branch=None,
+        )
         with self._settings_patch():
             md = _build_card_markdown(task, MATTERMOST_EVENT_TASK_COMPLETED, {})
 
@@ -1250,12 +1171,13 @@ class TestBuildCardMarkdown:
             scheduled_at=datetime(2024, 6, 1, tzinfo=timezone.utc),
             error_message="Out of memory",
         )
-        task.issue_iid = 20
-        task.is_manual = False
-        task.merge_request_iid = 30
-        task.merge_request_url = None
-        task.branch_name = None
-        task.target_branch = None
+        task.issue_id = 20
+        task.__dict__["issue"] = SimpleNamespace(
+            merge_request_iid=30,
+            merge_request_url=None,
+            branch_name=None,
+            target_branch=None,
+        )
         ctx = {
             "previous_scheduled_at": datetime(2024, 5, 1, tzinfo=timezone.utc),
             "scheduled_at": datetime(2024, 6, 1, tzinfo=timezone.utc),

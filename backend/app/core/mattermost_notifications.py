@@ -324,18 +324,18 @@ def _build_attachment_fields(task: Task, event_type: str, field_keys: list[str],
         MATTERMOST_FIELD_PROJECT: ("项目", f"#{task.project_id}", True),
         MATTERMOST_FIELD_ISSUE: (
             "Issue",
-            f"#{task.issue_iid}" if task.issue_iid is not None else ("手工任务" if task.is_manual else "-"),
+            f"#{task.issue_id}" if task.issue_id is not None else "-",
             True,
         ),
         MATTERMOST_FIELD_MERGE_REQUEST: (
             "Merge Request",
-            f"!{task.merge_request_iid}" if task.merge_request_iid is not None else (task.merge_request_url or "-"),
+            (getattr(task.issue, 'merge_request_url', None) or "-") if task.issue_id else "-",
             True,
         ),
         MATTERMOST_FIELD_INITIATOR: ("发起人", task.initiator_username or "-", True),
         MATTERMOST_FIELD_STATUS: ("状态", task.status.value, True),
-        MATTERMOST_FIELD_BRANCH: ("分支", task.branch_name or "-", True),
-        MATTERMOST_FIELD_TARGET_BRANCH: ("目标分支", task.target_branch or "-", True),
+        MATTERMOST_FIELD_BRANCH: ("分支", (getattr(task.issue, 'branch_name', None) or "-") if task.issue_id else "-", True),
+        MATTERMOST_FIELD_TARGET_BRANCH: ("目标分支", (getattr(task.issue, 'target_branch', None) or "-") if task.issue_id else "-", True),
         MATTERMOST_FIELD_SCHEDULED_AT: ("预约时间", _format_datetime(task.scheduled_at), False),
         MATTERMOST_FIELD_SCHEDULE_CHANGE: ("时间变更", schedule_change or "-", False),
         MATTERMOST_FIELD_ERROR: ("错误摘要", (task.error_message or "-")[:500], False),
@@ -368,10 +368,11 @@ def _build_card_markdown(task: Task, event_type: str, context: dict[str, Any]) -
         f"- 状态: `{task.status.value}`",
     ]
 
-    if task.issue_iid is not None:
-        lines.append(f"- Issue: `#{task.issue_iid}`")
-    if task.merge_request_iid is not None:
-        lines.append(f"- Merge Request: `!{task.merge_request_iid}`")
+    if task.issue_id is not None:
+        lines.append(f"- Issue: `#{task.issue_id}`")
+    issue = getattr(task, 'issue', None)
+    if issue and getattr(issue, 'merge_request_iid', None) is not None:
+        lines.append(f"- Merge Request: `!{issue.merge_request_iid}`")
     if task.initiator_username:
         lines.append(f"- 发起人: `{task.initiator_username}`")
     if task.scheduled_at is not None:
@@ -418,8 +419,6 @@ async def notify_task_event(
             for profile in profiles:
                 event_types = deserialize_string_list(profile.event_types_json)
                 if event_type not in event_types:
-                    continue
-                if task.is_manual and not profile.send_for_manual_tasks:
                     continue
 
                 target_summary = (

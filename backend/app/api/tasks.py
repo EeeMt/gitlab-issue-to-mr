@@ -25,7 +25,7 @@ from app.dependencies.project_access import (
     require_project_access,
     require_project_access_scope,
 )
-from app.models import Task, TaskLog, TaskStatus, User
+from app.models import Issue, Task, TaskLog, TaskStatus, User
 
 from app.api.task_schemas import CreateTaskRequest, RescheduleTaskRequest, RetryTaskRequest
 from app.api.task_operations import (
@@ -418,7 +418,14 @@ async def get_task_stats(
         }
 
     # Fall back to GitLab API if no database stats
-    if not task.merge_request_iid:
+    merge_request_iid = None
+    if task.issue_id:
+        issue_result = await db.execute(select(Issue).where(Issue.id == task.issue_id))
+        issue = issue_result.scalar_one_or_none()
+        if issue:
+            merge_request_iid = issue.merge_request_iid
+
+    if not merge_request_iid:
         return {"additions": 0, "deletions": 0, "total": 0}
 
     from app.core.gitlab_client import get_gitlab_client
@@ -427,7 +434,7 @@ async def get_task_stats(
     stats = await asyncio.to_thread(
         gitlab.get_merge_request_stats,
         task.project_id,
-        task.merge_request_iid,
+        merge_request_iid,
     )
 
     if not stats:
@@ -501,8 +508,7 @@ async def cancel_task(
     await db.refresh(task)
 
     # Kill the running container (if any) to free the thread pool slot immediately
-    issue_suffix = f"i{task.issue_iid}" if task.issue_iid else "manual"
-    container_name = f"codify-{task_id}-p{task.project_id}-{issue_suffix}"
+    container_name = f"codify-{task_id}-issue{task.issue_id}"
     try:
         docker = get_docker_client()
         container = await asyncio.to_thread(docker.client.containers.get, container_name)
