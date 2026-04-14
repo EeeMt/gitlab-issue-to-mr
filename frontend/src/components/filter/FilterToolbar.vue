@@ -25,7 +25,7 @@
               <n-icon size="14"><FunnelOutline /></n-icon>
             </template>
             {{ t('filter.filter') }}
-            <n-badge v-if="activeFilterCount > 0" :value="activeFilterCount" :max="9" class="filter-toolbar__badge" />
+            <span v-if="activeFilterCount > 0" class="filter-toolbar__badge">{{ activeFilterCount > 9 ? '9+' : activeFilterCount }}</span>
           </n-button>
         </template>
         <FilterPopover
@@ -103,7 +103,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { NInput, NButton, NIcon, NPopover, NBadge, NTag } from 'naive-ui'
+import { NInput, NButton, NIcon, NPopover, NTag } from 'naive-ui'
 import { SearchOutline, FunnelOutline, SwapVerticalOutline, SettingsOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import type { FilterSortConfig } from '../../composables/useFilterSort'
@@ -201,7 +201,18 @@ const filterChips = computed(() => {
   margin-left: 4px;
 }
 .filter-toolbar__badge {
-  margin-left: 4px;
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 9px;
+  background: var(--n-primary-color, #4080ff);
+  color: #fff;
+  display: inline-block;
+  padding: 0 5px;
 }
 .filter-toolbar__spacer {
   flex: 1;

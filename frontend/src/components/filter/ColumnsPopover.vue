@@ -46,7 +46,7 @@ const toggleableColumns = computed(() =>
 .columns-popover {
   width: 220px;
   background: var(--n-color, #fff);
-  border-radius: 8px;
+  border-radius: 12px;
   box-shadow: 0 3px 14px rgba(0, 0, 0, 0.12);
   border: 1px solid var(--n-border-color, #e0e0e6);
   padding: 4px 0;
@@ -63,14 +63,18 @@ const toggleableColumns = computed(() =>
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--n-border-color, rgba(255,255,255,0.06));
+  border-bottom: 1px solid var(--n-divider-color, #efeff5);
+  margin: 0 8px;
+  padding-left: 4px;
+  padding-right: 4px;
 }
 .columns-popover__label {
   font-size: 13px;
 }
 .columns-popover__footer {
-  padding: 8px 12px;
-  border-top: 1px solid var(--n-border-color, #333);
+  padding: 8px 4px;
+  border-top: 1px solid var(--n-divider-color, #efeff5);
+  margin: 0 8px;
 }
 .columns-popover__reset {
   font-size: 12px;

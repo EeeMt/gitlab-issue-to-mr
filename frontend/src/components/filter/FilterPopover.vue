@@ -184,7 +184,7 @@ function clearCurrent() {
   max-height: 360px;
   overflow-y: auto;
   background: var(--n-color, #fff);
-  border-radius: 8px;
+  border-radius: 12px;
   box-shadow: 0 3px 14px rgba(0, 0, 0, 0.12);
   border: 1px solid var(--n-border-color, #e0e0e6);
   padding: 4px 0;
@@ -233,8 +233,10 @@ function clearCurrent() {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--n-border-color, #333);
-  margin-bottom: 4px;
+  border-bottom: 1px solid var(--n-divider-color, #efeff5);
+  margin: 0 8px 4px;
+  padding-left: 4px;
+  padding-right: 4px;
 }
 .filter-popover__back {
   color: var(--n-primary-color, #4080ff);
@@ -293,9 +295,9 @@ function clearCurrent() {
 .filter-popover__footer {
   display: flex;
   justify-content: space-between;
-  padding: 8px 12px;
-  border-top: 1px solid var(--n-border-color, #333);
-  margin-top: 4px;
+  padding: 8px 4px;
+  border-top: 1px solid var(--n-divider-color, #efeff5);
+  margin: 4px 8px 0;
 }
 .filter-popover__footer-action {
   font-size: 12px;
