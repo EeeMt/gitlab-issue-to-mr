@@ -292,14 +292,14 @@
               <div class="prompt-label-row">
                 <span>{{ t('issue.field.description') }}</span>
                 <n-button
-                  size="small"
+                  size="tiny"
                   :disabled="promptTemplatesLoading || promptTemplates.length === 0"
                   :loading="promptTemplatesLoading"
                   type="default"
                   @click="showTemplateDrawer = true"
                 >
                   <template #icon>
-                    <n-icon :component="DocumentTextOutline" />
+                    <n-icon :component="DocumentTextOutline" size="12" />
                   </template>
                   {{ t('createTask.useTemplate') }}
                 </n-button>
@@ -339,12 +339,12 @@
 
           <!-- Schedule -->
           <n-form-item :label="t('createTask.schedule')">
-            <n-space vertical :size="12" style="width: 100%">
+            <div class="schedule-section">
               <n-radio-group v-model:value="scheduleType">
                 <n-radio value="now">{{ t('createTask.executeNow') }}</n-radio>
                 <n-radio value="scheduled">{{ t('createTask.scheduleAt') }}</n-radio>
               </n-radio-group>
-              <div v-if="scheduleType === 'scheduled'" class="schedule-row">
+              <div class="schedule-row" :class="{ 'schedule-row--hidden': scheduleType !== 'scheduled' }">
                 <n-date-picker
                   v-model:value="newTaskSchedule"
                   type="datetime"
@@ -362,7 +362,7 @@
                   {{ t('createTask.viewScheduleHeatmap') }}
                 </n-button>
               </div>
-            </n-space>
+            </div>
           </n-form-item>
         </n-form>
 
@@ -980,6 +980,15 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   width: 100%;
+  gap: 8px;
+}
+
+.prompt-label-row span {
+  flex-shrink: 0;
+}
+
+.prompt-label-row .n-button {
+  flex-shrink: 0;
 }
 
 .priority-selector {
@@ -1008,11 +1017,29 @@ onMounted(() => {
 .priority-card__label { font-weight: 600; font-size: 13px; }
 .priority-card__desc { font-size: 11px; color: var(--n-text-color-3); }
 
+.schedule-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
 .schedule-row {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
+  overflow: hidden;
+  max-height: 40px;
+  opacity: 1;
+  transition: max-height 0.2s ease, opacity 0.2s ease, margin 0.2s ease;
+}
+
+.schedule-row--hidden {
+  max-height: 0;
+  opacity: 0;
+  margin: 0;
+  pointer-events: none;
 }
 
 .prompt-variable-warning {
