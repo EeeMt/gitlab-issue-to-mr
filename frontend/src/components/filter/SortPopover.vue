@@ -54,7 +54,7 @@ const fieldOptions = computed(() =>
 
 <style scoped>
 .sort-popover {
-  width: 240px;
+  width: 200px;
   background: var(--n-color, #fff);
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.1);

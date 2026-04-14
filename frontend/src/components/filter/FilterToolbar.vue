@@ -18,7 +18,7 @@
       </n-input>
 
       <!-- Filter button -->
-      <n-popover trigger="click" placement="bottom-start" :show-arrow="false" raw>
+      <n-popover trigger="click" placement="bottom-start" :show-arrow="false" raw :style="{ boxShadow: 'none' }">
         <template #trigger>
           <n-button size="small" :secondary="!hasActiveFilters" :type="hasActiveFilters ? 'primary' : 'default'" data-testid="filter-toolbar-filter-btn">
             <template #icon>
@@ -36,7 +36,7 @@
       </n-popover>
 
       <!-- Sort button -->
-      <n-popover trigger="click" placement="bottom-start" :show-arrow="false" raw>
+      <n-popover trigger="click" placement="bottom-start" :show-arrow="false" raw :style="{ boxShadow: 'none' }">
         <template #trigger>
           <n-button size="small" secondary data-testid="filter-toolbar-sort-btn">
             <template #icon>
@@ -55,7 +55,7 @@
       </n-popover>
 
       <!-- Columns button -->
-      <n-popover trigger="click" placement="bottom-start" :show-arrow="false" raw>
+      <n-popover trigger="click" placement="bottom-start" :show-arrow="false" raw :style="{ boxShadow: 'none' }">
         <template #trigger>
           <n-button size="small" secondary data-testid="filter-toolbar-columns-btn">
             <template #icon>
