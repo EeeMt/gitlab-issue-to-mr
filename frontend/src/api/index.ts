@@ -672,6 +672,12 @@ export async function getTasksPaginated(params: {
   status?: string
   project_id?: number
   initiator_username?: string
+  priority?: string
+  search?: string
+  created_after?: string
+  created_before?: string
+  sort_by?: string
+  sort_order?: string
 }): Promise<PaginatedResponse<Task>> {
   const response = await api.get('/tasks', { params })
   return response.data
@@ -1055,6 +1061,11 @@ export async function getIssues(params?: {
   status?: string
   project_id?: number
   initiator_user_id?: number
+  search?: string
+  created_after?: string
+  created_before?: string
+  sort_by?: string
+  sort_order?: string
   page?: number
   page_size?: number
 }): Promise<IssueListResponse> {
