@@ -137,6 +137,8 @@ const en = {
     sortCreated: 'Created time',
     sortPriority: 'Priority',
     sortStatus: 'Status',
+    sortChanges: 'Changes',
+    sortTokens: 'Tokens',
     ascending: 'Ascending',
     descending: 'Descending',
     ordering: 'Ordering',

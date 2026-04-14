@@ -135,7 +135,7 @@ const filterConfig: FilterSortConfig = {
       key: 'project_id',
       label: 'filter.project',
       icon: FolderOpenOutline,
-      type: 'single-select',
+      type: 'multi-select',
       options: () => projects.value.map((p) => ({ label: p.path_with_namespace, value: p.id })),
     },
     {
@@ -149,6 +149,8 @@ const filterConfig: FilterSortConfig = {
   sortFields: [
     { key: 'created_at', label: 'filter.sortCreated' },
     { key: 'status', label: 'filter.sortStatus' },
+    { key: 'total_changes', label: 'filter.sortChanges' },
+    { key: 'total_input_tokens', label: 'filter.sortTokens' },
   ],
   columns: [
     { key: 'id', label: 'dashboard.id', defaultVisible: true, alwaysVisible: true },

@@ -141,7 +141,7 @@ const filterConfig: FilterSortConfig = {
       key: 'project_id',
       label: 'filter.project',
       icon: FolderOpenOutline,
-      type: 'single-select',
+      type: 'multi-select',
       options: () => projects.value.map((p) => ({ label: p.path_with_namespace, value: p.id })),
     },
     {
@@ -159,7 +159,7 @@ const filterConfig: FilterSortConfig = {
       key: 'initiator_username',
       label: 'filter.initiator',
       icon: PersonOutline,
-      type: 'single-select',
+      type: 'multi-select',
       options: () => initiatorOptions.value.map((o) => ({ label: o.label, value: o.value })),
     },
     {
@@ -174,6 +174,8 @@ const filterConfig: FilterSortConfig = {
     { key: 'created_at', label: 'filter.sortCreated' },
     { key: 'priority', label: 'filter.sortPriority' },
     { key: 'status', label: 'filter.sortStatus' },
+    { key: 'total_changes', label: 'filter.sortChanges' },
+    { key: 'input_tokens', label: 'filter.sortTokens' },
   ],
   columns: [
     { key: 'id', label: 'dashboard.id', defaultVisible: true, alwaysVisible: true },
@@ -186,6 +188,7 @@ const filterConfig: FilterSortConfig = {
     { key: 'branch_name', label: 'dashboard.branch', defaultVisible: false },
     { key: 'merge_request_url', label: 'dashboard.mergeRequest', defaultVisible: false },
     { key: 'changes', label: 'dashboard.changes', defaultVisible: true },
+    { key: 'tokens', label: 'analytics.tokens', defaultVisible: false },
     { key: 'created_at', label: 'common.created', defaultVisible: true },
     { key: 'scheduled_at', label: 'dashboard.scheduled', defaultVisible: false },
   ],
@@ -390,6 +393,19 @@ const allDesktopColumns = computed<DataTableColumns<Task>>(() => {
           h('span', { style: 'color: #18a053' }, '+' + (row.additions || 0)),
           h('span', { style: 'color: #db3b21; margin-left: 4px' }, '-' + (row.deletions || 0))
         ])
+      }
+    },
+    {
+      title: t('analytics.tokens'),
+      key: 'tokens',
+      width: 100,
+      render: (row) => {
+        const input = row.input_tokens || 0
+        const output = row.output_tokens || 0
+        if (!input && !output) return '-'
+        const total = input + output
+        const fmt = (n: number) => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n)
+        return h('span', { style: 'font-size: 12px; color: var(--n-text-color-3, #888)' }, fmt(total))
       }
     },
     {

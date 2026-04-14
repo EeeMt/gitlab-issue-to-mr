@@ -148,14 +148,14 @@ async def create_issue(
     return _serialize_issue(issue)
 
 
-ISSUES_SORT_FIELDS = {"created_at", "status"}
+ISSUES_SORT_FIELDS = {"created_at", "status", "total_changes", "total_input_tokens", "total_output_tokens"}
 SORT_ORDERS = {"asc", "desc"}
 
 
 @router.get("")
 async def list_issues(
     status: Optional[str] = None,
-    project_id: Optional[int] = None,
+    project_id: Optional[str] = None,
     initiator_user_id: Optional[int] = None,
     search: Optional[str] = None,
     created_after: Optional[str] = None,
@@ -207,7 +207,11 @@ async def list_issues(
     )
 
     # Determine sort column and direction
-    sort_column = getattr(Issue, effective_sort_by)
+    agg_sort_fields = {"total_changes", "total_input_tokens", "total_output_tokens"}
+    if effective_sort_by in agg_sort_fields:
+        sort_column = func.coalesce(getattr(task_agg_subq.c, effective_sort_by), 0)
+    else:
+        sort_column = getattr(Issue, effective_sort_by)
     order_clause = sort_column.asc() if effective_sort_order == "asc" else sort_column.desc()
 
     query = (
@@ -245,8 +249,31 @@ async def list_issues(
         elif valid_statuses:
             query = query.where(Issue.status.in_(valid_statuses))
 
-    if project_id is not None:
-        query = query.where(Issue.project_id == project_id)
+    # Project filter (comma-separated integers for multi-select)
+    if project_id:
+        project_ids = []
+        for p in project_id.split(","):
+            p = p.strip()
+            if p:
+                try:
+                    project_ids.append(int(p))
+                except ValueError:
+                    pass
+        if project_ids:
+            if not access_scope.is_unrestricted:
+                project_ids = [pid for pid in project_ids if pid in access_scope.accessible_project_ids]
+            if len(project_ids) == 1:
+                query = query.where(Issue.project_id == project_ids[0])
+            elif project_ids:
+                query = query.where(Issue.project_id.in_(project_ids))
+            else:
+                query = query.where(false())
+        elif not access_scope.is_unrestricted:
+            allowed_project_ids = access_scope.accessible_project_ids
+            if not allowed_project_ids:
+                query = query.where(false())
+            else:
+                query = query.where(Issue.project_id.in_(allowed_project_ids))
     elif not access_scope.is_unrestricted:
         allowed_project_ids = access_scope.accessible_project_ids
         if not allowed_project_ids:

@@ -45,14 +45,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-TASKS_SORT_FIELDS = {"created_at", "status", "priority"}
+TASKS_SORT_FIELDS = {"created_at", "status", "priority", "total_changes", "input_tokens", "output_tokens"}
 SORT_ORDERS = {"asc", "desc"}
 
 
 @router.get("/tasks")
 async def list_tasks(
     status: Optional[str] = None,
-    project_id: Optional[int] = None,
+    project_id: Optional[str] = None,
     issue_id: Optional[int] = None,
     initiator_username: Optional[str] = None,
     priority: Optional[str] = None,
@@ -90,7 +90,10 @@ async def list_tasks(
         effective_sort_order = sort_order
 
     sort_column = getattr(Task, effective_sort_by)
-    order_clause = sort_column.asc() if effective_sort_order == "asc" else sort_column.desc()
+    if effective_sort_order == "asc":
+        order_clause = sort_column.asc().nullslast()
+    else:
+        order_clause = sort_column.desc().nullslast()
 
     query = select(Task).options(selectinload(Task.issue)).order_by(order_clause)
 
@@ -115,8 +118,31 @@ async def list_tasks(
         elif valid_statuses:
             query = query.where(Task.status.in_(valid_statuses))
 
+    # Project filter (comma-separated integers for multi-select)
     if project_id:
-        query = query.where(Task.project_id == project_id)
+        project_ids = []
+        for p in project_id.split(","):
+            p = p.strip()
+            if p:
+                try:
+                    project_ids.append(int(p))
+                except ValueError:
+                    pass
+        if project_ids:
+            if not access_scope.is_unrestricted:
+                project_ids = [pid for pid in project_ids if pid in access_scope.accessible_project_ids]
+            if len(project_ids) == 1:
+                query = query.where(Task.project_id == project_ids[0])
+            elif project_ids:
+                query = query.where(Task.project_id.in_(project_ids))
+            else:
+                query = query.where(false())
+        elif not access_scope.is_unrestricted:
+            allowed_project_ids = access_scope.accessible_project_ids
+            if not allowed_project_ids:
+                query = query.where(false())
+            else:
+                query = query.where(Task.project_id.in_(allowed_project_ids))
     elif not access_scope.is_unrestricted:
         allowed_project_ids = access_scope.accessible_project_ids
         if not allowed_project_ids:
@@ -124,8 +150,13 @@ async def list_tasks(
         else:
             query = query.where(Task.project_id.in_(allowed_project_ids))
 
+    # Initiator filter (comma-separated usernames for multi-select)
     if initiator_username:
-        query = query.where(Task.initiator_username == initiator_username)
+        usernames = [u.strip() for u in initiator_username.split(",") if u.strip()]
+        if len(usernames) == 1:
+            query = query.where(Task.initiator_username == usernames[0])
+        elif usernames:
+            query = query.where(Task.initiator_username.in_(usernames))
 
     if issue_id:
         query = query.where(Task.issue_id == issue_id)

@@ -137,6 +137,8 @@ const zhCN = {
     sortCreated: '创建时间',
     sortPriority: '优先级',
     sortStatus: '状态',
+    sortChanges: '变更',
+    sortTokens: 'Tokens',
     ascending: '升序',
     descending: '降序',
     ordering: '排序方式',
