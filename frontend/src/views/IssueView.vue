@@ -460,6 +460,7 @@ import {
 import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
+import { extractSlotErrorMessage } from '../utils/slotError'
 import { authState, isAdmin } from '../auth'
 
 const route = useRoute()
@@ -799,6 +800,18 @@ async function handleSaveEdit() {
 }
 
 async function handleCreateTask() {
+  // Validate scheduled time is in the future
+  if (scheduleType.value === 'scheduled') {
+    if (!newTaskSchedule.value) {
+      message.warning(t('createTask.pleaseSelectScheduledTime'))
+      return
+    }
+    if (newTaskSchedule.value <= Date.now()) {
+      message.warning(t('createTask.scheduledTimeFuture'))
+      return
+    }
+  }
+
   createTaskLoading.value = true
   try {
     const request: Parameters<typeof createTask>[0] = {
@@ -808,17 +821,18 @@ async function handleCreateTask() {
     if (newTaskPrompt.value.trim()) {
       request.user_prompt = newTaskPrompt.value.trim()
     }
-    if (newTaskSchedule.value) {
+    if (scheduleType.value === 'scheduled' && newTaskSchedule.value) {
       request.scheduled_datetime = new Date(newTaskSchedule.value).toISOString()
     }
     await createTask(request)
-    message.success('Task created')
+    message.success(t('issue.createTask') + ' ✓')
     newTaskPrompt.value = ''
     newTaskSchedule.value = null
+    scheduleType.value = 'now'
     showCreateDrawer.value = false
     await fetchIssue()
-  } catch {
-    message.error('Failed to create task')
+  } catch (error: any) {
+    message.error(extractSlotErrorMessage(error, t, 'createTask.failedToCreateTask'))
   } finally {
     createTaskLoading.value = false
   }
