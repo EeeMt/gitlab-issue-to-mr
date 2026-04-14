@@ -325,7 +325,10 @@
                 v-for="opt in priorityOptions"
                 :key="opt.value"
                 class="priority-card"
-                :class="{ 'priority-card--active': newTaskPriority === opt.value }"
+                :class="[
+                  `priority-card--p${opt.value}`,
+                  { 'priority-card--active': newTaskPriority === opt.value }
+                ]"
                 @click="newTaskPriority = opt.value"
               >
                 <n-radio :value="opt.value" />
@@ -349,7 +352,7 @@
                   v-model:value="newTaskSchedule"
                   type="datetime"
                   clearable
-                  style="flex: 1"
+                  style="width: 240px; flex-shrink: 0"
                   :is-date-disabled="isScheduleDateDisabled"
                 />
                 <n-button
@@ -975,6 +978,10 @@ onMounted(() => {
   max-width: 100%;
 }
 
+.issue-view__create-form :deep(.variable-editor__codemirror .cm-editor) {
+  min-height: 200px;
+}
+
 .prompt-label-row {
   display: flex;
   align-items: center;
@@ -1010,10 +1017,21 @@ onMounted(() => {
 .priority-card:hover {
   border-color: var(--n-primary-color);
 }
-.priority-card--active {
-  border-color: var(--n-primary-color);
+.priority-card--active.priority-card--p0 {
+  border-color: #e88080;
+  background: rgba(232, 128, 128, 0.06);
+}
+.priority-card--active.priority-card--p1 {
+  border-color: #f0a020;
+  background: rgba(240, 160, 32, 0.06);
+}
+.priority-card--active.priority-card--p2 {
+  border-color: #63e2b7;
   background: rgba(99, 226, 183, 0.06);
 }
+.priority-card--p0 .priority-card__label { color: #d03050; }
+.priority-card--p1 .priority-card__label { color: #f0a020; }
+.priority-card--p2 .priority-card__label { color: #18a058; }
 .priority-card__label { font-weight: 600; font-size: 13px; }
 .priority-card__desc { font-size: 11px; color: var(--n-text-color-3); }
 
