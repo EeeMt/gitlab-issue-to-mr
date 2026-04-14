@@ -187,7 +187,7 @@ const filterConfig: FilterSortConfig = {
     { key: 'priority', label: 'dashboard.priority', defaultVisible: true },
     { key: 'branch_name', label: 'dashboard.branch', defaultVisible: false },
     { key: 'merge_request_url', label: 'dashboard.mergeRequest', defaultVisible: false },
-    { key: 'changes', label: 'dashboard.changes', defaultVisible: true },
+    { key: 'changes', label: 'common.changes', defaultVisible: true },
     { key: 'tokens', label: 'analytics.tokens', defaultVisible: false },
     { key: 'created_at', label: 'common.created', defaultVisible: true },
     { key: 'scheduled_at', label: 'dashboard.scheduled', defaultVisible: false },
@@ -253,6 +253,13 @@ function getProjectSecondaryLabel(task: Task): string {
 
 function getInitiatorLabel(task: Task): string {
   return task.initiator_username?.trim() || '-'
+}
+
+const secondaryTextStyle = { fontSize: '11px', color: 'rgba(15,23,42,0.45)', marginTop: '2px', lineHeight: '1.4' }
+
+function formatNumber(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—'
+  return Math.round(value).toLocaleString()
 }
 
 function formatCompactDateTime(value?: string | null): string {
@@ -383,29 +390,32 @@ const allDesktopColumns = computed<DataTableColumns<Task>>(() => {
       }
     },
     {
-      title: t('dashboard.changes'),
+      title: t('common.changes'),
       key: 'changes',
-      width: 84,
+      width: 110,
       render: (row) => {
-        if (row.additions === undefined && row.deletions === undefined) return '-'
-        if (!row.additions && !row.deletions) return '-'
-        return h('span', { style: 'display: flex; align-items: center; gap: 4px; font-size: 12px;' }, [
-          h('span', { style: 'color: #18a053' }, '+' + (row.additions || 0)),
-          h('span', { style: 'color: #db3b21; margin-left: 4px' }, '-' + (row.deletions || 0))
+        const total = (row.additions || 0) + (row.deletions || 0)
+        if (!total) return '—'
+        return h('div', [
+          h('div', String(total)),
+          h('div', { style: secondaryTextStyle }, t('analytics.changeBreakdown', { additions: row.additions || 0, deletions: row.deletions || 0 })),
         ])
       }
     },
     {
       title: t('analytics.tokens'),
       key: 'tokens',
-      width: 100,
+      width: 140,
       render: (row) => {
         const input = row.input_tokens || 0
         const output = row.output_tokens || 0
-        if (!input && !output) return '-'
+        if (!input && !output) return '—'
         const total = input + output
-        const fmt = (n: number) => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n)
-        return h('span', { style: 'font-size: 12px; color: var(--n-text-color-3, #888)' }, fmt(total))
+        return h('div', [
+          h('div', formatNumber(total)),
+          h('div', { style: secondaryTextStyle }, t('analytics.tokenInputLine', { value: formatNumber(input) })),
+          h('div', { style: secondaryTextStyle }, t('analytics.tokenOutputLine', { value: formatNumber(output) })),
+        ])
       }
     },
     {
