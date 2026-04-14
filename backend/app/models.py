@@ -19,7 +19,7 @@ class IssueStatus(str, Enum):
 
     OPEN = "open"
     IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
+    IN_REVIEW = "in_review"
     CLOSED = "closed"
 
 

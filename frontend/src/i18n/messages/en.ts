@@ -185,7 +185,7 @@ const en = {
     tokensUsed: 'Tokens Used',
     last90days: 'Last 90 days',
     trend: 'Trend',
-    issueStatusTip: 'Distribution of your issues by status (open / in progress / completed / closed) over the last 90 days',
+    issueStatusTip: 'Distribution of your issues by status (open / in progress / in review / closed) over the last 90 days',
     taskStatusTip: 'Distribution of your tasks by status (pending / queued / running / completed / failed / cancelled) over the last 90 days',
     linesChangedTip: 'Total lines added and deleted by your tasks in the last 90 days',
     tokensUsedTip: 'Total input and output tokens consumed by your tasks in the last 90 days',
@@ -238,11 +238,11 @@ const en = {
     totalIssues: 'Total Issues',
     openCount: 'Open',
     inProgressCount: 'In Progress',
-    completedCount: 'Completed',
+    completedCount: 'In Review',
     status: {
       open: 'Open',
       in_progress: 'In Progress',
-      completed: 'Completed',
+      in_review: 'In Review',
       closed: 'Closed',
     },
     field: {

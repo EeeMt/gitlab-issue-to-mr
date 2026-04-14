@@ -170,9 +170,9 @@ async def maybe_update_issue_status(db: AsyncSession, issue_id: int) -> None:
             )
         )
         if completed_count_result.scalar() > 0:
-            issue.status = IssueStatus.COMPLETED.value
+            issue.status = IssueStatus.IN_REVIEW.value
             await db.commit()
-            logger.info(f"Issue {issue_id} auto-transitioned to COMPLETED")
+            logger.info(f"Issue {issue_id} auto-transitioned to IN_REVIEW")
         else:
             issue.status = IssueStatus.OPEN.value
             await db.commit()

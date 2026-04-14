@@ -50,7 +50,7 @@ api.interceptors.response.use(
 
 // Status union types
 export type TaskStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
-export type IssueStatus = 'open' | 'in_progress' | 'completed' | 'closed'
+export type IssueStatus = 'open' | 'in_progress' | 'in_review' | 'closed'
 export type ContainerStatus = 'created' | 'running' | 'paused' | 'restarting' | 'removing' | 'exited' | 'dead'
 
 // API error type

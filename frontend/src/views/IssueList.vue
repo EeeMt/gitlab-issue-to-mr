@@ -132,7 +132,7 @@ const pagination = computed(() => ({
 const statusOptions = computed(() => [
   { label: t('issue.status.open'), value: 'open' },
   { label: t('issue.status.in_progress'), value: 'in_progress' },
-  { label: t('issue.status.completed'), value: 'completed' },
+  { label: t('issue.status.in_review'), value: 'in_review' },
   { label: t('issue.status.closed'), value: 'closed' },
 ])
 
@@ -153,7 +153,7 @@ function issueRowProps(row: Issue) {
 const statusColors: Record<IssueStatus, 'default' | 'info' | 'warning' | 'success'> = {
   open: 'info',
   in_progress: 'warning',
-  completed: 'success',
+  in_review: 'success',
   closed: 'default',
 }
 
@@ -314,7 +314,7 @@ async function fetchStats() {
       statsTotal.value = issueStats.total
       statsOpen.value = issueStats.by_status?.open ?? 0
       statsInProgress.value = issueStats.by_status?.in_progress ?? 0
-      statsCompleted.value = issueStats.by_status?.completed ?? 0
+      statsCompleted.value = issueStats.by_status?.in_review ?? 0
     }
   } catch {
     // Stats are supplementary; don't block UI

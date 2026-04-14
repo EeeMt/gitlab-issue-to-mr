@@ -235,7 +235,7 @@ const mockFailedTasks = [
 const mockStats = {
   total: 50, pending: 0, queued: 1, running: 3, completed: 30, failed: 10,
   cancelled: 0, completed_24h: 2, failed_cancelled_24h: 1, running_long_30min: 0,
-  issues: { total: 15, by_status: { open: 5, in_progress: 3, completed: 6, closed: 1 } },
+  issues: { total: 15, by_status: { open: 5, in_progress: 3, in_review: 6, closed: 1 } },
 }
 
 const mockHeatmapData = [{ date: '2024-01-01', count: 3 }]
@@ -417,7 +417,7 @@ describe('Dashboard', () => {
       setupDefaultMocks()
       mockApi.getStats.mockResolvedValue({
         ...mockStats,
-        issues: { total: 5, by_status: { open: 5, in_progress: 0, completed: 0, closed: 0 } },
+        issues: { total: 5, by_status: { open: 5, in_progress: 0, in_review: 0, closed: 0 } },
       })
       wrapper = mount(Dashboard, { global: { plugins: [router] } })
       await flushPromises()

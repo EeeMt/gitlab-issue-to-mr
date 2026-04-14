@@ -218,7 +218,7 @@ class Scheduler:
         """Auto-transition issue OPEN/COMPLETED → IN_PROGRESS when a task starts running."""
         try:
             issue = await db.get(Issue, issue_id)
-            if issue and issue.status in (IssueStatus.OPEN.value, IssueStatus.COMPLETED.value):
+            if issue and issue.status in (IssueStatus.OPEN.value, IssueStatus.IN_REVIEW.value):
                 issue.status = IssueStatus.IN_PROGRESS.value
                 await db.commit()
                 logger.info(f"Issue {issue_id} auto-transitioned to IN_PROGRESS")
