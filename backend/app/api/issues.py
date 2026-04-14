@@ -1,9 +1,10 @@
 """Issue CRUD API endpoints."""
 
 import logging
+from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import false, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -147,21 +148,48 @@ async def create_issue(
     return _serialize_issue(issue)
 
 
+ISSUES_SORT_FIELDS = {"created_at", "status"}
+SORT_ORDERS = {"asc", "desc"}
+
+
 @router.get("")
 async def list_issues(
     status: Optional[str] = None,
     project_id: Optional[int] = None,
     initiator_user_id: Optional[int] = None,
+    search: Optional[str] = None,
+    created_after: Optional[str] = None,
+    created_before: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_authenticated_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
-    """List issues with optional filtering and pagination."""
+    """List issues with optional filtering, sorting, and pagination."""
     page = max(1, page)
     page_size = max(1, min(100, page_size))
     offset = (page - 1) * page_size
+
+    # Validate sort params
+    effective_sort_by = "created_at"
+    effective_sort_order = "desc"
+    if sort_by:
+        if sort_by not in ISSUES_SORT_FIELDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid sort_by: {sort_by}. Allowed: {', '.join(sorted(ISSUES_SORT_FIELDS))}",
+            )
+        effective_sort_by = sort_by
+    if sort_order:
+        if sort_order not in SORT_ORDERS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid sort_order: {sort_order}. Allowed: asc, desc",
+            )
+        effective_sort_order = sort_order
 
     # Build a subquery for task_count and totals
     task_agg_subq = (
@@ -178,6 +206,10 @@ async def list_issues(
         .subquery()
     )
 
+    # Determine sort column and direction
+    sort_column = getattr(Issue, effective_sort_by)
+    order_clause = sort_column.asc() if effective_sort_order == "asc" else sort_column.desc()
+
     query = (
         select(
             Issue,
@@ -189,20 +221,29 @@ async def list_issues(
             task_agg_subq.c.total_output_tokens,
         )
         .outerjoin(task_agg_subq, Issue.id == task_agg_subq.c.issue_id)
-        .order_by(Issue.created_at.desc())
+        .order_by(order_clause)
     )
 
+    # Multi-status filter (comma-separated)
     if status:
-        try:
-            IssueStatus(status)
-        except ValueError:
+        status_parts = [s.strip() for s in status.split(",") if s.strip()]
+        valid_statuses = []
+        invalid_parts = []
+        for part in status_parts:
+            try:
+                valid_statuses.append(IssueStatus(part))
+            except ValueError:
+                invalid_parts.append(part)
+        if invalid_parts:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST
-                if hasattr(status, "HTTP_400_BAD_REQUEST")
-                else 400,
-                detail=f"Invalid status: {status}",
+                status_code=400,
+                detail=f"Invalid status value(s): {', '.join(invalid_parts)}. "
+                       f"Allowed: {', '.join(s.value for s in IssueStatus)}",
             )
-        query = query.where(Issue.status == status)
+        if len(valid_statuses) == 1:
+            query = query.where(Issue.status == valid_statuses[0])
+        elif valid_statuses:
+            query = query.where(Issue.status.in_(valid_statuses))
 
     if project_id is not None:
         query = query.where(Issue.project_id == project_id)
@@ -215,6 +256,25 @@ async def list_issues(
 
     if initiator_user_id is not None:
         query = query.where(Issue.initiator_user_id == initiator_user_id)
+
+    # Text search on title
+    if search and len(search) >= 2:
+        escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        query = query.where(Issue.title.ilike(f"%{escaped}%"))
+
+    # Date range filters
+    if created_after:
+        try:
+            dt = datetime.fromisoformat(created_after.replace("Z", "+00:00"))
+            query = query.where(Issue.created_at >= dt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid created_after: {created_after}")
+    if created_before:
+        try:
+            dt = datetime.fromisoformat(created_before.replace("Z", "+00:00"))
+            query = query.where(Issue.created_at <= dt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid created_before: {created_before}")
 
     # Total count
     count_q = select(func.count()).select_from(
