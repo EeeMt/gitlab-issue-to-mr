@@ -53,6 +53,7 @@ def create_mock_db(task, issue=None):
     mock_db.commit = AsyncMock()
     mock_db.add = MagicMock()
     mock_db.get = AsyncMock(return_value=issue)
+    mock_db.refresh = AsyncMock()
     return mock_db
 
 

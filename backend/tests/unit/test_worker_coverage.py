@@ -123,6 +123,7 @@ def _make_db(task=None):
     db.commit = AsyncMock()
     db.add = MagicMock()
     db.flush = AsyncMock()
+    db.refresh = AsyncMock()
 
     # Support db.get(Issue, issue_id) for loading issue from task
     async def _mock_get(model_cls, id_val):

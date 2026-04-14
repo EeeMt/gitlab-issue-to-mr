@@ -883,6 +883,16 @@ class WorkerExecutor:
                 container, task.id, db, settings.task_timeout
             )
 
+            # Check if task was cancelled externally while container was running
+            await db.refresh(task)
+            if task.status == TaskStatus.CANCELLED:
+                logger.info(f"[Task {task_id}] Was cancelled during execution, preserving cancelled status")
+                try:
+                    self.docker.remove_container(container, force=True)
+                except Exception:
+                    pass
+                return False
+
             # Parse results
             await self._parse_task_result(task, logs, db, exit_code, issue=issue)
 
@@ -1013,6 +1023,16 @@ class WorkerExecutor:
             exit_code, logs, log_chunks_saved = await self._stream_logs_to_db(
                 container, task.id, db, settings.task_timeout
             )
+
+            # Check if task was cancelled externally while container was running
+            await db.refresh(task)
+            if task.status == TaskStatus.CANCELLED:
+                logger.info(f"[Task {task_id}] Resume: was cancelled during execution, preserving cancelled status")
+                try:
+                    self.docker.remove_container(container, force=True)
+                except Exception:
+                    pass
+                return False
 
             # Parse results and update task
             await self._parse_task_result(task, logs, db, exit_code, issue=issue)

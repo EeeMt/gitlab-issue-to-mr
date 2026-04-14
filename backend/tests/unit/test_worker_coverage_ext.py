@@ -140,6 +140,7 @@ def _make_db(task=None):
     db.commit = AsyncMock()
     db.add = MagicMock()
     db.flush = AsyncMock()
+    db.refresh = AsyncMock()
 
     # db.get should return the task's issue when queried
     async def mock_get(model_class, id_val):
