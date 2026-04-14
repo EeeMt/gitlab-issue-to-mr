@@ -1,0 +1,89 @@
+<h2>Filter/Sort UI — Three Approaches</h2>
+<p style="color: #888; margin-bottom: 24px;">Which approach best fits Codify's lists?</p>
+
+<div class="cards" style="gap: 20px;">
+
+  <div class="card" style="border-left: 4px solid #4080ff;">
+    <h3>A. Linear-Style Toolbar <span style="background:#18a058;color:white;padding:2px 8px;border-radius:4px;font-size:12px;">Recommended</span></h3>
+    <div style="background:#1a1a2e;border-radius:8px;padding:16px;margin:12px 0;font-family:monospace;font-size:13px;color:#e0e0e0;">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+        <span style="background:#333;padding:4px 10px;border-radius:4px;">🔍 Search...</span>
+        <span style="background:#333;padding:4px 10px;border-radius:4px;">⊕ Filter</span>
+        <span style="background:#333;padding:4px 10px;border-radius:4px;">↕ Sort</span>
+        <span style="background:#333;padding:4px 10px;border-radius:4px;">⚙ Columns</span>
+        <span style="flex:1"></span>
+        <span style="color:#888;">12 results</span>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <span style="background:#1e3a5f;border:1px solid #4080ff;padding:2px 8px;border-radius:12px;font-size:11px;">Status: Open ✕</span>
+        <span style="background:#3a1e1e;border:1px solid #d03050;padding:2px 8px;border-radius:12px;font-size:11px;">Priority: P0 ✕</span>
+      </div>
+    </div>
+    <p><strong>How it works:</strong></p>
+    <ul style="font-size:14px;line-height:1.8;">
+      <li>Compact toolbar above the table with icon buttons</li>
+      <li>Click "Filter" → popover with category list → submenu with options</li>
+      <li>Active filters shown as removable chips below toolbar</li>
+      <li>Click "Sort" → popover with field + direction</li>
+      <li>Click "Columns" → popover with toggle switches</li>
+    </ul>
+    <div style="margin-top:12px;">
+      <div style="color:#18a058;">✓ Most like the reference screenshots</div>
+      <div style="color:#18a058;">✓ Clean, space-efficient</div>
+      <div style="color:#18a058;">✓ Scales well with many filters</div>
+      <div style="color:#f0a020;">△ Requires cascading popover implementation</div>
+    </div>
+  </div>
+
+  <div class="card" style="border-left: 4px solid #888;">
+    <h3>B. Side Panel</h3>
+    <div style="background:#1a1a2e;border-radius:8px;padding:16px;margin:12px 0;font-family:monospace;font-size:13px;color:#e0e0e0;">
+      <div style="display:flex;gap:12px;">
+        <div style="width:180px;background:#222;border-radius:6px;padding:12px;">
+          <div style="font-weight:bold;margin-bottom:8px;font-size:12px;">FILTERS</div>
+          <div style="margin-bottom:6px;font-size:11px;">Status ▾</div>
+          <div style="margin-bottom:6px;font-size:11px;">Project ▾</div>
+          <div style="margin-bottom:6px;font-size:11px;">Priority ▾</div>
+          <hr style="border-color:#444;margin:8px 0;">
+          <div style="font-weight:bold;margin-bottom:8px;font-size:12px;">SORT</div>
+          <div style="font-size:11px;">Created ↓</div>
+        </div>
+        <div style="flex:1;background:#222;border-radius:6px;padding:12px;font-size:11px;">
+          <div>[ Table content ... ]</div>
+        </div>
+      </div>
+    </div>
+    <ul style="font-size:14px;line-height:1.8;">
+      <li>Persistent side panel showing all filters</li>
+      <li>Always visible, no clicks needed to access</li>
+    </ul>
+    <div style="margin-top:12px;">
+      <div style="color:#18a058;">✓ All filters always visible</div>
+      <div style="color:#d03050;">✗ Takes horizontal space from table</div>
+      <div style="color:#d03050;">✗ Doesn't match the reference design</div>
+    </div>
+  </div>
+
+  <div class="card" style="border-left: 4px solid #888;">
+    <h3>C. Inline Header Dropdowns</h3>
+    <div style="background:#1a1a2e;border-radius:8px;padding:16px;margin:12px 0;font-family:monospace;font-size:13px;color:#e0e0e0;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <span style="background:#333;padding:4px 10px;border-radius:4px;">Status: All ▾</span>
+        <span style="background:#333;padding:4px 10px;border-radius:4px;">Project: All ▾</span>
+        <span style="background:#333;padding:4px 10px;border-radius:4px;">Priority: All ▾</span>
+        <span style="background:#333;padding:4px 10px;border-radius:4px;">Search...</span>
+      </div>
+    </div>
+    <ul style="font-size:14px;line-height:1.8;">
+      <li>Current approach evolved — just add more dropdowns</li>
+      <li>Quick to implement but messy with many filters</li>
+    </ul>
+    <div style="margin-top:12px;">
+      <div style="color:#18a058;">✓ Simplest to implement</div>
+      <div style="color:#d03050;">✗ Gets crowded quickly</div>
+      <div style="color:#d03050;">✗ No column toggle support</div>
+      <div style="color:#d03050;">✗ Doesn't scale</div>
+    </div>
+  </div>
+
+</div>

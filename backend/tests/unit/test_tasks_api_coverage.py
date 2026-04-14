@@ -102,15 +102,10 @@ class ListTasksStatusFilterTests(unittest.TestCase):
         from app.main import app
         app.dependency_overrides.clear()
 
-    def test_invalid_status_values_are_skipped(self):
-        """Lines 71-72: invalid status values in comma-separated list are silently ignored."""
-        task = _make_serializable_task(task_status=TaskStatus.RUNNING)
-
-        mock_data_result = MagicMock()
-        mock_data_result.scalars.return_value.all.return_value = [task]
-
+    def test_invalid_status_values_return_400(self):
+        """Invalid status values in comma-separated list now return 400."""
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_data_result)
+        mock_db.execute = AsyncMock()
 
         client, app = _make_app_client_with_db(mock_db)
 
@@ -118,17 +113,13 @@ class ListTasksStatusFilterTests(unittest.TestCase):
             response = client.get("/api/tasks?status=invalid_xyz,also_bad")
 
         app.dependency_overrides.clear()
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("invalid_xyz", response.json()["detail"])
 
-    def test_mixed_valid_and_invalid_statuses(self):
-        """Lines 71-72: mixed valid/invalid statuses — only valid ones are used."""
-        task = _make_serializable_task(task_status=TaskStatus.RUNNING)
-
-        mock_data_result = MagicMock()
-        mock_data_result.scalars.return_value.all.return_value = [task]
-
+    def test_mixed_valid_and_invalid_statuses_return_400(self):
+        """Mixed valid/invalid statuses return 400 due to invalid part."""
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_data_result)
+        mock_db.execute = AsyncMock()
 
         client, app = _make_app_client_with_db(mock_db)
 
@@ -136,7 +127,8 @@ class ListTasksStatusFilterTests(unittest.TestCase):
             response = client.get("/api/tasks?status=running,bogus_status")
 
         app.dependency_overrides.clear()
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("bogus_status", response.json()["detail"])
 
     def test_multiple_valid_statuses_uses_in_filter(self):
         """Lines 75-76: multiple valid statuses produce Task.status.in_() filter."""
@@ -159,15 +151,10 @@ class ListTasksStatusFilterTests(unittest.TestCase):
         data = response.json()
         self.assertEqual(len(data), 2)
 
-    def test_all_invalid_statuses_returns_unfiltered(self):
-        """All-invalid statuses result in no status filter applied."""
-        task = _make_serializable_task(task_status=TaskStatus.COMPLETED)
-
-        mock_data_result = MagicMock()
-        mock_data_result.scalars.return_value.all.return_value = [task]
-
+    def test_all_invalid_statuses_returns_400(self):
+        """All-invalid statuses return 400."""
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_data_result)
+        mock_db.execute = AsyncMock()
 
         client, app = _make_app_client_with_db(mock_db)
 
@@ -175,7 +162,7 @@ class ListTasksStatusFilterTests(unittest.TestCase):
             response = client.get("/api/tasks?status=foo,bar")
 
         app.dependency_overrides.clear()
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 400)
 
 
 # ---------------------------------------------------------------------------

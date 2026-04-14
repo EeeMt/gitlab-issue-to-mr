@@ -257,10 +257,13 @@ async def list_issues(
     if initiator_user_id is not None:
         query = query.where(Issue.initiator_user_id == initiator_user_id)
 
-    # Text search on title
-    if search and len(search) >= 2:
-        escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        query = query.where(Issue.title.ilike(f"%{escaped}%"))
+    # Text search on title (min 2, max 200 chars)
+    if search:
+        if len(search) > 200:
+            raise HTTPException(status_code=400, detail="search too long (max 200 characters)")
+        if len(search) >= 2:
+            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            query = query.where(Issue.title.ilike(f"%{escaped}%", escape="\\"))
 
     # Date range filters
     if created_after:

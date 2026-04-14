@@ -1,0 +1,105 @@
+<h2>Design Section 5: Full Toolbar Mockup — Integrated View</h2>
+<p style="color: #888; margin-bottom: 20px;">How it all looks together on the Issues list page</p>
+
+<div class="mockup" style="padding: 0;">
+
+  <!-- Page header area -->
+  <div style="padding:16px 20px;border-bottom:1px solid #333;display:flex;align-items:center;justify-content:space-between;">
+    <h2 style="margin:0;font-size:18px;">Issues</h2>
+    <div style="display:flex;gap:8px;">
+      <button style="background:#4080ff;color:white;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;">+ New Issue</button>
+    </div>
+  </div>
+
+  <!-- Filter Toolbar -->
+  <div style="padding:12px 20px;border-bottom:1px solid #333;">
+    <!-- Toolbar row -->
+    <div style="display:flex;gap:8px;align-items:center;">
+      <!-- Search -->
+      <div style="display:flex;align-items:center;gap:6px;background:#252540;border:1px solid #444;border-radius:6px;padding:5px 10px;width:200px;">
+        <span style="color:#888;">🔍</span>
+        <span style="color:#666;font-size:13px;">Search issues...</span>
+      </div>
+      <!-- Filter button -->
+      <div style="display:flex;align-items:center;gap:4px;background:#252540;border:1px solid #444;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:13px;">
+        <span>⊕</span>
+        <span>Filter</span>
+      </div>
+      <!-- Sort button -->
+      <div style="display:flex;align-items:center;gap:4px;background:#252540;border:1px solid #444;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:13px;">
+        <span>↕</span>
+        <span>Sort</span>
+        <span style="color:#888;font-size:11px;margin-left:2px;">Created ↓</span>
+      </div>
+      <!-- Columns button -->
+      <div style="display:flex;align-items:center;gap:4px;background:#252540;border:1px solid #444;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:13px;">
+        <span>⚙</span>
+        <span>Columns</span>
+      </div>
+      <!-- Spacer -->
+      <div style="flex:1;"></div>
+      <!-- Result count -->
+      <span style="color:#888;font-size:12px;">5 issues</span>
+    </div>
+
+    <!-- Active filters row -->
+    <div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap;">
+      <span style="background:#1e3a1e;border:1px solid #18a058;padding:2px 8px;border-radius:12px;font-size:11px;color:#88ff88;display:flex;align-items:center;gap:4px;">
+        Status: Open <span style="cursor:pointer;opacity:0.6;">✕</span>
+      </span>
+      <span style="background:#1e2a3a;border:1px solid #4080ff;padding:2px 8px;border-radius:12px;font-size:11px;color:#88bbff;display:flex;align-items:center;gap:4px;">
+        Project: my-webapp <span style="cursor:pointer;opacity:0.6;">✕</span>
+      </span>
+      <span style="color:#888;cursor:pointer;font-size:11px;margin-left:4px;">Clear all</span>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div style="padding:0 20px;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr style="border-bottom:1px solid #444;color:#888;">
+          <th style="padding:10px 8px;text-align:left;font-weight:500;">Title</th>
+          <th style="padding:10px 8px;text-align:left;font-weight:500;width:80px;">Status</th>
+          <th style="padding:10px 8px;text-align:left;font-weight:500;width:140px;">Project</th>
+          <th style="padding:10px 8px;text-align:left;font-weight:500;width:60px;">Tasks</th>
+          <th style="padding:10px 8px;text-align:left;font-weight:500;width:120px;">Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #333;">
+          <td style="padding:10px 8px;">Add user authentication module</td>
+          <td style="padding:10px 8px;"><span style="background:#1e3a1e;color:#18a058;padding:2px 6px;border-radius:3px;font-size:11px;">open</span></td>
+          <td style="padding:10px 8px;color:#888;">my-webapp</td>
+          <td style="padding:10px 8px;color:#888;">3</td>
+          <td style="padding:10px 8px;color:#888;">2 hours ago</td>
+        </tr>
+        <tr style="border-bottom:1px solid #333;">
+          <td style="padding:10px 8px;">Refactor database schema for orders</td>
+          <td style="padding:10px 8px;"><span style="background:#1e3a1e;color:#18a058;padding:2px 6px;border-radius:3px;font-size:11px;">open</span></td>
+          <td style="padding:10px 8px;color:#888;">my-webapp</td>
+          <td style="padding:10px 8px;color:#888;">1</td>
+          <td style="padding:10px 8px;color:#888;">5 hours ago</td>
+        </tr>
+        <tr style="border-bottom:1px solid #333;">
+          <td style="padding:10px 8px;">Fix CSS layout on mobile viewport</td>
+          <td style="padding:10px 8px;"><span style="background:#1e3a1e;color:#18a058;padding:2px 6px;border-radius:3px;font-size:11px;">open</span></td>
+          <td style="padding:10px 8px;color:#888;">my-webapp</td>
+          <td style="padding:10px 8px;color:#888;">0</td>
+          <td style="padding:10px 8px;color:#888;">1 day ago</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  <div style="padding:12px 20px;border-top:1px solid #333;display:flex;justify-content:center;">
+    <div style="display:flex;gap:4px;align-items:center;">
+      <span style="background:#252540;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;color:#888;">← Prev</span>
+      <span style="background:#1e3a5f;border:1px solid #4080ff;padding:4px 10px;border-radius:4px;font-size:12px;color:#88bbff;">1</span>
+      <span style="background:#252540;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;">2</span>
+      <span style="background:#252540;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;">3</span>
+      <span style="background:#252540;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;color:#888;">Next →</span>
+    </div>
+  </div>
+</div>

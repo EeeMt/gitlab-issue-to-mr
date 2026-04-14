@@ -45,33 +45,71 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+TASKS_SORT_FIELDS = {"created_at", "status", "priority"}
+SORT_ORDERS = {"asc", "desc"}
+
+
 @router.get("/tasks")
 async def list_tasks(
     status: Optional[str] = None,
     project_id: Optional[int] = None,
     issue_id: Optional[int] = None,
     initiator_username: Optional[str] = None,
+    priority: Optional[str] = None,
+    search: Optional[str] = None,
+    created_after: Optional[str] = None,
+    created_before: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
     page: Optional[int] = None,
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
-    """List tasks with optional filtering and pagination.
+    """List tasks with optional filtering, sorting, and pagination.
 
     When ``page`` is provided, returns ``{items, total, page, page_size}``.
     Without ``page``, returns a plain ``Task[]`` array (legacy behaviour).
     """
-    query = select(Task).options(selectinload(Task.issue)).order_by(Task.created_at.desc())
+    # Validate sort params
+    effective_sort_by = "created_at"
+    effective_sort_order = "desc"
+    if sort_by:
+        if sort_by not in TASKS_SORT_FIELDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid sort_by: {sort_by}. Allowed: {', '.join(sorted(TASKS_SORT_FIELDS))}",
+            )
+        effective_sort_by = sort_by
+    if sort_order:
+        if sort_order not in SORT_ORDERS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid sort_order: {sort_order}. Allowed: asc, desc",
+            )
+        effective_sort_order = sort_order
 
+    sort_column = getattr(Task, effective_sort_by)
+    order_clause = sort_column.asc() if effective_sort_order == "asc" else sort_column.desc()
+
+    query = select(Task).options(selectinload(Task.issue)).order_by(order_clause)
+
+    # Multi-status filter (comma-separated, raise 400 for invalid values)
     if status:
-        # Support comma-separated status values: ?status=running,pending,queued
         status_parts = [s.strip() for s in status.split(",") if s.strip()]
         valid_statuses = []
+        invalid_parts = []
         for part in status_parts:
             try:
                 valid_statuses.append(TaskStatus(part))
             except ValueError:
-                pass
+                invalid_parts.append(part)
+        if invalid_parts:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status value(s): {', '.join(invalid_parts)}. "
+                       f"Allowed: {', '.join(s.value for s in TaskStatus)}",
+            )
         if len(valid_statuses) == 1:
             query = query.where(Task.status == valid_statuses[0])
         elif valid_statuses:
@@ -91,6 +129,43 @@ async def list_tasks(
 
     if issue_id:
         query = query.where(Task.issue_id == issue_id)
+
+    # Priority filter (comma-separated integers, silently skip non-integers)
+    if priority:
+        priority_values = []
+        for p in priority.split(","):
+            p = p.strip()
+            if p:
+                try:
+                    priority_values.append(int(p))
+                except ValueError:
+                    pass
+        if len(priority_values) == 1:
+            query = query.where(Task.priority == priority_values[0])
+        elif priority_values:
+            query = query.where(Task.priority.in_(priority_values))
+
+    # Text search on user_prompt (min 2, max 200 chars)
+    if search:
+        if len(search) > 200:
+            raise HTTPException(status_code=400, detail="search too long (max 200 characters)")
+        if len(search) >= 2:
+            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            query = query.where(Task.user_prompt.ilike(f"%{escaped}%", escape="\\"))
+
+    # Date range filters
+    if created_after:
+        try:
+            dt = datetime.fromisoformat(created_after.replace("Z", "+00:00"))
+            query = query.where(Task.created_at >= dt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid created_after: {created_after}")
+    if created_before:
+        try:
+            dt = datetime.fromisoformat(created_before.replace("Z", "+00:00"))
+            query = query.where(Task.created_at <= dt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid created_before: {created_before}")
 
     project_lookup = await build_project_lookup(
         accessible_projects=access_scope.accessible_projects,

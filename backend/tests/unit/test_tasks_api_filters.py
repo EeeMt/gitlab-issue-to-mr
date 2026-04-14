@@ -1,9 +1,12 @@
+"""Tests for enhanced tasks list filtering, sorting, and search."""
+
 import os
 import sys
+import unittest
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Optional
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -35,6 +38,26 @@ def _make_task(
         created_at=now,
         updated_at=now,
     )
+
+
+def _mock_paginated_db(tasks, total=None):
+    """Build a mock AsyncSession for paginated mode (page is not None)."""
+    if total is None:
+        total = len(tasks)
+    count_result = MagicMock()
+    count_result.scalar.return_value = total
+
+    main_result = MagicMock()
+    main_result.scalars.return_value = MagicMock(all=lambda: tasks)
+
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[count_result, main_result])
+    return db
+
+
+# ---------------------------------------------------------------------------
+# Existing tests (preserved)
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -149,3 +172,291 @@ async def test_list_projects_uses_ttl_cache_for_unrestricted_scope():
     assert first == fake_projects
     assert second == fake_projects
     assert to_thread.await_count == 1
+
+
+# ---------------------------------------------------------------------------
+# New filter/sort/search tests
+# ---------------------------------------------------------------------------
+
+
+class TestListTasksMultiStatus(unittest.IsolatedAsyncioTestCase):
+    """Test comma-separated multi-status filtering on GET /api/tasks."""
+
+    async def test_invalid_status_returns_400(self):
+        from fastapi import HTTPException
+
+        db = _mock_paginated_db([])
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            with self.assertRaises(HTTPException) as ctx:
+                await list_tasks(
+                    status="bogus",
+                    page=1,
+                    page_size=20,
+                    db=db,
+                    access_scope=scope,
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("bogus", ctx.exception.detail)
+
+    async def test_mixed_valid_invalid_status_returns_400(self):
+        from fastapi import HTTPException
+
+        db = _mock_paginated_db([])
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            with self.assertRaises(HTTPException) as ctx:
+                await list_tasks(
+                    status="running,bogus",
+                    page=1,
+                    page_size=20,
+                    db=db,
+                    access_scope=scope,
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("bogus", ctx.exception.detail)
+
+    async def test_valid_multi_status_accepted(self):
+        db = _mock_paginated_db([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            result = await list_tasks(
+                status="running,pending",
+                page=1,
+                page_size=20,
+                db=db,
+                access_scope=scope,
+            )
+        self.assertIn("items", result)
+
+
+class TestListTasksSortParams(unittest.IsolatedAsyncioTestCase):
+    """Test sort_by and sort_order params on GET /api/tasks."""
+
+    async def test_invalid_sort_by_returns_400(self):
+        from fastapi import HTTPException
+
+        db = _mock_paginated_db([])
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            with self.assertRaises(HTTPException) as ctx:
+                await list_tasks(
+                    sort_by="invalid_field",
+                    page=1,
+                    page_size=20,
+                    db=db,
+                    access_scope=scope,
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_invalid_sort_order_returns_400(self):
+        from fastapi import HTTPException
+
+        db = _mock_paginated_db([])
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            with self.assertRaises(HTTPException) as ctx:
+                await list_tasks(
+                    sort_order="random",
+                    page=1,
+                    page_size=20,
+                    db=db,
+                    access_scope=scope,
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_valid_sort_by_status(self):
+        db = _mock_paginated_db([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            result = await list_tasks(
+                sort_by="status",
+                sort_order="asc",
+                page=1,
+                page_size=20,
+                db=db,
+                access_scope=scope,
+            )
+        self.assertIn("items", result)
+
+    async def test_valid_sort_by_priority(self):
+        db = _mock_paginated_db([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            result = await list_tasks(
+                sort_by="priority",
+                sort_order="asc",
+                page=1,
+                page_size=20,
+                db=db,
+                access_scope=scope,
+            )
+        self.assertIn("items", result)
+
+
+class TestListTasksSearchParam(unittest.IsolatedAsyncioTestCase):
+    """Test search param on GET /api/tasks."""
+
+    async def test_search_param_accepted(self):
+        db = _mock_paginated_db([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            result = await list_tasks(
+                search="auth",
+                page=1,
+                page_size=20,
+                db=db,
+                access_scope=scope,
+            )
+        self.assertIn("items", result)
+
+    async def test_short_search_ignored(self):
+        """Search strings < 2 chars should be silently ignored."""
+        db = _mock_paginated_db([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            result = await list_tasks(
+                search="a",
+                page=1,
+                page_size=20,
+                db=db,
+                access_scope=scope,
+            )
+        self.assertIn("items", result)
+
+
+class TestListTasksPriorityFilter(unittest.IsolatedAsyncioTestCase):
+    """Test priority filter on GET /api/tasks."""
+
+    async def test_priority_filter_accepted(self):
+        db = _mock_paginated_db([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            result = await list_tasks(
+                priority="0,1",
+                page=1,
+                page_size=20,
+                db=db,
+                access_scope=scope,
+            )
+        self.assertIn("items", result)
+
+    async def test_single_priority_accepted(self):
+        db = _mock_paginated_db([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            result = await list_tasks(
+                priority="0",
+                page=1,
+                page_size=20,
+                db=db,
+                access_scope=scope,
+            )
+        self.assertIn("items", result)
+
+    async def test_invalid_priority_silently_skipped(self):
+        """Invalid priority values are silently skipped, not 400."""
+        db = _mock_paginated_db([])
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            result = await list_tasks(
+                priority="abc",
+                page=1,
+                page_size=20,
+                db=db,
+                access_scope=scope,
+            )
+        self.assertIn("items", result)
+
+    async def test_mixed_valid_invalid_priority(self):
+        """Mixed valid/invalid priority: valid kept, invalid silently dropped."""
+        db = _mock_paginated_db([])
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            result = await list_tasks(
+                priority="0,abc,1",
+                page=1,
+                page_size=20,
+                db=db,
+                access_scope=scope,
+            )
+        self.assertIn("items", result)
+
+
+class TestListTasksDateRange(unittest.IsolatedAsyncioTestCase):
+    """Test created_after / created_before params."""
+
+    async def test_valid_created_after(self):
+        db = _mock_paginated_db([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            result = await list_tasks(
+                created_after="2025-01-01T00:00:00",
+                page=1,
+                page_size=20,
+                db=db,
+                access_scope=scope,
+            )
+        self.assertIn("items", result)
+
+    async def test_valid_created_before(self):
+        db = _mock_paginated_db([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            result = await list_tasks(
+                created_before="2026-12-31T23:59:59",
+                page=1,
+                page_size=20,
+                db=db,
+                access_scope=scope,
+            )
+        self.assertIn("items", result)
+
+    async def test_invalid_created_after_returns_400(self):
+        from fastapi import HTTPException
+
+        db = _mock_paginated_db([])
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            with self.assertRaises(HTTPException) as ctx:
+                await list_tasks(
+                    created_after="not-a-date",
+                    page=1,
+                    page_size=20,
+                    db=db,
+                    access_scope=scope,
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_invalid_created_before_returns_400(self):
+        from fastapi import HTTPException
+
+        db = _mock_paginated_db([])
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            with self.assertRaises(HTTPException) as ctx:
+                await list_tasks(
+                    created_before="garbage",
+                    page=1,
+                    page_size=20,
+                    db=db,
+                    access_scope=scope,
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
