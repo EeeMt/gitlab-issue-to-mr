@@ -88,7 +88,7 @@ import { useBreakpoints } from '../composables/useBreakpoints'
 import { usePolling } from '../composables/usePolling'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
 import { formatPriority, getProjectLabel as _getProjectLabel } from '../utils/format'
-import { EllipseOutline, FolderOpenOutline, FlagOutline, PersonOutline, CalendarOutline } from '@vicons/ionicons5'
+import { EllipseOutline, FolderOpenOutline, FlagOutline, PersonOutline, CalendarOutline, GitMergeOutline, TimeOutline } from '@vicons/ionicons5'
 
 const router = useRouter()
 const message = useMessage()
@@ -161,11 +161,28 @@ const filterConfig: FilterSortConfig = {
       options: () => initiatorOptions.value.map((o) => ({ label: o.label, value: o.value })),
     },
     {
+      key: 'has_mr',
+      label: 'filter.hasMr',
+      icon: GitMergeOutline,
+      type: 'single-select',
+      options: () => [
+        { label: t('filter.hasMrYes'), value: 'true' },
+        { label: t('filter.hasMrNo'), value: 'false' },
+      ],
+    },
+    {
       key: 'created',
       label: 'filter.created',
       icon: CalendarOutline,
       type: 'date-range',
       apiParam: 'created_after,created_before',
+    },
+    {
+      key: 'scheduled',
+      label: 'filter.scheduled',
+      icon: TimeOutline,
+      type: 'date-range',
+      apiParam: 'scheduled_after,scheduled_before',
     },
   ],
   sortFields: [

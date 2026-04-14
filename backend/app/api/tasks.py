@@ -9,7 +9,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import delete, func, select, false
+from sqlalchemy import delete, func, or_, select, false
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -56,9 +56,12 @@ async def list_tasks(
     issue_id: Optional[int] = None,
     initiator_username: Optional[str] = None,
     priority: Optional[str] = None,
+    has_mr: Optional[bool] = None,
     search: Optional[str] = None,
     created_after: Optional[str] = None,
     created_before: Optional[str] = None,
+    scheduled_after: Optional[str] = None,
+    scheduled_before: Optional[str] = None,
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
     page: Optional[int] = None,
@@ -176,6 +179,15 @@ async def list_tasks(
         elif priority_values:
             query = query.where(Task.priority.in_(priority_values))
 
+    # Has MR filter (checks if the task's issue has a merge_request_iid)
+    if has_mr is not None:
+        if has_mr:
+            query = query.where(Task.issue.has(Issue.merge_request_iid.is_not(None)))
+        else:
+            query = query.where(
+                or_(Task.issue_id.is_(None), Task.issue.has(Issue.merge_request_iid.is_(None)))
+            )
+
     # Text search on user_prompt (min 2, max 200 chars)
     if search:
         if len(search) > 200:
@@ -197,6 +209,20 @@ async def list_tasks(
             query = query.where(Task.created_at <= dt)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid created_before: {created_before}")
+
+    # Scheduled date range filters
+    if scheduled_after:
+        try:
+            dt = datetime.fromisoformat(scheduled_after.replace("Z", "+00:00")).replace(tzinfo=None)
+            query = query.where(Task.scheduled_at >= dt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid scheduled_after: {scheduled_after}")
+    if scheduled_before:
+        try:
+            dt = datetime.fromisoformat(scheduled_before.replace("Z", "+00:00")).replace(tzinfo=None)
+            query = query.where(Task.scheduled_at <= dt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid scheduled_before: {scheduled_before}")
 
     project_lookup = await build_project_lookup(
         accessible_projects=access_scope.accessible_projects,
