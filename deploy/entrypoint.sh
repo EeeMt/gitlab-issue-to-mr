@@ -15,6 +15,7 @@ USER_PROMPT="${USER_PROMPT:?Missing USER_PROMPT}"
 # ISSUE_IID - required for webhook-triggered tasks, optional for manual tasks
 ISSUE_IID="${ISSUE_IID:-}"
 ISSUE_ID="${ISSUE_ID:-}"
+ISSUE_TITLE="${ISSUE_TITLE:-}"
 # BASE_BRANCH - base branch to create new branch from (defaults to TARGET_BRANCH if not set)
 BASE_BRANCH="${BASE_BRANCH:-}"
 TARGET_BRANCH="${TARGET_BRANCH:-}"
@@ -205,10 +206,11 @@ update_mr_description() {
 
 build_running_mr_description() {
     cat <<EOF
-## 🚀 AI 正在执行
+## ${ISSUE_TITLE:-AI 正在执行}
 
-### 需求
-${USER_PROMPT}
+### 🔄 任务 #${TASK_ID} 正在执行
+
+**提示:** ${USER_PROMPT}
 
 ---
 
@@ -684,11 +686,9 @@ AI-Generated: true"
 
         echo "CODIFY_MR_TITLE:${FINAL_MR_TITLE}"
 
-        if [ -n "${FINAL_SUMMARY_CONTENT}" ]; then
-            update_mr "${FINAL_MR_TITLE}" "$(build_completed_mr_description "${FINAL_SUMMARY_CONTENT}" "${FINAL_CHANGED_FILES_TEXT}")" || true
-        else
-            update_mr "${FINAL_MR_TITLE}" "" || true
-        fi
+        # Only update MR title here; backend will rebuild the full description
+        # with issue context + all task statuses after the container exits.
+        update_mr "${FINAL_MR_TITLE}" "" || true
     fi
 
     echo "========================================"

@@ -28,6 +28,7 @@ import asyncio
 import json
 import unittest
 from datetime import datetime
+from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 from app.core.worker import WorkerExecutor, scrub_sensitive_data, sanitize_sensitive_data
@@ -851,52 +852,83 @@ class TestParseMrFromLogs(unittest.TestCase):
 
 
 # ===================================================================
-# _update_mr_description
+# _update_mr_description_for_issue
 # ===================================================================
 
-class TestUpdateMrDescription(unittest.TestCase):
-    """Tests for _update_mr_description — lines 722-759."""
+class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
+    """Tests for _update_mr_description_for_issue — comprehensive MR description."""
 
-    def test_adds_new_execution_section(self):
-        """Adds execution progress section when none exists — lines 751-754."""
+    async def test_builds_description_with_all_tasks(self):
+        """Builds MR description from issue + all tasks."""
         mock_mr = MagicMock()
-        mock_mr.description = "## Original description"
+        mock_mr.description = ""
 
         mock_gitlab = MagicMock()
         mock_gitlab.get_merge_request.return_value = mock_mr
         worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(id=42)
 
-        worker._update_mr_description(task, mr_iid=5)
+        issue = MagicMock()
+        issue.id = 10
+        issue.title = "Test Issue"
+        issue.description = "Some description"
+        issue.merge_request_iid = 5
+        issue.gitlab_issue_iid = None
 
-        self.assertIn("执行进度", mock_mr.description)
-        self.assertIn("任务 42", mock_mr.description)
+        task1 = _make_task(id=1)
+        task1.user_prompt = "Prompt 1"
+        task1.status = TaskStatus.COMPLETED
+        task1.issue_id = 10
+
+        task2 = _make_task(id=2)
+        task2.user_prompt = "Prompt 2"
+        task2.status = TaskStatus.FAILED
+        task2.issue_id = 10
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [task1, task2]
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        await worker._update_mr_description_for_issue(task1, issue, mock_db)
+
+        desc = mock_mr.description
+        self.assertIn("Test Issue", desc)
+        self.assertIn("Some description", desc)
+        self.assertIn("Prompt 1", desc)
+        self.assertIn("Prompt 2", desc)
+        self.assertIn("✅", desc)
+        self.assertIn("❌", desc)
         mock_mr.save.assert_called_once()
 
-    def test_appends_to_existing_execution_section(self):
-        """Appends to existing execution section — lines 742-750."""
-        mock_mr = MagicMock()
-        mock_mr.description = "## Info\n---\n### 执行进度\n- [x] 初始任务完成\n---\n## Footer"
+    async def test_skips_when_no_mr_iid(self):
+        """Does nothing when issue has no MR."""
+        worker = _make_worker()
+        issue = MagicMock()
+        issue.merge_request_iid = None
+        mock_db = AsyncMock()
 
-        mock_gitlab = MagicMock()
-        mock_gitlab.get_merge_request.return_value = mock_mr
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(id=77)
+        await worker._update_mr_description_for_issue(_make_task(), issue, mock_db)
+        mock_db.execute.assert_not_called()
 
-        worker._update_mr_description(task, mr_iid=5)
-
-        self.assertIn("任务 77", mock_mr.description)
-        self.assertIn("Footer", mock_mr.description)
-
-    def test_skips_when_mr_not_found(self):
-        """Does nothing when MR is not found — lines 731-733."""
+    async def test_skips_when_mr_not_found(self):
+        """Does nothing when MR is not found in GitLab."""
         mock_gitlab = MagicMock()
         mock_gitlab.get_merge_request.return_value = None
         worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task()
 
-        # Should not raise
-        worker._update_mr_description(task, mr_iid=5)
+        issue = MagicMock()
+        issue.id = 10
+        issue.title = "Test"
+        issue.description = ""
+        issue.merge_request_iid = 5
+        issue.gitlab_issue_iid = None
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        await worker._update_mr_description_for_issue(_make_task(), issue, mock_db)
 
 
 # ===================================================================

@@ -493,6 +493,7 @@ class WorkerExecutor:
             "TASK_ID": str(task.id),
             "TASK_TIMEOUT": str(settings.task_timeout),
             "ISSUE_ID": str(issue.id),
+            "ISSUE_TITLE": issue.title or "",
         }
 
         # Pass session ID for resume
@@ -698,44 +699,83 @@ class WorkerExecutor:
                 except Exception as e:
                     logger.warning(f"[Task {task.id}] Failed to get MR stats: {e}")
 
-    def _update_mr_description(self, task: Task, mr_iid: int) -> None:
-        """Update MR description with execution progress.
+    async def _update_mr_description_for_issue(
+        self,
+        task: Task,
+        issue: Issue,
+        db: AsyncSession,
+    ) -> None:
+        """Rebuild MR description from issue context + all tasks.
 
-        Args:
-            task: Task object
-            mr_iid: MR IID to update
+        Replaces the entire MR description with a comprehensive view:
+        - Issue title and description
+        - Table of all tasks with status and prompt summary
+        - Issue reference (Closes #N)
         """
-        # Get current MR details
-        mr = self.gitlab.get_merge_request(task.project_id, mr_iid)
-        if not mr:
-            logger.warning(f"Could not find MR !{mr_iid} to update description")
+        mr_iid = issue.merge_request_iid
+        if not mr_iid:
             return
 
-        current_desc = mr.description or ""
+        try:
+            all_tasks = (await db.execute(
+                select(Task)
+                .where(Task.issue_id == issue.id)
+                .order_by(Task.id)
+            )).scalars().all()
 
-        # Parse current description to find execution progress section
-        execution_section = "\n---\n### 执行进度"
+            status_icons = {
+                TaskStatus.PENDING: "⏳",
+                TaskStatus.QUEUED: "📋",
+                TaskStatus.RUNNING: "🔄",
+                TaskStatus.COMPLETED: "✅",
+                TaskStatus.FAILED: "❌",
+                TaskStatus.CANCELLED: "🚫",
+            }
 
-        if execution_section in current_desc:
-            # Update existing section - append new progress
-            progress_update = f"\n- [x] 继续修改任务完成 (任务 {task.id})"
-            # Find position after "### 执行进度" and before next "---"
-            idx = current_desc.find(execution_section)
-            # Find next "---" after the section header
-            next_section = current_desc.find("\n---", idx + len(execution_section))
-            if next_section > 0:
-                new_desc = current_desc[:next_section] + progress_update + current_desc[next_section:]
-            else:
-                new_desc = current_desc + progress_update
-        else:
-            # Add new section
-            progress_update = f"{execution_section}\n- [x] 继续修改任务完成 (任务 {task.id})\n"
-            new_desc = current_desc + progress_update
+            lines = []
+            lines.append(f"## {issue.title or 'Untitled Issue'}")
+            lines.append("")
+            if issue.description:
+                lines.append(issue.description)
+                lines.append("")
 
-        # Update MR via API
-        mr.description = new_desc
-        mr.save()
-        logger.info(f"Updated MR !{mr_iid} description with task #{task.id} progress")
+            lines.append("---")
+            lines.append("")
+            lines.append("### 任务执行记录")
+            lines.append("")
+            lines.append("| # | 状态 | 提示 |")
+            lines.append("|---|------|------|")
+
+            for t in all_tasks:
+                icon = status_icons.get(t.status, "❓")
+                status_label = t.status.value if t.status else "unknown"
+                prompt_short = (t.user_prompt or "")[:80]
+                if len(t.user_prompt or "") > 80:
+                    prompt_short += "..."
+                prompt_short = prompt_short.replace("|", "\\|").replace("\n", " ")
+                lines.append(f"| {t.id} | {icon} {status_label} | {prompt_short} |")
+
+            lines.append("")
+
+            if issue.gitlab_issue_iid:
+                lines.append(f"\nCloses #{issue.gitlab_issue_iid}")
+
+            description = "\n".join(lines)
+
+            mr = self.gitlab.get_merge_request(task.project_id, mr_iid)
+            if not mr:
+                logger.warning(f"Could not find MR !{mr_iid} to update description")
+                return
+
+            mr.description = description
+            mr.save()
+            logger.info(
+                f"[Task {task.id}] Updated MR !{mr_iid} description "
+                f"with issue #{issue.id} context ({len(all_tasks)} tasks)"
+            )
+
+        except Exception as e:
+            logger.warning(f"[Task {task.id}] Failed to update MR description: {e}")
 
     async def _send_notifications(
         self,
@@ -948,6 +988,10 @@ class WorkerExecutor:
 
             await db.commit()
 
+            # Update MR description with comprehensive issue context + all tasks
+            if issue and issue.merge_request_iid:
+                await self._update_mr_description_for_issue(task, issue, db)
+
             try:
                 self.docker.remove_container(container, force=True)
             except Exception as e:
@@ -1077,6 +1121,10 @@ class WorkerExecutor:
 
             await db.commit()
 
+            # Update MR description with comprehensive issue context + all tasks
+            if issue and issue.merge_request_iid:
+                await self._update_mr_description_for_issue(task, issue, db)
+
             try:
                 self.docker.remove_container(container, force=True)
             except Exception as e:
@@ -1150,12 +1198,6 @@ class WorkerExecutor:
         if notify_target == "mr" and mr_iid:
             await asyncio.to_thread(self.gitlab.create_mr_note, task.project_id, mr_iid, message)
             logger.info(f"Sent completion notification to MR !{mr_iid} for task {task.id}, success={success}")
-
-            if success:
-                try:
-                    self._update_mr_description(task, mr_iid)
-                except Exception as e:
-                    logger.warning(f"Failed to update MR description: {e}")
 
         if not success:
             await self._send_failure_alert(task, issue)

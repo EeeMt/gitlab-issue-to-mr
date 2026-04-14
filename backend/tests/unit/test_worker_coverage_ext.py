@@ -43,6 +43,7 @@ import asyncio
 import json
 import time
 import unittest
+from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.core.worker import WorkerExecutor, scrub_sensitive_data, sanitize_sensitive_data
@@ -647,26 +648,23 @@ class TestUpdateTaskStatsFromApi(unittest.TestCase):
         mock_gitlab.get_merge_request_stats.assert_not_awaited()
 
 
-class TestUpdateMrDescriptionNoNextSection(unittest.TestCase):
-    """Test _update_mr_description with existing section and no next section — line 779."""
+class TestUpdateMrDescriptionForIssueExceptionHandling(IsolatedAsyncioTestCase):
+    """Test _update_mr_description_for_issue handles exceptions gracefully."""
 
-    def test_existing_section_no_next_section(self):
-        """When execution section exists but there's no next --- section, append at end."""
-        mock_mr = MagicMock()
-        # Description has execution section but no trailing ---
-        mock_mr.description = "## Info\n---\n### 执行进度\n- [x] 初始任务完成"
-
+    async def test_exception_during_db_query_caught(self):
+        """DB query failure is caught and logged."""
         mock_gitlab = MagicMock()
-        mock_gitlab.get_merge_request.return_value = mock_mr
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task(id=99)
+        issue = MagicMock()
+        issue.id = 10
+        issue.merge_request_iid = 5
 
-        worker._update_mr_description(task, mr_iid=5)
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(side_effect=Exception("DB error"))
 
-        self.assertIn("任务 99", mock_mr.description)
-        mock_mr.save.assert_called_once()
-        # The progress should be appended at the end
-        self.assertTrue(mock_mr.description.endswith("(任务 99)"))
+        # Should not raise
+        await worker._update_mr_description_for_issue(task, issue, mock_db)
 
 
 # ===================================================================
@@ -1184,12 +1182,12 @@ class TestNotifyTaskCompletedMrIidExtraction(unittest.TestCase):
         mock_gitlab.create_mr_note.assert_not_called()
 
 
-class TestNotifyTaskCompletedUpdateMrDescException(unittest.TestCase):
-    """Test _notify_task_completed catches _update_mr_description exception — lines 1226-1227."""
+class TestNotifyTaskCompletedNoDescUpdate(unittest.TestCase):
+    """Test _notify_task_completed no longer updates MR description inline."""
 
     @patch('app.core.worker.get_settings')
-    def test_update_mr_description_exception_caught(self, mock_get_settings):
-        """Exception in _update_mr_description during notification is caught — lines 1226-1227."""
+    def test_notification_does_not_call_update_mr_description(self, mock_get_settings):
+        """MR description update moved to execute_task; notification only creates a note."""
         mock_get_settings.return_value = _make_settings()
         mock_gitlab = MagicMock()
         mock_gitlab.create_mr_note = MagicMock()
@@ -1200,11 +1198,10 @@ class TestNotifyTaskCompletedUpdateMrDescException(unittest.TestCase):
         )
         issue = task.issue
 
-        with patch.object(worker, '_update_mr_description', side_effect=Exception("desc update failed")):
-            # Should not raise
-            asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr", issue=issue))
+        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr", issue=issue))
 
         mock_gitlab.create_mr_note.assert_called_once()
+        mock_gitlab.get_merge_request.assert_not_called()
 
 
 class TestSendFailureAlertWebhookException(unittest.TestCase):
