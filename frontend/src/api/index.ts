@@ -142,6 +142,7 @@ export interface Task {
     branch_name: string | null
     base_branch: string | null
     target_branch: string | null
+    merge_request_iid: number | null
     merge_request_url: string | null
   }
 }

@@ -70,6 +70,7 @@ def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = Non
             "branch_name": issue.branch_name,
             "base_branch": issue.base_branch,
             "target_branch": issue.target_branch,
+            "merge_request_iid": issue.merge_request_iid,
             "merge_request_url": issue.merge_request_url,
         }
     return data

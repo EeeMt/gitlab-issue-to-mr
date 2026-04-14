@@ -332,11 +332,13 @@ const columns = computed<DataTableColumns<Task>>(() => {
       width: 72,
       render: (row) => {
         const mrUrl = row.issue?.merge_request_url
+        const mrIid = row.issue?.merge_request_iid
         if (!mrUrl) return '-'
+        const label = mrIid ? `!${mrIid}` : 'MR'
         return h(
           'a',
           { href: mrUrl, target: '_blank', rel: 'noopener noreferrer', class: 'app-link' },
-          t('dashboard.open')
+          label
         )
       }
     },
