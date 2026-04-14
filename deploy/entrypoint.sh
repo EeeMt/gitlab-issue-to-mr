@@ -353,12 +353,14 @@ EOF
 build_mr_title_prompt() {
     local changed_files_text="$1"
     cat <<EOF
-请根据下面的需求和最终改动，生成一个简洁明确的 GitLab Merge Request 标题。
+直接输出一个简洁的 GitLab Merge Request 标题。
+
+重要：直接输出标题文本本身，不要有任何前言、解释或说明。第一个字就是标题内容。
 
 要求：
-1. 只输出标题文本，不要引号、编号、前缀、解释或 markdown。
-2. 中文优先，尽量控制在 30 个字以内。
-3. 体现主要结果，不要写“实现功能”“更新代码”这类空泛表述。
+1. 只输出标题，不要引号、编号、前缀或 markdown。
+2. 中文优先，控制在 30 字以内。
+3. 体现主要结果。
 
 需求：
 ${USER_PROMPT}
@@ -373,16 +375,18 @@ build_commit_message_prompt() {
     local diff_stats_text="$2"
     local summary_text="$3"
     cat <<EOF
-请根据下面的信息，生成一条符合 Conventional Commits 规范的 git commit message。
+根据下面的信息，直接输出一条 Conventional Commits 规范的 git commit message。
 
-要求：
+重要：直接输出 commit message 本身，第一个字符必须是 type（如 feat:、fix: 等），不要有任何前言、解释或说明文字。
+
+格式：
 1. 使用中文。
-2. 第一行必须使用 Conventional Commits 格式：<type>: <description>。
-3. type 从 feat、fix、refactor、docs、test、build、chore、ci 中选择最合适的一个；如果是新增可交付能力、初始化可运行项目、补充用户可见结果，优先使用 feat。
-4. description 简洁明确，尽量控制在 50 个字符内，最多不超过 72 个字符。
-5. 如果需要正文，subject 后空一行，再用 1-3 行简短说明“做了什么/为什么”。
+2. 第一行格式：<type>: <description>
+3. type 从 feat、fix、refactor、docs、test、build、chore、ci 中选择。
+4. description 简洁明确，控制在 50 字符内。
+5. 如需正文，subject 后空一行，用 1-3 行简短说明。
 6. 最后添加 footer：AI-Generated: true
-7. 不要使用 markdown、代码块、引号，也不要包含 Co-authored-by trailer，我会自行追加。
+7. 不要使用 markdown、代码块、引号，不要包含 Co-authored-by。
 
 用户需求：
 ${USER_PROMPT}
@@ -595,6 +599,11 @@ if [ -n "$CHANGES" ]; then
 
     if [ ${COMMIT_MESSAGE_RESULT} -eq 0 ]; then
         FINAL_COMMIT_MESSAGE=$(printf '%s\n' "${GENERATED_COMMIT_MESSAGE}" | sed 's/\r$//')
+        # Strip preamble: remove lines before the first conventional commit type
+        STRIPPED=$(printf '%s\n' "${FINAL_COMMIT_MESSAGE}" | sed -n '/^\(feat\|fix\|refactor\|docs\|test\|build\|chore\|ci\)[:(]/,$p')
+        if [ -n "${STRIPPED}" ]; then
+            FINAL_COMMIT_MESSAGE="${STRIPPED}"
+        fi
     fi
 
     if [ -z "${FINAL_COMMIT_MESSAGE}" ]; then
@@ -665,6 +674,9 @@ AI-Generated: true"
     fi
 
     if [ -n "${MR_IID}" ]; then
+        # MR title is managed by the backend (based on issue title).
+        # We only generate a title here for logging / CODIFY_MR_TITLE marker;
+        # we do NOT call update_mr to overwrite the MR title.
         TITLE_PROMPT=$(build_mr_title_prompt "${CHANGED_FILES_TEXT}")
         printf '%s\n' "${TITLE_PROMPT}" > /tmp/mr_title_prompt.txt
         chmod 644 /tmp/mr_title_prompt.txt
@@ -685,10 +697,6 @@ AI-Generated: true"
         fi
 
         echo "CODIFY_MR_TITLE:${FINAL_MR_TITLE}"
-
-        # Only update MR title here; backend will rebuild the full description
-        # with issue context + all task statuses after the container exits.
-        update_mr "${FINAL_MR_TITLE}" "" || true
     fi
 
     echo "========================================"

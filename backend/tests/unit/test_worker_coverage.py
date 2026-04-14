@@ -78,7 +78,7 @@ def _make_task(**kwargs):
 
     # Separate issue-level kwargs
     issue_overrides = {}
-    for key in ['branch_name', 'base_branch', 'target_branch', 'merge_request_iid', 'merge_request_url']:
+    for key in ['branch_name', 'base_branch', 'target_branch', 'merge_request_iid', 'merge_request_url', 'title', 'description']:
         if key in kwargs:
             issue_overrides[key] = kwargs.pop(key)
 
@@ -104,6 +104,8 @@ def _make_task(**kwargs):
         mock_issue.target_branch = issue_overrides.get('target_branch', 'main')
         mock_issue.merge_request_iid = issue_overrides.get('merge_request_iid', None)
         mock_issue.merge_request_url = issue_overrides.get('merge_request_url', None)
+        mock_issue.title = issue_overrides.get('title', None)
+        mock_issue.description = issue_overrides.get('description', None)
         mock_issue.claude_session_id = None
         mock_issue.session_storage_path = None
         mock_issue.project_id = defaults['project_id']
@@ -142,16 +144,36 @@ def _make_db(task=None):
 # ===================================================================
 
 class TestBuildInitialMrTitle(unittest.TestCase):
-    """Tests for _build_initial_mr_title — prompt-based only."""
+    """Tests for _build_initial_mr_title — issue title preferred, prompt fallback."""
 
-    def test_title_from_short_prompt(self):
-        """Title comes from user_prompt when present."""
+    def test_title_from_issue_title(self):
+        """When issue has a title, MR title uses it."""
         worker = _make_worker()
-        task = _make_task(user_prompt="Login page broken")
+        task = _make_task(user_prompt="Fix the bug", title="Login page broken")
 
         title = worker._build_initial_mr_title(task)
 
-        self.assertEqual(title, "AI: Login page broken")
+        self.assertEqual(title, "Draft: Login page broken")
+
+    def test_title_from_issue_title_truncated(self):
+        """Long issue title is truncated to 120 chars."""
+        worker = _make_worker()
+        long_title = "A" * 200
+        task = _make_task(user_prompt="Fix it", title=long_title)
+
+        title = worker._build_initial_mr_title(task)
+
+        self.assertTrue(title.startswith("Draft: "))
+        self.assertLessEqual(len(title), 127)  # "Draft: " + 120 chars
+
+    def test_title_fallback_to_prompt_when_no_issue_title(self):
+        """When issue has no title, fall back to prompt."""
+        worker = _make_worker()
+        task = _make_task(user_prompt="Fix login page. Also update the tests.")
+
+        title = worker._build_initial_mr_title(task)
+
+        self.assertEqual(title, "AI: Fix login page")
 
     def test_title_from_prompt_strips_whitespace(self):
         """Whitespace in prompt is collapsed."""
@@ -161,24 +183,6 @@ class TestBuildInitialMrTitle(unittest.TestCase):
         title = worker._build_initial_mr_title(task)
 
         self.assertEqual(title, "AI: Add unit tests for auth")
-
-    def test_title_from_prompt_uses_first_sentence(self):
-        """Prompt with punctuation takes first sentence only."""
-        worker = _make_worker()
-        task = _make_task(user_prompt="Improve caching layer. Also update docs.")
-
-        title = worker._build_initial_mr_title(task)
-
-        self.assertEqual(title, "AI: Improve caching layer")
-
-    def test_title_from_prompt_with_sentence_split(self):
-        """Prompt with punctuation should be split at first sentence boundary."""
-        worker = _make_worker()
-        task = _make_task(user_prompt="Fix login page. Also update the tests.")
-
-        title = worker._build_initial_mr_title(task)
-
-        self.assertEqual(title, "AI: Fix login page")
 
     def test_title_from_prompt_truncated_at_100(self):
         """Long prompt segment should be truncated to 100 chars."""
@@ -192,7 +196,7 @@ class TestBuildInitialMrTitle(unittest.TestCase):
         self.assertLessEqual(len(title), 104 + 1)  # "AI: " + 100 chars
 
     def test_title_fallback_to_task_id(self):
-        """When no prompt, use task ID."""
+        """When no prompt and no issue title, use task ID."""
         worker = _make_worker()
         task = _make_task(user_prompt="", id=99)
 
@@ -201,7 +205,7 @@ class TestBuildInitialMrTitle(unittest.TestCase):
         self.assertEqual(title, "AI: Task 99")
 
     def test_title_prompt_none_falls_to_task_id(self):
-        """When user_prompt is None, fall back to task ID."""
+        """When user_prompt is None and no issue title, fall back to task ID."""
         worker = _make_worker()
         task = _make_task(user_prompt=None, id=7)
 
@@ -210,7 +214,7 @@ class TestBuildInitialMrTitle(unittest.TestCase):
         self.assertEqual(title, "AI: Task 7")
 
     def test_title_from_multiword_prompt(self):
-        """Title uses prompt content directly."""
+        """Title uses prompt content when no issue title."""
         worker = _make_worker()
         task = _make_task(user_prompt="Update README")
 

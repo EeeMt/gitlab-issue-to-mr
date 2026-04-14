@@ -128,7 +128,11 @@ class WorkerExecutor:
         self.gitlab = gitlab_client or get_gitlab_client()
 
     def _build_initial_mr_title(self, task: Task) -> str:
-        """Build a reasonable initial MR title before AI execution finishes."""
+        """Build a reasonable initial MR title — uses issue title when available."""
+        issue = task.issue if task.issue else None
+        if issue and issue.title:
+            return f"Draft: {issue.title[:120]}"
+
         prompt = re.sub(r"\s+", " ", task.user_prompt or "").strip()
         if prompt:
             short_prompt = re.split(r"[;\n。！？.!?]", prompt, maxsplit=1)[0].strip()
@@ -757,9 +761,6 @@ class WorkerExecutor:
 
             lines.append("")
 
-            if issue.gitlab_issue_iid:
-                lines.append(f"\nCloses #{issue.gitlab_issue_iid}")
-
             description = "\n".join(lines)
 
             mr = self.gitlab.get_merge_request(task.project_id, mr_iid)
@@ -768,9 +769,12 @@ class WorkerExecutor:
                 return
 
             mr.description = description
+            # Set MR title to issue title (remove "Draft: " prefix if MR is no longer draft)
+            if issue.title:
+                mr.title = issue.title
             mr.save()
             logger.info(
-                f"[Task {task.id}] Updated MR !{mr_iid} description "
+                f"[Task {task.id}] Updated MR !{mr_iid} title+description "
                 f"with issue #{issue.id} context ({len(all_tasks)} tasks)"
             )
 

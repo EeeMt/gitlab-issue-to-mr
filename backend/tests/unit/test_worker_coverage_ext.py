@@ -93,7 +93,7 @@ def _make_task(**kwargs):
 
     # Separate issue-level kwargs
     issue_overrides = {}
-    for key in ['branch_name', 'base_branch', 'target_branch', 'merge_request_iid', 'merge_request_url']:
+    for key in ['branch_name', 'base_branch', 'target_branch', 'merge_request_iid', 'merge_request_url', 'title', 'description']:
         if key in kwargs:
             issue_overrides[key] = kwargs.pop(key)
 
@@ -120,6 +120,8 @@ def _make_task(**kwargs):
         mock_issue.target_branch = issue_overrides.get('target_branch', 'main')
         mock_issue.merge_request_iid = issue_overrides.get('merge_request_iid', None)
         mock_issue.merge_request_url = issue_overrides.get('merge_request_url', None)
+        mock_issue.title = issue_overrides.get('title', None)
+        mock_issue.description = issue_overrides.get('description', None)
         mock_issue.claude_session_id = None
         mock_issue.session_storage_path = None
         mock_issue.project_id = defaults['project_id']
