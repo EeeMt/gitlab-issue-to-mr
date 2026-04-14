@@ -155,7 +155,7 @@ const filterConfig: FilterSortConfig = {
     { key: 'title', label: 'issue.field.title', defaultVisible: true, alwaysVisible: true },
     { key: 'project_id', label: 'issue.field.project', defaultVisible: true },
     { key: 'status', label: 'common.status', defaultVisible: true },
-    { key: 'task_count', label: 'issue.taskCount', defaultVisible: true },
+    { key: 'task_count', label: 'issue.field.tasks', defaultVisible: true },
     { key: 'total_changes', label: 'common.changes', defaultVisible: true },
     { key: 'total_tokens', label: 'analytics.tokens', defaultVisible: true },
     { key: 'initiator_username', label: 'issue.field.creator', defaultVisible: false },
@@ -269,7 +269,7 @@ const allColumns = computed<DataTableColumns<Issue>>(() => [
       ),
   },
   {
-    title: t('issue.taskCount', { count: '' }).trim(),
+    title: t('issue.field.tasks'),
     key: 'task_count',
     width: 80,
     render: (row) => String(row.task_count ?? 0),

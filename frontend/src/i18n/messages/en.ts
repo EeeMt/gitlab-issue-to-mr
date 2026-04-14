@@ -286,6 +286,7 @@ const en = {
       createdAt: 'Created',
       updatedAt: 'Updated',
       creator: 'Creator',
+      tasks: 'Tasks',
     },
     totals: {
       additions: 'Additions',

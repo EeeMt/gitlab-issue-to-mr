@@ -297,7 +297,7 @@ const allDesktopColumns = computed<DataTableColumns<Task>>(() => {
       width: 52
     },
     {
-      title: t('task.prompt'),
+      title: t('createTask.prompt'),
       key: 'user_prompt',
       ellipsis: { tooltip: true },
       render: (row) => row.user_prompt || '-',

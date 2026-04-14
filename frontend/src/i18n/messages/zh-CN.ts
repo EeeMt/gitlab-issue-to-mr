@@ -283,6 +283,7 @@ const zhCN = {
       createdAt: '创建时间',
       updatedAt: '更新时间',
       creator: '创建人',
+      tasks: '任务数',
     },
     totals: {
       additions: '新增行数',

@@ -63,7 +63,12 @@ const fieldOptions = computed(() =>
 
 <style scoped>
 .sort-popover {
-  width: 220px;
+  width: 240px;
+  background: var(--n-color, #fff);
+  border-radius: 8px;
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--n-border-color, #e0e0e6);
+  padding: 4px 0;
 }
 .sort-popover__header {
   font-size: 11px;
@@ -84,8 +89,12 @@ const fieldOptions = computed(() =>
   width: 100%;
   display: flex;
 }
-.sort-popover__direction .n-button {
+.sort-popover__direction :deep(.n-button) {
   flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 8px;
 }
 .sort-popover__footer {
   padding: 8px 12px;

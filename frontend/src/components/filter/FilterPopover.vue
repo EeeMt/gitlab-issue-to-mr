@@ -183,6 +183,11 @@ function clearCurrent() {
   width: 240px;
   max-height: 360px;
   overflow-y: auto;
+  background: var(--n-color, #fff);
+  border-radius: 8px;
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--n-border-color, #e0e0e6);
+  padding: 4px 0;
 }
 .filter-popover__header {
   font-size: 11px;
