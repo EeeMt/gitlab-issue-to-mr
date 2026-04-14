@@ -12,7 +12,7 @@
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
               <div class="metric-title">
-                <span>{{ t('dashboard.issueStatus') }}</span>
+                <span><n-icon size="15" :component="DocumentTextOutline" class="metric-title-icon" />{{ t('dashboard.issueStatus') }}</span>
                 <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.issueStatusTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
@@ -23,7 +23,7 @@
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
               <div class="metric-title">
-                <span>{{ t('dashboard.taskStatus') }}</span>
+                <span><n-icon size="15" :component="CheckboxOutline" class="metric-title-icon" />{{ t('dashboard.taskStatus') }}</span>
                 <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.taskStatusTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
@@ -34,7 +34,7 @@
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
               <div class="metric-title">
-                <span>{{ t('dashboard.linesChanged') }}</span>
+                <span><n-icon size="15" :component="CodeSlashOutline" class="metric-title-icon" />{{ t('dashboard.linesChanged') }}</span>
                 <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.linesChangedTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
@@ -49,7 +49,7 @@
           <n-gi>
             <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
               <div class="metric-title">
-                <span>{{ t('dashboard.tokensUsed') }}</span>
+                <span><n-icon size="15" :component="FlashOutline" class="metric-title-icon" />{{ t('dashboard.tokensUsed') }}</span>
                 <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.tokensUsedTip') }}</n-tooltip>
               </div>
               <div class="metric-body">
@@ -147,6 +147,9 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getIssues, getTasksPaginated, getStats, getAnalytics, getActivityHeatmap, type Issue, type Task, type ActivityHeatmapEntry, type AnalyticsTrendPoint } from '../api'
 import {
+  CheckboxOutline,
+  CodeSlashOutline,
+  DocumentTextOutline,
   FlashOutline,
   InformationCircleOutline,
 } from '@vicons/ionicons5'
@@ -426,6 +429,12 @@ onMounted(() => {
   color: #666;
   text-align: center;
   position: relative;
+}
+
+.metric-title-icon {
+  margin-right: 4px;
+  vertical-align: -2px;
+  opacity: 0.7;
 }
 
 .metric-info-icon {
