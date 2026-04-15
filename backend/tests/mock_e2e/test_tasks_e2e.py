@@ -422,19 +422,6 @@ class TestCreateTask:
         assert resp.status_code == 200
         assert resp.json()["priority"] == 0
 
-    async def test_create_task_same_branch_and_target_rejected(self, client):
-        """Source branch and target branch cannot be the same (tested at issue level)."""
-        # This validation now happens at the issue creation level
-        resp = await client.post("/api/issues", json={
-            "project_id": 1,
-            "title": "Same branch issue",
-            "base_branch": "main",
-            "target_branch": "main",
-        })
-        # Should be rejected if validation exists at issue level
-        # If not rejected, we skip this test as it's no longer relevant
-        if resp.status_code == 200:
-            pytest.skip("Branch validation moved to issue level")
 
     async def test_create_task_with_negative_delay_rejected(self, client):
         """Negative delay_seconds should be rejected."""
