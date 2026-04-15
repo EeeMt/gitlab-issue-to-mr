@@ -15,6 +15,7 @@ The system currently supports a single AI provider configuration (Anthropic base
 4. CRUD API for provider management
 5. Frontend: new "AI Providers" tab in Config page, provider selector in task creation
 6. Worker resolves provider from task → default → legacy fallback
+7. System prompt passed via `APPEND_SYSTEM_PROMPT` env var → `ci-claude.sh` already passes it as `--append-system-prompt` to Claude CLI
 
 ## Data Model
 
