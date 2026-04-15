@@ -217,9 +217,11 @@ _MOCK_COMMON := -c $(MOCK_INT_COMPOSE) -s $(PROJECT_ROOT)
 
 .PHONY: test-mock-integration-build
 test-mock-integration-build: ## Build images for mock integration tests
+	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.backend -t codify-backend:latest $(PROJECT_ROOT)
+	docker build -f $(PROJECT_ROOT)/backend/tests/mock_integration/Dockerfile.backend-test -t codify-backend-test:latest $(PROJECT_ROOT)
 	docker build -f $(PROJECT_ROOT)/backend/tests/mock_integration/mock_server/Dockerfile -t codify-mock-services:latest $(PROJECT_ROOT)
 	docker build -f $(PROJECT_ROOT)/backend/tests/mock_integration/fake_claude/Dockerfile.worker-test -t codify-worker-test:latest $(PROJECT_ROOT)
-	@echo "Mock integration test images built: codify-mock-services:latest, codify-worker-test:latest"
+	@echo "Mock integration test images built: codify-backend:latest, codify-backend-test:latest, codify-mock-services:latest, codify-worker-test:latest"
 
 .PHONY: test-mock-integration-up
 test-mock-integration-up: test-mock-integration-build ## Start mock integration test environment

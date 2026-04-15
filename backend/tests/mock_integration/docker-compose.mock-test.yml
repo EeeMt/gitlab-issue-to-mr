@@ -41,7 +41,7 @@ services:
 
   # Codify backend — real application server
   backend:
-    image: codify-backend:latest
+    image: codify-backend-test:latest
     ports:
       - "${MOCK_PORT_BACKEND:-18000}:8000"
     environment:
@@ -66,6 +66,7 @@ services:
       BACKEND_URL: http://backend:8000
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ../../../backend/tests:/app/tests
     depends_on:
       postgres:
         condition: service_healthy
@@ -81,7 +82,7 @@ services:
 
   # Scheduler — picks up pending tasks and spawns worker containers
   scheduler:
-    image: codify-backend:latest
+    image: codify-backend-test:latest
     command: ["python3", "-m", "app.scheduler_service"]
     environment:
       DATABASE_URL: postgresql+asyncpg://codify:codify_password@postgres:5432/codify

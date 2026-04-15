@@ -79,12 +79,8 @@ fi
 
 compose up -d --wait postgres mock-services backend scheduler
 
-# --- Copy tests into container ---
-docker cp "$SOURCE_ROOT/backend/tests" "$CONTAINER:/tmp/tests"
-docker exec "$CONTAINER" bash -c \
-  "mkdir -p /app/tests && cp /tmp/tests/__init__.py /app/tests/ 2>/dev/null; \
-   rm -rf /app/tests/mock_integration && cp -r /tmp/tests/mock_integration /app/tests/mock_integration"
-docker exec "$CONTAINER" pip install pytest pytest-asyncio httpx --quiet 2>/dev/null
+# Test dependencies are pre-installed in codify-backend-test image.
+# Test files are volume-mounted from host for fast iteration.
 
 # --- Build pytest args ---
 if [[ ${#TEST_FILES[@]} -gt 0 ]]; then
