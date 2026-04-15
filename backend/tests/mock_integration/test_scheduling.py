@@ -128,9 +128,16 @@ class TestConcurrencyLimit:
         admin_auth_headers: dict,
     ):
         """Create more tasks than MAX_CONCURRENCY, verify they all eventually complete."""
-        # docker-compose has MAX_CONCURRENCY=2, so create 3 tasks
+        # Fetch current MAX_CONCURRENCY from config and create one extra task
+        resp = await http_client.get(
+            f"{backend_url}/api/config",
+            headers=admin_auth_headers,
+        )
+        max_conc = resp.json().get("runtime", {}).get("max_concurrency", 5)
+        num_tasks = max_conc + 1
+
         task_ids = []
-        for i in range(3):
+        for i in range(num_tasks):
             _issue, task_data = await create_issue_and_task(
                 http_client, backend_url, admin_auth_headers,
                 title=f"Concurrency test {i}",

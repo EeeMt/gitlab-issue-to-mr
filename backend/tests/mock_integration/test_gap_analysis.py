@@ -187,8 +187,7 @@ class TestPositiveConcurrency:
     ):
         """Create tasks for 2 different issues -- both should run concurrently.
 
-        docker-compose has MAX_CONCURRENCY=2, so two tasks
-        should start roughly at the same time.
+        MAX_CONCURRENCY >= 2, so two tasks should start roughly at the same time.
         """
         await http_client.patch(
             f"{mock_url}/mock/config",
@@ -351,7 +350,7 @@ class TestMultiplePriorityLevels:
     ):
         """Create P2, P1, P0 tasks in that order -- verify P0 starts first.
 
-        With MAX_CONCURRENCY=2 and claude_delay=5, the first task picked
+        With MAX_CONCURRENCY >= 2 and claude_delay=5, the first task picked
         should be P0 (highest priority), then P1, then P2.
         """
         await http_client.patch(
