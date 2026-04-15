@@ -240,22 +240,33 @@ test-mock-integration: test-mock-integration-build ## Run mock integration tests
 	$(MOCK_STACK_SCRIPT) $(_MOCK_COMMON) -d || \
 		{ docker-compose -f $(MOCK_INT_COMPOSE) logs; false; }
 
-# --- Two-stack parallel mock integration tests ---
-# Group A and Group B test files (balanced by container wait count)
-MOCK_GROUP_A := test_entrypoint_paths.py test_failure_injection.py \
-	test_api_endpoints.py test_edge_cases.py test_scheduling.py test_happy_path.py \
-	test_failure_paths.py test_remaining_endpoints.py test_system_apis.py test_admin_and_templates.py \
-	test_mutex_and_scheduling.py
-MOCK_GROUP_B := test_security_and_resilience.py test_edge_cases_advanced.py test_entrypoint.py \
-	test_advanced.py test_mr_followup_and_env.py test_gap_analysis.py test_additional.py \
-	test_health_access_sse.py test_coverage_gaps.py test_validation_and_dedup.py \
-	test_notifications_and_operations.py test_webhook_and_lifecycle.py
+# --- Three-stack parallel mock integration tests ---
+# Test file counts: remaining_endpoints(25), health_access_sse(25), notifications_and_operations(17),
+# mutex_and_scheduling(15), system_apis(14), admin_and_templates(13), validation_and_dedup(12),
+# security_and_resilience(12), entrypoint_paths(12), edge_cases_advanced(12), api_endpoints(12),
+# mr_followup_and_env(11), entrypoint(11), failure_injection(10), webhook_and_lifecycle(7),
+# gap_analysis(7), edge_cases(7), advanced(6), happy_path(4), coverage_gaps(4), additional(4),
+# failure_paths(3), scheduling(2)
+
+# Group A: 82 tests
+MOCK_GROUP_A := test_remaining_endpoints.py test_entrypoint_paths.py \
+	test_api_endpoints.py test_failure_injection.py test_happy_path.py \
+	test_additional.py test_coverage_gaps.py test_failure_paths.py \
+	test_scheduling.py
+# Group B: 82 tests
+MOCK_GROUP_B := test_health_access_sse.py test_mutex_and_scheduling.py \
+	test_system_apis.py test_edge_cases.py test_webhook_and_lifecycle.py \
+	test_gap_analysis.py test_advanced.py
+# Group C: 81 tests
+MOCK_GROUP_C := test_notifications_and_operations.py test_admin_and_templates.py \
+	test_validation_and_dedup.py test_security_and_resilience.py \
+	test_edge_cases_advanced.py test_mr_followup_and_env.py \
+	test_entrypoint.py
 
 .PHONY: test-mock-integration-parallel
-test-mock-integration-parallel: test-mock-integration-build ## Run mock integration tests in parallel (two stacks)
+test-mock-integration-parallel: test-mock-integration-build ## Run mock integration tests in parallel (three stacks)
 	@_d=$$(mktemp -d); _t0=$$(date +%s); \
-	printf "\n\033[1;33m━━━ Parallel Mock Integration Tests ━━━\033[0m\n"; \
-	printf "Starting two independent test stacks...\n\n"; \
+	printf "\n\033[1;33m━━━ Parallel Mock Integration Tests (3 stacks) ━━━\033[0m\n\n"; \
 	( $(MOCK_STACK_SCRIPT) $(_MOCK_COMMON) -d \
 		-p mock_a -n codify-mock-test-a -w mocka -P 19000 -B 18000 -l A \
 		$(MOCK_GROUP_A); \
@@ -266,16 +277,23 @@ test-mock-integration-parallel: test-mock-integration-build ## Run mock integrat
 		$(MOCK_GROUP_B); \
 	  echo $$? > "$$_d/b.rc" \
 	) 2>&1 | sed 's/^/[B] /' & \
+	( $(MOCK_STACK_SCRIPT) $(_MOCK_COMMON) -d \
+		-p mock_c -n codify-mock-test-c -w mockc -P 19002 -B 18002 -l C \
+		$(MOCK_GROUP_C); \
+	  echo $$? > "$$_d/c.rc" \
+	) 2>&1 | sed 's/^/[C] /' & \
 	wait; \
 	_elapsed=$$(( $$(date +%s) - $$_t0 )); \
 	_ra=$$(cat "$$_d/a.rc" 2>/dev/null || echo 1); \
 	_rb=$$(cat "$$_d/b.rc" 2>/dev/null || echo 1); \
+	_rc=$$(cat "$$_d/c.rc" 2>/dev/null || echo 1); \
 	printf "\n\033[1;33m━━━ Results ━━━\033[0m\n"; \
 	if [ "$$_ra" = "0" ]; then _sa="PASS"; else _sa="FAIL"; fi; \
 	if [ "$$_rb" = "0" ]; then _sb="PASS"; else _sb="FAIL"; fi; \
-	printf "Stack A: %s   Stack B: %s   Time: %ds\n" "$$_sa" "$$_sb" "$$_elapsed"; \
+	if [ "$$_rc" = "0" ]; then _sc="PASS"; else _sc="FAIL"; fi; \
+	printf "Stack A: %s   Stack B: %s   Stack C: %s   Time: %ds\n" "$$_sa" "$$_sb" "$$_sc" "$$_elapsed"; \
 	rm -rf "$$_d"; \
-	[ "$$_ra" = "0" ] && [ "$$_rb" = "0" ]
+	[ "$$_ra" = "0" ] && [ "$$_rb" = "0" ] && [ "$$_rc" = "0" ]
 
 .PHONY: test-e2e-gitlab
 test-e2e-gitlab: ## Run GitLab E2E tests inside Docker (auto-skips if no GITLAB_BOT_TOKEN)
@@ -513,7 +531,7 @@ help:
 	@echo "  make test-mock-integration-up         Start mock integration test environment"
 	@echo "  make test-mock-integration-down       Stop mock integration test environment"
 	@echo "  make test-mock-integration-logs       View mock integration test logs"
-	@echo "  make test-mock-integration-parallel  Run mock integration tests in 2 parallel stacks"
+	@echo "  make test-mock-integration-parallel  Run mock integration tests in 3 parallel stacks"
 	@echo ""
 	@echo "E2E Tests:"
 	@echo "  make test-e2e                        Run ALL E2E: parallel + serial + gitlab + cleanup"
