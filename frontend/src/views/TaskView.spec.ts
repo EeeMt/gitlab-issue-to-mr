@@ -399,7 +399,8 @@ const router = createRouter({
   history: createMemoryHistory(),
   routes: [
     { path: '/', name: 'home', component: { template: '<div>home</div>' } },
-    { path: '/tasks/:id', name: 'task-view', component: TaskView }
+    { path: '/tasks/:id', name: 'task-view', component: TaskView },
+    { path: '/issues/:id', name: 'IssueView', component: { template: '<div>issue</div>' } }
   ]
 })
 
