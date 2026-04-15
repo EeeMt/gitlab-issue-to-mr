@@ -490,7 +490,9 @@ class TestRetrySlotEnforcement:
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "success"
+        # Retry returns the new task, which should have pending status
+        assert data["status"] == "pending"
+        assert data["is_retry"] is True
 
     async def test_retry_without_schedule_bypasses_slot(self, client, db_session):
         """Retry without scheduled_datetime ignores slot capacity entirely."""

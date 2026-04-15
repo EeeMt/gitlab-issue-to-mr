@@ -124,7 +124,12 @@ test-unit: $(VENV)/.installed $(NODE_MODULES)/.installed ## Run all unit tests w
 	echo $$(( $$(date +%s) - $$_t0 )) > "$$_d/be.time"; \
 	printf "\n\033[1m━━━ Frontend unit tests ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n"; \
 	_t0=$$(date +%s); \
-	(cd $(PROJECT_ROOT)/frontend && script -q /dev/null bash -c 'FORCE_COLOR=1 npx vitest run --coverage'; \
+	(cd $(PROJECT_ROOT)/frontend && \
+	  if [ "$$(uname)" = "Darwin" ]; then \
+	    script -q /dev/null bash -c 'FORCE_COLOR=1 npx vitest run --coverage'; \
+	  else \
+	    script -qec 'FORCE_COLOR=1 npx vitest run --coverage' /dev/null; \
+	  fi; \
 	  echo $$? > "$$_d/fe.rc") 2>&1 | tee "$$_d/fe.log"; \
 	echo $$(( $$(date +%s) - $$_t0 )) > "$$_d/fe.time"; \
 	printf "\n\033[1m━━━ Mock E2E tests ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n"; \
