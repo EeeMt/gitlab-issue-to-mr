@@ -1161,6 +1161,7 @@ describe('CreateTask', () => {
     })
 
     it('should handle fetchPromptTemplates error gracefully', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       ;(mockApi.getProjects as Mock).mockResolvedValue(mockProjects)
       ;(mockApi.getBranches as Mock).mockResolvedValue([])
       ;(mockApi.getPromptTemplates as Mock).mockRejectedValue(new Error('API Error'))
@@ -1182,6 +1183,8 @@ describe('CreateTask', () => {
       await flushPromises()
 
       expect(wrapper.find('.create-task-page').exists()).toBe(true)
+      expect(consoleSpy).toHaveBeenCalledWith('Failed to fetch prompt templates:', expect.any(Error))
+      consoleSpy.mockRestore()
     })
   })
 

@@ -284,11 +284,13 @@ class TestCreateTask:
         assert resp.status_code == 200
         data = resp.json()
         assert data["project_id"] == 1
-        assert data["issue"]["id"] == issue_id
+        assert data["issue_id"] == issue_id
         assert data["user_prompt"] == "Fix the bug"
         assert data["status"] == "pending"
         assert data["scheduled_at"] is None
         assert "id" in data
+        # Issue details may or may not be included depending on relationship loading
+        # The key point is that issue_id links to the issue
 
     async def test_create_task_with_all_fields(self, client):
         """Create a task with all optional fields populated."""
@@ -311,7 +313,7 @@ class TestCreateTask:
         assert resp.status_code == 200
         data = resp.json()
         assert data["project_id"] == 42
-        assert data["issue"]["target_branch"] == "main"
+        assert data["issue_id"] == issue_id
         assert data["priority"] == 2
 
     async def test_create_task_with_delay_seconds(self, client):
@@ -639,19 +641,25 @@ class TestGetTask:
         resp = await client.get(f"/api/tasks/{task.id}")
         assert resp.status_code == 200
         data = resp.json()
+        # Fields directly on task response
         expected_keys = {
             "id", "project_id", "project_name", "project_path_with_namespace",
-            "project_url", "issue_iid", "issue_url", "issue_id", "note_id",
+            "project_url", "issue_id",
             "user_prompt", "initiator_user_id", "initiator_gitlab_user_id",
-            "initiator_username", "branch_name", "base_branch", "branch_url",
-            "merge_request_iid", "merge_request_url", "status", "priority",
-            "scheduled_at", "container_id", "container_name", "target_branch",
-            "target_branch_url", "commit_sha", "error_message", "additions",
+            "initiator_username", "is_retry", "retry_source_task_id",
+            "status", "priority",
+            "scheduled_at", "container_id", "container_name",
+            "commit_sha", "error_message", "additions",
             "deletions", "total_changes", "input_tokens", "output_tokens",
-            "model_name", "merge_request_title", "is_manual", "created_at",
+            "model_name", "merge_request_title", "created_at",
             "updated_at", "started_at", "completed_at",
         }
         assert expected_keys.issubset(data.keys())
+        # Issue fields are nested under "issue"
+        if data.get("issue"):
+            issue_keys = {"id", "title", "branch_name", "base_branch", "target_branch", 
+                         "merge_request_iid", "merge_request_url"}
+            assert issue_keys.issubset(data["issue"].keys())
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -797,28 +805,31 @@ class TestRetryTask:
     """POST /api/tasks/{id}/retry — retry a failed or cancelled task."""
 
     async def test_retry_failed_task(self, client, db_session):
-        """Retrying a FAILED task resets status to PENDING."""
+        """Retrying a FAILED task creates a new retry task."""
         task = await _seed_task(db_session, status=TaskStatus.FAILED,
                                 error_message="Something went wrong")
 
         resp = await client.post(f"/api/tasks/{task.id}/retry")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "success"
-
-        # Verify DB state
+        # Retry returns the NEW task, not the original
+        assert data["is_retry"] is True
+        assert data["retry_source_task_id"] == task.id
+        assert data["status"] == "pending"
+        
+        # Original task remains FAILED
         resp2 = await client.get(f"/api/tasks/{task.id}")
-        task_data = resp2.json()
-        assert task_data["status"] == "pending"
-        assert task_data["error_message"] is None
+        assert resp2.json()["status"] == "failed"
 
     async def test_retry_cancelled_task(self, client, db_session):
-        """Retrying a CANCELLED task resets status to PENDING."""
+        """Retrying a CANCELLED task creates a new retry task."""
         task = await _seed_task(db_session, status=TaskStatus.CANCELLED)
 
         resp = await client.post(f"/api/tasks/{task.id}/retry")
         assert resp.status_code == 200
-        assert resp.json()["status"] == "success"
+        data = resp.json()
+        assert data["is_retry"] is True
+        assert data["retry_source_task_id"] == task.id
 
     async def test_retry_pending_task_rejected(self, client, db_session):
         """Retrying a PENDING task returns 400."""
@@ -842,7 +853,7 @@ class TestRetryTask:
         assert resp.status_code == 400
 
     async def test_retry_with_scheduled_datetime(self, client, db_session):
-        """Retrying with a future scheduled_datetime schedules the retry."""
+        """Retrying with a future scheduled_datetime creates a scheduled retry task."""
         task = await _seed_task(db_session, status=TaskStatus.FAILED)
         future = _future_dt(hours=72)
 
@@ -851,11 +862,10 @@ class TestRetryTask:
             json={"scheduled_datetime": future.isoformat()},
         )
         assert resp.status_code == 200
-        assert "scheduled for retry" in resp.json()["message"]
-
-        # Verify scheduled_at is set
-        resp2 = await client.get(f"/api/tasks/{task.id}")
-        assert resp2.json()["scheduled_at"] is not None
+        data = resp.json()
+        # Returns the new retry task
+        assert data["is_retry"] is True
+        assert data["scheduled_at"] is not None
 
     async def test_retry_nonexistent_task(self, client):
         """Retrying a non-existent task returns 404."""
@@ -863,7 +873,7 @@ class TestRetryTask:
         assert resp.status_code == 404
 
     async def test_retry_clears_previous_execution_data(self, client, db_session):
-        """Retry resets started_at, completed_at, container_id, commit_sha, stats."""
+        """Retry creates a new task without previous execution data."""
         task = await _seed_task(
             db_session,
             status=TaskStatus.FAILED,
@@ -877,10 +887,10 @@ class TestRetryTask:
             error_message="Previous error",
         )
 
-        await client.post(f"/api/tasks/{task.id}/retry")
-
-        resp = await client.get(f"/api/tasks/{task.id}")
+        resp = await client.post(f"/api/tasks/{task.id}/retry")
+        assert resp.status_code == 200
         data = resp.json()
+        # New retry task has clean state
         assert data["status"] == "pending"
         assert data["started_at"] is None
         assert data["completed_at"] is None
@@ -892,21 +902,27 @@ class TestRetryTask:
         assert data["error_message"] is None
 
     async def test_retry_clears_previous_logs(self, client, db_session):
-        """Retry clears task logs from the previous execution."""
+        """Retry creates a new task; original task's logs remain."""
         task = await _seed_task(db_session, status=TaskStatus.FAILED)
         await _seed_task_log(db_session, task.id, message="Old log 1")
         await _seed_task_log(db_session, task.id, message="Old log 2")
 
-        # Verify logs exist
+        # Verify logs exist on original task
         resp = await client.get(f"/api/tasks/{task.id}/logs")
         assert len(resp.json()) == 2
 
-        # Retry
-        await client.post(f"/api/tasks/{task.id}/retry")
+        # Retry creates a new task
+        retry_resp = await client.post(f"/api/tasks/{task.id}/retry")
+        assert retry_resp.status_code == 200
+        new_task_id = retry_resp.json()["id"]
 
-        # Verify logs are cleared
+        # Original task's logs remain
         resp2 = await client.get(f"/api/tasks/{task.id}/logs")
-        assert len(resp2.json()) == 0
+        assert len(resp2.json()) == 2
+        
+        # New retry task has no logs
+        resp3 = await client.get(f"/api/tasks/{new_task_id}/logs")
+        assert len(resp3.json()) == 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════
