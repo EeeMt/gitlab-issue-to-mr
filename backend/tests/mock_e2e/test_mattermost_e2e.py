@@ -1006,6 +1006,7 @@ from app.core.mattermost_notifications import (
     notify_task_event,
 )
 from app.models import (
+    Issue,
     MattermostNotificationDelivery,
     MattermostNotificationProfile,
     MattermostUserMapping,
@@ -1080,29 +1081,53 @@ async def _seed_profile(session, *, name="default", enabled=True, target_type="c
     return profile
 
 
-async def _seed_task(session, *, task_id=1, status=TaskStatus.COMPLETED, is_manual=False,
-                     initiator_username="alice", initiator_user_id=None,
-                     initiator_gitlab_user_id=None, project_id=10,
-                     issue_iid=42, error_message=None, **kwargs):
-    """Insert a Task into the test DB."""
-    task = Task(
-        id=task_id,
-        project_id=project_id,
-        issue_iid=issue_iid,
-        user_prompt="test prompt",
+async def _seed_issue(session, *, issue_id=None, project_id=10, **kwargs):
+    """Insert an Issue into the test DB."""
+    defaults = dict(
+        title="Test issue",
+        description="Test description",
         branch_name="feature/test",
         target_branch="main",
+        status="open",
+        project_id=project_id,
+    )
+    defaults.update(kwargs)
+    if issue_id is not None:
+        defaults["id"] = issue_id
+    issue = Issue(**defaults)
+    session.add(issue)
+    await session.commit()
+    await session.refresh(issue)
+    return issue
+
+
+async def _seed_task(session, *, task_id=None, status=TaskStatus.COMPLETED,
+                     initiator_username="alice", initiator_user_id=None,
+                     initiator_gitlab_user_id=None, project_id=10,
+                     issue=None, error_message=None, **kwargs):
+    """Insert a Task into the test DB."""
+    if issue is None:
+        issue = await _seed_issue(session, project_id=project_id)
+    
+    defaults = dict(
+        project_id=project_id,
+        issue_id=issue.id,
+        user_prompt="test prompt",
         status=status,
-        is_manual=is_manual,
         initiator_username=initiator_username,
         initiator_user_id=initiator_user_id,
         initiator_gitlab_user_id=initiator_gitlab_user_id,
         error_message=error_message,
-        **kwargs,
     )
+    defaults.update(kwargs)
+    if task_id is not None:
+        defaults["id"] = task_id
+    task = Task(**defaults)
     session.add(task)
     await session.commit()
     await session.refresh(task)
+    # Eagerly load the issue relationship to avoid lazy loading issues
+    task.issue = issue
     return task
 
 
@@ -1407,24 +1432,25 @@ class TestNotifyFiltering:
         deliveries = await _get_deliveries(notify_session, task.id)
         assert len(deliveries) == 0
 
-    async def test_skips_manual_task_when_not_opted_in(self, notify_sf, notify_session):
-        """Manual tasks are skipped when send_for_manual_tasks=False."""
+    async def test_skips_task_when_send_for_manual_tasks_false(self, notify_sf, notify_session):
+        """Note: send_for_manual_tasks no longer has effect (all tasks are manual now).
+        This test is kept for backwards compatibility but both settings behave the same."""
         await _seed_profile(notify_session, manual=False, events=["task_completed"])
-        task = await _seed_task(notify_session, is_manual=True)
+        task = await _seed_task(notify_session)
 
         mock_client = AsyncMock()
+        mock_client.get_channel_by_name.return_value = {"id": "ch-001"}
 
         with _patches(notify_sf, mock_client):
             await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
 
-        mock_client.create_post.assert_not_called()
-        deliveries = await _get_deliveries(notify_session, task.id)
-        assert len(deliveries) == 0
+        # Since is_manual filtering was removed, this now sends the notification
+        mock_client.create_post.assert_awaited_once()
 
-    async def test_sends_manual_task_when_opted_in(self, notify_sf, notify_session):
-        """Manual tasks are sent when send_for_manual_tasks=True."""
+    async def test_sends_task_when_send_for_manual_tasks_true(self, notify_sf, notify_session):
+        """Tasks are sent when send_for_manual_tasks=True."""
         await _seed_profile(notify_session, manual=True, events=["task_completed"])
-        task = await _seed_task(notify_session, is_manual=True)
+        task = await _seed_task(notify_session)
 
         mock_client = AsyncMock()
         mock_client.get_channel_by_name.return_value = {"id": "ch-001"}
@@ -1683,10 +1709,10 @@ class TestNotifyContext:
         assert "OOM" in error_field[0]["value"]
 
     async def test_manual_task_shows_in_issue_field(self, notify_sf, notify_session):
-        """Manual tasks without issue_iid show '手工任务' in issue field."""
+        """All tasks have an issue now, so issue field shows issue_id."""
         await _seed_profile(notify_session, manual=True, events=["task_completed"],
                             fields=["task_id", "issue"])
-        task = await _seed_task(notify_session, is_manual=True, issue_iid=None)
+        task = await _seed_task(notify_session)  # All tasks have an issue
 
         mock_client = AsyncMock()
         mock_client.get_channel_by_name.return_value = {"id": "ch-001"}
@@ -1698,7 +1724,8 @@ class TestNotifyContext:
         fields = props["attachments"][0]["fields"]
         issue_field = [f for f in fields if f["title"] == "Issue"]
         assert len(issue_field) == 1
-        assert issue_field[0]["value"] == "手工任务"
+        # Now shows issue_id instead of "手工任务"
+        assert f"#{task.issue_id}" in issue_field[0]["value"]
 
 
 # ---------------------------------------------------------------------------

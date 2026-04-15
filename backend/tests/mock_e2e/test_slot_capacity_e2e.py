@@ -35,7 +35,7 @@ from app.dependencies.project_access import (
     require_project_access_scope,
 )
 from app.main import app
-from app.models import Base, Task, TaskStatus
+from app.models import Base, Issue, Task, TaskStatus
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -173,15 +173,24 @@ async def _seed_tasks(
 ) -> list[Task]:
     """Insert *count* tasks directly into the test database."""
     tasks: list[Task] = []
-    for _ in range(count):
-        task = Task(
+    for i in range(count):
+        # Create an issue for each task
+        issue = Issue(
             project_id=project_id,
-            user_prompt="Seeded task",
+            title=f"Test issue {i}",
             branch_name="test/branch",
             target_branch="main",
+            status="open",
+        )
+        session.add(issue)
+        await session.flush()
+        
+        task = Task(
+            project_id=project_id,
+            issue_id=issue.id,
+            user_prompt="Seeded task",
             status=status,
             scheduled_at=scheduled_at,
-            is_manual=True,
         )
         session.add(task)
         tasks.append(task)
@@ -337,14 +346,23 @@ class TestTaskCreationSlotEnforcement:
         client: AsyncClient,
         *,
         scheduled_datetime: datetime | None = None,
+        issue_id: int | None = None,
         **extra,
     ):
         """Helper: issue POST /api/tasks with sensible defaults."""
+        # Create issue if not provided
+        if issue_id is None:
+            issue_resp = await client.post("/api/issues", json={
+                "project_id": 1,
+                "title": "Test issue for task creation",
+                "target_branch": "main",
+            })
+            assert issue_resp.status_code == 200
+            issue_id = issue_resp.json()["id"]
+        
         payload: dict = {
-            "project_id": 1,
+            "issue_id": issue_id,
             "user_prompt": "Implement feature X",
-            "branch_name": "feat/x",
-            "target_branch": "main",
             "priority": 0,
             **extra,
         }

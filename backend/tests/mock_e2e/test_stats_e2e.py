@@ -42,7 +42,7 @@ from app.dependencies.project_access import (
     require_project_access_scope,
 )
 from app.main import app
-from app.models import Base, Task, TaskStatus
+from app.models import Base, Issue, Task, TaskStatus
 from app.core.utcnow import utcnow
 
 
@@ -231,18 +231,36 @@ def _mock_gitlab_projects():
 # ---------------------------------------------------------------------------
 
 
-async def _seed_task(db_session: AsyncSession, **overrides) -> Task:
-    """Create a task directly in the test database."""
-    now = utcnow()
+async def _seed_issue(db_session: AsyncSession, **overrides) -> Issue:
+    """Create an issue directly in the test database."""
     defaults = dict(
         project_id=1,
-        issue_iid=10,
-        user_prompt="Test prompt",
+        title="Test issue",
+        description="Test description",
         branch_name="codify/test",
         target_branch="main",
+        status="open",
+    )
+    defaults.update(overrides)
+    issue = Issue(**defaults)
+    db_session.add(issue)
+    await db_session.commit()
+    await db_session.refresh(issue)
+    return issue
+
+
+async def _seed_task(db_session: AsyncSession, issue: Issue = None, **overrides) -> Task:
+    """Create a task directly in the test database."""
+    if issue is None:
+        issue = await _seed_issue(db_session)
+    
+    now = utcnow()
+    defaults = dict(
+        project_id=issue.project_id,
+        issue_id=issue.id,
+        user_prompt="Test prompt",
         status=TaskStatus.COMPLETED,
         priority=1,
-        is_manual=False,
         initiator_username="testuser",
         created_at=now,
         updated_at=now,

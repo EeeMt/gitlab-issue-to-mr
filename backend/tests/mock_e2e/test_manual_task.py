@@ -156,19 +156,15 @@ class TestManualTaskCreation:
     @pytest.mark.asyncio
     async def test_create_task_immediate(self):
         """Test creating a task for immediate execution."""
-        from app.api.tasks import CreateTaskRequest
+        from app.api.task_schemas import CreateTaskRequest
 
         request = CreateTaskRequest(
-            project_id=TEST_PROJECT_ID,
-            branch_name=TEST_BRANCH,
-            target_branch=TEST_TARGET_BRANCH,
+            issue_id=1,  # Now requires issue_id
             user_prompt=TEST_PROMPT,
             priority=0,
         )
 
-        assert request.project_id == TEST_PROJECT_ID
-        assert request.branch_name == TEST_BRANCH
-        assert request.target_branch == TEST_TARGET_BRANCH
+        assert request.issue_id == 1
         assert request.user_prompt == TEST_PROMPT
         assert request.priority == 0
         assert request.delay_seconds is None
@@ -177,11 +173,10 @@ class TestManualTaskCreation:
     @pytest.mark.asyncio
     async def test_create_task_with_delay(self):
         """Test creating a task with delay."""
-        from app.api.tasks import CreateTaskRequest
+        from app.api.task_schemas import CreateTaskRequest
 
         request = CreateTaskRequest(
-            project_id=TEST_PROJECT_ID,
-            branch_name=TEST_BRANCH,
+            issue_id=1,
             user_prompt=TEST_PROMPT,
             delay_seconds=300,  # 5 minutes
         )
@@ -191,12 +186,11 @@ class TestManualTaskCreation:
     @pytest.mark.asyncio
     async def test_create_task_with_scheduled_datetime(self):
         """Test creating a task with scheduled datetime."""
-        from app.api.tasks import CreateTaskRequest
+        from app.api.task_schemas import CreateTaskRequest
 
         scheduled = datetime.now(UTC) + timedelta(days=30)
         request = CreateTaskRequest(
-            project_id=TEST_PROJECT_ID,
-            branch_name=TEST_BRANCH,
+            issue_id=1,
             user_prompt=TEST_PROMPT,
             scheduled_datetime=scheduled,
         )
@@ -205,41 +199,29 @@ class TestManualTaskCreation:
 
 
 class TestManualTaskNotification:
-    """Test that manual tasks don't send issue notifications."""
+    """Tests for task notifications (all tasks are now manual)."""
 
-    def test_manual_task_notification_skip(self):
-        """Test that manual tasks skip issue notifications."""
-        from app.models import Task, TaskStatus
+    def test_task_has_issue_id(self):
+        """Test that tasks now always have an issue_id."""
+        from app.models import Task, TaskStatus, Issue
 
-        # Create a manual task
-        task = Task(
+        # All tasks must have an associated issue
+        issue = Issue(
             project_id=TEST_PROJECT_ID,
-            user_prompt=TEST_PROMPT,
+            title="Test issue",
             branch_name=TEST_BRANCH,
             target_branch=TEST_TARGET_BRANCH,
-            is_manual=True,
-            issue_iid=None,
-            issue_id=None,
-            note_id=None,
+            status="open",
         )
-
-        # Verify it's a manual task
-        assert task.is_manual is True
-        assert task.issue_iid is None
-
-        # Non-manual task should have issue info
-        webhook_task = Task(
+        
+        task = Task(
             project_id=TEST_PROJECT_ID,
-            issue_iid=123,
-            issue_id=456,
-            note_id=789,
+            issue_id=1,  # Always has an issue
             user_prompt=TEST_PROMPT,
-            branch_name="codify/issue-123",
-            is_manual=False,
         )
 
-        assert webhook_task.is_manual is False
-        assert webhook_task.issue_iid == 123
+        # Verify it has an issue_id
+        assert task.issue_id == 1
 
 
 class TestBaseBranchWorkflow:
@@ -282,11 +264,10 @@ class TestManualTaskScheduling:
 
     def test_scheduled_at_calculation_delay(self):
         """Test scheduled_at calculation with delay."""
-        from app.api.tasks import CreateTaskRequest
+        from app.api.task_schemas import CreateTaskRequest
 
         request = CreateTaskRequest(
-            project_id=TEST_PROJECT_ID,
-            branch_name=TEST_BRANCH,
+            issue_id=1,
             user_prompt=TEST_PROMPT,
             delay_seconds=600,  # 10 minutes
         )
@@ -306,11 +287,10 @@ class TestManualTaskScheduling:
     def test_scheduled_at_calculation_absolute(self):
         """Test scheduled_at calculation with absolute time."""
         scheduled = datetime(2026, 12, 31, 23, 59, 59)
-        from app.api.tasks import CreateTaskRequest
+        from app.api.task_schemas import CreateTaskRequest
 
         request = CreateTaskRequest(
-            project_id=TEST_PROJECT_ID,
-            branch_name=TEST_BRANCH,
+            issue_id=1,
             user_prompt=TEST_PROMPT,
             scheduled_datetime=scheduled,
         )
