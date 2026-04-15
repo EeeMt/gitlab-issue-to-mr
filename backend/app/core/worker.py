@@ -884,11 +884,12 @@ class WorkerExecutor:
         container = None
 
         try:
-            # Pull worker image
-            try:
-                self.docker.pull_image(settings.worker_image, force=True)
-            except Exception as e:
-                logger.warning(f"Failed to pull image: {e}, trying to use existing")
+            # Pull worker image (skipped when worker_skip_image_pull is set)
+            if not settings.worker_skip_image_pull:
+                try:
+                    self.docker.pull_image(settings.worker_image, force=True)
+                except Exception as e:
+                    logger.warning(f"Failed to pull image: {e}, trying to use existing")
 
             mr_iid = issue.merge_request_iid if issue else None
             mr_web_url = issue.merge_request_url if issue else None
