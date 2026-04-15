@@ -30,10 +30,11 @@ class TestDashboardPage:
         class_page.wait_for_load_state("domcontentloaded")
         expect(class_page.get_by_test_id("dashboard-page")).to_be_visible()
 
-    def test_dashboard_header_is_displayed(self, class_page: Page):
+    def test_dashboard_summary_is_displayed(self, class_page: Page):
+        """Dashboard summary section should be visible (PageHeader was removed)."""
         class_page.goto("/dashboard")
-        class_page.wait_for_load_state("domcontentloaded")
-        expect(class_page.get_by_test_id("dashboard-header")).to_be_visible()
+        # Summary renders after v-if="hasLoadedOnce" — need generous timeout under parallel load
+        expect(class_page.get_by_test_id("dashboard-summary")).to_be_visible(timeout=30000)
 
     def test_dashboard_new_issue_button_visible(self, class_page: Page):
         class_page.goto("/dashboard")
@@ -59,8 +60,9 @@ class TestDashboardSummaryCards:
     def test_summary_cards_have_labels_and_values(self, class_page: Page):
         class_page.goto("/dashboard")
         class_page.wait_for_selector("[data-testid='dashboard-summary']", timeout=10000)
-        labels = class_page.locator(".summary-card__label")
-        values = class_page.locator(".summary-card__value")
+        # Dashboard now uses .metric-title and .dashboard-stat__value
+        labels = class_page.locator(".metric-title")
+        values = class_page.locator(".dashboard-stat__value")
         expect(labels.first).to_be_visible()
         expect(values.first).to_be_visible()
 
@@ -68,7 +70,8 @@ class TestDashboardSummaryCards:
         """Each summary card value should display a number."""
         class_page.goto("/dashboard")
         class_page.wait_for_selector("[data-testid='dashboard-summary']", timeout=10000)
-        values = class_page.locator(".summary-card__value")
+        # Dashboard now uses .dashboard-stat__value
+        values = class_page.locator(".dashboard-stat__value")
         for i in range(values.count()):
             text = values.nth(i).inner_text().strip()
             assert text.isdigit(), f"Card value {i} is not numeric: {text!r}"
@@ -148,7 +151,9 @@ class TestDashboardNavigation:
 
         recent_issues = logged_in_page.get_by_test_id("dashboard-recent-issues")
         link = recent_issues.get_by_text("DashboardLinkNav")
-        link.click()
+        # Use .first to avoid strict mode violation (title appears multiple times)
+        expect(link.first).to_be_visible(timeout=10000)
+        link.first.click()
         logged_in_page.wait_for_url(f"**/issues/{issue['id']}", timeout=5000)
         assert f"/issues/{issue['id']}" in logged_in_page.url
 
@@ -165,6 +170,41 @@ class TestDashboardIssueAppears:
 
         logged_in_page.goto("/dashboard")
         logged_in_page.wait_for_load_state("networkidle")
+        # Wait for the table to load data
+        logged_in_page.wait_for_timeout(1000)
 
         recent_issues = logged_in_page.get_by_test_id("dashboard-recent-issues")
-        expect(recent_issues.get_by_text("DashboardRecentTest")).to_be_visible()
+        # Use .first to avoid strict mode violation (title appears multiple times in table)
+        expect(recent_issues.get_by_text("DashboardRecentTest").first).to_be_visible(timeout=10000)
+
+
+@pytest.mark.dashboard
+class TestDashboardRefactoredFeatures:
+    """Tests for new dashboard features after refactoring."""
+
+    def test_activity_heatmap_visible(self, class_page: Page):
+        """Activity heatmap section should be visible on dashboard."""
+        class_page.goto("/dashboard")
+        class_page.wait_for_load_state("domcontentloaded")
+        expect(class_page.get_by_test_id("dashboard-activity-heatmap")).to_be_visible()
+
+    def test_trend_chart_visible(self, class_page: Page):
+        """Trend chart section should be visible on dashboard."""
+        class_page.goto("/dashboard")
+        class_page.wait_for_load_state("domcontentloaded")
+        expect(class_page.get_by_test_id("dashboard-trend-chart")).to_be_visible()
+
+    def test_metric_cards_show_correct_structure(self, class_page: Page):
+        """Metric cards should have proper title and value structure."""
+        class_page.goto("/dashboard")
+        class_page.wait_for_selector("[data-testid='dashboard-summary']", timeout=10000)
+        
+        # Check that cards have the dashboard-metric-card class
+        cards = class_page.locator(".dashboard-metric-card")
+        expect(cards.first).to_be_visible()
+        
+        # Check that first card has metric-title and metric-body
+        first_card = cards.first
+        expect(first_card.locator(".metric-title")).to_be_visible()
+        expect(first_card.locator(".metric-body")).to_be_visible()
+

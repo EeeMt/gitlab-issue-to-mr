@@ -83,35 +83,37 @@ class TestTaskListSummaryCards:
 class TestTaskListFilters:
     """Tests for task list filter controls."""
 
-    def test_status_filter_exists(self, class_page: Page):
+    def test_filter_toolbar_exists(self, class_page: Page):
+        """Filter toolbar should be visible on the page."""
         class_page.goto("/tasks")
         class_page.wait_for_load_state("domcontentloaded")
-        status_filter = class_page.locator(".dashboard__filter--status")
-        expect(status_filter).to_be_visible()
+        expect(class_page.get_by_test_id("filter-toolbar")).to_be_visible()
 
-    def test_project_filter_exists(self, class_page: Page):
+    def test_filter_button_exists(self, class_page: Page):
+        """Filter button should be visible in the filter toolbar."""
         class_page.goto("/tasks")
         class_page.wait_for_load_state("domcontentloaded")
-        project_filter = class_page.locator(".dashboard__filter--project")
-        expect(project_filter).to_be_visible()
+        expect(class_page.get_by_test_id("filter-toolbar-filter-btn")).to_be_visible()
 
-    def test_initiator_filter_exists(self, class_page: Page):
+    def test_search_input_exists(self, class_page: Page):
+        """Search input should be visible in the filter toolbar."""
         class_page.goto("/tasks")
         class_page.wait_for_load_state("domcontentloaded")
-        initiator_filter = class_page.locator(".dashboard__filter--initiator")
-        expect(initiator_filter).to_be_visible()
+        expect(class_page.get_by_test_id("filter-toolbar-search")).to_be_visible()
 
-    def test_status_filter_opens_dropdown(self, logged_in_page: Page):
-        """Clicking status filter should show dropdown options."""
+    def test_filter_button_opens_popover(self, logged_in_page: Page):
+        """Clicking filter button should show filter popover with options."""
         logged_in_page.goto("/tasks")
         logged_in_page.wait_for_load_state("networkidle")
 
-        status_filter = logged_in_page.locator(".dashboard__filter--status .n-base-selection")
-        status_filter.click()
+        # Click the filter button to open FilterPopover
+        filter_btn = logged_in_page.get_by_test_id("filter-toolbar-filter-btn")
+        filter_btn.click()
         logged_in_page.wait_for_timeout(500)
 
-        options = logged_in_page.locator(".n-base-select-option")
-        assert options.count() >= 5
+        # Check that a popover or dropdown appears (FilterPopover uses n-popover)
+        popover = logged_in_page.locator(".n-popover")
+        expect(popover.first).to_be_visible(timeout=5000)
 
 
 # ---------------------------------------------------------------------------
@@ -171,3 +173,54 @@ class TestTaskListPagination:
         pagination = class_page.locator(".n-pagination")
         if pagination.count() > 0:
             expect(pagination.first).to_be_visible()
+
+
+@pytest.mark.task_list
+class TestTaskListRefactoredFeatures:
+    """Tests for new task list features after FilterToolbar refactoring."""
+
+    def test_filter_toolbar_visible_on_load(self, class_page: Page):
+        """Filter toolbar should be visible on page load."""
+        class_page.goto("/tasks")
+        class_page.wait_for_load_state("domcontentloaded")
+        toolbar = class_page.get_by_test_id("filter-toolbar")
+        expect(toolbar).to_be_visible()
+
+    def test_filter_toolbar_search_visible(self, class_page: Page):
+        """Search input should be visible in filter toolbar."""
+        class_page.goto("/tasks")
+        class_page.wait_for_load_state("domcontentloaded")
+        search = class_page.get_by_test_id("filter-toolbar-search")
+        expect(search).to_be_visible()
+
+    def test_filter_toolbar_has_sort_button(self, class_page: Page):
+        """Sort button should be visible in filter toolbar."""
+        class_page.goto("/tasks")
+        class_page.wait_for_load_state("domcontentloaded")
+        sort_btn = class_page.get_by_test_id("filter-toolbar-sort-btn")
+        expect(sort_btn).to_be_visible()
+
+    def test_filter_toolbar_has_columns_button(self, class_page: Page):
+        """Columns button should be visible in filter toolbar."""
+        class_page.goto("/tasks")
+        class_page.wait_for_load_state("domcontentloaded")
+        columns_btn = class_page.get_by_test_id("filter-toolbar-columns-btn")
+        expect(columns_btn).to_be_visible()
+
+    def test_summary_cards_show_correct_labels(self, class_page: Page):
+        """Summary cards should have metric-title labels."""
+        class_page.goto("/tasks")
+        class_page.wait_for_selector("[data-testid='tasks-summary']", timeout=10000)
+        
+        # Check for metric-title elements (new structure)
+        labels = class_page.locator(".metric-title")
+        if labels.count() > 0:
+            expect(labels.first).to_be_visible()
+
+    def test_summary_section_has_cards(self, class_page: Page):
+        """Summary section should have multiple summary cards."""
+        class_page.goto("/tasks")
+        class_page.wait_for_selector("[data-testid='tasks-summary']", timeout=10000)
+        
+        cards = class_page.get_by_test_id("tasks-summary-card")
+        assert cards.count() >= 1, "Summary section should have at least one card"

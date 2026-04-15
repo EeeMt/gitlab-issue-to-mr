@@ -105,11 +105,12 @@ class TestTaskActions:
         execute_button = class_page.get_by_role("button", name="Execute")
 
     def test_task_view_no_actions_for_completed_tasks(self, class_page: Page):
-        """Test that completed tasks show no action buttons."""
+        """Test that completed tasks show no action buttons or show the no-action message."""
         class_page.goto("/tasks/1")
         class_page.wait_for_selector(".task-view", state="visible", timeout=5000)
-        # Wait for task data to load (actions card indicates API response arrived)
         class_page.wait_for_selector("[data-testid='task-actions']", state="visible", timeout=10000)
+        # Wait for data to settle
+        class_page.wait_for_timeout(1000)
         no_action = class_page.locator(".task-actions__empty")
         if no_action.count() > 0 and no_action.is_visible():
             expect(no_action).to_contain_text("No manual action is available")

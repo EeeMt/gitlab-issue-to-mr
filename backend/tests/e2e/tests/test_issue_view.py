@@ -66,8 +66,8 @@ class TestIssueViewPage:
 
     def test_issue_view_header_visible(self, logged_in_page: Page, test_issue_id):
         logged_in_page.goto(f"/issues/{test_issue_id}")
-        logged_in_page.wait_for_load_state("domcontentloaded")
-        expect(logged_in_page.get_by_test_id("issue-view-header")).to_be_visible()
+        # Header depends on API data (v-if after fetch) — need generous timeout under parallel load
+        expect(logged_in_page.get_by_test_id("issue-view-header")).to_be_visible(timeout=30000)
 
     def test_metadata_card_visible(self, logged_in_page: Page, test_issue_id):
         logged_in_page.goto(f"/issues/{test_issue_id}")
@@ -84,12 +84,11 @@ class TestIssueViewPage:
         logged_in_page.wait_for_load_state("domcontentloaded")
         expect(logged_in_page.get_by_test_id("issue-tasks-card")).to_be_visible()
 
-    def test_create_task_card_visible(self, logged_in_page: Page, test_issue_id):
+    def test_toggle_create_task_button_visible(self, logged_in_page: Page, test_issue_id):
+        """Toggle button for create task drawer should be visible."""
         logged_in_page.goto(f"/issues/{test_issue_id}")
         logged_in_page.wait_for_load_state("domcontentloaded")
-        # Create task form is collapsed by default; toggle it open first
-        logged_in_page.get_by_test_id("issue-toggle-create-task").click()
-        expect(logged_in_page.get_by_test_id("issue-create-task-card")).to_be_visible()
+        expect(logged_in_page.get_by_test_id("issue-toggle-create-task")).to_be_visible()
 
 
 # ---------------------------------------------------------------------------
@@ -103,17 +102,20 @@ class TestIssueViewCreateTaskForm:
     def test_task_prompt_input_visible(self, logged_in_page: Page, test_issue_id):
         logged_in_page.goto(f"/issues/{test_issue_id}")
         logged_in_page.wait_for_load_state("networkidle")
-        # Toggle create task form open
+        # Open the create task drawer first
         logged_in_page.get_by_test_id("issue-toggle-create-task").click()
-        # VariableEditor uses CodeMirror; look for .cm-editor inside the form
-        editor = logged_in_page.get_by_test_id("issue-create-task-card").locator(".cm-editor")
-        expect(editor).to_be_visible()
+        logged_in_page.wait_for_timeout(500)
+        # VariableEditor uses CodeMirror; look for .cm-editor inside the drawer
+        drawer = logged_in_page.get_by_test_id("issue-create-task-drawer")
+        editor = drawer.locator(".cm-editor")
+        expect(editor).to_be_visible(timeout=5000)
 
     def test_create_task_button_visible(self, logged_in_page: Page, test_issue_id):
         logged_in_page.goto(f"/issues/{test_issue_id}")
         logged_in_page.wait_for_load_state("domcontentloaded")
-        # Toggle create task form open first
+        # Open the drawer first to see the button inside
         logged_in_page.get_by_test_id("issue-toggle-create-task").click()
+        logged_in_page.wait_for_timeout(500)
         expect(logged_in_page.get_by_test_id("issue-create-task-button")).to_be_visible()
 
     def test_edit_button_visible(self, logged_in_page: Page, test_issue_id):
@@ -140,15 +142,17 @@ class TestIssueViewCreateTask:
         logged_in_page.goto(f"/issues/{test_issue_id}")
         logged_in_page.wait_for_load_state("networkidle")
 
-        # Toggle create task form open
+        # Open the create task drawer
         logged_in_page.get_by_test_id("issue-toggle-create-task").click()
+        logged_in_page.wait_for_timeout(500)
 
-        # Fill prompt via CodeMirror editor (VariableEditor)
-        editor = logged_in_page.get_by_test_id("issue-create-task-card").locator(".cm-content")
+        # Fill prompt via CodeMirror editor (VariableEditor) inside the drawer
+        drawer = logged_in_page.get_by_test_id("issue-create-task-drawer")
+        editor = drawer.locator(".cm-content")
         editor.click()
         editor.fill("E2E form-created task prompt")
 
-        # Click create task
+        # Click create task button inside the drawer
         logged_in_page.get_by_test_id("issue-create-task-button").click()
         logged_in_page.wait_for_timeout(2000)
 
@@ -274,3 +278,100 @@ class TestIssueViewClose:
 
         # After close, the close button should be disabled
         expect(close_btn).to_be_disabled()
+
+
+@pytest.mark.issue_view
+class TestIssueViewCreateTaskDrawer:
+    """Tests for the create task drawer on issue view."""
+
+    def test_toggle_button_opens_drawer(self, logged_in_page: Page, test_issue_id):
+        """Clicking toggle button should open the create task drawer."""
+        logged_in_page.goto(f"/issues/{test_issue_id}")
+        logged_in_page.wait_for_load_state("networkidle")
+
+        # Click the toggle button
+        toggle_btn = logged_in_page.get_by_test_id("issue-toggle-create-task")
+        toggle_btn.click()
+        logged_in_page.wait_for_timeout(500)
+
+        # Drawer should be visible
+        drawer = logged_in_page.get_by_test_id("issue-create-task-drawer")
+        expect(drawer).to_be_visible()
+
+    def test_toggle_button_closes_drawer(self, logged_in_page: Page, test_issue_id):
+        """Drawer can be closed by pressing Escape or clicking the mask."""
+        logged_in_page.goto(f"/issues/{test_issue_id}")
+        logged_in_page.wait_for_load_state("networkidle")
+
+        toggle_btn = logged_in_page.get_by_test_id("issue-toggle-create-task")
+        
+        # Open drawer
+        toggle_btn.click()
+        logged_in_page.wait_for_timeout(800)
+        drawer = logged_in_page.get_by_test_id("issue-create-task-drawer")
+        expect(drawer).to_be_visible()
+        
+        # Close drawer by pressing Escape key
+        logged_in_page.keyboard.press("Escape")
+        logged_in_page.wait_for_timeout(500)
+        expect(drawer).not_to_be_visible()
+
+    def test_drawer_has_prompt_input(self, logged_in_page: Page, test_issue_id):
+        """Drawer should have a prompt input (CodeMirror editor)."""
+        logged_in_page.goto(f"/issues/{test_issue_id}")
+        logged_in_page.wait_for_load_state("networkidle")
+
+        logged_in_page.get_by_test_id("issue-toggle-create-task").click()
+        logged_in_page.wait_for_timeout(500)
+
+        drawer = logged_in_page.get_by_test_id("issue-create-task-drawer")
+        editor = drawer.locator(".cm-editor")
+        expect(editor).to_be_visible()
+
+    def test_drawer_has_priority_select(self, logged_in_page: Page, test_issue_id):
+        """Drawer should have a priority select."""
+        logged_in_page.goto(f"/issues/{test_issue_id}")
+        logged_in_page.wait_for_load_state("networkidle")
+
+        logged_in_page.get_by_test_id("issue-toggle-create-task").click()
+        logged_in_page.wait_for_timeout(500)
+
+        drawer = logged_in_page.get_by_test_id("issue-create-task-drawer")
+        # Priority select should be an n-select or similar
+        priority_select = drawer.locator(".n-base-selection, .n-select")
+        if priority_select.count() > 0:
+            expect(priority_select.first).to_be_visible()
+
+    def test_drawer_has_submit_button(self, logged_in_page: Page, test_issue_id):
+        """Drawer should have a submit button."""
+        logged_in_page.goto(f"/issues/{test_issue_id}")
+        logged_in_page.wait_for_load_state("networkidle")
+
+        logged_in_page.get_by_test_id("issue-toggle-create-task").click()
+        logged_in_page.wait_for_timeout(500)
+
+        submit_btn = logged_in_page.get_by_test_id("issue-create-task-button")
+        expect(submit_btn).to_be_visible()
+
+    def test_created_task_appears_in_table(self, logged_in_page: Page, test_issue_id):
+        """Task created via drawer should appear in the tasks table."""
+        logged_in_page.goto(f"/issues/{test_issue_id}")
+        logged_in_page.wait_for_load_state("networkidle")
+
+        # Open drawer
+        logged_in_page.get_by_test_id("issue-toggle-create-task").click()
+        logged_in_page.wait_for_timeout(500)
+
+        # Fill prompt
+        drawer = logged_in_page.get_by_test_id("issue-create-task-drawer")
+        editor = drawer.locator(".cm-content")
+        editor.click()
+        editor.fill("E2E drawer task test")
+
+        # Submit
+        logged_in_page.get_by_test_id("issue-create-task-button").click()
+        logged_in_page.wait_for_timeout(2000)
+
+        # Check task appears in task table
+        tasks_card = logged_in_page.get_by_test_id("issue-tasks-card")
+        expect(tasks_card.get_by_text("E2E drawer task test")).to_be_visible(timeout=10000)

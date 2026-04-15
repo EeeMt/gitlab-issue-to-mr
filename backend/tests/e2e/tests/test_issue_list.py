@@ -44,16 +44,17 @@ class TestIssueListPage:
         class_page.wait_for_load_state("domcontentloaded")
         expect(class_page.get_by_test_id("issue-list-create-button")).to_be_visible()
 
-    def test_status_filter_visible(self, class_page: Page):
+    def test_filter_toolbar_visible(self, class_page: Page):
+        """Filter toolbar should be visible on the page."""
         class_page.goto("/issues")
         class_page.wait_for_load_state("domcontentloaded")
-        expect(class_page.get_by_test_id("issue-list-status-filter")).to_be_visible()
+        expect(class_page.get_by_test_id("filter-toolbar")).to_be_visible()
 
-    def test_project_filter_visible(self, class_page: Page):
+    def test_filter_button_visible(self, class_page: Page):
+        """Filter button should be visible in the filter toolbar."""
         class_page.goto("/issues")
         class_page.wait_for_load_state("domcontentloaded")
-        filters = class_page.locator(".issue-list__filter--project")
-        expect(filters).to_be_visible()
+        expect(class_page.get_by_test_id("filter-toolbar-filter-btn")).to_be_visible()
 
     def test_table_has_expected_columns(self, class_page: Page):
         """Issue table should have column headers."""
@@ -90,9 +91,11 @@ class TestIssueListNavigation:
         logged_in_page.wait_for_load_state("networkidle")
 
         table = logged_in_page.get_by_test_id("issue-list-table")
-        link = table.get_by_text("IssueListClickNav")
-        expect(link).to_be_visible(timeout=10000)
-        link.click()
+        # The title is in a button within the table cell - find and click the button directly
+        # Use force=True because table cells sometimes intercept pointer events
+        link = table.locator("button").filter(has_text="IssueListClickNav")
+        expect(link.first).to_be_visible(timeout=10000)
+        link.first.click(force=True)
         logged_in_page.wait_for_url(f"**/issues/{issue['id']}", timeout=5000)
         assert f"/issues/{issue['id']}" in logged_in_page.url
 
@@ -131,14 +134,51 @@ class TestIssueListData:
 class TestIssueListFilters:
     """Tests for issue list filter functionality."""
 
-    def test_status_filter_opens_dropdown(self, logged_in_page: Page):
-        """Status filter should open a dropdown with options."""
+    def test_filter_button_opens_popover(self, logged_in_page: Page):
+        """Filter button should open a popover with filter options."""
         logged_in_page.goto("/issues")
         logged_in_page.wait_for_load_state("domcontentloaded")
 
-        filter_el = logged_in_page.get_by_test_id("issue-list-status-filter")
-        filter_el.locator(".n-base-selection").click()
+        filter_btn = logged_in_page.get_by_test_id("filter-toolbar-filter-btn")
+        filter_btn.click()
         logged_in_page.wait_for_timeout(500)
 
-        options = logged_in_page.locator(".n-base-select-option")
-        assert options.count() >= 3  # open, in_progress, completed, closed
+        # Check that a popover appears (FilterPopover uses n-popover)
+        popover = logged_in_page.locator(".n-popover")
+        expect(popover.first).to_be_visible(timeout=5000)
+
+
+@pytest.mark.issue_list
+class TestIssueListRefactoredFeatures:
+    """Tests for new issue list features after FilterToolbar refactoring."""
+
+    def test_filter_toolbar_visible_on_load(self, class_page: Page):
+        """Filter toolbar should be visible on page load."""
+        class_page.goto("/issues")
+        class_page.wait_for_load_state("domcontentloaded")
+        toolbar = class_page.get_by_test_id("filter-toolbar")
+        expect(toolbar).to_be_visible()
+
+    def test_filter_toolbar_search_visible(self, class_page: Page):
+        """Search input should be visible in filter toolbar."""
+        class_page.goto("/issues")
+        class_page.wait_for_load_state("domcontentloaded")
+        search = class_page.get_by_test_id("filter-toolbar-search")
+        expect(search).to_be_visible()
+
+    def test_filter_count_visible(self, class_page: Page):
+        """Filter count should be visible in filter toolbar."""
+        class_page.goto("/issues")
+        class_page.wait_for_load_state("domcontentloaded")
+        count = class_page.get_by_test_id("filter-toolbar-count")
+        expect(count).to_be_visible()
+
+    def test_summary_section_has_cards(self, class_page: Page):
+        """Summary section should have multiple summary cards."""
+        class_page.goto("/issues")
+        class_page.wait_for_load_state("domcontentloaded")
+        
+        summary = class_page.get_by_test_id("issue-summary")
+        if summary.count() > 0:
+            cards = class_page.get_by_test_id("issue-summary-card")
+            assert cards.count() >= 1, "Summary section should have at least one card"

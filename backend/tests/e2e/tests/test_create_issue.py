@@ -78,9 +78,11 @@ class TestCreateIssuePage:
         # Enable MR toggle
         mr_switch = class_page.locator(".n-switch")
         mr_switch.click()
-        class_page.wait_for_timeout(1000)
-        target_sel = class_page.locator(".n-base-selection").filter(has_text="Select target branch")
-        expect(target_sel).to_be_visible(timeout=10000)
+        class_page.wait_for_timeout(1500)
+        # Look for the target branch form item (v-if condition should now be met)
+        # The select will be inside a form-item with label "Target Branch"
+        target_form_item = class_page.locator("label").filter(has_text=re.compile(r"Target\s*Branch", re.IGNORECASE))
+        expect(target_form_item).to_be_visible(timeout=10000)
 
     def test_submit_button_visible(self, class_page: Page):
         class_page.goto("/issues/create")
