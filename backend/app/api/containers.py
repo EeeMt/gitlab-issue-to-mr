@@ -16,15 +16,18 @@ from app.database import get_db
 from app.dependencies.auth import require_admin_user, require_authenticated_user, require_page_access
 from app.dependencies.auth import get_optional_current_user
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
-from app.models import Task, TaskLog, User
+from app.models import Issue, Task, TaskLog, User
 from app.core.docker_client import get_docker_client
 from app.api.task_operations import get_task_with_access_check
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 router = APIRouter()
 
-WORKER_CONTAINER_PATTERN = re.compile(r"^codify-\d+-p\d+-(i\d+|manual)$")
+
+def _get_container_pattern() -> re.Pattern:
+    """Build container name regex using configured prefix."""
+    prefix = re.escape(get_settings().worker_container_prefix)
+    return re.compile(rf"^{prefix}-(\d+)-issue(\d+)$")
 
 
 @router.get("/containers")
@@ -45,34 +48,40 @@ async def list_containers(
 
     try:
         docker = get_docker_client()
+        settings = get_settings()
+        prefix = settings.worker_container_prefix
+        pattern = _get_container_pattern()
         all_containers = await asyncio.to_thread(
             docker.client.containers.list,
             all=True,
-            filters={"name": "codify-"},
+            filters={"name": f"{prefix}-"},
         )
 
         for container in all_containers:
-            # Only show worker containers
-            if not WORKER_CONTAINER_PATTERN.match(container.name):
+            if not pattern.match(container.name):
                 continue
 
-            # Try to extract task_id from container name
-            # Formats: codify-{task_id}-p{project_id}-i{issue_iid}
-            #          codify-{task_id}-p{project_id}-manual
+            # Extract task_id and issue_id from: {prefix}-{task_id}-issue{issue_id}
             task_id = None
-            project_id = None
-            issue_iid = None
+            issue_id = None
 
-            try:
-                parts = container.name.split("-")
-                if len(parts) >= 4 and parts[0] == "codify":
-                    task_id = int(parts[1])
-                    project_id = int(parts[2].replace("p", ""))
-                    if parts[3].startswith("i"):
-                        issue_iid = int(parts[3][1:])
-                    # 'manual' suffix: issue_iid stays None
-            except (ValueError, IndexError):
-                pass
+            m = pattern.match(container.name)
+            if m:
+                task_id = int(m.group(1))
+                issue_id = int(m.group(2))
+
+            # Look up project_id from task for access control
+            project_id = None
+            if task_id is not None:
+                result = await db.execute(
+                    select(Task.issue_id).where(Task.id == task_id)
+                )
+                tid = result.scalar_one_or_none()
+                if tid:
+                    result2 = await db.execute(
+                        select(Issue.project_id).where(Issue.id == tid)
+                    )
+                    project_id = result2.scalar_one_or_none()
 
             if (
                 project_id is not None
@@ -86,8 +95,8 @@ async def list_containers(
                 "name": container.name,
                 "status": container.status,
                 "task_id": task_id,
+                "issue_id": issue_id,
                 "project_id": project_id,
-                "issue_iid": issue_iid,
                 "created_at": container.attrs.get("Created", ""),
             })
 

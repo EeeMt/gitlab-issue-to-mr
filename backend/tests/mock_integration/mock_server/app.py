@@ -46,14 +46,22 @@ def record_call(service: str, method: str, path: str, body: Any = None, extra: d
 
 
 @app.get("/mock/calls")
-async def get_calls(service: str | None = None, method: str | None = None):
-    """Retrieve recorded calls for test assertions."""
+async def get_calls(service: str | None = None, method: str | None = None, since: str | None = None):
+    """Retrieve recorded calls for test assertions.
+    
+    Args:
+        service: Filter by service name (e.g., 'gitlab', 'git')
+        method: Filter by HTTP method
+        since: ISO timestamp — only return calls after this time
+    """
     with _call_log_lock:
         calls = list(_call_log)
     if service:
         calls = [c for c in calls if c["service"] == service]
     if method:
         calls = [c for c in calls if c["method"] == method]
+    if since:
+        calls = [c for c in calls if c["timestamp"] > since]
     return calls
 
 

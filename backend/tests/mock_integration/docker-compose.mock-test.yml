@@ -30,7 +30,7 @@ services:
       context: ../../../
       dockerfile: backend/tests/mock_integration/mock_server/Dockerfile
     ports:
-      - "19000:9000"
+      - "${MOCK_PORT_MOCK:-19000}:9000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/mock/health"]
       interval: 2s
@@ -43,7 +43,7 @@ services:
   backend:
     image: codify-backend:latest
     ports:
-      - "18000:8000"
+      - "${MOCK_PORT_BACKEND:-18000}:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://codify:codify_password@postgres:5432/codify
       GITLAB_URL: http://mock-services:9000
@@ -54,7 +54,8 @@ services:
       ANTHROPIC_MODEL: fake-claude-1.0
       DOCKER_HOST: unix:///var/run/docker.sock
       WORKER_IMAGE: codify-worker-test:latest
-      WORKER_NETWORK: codify-mock-test
+      WORKER_NETWORK: ${MOCK_NETWORK:-codify-mock-test}
+      WORKER_CONTAINER_PREFIX: ${WORKER_PREFIX:-codify}
       AUTO_MIGRATE: "true"
       MAX_CONCURRENCY: "2"
       TASK_TIMEOUT: "120"
@@ -90,7 +91,8 @@ services:
       ANTHROPIC_MODEL: fake-claude-1.0
       DOCKER_HOST: unix:///var/run/docker.sock
       WORKER_IMAGE: codify-worker-test:latest
-      WORKER_NETWORK: codify-mock-test
+      WORKER_NETWORK: ${MOCK_NETWORK:-codify-mock-test}
+      WORKER_CONTAINER_PREFIX: ${WORKER_PREFIX:-codify}
       AUTO_MIGRATE: "false"
       MAX_CONCURRENCY: "2"
       TASK_TIMEOUT: "120"
@@ -107,5 +109,5 @@ services:
 
 networks:
   mock-test:
-    name: codify-mock-test
+    name: ${MOCK_NETWORK:-codify-mock-test}
     driver: bridge

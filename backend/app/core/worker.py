@@ -832,7 +832,8 @@ class WorkerExecutor:
 
     def _get_container_name(self, task: Task) -> str:
         """Generate container name with naming convention."""
-        return f"codify-{task.id}-issue{task.issue_id}"
+        prefix = get_settings().worker_container_prefix
+        return f"{prefix}-{task.id}-issue{task.issue_id}"
 
     async def execute_task(self, db: AsyncSession, task_id: int) -> bool:
         """Execute a task."""

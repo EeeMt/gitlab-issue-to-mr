@@ -134,6 +134,7 @@ class Settings(BaseSettings):
     # Worker Configuration
     worker_image: str = Field(default="codify-worker:latest")
     worker_network: str = Field(default="bridge")  # Docker network for worker containers
+    worker_container_prefix: str = Field(default="codify")  # Prefix for worker container names
     maven_cache_host_path: str = Field(default="")  # Host path to .m2/repository dir; empty = disabled
     maven_settings_host_path: str = Field(default="")  # Host path to settings.xml; empty = disabled
     # JSON array of volume mounts: [{"host_path": "/path", "container_path": "/path", "mode": "ro"}]

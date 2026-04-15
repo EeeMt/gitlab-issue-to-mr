@@ -29,12 +29,15 @@ _SESSION_CLEANUP_INTERVAL_SECONDS = 3600
 _worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-")
 
 
-WORKER_CONTAINER_PATTERN = re.compile(r"^codify-(\d+)-issue(\d+)$")
+def _get_container_pattern() -> re.Pattern:
+    """Build container name regex using configured prefix."""
+    prefix = re.escape(get_settings().worker_container_prefix)
+    return re.compile(rf"^{prefix}-(\d+)-issue(\d+)$")
 
 
 def _extract_task_id(container_name: str) -> int | None:
     """Extract task_id from a worker container name like codify-123-issue456."""
-    m = WORKER_CONTAINER_PATTERN.match(container_name)
+    m = _get_container_pattern().match(container_name)
     return int(m.group(1)) if m else None
 
 
@@ -290,13 +293,15 @@ class Scheduler:
             resumed_task_ids: set[int] = set()
             try:
                 docker = get_docker_client()
+                prefix = get_settings().worker_container_prefix
                 all_containers = docker.client.containers.list(
                     all=True,
-                    filters={"name": "codify-"}
+                    filters={"name": f"{prefix}-"}
                 )
+                pattern = _get_container_pattern()
 
                 for container in all_containers:
-                    if not WORKER_CONTAINER_PATTERN.match(container.name):
+                    if not pattern.match(container.name):
                         continue
 
                     task_id = _extract_task_id(container.name)
