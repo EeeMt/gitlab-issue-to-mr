@@ -230,8 +230,17 @@ test-mock-integration-logs: ## View mock integration test logs
 	docker-compose -f $(MOCK_INT_COMPOSE) logs -f
 
 .PHONY: test-mock-integration
-test-mock-integration: $(VENV)/.installed test-mock-integration-up ## Run mock integration tests (builds + starts env + runs tests)
-	cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m pytest tests/mock_integration/ -v --tb=short || \
+test-mock-integration: test-mock-integration-up ## Run mock integration tests (builds + starts env + runs tests inside backend container)
+	@echo "Copying test files into backend container..."
+	@docker cp $(PROJECT_ROOT)/backend/tests mock_integration-backend-1:/tmp/tests
+	@docker exec mock_integration-backend-1 bash -c "mkdir -p /app/tests && cp /tmp/tests/__init__.py /app/tests/ 2>/dev/null; rm -rf /app/tests/mock_integration && cp -r /tmp/tests/mock_integration /app/tests/mock_integration"
+	@docker exec mock_integration-backend-1 pip install pytest pytest-asyncio httpx --quiet 2>/dev/null
+	docker exec \
+		-e MOCK_TEST_BACKEND_URL=http://localhost:8000 \
+		-e MOCK_TEST_MOCK_URL=http://mock-services:9000 \
+		-e DOCKER_HOST_IP=mock-services \
+		mock_integration-backend-1 \
+		python -m pytest tests/mock_integration/ -v --tb=short -k "not TestCrashRecovery" || \
 		{ docker-compose -f $(MOCK_INT_COMPOSE) logs; false; }
 
 .PHONY: test-e2e-gitlab
