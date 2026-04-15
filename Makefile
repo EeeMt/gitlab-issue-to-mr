@@ -210,6 +210,10 @@ test-mock-e2e: $(VENV)/.installed ## Run mock E2E tests
 # ---------------------------------------------------------------------------
 
 MOCK_INT_COMPOSE := $(PROJECT_ROOT)/backend/tests/mock_integration/docker-compose.mock-test.yml
+MOCK_STACK_SCRIPT := $(PROJECT_ROOT)/scripts/run-mock-stack.sh
+
+# Common flags for run-mock-stack.sh
+_MOCK_COMMON := -c $(MOCK_INT_COMPOSE) -s $(PROJECT_ROOT)
 
 .PHONY: test-mock-integration-build
 test-mock-integration-build: ## Build images for mock integration tests
@@ -230,17 +234,8 @@ test-mock-integration-logs: ## View mock integration test logs
 	docker-compose -f $(MOCK_INT_COMPOSE) logs -f
 
 .PHONY: test-mock-integration
-test-mock-integration: test-mock-integration-up ## Run mock integration tests (builds + starts env + runs tests inside backend container)
-	@echo "Copying test files into backend container..."
-	@docker cp $(PROJECT_ROOT)/backend/tests mock_integration-backend-1:/tmp/tests
-	@docker exec mock_integration-backend-1 bash -c "mkdir -p /app/tests && cp /tmp/tests/__init__.py /app/tests/ 2>/dev/null; rm -rf /app/tests/mock_integration && cp -r /tmp/tests/mock_integration /app/tests/mock_integration"
-	@docker exec mock_integration-backend-1 pip install pytest pytest-asyncio httpx --quiet 2>/dev/null
-	docker exec \
-		-e MOCK_TEST_BACKEND_URL=http://localhost:8000 \
-		-e MOCK_TEST_MOCK_URL=http://mock-services:9000 \
-		-e DOCKER_HOST_IP=mock-services \
-		mock_integration-backend-1 \
-		python -m pytest tests/mock_integration/ -v --tb=short -k "not TestCrashRecovery" || \
+test-mock-integration: test-mock-integration-build ## Run mock integration tests (sequential, single stack)
+	$(MOCK_STACK_SCRIPT) $(_MOCK_COMMON) -d || \
 		{ docker-compose -f $(MOCK_INT_COMPOSE) logs; false; }
 
 # --- Two-stack parallel mock integration tests ---
@@ -254,86 +249,29 @@ MOCK_GROUP_B := test_security_and_resilience.py test_edge_cases_advanced.py test
 	test_health_access_sse.py test_coverage_gaps.py test_validation_and_dedup.py \
 	test_notifications_and_operations.py test_webhook_and_lifecycle.py
 
-# Helper: start a mock stack, copy tests, run a test group
-# Usage: $(call _mock_stack,<project>,<network>,<prefix>,<group_files>,<label>)
-define _mock_stack_run
-	@printf "\n\033[1;36m━━━ Mock Stack $(5): starting ━━━\033[0m\n"
-	COMPOSE_PROJECT_NAME=$(1) MOCK_NETWORK=$(2) WORKER_PREFIX=$(3) \
-		docker-compose -f $(MOCK_INT_COMPOSE) up -d --wait postgres mock-services backend scheduler
-	@docker cp $(PROJECT_ROOT)/backend/tests $(1)-backend-1:/tmp/tests
-	@docker exec $(1)-backend-1 bash -c \
-		"mkdir -p /app/tests && cp /tmp/tests/__init__.py /app/tests/ 2>/dev/null; \
-		 rm -rf /app/tests/mock_integration && cp -r /tmp/tests/mock_integration /app/tests/mock_integration"
-	@docker exec $(1)-backend-1 pip install pytest pytest-asyncio httpx --quiet 2>/dev/null
-	docker exec \
-		-e MOCK_TEST_BACKEND_URL=http://localhost:8000 \
-		-e MOCK_TEST_MOCK_URL=http://mock-services:9000 \
-		-e DOCKER_HOST_IP=mock-services \
-		$(1)-backend-1 \
-		python -m pytest $(addprefix tests/mock_integration/,$(4)) -v --tb=short -k "not TestCrashRecovery"
-endef
-
 .PHONY: test-mock-integration-parallel
 test-mock-integration-parallel: test-mock-integration-build ## Run mock integration tests in parallel (two stacks)
-	@_d=$$(mktemp -d); \
-	_t0=$$(date +%s); \
-	printf "\n\033[1;33m━━━ Parallel Mock Integration Tests ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n"; \
+	@_d=$$(mktemp -d); _t0=$$(date +%s); \
+	printf "\n\033[1;33m━━━ Parallel Mock Integration Tests ━━━\033[0m\n"; \
 	printf "Starting two independent test stacks...\n\n"; \
-	( \
-		printf "\033[1;36m━━━ Stack A: starting ━━━\033[0m\n"; \
-		COMPOSE_PROJECT_NAME=mock_a MOCK_NETWORK=codify-mock-test-a WORKER_PREFIX=mocka \
-		MOCK_PORT_MOCK=19000 MOCK_PORT_BACKEND=18000 \
-			docker-compose -f $(MOCK_INT_COMPOSE) up -d --wait postgres mock-services backend scheduler && \
-		docker cp $(PROJECT_ROOT)/backend/tests mock_a-backend-1:/tmp/tests && \
-		docker exec mock_a-backend-1 bash -c \
-			"mkdir -p /app/tests && cp /tmp/tests/__init__.py /app/tests/ 2>/dev/null; \
-			 rm -rf /app/tests/mock_integration && cp -r /tmp/tests/mock_integration /app/tests/mock_integration" && \
-		docker exec mock_a-backend-1 pip install pytest pytest-asyncio httpx --quiet 2>/dev/null; \
-		docker exec \
-			-e MOCK_TEST_BACKEND_URL=http://localhost:8000 \
-			-e MOCK_TEST_MOCK_URL=http://mock-services:9000 \
-			-e DOCKER_HOST_IP=mock-services \
-			mock_a-backend-1 \
-			python -m pytest \
-				$(addprefix tests/mock_integration/,$(MOCK_GROUP_A)) \
-				-v --tb=short -k "not TestCrashRecovery"; \
-		echo $$? > "$$_d/a.rc" \
-	) 2>&1 | sed 's/^/[A] /' &  \
-	( \
-		printf "\033[1;35m━━━ Stack B: starting ━━━\033[0m\n"; \
-		COMPOSE_PROJECT_NAME=mock_b MOCK_NETWORK=codify-mock-test-b WORKER_PREFIX=mockb \
-		MOCK_PORT_MOCK=19001 MOCK_PORT_BACKEND=18001 \
-			docker-compose -f $(MOCK_INT_COMPOSE) up -d --wait postgres mock-services backend scheduler && \
-		docker cp $(PROJECT_ROOT)/backend/tests mock_b-backend-1:/tmp/tests && \
-		docker exec mock_b-backend-1 bash -c \
-			"mkdir -p /app/tests && cp /tmp/tests/__init__.py /app/tests/ 2>/dev/null; \
-			 rm -rf /app/tests/mock_integration && cp -r /tmp/tests/mock_integration /app/tests/mock_integration" && \
-		docker exec mock_b-backend-1 pip install pytest pytest-asyncio httpx --quiet 2>/dev/null; \
-		docker exec \
-			-e MOCK_TEST_BACKEND_URL=http://localhost:8000 \
-			-e MOCK_TEST_MOCK_URL=http://mock-services:9000 \
-			-e DOCKER_HOST_IP=mock-services \
-			mock_b-backend-1 \
-			python -m pytest \
-				$(addprefix tests/mock_integration/,$(MOCK_GROUP_B)) \
-				-v --tb=short -k "not TestCrashRecovery"; \
-		echo $$? > "$$_d/b.rc" \
+	( $(MOCK_STACK_SCRIPT) $(_MOCK_COMMON) -d \
+		-p mock_a -n codify-mock-test-a -w mocka -P 19000 -B 18000 -l A \
+		$(MOCK_GROUP_A); \
+	  echo $$? > "$$_d/a.rc" \
+	) 2>&1 | sed 's/^/[A] /' & \
+	( $(MOCK_STACK_SCRIPT) $(_MOCK_COMMON) -d \
+		-p mock_b -n codify-mock-test-b -w mockb -P 19001 -B 18001 -l B \
+		$(MOCK_GROUP_B); \
+	  echo $$? > "$$_d/b.rc" \
 	) 2>&1 | sed 's/^/[B] /' & \
 	wait; \
 	_elapsed=$$(( $$(date +%s) - $$_t0 )); \
 	_ra=$$(cat "$$_d/a.rc" 2>/dev/null || echo 1); \
 	_rb=$$(cat "$$_d/b.rc" 2>/dev/null || echo 1); \
-	printf "\n\033[1;33m━━━ Results ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n"; \
+	printf "\n\033[1;33m━━━ Results ━━━\033[0m\n"; \
 	if [ "$$_ra" = "0" ]; then _sa="PASS"; else _sa="FAIL"; fi; \
 	if [ "$$_rb" = "0" ]; then _sb="PASS"; else _sb="FAIL"; fi; \
 	printf "Stack A: %s   Stack B: %s   Time: %ds\n" "$$_sa" "$$_sb" "$$_elapsed"; \
-	printf "Tearing down stacks...\n"; \
-	COMPOSE_PROJECT_NAME=mock_a MOCK_NETWORK=codify-mock-test-a WORKER_PREFIX=mocka \
-	MOCK_PORT_MOCK=19000 MOCK_PORT_BACKEND=18000 \
-		docker-compose -f $(MOCK_INT_COMPOSE) down -v 2>/dev/null; \
-	COMPOSE_PROJECT_NAME=mock_b MOCK_NETWORK=codify-mock-test-b WORKER_PREFIX=mockb \
-	MOCK_PORT_MOCK=19001 MOCK_PORT_BACKEND=18001 \
-		docker-compose -f $(MOCK_INT_COMPOSE) down -v 2>/dev/null; \
 	rm -rf "$$_d"; \
 	[ "$$_ra" = "0" ] && [ "$$_rb" = "0" ]
 
