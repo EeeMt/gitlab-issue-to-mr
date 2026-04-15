@@ -56,7 +56,7 @@ class Issue(Base):
     branch_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     base_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     target_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    merge_request_iid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    merge_request_iid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     merge_request_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
     # Claude session persistence
@@ -122,7 +122,7 @@ class Task(Base):
 
     # Scheduling
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    scheduled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    scheduled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
 
     # Container tracking
     container_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
