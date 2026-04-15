@@ -55,7 +55,7 @@
         <!-- Single-select: radio-style list -->
         <template v-else-if="selectedCategory.type === 'single-select'">
           <n-input
-            v-if="categoryOptions.length > 6"
+            v-if="categoryOptions.length > SEARCH_THRESHOLD"
             v-model:value="optionSearch"
             :placeholder="t('filter.search')"
             size="small"
@@ -112,6 +112,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const SEARCH_THRESHOLD = 6
 const selectedCategory = ref<FilterField | null>(null)
 const tempMultiValue = ref<any[]>([])
 const tempDateRange = ref<[number, number] | null>(null)

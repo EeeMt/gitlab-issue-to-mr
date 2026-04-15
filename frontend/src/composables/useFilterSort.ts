@@ -52,8 +52,8 @@ function loadFromStorage(key: string): PersistedState | null {
 function saveToStorage(key: string, state: PersistedState) {
   try {
     localStorage.setItem(key, JSON.stringify(state))
-  } catch {
-    // localStorage full or unavailable
+  } catch (err) {
+    console.warn('[useFilterSort] Failed to persist state:', err)
   }
 }
 

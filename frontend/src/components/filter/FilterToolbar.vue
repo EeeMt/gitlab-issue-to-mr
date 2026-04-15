@@ -101,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import { NInput, NButton, NIcon, NPopover, NTag } from 'naive-ui'
 import { SearchOutline, FunnelOutline, SwapVerticalOutline, SettingsOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
@@ -143,6 +143,10 @@ function onSearchInput(val: string) {
     emit('search', val)
   }, 300)
 }
+
+onUnmounted(() => {
+  if (debounceTimer) clearTimeout(debounceTimer)
+})
 
 const currentSortLabel = computed(() => {
   const field = props.config.sortFields.find((f) => f.key === props.sort.field)
