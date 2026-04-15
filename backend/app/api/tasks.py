@@ -717,6 +717,9 @@ async def retry_task(
     db.add(new_task)
     await db.commit()
     await db.refresh(new_task)
+    # Eagerly set the issue relationship for serialization
+    result = await db.execute(select(Issue).where(Issue.id == new_task.issue_id))
+    new_task.issue = result.scalar_one_or_none()
 
     await notify_task_retried(new_task, None, scheduled_at)
     action = f"scheduled for retry at {scheduled_at}" if scheduled_at else "created as retry"
@@ -852,6 +855,7 @@ async def create_task(
     db.add(task)
     await db.commit()
     await db.refresh(task)
+    task.issue = issue  # ensure nested issue is included in serialization
 
     logger.info(
         f"Created task {task.id} for issue {issue.id} (project {issue.project_id}), "
