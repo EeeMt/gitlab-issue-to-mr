@@ -227,7 +227,7 @@ async def wait_for_task_status(
     target_statuses: list[str],
     auth_headers: dict,
     timeout: float = 120.0,
-    poll_interval: float = 2.0,
+    poll_interval: float = 0.5,
 ) -> dict:
     """Poll task status until it reaches one of the target statuses."""
     start = time.time()
