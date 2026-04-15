@@ -15,70 +15,82 @@ from app.main import app
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_context
 from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
-from app.api.containers import WORKER_CONTAINER_PATTERN
+from app.api.containers import _get_container_pattern
 
 
 class ContainerPatternTests(unittest.TestCase):
     """Test container name pattern matching."""
 
-    def test_worker_container_pattern_valid(self):
+    @patch("app.api.containers.get_settings")
+    def test_worker_container_pattern_valid(self, mock_settings):
         """Valid worker container names should match."""
+        mock_settings.return_value.worker_container_prefix = "codify"
+        pattern = _get_container_pattern()
         valid_names = [
-            "codify-1-p123-i456",
-            "codify-100-p1-i999",
-            "codify-99999-p99999-i1",
+            "codify-1-issue123",
+            "codify-100-issue1",
+            "codify-99999-issue99999",
         ]
         for name in valid_names:
-            self.assertTrue(WORKER_CONTAINER_PATTERN.match(name), f"'{name}' should match")
+            self.assertTrue(pattern.match(name), f"'{name}' should match")
 
-    def test_worker_container_pattern_invalid(self):
+    @patch("app.api.containers.get_settings")
+    def test_worker_container_pattern_invalid(self, mock_settings):
         """Non-worker container names should not match."""
+        mock_settings.return_value.worker_container_prefix = "codify"
+        pattern = _get_container_pattern()
         invalid_names = [
             "nginx-web",
             "redis-cache",
-            "codify-1",  # Missing parts
-            "codify-1-p",  # Missing project/issue
-            "codify--p123-i456",  # Missing task_id
-            "something-codify-1-p123-i456",  # Prefix before codify
+            "codify-1",  # Missing issue part
+            "codify-1-issue",  # Missing issue number
+            "codify--issue123",  # Missing task_id
+            "something-codify-1-issue123",  # Prefix before codify
+            "codify-1-p123-i456",  # Old format
+            "codify-1-p123-manual",  # Old manual format
         ]
         for name in invalid_names:
-            self.assertFalse(WORKER_CONTAINER_PATTERN.match(name), f"'{name}' should NOT match")
+            self.assertFalse(pattern.match(name), f"'{name}' should NOT match")
+
+    @patch("app.api.containers.get_settings")
+    def test_worker_container_pattern_extracts_groups(self, mock_settings):
+        """Pattern should extract task_id and issue_id from valid names."""
+        mock_settings.return_value.worker_container_prefix = "codify"
+        pattern = _get_container_pattern()
+        m = pattern.match("codify-42-issue789")
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group(1), "42")
+        self.assertEqual(m.group(2), "789")
 
 
 class ContainerLogsHelpersTests(unittest.TestCase):
     """Test helper functions for container handling."""
 
-    def test_extract_container_info_valid_name(self):
-        """Test extracting task/project/issue info from valid container name."""
-        # This tests the logic that's inline in list_containers
-        name = "codify-42-p123-i789"
+    @patch("app.api.containers.get_settings")
+    def test_extract_container_info_valid_name(self, mock_settings):
+        """Test extracting task_id and issue_id from valid container name using regex."""
+        mock_settings.return_value.worker_container_prefix = "codify"
+        pattern = _get_container_pattern()
+        name = "codify-42-issue789"
 
-        parts = name.split("-")
-        self.assertEqual(parts[0], "codify")
-        self.assertEqual(parts[1], "42")  # task_id
-        self.assertEqual(parts[2], "p123")  # project_id
-        self.assertEqual(parts[3], "i789")  # issue_iid
+        m = pattern.match(name)
+        self.assertIsNotNone(m)
 
-        task_id = int(parts[1])
-        project_id = int(parts[2].replace("p", ""))
-        issue_iid = int(parts[3].replace("i", ""))
+        task_id = int(m.group(1))
+        issue_id = int(m.group(2))
 
         self.assertEqual(task_id, 42)
-        self.assertEqual(project_id, 123)
-        self.assertEqual(issue_iid, 789)
+        self.assertEqual(issue_id, 789)
 
-    def test_extract_container_info_invalid_name(self):
-        """Test extracting info from invalid container name returns None/0."""
+    @patch("app.api.containers.get_settings")
+    def test_extract_container_info_invalid_name(self, mock_settings):
+        """Test that invalid container names do not match the pattern."""
+        mock_settings.return_value.worker_container_prefix = "codify"
+        pattern = _get_container_pattern()
         name = "nginx-web"
 
-        parts = name.split("-")
-        # For non-worker containers, parsing should fail
-        if len(parts) >= 5 and parts[0] == "codify":
-            # Would extract
-            pass
-        else:
-            # Should skip - this is what the code does
-            self.assertTrue(len(parts) < 5 or parts[0] != "codify")
+        m = pattern.match(name)
+        self.assertIsNone(m)
 
 
 class TaskContainerLogsAPIHelperTests(unittest.TestCase):
@@ -171,14 +183,21 @@ class ListContainersEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 500)
 
     def test_list_containers_filters_non_worker_containers(self):
-        """Only containers matching WORKER_CONTAINER_PATTERN should appear in the response."""
+        """Only containers matching the worker pattern should appear in the response."""
         from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context
         from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        # Mock DB: for the worker container (task_id=5, issue_id=10)
+        # 1st execute → Task.issue_id lookup → returns 10
+        # 2nd execute → Issue.project_id lookup → returns 1
+        r1 = MagicMock(); r1.scalar_one_or_none.return_value = 10
+        r2 = MagicMock(); r2.scalar_one_or_none.return_value = 1
         mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[r1, r2])
 
         async def override_db():
             yield mock_db
@@ -189,7 +208,7 @@ class ListContainersEndpointTests(unittest.TestCase):
 
         # Two containers: one worker, one non-worker
         worker_container = MagicMock()
-        worker_container.name = "codify-5-p1-i10"
+        worker_container.name = "codify-5-issue10"
         worker_container.id = "abc123"
         worker_container.status = "running"
         worker_container.attrs = {"Created": "2024-01-01T00:00:00Z"}
@@ -203,14 +222,19 @@ class ListContainersEndpointTests(unittest.TestCase):
         mock_docker = MagicMock()
         mock_docker.client.containers.list.return_value = [worker_container, non_worker_container]
 
-        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+        with patch("app.api.containers.get_docker_client", return_value=mock_docker), \
+             patch("app.api.containers.get_settings") as mock_settings:
+            mock_settings.return_value.worker_container_prefix = "codify"
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/api/containers")
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]["name"], "codify-5-p1-i10")
+        self.assertEqual(data[0]["name"], "codify-5-issue10")
+        self.assertEqual(data[0]["task_id"], 5)
+        self.assertEqual(data[0]["issue_id"], 10)
+        self.assertEqual(data[0]["project_id"], 1)
 
 
 class GetContainerLogsEndpointTests(unittest.TestCase):
@@ -393,19 +417,28 @@ class ListContainersAccessScopeFilterTests(unittest.TestCase):
 
         # Unrestricted scope: all containers visible
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        # Mock DB: container A (task_id=10, issue_id=5) and container B (task_id=20, issue_id=8)
+        # A: execute → issue_id=5, execute → project_id=1
+        # B: execute → issue_id=8, execute → project_id=2
+        r1 = MagicMock(); r1.scalar_one_or_none.return_value = 5   # Task 10 → issue_id=5
+        r2 = MagicMock(); r2.scalar_one_or_none.return_value = 1   # Issue 5 → project_id=1
+        r3 = MagicMock(); r3.scalar_one_or_none.return_value = 8   # Task 20 → issue_id=8
+        r4 = MagicMock(); r4.scalar_one_or_none.return_value = 2   # Issue 8 → project_id=2
         mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[r1, r2, r3, r4])
 
         async def override_db():
             yield mock_db
 
         container_a = MagicMock()
-        container_a.name = "codify-10-p1-i5"
+        container_a.name = "codify-10-issue5"
         container_a.id = "aaa"
         container_a.status = "running"
         container_a.attrs = {"Created": "2024-01-01T00:00:00Z"}
 
         container_b = MagicMock()
-        container_b.name = "codify-20-p2-i8"
+        container_b.name = "codify-20-issue8"
         container_b.id = "bbb"
         container_b.status = "exited"
         container_b.attrs = {"Created": "2024-01-02T00:00:00Z"}
@@ -418,7 +451,9 @@ class ListContainersAccessScopeFilterTests(unittest.TestCase):
         app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
         app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
-        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+        with patch("app.api.containers.get_docker_client", return_value=mock_docker), \
+             patch("app.api.containers.get_settings") as mock_settings:
+            mock_settings.return_value.worker_container_prefix = "codify"
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/api/containers")
 
@@ -427,8 +462,8 @@ class ListContainersAccessScopeFilterTests(unittest.TestCase):
         # Both worker containers should appear in an unrestricted scope
         self.assertEqual(len(data), 2)
         names = {c["name"] for c in data}
-        self.assertIn("codify-10-p1-i5", names)
-        self.assertIn("codify-20-p2-i8", names)
+        self.assertIn("codify-10-issue5", names)
+        self.assertIn("codify-20-issue8", names)
 
 
 # ---------------------------------------------------------------------------
@@ -436,57 +471,41 @@ class ListContainersAccessScopeFilterTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class ManualContainerPatternTests(unittest.TestCase):
-    """Test pattern matching and parsing for manual containers (codify-X-pY-manual)."""
+class CustomPrefixPatternTests(unittest.TestCase):
+    """Test pattern matching with different container name prefixes."""
 
-    def test_manual_container_matches_pattern(self):
-        """The 'manual' suffix pattern should match the worker regex."""
-        self.assertTrue(WORKER_CONTAINER_PATTERN.match("codify-1-p123-manual"))
-        self.assertTrue(WORKER_CONTAINER_PATTERN.match("codify-999-p1-manual"))
+    @patch("app.api.containers.get_settings")
+    def test_custom_prefix_matches(self, mock_settings):
+        """Container names with a custom prefix should match when prefix is configured."""
+        mock_settings.return_value.worker_container_prefix = "myapp"
+        pattern = _get_container_pattern()
+        self.assertTrue(pattern.match("myapp-1-issue123"))
+        self.assertTrue(pattern.match("myapp-999-issue1"))
 
-    def test_manual_container_parsing_extracts_ids(self):
-        """Manual container name should yield correct task_id/project_id and None issue_iid."""
-        name = "codify-42-p99-manual"
-        parts = name.split("-")
-        task_id = int(parts[1])
-        project_id = int(parts[2].replace("p", ""))
-        self.assertEqual(task_id, 42)
-        self.assertEqual(project_id, 99)
-        # Manual suffix: no issue_iid
-        self.assertFalse(parts[3].startswith("i"))
+    @patch("app.api.containers.get_settings")
+    def test_custom_prefix_rejects_default_prefix(self, mock_settings):
+        """Default 'codify' prefix should NOT match when a custom prefix is configured."""
+        mock_settings.return_value.worker_container_prefix = "myapp"
+        pattern = _get_container_pattern()
+        self.assertFalse(pattern.match("codify-1-issue123"))
 
-    def test_list_containers_returns_manual_container_with_null_issue_iid(self):
-        """Manual containers should appear in list_containers with issue_iid=None."""
-        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
-        mock_db = MagicMock()
+    @patch("app.api.containers.get_settings")
+    def test_prefix_with_special_chars_is_escaped(self, mock_settings):
+        """Prefix with regex-special chars should be escaped and match literally."""
+        mock_settings.return_value.worker_container_prefix = "my.app"
+        pattern = _get_container_pattern()
+        # Literal dot should match
+        self.assertTrue(pattern.match("my.app-5-issue10"))
+        # Dot as wildcard should NOT match
+        self.assertFalse(pattern.match("myXapp-5-issue10"))
 
-        async def override_db():
-            yield mock_db
-
-        manual_container = MagicMock()
-        manual_container.name = "codify-7-p50-manual"
-        manual_container.id = "manual123"
-        manual_container.status = "running"
-        manual_container.attrs = {"Created": "2024-06-01T00:00:00Z"}
-
-        mock_docker = MagicMock()
-        mock_docker.client.containers.list.return_value = [manual_container]
-
-        app.dependency_overrides[get_db] = override_db
-        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
-        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
-
-        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
-            client = TestClient(app, raise_server_exceptions=False)
-            response = client.get("/api/containers")
-
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]["name"], "codify-7-p50-manual")
-        self.assertEqual(data[0]["task_id"], 7)
-        self.assertEqual(data[0]["project_id"], 50)
-        self.assertIsNone(data[0]["issue_iid"])
+    @patch("app.api.containers.get_settings")
+    def test_default_prefix_matches(self, mock_settings):
+        """Default 'codify' prefix should work correctly."""
+        mock_settings.return_value.worker_container_prefix = "codify"
+        pattern = _get_container_pattern()
+        self.assertTrue(pattern.match("codify-42-issue100"))
+        self.assertFalse(pattern.match("codify-42-p100-manual"))  # Old format rejected
 
     def tearDown(self):
         app.dependency_overrides.clear()
@@ -510,21 +529,29 @@ class ListContainersRestrictedAccessTests(unittest.TestCase):
             is_unrestricted=False,
             accessible_projects=[{"id": 1}],
         )
+
+        # Mock DB: container A (task_id=10) → issue_id=5 → project_id=1
+        #          container B (task_id=20) → issue_id=8 → project_id=2
+        r1 = MagicMock(); r1.scalar_one_or_none.return_value = 5   # Task 10 → issue_id=5
+        r2 = MagicMock(); r2.scalar_one_or_none.return_value = 1   # Issue 5 → project_id=1
+        r3 = MagicMock(); r3.scalar_one_or_none.return_value = 8   # Task 20 → issue_id=8
+        r4 = MagicMock(); r4.scalar_one_or_none.return_value = 2   # Issue 8 → project_id=2
         mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[r1, r2, r3, r4])
 
         async def override_db():
             yield mock_db
 
-        # Container A: project_id=1 (accessible)
+        # Container A: project_id=1 (accessible via DB lookup)
         container_a = MagicMock()
-        container_a.name = "codify-10-p1-i5"
+        container_a.name = "codify-10-issue5"
         container_a.id = "aaa"
         container_a.status = "running"
         container_a.attrs = {"Created": "2024-01-01T00:00:00Z"}
 
-        # Container B: project_id=2 (NOT accessible)
+        # Container B: project_id=2 (NOT accessible via DB lookup)
         container_b = MagicMock()
-        container_b.name = "codify-20-p2-i8"
+        container_b.name = "codify-20-issue8"
         container_b.id = "bbb"
         container_b.status = "running"
         container_b.attrs = {"Created": "2024-01-02T00:00:00Z"}
@@ -536,14 +563,16 @@ class ListContainersRestrictedAccessTests(unittest.TestCase):
         app.dependency_overrides[require_authenticated_context] = _make_auth_override()
         app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
-        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+        with patch("app.api.containers.get_docker_client", return_value=mock_docker), \
+             patch("app.api.containers.get_settings") as mock_settings:
+            mock_settings.return_value.worker_container_prefix = "codify"
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/api/containers")
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]["name"], "codify-10-p1-i5")
+        self.assertEqual(data[0]["name"], "codify-10-issue5")
         self.assertEqual(data[0]["project_id"], 1)
 
     def test_restricted_scope_shows_nothing_when_no_projects_accessible(self):
@@ -552,13 +581,18 @@ class ListContainersRestrictedAccessTests(unittest.TestCase):
             is_unrestricted=False,
             accessible_projects=[],  # No projects accessible
         )
+
+        # Mock DB: container (task_id=10) → issue_id=5 → project_id=1
+        r1 = MagicMock(); r1.scalar_one_or_none.return_value = 5
+        r2 = MagicMock(); r2.scalar_one_or_none.return_value = 1
         mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[r1, r2])
 
         async def override_db():
             yield mock_db
 
         container_a = MagicMock()
-        container_a.name = "codify-10-p1-i5"
+        container_a.name = "codify-10-issue5"
         container_a.id = "aaa"
         container_a.status = "running"
         container_a.attrs = {"Created": "2024-01-01T00:00:00Z"}
@@ -570,7 +604,9 @@ class ListContainersRestrictedAccessTests(unittest.TestCase):
         app.dependency_overrides[require_authenticated_context] = _make_auth_override()
         app.dependency_overrides[require_project_access_scope] = lambda: access_scope
 
-        with patch("app.api.containers.get_docker_client", return_value=mock_docker):
+        with patch("app.api.containers.get_docker_client", return_value=mock_docker), \
+             patch("app.api.containers.get_settings") as mock_settings:
+            mock_settings.return_value.worker_container_prefix = "codify"
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/api/containers")
 

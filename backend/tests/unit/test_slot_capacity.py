@@ -684,11 +684,14 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
         task = _make_serializable_task(task_status=TaskStatus.FAILED, task_id=81)
         task.project_id = 1
 
-        # First execute returns the task; second returns None (no existing retry)
+        # First execute returns the task; second returns None (no existing retry);
+        # third fetches the Issue for serialization
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_issue = MagicMock()
+        mock_result_issue.scalar_one_or_none.return_value = None
 
         now = datetime(2024, 1, 1, 12, 0, 0)
 
@@ -700,7 +703,7 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry])
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
@@ -726,11 +729,14 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
         task = _make_serializable_task(task_status=TaskStatus.FAILED, task_id=82)
         task.project_id = 1
 
-        # First execute returns the task; second returns None (no existing retry)
+        # First execute returns the task; second returns None (no existing retry);
+        # third fetches the Issue for serialization
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_issue = MagicMock()
+        mock_result_issue.scalar_one_or_none.return_value = None
 
         now = datetime(2024, 1, 1, 12, 0, 0)
 
@@ -742,7 +748,7 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry])
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)

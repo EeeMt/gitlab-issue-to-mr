@@ -719,24 +719,36 @@ class TestModuleLevelHelpers(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 
 class TestWorkerContainerPattern(unittest.TestCase):
-    """Tests for the WORKER_CONTAINER_PATTERN regex."""
+    """Tests for the _get_container_pattern() regex."""
 
-    def test_matches_issue_container(self) -> None:
-        from app.scheduler import WORKER_CONTAINER_PATTERN
-        self.assertIsNotNone(WORKER_CONTAINER_PATTERN.match("codify-1-issue10"))
+    @patch('app.scheduler.get_settings')
+    def test_matches_issue_container(self, mock_settings: MagicMock) -> None:
+        from app.scheduler import _get_container_pattern
+        mock_settings.return_value.worker_container_prefix = "codify"
+        pattern = _get_container_pattern()
+        self.assertIsNotNone(pattern.match("codify-1-issue10"))
 
-    def test_matches_another_issue_container(self) -> None:
-        from app.scheduler import WORKER_CONTAINER_PATTERN
-        self.assertIsNotNone(WORKER_CONTAINER_PATTERN.match("codify-42-issue200"))
+    @patch('app.scheduler.get_settings')
+    def test_matches_another_issue_container(self, mock_settings: MagicMock) -> None:
+        from app.scheduler import _get_container_pattern
+        mock_settings.return_value.worker_container_prefix = "codify"
+        pattern = _get_container_pattern()
+        self.assertIsNotNone(pattern.match("codify-42-issue200"))
 
-    def test_rejects_service_container(self) -> None:
-        from app.scheduler import WORKER_CONTAINER_PATTERN
-        self.assertIsNone(WORKER_CONTAINER_PATTERN.match("codify-backend"))
-        self.assertIsNone(WORKER_CONTAINER_PATTERN.match("codify-postgres"))
+    @patch('app.scheduler.get_settings')
+    def test_rejects_service_container(self, mock_settings: MagicMock) -> None:
+        from app.scheduler import _get_container_pattern
+        mock_settings.return_value.worker_container_prefix = "codify"
+        pattern = _get_container_pattern()
+        self.assertIsNone(pattern.match("codify-backend"))
+        self.assertIsNone(pattern.match("codify-postgres"))
 
-    def test_rejects_partial_match(self) -> None:
-        from app.scheduler import WORKER_CONTAINER_PATTERN
-        self.assertIsNone(WORKER_CONTAINER_PATTERN.match("codify-1-p100-other"))
+    @patch('app.scheduler.get_settings')
+    def test_rejects_partial_match(self, mock_settings: MagicMock) -> None:
+        from app.scheduler import _get_container_pattern
+        mock_settings.return_value.worker_container_prefix = "codify"
+        pattern = _get_container_pattern()
+        self.assertIsNone(pattern.match("codify-1-p100-other"))
 
 
 # ---------------------------------------------------------------------------

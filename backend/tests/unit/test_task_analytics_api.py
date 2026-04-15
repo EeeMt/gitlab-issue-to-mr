@@ -25,10 +25,11 @@ async def test_create_task_persists_manual_initiator_metadata():
         user_prompt="Build analytics page",
         priority=1,
     )
-    mock_issue = MagicMock(spec=Issue)
+    mock_issue = MagicMock()
     mock_issue.id = 1
     mock_issue.project_id = 101
     mock_issue.description = "Build analytics page"
+    mock_issue.status = "open"
 
     db = MagicMock()
     db.add = MagicMock()

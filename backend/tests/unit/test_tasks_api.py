@@ -578,11 +578,14 @@ class RetryTaskAPITests(unittest.TestCase):
         task.id = 5
         task.project_id = 1
 
-        # First execute returns the task; second returns None (no existing retry)
+        # First execute returns the task; second returns None (no existing retry);
+        # third fetches the Issue for serialization
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_issue = MagicMock()
+        mock_result_issue.scalar_one_or_none.return_value = None
 
         now = datetime(2024, 1, 1, 12, 0, 0)
 
@@ -594,7 +597,7 @@ class RetryTaskAPITests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry])
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
@@ -620,11 +623,14 @@ class RetryTaskAPITests(unittest.TestCase):
         task.id = 6
         task.project_id = 1
 
-        # First execute returns the task; second returns None (no existing retry)
+        # First execute returns the task; second returns None (no existing retry);
+        # third fetches the Issue for serialization
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_issue = MagicMock()
+        mock_result_issue.scalar_one_or_none.return_value = None
 
         now = datetime(2024, 1, 1, 12, 0, 0)
 
@@ -636,7 +642,7 @@ class RetryTaskAPITests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry])
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
@@ -1100,7 +1106,7 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
         task.project_id = 1
 
         # First execute returns the task; second returns None (no existing retry);
-        # subsequent calls return an empty default for slot capacity queries
+        # third is for slot capacity count query; fourth fetches Issue for serialization
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
@@ -1108,6 +1114,8 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
         mock_result_default = MagicMock()
         mock_result_default.scalar_one_or_none.return_value = None
         mock_result_default.scalar.return_value = 0
+        mock_result_issue = MagicMock()
+        mock_result_issue.scalar_one_or_none.return_value = None
 
         now = datetime(2024, 1, 1, 12, 0, 0)
 
@@ -1119,7 +1127,7 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_default])
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_default, mock_result_issue])
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
