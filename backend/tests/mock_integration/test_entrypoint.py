@@ -1,7 +1,7 @@
-"""Entrypoint.sh logic tests — MR updates, CODIFY markers, no-MR mode, base branch.
+"""Entrypoint.sh logic tests — MR updates, CODIFY markers, no-MR mode, git ops.
 
-Tests specific behaviors of the real entrypoint.sh (683 lines) that runs
-inside worker containers with mock external services.
+Tests specific behaviors of the real entrypoint.sh that runs inside worker
+containers with mock external services. Uses the Issue → Task flow.
 
 Prerequisites:
     docker-compose -f backend/tests/mock_integration/docker-compose.mock-test.yml up -d
@@ -14,9 +14,10 @@ import httpx
 import pytest
 
 from .conftest import (
-    build_webhook_payload,
+    create_issue,
+    create_issue_and_task,
+    create_task,
     get_mock_calls,
-    send_webhook,
     wait_for_task_status,
 )
 
@@ -35,14 +36,12 @@ class TestMRDescription:
         admin_auth_headers: dict,
     ):
         """MR description should be updated at least once during task execution."""
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=200,
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="MR description update test",
             prompt="Create a utility function",
         )
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json()["task_id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -75,18 +74,12 @@ class TestCODIFYMarkersDetailed:
         admin_auth_headers: dict,
     ):
         """CODIFY_COMMIT_SHA should be parsed into task.commit_sha."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Create a file for commit SHA test",
-                "branch_name": "codify/commit-sha-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Commit SHA test",
+            prompt="Create a file for commit SHA test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -106,19 +99,13 @@ class TestCODIFYMarkersDetailed:
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """merge_request_url should be parsed from container logs."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Create a file for MR URL test",
-                "branch_name": "codify/mr-url-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        """merge_request_url should be parsed from container logs (on Issue, not Task)."""
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="MR URL test",
+            prompt="Create a file for MR URL test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -127,9 +114,11 @@ class TestCODIFYMarkersDetailed:
             timeout=120,
         )
         assert task["status"] == "completed"
-        assert task.get("merge_request_url"), "merge_request_url should be set"
-        assert "/merge_requests/" in task["merge_request_url"]
-        logger.info(f"✅ MR URL: {task['merge_request_url']}")
+        # merge_request_url is now on the nested issue object
+        issue_data = task.get("issue", {})
+        assert issue_data.get("merge_request_url"), "issue.merge_request_url should be set"
+        assert "/merge_requests/" in issue_data["merge_request_url"]
+        logger.info(f"✅ MR URL: {issue_data['merge_request_url']}")
 
     async def test_task_logs_recorded(
         self,
@@ -138,18 +127,12 @@ class TestCODIFYMarkersDetailed:
         admin_auth_headers: dict,
     ):
         """Task execution should produce log entries."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Create a file for logs test",
-                "branch_name": "codify/logs-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Logs recording test",
+            prompt="Create a file for logs test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -180,18 +163,12 @@ class TestClaudeOutputTypes:
         admin_auth_headers: dict,
     ):
         """CODIFY_THINKING markers should create 'thinking' log entries."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Create files to test thinking output",
-                "branch_name": "codify/thinking-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Thinking output test",
+            prompt="Create files to test thinking output",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -229,18 +206,12 @@ class TestClaudeOutputTypes:
         admin_auth_headers: dict,
     ):
         """CODIFY_TOOL_USE_START + CODIFY_TOOL_RESULT should create tool_call logs with output."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Create files to test tool call output",
-                "branch_name": "codify/tool-call-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Tool call output test",
+            prompt="Create files to test tool call output",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -289,18 +260,12 @@ class TestClaudeOutputTypes:
         admin_auth_headers: dict,
     ):
         """CODIFY_ASSISTANT_TEXT markers should create 'assistant_text' log entries."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Create files to test assistant text output",
-                "branch_name": "codify/assistant-text-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Assistant text output test",
+            prompt="Create files to test assistant text output",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -336,18 +301,12 @@ class TestClaudeOutputTypes:
         admin_auth_headers: dict,
     ):
         """CODIFY_SYSTEM_INIT should create 'system_init' log entry with model name."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Create a file for system init test",
-                "branch_name": "codify/system-init-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="System init test",
+            prompt="Create a file for system init test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -387,18 +346,12 @@ class TestClaudeOutputTypes:
         admin_auth_headers: dict,
     ):
         """Verify the complete sequence of Claude output types appears in order."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Create files for full output sequence test",
-                "branch_name": "codify/output-sequence-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Output sequence test",
+            prompt="Create files for full output sequence test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -458,19 +411,18 @@ class TestNoMRMode:
         mock_url: str,
         admin_auth_headers: dict,
     ):
-        """Task with target_branch=None should complete without creating an MR."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Create a file in no-MR mode",
-                "branch_name": "codify/no-mr-test",
-                # target_branch intentionally omitted (None → no-MR mode)
-            },
-            headers=admin_auth_headers,
+        """Issue with target_branch=None should complete task without creating an MR."""
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="No-MR mode test",
+            description="Create a file in no-MR mode",
+            target_branch=None,
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task = await create_task(
+            http_client, backend_url, admin_auth_headers, issue["id"],
+            user_prompt="Create a file in no-MR mode",
+        )
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -483,10 +435,14 @@ class TestNoMRMode:
             f"{task.get('error_message', '')}"
         )
 
-        # In no-MR mode, merge_request_url should NOT be set
+        # In no-MR mode, merge_request_url on the issue should NOT be set
         # (entrypoint.sh skips MR creation when TARGET_BRANCH is empty)
         # Note: commit_sha should still be set since code was pushed
         assert task.get("commit_sha"), "commit_sha should still be set in no-MR mode"
+        issue_data = task.get("issue", {})
+        assert not issue_data.get("merge_request_url"), (
+            "issue.merge_request_url should not be set in no-MR mode"
+        )
 
         # Verify no MR was created in mock GitLab
         gitlab_calls = await get_mock_calls(http_client, mock_url, service="gitlab")
@@ -512,14 +468,12 @@ class TestGitOperations:
         admin_auth_headers: dict,
     ):
         """Verify both git clone and push operations are recorded."""
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=201,
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Git operations test",
             prompt="Create a file to verify git operations",
         )
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json()["task_id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,

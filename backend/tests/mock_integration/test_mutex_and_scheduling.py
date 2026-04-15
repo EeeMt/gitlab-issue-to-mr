@@ -1,7 +1,7 @@
 """Advanced scheduling, mutex, and lifecycle tests.
 
 Tests that the system correctly handles:
-- Issue mutex: different issues run parallel, manual tasks bypass mutex
+- Issue mutex: different issues run parallel, same issue queued
 - Issue mutex: mutex released after task failure
 - Scheduled tasks: delay_seconds, validation, ordering
 - Task lifecycle edge cases
@@ -12,16 +12,15 @@ Prerequisites:
 
 import asyncio
 import logging
-import random
-import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
 
 from .conftest import (
-    build_webhook_payload,
-    send_webhook,
+    create_issue,
+    create_issue_and_task,
+    create_task,
     wait_for_task_status,
 )
 
@@ -45,36 +44,39 @@ class TestIssueMutexAdvanced:
             json={"claude_delay_seconds": 8},
         )
 
-        issue_a = random.randint(10000, 10999)
-        issue_b = random.randint(11000, 11999)
-
-        # Create two tasks for different issues
-        payload_a = build_webhook_payload(
-            project_id=1, issue_iid=issue_a, prompt="Issue A task",
+        # Create two different issues
+        issue_a = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="Parallel test issue A", description="Issue A task",
         )
-        payload_a["object_attributes"]["id"] = random.randint(100000, 999999)
-        resp_a = await send_webhook(http_client, backend_url, payload_a)
-        assert resp_a.status_code == 200
-        task_a_id = resp_a.json()["task_id"]
+        issue_b = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="Parallel test issue B", description="Issue B task",
+        )
+
+        # Create one task under each issue
+        task_a = await create_task(
+            http_client, backend_url, admin_auth_headers, issue_a["id"],
+            user_prompt="Issue A task",
+        )
+        task_a_id = task_a["id"]
 
         await asyncio.sleep(1)
 
-        payload_b = build_webhook_payload(
-            project_id=1, issue_iid=issue_b, prompt="Issue B task",
+        task_b = await create_task(
+            http_client, backend_url, admin_auth_headers, issue_b["id"],
+            user_prompt="Issue B task",
         )
-        payload_b["object_attributes"]["id"] = random.randint(100000, 999999)
-        resp_b = await send_webhook(http_client, backend_url, payload_b)
-        assert resp_b.status_code == 200
-        task_b_id = resp_b.json()["task_id"]
+        task_b_id = task_b["id"]
 
         # Both should reach running (different issues, no mutex)
-        task_a = await wait_for_task_status(
+        task_a_status = await wait_for_task_status(
             http_client, backend_url, task_a_id,
             target_statuses=["running", "completed", "failed"],
             auth_headers=admin_auth_headers,
             timeout=60,
         )
-        task_b = await wait_for_task_status(
+        task_b_status = await wait_for_task_status(
             http_client, backend_url, task_b_id,
             target_statuses=["running", "completed", "failed"],
             auth_headers=admin_auth_headers,
@@ -84,8 +86,8 @@ class TestIssueMutexAdvanced:
         # If both reached running, they ran in parallel (good!)
         # If one is already completed, that's fine too — concurrency worked
         logger.info(
-            f"Task A (issue {issue_a}): {task_a['status']}, "
-            f"Task B (issue {issue_b}): {task_b['status']}"
+            f"Task A (issue {issue_a['id']}): {task_a_status['status']}, "
+            f"Task B (issue {issue_b['id']}): {task_b_status['status']}"
         )
 
         # Wait for both to finish
@@ -109,40 +111,32 @@ class TestIssueMutexAdvanced:
         a_started = task_a_final.get("started_at", "")
         b_started = task_b_final.get("started_at", "")
         if a_started and b_started:
-            # Parse timestamps to compare — they should be within a few seconds
             logger.info(f"✅ Different issues ran in parallel: A={a_started}, B={b_started}")
 
-    async def test_manual_tasks_no_mutex_conflict(
+    async def test_different_issues_no_mutex_conflict(
         self,
         http_client: httpx.AsyncClient,
         backend_url: str,
         mock_url: str,
         admin_auth_headers: dict,
     ):
-        """Manual tasks (no issue_iid) should not block each other."""
+        """Tasks for different issues should not block each other."""
         await http_client.patch(
             f"{mock_url}/mock/config",
             json={"claude_delay_seconds": 5},
         )
 
-        # Create two manual tasks — they use "manual:{task_id}" as mutex key
         task_ids = []
         for i in range(2):
-            resp = await http_client.post(
-                f"{backend_url}/api/tasks",
-                json={
-                    "project_id": 1,
-                    "user_prompt": f"Manual task {i} for mutex bypass test",
-                    "branch_name": f"codify/manual-mutex-{i}-{int(time.time())}",
-                    "target_branch": "main",
-                },
-                headers=admin_auth_headers,
+            issue, task = await create_issue_and_task(
+                http_client, backend_url, admin_auth_headers,
+                title=f"Mutex bypass test issue {i}",
+                prompt=f"Task {i} for mutex bypass test",
             )
-            assert resp.status_code in (200, 201)
-            task_ids.append(resp.json()["id"])
+            task_ids.append(task["id"])
             await asyncio.sleep(0.5)
 
-        # Both should eventually complete (they don't block each other)
+        # Both should eventually complete (different issues don't block each other)
         for tid in task_ids:
             task = await wait_for_task_status(
                 http_client, backend_url, tid,
@@ -151,10 +145,10 @@ class TestIssueMutexAdvanced:
                 timeout=120,
             )
             assert task["status"] == "completed", (
-                f"Manual task {tid} failed: {task.get('error_message')}"
+                f"Task {tid} failed: {task.get('error_message')}"
             )
 
-        logger.info("✅ Two manual tasks completed without mutex conflict")
+        logger.info("✅ Two tasks for different issues completed without mutex conflict")
 
     async def test_mutex_released_after_failure(
         self,
@@ -164,7 +158,11 @@ class TestIssueMutexAdvanced:
         admin_auth_headers: dict,
     ):
         """If task1 for an issue fails, task2 for same issue should still run."""
-        issue_iid = random.randint(12000, 12999)
+        # Create one issue for both tasks
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="Mutex release test issue",
+        )
 
         # First task will fail (exit code 1)
         await http_client.patch(
@@ -172,22 +170,20 @@ class TestIssueMutexAdvanced:
             json={"claude_exit_code": 1},
         )
 
-        payload1 = build_webhook_payload(
-            project_id=1, issue_iid=issue_iid, prompt="Failing task for mutex release",
+        task1 = await create_task(
+            http_client, backend_url, admin_auth_headers, issue["id"],
+            user_prompt="Failing task for mutex release",
         )
-        payload1["object_attributes"]["id"] = random.randint(100000, 999999)
-        resp1 = await send_webhook(http_client, backend_url, payload1)
-        assert resp1.status_code == 200
-        task1_id = resp1.json()["task_id"]
+        task1_id = task1["id"]
 
         # Wait for task1 to fail
-        task1 = await wait_for_task_status(
+        task1_final = await wait_for_task_status(
             http_client, backend_url, task1_id,
             target_statuses=["failed"],
             auth_headers=admin_auth_headers,
             timeout=120,
         )
-        assert task1["status"] == "failed"
+        assert task1_final["status"] == "failed"
         logger.info(f"Task1 ({task1_id}) failed as expected")
 
         # Now reset to success and create task2 for the same issue
@@ -196,24 +192,22 @@ class TestIssueMutexAdvanced:
             json={"claude_exit_code": 0},
         )
 
-        payload2 = build_webhook_payload(
-            project_id=1, issue_iid=issue_iid, prompt="Second task after failure",
+        task2 = await create_task(
+            http_client, backend_url, admin_auth_headers, issue["id"],
+            user_prompt="Second task after failure",
         )
-        payload2["object_attributes"]["id"] = random.randint(100000, 999999)
-        resp2 = await send_webhook(http_client, backend_url, payload2)
-        assert resp2.status_code == 200
-        task2_id = resp2.json()["task_id"]
+        task2_id = task2["id"]
 
         # Task2 should run and complete (mutex was released after task1 failure)
-        task2 = await wait_for_task_status(
+        task2_final = await wait_for_task_status(
             http_client, backend_url, task2_id,
             target_statuses=["completed", "failed"],
             auth_headers=admin_auth_headers,
             timeout=120,
         )
-        assert task2["status"] == "completed", (
+        assert task2_final["status"] == "completed", (
             f"Task2 should succeed after task1 failure released mutex: "
-            f"got {task2['status']}, error={task2.get('error_message')}"
+            f"got {task2_final['status']}, error={task2_final.get('error_message')}"
         )
         logger.info("✅ Mutex released after failure — task2 completed")
 
@@ -225,7 +219,11 @@ class TestIssueMutexAdvanced:
         admin_auth_headers: dict,
     ):
         """Explicitly verify task2 stays queued while task1 runs for same issue."""
-        issue_iid = random.randint(13000, 13999)
+        # Create one issue for both tasks
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="Mutex queue monitoring test issue",
+        )
 
         # Long delay so task1 stays running
         await http_client.patch(
@@ -233,13 +231,11 @@ class TestIssueMutexAdvanced:
             json={"claude_delay_seconds": 15},
         )
 
-        payload1 = build_webhook_payload(
-            project_id=1, issue_iid=issue_iid, prompt="Long running task for queue monitoring",
+        task1 = await create_task(
+            http_client, backend_url, admin_auth_headers, issue["id"],
+            user_prompt="Long running task for queue monitoring",
         )
-        payload1["object_attributes"]["id"] = random.randint(100000, 999999)
-        resp1 = await send_webhook(http_client, backend_url, payload1)
-        assert resp1.status_code == 200
-        task1_id = resp1.json()["task_id"]
+        task1_id = task1["id"]
 
         # Wait for task1 to start running
         await wait_for_task_status(
@@ -250,13 +246,11 @@ class TestIssueMutexAdvanced:
         )
 
         # Now create task2 for same issue
-        payload2 = build_webhook_payload(
-            project_id=1, issue_iid=issue_iid, prompt="Queued task for same issue",
+        task2 = await create_task(
+            http_client, backend_url, admin_auth_headers, issue["id"],
+            user_prompt="Queued task for same issue",
         )
-        payload2["object_attributes"]["id"] = random.randint(100000, 999999)
-        resp2 = await send_webhook(http_client, backend_url, payload2)
-        assert resp2.status_code == 200
-        task2_id = resp2.json()["task_id"]
+        task2_id = task2["id"]
 
         # Poll task2 several times to confirm it stays pending/queued
         checks_pending = 0
@@ -273,7 +267,8 @@ class TestIssueMutexAdvanced:
                 break
 
         assert checks_pending >= 3, (
-            f"Task2 should stay pending/queued while task1 runs (saw {checks_pending}/5 pending checks)"
+            f"Task2 should stay pending/queued while task1 runs "
+            f"(saw {checks_pending}/5 pending checks)"
         )
         logger.info(f"Task2 stayed queued for {checks_pending} checks while task1 ran")
 
@@ -304,19 +299,14 @@ class TestScheduledTasks:
         admin_auth_headers: dict,
     ):
         """Task with delay_seconds should have scheduled_at set."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Delayed task",
-                "branch_name": f"codify/delayed-{int(time.time())}",
-                "target_branch": "main",
-                "delay_seconds": 60,
-            },
-            headers=admin_auth_headers,
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="Delayed task test",
         )
-        assert resp.status_code in (200, 201)
-        task = resp.json()
+        task = await create_task(
+            http_client, backend_url, admin_auth_headers, issue["id"],
+            user_prompt="Delayed task", delay_seconds=60,
+        )
         assert task.get("scheduled_at") is not None, "Task should have scheduled_at set"
         logger.info(f"✅ Delayed task created with scheduled_at={task['scheduled_at']}")
 
@@ -333,13 +323,15 @@ class TestScheduledTasks:
         admin_auth_headers: dict,
     ):
         """delay_seconds=0 should be rejected (must be > 0)."""
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="Zero delay test",
+        )
         resp = await http_client.post(
             f"{backend_url}/api/tasks",
             json={
-                "project_id": 1,
+                "issue_id": issue["id"],
                 "user_prompt": "Zero delay task",
-                "branch_name": f"codify/zero-delay-{int(time.time())}",
-                "target_branch": "main",
                 "delay_seconds": 0,
             },
             headers=admin_auth_headers,
@@ -353,14 +345,16 @@ class TestScheduledTasks:
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """delay_seconds=-1 should be rejected."""
+        """delay_seconds=-5 should be rejected."""
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="Negative delay test",
+        )
         resp = await http_client.post(
             f"{backend_url}/api/tasks",
             json={
-                "project_id": 1,
+                "issue_id": issue["id"],
                 "user_prompt": "Negative delay task",
-                "branch_name": f"codify/neg-delay-{int(time.time())}",
-                "target_branch": "main",
                 "delay_seconds": -5,
             },
             headers=admin_auth_headers,
@@ -375,14 +369,16 @@ class TestScheduledTasks:
         admin_auth_headers: dict,
     ):
         """scheduled_datetime in the past should be rejected."""
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="Past scheduled test",
+        )
         past_time = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         resp = await http_client.post(
             f"{backend_url}/api/tasks",
             json={
-                "project_id": 1,
+                "issue_id": issue["id"],
                 "user_prompt": "Past scheduled task",
-                "branch_name": f"codify/past-sched-{int(time.time())}",
-                "target_branch": "main",
                 "scheduled_datetime": past_time,
             },
             headers=admin_auth_headers,
@@ -399,53 +395,48 @@ class TestScheduledTasks:
         admin_auth_headers: dict,
     ):
         """An immediate task should run while a future-scheduled task waits."""
+        # Create issues for both tasks (separate issues to avoid mutex)
+        future_issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="Future scheduled task issue",
+        )
+        immediate_issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="Immediate task issue",
+        )
+
         # Create a future-scheduled task (won't run for 5 minutes)
         future_time = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Future scheduled task",
-                "branch_name": f"codify/future-sched-{int(time.time())}",
-                "target_branch": "main",
-                "scheduled_datetime": future_time,
-            },
-            headers=admin_auth_headers,
+        future_task = await create_task(
+            http_client, backend_url, admin_auth_headers, future_issue["id"],
+            user_prompt="Future scheduled task", scheduled_datetime=future_time,
         )
-        assert resp.status_code in (200, 201)
-        future_id = resp.json()["id"]
+        future_id = future_task["id"]
 
         # Create an immediate task
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Immediate task",
-                "branch_name": f"codify/immediate-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        immediate_task = await create_task(
+            http_client, backend_url, admin_auth_headers, immediate_issue["id"],
+            user_prompt="Immediate task",
         )
-        assert resp.status_code in (200, 201)
-        immediate_id = resp.json()["id"]
+        immediate_id = immediate_task["id"]
 
         # Immediate should complete while scheduled waits
-        immediate_task = await wait_for_task_status(
+        immediate_result = await wait_for_task_status(
             http_client, backend_url, immediate_id,
             target_statuses=["completed", "failed"],
             auth_headers=admin_auth_headers,
             timeout=120,
         )
-        assert immediate_task["status"] == "completed"
+        assert immediate_result["status"] == "completed"
 
         # Future task should still be pending
         resp = await http_client.get(
             f"{backend_url}/api/tasks/{future_id}",
             headers=admin_auth_headers,
         )
-        future_task = resp.json()
-        assert future_task["status"] in ("pending", "queued"), (
-            f"Future-scheduled task should still be waiting, got {future_task['status']}"
+        future_result = resp.json()
+        assert future_result["status"] in ("pending", "queued"), (
+            f"Future-scheduled task should still be waiting, got {future_result['status']}"
         )
         logger.info("✅ Immediate task ran while future-scheduled task waited")
 
@@ -457,29 +448,7 @@ class TestScheduledTasks:
 
 
 class TestBranchValidation:
-    """Branch name validation and edge cases."""
-
-    async def test_same_branch_as_target_rejected(
-        self,
-        http_client: httpx.AsyncClient,
-        backend_url: str,
-        admin_auth_headers: dict,
-    ):
-        """Source branch equal to target branch should be rejected."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Same branch test",
-                "branch_name": "main",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
-        )
-        assert resp.status_code == 422, (
-            f"Expected 422 for same source/target branch, got {resp.status_code}"
-        )
-        logger.info("✅ Same source/target branch correctly rejected")
+    """Issue/branch validation and edge cases."""
 
     async def test_no_target_branch_succeeds(
         self,
@@ -487,29 +456,37 @@ class TestBranchValidation:
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """No target branch (no-MR mode) should succeed."""
+        """Issue without target_branch (no-MR mode) should succeed."""
+        # Create issue without target_branch via raw POST
         resp = await http_client.post(
-            f"{backend_url}/api/tasks",
+            f"{backend_url}/api/issues",
             json={
+                "title": "No-MR mode test",
+                "description": "No-MR mode task",
                 "project_id": 1,
-                "user_prompt": "No-MR mode task",
-                "branch_name": f"codify/no-mr-{int(time.time())}",
             },
             headers=admin_auth_headers,
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        assert resp.status_code in (200, 201), (
+            f"Create issue without target_branch failed: {resp.status_code} {resp.text}"
+        )
+        issue = resp.json()
 
-        task = await wait_for_task_status(
+        task = await create_task(
+            http_client, backend_url, admin_auth_headers, issue["id"],
+            user_prompt="No-MR mode task",
+        )
+        task_id = task["id"]
+
+        result = await wait_for_task_status(
             http_client, backend_url, task_id,
             target_statuses=["completed", "failed"],
             auth_headers=admin_auth_headers,
             timeout=120,
         )
-        # No-MR mode: task should complete (no MR created, just push)
-        assert task["status"] == "completed", (
-            f"No-MR mode task should complete: got {task['status']}, "
-            f"error={task.get('error_message')}"
+        assert result["status"] == "completed", (
+            f"No-MR mode task should complete: got {result['status']}, "
+            f"error={result.get('error_message')}"
         )
         logger.info("✅ No-MR mode task completed successfully")
 
@@ -519,29 +496,37 @@ class TestBranchValidation:
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """Task with explicit base_branch should succeed."""
+        """Issue with explicit base_branch should succeed."""
         resp = await http_client.post(
-            f"{backend_url}/api/tasks",
+            f"{backend_url}/api/issues",
             json={
+                "title": "Base branch test",
+                "description": "Base branch task",
                 "project_id": 1,
-                "user_prompt": "Base branch test",
-                "branch_name": f"codify/base-branch-{int(time.time())}",
                 "base_branch": "main",
                 "target_branch": "main",
             },
             headers=admin_auth_headers,
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        assert resp.status_code in (200, 201), (
+            f"Create issue with base_branch failed: {resp.status_code} {resp.text}"
+        )
+        issue = resp.json()
 
-        task = await wait_for_task_status(
+        task = await create_task(
+            http_client, backend_url, admin_auth_headers, issue["id"],
+            user_prompt="Base branch test task",
+        )
+        task_id = task["id"]
+
+        result = await wait_for_task_status(
             http_client, backend_url, task_id,
             target_statuses=["completed", "failed"],
             auth_headers=admin_auth_headers,
             timeout=120,
         )
-        assert task["status"] == "completed", (
-            f"Base branch task should complete: {task.get('error_message')}"
+        assert result["status"] == "completed", (
+            f"Base branch task should complete: {result.get('error_message')}"
         )
         logger.info("✅ Task with explicit base_branch completed")
 
@@ -558,19 +543,13 @@ class TestTaskPriorityLevels:
         """P0, P1, P2 tasks should all complete successfully."""
         task_ids = {}
         for priority in [0, 1, 2]:
-            resp = await http_client.post(
-                f"{backend_url}/api/tasks",
-                json={
-                    "project_id": 1,
-                    "user_prompt": f"Priority P{priority} test",
-                    "branch_name": f"codify/p{priority}-test-{int(time.time())}",
-                    "target_branch": "main",
-                    "priority": priority,
-                },
-                headers=admin_auth_headers,
+            issue, task = await create_issue_and_task(
+                http_client, backend_url, admin_auth_headers,
+                title=f"Priority P{priority} test issue",
+                prompt=f"Priority P{priority} test",
+                priority=priority,
             )
-            assert resp.status_code in (200, 201)
-            task_ids[priority] = resp.json()["id"]
+            task_ids[priority] = task["id"]
             await asyncio.sleep(0.5)
 
         # All should complete
@@ -594,13 +573,15 @@ class TestTaskPriorityLevels:
         admin_auth_headers: dict,
     ):
         """Priority values outside 0-2 should be rejected or clamped."""
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="Invalid priority test issue",
+        )
         resp = await http_client.post(
             f"{backend_url}/api/tasks",
             json={
-                "project_id": 1,
+                "issue_id": issue["id"],
                 "user_prompt": "Invalid priority task",
-                "branch_name": f"codify/bad-priority-{int(time.time())}",
-                "target_branch": "main",
                 "priority": -1,
             },
             headers=admin_auth_headers,
@@ -621,25 +602,22 @@ class TestTaskPriorityLevels:
 class TestRapidTaskCreation:
     """Rapid task creation to stress test the system."""
 
-    async def test_rapid_webhook_spam(
+    async def test_rapid_task_creation(
         self,
         http_client: httpx.AsyncClient,
         backend_url: str,
         mock_url: str,
         admin_auth_headers: dict,
     ):
-        """Send multiple webhooks rapidly — all should be accepted."""
+        """Create multiple tasks rapidly — all should be accepted."""
         task_ids = []
         for i in range(5):
-            payload = build_webhook_payload(
-                project_id=1,
-                issue_iid=random.randint(20000, 29999),
+            issue, task = await create_issue_and_task(
+                http_client, backend_url, admin_auth_headers,
+                title=f"Rapid task issue {i}",
                 prompt=f"Rapid task {i}",
             )
-            payload["object_attributes"]["id"] = random.randint(100000, 999999)
-            resp = await send_webhook(http_client, backend_url, payload)
-            if resp.status_code == 200 and resp.json().get("task_id"):
-                task_ids.append(resp.json()["task_id"])
+            task_ids.append(task["id"])
 
         assert len(task_ids) >= 3, f"Expected at least 3 tasks created, got {len(task_ids)}"
 
@@ -654,27 +632,21 @@ class TestRapidTaskCreation:
 
         logger.info(f"✅ {len(task_ids)} rapid tasks all reached terminal state")
 
-    async def test_rapid_manual_task_creation(
+    async def test_rapid_task_creation_completes(
         self,
         http_client: httpx.AsyncClient,
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """Create multiple manual tasks in quick succession."""
+        """Create multiple tasks in quick succession — all should complete."""
         task_ids = []
         for i in range(3):
-            resp = await http_client.post(
-                f"{backend_url}/api/tasks",
-                json={
-                    "project_id": 1,
-                    "user_prompt": f"Rapid manual task {i}",
-                    "branch_name": f"codify/rapid-{i}-{int(time.time())}",
-                    "target_branch": "main",
-                },
-                headers=admin_auth_headers,
+            issue, task = await create_issue_and_task(
+                http_client, backend_url, admin_auth_headers,
+                title=f"Rapid completion test issue {i}",
+                prompt=f"Rapid completion task {i}",
             )
-            assert resp.status_code in (200, 201)
-            task_ids.append(resp.json()["id"])
+            task_ids.append(task["id"])
 
         # All should eventually complete
         for tid in task_ids:
@@ -685,7 +657,7 @@ class TestRapidTaskCreation:
                 timeout=180,
             )
             assert task["status"] == "completed", (
-                f"Rapid manual task {tid} failed: {task.get('error_message')}"
+                f"Rapid task {tid} failed: {task.get('error_message')}"
             )
 
-        logger.info(f"✅ {len(task_ids)} rapid manual tasks all completed")
+        logger.info(f"✅ {len(task_ids)} rapid tasks all completed")

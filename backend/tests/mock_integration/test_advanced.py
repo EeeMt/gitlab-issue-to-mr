@@ -1,10 +1,10 @@
-"""Advanced integration tests — base branch, scheduling, crash recovery, issue mutex.
+"""Advanced integration tests: base branch, scheduling, crash recovery, issue mutex.
 
 Tests complex scheduler and worker behaviors:
 - Base branch handling (creating branch from specific base)
 - Delayed/scheduled tasks (delay_seconds support)
 - Crash recovery (scheduler restart marks orphaned tasks as failed)
-- Issue mutex (same issue can't have concurrent tasks)
+- Issue mutex (same issue cannot have concurrent tasks)
 
 Prerequisites:
     docker-compose -f backend/tests/mock_integration/docker-compose.mock-test.yml up -d
@@ -20,9 +20,10 @@ import httpx
 import pytest
 
 from .conftest import (
-    build_webhook_payload,
+    create_issue,
+    create_issue_and_task,
+    create_task,
     get_mock_calls,
-    send_webhook,
     wait_for_task_status,
     DOCKER_HOST_IP,
 )
@@ -30,7 +31,7 @@ from .conftest import (
 logger = logging.getLogger(__name__)
 pytestmark = pytest.mark.asyncio
 
-# Project root: backend/tests/mock_integration/test_advanced.py → 4 levels up
+# Project root: backend/tests/mock_integration/test_advanced.py -> 4 levels up
 PROJECT_ROOT = str(Path(__file__).resolve().parents[3])
 
 
@@ -44,26 +45,27 @@ class TestBaseBranch:
         mock_url: str,
         admin_auth_headers: dict,
     ):
-        """Create a manual task with base_branch set.
-
-        The entrypoint.sh should:
-        1. Clone the repo
-        2. Create the new branch from origin/<base_branch>
-        3. Complete successfully
-        """
+        """Create a task with base_branch set on the issue."""
+        # Create issue with explicit base_branch via direct API call
         resp = await http_client.post(
-            f"{backend_url}/api/tasks",
+            f"{backend_url}/api/issues",
             json={
+                "title": f"Base branch test {int(time.time())}",
+                "description": "Test base branch handling",
                 "project_id": 1,
-                "user_prompt": "Test base branch handling",
-                "branch_name": "codify/test-base-branch",
                 "base_branch": "main",
                 "target_branch": "main",
             },
             headers=admin_auth_headers,
         )
-        assert resp.status_code in (200, 201), f"Create task failed: {resp.text}"
-        task_id = resp.json()["id"]
+        assert resp.status_code in (200, 201), f"Create issue failed: {resp.text}"
+        issue = resp.json()
+
+        task = await create_task(
+            http_client, backend_url, admin_auth_headers, issue["id"],
+            user_prompt="Test base branch handling",
+        )
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -74,12 +76,12 @@ class TestBaseBranch:
         assert task["status"] == "completed", (
             f"Task with base_branch should complete: {task.get('error_message')}"
         )
-        assert task.get("base_branch") == "main", "base_branch should be stored on task"
+        # base_branch is on the issue, not the task
+        issue_data = task.get("issue", {})
+        assert issue_data.get("base_branch") == "main", "base_branch should be stored on issue"
 
-        # Verify git operations
         git_calls = await get_mock_calls(http_client, mock_url, service="git")
         assert len(git_calls) >= 2, "Expected at least clone + push git operations"
-        logger.info("✅ Task with explicit base_branch completed successfully")
 
     async def test_task_without_base_branch_uses_target(
         self,
@@ -88,23 +90,14 @@ class TestBaseBranch:
         mock_url: str,
         admin_auth_headers: dict,
     ):
-        """When no base_branch is set, entrypoint falls back to TARGET_BRANCH.
-
-        Worker.py only sets BASE_BRANCH env when task.base_branch is set.
-        entrypoint.sh falls back: BASE_BRANCH = TARGET_BRANCH or default_branch.
-        """
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Test without base branch",
-                "branch_name": "codify/test-no-base",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        """When no base_branch is set, entrypoint falls back to TARGET_BRANCH."""
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"No base branch test {int(time.time())}",
+            prompt="Test without base branch",
+            target_branch="main",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -115,9 +108,8 @@ class TestBaseBranch:
         assert task["status"] == "completed", (
             f"Task without base_branch should complete: {task.get('error_message')}"
         )
-        # base_branch should be None/null when not explicitly set
-        assert task.get("base_branch") is None, "base_branch should be None when not set"
-        logger.info("✅ Task without base_branch completed (falls back to target)")
+        issue_data = task.get("issue", {})
+        assert issue_data.get("base_branch") is None, "base_branch should be None when not set"
 
 
 class TestScheduledTasks:
@@ -130,30 +122,17 @@ class TestScheduledTasks:
         mock_url: str,
         admin_auth_headers: dict,
     ):
-        """Create a task with delay_seconds=15.
-
-        The task should:
-        1. Be created immediately as PENDING with scheduled_at in the future
-        2. NOT start running during the first ~12 seconds
-        3. Eventually be picked up after the delay expires
-        4. Complete successfully
-        """
+        """Create a task with delay_seconds=15."""
         delay = 15
 
-        # Create the delayed task
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Delayed task test",
-                "branch_name": "codify/test-delayed",
-                "target_branch": "main",
-                "delay_seconds": delay,
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Delayed task test {int(time.time())}",
+            prompt="Delayed task test",
+            target_branch="main",
+            delay_seconds=delay,
         )
-        assert resp.status_code in (200, 201), f"Create delayed task failed: {resp.text}"
-        task_id = resp.json()["id"]
+        task_id = task["id"]
         create_time = time.time()
         logger.info(f"Created delayed task {task_id} with delay={delay}s")
 
@@ -178,15 +157,12 @@ class TestScheduledTasks:
         elapsed = time.time() - create_time
         logger.info(f"Task status after {elapsed:.0f}s: {early_status}")
 
-        # The task should still be pending/queued (not running) before delay expires
-        # Allow some slack: the scheduler polls every 2-3 seconds
         if elapsed < delay - 3:
             assert early_status in ("pending", "queued"), (
                 f"Task should still be pending/queued at {elapsed:.0f}s "
                 f"(delay={delay}s), got: {early_status}"
             )
 
-        # Now wait for the task to complete after the delay
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
             target_statuses=["completed", "failed"],
@@ -198,9 +174,8 @@ class TestScheduledTasks:
             f"Delayed task should complete: {task.get('error_message')}"
         )
 
-        # The task should have taken at least delay_seconds to start
         logger.info(
-            f"✅ Delayed task completed after {total_elapsed:.0f}s "
+            f"Delayed task completed after {total_elapsed:.0f}s "
             f"(delay was {delay}s)"
         )
         assert total_elapsed >= delay - 3, (
@@ -219,51 +194,44 @@ class TestIssueMutex:
         mock_url: str,
         admin_auth_headers: dict,
     ):
-        """Create two webhook tasks for the same issue.
-
-        The scheduler's issue mutex should prevent the second task from
-        running while the first is still active. Both should eventually complete.
-        """
-        # Add delay so first task takes a while
+        """Create two tasks for the same issue — mutex prevents parallel execution."""
         await http_client.patch(
             f"{mock_url}/mock/config",
             json={"claude_delay_seconds": 8},
         )
 
-        # Send two webhooks for the same project/issue but different prompts
-        payload1 = build_webhook_payload(
-            project_id=1,
-            issue_iid=99,
-            prompt="First task for mutex test",
+        # Create one issue and two tasks under it
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Mutex test {int(time.time())}",
+            description="Mutex test issue",
+            target_branch="main",
         )
-        resp1 = await send_webhook(http_client, backend_url, payload1)
-        assert resp1.status_code == 200
-        task1_id = resp1.json()["task_id"]
 
-        # Small delay so second task is created after first
+        task1 = await create_task(
+            http_client, backend_url, admin_auth_headers, issue["id"],
+            user_prompt="First task for mutex test",
+        )
+        task1_id = task1["id"]
+
         await asyncio.sleep(1)
 
-        payload2 = build_webhook_payload(
-            project_id=1,
-            issue_iid=99,
-            prompt="Second task for mutex test",
+        task2 = await create_task(
+            http_client, backend_url, admin_auth_headers, issue["id"],
+            user_prompt="Second task for mutex test",
         )
-        resp2 = await send_webhook(http_client, backend_url, payload2)
-        assert resp2.status_code == 200
-        task2_id = resp2.json()["task_id"]
+        task2_id = task2["id"]
 
         logger.info(f"Created mutex test tasks: {task1_id}, {task2_id}")
 
-        # Wait for first task to start running
-        task1 = await wait_for_task_status(
+        task1_data = await wait_for_task_status(
             http_client, backend_url, task1_id,
             target_statuses=["running", "completed", "failed"],
             auth_headers=admin_auth_headers,
             timeout=60,
         )
 
-        # While first task is running, second should still be pending
-        if task1["status"] == "running":
+        if task1_data["status"] == "running":
             resp = await http_client.get(
                 f"{backend_url}/api/tasks/{task2_id}",
                 headers=admin_auth_headers,
@@ -277,7 +245,6 @@ class TestIssueMutex:
                 f"got: {task2_interim['status']}"
             )
 
-        # Both should eventually complete
         task1_final = await wait_for_task_status(
             http_client, backend_url, task1_id,
             target_statuses=["completed", "failed"],
@@ -298,7 +265,6 @@ class TestIssueMutex:
             f"Second mutex task should complete: {task2_final.get('error_message')}"
         )
 
-        # Verify sequential execution: task2 should have started after task1 completed
         t1_completed = task1_final.get("completed_at", "")
         t2_started = task2_final.get("started_at", "")
         if t1_completed and t2_started:
@@ -306,11 +272,6 @@ class TestIssueMutex:
                 f"Task2 should start after Task1 completes (issue mutex): "
                 f"T1 completed={t1_completed}, T2 started={t2_started}"
             )
-
-        logger.info(
-            f"✅ Issue mutex verified: tasks ran sequentially "
-            f"(T1 done={t1_completed}, T2 start={t2_started})"
-        )
 
 
 class TestCrashRecovery:
@@ -323,37 +284,21 @@ class TestCrashRecovery:
         mock_url: str,
         admin_auth_headers: dict,
     ):
-        """Simulate a crash recovery scenario.
-
-        Steps:
-        1. Create a task with very long claude delay
-        2. Wait for it to reach RUNNING status
-        3. Kill the worker container (simulating crash — orphan in DB)
-        4. Restart the scheduler (triggers crash recovery)
-        5. The task should be marked as FAILED (container gone)
-           OR completed if the scheduler resumes from exited container
-        """
-        # Use long delay so the task stays running
+        """Simulate a crash recovery scenario."""
         await http_client.patch(
             f"{mock_url}/mock/config",
             json={"claude_delay_seconds": 60},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Crash recovery test task",
-                "branch_name": "codify/crash-recovery-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Crash recovery test {int(time.time())}",
+            prompt="Crash recovery test task",
+            target_branch="main",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
         logger.info(f"Created crash recovery test task {task_id}")
 
-        # Wait for task to reach RUNNING
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
             target_statuses=["running"],
@@ -363,12 +308,8 @@ class TestCrashRecovery:
         assert task["status"] == "running"
         logger.info(f"Task {task_id} is now running")
 
-        # IMPORTANT: Stop the scheduler FIRST so its monitoring thread can't
-        # process the container removal. Then kill the worker container.
-        # When we restart the scheduler, crash recovery finds RUNNING task but
-        # no container → marks FAILED.
         compose_file = "backend/tests/mock_integration/docker-compose.mock-test.yml"
-        logger.info("Stopping scheduler before killing worker container...")
+        logger.info("Stopping scheduler before removing worker container...")
         subprocess.run(
             ["docker", "compose", "-f", compose_file, "stop", "scheduler"],
             capture_output=True, text=True, timeout=30,
@@ -376,10 +317,10 @@ class TestCrashRecovery:
         )
         await asyncio.sleep(2)
 
-        # Now kill the worker container (scheduler can't react)
-        container_name = f"codify-{task_id}-"
+        container_prefix = f"codify-{task_id}-"
+        fmt = "{{.Names}}"
         result = subprocess.run(
-            ["docker", "ps", "-a", "--format", "{{.Names}}", "--filter", f"name={container_name}"],
+            ["docker", "ps", "-a", "--format", fmt, "--filter", f"name={container_prefix}"],
             capture_output=True, text=True, timeout=10,
         )
         containers = [c.strip() for c in result.stdout.strip().split("\n") if c.strip()]
@@ -393,7 +334,6 @@ class TestCrashRecovery:
             )
         await asyncio.sleep(2)
 
-        # Restart the scheduler — crash recovery runs on startup
         logger.info("Starting scheduler to trigger crash recovery...")
         subprocess.run(
             ["docker", "compose", "-f", compose_file, "start", "scheduler"],
@@ -401,11 +341,8 @@ class TestCrashRecovery:
             cwd=PROJECT_ROOT,
         )
 
-        # Wait for scheduler to boot and run crash recovery
         await asyncio.sleep(10)
 
-        # The task should now be marked as FAILED
-        # (crashed task with no container → "Task was running when scheduler restarted")
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
             target_statuses=["completed", "failed"],
@@ -413,7 +350,6 @@ class TestCrashRecovery:
             timeout=60,
         )
 
-        # Task should be failed since we killed the container
         assert task["status"] == "failed", (
             f"Orphaned task should be marked failed after crash recovery, "
             f"got: {task['status']}"
@@ -422,7 +358,6 @@ class TestCrashRecovery:
         assert "scheduler restarted" in error_msg.lower() or "container" in error_msg.lower(), (
             f"Error message should mention restart/container, got: {error_msg}"
         )
-        logger.info(f"✅ Crash recovery: orphaned task {task_id} marked failed: {error_msg}")
 
     async def test_scheduler_resumes_running_container(
         self,
@@ -431,33 +366,20 @@ class TestCrashRecovery:
         mock_url: str,
         admin_auth_headers: dict,
     ):
-        """If a worker container is still running during restart, scheduler resumes it.
-
-        Steps:
-        1. Create a task with moderate delay
-        2. Wait for RUNNING status
-        3. Restart scheduler (container still alive)
-        4. Task should eventually COMPLETE (scheduler resumes monitoring)
-        """
+        """If a worker container is still running during restart, scheduler resumes it."""
         await http_client.patch(
             f"{mock_url}/mock/config",
             json={"claude_delay_seconds": 10},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Resume test task",
-                "branch_name": "codify/crash-resume-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Crash resume test {int(time.time())}",
+            prompt="Resume test task",
+            target_branch="main",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
-        # Wait for RUNNING
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
             target_statuses=["running"],
@@ -467,7 +389,6 @@ class TestCrashRecovery:
         assert task["status"] == "running"
         logger.info(f"Task {task_id} running, restarting scheduler...")
 
-        # Restart scheduler — container is still alive so it should resume
         compose_file = "backend/tests/mock_integration/docker-compose.mock-test.yml"
         subprocess.run(
             ["docker", "compose", "-f", compose_file, "restart", "scheduler"],
@@ -475,7 +396,6 @@ class TestCrashRecovery:
             cwd=PROJECT_ROOT,
         )
 
-        # Wait for task to complete (scheduler resumes monitoring)
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
             target_statuses=["completed", "failed"],
@@ -485,4 +405,3 @@ class TestCrashRecovery:
         assert task["status"] == "completed", (
             f"Resumed task should complete: {task.get('error_message')}"
         )
-        logger.info(f"✅ Scheduler resumed task {task_id} after restart")

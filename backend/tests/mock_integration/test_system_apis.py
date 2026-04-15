@@ -13,6 +13,7 @@ import httpx
 import pytest
 
 from .conftest import (
+    create_issue_and_task,
     wait_for_task_status,
 )
 
@@ -303,19 +304,14 @@ class TestTaskListAdvancedFilters:
         admin_auth_headers: dict,
     ):
         """GET /tasks?project_id=1 should only return tasks for that project."""
-        # Create a task first
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Project filter test",
-                "branch_name": "codify/project-filter-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        # Create an issue and task first
+        _issue, task_data = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Project filter test",
+            prompt="Project filter test",
+            project_id=1,
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task_data["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,

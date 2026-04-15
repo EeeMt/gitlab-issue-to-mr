@@ -4,19 +4,15 @@ Tests public health endpoint, 403 for non-admin access, SSE log streaming,
 container listing, GitLab config test endpoint, and webhook management.
 """
 
-import asyncio
-import random
-import time
-
 import httpx
 import pytest
 
 from .conftest import (
     BACKEND_URL,
     MOCK_SERVICES_URL,
-    WEBHOOK_SECRET,
-    build_webhook_payload,
-    send_webhook,
+    create_issue,
+    create_issue_and_task,
+    create_task,
     wait_for_task_status,
 )
 
@@ -163,11 +159,10 @@ class TestSSELogStream:
         """SSE stream for a completed task should include events and end with 'done'."""
         async with httpx.AsyncClient(timeout=30) as client:
             # Create and wait for task completion
-            iid = random.randint(10000, 89999)
-            payload = build_webhook_payload(project_id=1, issue_iid=iid)
-            payload["object_attributes"]["id"] = random.randint(100000, 999999)
-            resp = await send_webhook(client, BACKEND_URL, payload)
-            task_id = resp.json()["task_id"]
+            _issue, task = await create_issue_and_task(
+                client, BACKEND_URL, admin_headers,
+            )
+            task_id = task["id"]
 
             await wait_for_task_status(
                 client, BACKEND_URL, task_id,
@@ -248,11 +243,10 @@ class TestContainerListing:
             )
 
             try:
-                iid = random.randint(10000, 89999)
-                payload = build_webhook_payload(project_id=1, issue_iid=iid)
-                payload["object_attributes"]["id"] = random.randint(100000, 999999)
-                resp = await send_webhook(client, BACKEND_URL, payload)
-                task_id = resp.json()["task_id"]
+                _issue, task = await create_issue_and_task(
+                    client, BACKEND_URL, admin_headers,
+                )
+                task_id = task["id"]
 
                 # Wait for running
                 await wait_for_task_status(
@@ -383,11 +377,10 @@ class TestTaskOperationsEdge:
     async def test_cancel_completed_task_rejected(self, admin_headers):
         """Cannot cancel an already completed task."""
         async with httpx.AsyncClient(timeout=30) as client:
-            iid = random.randint(10000, 89999)
-            payload = build_webhook_payload(project_id=1, issue_iid=iid)
-            payload["object_attributes"]["id"] = random.randint(100000, 999999)
-            resp = await send_webhook(client, BACKEND_URL, payload)
-            task_id = resp.json()["task_id"]
+            _issue, task = await create_issue_and_task(
+                client, BACKEND_URL, admin_headers,
+            )
+            task_id = task["id"]
 
             await wait_for_task_status(
                 client, BACKEND_URL, task_id,
@@ -412,11 +405,10 @@ class TestTaskOperationsEdge:
             )
 
             try:
-                iid = random.randint(10000, 89999)
-                payload = build_webhook_payload(project_id=1, issue_iid=iid)
-                payload["object_attributes"]["id"] = random.randint(100000, 999999)
-                resp = await send_webhook(client, BACKEND_URL, payload)
-                task_id = resp.json()["task_id"]
+                _issue, task = await create_issue_and_task(
+                    client, BACKEND_URL, admin_headers,
+                )
+                task_id = task["id"]
 
                 await wait_for_task_status(
                     client, BACKEND_URL, task_id,
@@ -440,20 +432,17 @@ class TestTaskOperationsEdge:
     async def test_retry_pending_task_rejected(self, admin_headers):
         """Cannot retry a task that is still pending."""
         async with httpx.AsyncClient(timeout=30) as client:
-            # Create a manual task (will be pending briefly)
-            resp = await client.post(
-                f"{BACKEND_URL}/api/tasks",
-                headers=admin_headers,
-                json={
-                    "project_id": 1,
-                    "user_prompt": "Retry test task",
-                    "branch_name": f"codify/retry-pending-{random.randint(1000, 9999)}",
-                    "target_branch": "main",
-                    "scheduled_at": "2099-12-31T23:59:59Z",
-                },
+            # Create an issue, then a scheduled task (will stay pending)
+            issue = await create_issue(
+                client, BACKEND_URL, admin_headers,
+                title="Retry pending test",
             )
-            assert resp.status_code in (200, 201)
-            task_id = resp.json()["id"]
+            task = await create_task(
+                client, BACKEND_URL, admin_headers, issue["id"],
+                user_prompt="Retry test task",
+                scheduled_datetime="2099-12-31T23:59:59Z",
+            )
+            task_id = task["id"]
 
             # Try retry on pending task
             resp = await client.post(

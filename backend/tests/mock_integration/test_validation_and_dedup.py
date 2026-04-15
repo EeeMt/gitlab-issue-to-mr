@@ -1,144 +1,24 @@
-"""Tests for API validation, deduplication, and task lifecycle correctness.
+"""Tests for API validation, task lifecycle correctness, and edge cases.
 
 Covers:
-- Webhook deduplication (same note_id → only 1 task)
-- Concurrent duplicate webhooks (race condition)
 - Task priority boundary validation
 - Cancel non-cancellable tasks (completed/failed)
 - Task list ordering (newest first)
-- Task creation edge cases
+- Task creation edge cases (missing issue_id, empty prompt)
 - Retry completed vs failed tasks
 """
 
 import asyncio
-import random
-import time
 
 import httpx
 import pytest
 
 from .conftest import (
-    BACKEND_URL,
-    MOCK_SERVICES_URL,
-    build_webhook_payload,
-    get_mock_calls,
-    send_webhook,
+    create_issue,
+    create_issue_and_task,
+    create_task,
     wait_for_task_status,
 )
-
-
-class TestWebhookDeduplication:
-    """Verify that duplicate webhooks (same note_id) create only one task."""
-
-    @pytest.mark.asyncio
-    async def test_duplicate_webhook_same_note_id_creates_one_task(
-        self,
-        http_client: httpx.AsyncClient,
-        backend_url: str,
-        admin_auth_headers: dict,
-    ):
-        """Sending the same webhook twice with identical note_id should create only one task."""
-        iid = random.randint(50000, 59999)
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=iid,
-            prompt="Dedup test - same note_id",
-        )
-        fixed_note_id = random.randint(200000, 299999)
-        payload["object_attributes"]["id"] = fixed_note_id
-
-        # First webhook
-        resp1 = await send_webhook(http_client, backend_url, payload)
-        assert resp1.status_code == 200
-        data1 = resp1.json()
-        task_id_1 = data1.get("task_id")
-
-        # Second webhook with same note_id
-        resp2 = await send_webhook(http_client, backend_url, payload)
-        assert resp2.status_code == 200
-        data2 = resp2.json()
-
-        # Second should be detected as duplicate
-        assert data2.get("status") == "duplicate" or data2.get("task_id") == task_id_1, (
-            f"Expected duplicate detection, got: {data2}"
-        )
-
-        # If both returned task_ids, they should be the same
-        if data2.get("task_id") and task_id_1:
-            assert data2["task_id"] == task_id_1
-
-    @pytest.mark.asyncio
-    async def test_different_note_ids_create_separate_tasks(
-        self,
-        http_client: httpx.AsyncClient,
-        backend_url: str,
-        admin_auth_headers: dict,
-    ):
-        """Different note_ids on same issue should create separate tasks."""
-        iid = random.randint(60000, 69999)
-
-        payload1 = build_webhook_payload(project_id=1, issue_iid=iid, prompt="First comment")
-        payload1["object_attributes"]["id"] = random.randint(300000, 399999)
-
-        payload2 = build_webhook_payload(project_id=1, issue_iid=iid, prompt="Second comment")
-        payload2["object_attributes"]["id"] = random.randint(400000, 499999)
-
-        resp1 = await send_webhook(http_client, backend_url, payload1)
-        resp2 = await send_webhook(http_client, backend_url, payload2)
-
-        assert resp1.status_code == 200
-        assert resp2.status_code == 200
-
-        tid1 = resp1.json().get("task_id")
-        tid2 = resp2.json().get("task_id")
-
-        # Both should create tasks (different note_ids)
-        assert tid1 is not None, f"First webhook failed: {resp1.json()}"
-        assert tid2 is not None, f"Second webhook failed: {resp2.json()}"
-        assert tid1 != tid2, "Different note_ids should create different tasks"
-
-    @pytest.mark.asyncio
-    async def test_concurrent_duplicate_webhooks_only_one_task(
-        self,
-        http_client: httpx.AsyncClient,
-        backend_url: str,
-        admin_auth_headers: dict,
-    ):
-        """Sending identical webhooks concurrently should create at most one task."""
-        iid = random.randint(70000, 79999)
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=iid,
-            prompt="Concurrent dedup test",
-        )
-        fixed_note_id = random.randint(500000, 599999)
-        payload["object_attributes"]["id"] = fixed_note_id
-
-        # Send 3 identical webhooks concurrently
-        async def send_one():
-            async with httpx.AsyncClient(timeout=30.0) as c:
-                return await send_webhook(c, backend_url, payload)
-
-        results = await asyncio.gather(send_one(), send_one(), send_one())
-
-        # Count how many created tasks
-        # 200 = success, 500 = DB conflict from race (acceptable — means dedup caught it)
-        task_ids = set()
-        success_count = 0
-        for r in results:
-            assert r.status_code in (200, 500), (
-                f"Unexpected status {r.status_code} during concurrent dedup"
-            )
-            if r.status_code == 200:
-                data = r.json()
-                if data.get("task_id"):
-                    task_ids.add(data["task_id"])
-                success_count += 1
-
-        # At most 1 unique task should be created
-        assert len(task_ids) <= 1, (
-            f"Expected at most 1 task from concurrent duplicate webhooks, got {len(task_ids)}: {task_ids}"
-        )
 
 
 class TestTaskLifecycleValidation:
@@ -152,18 +32,13 @@ class TestTaskLifecycleValidation:
         admin_auth_headers: dict,
     ):
         """Cannot cancel a task that has already completed."""
-        # Create and wait for completion
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=random.randint(80000, 89999),
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
             prompt="Quick task for cancel test",
         )
-        payload["object_attributes"]["id"] = random.randint(600000, 699999)
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json()["task_id"]
+        task_id = task["id"]
 
-        task = await wait_for_task_status(
+        result = await wait_for_task_status(
             http_client, backend_url, task_id,
             ["completed", "failed"], admin_auth_headers,
         )
@@ -174,7 +49,7 @@ class TestTaskLifecycleValidation:
             headers=admin_auth_headers,
         )
         assert cancel_resp.status_code == 400, (
-            f"Expected 400 for cancel of {task['status']} task, got {cancel_resp.status_code}"
+            f"Expected 400 for cancel of {result['status']} task, got {cancel_resp.status_code}"
         )
 
     @pytest.mark.asyncio
@@ -193,15 +68,11 @@ class TestTaskLifecycleValidation:
                 json={"claude_delay_seconds": 30},
             )
 
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=random.randint(81000, 81999),
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
             prompt="Slow task for retry test",
         )
-        payload["object_attributes"]["id"] = random.randint(700000, 799999)
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json()["task_id"]
+        task_id = task["id"]
 
         # Wait until running
         await wait_for_task_status(
@@ -232,7 +103,7 @@ class TestTaskLifecycleValidation:
         mock_url: str,
         admin_auth_headers: dict,
     ):
-        """Retrying a failed task should create a new task or re-queue."""
+        """Retrying a failed task should create a new task under the same issue."""
         # Force failure
         async with httpx.AsyncClient(timeout=10) as mc:
             await mc.patch(
@@ -240,15 +111,11 @@ class TestTaskLifecycleValidation:
                 json={"claude_exit_code": 1},
             )
 
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=random.randint(82000, 82999),
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
             prompt="Fail then retry",
         )
-        payload["object_attributes"]["id"] = random.randint(800000, 899999)
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json()["task_id"]
+        task_id = task["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -268,9 +135,9 @@ class TestTaskLifecycleValidation:
             f"Retry failed: {retry_resp.status_code} {retry_resp.text}"
         )
 
-        # New task or same task re-queued
+        # Retry creates a new task under the same issue
         retry_data = retry_resp.json()
-        new_task_id = retry_data.get("task_id") or retry_data.get("id") or task_id
+        new_task_id = retry_data.get("id") or retry_data.get("task_id") or task_id
 
         final = await wait_for_task_status(
             http_client, backend_url, new_task_id,
@@ -296,17 +163,12 @@ class TestTaskListOrdering:
         """Tasks should be returned newest first (created_at DESC)."""
         created_ids = []
         for i in range(3):
-            payload = build_webhook_payload(
-                project_id=1,
-                issue_iid=random.randint(83000 + i * 1000, 83999 + i * 1000),
+            _issue, task = await create_issue_and_task(
+                http_client, backend_url, admin_auth_headers,
+                title=f"Order test issue {i}",
                 prompt=f"Order test {i}",
             )
-            payload["object_attributes"]["id"] = random.randint(900000, 999999)
-            resp = await send_webhook(http_client, backend_url, payload)
-            assert resp.status_code == 200
-            tid = resp.json().get("task_id")
-            if tid:
-                created_ids.append(tid)
+            created_ids.append(task["id"])
             await asyncio.sleep(0.3)  # Ensure different created_at
 
         assert len(created_ids) >= 2, "Need at least 2 tasks to check ordering"
@@ -343,7 +205,7 @@ class TestTaskListOrdering:
         assert resp.status_code == 200
         data = resp.json()
         assert "total" in data, f"Missing 'total' in paginated response: {list(data.keys())}"
-        assert "items" in data, f"Missing 'items' in paginated response"
+        assert "items" in data, "Missing 'items' in paginated response"
         assert data["total"] >= 0
         assert len(data["items"]) <= 5
 
@@ -359,10 +221,15 @@ class TestTaskCreationEdgeCases:
         admin_auth_headers: dict,
     ):
         """Creating a task with priority=99 should either work or be rejected."""
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="Extreme priority issue",
+            description="Priority boundary test",
+        )
         resp = await http_client.post(
             f"{backend_url}/api/tasks",
             json={
-                "project_id": 1,
+                "issue_id": issue["id"],
                 "user_prompt": "Priority boundary test",
                 "priority": 99,
             },
@@ -381,10 +248,15 @@ class TestTaskCreationEdgeCases:
         admin_auth_headers: dict,
     ):
         """Creating a task with priority=-1 should either work or be rejected."""
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="Negative priority issue",
+            description="Negative priority test",
+        )
         resp = await http_client.post(
             f"{backend_url}/api/tasks",
             json={
-                "project_id": 1,
+                "issue_id": issue["id"],
                 "user_prompt": "Negative priority test",
                 "priority": -1,
             },
@@ -401,60 +273,44 @@ class TestTaskCreationEdgeCases:
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """Task with empty user_prompt should be rejected."""
+        """Task with no usable prompt should be rejected when issue also has no description."""
+        # Create issue with no description so there's no fallback prompt
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="Empty prompt issue",
+            description=None,
+        )
         resp = await http_client.post(
             f"{backend_url}/api/tasks",
             json={
-                "project_id": 1,
-                "user_prompt": "",
+                "issue_id": issue["id"],
+                "user_prompt": None,
             },
             headers=admin_auth_headers,
         )
-        # Empty prompt should be rejected
+        # No prompt and no issue description — should be rejected
         assert resp.status_code in (400, 422), (
-            f"Empty prompt should be rejected, got {resp.status_code}: {resp.text[:200]}"
+            f"Empty prompt with no issue description should be rejected, "
+            f"got {resp.status_code}: {resp.text[:200]}"
         )
 
     @pytest.mark.asyncio
-    async def test_create_task_missing_project_id_rejected(
+    async def test_create_task_missing_issue_id_rejected(
         self,
         http_client: httpx.AsyncClient,
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """Task without project_id should be rejected."""
+        """Task without issue_id should be rejected."""
         resp = await http_client.post(
             f"{backend_url}/api/tasks",
             json={
-                "user_prompt": "No project test",
+                "user_prompt": "No issue_id test",
             },
             headers=admin_auth_headers,
         )
         assert resp.status_code in (400, 422), (
-            f"Missing project_id should be rejected, got {resp.status_code}"
-        )
-
-    @pytest.mark.asyncio
-    async def test_create_task_with_very_long_branch_name(
-        self,
-        http_client: httpx.AsyncClient,
-        backend_url: str,
-        admin_auth_headers: dict,
-    ):
-        """Task with a very long branch name should either truncate or reject."""
-        long_branch = "codify/" + "x" * 300
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Long branch test",
-                "branch_name": long_branch,
-            },
-            headers=admin_auth_headers,
-        )
-        # Either accepted (truncated) or rejected (too long)
-        assert resp.status_code in (200, 201, 400, 422, 500), (
-            f"Unexpected status for long branch: {resp.status_code}"
+            f"Missing issue_id should be rejected, got {resp.status_code}"
         )
 
 
@@ -498,20 +354,12 @@ class TestCancelAndRetryEdgeCases:
     ):
         """Cancelling an already-cancelled task should return 400."""
         # Create a future-scheduled task (stays pending)
-        ts = int(time.time())
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Double cancel test",
-                "branch_name": f"codify/double-cancel-{ts}",
-                "delay_seconds": 3600,
-            },
-            headers=admin_auth_headers,
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            prompt="Double cancel test",
+            delay_seconds=3600,
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json().get("task_id") or resp.json().get("id")
-        assert task_id is not None
+        task_id = task["id"]
 
         # First cancel should succeed
         c1 = await http_client.post(

@@ -1,10 +1,9 @@
-"""Edge case and stress tests — timeout, stats, retries, webhook validation.
+"""Edge case and stress tests — timeout, stats, retries, custom files, long prompts.
 
 Tests that exercise less common code paths:
 - Container timeout (claude delay exceeds TASK_TIMEOUT)
 - Usage stats recording (input_tokens, output_tokens)
 - Multiple retry attempts
-- Webhook payload edge cases
 - Custom file changes via mock config
 - Long prompts
 
@@ -12,18 +11,15 @@ Prerequisites:
     docker-compose -f backend/tests/mock_integration/docker-compose.mock-test.yml up -d
 """
 
-import asyncio
 import logging
-import random
 import time
 
 import httpx
 import pytest
 
 from .conftest import (
-    build_webhook_payload,
+    create_issue_and_task,
     get_mock_calls,
-    send_webhook,
     wait_for_task_status,
 )
 
@@ -49,18 +45,12 @@ class TestContainerTimeout:
         )
 
         try:
-            resp = await http_client.post(
-                f"{backend_url}/api/tasks",
-                json={
-                    "project_id": 1,
-                    "user_prompt": "This task will timeout",
-                    "branch_name": f"codify/timeout-{int(time.time())}",
-                    "target_branch": "main",
-                },
-                headers=admin_auth_headers,
+            issue, task = await create_issue_and_task(
+                http_client, backend_url, admin_auth_headers,
+                title=f"Timeout test {int(time.time())}",
+                prompt="This task will timeout",
             )
-            assert resp.status_code in (200, 201)
-            task_id = resp.json()["id"]
+            task_id = task["id"]
 
             # Wait for task to fail (should timeout around 120s + container overhead)
             task = await wait_for_task_status(
@@ -93,18 +83,12 @@ class TestUsageStats:
         admin_auth_headers: dict,
     ):
         """Completed task should have input_tokens and output_tokens recorded."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Task for stats verification",
-                "branch_name": f"codify/stats-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Stats verification {int(time.time())}",
+            prompt="Task for stats verification",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -136,18 +120,12 @@ class TestUsageStats:
             json={"claude_exit_code": 1},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Failed task for stats",
-                "branch_name": f"codify/fail-stats-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Failed stats test {int(time.time())}",
+            prompt="Failed task for stats",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -182,18 +160,12 @@ class TestRetryBehavior:
             json={"claude_exit_code": 1},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Task to retry",
-                "branch_name": f"codify/retry-succeed-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Retry succeed test {int(time.time())}",
+            prompt="Task to retry",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -243,18 +215,12 @@ class TestRetryBehavior:
         )
 
         try:
-            resp = await http_client.post(
-                f"{backend_url}/api/tasks",
-                json={
-                    "project_id": 1,
-                    "user_prompt": "Running task retry test",
-                    "branch_name": f"codify/retry-running-{int(time.time())}",
-                    "target_branch": "main",
-                },
-                headers=admin_auth_headers,
+            issue, task = await create_issue_and_task(
+                http_client, backend_url, admin_auth_headers,
+                title=f"Retry running test {int(time.time())}",
+                prompt="Running task retry test",
             )
-            assert resp.status_code in (200, 201)
-            task_id = resp.json()["id"]
+            task_id = task["id"]
 
             await wait_for_task_status(
                 http_client, backend_url, task_id,
@@ -285,18 +251,12 @@ class TestRetryBehavior:
         admin_auth_headers: dict,
     ):
         """Retrying a completed (successful) task should be rejected."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Completed task retry test",
-                "branch_name": f"codify/retry-complete-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Retry complete test {int(time.time())}",
+            prompt="Completed task retry test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -313,115 +273,6 @@ class TestRetryBehavior:
             f"Retry of completed task should be rejected, got {resp.status_code}"
         )
         logger.info(f"✅ Retry of completed task rejected with {resp.status_code}")
-
-
-class TestWebhookEdgeCases:
-    """Webhook payload validation and edge cases."""
-
-    async def test_webhook_missing_note_body(
-        self,
-        http_client: httpx.AsyncClient,
-        backend_url: str,
-    ):
-        """Webhook without note body should be handled gracefully."""
-        payload = {
-            "object_kind": "note",
-            "event_type": "note",
-            "project": {"id": 1, "path_with_namespace": "test/project"},
-            "object_attributes": {
-                "id": random.randint(100000, 999999),
-                "noteable_type": "Issue",
-                # Missing "note" field
-            },
-            "issue": {"iid": 1},
-        }
-        resp = await http_client.post(
-            f"{backend_url}/api/webhook/gitlab",
-            json=payload,
-            headers={"X-Gitlab-Token": "mock-webhook-secret"},
-        )
-        # Should not crash — may return 200 (ignored) or 400
-        assert resp.status_code in (200, 400, 422), (
-            f"Missing note body should be handled, got {resp.status_code}"
-        )
-        logger.info(f"✅ Missing note body handled: {resp.status_code}")
-
-    async def test_webhook_non_issue_note_creates_task(
-        self,
-        http_client: httpx.AsyncClient,
-        backend_url: str,
-    ):
-        """Webhook for MR note with @ai-bot also creates a task (backend supports this)."""
-        payload = {
-            "object_kind": "note",
-            "event_type": "note",
-            "project": {"id": 1, "path_with_namespace": "test/project"},
-            "object_attributes": {
-                "id": random.randint(100000, 999999),
-                "noteable_type": "MergeRequest",
-                "note": "@ai-bot do something",
-            },
-            "merge_request": {"iid": 1},
-        }
-        resp = await http_client.post(
-            f"{backend_url}/api/webhook/gitlab",
-            json=payload,
-            headers={"X-Gitlab-Token": "mock-webhook-secret"},
-        )
-        # Backend accepts MR notes with @ai-bot and creates tasks
-        assert resp.status_code == 200
-        data = resp.json()
-        # May create a task or ignore — both are valid
-        logger.info(f"✅ MR note with @ai-bot: task_id={data.get('task_id')}, status={data.get('status')}")
-
-    async def test_webhook_without_ai_bot_mention_ignored(
-        self,
-        http_client: httpx.AsyncClient,
-        backend_url: str,
-    ):
-        """Webhook for issue note without @ai-bot mention should be ignored."""
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=random.randint(30000, 39999),
-            prompt="No AI bot mention here",
-        )
-        payload["object_attributes"]["id"] = random.randint(100000, 999999)
-        # Override note to remove @ai-bot
-        payload["object_attributes"]["note"] = "Just a regular comment without bot mention"
-
-        resp = await http_client.post(
-            f"{backend_url}/api/webhook/gitlab",
-            json=payload,
-            headers={"X-Gitlab-Token": "mock-webhook-secret"},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data.get("task_id") is None
-        logger.info(f"✅ Comment without @ai-bot correctly ignored")
-
-    async def test_webhook_empty_prompt_after_mention(
-        self,
-        http_client: httpx.AsyncClient,
-        backend_url: str,
-    ):
-        """Webhook with @ai-bot but empty prompt should be handled."""
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=random.randint(40000, 49999),
-            prompt="",
-        )
-        payload["object_attributes"]["id"] = random.randint(100000, 999999)
-        # Note is just "@ai-bot" with no prompt
-        payload["object_attributes"]["note"] = "@ai-bot"
-
-        resp = await http_client.post(
-            f"{backend_url}/api/webhook/gitlab",
-            json=payload,
-            headers={"X-Gitlab-Token": "mock-webhook-secret"},
-        )
-        # Should either create task with empty prompt or reject
-        assert resp.status_code in (200, 400, 422)
-        logger.info(f"✅ Empty prompt after @ai-bot handled: {resp.status_code}")
 
 
 class TestCustomFileChanges:
@@ -444,18 +295,12 @@ class TestCustomFileChanges:
             json={"claude_file_changes": custom_files},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Create custom files",
-                "branch_name": f"codify/custom-files-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Custom files test {int(time.time())}",
+            prompt="Create custom files",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -485,18 +330,12 @@ class TestTaskLogs:
         admin_auth_headers: dict,
     ):
         """Completed task should have retrievable logs."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Task for log verification",
-                "branch_name": f"codify/logs-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Log verification test {int(time.time())}",
+            prompt="Task for log verification",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -536,18 +375,12 @@ class TestTaskLogs:
             json={"claude_exit_code": 1},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Task for error log verification",
-                "branch_name": f"codify/error-logs-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Error log test {int(time.time())}",
+            prompt="Task for error log verification",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -591,18 +424,12 @@ class TestLongPrompt:
         long_prompt = "Implement a comprehensive feature: " + ("detailed requirement " * 250)
         assert len(long_prompt) > 5000
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": long_prompt,
-                "branch_name": f"codify/long-prompt-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Long prompt test {int(time.time())}",
+            prompt=long_prompt,
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -624,18 +451,12 @@ class TestLongPrompt:
         """Task with unicode/CJK characters in prompt should succeed."""
         unicode_prompt = "请帮我创建一个 hello.py 文件，输出 '你好世界' 🌍✨"
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": unicode_prompt,
-                "branch_name": f"codify/unicode-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Unicode prompt test {int(time.time())}",
+            prompt=unicode_prompt,
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,

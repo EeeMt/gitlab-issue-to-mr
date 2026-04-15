@@ -17,9 +17,8 @@ import httpx
 import pytest
 
 from .conftest import (
-    build_webhook_payload,
+    create_issue_and_task,
     get_mock_calls,
-    send_webhook,
     wait_for_task_status,
 )
 
@@ -45,15 +44,13 @@ class TestContainerFailure:
         )
         assert resp.status_code == 200
 
-        # Create task via webhook with unique issue_iid
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=100,
+        # Create issue and task
+        _issue, task_data = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Claude failure test",
             prompt="This should fail because claude returns exit code 1",
         )
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json()["task_id"]
+        task_id = task_data["id"]
         logger.info(f"Created task {task_id} (expected to fail)")
 
         # Wait for failure
@@ -87,19 +84,13 @@ class TestTaskCancel:
         assert resp.status_code == 200
 
         try:
-            # Create task
-            resp = await http_client.post(
-                f"{backend_url}/api/tasks",
-                json={
-                    "project_id": 1,
-                    "user_prompt": "This task will be cancelled",
-                    "branch_name": f"codify/cancel-test-{int(time.time())}",
-                    "target_branch": "main",
-                },
-                headers=admin_auth_headers,
+            # Create issue and task
+            _issue, task_data = await create_issue_and_task(
+                http_client, backend_url, admin_auth_headers,
+                title=f"Cancel test {int(time.time())}",
+                prompt="This task will be cancelled",
             )
-            assert resp.status_code in (200, 201)
-            task_id = resp.json()["id"]
+            task_id = task_data["id"]
             logger.info(f"Created task {task_id} for cancel test")
 
             # Wait for it to start running
@@ -171,18 +162,12 @@ class TestTaskRetry:
             json={"claude_exit_code": 1},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "This will fail then succeed on retry",
-                "branch_name": "codify/retry-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        _issue, task_data = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Retry test",
+            prompt="This will fail then succeed on retry",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task_data["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -205,9 +190,13 @@ class TestTaskRetry:
         )
         assert resp.status_code == 200, f"Retry failed: {resp.text}"
 
+        # The retry creates a new task under the same issue
+        retry_data = resp.json()
+        retry_task_id = retry_data.get("task_id") or retry_data.get("id") or task_id
+
         # 3. Wait for completion
         task = await wait_for_task_status(
-            http_client, backend_url, task_id,
+            http_client, backend_url, retry_task_id,
             target_statuses=["completed", "failed"],
             auth_headers=admin_auth_headers,
             timeout=120,
@@ -216,4 +205,4 @@ class TestTaskRetry:
             f"Retried task should complete but got {task['status']}: "
             f"{task.get('error_message', '')}"
         )
-        logger.info(f"✅ Retry succeeded: task {task_id} → completed")
+        logger.info(f"✅ Retry succeeded: task {retry_task_id} → completed")

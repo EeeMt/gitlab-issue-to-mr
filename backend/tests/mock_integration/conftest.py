@@ -140,64 +140,84 @@ async def admin_auth_headers(backend_url: str) -> dict:
     pytest.skip(f"Could not authenticate: register={resp.status_code} {resp.text}")
 
 
-def build_webhook_payload(
-    project_id: int = 1,
-    issue_iid: int = 1,
-    prompt: str = "Create a hello.py file",
-    action: str = "comment",
-    object_kind: str = "note",
-    noteable_type: str = "Issue",
-) -> dict:
-    """Build a GitLab webhook payload for issue comment."""
-    return {
-        "object_kind": object_kind,
-        "event_type": "note",
-        "user": {
-            "id": 42,
-            "name": "Test User",
-            "username": "testuser",
-            "avatar_url": "",
-        },
-        "project": {
-            "id": project_id,
-            "name": "test-project",
-            "path_with_namespace": "test-group/test-project",
-            "web_url": "http://mock-services:9000/test-group/test-project",
-            "default_branch": "main",
-        },
-        "object_attributes": {
-            "id": int(time.time()),
-            "note": f"@ai-bot {prompt}",
-            "noteable_type": noteable_type,
-            "action": action,
-        },
-        "issue": {
-            "id": issue_iid * 1000,
-            "iid": issue_iid,
-            "title": f"Test Issue #{issue_iid}",
-            "state": "opened",
-            "action": "open",
-        },
-    }
-
-
-async def send_webhook(
+async def create_issue(
     client: httpx.AsyncClient,
     backend_url: str,
-    payload: dict,
-    secret: str = WEBHOOK_SECRET,
-) -> httpx.Response:
-    """Send a signed webhook to the backend."""
-    body = json.dumps(payload, separators=(",", ":"))
-    return await client.post(
-        f"{backend_url}/api/webhook/gitlab",
-        content=body,
-        headers={
-            "Content-Type": "application/json",
-            "X-Gitlab-Token": secret,
-            "X-Gitlab-Event": "Note Hook",
+    auth_headers: dict,
+    *,
+    title: str = "Test Issue",
+    description: str = "Create a hello.py file",
+    project_id: int = 1,
+    target_branch: str = "main",
+) -> dict:
+    """Create an issue via the API. Returns the issue JSON."""
+    resp = await client.post(
+        f"{backend_url}/api/issues",
+        json={
+            "title": title,
+            "description": description,
+            "project_id": project_id,
+            "target_branch": target_branch,
         },
+        headers=auth_headers,
     )
+    assert resp.status_code in (200, 201), f"Create issue failed: {resp.status_code} {resp.text}"
+    return resp.json()
+
+
+async def create_task(
+    client: httpx.AsyncClient,
+    backend_url: str,
+    auth_headers: dict,
+    issue_id: int,
+    *,
+    user_prompt: str | None = None,
+    priority: int = 0,
+    delay_seconds: int | None = None,
+    scheduled_datetime: str | None = None,
+) -> dict:
+    """Create a task under an issue via the API. Returns the task JSON."""
+    body: dict[str, Any] = {"issue_id": issue_id, "priority": priority}
+    if user_prompt is not None:
+        body["user_prompt"] = user_prompt
+    if delay_seconds is not None:
+        body["delay_seconds"] = delay_seconds
+    if scheduled_datetime is not None:
+        body["scheduled_datetime"] = scheduled_datetime
+    resp = await client.post(
+        f"{backend_url}/api/tasks",
+        json=body,
+        headers=auth_headers,
+    )
+    assert resp.status_code in (200, 201), f"Create task failed: {resp.status_code} {resp.text}"
+    return resp.json()
+
+
+async def create_issue_and_task(
+    client: httpx.AsyncClient,
+    backend_url: str,
+    auth_headers: dict,
+    *,
+    title: str = "Test Issue",
+    prompt: str = "Create a hello.py file",
+    project_id: int = 1,
+    target_branch: str = "main",
+    priority: int = 0,
+    delay_seconds: int | None = None,
+    scheduled_datetime: str | None = None,
+) -> tuple[dict, dict]:
+    """Convenience: create an issue + task. Returns (issue, task) tuple."""
+    issue = await create_issue(
+        client, backend_url, auth_headers,
+        title=title, description=prompt, project_id=project_id,
+        target_branch=target_branch,
+    )
+    task = await create_task(
+        client, backend_url, auth_headers, issue["id"],
+        user_prompt=prompt, priority=priority,
+        delay_seconds=delay_seconds, scheduled_datetime=scheduled_datetime,
+    )
+    return issue, task
 
 
 async def wait_for_task_status(

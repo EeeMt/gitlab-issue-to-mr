@@ -20,9 +20,8 @@ import httpx
 import pytest
 
 from .conftest import (
-    build_webhook_payload,
+    create_issue_and_task,
     get_mock_calls,
-    send_webhook,
     wait_for_task_status,
 )
 
@@ -48,14 +47,12 @@ class TestGitPushFailure:
         )
         assert resp.status_code == 200
 
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=300,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Git push failure test",
             prompt="This should fail because git push is rejected",
         )
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json()["task_id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -88,14 +85,12 @@ class TestMRUpdateFailure:
         )
         assert resp.status_code == 200
 
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=301,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="MR update failure test",
             prompt="Task should complete even though MR update fails",
         )
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json()["task_id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -137,14 +132,12 @@ class TestIssueCommentFailure:
         )
         assert resp.status_code == 200
 
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=302,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Issue comment failure test",
             prompt="Task should complete even when comments fail",
         )
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json()["task_id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -170,18 +163,12 @@ class TestTokenUsageStats:
         admin_auth_headers: dict,
     ):
         """input_tokens and output_tokens should be parsed from CODIFY_STATS."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Create a file for token stats test",
-                "branch_name": "codify/token-stats-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Token usage stats test",
+            prompt="Create a file for token stats test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -218,18 +205,12 @@ class TestDiffStats:
         admin_auth_headers: dict,
     ):
         """additions/deletions/total_changes should be parsed from CODIFY_DIFF."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Create files for diff stats test",
-                "branch_name": "codify/diff-stats-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Diff stats test",
+            prompt="Create files for diff stats test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -264,18 +245,12 @@ class TestMRTitleParsing:
         admin_auth_headers: dict,
     ):
         """merge_request_title should be parsed from CODIFY_MR_TITLE marker."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Create a file for MR title test",
-                "branch_name": "codify/mr-title-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="MR title parsing test",
+            prompt="Create a file for MR title test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -304,18 +279,12 @@ class TestToolCallsJSON:
         admin_auth_headers: dict,
     ):
         """CODIFY_TOOL_CALLS should be stored as a 'tool_calls_json' log entry."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Create files for tool calls JSON test",
-                "branch_name": "codify/tool-calls-json-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Tool calls JSON test",
+            prompt="Create files for tool calls JSON test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,

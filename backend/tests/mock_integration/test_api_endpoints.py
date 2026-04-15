@@ -15,14 +15,14 @@ Prerequisites:
 
 import asyncio
 import logging
-import time
 
 import httpx
 import pytest
 
 from .conftest import (
-    build_webhook_payload,
-    send_webhook,
+    create_issue,
+    create_issue_and_task,
+    create_task,
     wait_for_task_status,
 )
 
@@ -48,19 +48,13 @@ class TestTaskListPagination:
 
         tasks.py: page=None → plain list; page=N → {items, total, page, page_size}
         """
-        # Create 3 quick tasks
+        # Create 3 quick tasks via Issue→Task flow
         for i in range(3):
-            resp = await http_client.post(
-                f"{backend_url}/api/tasks",
-                json={
-                    "project_id": 1,
-                    "user_prompt": f"Pagination test task {i}",
-                    "branch_name": f"codify/page-test-{i}",
-                    "target_branch": "main",
-                },
-                headers=admin_auth_headers,
+            await create_issue_and_task(
+                http_client, backend_url, admin_auth_headers,
+                title=f"Pagination test task {i}",
+                prompt=f"Pagination test task {i}",
             )
-            assert resp.status_code in (200, 201)
 
         # Paginated request
         resp = await http_client.get(
@@ -152,19 +146,16 @@ class TestScheduledTasksEndpoint:
         # Create a task scheduled 60 seconds in the future
         future_time = datetime.now(timezone.utc) + timedelta(seconds=60)
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Scheduled listing test",
-                "branch_name": "codify/scheduled-list-test",
-                "target_branch": "main",
-                "scheduled_datetime": future_time.isoformat(),
-            },
-            headers=admin_auth_headers,
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="Scheduled listing test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task = await create_task(
+            http_client, backend_url, admin_auth_headers, issue["id"],
+            user_prompt="Scheduled listing test",
+            scheduled_datetime=future_time.isoformat(),
+        )
+        task_id = task["id"]
 
         # Query the scheduled tasks endpoint
         resp2 = await http_client.get(
@@ -245,18 +236,12 @@ class TestLogStreamEndpoint:
 
         GET /tasks/{id}/log-stream returns SSE events.
         """
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Log stream test",
-                "branch_name": "codify/log-stream-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Log stream test",
+            prompt="Log stream test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -324,18 +309,12 @@ class TestRetryWithSchedule:
             json={"claude_exit_code": 1},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Task that will fail for retry test",
-                "branch_name": "codify/retry-schedule-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Retry schedule test",
+            prompt="Task that will fail for retry test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -360,9 +339,12 @@ class TestRetryWithSchedule:
         )
 
         if resp2.status_code == 200:
-            # Task should be back to pending with scheduled_at set
+            # Retry creates a new task in the Issue→Task model
+            retry_data = resp2.json()
+            retry_id = retry_data.get("id") or retry_data.get("task_id") or task_id
+
             resp3 = await http_client.get(
-                f"{backend_url}/api/tasks/{task_id}",
+                f"{backend_url}/api/tasks/{retry_id}",
                 headers=admin_auth_headers,
             )
             task_data = resp3.json()
@@ -372,17 +354,17 @@ class TestRetryWithSchedule:
             scheduled_at = task_data.get("scheduled_at")
             assert scheduled_at is not None, "Retried task should have scheduled_at"
             logger.info(
-                f"✅ Retry with schedule: task {task_id} → pending, "
+                f"✅ Retry with schedule: task {retry_id} → pending, "
                 f"scheduled_at={scheduled_at}"
             )
 
             # Execute immediately to not leave hanging
             await http_client.post(
-                f"{backend_url}/api/tasks/{task_id}/execute",
+                f"{backend_url}/api/tasks/{retry_id}/execute",
                 headers=admin_auth_headers,
             )
             await wait_for_task_status(
-                http_client, backend_url, task_id,
+                http_client, backend_url, retry_id,
                 target_statuses=["completed", "failed"],
                 auth_headers=admin_auth_headers,
                 timeout=120,
@@ -415,18 +397,12 @@ class TestContainerListingEndpoint:
             json={"claude_delay_seconds": 10},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Container listing test",
-                "branch_name": "codify/container-list-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Container listing test",
+            prompt="Container listing test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         # Wait for task to start running
         await asyncio.sleep(5)
@@ -487,18 +463,12 @@ class TestRetryCountTracking:
             json={"claude_exit_code": 1},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Retry count tracking test",
-                "branch_name": "codify/retry-count-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Retry count tracking test",
+            prompt="Retry count tracking test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -508,12 +478,13 @@ class TestRetryCountTracking:
         )
         assert task["status"] == "failed"
 
-        # Check initial retry_count
+        # Check original task info before retry
         resp2 = await http_client.get(
             f"{backend_url}/api/tasks/{task_id}",
             headers=admin_auth_headers,
         )
-        initial_retry = resp2.json().get("retry_count", 0)
+        original_data = resp2.json()
+        initial_is_retry = original_data.get("is_retry", False)
 
         # Reset mock and retry
         await http_client.patch(
@@ -527,25 +498,32 @@ class TestRetryCountTracking:
         )
         assert resp3.status_code == 200
 
-        # Wait for retry to complete
+        # Retry creates a new task in the Issue→Task model
+        retry_data = resp3.json()
+        retry_id = retry_data.get("id") or retry_data.get("task_id") or task_id
+
+        # Wait for retry task to complete
         task2 = await wait_for_task_status(
-            http_client, backend_url, task_id,
+            http_client, backend_url, retry_id,
             target_statuses=["completed", "failed"],
             auth_headers=admin_auth_headers,
             timeout=120,
         )
         assert task2["status"] == "completed"
 
-        # Check retry_count incremented
+        # Check retry task has is_retry=True and retry_source_task_id set
         resp4 = await http_client.get(
-            f"{backend_url}/api/tasks/{task_id}",
+            f"{backend_url}/api/tasks/{retry_id}",
             headers=admin_auth_headers,
         )
-        new_retry = resp4.json().get("retry_count", 0)
+        retry_task_data = resp4.json()
+        new_is_retry = retry_task_data.get("is_retry", False)
+        retry_source = retry_task_data.get("retry_source_task_id")
 
         logger.info(
-            f"✅ Retry count: {initial_retry} → {new_retry} "
-            f"(delta={new_retry - initial_retry})"
+            f"✅ Retry tracking: original task {task_id} (is_retry={initial_is_retry}) "
+            f"→ retry task {retry_id} (is_retry={new_is_retry}, "
+            f"retry_source_task_id={retry_source})"
         )
 
     async def test_retry_only_allowed_for_failed_or_cancelled(
@@ -557,18 +535,12 @@ class TestRetryCountTracking:
     ):
         """Retrying a completed task should be rejected."""
         # Create a task that will complete
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Retry validation test",
-                "branch_name": "codify/retry-validation-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Retry validation test",
+            prompt="Retry validation test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -611,18 +583,12 @@ class TestTaskLogsContent:
         ci-claude.sh emits: SYSTEM_INIT, THINKING x2, ASSISTANT_TEXT x2,
         TOOL_USE_START x3, TOOL_RESULT x3 — total ~10 marker events.
         """
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Log content verification test",
-                "branch_name": "codify/log-content-test",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Log content verification test",
+            prompt="Log content verification test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -677,19 +643,17 @@ class TestCancelPendingTask:
 
         # Create a task scheduled far in the future (won't start)
         future_time = datetime.now(timezone.utc) + timedelta(hours=1)
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Task to cancel while pending",
-                "branch_name": "codify/cancel-pending-test",
-                "target_branch": "main",
-                "scheduled_datetime": future_time.isoformat(),
-            },
-            headers=admin_auth_headers,
+
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="Cancel pending test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task = await create_task(
+            http_client, backend_url, admin_auth_headers, issue["id"],
+            user_prompt="Task to cancel while pending",
+            scheduled_datetime=future_time.isoformat(),
+        )
+        task_id = task["id"]
 
         # Verify it's pending
         resp2 = await http_client.get(

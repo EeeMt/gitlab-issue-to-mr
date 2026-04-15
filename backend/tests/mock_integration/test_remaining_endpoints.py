@@ -11,9 +11,9 @@ import pytest
 from .conftest import (
     BACKEND_URL,
     MOCK_SERVICES_URL,
-    WEBHOOK_SECRET,
-    build_webhook_payload,
-    send_webhook,
+    create_issue,
+    create_issue_and_task,
+    create_task,
     wait_for_task_status,
 )
 
@@ -57,11 +57,12 @@ class TestTaskStats:
     async def test_completed_task_stats(self, admin_headers):
         """Completed task should return stats (may be zeros in mock env)."""
         async with httpx.AsyncClient(timeout=30) as client:
-            iid = random.randint(10000, 89999)
-            payload = build_webhook_payload(project_id=1, issue_iid=iid)
-            payload["object_attributes"]["id"] = random.randint(100000, 999999)
-            resp = await send_webhook(client, BACKEND_URL, payload)
-            task_id = resp.json()["task_id"]
+            _issue, task_data = await create_issue_and_task(
+                client, BACKEND_URL, admin_headers,
+                title=f"Stats test {random.randint(10000, 89999)}",
+                prompt="Create a hello.py file",
+            )
+            task_id = task_data["id"]
 
             await wait_for_task_status(
                 client, BACKEND_URL, task_id,
@@ -201,11 +202,12 @@ class TestContainerLogs:
     async def test_container_logs_completed_task(self, admin_headers):
         """Container logs for a completed task should return log data."""
         async with httpx.AsyncClient(timeout=30) as client:
-            iid = random.randint(10000, 89999)
-            payload = build_webhook_payload(project_id=1, issue_iid=iid)
-            payload["object_attributes"]["id"] = random.randint(100000, 999999)
-            resp = await send_webhook(client, BACKEND_URL, payload)
-            task_id = resp.json()["task_id"]
+            _issue, task_data = await create_issue_and_task(
+                client, BACKEND_URL, admin_headers,
+                title=f"Container logs test {random.randint(10000, 89999)}",
+                prompt="Create a hello.py file",
+            )
+            task_id = task_data["id"]
 
             await wait_for_task_status(
                 client, BACKEND_URL, task_id,
@@ -228,11 +230,12 @@ class TestContainerLogs:
     async def test_container_logs_db_source(self, admin_headers):
         """Container logs with source=db should use database chunks."""
         async with httpx.AsyncClient(timeout=30) as client:
-            iid = random.randint(10000, 89999)
-            payload = build_webhook_payload(project_id=1, issue_iid=iid)
-            payload["object_attributes"]["id"] = random.randint(100000, 999999)
-            resp = await send_webhook(client, BACKEND_URL, payload)
-            task_id = resp.json()["task_id"]
+            _issue, task_data = await create_issue_and_task(
+                client, BACKEND_URL, admin_headers,
+                title=f"Container logs DB test {random.randint(10000, 89999)}",
+                prompt="Create a hello.py file",
+            )
+            task_id = task_data["id"]
 
             await wait_for_task_status(
                 client, BACKEND_URL, task_id,
@@ -402,28 +405,6 @@ class TestRuntimeConfigKeyDelete:
 
 class TestMiscEndpoints:
     """Miscellaneous endpoint edge cases."""
-
-    @pytest.mark.asyncio
-    async def test_webhook_without_secret_header(self):
-        """Webhook without X-Gitlab-Token should be rejected."""
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                f"{BACKEND_URL}/api/webhook/gitlab",
-                json={"object_kind": "note"},
-                # No X-Gitlab-Token header
-            )
-            assert resp.status_code in (400, 401, 403)
-
-    @pytest.mark.asyncio
-    async def test_webhook_with_wrong_secret(self):
-        """Webhook with wrong secret should be rejected."""
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                f"{BACKEND_URL}/api/webhook/gitlab",
-                json={"object_kind": "note"},
-                headers={"X-Gitlab-Token": "wrong-secret-value"},
-            )
-            assert resp.status_code in (400, 401, 403)
 
     @pytest.mark.asyncio
     async def test_api_404_for_unknown_route(self):

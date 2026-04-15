@@ -12,16 +12,14 @@ Prerequisites:
 """
 
 import logging
-import random
 import time
 
 import httpx
 import pytest
 
 from .conftest import (
-    build_webhook_payload,
+    create_issue_and_task,
     get_mock_calls,
-    send_webhook,
     wait_for_task_status,
 )
 
@@ -45,18 +43,12 @@ class TestProjectLookupFailure:
             json={"fail_project_lookup": True},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Should fail due to project 404",
-                "branch_name": f"codify/proj404-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Project 404 test {int(time.time())}",
+            prompt="Should fail due to project 404",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -66,40 +58,6 @@ class TestProjectLookupFailure:
         )
         assert task["status"] == "failed", f"Expected failed, got {task['status']}"
         logger.info(f"✅ Project 404 correctly failed task: {task.get('error_message', '')[:100]}")
-
-    async def test_project_404_via_webhook(
-        self,
-        http_client: httpx.AsyncClient,
-        backend_url: str,
-        mock_url: str,
-        admin_auth_headers: dict,
-    ):
-        """Webhook-created task with project 404 should also fail."""
-        await http_client.patch(
-            f"{mock_url}/mock/config",
-            json={"fail_project_lookup": True},
-        )
-
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=random.randint(5000, 5999),
-            prompt="Webhook task with bad project",
-        )
-        payload["object_attributes"]["id"] = random.randint(100000, 999999)
-
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json().get("task_id")
-        assert task_id is not None
-
-        task = await wait_for_task_status(
-            http_client, backend_url, task_id,
-            target_statuses=["completed", "failed"],
-            auth_headers=admin_auth_headers,
-            timeout=120,
-        )
-        assert task["status"] == "failed"
-        logger.info("✅ Webhook task correctly failed on project 404")
 
 
 class TestGitCloneFailure:
@@ -118,18 +76,12 @@ class TestGitCloneFailure:
             json={"fail_git_clone": True},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Should fail due to clone error",
-                "branch_name": f"codify/clone-fail-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Clone fail test {int(time.time())}",
+            prompt="Should fail due to clone error",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -165,18 +117,12 @@ class TestExitCodes:
             json={"claude_exit_code": exit_code},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": f"Task with exit code {exit_code}",
-                "branch_name": f"codify/exit-{exit_code}-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Exit code {exit_code} test {int(time.time())}",
+            prompt=f"Task with exit code {exit_code}",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -202,18 +148,12 @@ class TestExitCodes:
             json={"claude_exit_code": 0},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Task with exit code 0",
-                "branch_name": f"codify/exit-0-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Exit code 0 test {int(time.time())}",
+            prompt="Task with exit code 0",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -241,18 +181,12 @@ class TestIssueNotesFailure:
             json={"fail_issue_notes": True},
         )
 
-        # Use webhook to create task (so it has issue_iid and would try to comment)
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=random.randint(6000, 6999),
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Notes failure test {int(time.time())}",
             prompt="Task despite comment failure",
         )
-        payload["object_attributes"]["id"] = random.randint(100000, 999999)
-
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json().get("task_id")
-        assert task_id is not None
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -260,48 +194,10 @@ class TestIssueNotesFailure:
             auth_headers=admin_auth_headers,
             timeout=120,
         )
-        # Task should complete — comment failure is non-fatal
         assert task["status"] == "completed", (
             f"Issue notes failure should be non-fatal: got {task['status']}"
         )
         logger.info("✅ Task completed despite issue notes failure")
-
-    async def test_issue_notes_failure_with_manual_task(
-        self,
-        http_client: httpx.AsyncClient,
-        backend_url: str,
-        mock_url: str,
-        admin_auth_headers: dict,
-    ):
-        """Manual tasks (no issue_iid) should not be affected by notes failure."""
-        await http_client.patch(
-            f"{mock_url}/mock/config",
-            json={"fail_issue_notes": True},
-        )
-
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Manual task ignores notes failure",
-                "branch_name": f"codify/notes-manual-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
-        )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
-
-        task = await wait_for_task_status(
-            http_client, backend_url, task_id,
-            target_statuses=["completed", "failed"],
-            auth_headers=admin_auth_headers,
-            timeout=120,
-        )
-        assert task["status"] == "completed", (
-            f"Manual task should succeed regardless of notes failure: got {task['status']}"
-        )
-        logger.info("✅ Manual task completed, notes failure irrelevant")
 
 
 class TestCombinedFailures:
@@ -320,18 +216,12 @@ class TestCombinedFailures:
             json={"fail_mr_update": True},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Task with MR update failure",
-                "branch_name": f"codify/mr-update-fail-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"MR update fail test {int(time.time())}",
+            prompt="Task with MR update failure",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -339,7 +229,6 @@ class TestCombinedFailures:
             auth_headers=admin_auth_headers,
             timeout=120,
         )
-        # MR update is typically non-fatal — task can still complete
         logger.info(
             f"Task with MR update failure: status={task['status']}, "
             f"error={(task.get('error_message') or '')[:80]}"
@@ -361,17 +250,12 @@ class TestCombinedFailures:
             },
         )
 
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=random.randint(7000, 7999),
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Notes+MR update fail test {int(time.time())}",
             prompt="Task with multiple non-fatal failures",
         )
-        payload["object_attributes"]["id"] = random.randint(100000, 999999)
-
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json().get("task_id")
-        assert task_id is not None
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -379,7 +263,6 @@ class TestCombinedFailures:
             auth_headers=admin_auth_headers,
             timeout=120,
         )
-        # Even with multiple non-fatal failures, task should complete
         assert task["status"] == "completed", (
             f"Multiple non-fatal failures should still complete: got {task['status']}"
         )
@@ -401,17 +284,12 @@ class TestCombinedFailures:
             },
         )
 
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=random.randint(8000, 8999),
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Fatal+nonfatal fail test {int(time.time())}",
             prompt="Task with fatal + non-fatal failures",
         )
-        payload["object_attributes"]["id"] = random.randint(100000, 999999)
-
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json().get("task_id")
-        assert task_id is not None
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -436,18 +314,12 @@ class TestMockCallRecording:
         admin_auth_headers: dict,
     ):
         """A successful task should trigger project lookup, git clone, git push, and MR calls."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Verify call recording",
-                "branch_name": f"codify/call-record-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Call recording test {int(time.time())}",
+            prompt="Verify call recording",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -458,12 +330,10 @@ class TestMockCallRecording:
 
         calls = await get_mock_calls(http_client, mock_url)
 
-        # Should have called GitLab project API
         gitlab_calls = [c for c in calls if c.get("service") == "gitlab"]
         project_calls = [c for c in gitlab_calls if "/api/v4/projects/" in c.get("path", "")]
         assert len(project_calls) > 0, "Expected at least one project lookup call"
 
-        # Should have git operations
         git_calls = [c for c in calls if c.get("service") == "git"]
         assert len(git_calls) > 0, "Expected git operations (clone/push)"
 
@@ -484,18 +354,12 @@ class TestMockCallRecording:
             json={"claude_exit_code": 1},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Verify calls on failure",
-                "branch_name": f"codify/fail-calls-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Failed calls test {int(time.time())}",
+            prompt="Verify calls on failure",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -505,7 +369,6 @@ class TestMockCallRecording:
         )
 
         calls = await get_mock_calls(http_client, mock_url)
-        # Should still have project lookup and git clone (failure happens after clone)
         gitlab_calls = [c for c in calls if c.get("service") == "gitlab"]
         assert len(gitlab_calls) > 0, "Failed task should still have GitLab calls"
         logger.info(f"✅ Failed task recorded {len(calls)} calls before failure")

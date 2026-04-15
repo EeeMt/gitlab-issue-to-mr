@@ -2,7 +2,6 @@
 
 Tests the scheduler's task management capabilities:
 - Priority ordering (P0 before P1 before P2)
-- Issue mutex (same issue can't run concurrently)
 - Concurrency limits (respects MAX_CONCURRENCY)
 
 Prerequisites:
@@ -17,6 +16,7 @@ import httpx
 import pytest
 
 from .conftest import (
+    create_issue_and_task,
     get_mock_calls,
     wait_for_task_status,
 )
@@ -43,19 +43,13 @@ class TestPriorityOrdering:
             json={"claude_delay_seconds": 15},
         )
 
-        blocker_resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Blocker task to occupy a slot",
-                "branch_name": f"codify/blocker-{int(time.time())}",
-                "target_branch": "main",
-                "priority": 1,
-            },
-            headers=admin_auth_headers,
+        _blocker_issue, blocker_task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Blocker task {int(time.time())}",
+            prompt="Blocker task to occupy a slot",
+            priority=1,
         )
-        assert blocker_resp.status_code in (200, 201)
-        blocker_id = blocker_resp.json()["id"]
+        blocker_id = blocker_task["id"]
 
         # Wait for blocker to start running (occupying 1 of 2 slots)
         await wait_for_task_status(
@@ -72,34 +66,22 @@ class TestPriorityOrdering:
         )
 
         # Create P2 task first
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "P2 low priority task",
-                "branch_name": f"codify/priority-p2-{int(time.time())}",
-                "target_branch": "main",
-                "priority": 2,
-            },
-            headers=admin_auth_headers,
+        _p2_issue, p2_task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"P2 low priority {int(time.time())}",
+            prompt="P2 low priority task",
+            priority=2,
         )
-        assert resp.status_code in (200, 201)
-        p2_id = resp.json()["id"]
+        p2_id = p2_task["id"]
 
         # Create P0 task second (should be picked before P2)
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "P0 high priority task",
-                "branch_name": f"codify/priority-p0-{int(time.time())}",
-                "target_branch": "main",
-                "priority": 0,
-            },
-            headers=admin_auth_headers,
+        _p0_issue, p0_task_data = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"P0 high priority {int(time.time())}",
+            prompt="P0 high priority task",
+            priority=0,
         )
-        assert resp.status_code in (200, 201)
-        p0_id = resp.json()["id"]
+        p0_id = p0_task_data["id"]
 
         # Wait for all tasks to complete
         p0_task = await wait_for_task_status(
@@ -149,18 +131,12 @@ class TestConcurrencyLimit:
         # docker-compose has MAX_CONCURRENCY=2, so create 3 tasks
         task_ids = []
         for i in range(3):
-            resp = await http_client.post(
-                f"{backend_url}/api/tasks",
-                json={
-                    "project_id": 1,
-                    "user_prompt": f"Concurrency test task {i}",
-                    "branch_name": f"codify/concurrency-{i}",
-                    "target_branch": "main",
-                },
-                headers=admin_auth_headers,
+            _issue, task_data = await create_issue_and_task(
+                http_client, backend_url, admin_auth_headers,
+                title=f"Concurrency test {i}",
+                prompt=f"Concurrency test task {i}",
             )
-            assert resp.status_code in (200, 201)
-            task_ids.append(resp.json()["id"])
+            task_ids.append(task_data["id"])
 
         # All 3 should eventually complete
         for tid in task_ids:

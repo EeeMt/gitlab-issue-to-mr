@@ -1,175 +1,118 @@
 """MR follow-up tasks, container env validation, and concurrent retry tests.
 
-Tests MR comment follow-up task creation (requires completed parent task),
-worker container environment variables, and concurrent operation edge cases.
+Tests follow-up task creation on the same issue, worker container environment
+variables, and concurrent operation edge cases.
 """
 
-import asyncio
-import random
-import time
-
-import httpx
 import pytest
 
 from .conftest import (
     BACKEND_URL,
     MOCK_SERVICES_URL,
-    WEBHOOK_SECRET,
-    build_webhook_payload,
+    create_issue,
+    create_issue_and_task,
+    create_task,
     get_mock_calls,
-    send_webhook,
     wait_for_task_status,
 )
-
-
-def _extract_auth(resp: httpx.Response) -> dict:
-    """Extract auth headers from login/register response."""
-    cookies = dict(resp.cookies)
-    if cookies:
-        return {"Cookie": "; ".join(f"{k}={v}" for k, v in cookies.items())}
-    token = resp.json().get("access_token")
-    if token:
-        return {"Authorization": f"Bearer {token}"}
-    raise ValueError(f"No auth in response: {resp.status_code} {resp.text}")
-
-
-@pytest.fixture
-async def admin_headers():
-    """Get admin auth headers."""
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.post(
-            f"{BACKEND_URL}/api/auth/local/login",
-            json={"username": "admin", "password": "admin123"},
-        )
-        if resp.status_code == 200:
-            return _extract_auth(resp)
-        resp = await client.post(
-            f"{BACKEND_URL}/api/auth/local/register",
-            json={"username": "admin", "password": "admin123"},
-        )
-        assert resp.status_code in (200, 201)
-        return _extract_auth(resp)
 
 
 # ── MR Follow-up Task ────────────────────────────────────────────────
 
 
 class TestMRFollowUpTask:
-    """Complete flow: issue comment → task completes with MR → MR comment creates follow-up."""
+    """Flow: create issue+task → task completes → create follow-up task on same issue."""
 
     @pytest.mark.asyncio
-    async def test_mr_follow_up_full_flow(self, admin_headers):
-        """Issue task completes → MR created → @ai-bot on MR → follow-up task."""
-        async with httpx.AsyncClient(timeout=30) as client:
-            # Step 1: Create initial task via issue webhook
-            iid = random.randint(10000, 89999)
-            payload = build_webhook_payload(
-                project_id=1,
-                issue_iid=iid,
-                prompt="Create a hello.py file with unit tests",
-            )
-            payload["object_attributes"]["id"] = random.randint(100000, 999999)
-            resp = await send_webhook(client, BACKEND_URL, payload)
-            assert resp.status_code == 200
-            task_id = resp.json()["task_id"]
+    async def test_mr_follow_up_full_flow(
+        self, http_client, backend_url, admin_auth_headers,
+    ):
+        """First task completes on an issue → second (follow-up) task on same issue."""
+        # Step 1: Create issue + initial task
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="MR follow-up flow issue",
+            prompt="Create a hello.py file with unit tests",
+        )
+        task_id = task["id"]
+        issue_id = issue["id"]
 
-            # Step 2: Wait for task to complete (creates MR)
-            task = await wait_for_task_status(
-                client, BACKEND_URL, task_id,
-                target_statuses=["completed"],
-                auth_headers=admin_headers,
-                timeout=120,
-            )
-            assert task["status"] == "completed"
-            mr_iid = task.get("merge_request_iid")
+        # Step 2: Wait for task to complete (creates MR)
+        task = await wait_for_task_status(
+            http_client, backend_url, task_id,
+            target_statuses=["completed"],
+            auth_headers=admin_auth_headers,
+            timeout=120,
+        )
+        assert task["status"] == "completed"
 
-            if not mr_iid:
-                pytest.skip("Task completed but no MR iid — mock may not set it")
+        mr_iid = task["issue"]["merge_request_iid"]
+        branch = task["issue"]["branch_name"]
 
-            # Step 3: Send MR comment webhook
-            mr_payload = build_webhook_payload(
-                project_id=1,
-                issue_iid=iid,
-                prompt="Add error handling to the hello.py file",
-                noteable_type="MergeRequest",
-            )
-            mr_payload["object_attributes"]["id"] = random.randint(200000, 999999)
-            mr_payload["merge_request"] = {
-                "id": mr_iid * 1000,
-                "iid": mr_iid,
-                "title": f"MR from task {task_id}",
-                "state": "opened",
-                "source_branch": task.get("branch_name", f"codify/issue-{iid}"),
-                "target_branch": "main",
-            }
+        # Step 3: Create a follow-up task on the SAME issue
+        follow_up = await create_task(
+            http_client, backend_url, admin_auth_headers, issue_id,
+            user_prompt="Add error handling to the hello.py file",
+        )
+        follow_up_id = follow_up["id"]
 
-            mr_resp = await send_webhook(client, BACKEND_URL, mr_payload)
-            assert mr_resp.status_code == 200
-            mr_data = mr_resp.json()
+        # Verify follow-up references the same issue (and therefore same branch/MR)
+        assert follow_up["issue_id"] == issue_id
+        assert follow_up["issue"]["branch_name"] == branch
 
-            # May create a follow-up task or be ignored depending on MR state
-            if "task_id" in mr_data:
-                follow_up_id = mr_data["task_id"]
-                # Verify follow-up task inherits branch from parent
-                follow_up = await client.get(
-                    f"{BACKEND_URL}/api/tasks/{follow_up_id}",
-                    headers=admin_headers,
-                )
-                follow_up_data = follow_up.json()
-                assert follow_up_data["project_id"] == 1
-                assert follow_up_data["merge_request_iid"] == mr_iid
+        # Wait for follow-up to reach a terminal state
+        follow_up = await wait_for_task_status(
+            http_client, backend_url, follow_up_id,
+            target_statuses=["completed", "failed"],
+            auth_headers=admin_auth_headers,
+            timeout=120,
+        )
+        assert follow_up["project_id"] == 1
 
     @pytest.mark.asyncio
-    async def test_mr_comment_on_running_task_ignored(self, admin_headers):
-        """MR comment while task is still running should be ignored."""
-        async with httpx.AsyncClient(timeout=30) as client:
-            # Configure delay so task stays running
-            await client.patch(
-                f"{MOCK_SERVICES_URL}/mock/config",
-                json={"claude_delay_seconds": 30},
+    async def test_second_task_on_running_issue_queued(
+        self, http_client, backend_url, mock_url, admin_auth_headers,
+    ):
+        """Creating a second task while the first is running should queue it (issue mutex)."""
+        # Configure delay so first task stays running
+        await http_client.patch(
+            f"{mock_url}/mock/config",
+            json={"claude_delay_seconds": 30},
+        )
+
+        try:
+            # Create issue + first task
+            issue, task1 = await create_issue_and_task(
+                http_client, backend_url, admin_auth_headers,
+                title="Issue mutex test",
+                prompt="Long running task for mutex test",
+            )
+            task1_id = task1["id"]
+            issue_id = issue["id"]
+
+            # Wait for first task to be running
+            await wait_for_task_status(
+                http_client, backend_url, task1_id,
+                target_statuses=["running"],
+                auth_headers=admin_auth_headers,
+                timeout=60,
             )
 
-            try:
-                # Create task
-                iid = random.randint(10000, 89999)
-                payload = build_webhook_payload(
-                    project_id=1, issue_iid=iid,
-                    prompt="Long running task for MR test",
-                )
-                payload["object_attributes"]["id"] = random.randint(100000, 999999)
-                resp = await send_webhook(client, BACKEND_URL, payload)
-                assert resp.status_code == 200
-                task_id = resp.json()["task_id"]
+            # Create second task on the same issue
+            task2 = await create_task(
+                http_client, backend_url, admin_auth_headers, issue_id,
+                user_prompt="Extra changes while first task runs",
+            )
 
-                # Wait for running state
-                task = await wait_for_task_status(
-                    client, BACKEND_URL, task_id,
-                    target_statuses=["running"],
-                    auth_headers=admin_headers,
-                    timeout=60,
-                )
-
-                # Try MR comment (should be ignored since task is still running)
-                mr_payload = build_webhook_payload(
-                    project_id=1, issue_iid=iid,
-                    prompt="Extra changes",
-                    noteable_type="MergeRequest",
-                )
-                mr_payload["object_attributes"]["id"] = random.randint(300000, 999999)
-                mr_payload["merge_request"] = {
-                    "id": 99001, "iid": 99001,
-                    "title": "Test MR", "state": "opened",
-                }
-                mr_resp = await send_webhook(client, BACKEND_URL, mr_payload)
-                assert mr_resp.status_code == 200
-                # Should be ignored — no completed task for this MR
-                data = mr_resp.json()
-                assert data.get("status") == "ignored" or "task_id" not in data
-            finally:
-                await client.patch(
-                    f"{MOCK_SERVICES_URL}/mock/config",
-                    json={"claude_delay_seconds": 0},
-                )
+            # Second task should be pending/queued, not running concurrently
+            assert task2["status"] in ("pending", "queued"), (
+                f"Second task should be queued due to issue mutex, got: {task2['status']}"
+            )
+        finally:
+            await http_client.patch(
+                f"{mock_url}/mock/config",
+                json={"claude_delay_seconds": 0},
+            )
 
 
 # ── Container Environment Validation ─────────────────────────────────
@@ -179,79 +122,50 @@ class TestContainerEnvironment:
     """Verify worker containers receive correct environment variables."""
 
     @pytest.mark.asyncio
-    async def test_worker_receives_required_env_vars(self, admin_headers):
+    async def test_worker_receives_required_env_vars(
+        self, http_client, backend_url, admin_auth_headers,
+    ):
         """Task execution should pass all required env vars to the container."""
-        async with httpx.AsyncClient(timeout=30) as client:
-            iid = random.randint(10000, 89999)
-            payload = build_webhook_payload(project_id=1, issue_iid=iid)
-            payload["object_attributes"]["id"] = random.randint(100000, 999999)
-            resp = await send_webhook(client, BACKEND_URL, payload)
-            assert resp.status_code == 200
-            task_id = resp.json()["task_id"]
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Env vars test issue",
+            prompt="Create a hello.py file",
+        )
+        task_id = task["id"]
 
-            task = await wait_for_task_status(
-                client, BACKEND_URL, task_id,
-                target_statuses=["completed", "failed"],
-                auth_headers=admin_headers,
-                timeout=120,
-            )
+        task = await wait_for_task_status(
+            http_client, backend_url, task_id,
+            target_statuses=["completed", "failed"],
+            auth_headers=admin_auth_headers,
+            timeout=120,
+        )
 
-            # Check the task has expected fields filled
-            assert task.get("project_id") == 1
-            assert task.get("branch_name") is not None
-            assert task.get("container_name") is not None
-
-            # Container name follows pattern: codify-{task_id}-p{project_id}-i{issue_iid}
-            container_name = task["container_name"]
-            assert f"p1" in container_name, \
-                f"Container name should include project: {container_name}"
+        # Check the task/issue have expected fields
+        assert task.get("project_id") == 1
+        assert task["issue"]["branch_name"] is not None
+        assert task.get("container_id") is not None
 
     @pytest.mark.asyncio
-    async def test_manual_task_no_issue_iid(self, admin_headers):
-        """Manual tasks (no issue_iid) should still run successfully."""
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{BACKEND_URL}/api/tasks",
-                headers=admin_headers,
-                json={
-                    "project_id": 1,
-                    "user_prompt": "Create a utility function",
-                    "branch_name": f"codify/manual-env-{random.randint(1000, 9999)}",
-                    "target_branch": "main",
-                },
-            )
-            assert resp.status_code in (200, 201)
-            task_id = resp.json()["id"]
-
-            task = await wait_for_task_status(
-                client, BACKEND_URL, task_id,
-                target_statuses=["completed", "failed"],
-                auth_headers=admin_headers,
-                timeout=120,
-            )
-            # Manual tasks should complete even without issue_iid
-            assert task["status"] in ("completed", "failed")
-            assert task.get("is_manual") is True
-
-    @pytest.mark.asyncio
-    async def test_task_records_model_name(self, admin_headers):
+    async def test_task_records_model_name(
+        self, http_client, backend_url, admin_auth_headers,
+    ):
         """Completed tasks should record the model used."""
-        async with httpx.AsyncClient(timeout=30) as client:
-            iid = random.randint(10000, 89999)
-            payload = build_webhook_payload(project_id=1, issue_iid=iid)
-            payload["object_attributes"]["id"] = random.randint(100000, 999999)
-            resp = await send_webhook(client, BACKEND_URL, payload)
-            task_id = resp.json()["task_id"]
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Model name test issue",
+            prompt="Create a hello.py file",
+        )
+        task_id = task["id"]
 
-            task = await wait_for_task_status(
-                client, BACKEND_URL, task_id,
-                target_statuses=["completed", "failed"],
-                auth_headers=admin_headers,
-                timeout=120,
-            )
-            # model_name may be set from CODIFY markers output
-            # Just verify the field exists (may be null in mock)
-            assert "model_name" in task
+        task = await wait_for_task_status(
+            http_client, backend_url, task_id,
+            target_statuses=["completed", "failed"],
+            auth_headers=admin_auth_headers,
+            timeout=120,
+        )
+        # model_name may be set from CODIFY markers output
+        # Just verify the field exists (may be null in mock)
+        assert "model_name" in task
 
 
 # ── Concurrent Retry ─────────────────────────────────────────────────
@@ -261,50 +175,52 @@ class TestConcurrentRetry:
     """Test retry behavior under concurrent conditions."""
 
     @pytest.mark.asyncio
-    async def test_double_retry_same_task(self, admin_headers):
+    async def test_double_retry_same_task(
+        self, http_client, backend_url, mock_url, admin_auth_headers,
+    ):
         """Two rapid retries on the same failed task — second should fail."""
-        async with httpx.AsyncClient(timeout=30) as client:
-            # Create a task that will fail
-            await client.patch(
-                f"{MOCK_SERVICES_URL}/mock/config",
-                json={"claude_exit_code": 1},
-            )
+        # Create a task that will fail
+        await http_client.patch(
+            f"{mock_url}/mock/config",
+            json={"claude_exit_code": 1},
+        )
 
-            iid = random.randint(10000, 89999)
-            payload = build_webhook_payload(project_id=1, issue_iid=iid)
-            payload["object_attributes"]["id"] = random.randint(100000, 999999)
-            resp = await send_webhook(client, BACKEND_URL, payload)
-            task_id = resp.json()["task_id"]
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Double retry test issue",
+            prompt="Task that will fail",
+        )
+        task_id = task["id"]
 
-            task = await wait_for_task_status(
-                client, BACKEND_URL, task_id,
-                target_statuses=["completed", "failed"],
-                auth_headers=admin_headers,
-                timeout=120,
-            )
-            assert task["status"] == "failed"
+        task = await wait_for_task_status(
+            http_client, backend_url, task_id,
+            target_statuses=["completed", "failed"],
+            auth_headers=admin_auth_headers,
+            timeout=120,
+        )
+        assert task["status"] == "failed"
 
-            # Reset exit code so retry can succeed
-            await client.patch(
-                f"{MOCK_SERVICES_URL}/mock/config",
-                json={"claude_exit_code": 0},
-            )
+        # Reset exit code so retry can succeed
+        await http_client.patch(
+            f"{mock_url}/mock/config",
+            json={"claude_exit_code": 0},
+        )
 
-            # Retry #1 — should succeed
-            r1 = await client.post(
-                f"{BACKEND_URL}/api/tasks/{task_id}/retry",
-                headers=admin_headers,
-            )
-            assert r1.status_code == 200
+        # Retry #1 — should succeed
+        r1 = await http_client.post(
+            f"{backend_url}/api/tasks/{task_id}/retry",
+            headers=admin_auth_headers,
+        )
+        assert r1.status_code == 200
 
-            # Retry #2 — task is now pending/queued, should fail
-            r2 = await client.post(
-                f"{BACKEND_URL}/api/tasks/{task_id}/retry",
-                headers=admin_headers,
-            )
-            # Second retry should be rejected (task no longer failed)
-            assert r2.status_code in (400, 409), \
-                f"Double retry should be rejected, got: {r2.status_code}"
+        # Retry #2 — task is now pending/queued, should fail
+        r2 = await http_client.post(
+            f"{backend_url}/api/tasks/{task_id}/retry",
+            headers=admin_auth_headers,
+        )
+        # Second retry should be rejected (task no longer failed)
+        assert r2.status_code in (400, 409), \
+            f"Double retry should be rejected, got: {r2.status_code}"
 
 
 # ── Task Logs Verification ───────────────────────────────────────────
@@ -314,86 +230,92 @@ class TestTaskLogsContent:
     """Verify task logs contain expected content after execution."""
 
     @pytest.mark.asyncio
-    async def test_completed_task_has_logs(self, admin_headers):
+    async def test_completed_task_has_logs(
+        self, http_client, backend_url, admin_auth_headers,
+    ):
         """A completed task should have non-empty logs."""
-        async with httpx.AsyncClient(timeout=30) as client:
-            iid = random.randint(10000, 89999)
-            payload = build_webhook_payload(project_id=1, issue_iid=iid)
-            payload["object_attributes"]["id"] = random.randint(100000, 999999)
-            resp = await send_webhook(client, BACKEND_URL, payload)
-            task_id = resp.json()["task_id"]
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Completed logs test issue",
+            prompt="Create a hello.py file",
+        )
+        task_id = task["id"]
 
-            task = await wait_for_task_status(
-                client, BACKEND_URL, task_id,
-                target_statuses=["completed", "failed"],
-                auth_headers=admin_headers,
-                timeout=120,
-            )
+        await wait_for_task_status(
+            http_client, backend_url, task_id,
+            target_statuses=["completed", "failed"],
+            auth_headers=admin_auth_headers,
+            timeout=120,
+        )
 
-            # Fetch logs
-            logs_resp = await client.get(
-                f"{BACKEND_URL}/api/tasks/{task_id}/logs",
-                headers=admin_headers,
-            )
-            assert logs_resp.status_code == 200
-            logs = logs_resp.json()
-            assert isinstance(logs, list)
-            assert len(logs) > 0, "Completed task should have at least one log entry"
+        # Fetch logs
+        logs_resp = await http_client.get(
+            f"{backend_url}/api/tasks/{task_id}/logs",
+            headers=admin_auth_headers,
+        )
+        assert logs_resp.status_code == 200
+        logs = logs_resp.json()
+        assert isinstance(logs, list)
+        assert len(logs) > 0, "Completed task should have at least one log entry"
 
     @pytest.mark.asyncio
-    async def test_failed_task_has_error_in_logs(self, admin_headers):
+    async def test_failed_task_has_error_in_logs(
+        self, http_client, backend_url, mock_url, admin_auth_headers,
+    ):
         """A failed task should have error information in logs."""
-        async with httpx.AsyncClient(timeout=30) as client:
-            # Make Claude fail
-            await client.patch(
-                f"{MOCK_SERVICES_URL}/mock/config",
-                json={"claude_exit_code": 1},
-            )
+        # Make Claude fail
+        await http_client.patch(
+            f"{mock_url}/mock/config",
+            json={"claude_exit_code": 1},
+        )
 
-            iid = random.randint(10000, 89999)
-            payload = build_webhook_payload(project_id=1, issue_iid=iid)
-            payload["object_attributes"]["id"] = random.randint(100000, 999999)
-            resp = await send_webhook(client, BACKEND_URL, payload)
-            task_id = resp.json()["task_id"]
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Failed logs test issue",
+            prompt="Task that will fail for log check",
+        )
+        task_id = task["id"]
 
-            task = await wait_for_task_status(
-                client, BACKEND_URL, task_id,
-                target_statuses=["completed", "failed"],
-                auth_headers=admin_headers,
-                timeout=120,
-            )
+        task = await wait_for_task_status(
+            http_client, backend_url, task_id,
+            target_statuses=["completed", "failed"],
+            auth_headers=admin_auth_headers,
+            timeout=120,
+        )
 
-            assert task["status"] == "failed"
-            # Error message should be set
-            assert task.get("error_message"), \
-                "Failed task should have error_message"
+        assert task["status"] == "failed"
+        # Error message should be set
+        assert task.get("error_message"), \
+            "Failed task should have error_message"
 
     @pytest.mark.asyncio
-    async def test_task_logs_sanitized(self, admin_headers):
+    async def test_task_logs_sanitized(
+        self, http_client, backend_url, admin_auth_headers,
+    ):
         """Task logs should not contain sensitive tokens."""
-        async with httpx.AsyncClient(timeout=30) as client:
-            iid = random.randint(10000, 89999)
-            payload = build_webhook_payload(project_id=1, issue_iid=iid)
-            payload["object_attributes"]["id"] = random.randint(100000, 999999)
-            resp = await send_webhook(client, BACKEND_URL, payload)
-            task_id = resp.json()["task_id"]
+        _issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Sanitized logs test issue",
+            prompt="Create a hello.py file",
+        )
+        task_id = task["id"]
 
-            await wait_for_task_status(
-                client, BACKEND_URL, task_id,
-                target_statuses=["completed", "failed"],
-                auth_headers=admin_headers,
-                timeout=120,
-            )
+        await wait_for_task_status(
+            http_client, backend_url, task_id,
+            target_statuses=["completed", "failed"],
+            auth_headers=admin_auth_headers,
+            timeout=120,
+        )
 
-            logs_resp = await client.get(
-                f"{BACKEND_URL}/api/tasks/{task_id}/logs",
-                headers=admin_headers,
-            )
-            logs = logs_resp.json()
-            logs_text = str(logs)
-            # Should not contain raw tokens (sanitize_sensitive_data strips these)
-            assert "glpat-" not in logs_text, "Logs should not contain GitLab tokens"
-            assert "sk-ant-" not in logs_text, "Logs should not contain Anthropic keys"
+        logs_resp = await http_client.get(
+            f"{backend_url}/api/tasks/{task_id}/logs",
+            headers=admin_auth_headers,
+        )
+        logs = logs_resp.json()
+        logs_text = str(logs)
+        # Should not contain raw tokens (sanitize_sensitive_data strips these)
+        assert "glpat-" not in logs_text, "Logs should not contain GitLab tokens"
+        assert "sk-ant-" not in logs_text, "Logs should not contain Anthropic keys"
 
 
 # ── Authentication Edge Cases ────────────────────────────────────────
@@ -405,6 +327,8 @@ class TestAuthEdgeCases:
     @pytest.mark.asyncio
     async def test_invalid_credentials_rejected(self):
         """Wrong password should return 401."""
+        import httpx
+
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
                 f"{BACKEND_URL}/api/auth/local/login",
@@ -415,6 +339,8 @@ class TestAuthEdgeCases:
     @pytest.mark.asyncio
     async def test_nonexistent_user_rejected(self):
         """Login with non-existent user should fail."""
+        import httpx
+
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
                 f"{BACKEND_URL}/api/auth/local/login",
@@ -425,6 +351,8 @@ class TestAuthEdgeCases:
     @pytest.mark.asyncio
     async def test_expired_token_rejected(self):
         """A garbage token should be rejected."""
+        import httpx
+
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
                 f"{BACKEND_URL}/api/tasks",

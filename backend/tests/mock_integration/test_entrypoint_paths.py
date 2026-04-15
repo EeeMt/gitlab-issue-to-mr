@@ -1,6 +1,7 @@
 """Entrypoint and worker code path tests — MR workflows, markers, sanitization.
 
-Tests that verify entrypoint.sh and worker.py code paths:
+Tests that verify entrypoint.sh and worker.py code paths using the
+Issue → Task → MR flow:
 - MR description updates (running → completed)
 - Existing MR detection and reuse
 - CODIFY markers in task output (stats, tool calls)
@@ -13,16 +14,15 @@ Prerequisites:
 """
 
 import logging
-import random
-import time
 
 import httpx
 import pytest
 
 from .conftest import (
-    build_webhook_payload,
+    create_issue,
+    create_issue_and_task,
+    create_task,
     get_mock_calls,
-    send_webhook,
     wait_for_task_status,
 )
 
@@ -41,18 +41,12 @@ class TestMRDescriptionUpdates:
         admin_auth_headers: dict,
     ):
         """Completed task should trigger MR description update via PUT call."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "MR description update test",
-                "branch_name": f"codify/mr-desc-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="MR Description Update Test",
+            prompt="MR description update test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -86,18 +80,12 @@ class TestMRDescriptionUpdates:
         admin_auth_headers: dict,
     ):
         """MR description should contain execution summary markers."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Task for MR description content check",
-                "branch_name": f"codify/mr-content-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="MR Description Content Check",
+            prompt="Task for MR description content check",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -137,18 +125,12 @@ class TestExistingMRDetection:
         admin_auth_headers: dict,
     ):
         """Task should search for existing MR by source_branch before creating new one."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Existing MR search test",
-                "branch_name": f"codify/mr-search-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Existing MR Search Test",
+            prompt="Existing MR search test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -184,18 +166,12 @@ class TestCODIFYMarkers:
         admin_auth_headers: dict,
     ):
         """Completed task should have tool_calls parsed from CODIFY_TOOL_CALLS marker."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Task for tool calls verification",
-                "branch_name": f"codify/markers-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Tool Calls Verification",
+            prompt="Task for tool calls verification",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -224,18 +200,12 @@ class TestCODIFYMarkers:
         admin_auth_headers: dict,
     ):
         """Completed task should have usage stats from CODIFY_STATS marker."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Task for usage stats verification",
-                "branch_name": f"codify/usage-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Usage Stats Verification",
+            prompt="Task for usage stats verification",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -265,18 +235,12 @@ class TestLogSanitization:
         admin_auth_headers: dict,
     ):
         """Task logs should not contain GitLab or Anthropic tokens."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Task for log sanitization check",
-                "branch_name": f"codify/sanitize-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Log Sanitization Check",
+            prompt="Task for log sanitization check",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -332,18 +296,18 @@ class TestNoChangesDetection:
             json={"claude_skip_files": True},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "No changes MR mode test",
-                "branch_name": f"codify/no-changes-mr-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="No Changes MR Mode Test",
+            description="No changes MR mode test",
+            target_branch="main",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task = await create_task(
+            http_client, backend_url, admin_auth_headers,
+            issue["id"],
+            user_prompt="No changes MR mode test",
+        )
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -370,18 +334,18 @@ class TestNoChangesDetection:
             json={"claude_skip_files": True},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "No changes no-MR mode test",
-                "branch_name": f"codify/no-changes-nomr-{int(time.time())}",
-                # No target_branch → no-MR mode
-            },
-            headers=admin_auth_headers,
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title="No Changes No-MR Mode Test",
+            description="No changes no-MR mode test",
+            target_branch=None,
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task = await create_task(
+            http_client, backend_url, admin_auth_headers,
+            issue["id"],
+            user_prompt="No changes no-MR mode test",
+        )
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -413,18 +377,12 @@ class TestMRCreationFlow:
             json={"fail_mr_creation": False},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "MR creation flow test",
-                "branch_name": f"codify/mr-create-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="MR Creation Flow Test",
+            prompt="MR creation flow test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -454,19 +412,13 @@ class TestMRCreationFlow:
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """Completed task with target_branch should have merge_request_url."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "MR URL verification",
-                "branch_name": f"codify/mr-url-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        """Completed task's issue should have merge_request_url."""
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="MR URL Verification",
+            prompt="MR URL verification",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -475,37 +427,33 @@ class TestMRCreationFlow:
             timeout=120,
         )
 
-        mr_url = task.get("merge_request_url")
+        # merge_request_url is on the issue, not the task
+        issue_data = task.get("issue", {})
+        mr_url = issue_data.get("merge_request_url") if issue_data else None
         if mr_url:
             assert "merge_requests" in mr_url or "mr" in mr_url
-            logger.info(f"✅ Task has MR URL: {mr_url}")
+            logger.info(f"✅ Issue has MR URL: {mr_url}")
         else:
-            logger.info("MR URL not in task response (may use different field name)")
+            logger.info("MR URL not in issue data (may use different field name)")
 
 
-class TestWebhookToMRFlow:
-    """End-to-end webhook → task → MR with mock call verification."""
+class TestIssueTaskToMRFlow:
+    """End-to-end Issue → Task → MR with mock call verification."""
 
-    async def test_webhook_creates_task_with_issue_comment(
+    async def test_completed_task_posts_gitlab_comment(
         self,
         http_client: httpx.AsyncClient,
         backend_url: str,
         mock_url: str,
         admin_auth_headers: dict,
     ):
-        """Webhook-created task should post a comment back on the issue."""
-        issue_iid = random.randint(50000, 59999)
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=issue_iid,
+        """Completed task should post a comment back on GitLab via the API."""
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="GitLab Comment Verification",
             prompt="Create a hello.py file",
         )
-        payload["object_attributes"]["id"] = random.randint(100000, 999999)
-
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json().get("task_id")
-        assert task_id is not None
+        task_id = task["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -516,14 +464,13 @@ class TestWebhookToMRFlow:
 
         calls = await get_mock_calls(http_client, mock_url, service="gitlab")
 
-        # Should have posted comments on the issue
+        # Check for any POST calls to /notes (issue comment posting)
         note_calls = [
             c for c in calls
-            if c["method"] == "POST" and f"/issues/{issue_iid}/notes" in c.get("path", "")
+            if c["method"] == "POST" and "/notes" in c.get("path", "")
         ]
         if note_calls:
             logger.info(f"✅ {len(note_calls)} issue comment(s) posted")
-            # Check comment content
             for nc in note_calls:
                 body = nc.get("body", {})
                 if isinstance(body, dict):
@@ -541,18 +488,12 @@ class TestWebhookToMRFlow:
         admin_auth_headers: dict,
     ):
         """Full task flow should record: clone, push, MR create/update."""
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Full flow git ops verification",
-                "branch_name": f"codify/git-ops-{int(time.time())}",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Git Operations Verification",
+            prompt="Full flow git ops verification",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,

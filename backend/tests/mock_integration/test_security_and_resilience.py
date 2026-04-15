@@ -5,23 +5,19 @@ Covers:
 - Issue mutex enforcement (same issue → sequential, not parallel)
 - Task state machine (valid/invalid transitions)
 - Error message content verification
-- Large payload handling
 - Multiple rapid operations stress
 """
 
 import asyncio
-import random
 import time
 
 import httpx
 import pytest
 
 from .conftest import (
-    BACKEND_URL,
-    MOCK_SERVICES_URL,
-    build_webhook_payload,
-    get_mock_calls,
-    send_webhook,
+    create_issue,
+    create_issue_and_task,
+    create_task,
     wait_for_task_status,
 )
 
@@ -37,22 +33,18 @@ class TestLogSanitizationSecurity:
         admin_auth_headers: dict,
     ):
         """GITLAB_TOKEN (glpat-*) should be sanitized in stored logs."""
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=random.randint(90000, 90999),
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Token sanitization test {int(time.time())}",
             prompt="Create a file that prints env vars",
         )
-        payload["object_attributes"]["id"] = random.randint(100000, 199999)
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json()["task_id"]
+        task_id = task["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,
             ["completed", "failed"], admin_auth_headers,
         )
 
-        # Fetch task logs
         logs_resp = await http_client.get(
             f"{backend_url}/api/tasks/{task_id}/logs",
             headers=admin_auth_headers,
@@ -60,7 +52,6 @@ class TestLogSanitizationSecurity:
         assert logs_resp.status_code == 200
         logs = logs_resp.json()
 
-        # Check all log entries for leaked tokens
         all_log_text = " ".join(
             str(entry.get("message", "") if isinstance(entry, dict) else entry)
             for entry in (logs if isinstance(logs, list) else logs.get("items", [logs]))
@@ -68,7 +59,6 @@ class TestLogSanitizationSecurity:
         assert "glpat-" not in all_log_text.lower(), (
             "GitLab token pattern 'glpat-' found in sanitized logs"
         )
-        # Mock token is "mock-token-12345", also check
         assert "mock-token-12345" not in all_log_text, (
             "Mock GitLab token found in logs — should be sanitized"
         )
@@ -81,15 +71,12 @@ class TestLogSanitizationSecurity:
         admin_auth_headers: dict,
     ):
         """ANTHROPIC_API_KEY (sk-ant-*) should be sanitized in stored logs."""
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=random.randint(91000, 91999),
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Anthropic key sanitization test {int(time.time())}",
             prompt="Test anthropic key sanitization",
         )
-        payload["object_attributes"]["id"] = random.randint(200000, 299999)
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json()["task_id"]
+        task_id = task["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -123,54 +110,42 @@ class TestIssueMutexEnforcement:
         mock_url: str,
         admin_auth_headers: dict,
     ):
-        """Two tasks for the same project:issue should not run simultaneously."""
-        # Use moderate delay so tasks overlap if mutex is broken
+        """Two tasks for the same issue should not run simultaneously."""
         async with httpx.AsyncClient(timeout=10) as mc:
             await mc.patch(
                 f"{mock_url}/mock/config",
                 json={"claude_delay_seconds": 8},
             )
 
-        shared_iid = random.randint(92000, 92999)
-
-        payload1 = build_webhook_payload(
-            project_id=1,
-            issue_iid=shared_iid,
-            prompt="Mutex test task 1",
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Mutex test issue {int(time.time())}",
+            description="Mutex test",
         )
-        payload1["object_attributes"]["id"] = random.randint(300000, 399999)
 
-        payload2 = build_webhook_payload(
-            project_id=1,
-            issue_iid=shared_iid,
-            prompt="Mutex test task 2",
+        task1 = await create_task(
+            http_client, backend_url, admin_auth_headers, issue["id"],
+            user_prompt="Mutex test task 1",
         )
-        payload2["object_attributes"]["id"] = random.randint(400000, 499999)
+        tid1 = task1["id"]
 
-        # Create both tasks
-        r1 = await send_webhook(http_client, backend_url, payload1)
-        assert r1.status_code == 200
-        tid1 = r1.json()["task_id"]
+        task2 = await create_task(
+            http_client, backend_url, admin_auth_headers, issue["id"],
+            user_prompt="Mutex test task 2",
+        )
+        tid2 = task2["id"]
 
-        r2 = await send_webhook(http_client, backend_url, payload2)
-        assert r2.status_code == 200
-        tid2 = r2.json()["task_id"]
-
-        # Wait for first task to start running
         await wait_for_task_status(
             http_client, backend_url, tid1,
             ["running", "completed", "failed"], admin_auth_headers, timeout=60,
         )
 
-        # Check second task: should still be pending (mutex blocks it)
         r2_detail = await http_client.get(
             f"{backend_url}/api/tasks/{tid2}",
             headers=admin_auth_headers,
         )
         task2_status = r2_detail.json()["status"]
 
-        # Task 2 should not be running simultaneously (it should be pending or queued)
-        # If task 1 already completed fast, task 2 may have started — that's OK
         r1_detail = await http_client.get(
             f"{backend_url}/api/tasks/{tid1}",
             headers=admin_auth_headers,
@@ -178,13 +153,11 @@ class TestIssueMutexEnforcement:
         task1_status = r1_detail.json()["status"]
 
         if task1_status == "running":
-            # Mutex should prevent task2 from being "running" at the same time
             assert task2_status in ("pending", "queued"), (
                 f"Mutex violation: task1={task1_status}, task2={task2_status} "
-                f"(both for same issue {shared_iid})"
+                f"(both for same issue {issue['id']})"
             )
 
-        # Wait for both to complete
         await wait_for_task_status(
             http_client, backend_url, tid1,
             ["completed", "failed"], admin_auth_headers, timeout=60,
@@ -209,24 +182,21 @@ class TestIssueMutexEnforcement:
                 json={"claude_delay_seconds": 8},
             )
 
-        iid1 = random.randint(93000, 93499)
-        iid2 = random.randint(93500, 93999)
+        ts = int(time.time())
+        issue1, task1 = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Parallel test 1 {ts}",
+            prompt="Parallel test 1",
+        )
+        tid1 = task1["id"]
 
-        payload1 = build_webhook_payload(project_id=1, issue_iid=iid1, prompt="Parallel test 1")
-        payload1["object_attributes"]["id"] = random.randint(500000, 599999)
+        issue2, task2 = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Parallel test 2 {ts}",
+            prompt="Parallel test 2",
+        )
+        tid2 = task2["id"]
 
-        payload2 = build_webhook_payload(project_id=1, issue_iid=iid2, prompt="Parallel test 2")
-        payload2["object_attributes"]["id"] = random.randint(600000, 699999)
-
-        r1 = await send_webhook(http_client, backend_url, payload1)
-        r2 = await send_webhook(http_client, backend_url, payload2)
-
-        assert r1.status_code == 200
-        assert r2.status_code == 200
-        tid1 = r1.json()["task_id"]
-        tid2 = r2.json()["task_id"]
-
-        # Wait for both to start
         await wait_for_task_status(
             http_client, backend_url, tid1,
             ["running", "completed", "failed"], admin_auth_headers, timeout=60,
@@ -236,7 +206,6 @@ class TestIssueMutexEnforcement:
             ["running", "completed", "failed"], admin_auth_headers, timeout=60,
         )
 
-        # Check if both are running (or one already finished quickly)
         r1_detail = await http_client.get(
             f"{backend_url}/api/tasks/{tid1}", headers=admin_auth_headers,
         )
@@ -246,11 +215,9 @@ class TestIssueMutexEnforcement:
         s1 = r1_detail.json()["status"]
         s2 = r2_detail.json()["status"]
 
-        # Both should have progressed beyond pending (parallel execution allowed)
         assert s1 in ("running", "completed", "failed"), f"Task 1 stuck: {s1}"
         assert s2 in ("running", "completed", "failed"), f"Task 2 stuck: {s2}"
 
-        # Wait for completion
         await wait_for_task_status(
             http_client, backend_url, tid1,
             ["completed", "failed"], admin_auth_headers, timeout=60,
@@ -272,22 +239,18 @@ class TestTaskStateMachine:
         admin_auth_headers: dict,
     ):
         """Cannot execute a task that already completed."""
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=random.randint(94000, 94999),
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Execute completed test {int(time.time())}",
             prompt="Execute completed test",
         )
-        payload["object_attributes"]["id"] = random.randint(700000, 799999)
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json()["task_id"]
+        task_id = task["id"]
 
         await wait_for_task_status(
             http_client, backend_url, task_id,
             ["completed", "failed"], admin_auth_headers,
         )
 
-        # Try to execute again
         exec_resp = await http_client.post(
             f"{backend_url}/api/tasks/{task_id}/execute",
             headers=admin_auth_headers,
@@ -304,28 +267,20 @@ class TestTaskStateMachine:
         admin_auth_headers: dict,
     ):
         """Cannot execute a task that was cancelled."""
-        ts = int(time.time())
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Cancel then execute test",
-                "branch_name": f"codify/cancel-exec-{ts}",
-                "delay_seconds": 3600,
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Cancel then execute test {int(time.time())}",
+            prompt="Cancel then execute test",
+            delay_seconds=3600,
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json().get("task_id") or resp.json().get("id")
+        task_id = task["id"]
 
-        # Cancel it
         c = await http_client.post(
             f"{backend_url}/api/tasks/{task_id}/cancel",
             headers=admin_auth_headers,
         )
         assert c.status_code == 200
 
-        # Try to execute
         exec_resp = await http_client.post(
             f"{backend_url}/api/tasks/{task_id}/execute",
             headers=admin_auth_headers,
@@ -353,15 +308,12 @@ class TestErrorMessageContent:
                 json={"claude_exit_code": 1},
             )
 
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=random.randint(95000, 95999),
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Error message test {int(time.time())}",
             prompt="Error message test",
         )
-        payload["object_attributes"]["id"] = random.randint(800000, 899999)
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json()["task_id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -383,19 +335,13 @@ class TestErrorMessageContent:
         admin_auth_headers: dict,
     ):
         """Cancelled task should have 'Cancelled by user' message."""
-        ts = int(time.time())
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Cancel error msg test",
-                "branch_name": f"codify/cancel-msg-{ts}",
-                "delay_seconds": 3600,
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Cancel error msg test {int(time.time())}",
+            prompt="Cancel error msg test",
+            delay_seconds=3600,
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json().get("task_id") or resp.json().get("id")
+        task_id = task["id"]
 
         await http_client.post(
             f"{backend_url}/api/tasks/{task_id}/cancel",
@@ -428,15 +374,12 @@ class TestErrorMessageContent:
                 json={"fail_git_push": True},
             )
 
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=random.randint(96000, 96999),
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Push fail error test {int(time.time())}",
             prompt="Push fail error msg test",
         )
-        payload["object_attributes"]["id"] = random.randint(900000, 999999)
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json()["task_id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -458,17 +401,13 @@ class TestRapidOperationsStress:
         admin_auth_headers: dict,
     ):
         """Rapidly polling a task's status should not cause errors."""
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=random.randint(97000, 97999),
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Rapid polling test {int(time.time())}",
             prompt="Rapid polling test",
         )
-        payload["object_attributes"]["id"] = random.randint(100000, 199999)
-        resp = await send_webhook(http_client, backend_url, payload)
-        assert resp.status_code == 200
-        task_id = resp.json()["task_id"]
+        task_id = task["id"]
 
-        # Poll 20 times rapidly
         errors = 0
         for _ in range(20):
             r = await http_client.get(
@@ -481,7 +420,6 @@ class TestRapidOperationsStress:
 
         assert errors == 0, f"Got {errors} errors during rapid polling"
 
-        # Clean up: wait for task to finish
         await wait_for_task_status(
             http_client, backend_url, task_id,
             ["completed", "failed"], admin_auth_headers,

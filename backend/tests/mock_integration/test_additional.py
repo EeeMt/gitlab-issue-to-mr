@@ -1,18 +1,15 @@
-"""Additional integration tests — timeout, webhook validation, execute-now, project lookup.
+"""Additional integration tests — timeout, execute-now, project lookup, reschedule.
 
 Covers more edge cases and API behaviors:
 - Container timeout when Claude takes too long
-- Webhook secret validation (reject invalid secrets)
 - Execute-now API (immediately run a pending task)
 - Project lookup failure (mock 404) → task fails
-- Duplicate webhook handling
-- Task with custom files (FAKE_CLAUDE_FILES env)
+- Task rescheduling
 
 Prerequisites:
     docker-compose -f backend/tests/mock_integration/docker-compose.mock-test.yml up -d
 """
 
-import asyncio
 import logging
 import time
 
@@ -20,11 +17,8 @@ import httpx
 import pytest
 
 from .conftest import (
-    build_webhook_payload,
-    get_mock_calls,
-    send_webhook,
+    create_issue_and_task,
     wait_for_task_status,
-    WEBHOOK_SECRET,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,18 +55,12 @@ class TestContainerTimeout:
             json={"claude_delay_seconds": 180},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Timeout test task",
-                "branch_name": "codify/test-timeout",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        _issue, task_data = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Timeout test",
+            prompt="Timeout test task",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task_data["id"]
 
         # Wait for task to reach RUNNING first
         task = await wait_for_task_status(
@@ -98,68 +86,6 @@ class TestContainerTimeout:
         logger.info(f"✅ Timeout task {task_id} correctly failed")
 
 
-class TestWebhookValidation:
-    """Verify webhook endpoint validates secrets and payloads."""
-
-    async def test_invalid_webhook_secret_rejected(
-        self,
-        http_client: httpx.AsyncClient,
-        backend_url: str,
-    ):
-        """Webhook with wrong secret should be rejected."""
-        payload = build_webhook_payload(project_id=1, issue_iid=50)
-        resp = await send_webhook(
-            http_client, backend_url, payload,
-            secret="wrong-secret-12345",
-        )
-        # Backend should reject with 401 or 403
-        assert resp.status_code in (401, 403, 422), (
-            f"Invalid secret should be rejected, got: {resp.status_code} {resp.text}"
-        )
-        logger.info(f"✅ Invalid webhook secret rejected with {resp.status_code}")
-
-    async def test_missing_webhook_secret_rejected(
-        self,
-        http_client: httpx.AsyncClient,
-        backend_url: str,
-    ):
-        """Webhook without secret header should be rejected."""
-        payload = build_webhook_payload(project_id=1, issue_iid=51)
-        import json
-        body = json.dumps(payload, separators=(",", ":"))
-        resp = await http_client.post(
-            f"{backend_url}/api/webhook/gitlab",
-            content=body,
-            headers={
-                "Content-Type": "application/json",
-                "X-Gitlab-Event": "Note Hook",
-                # No X-Gitlab-Token header
-            },
-        )
-        assert resp.status_code in (401, 403, 422), (
-            f"Missing secret should be rejected, got: {resp.status_code}"
-        )
-        logger.info(f"✅ Missing webhook secret rejected with {resp.status_code}")
-
-    async def test_non_bot_comment_ignored(
-        self,
-        http_client: httpx.AsyncClient,
-        backend_url: str,
-    ):
-        """Webhook for a comment that doesn't mention @ai-bot should be ignored."""
-        payload = build_webhook_payload(project_id=1, issue_iid=52)
-        # Override the note text to not mention @ai-bot
-        payload["object_attributes"]["note"] = "This is a regular comment, no bot mention"
-        resp = await send_webhook(http_client, backend_url, payload)
-        # Should return 200 but without creating a task
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data.get("task_id") is None, (
-            f"Non-bot comment should not create a task: {data}"
-        )
-        logger.info("✅ Non-bot comment correctly ignored")
-
-
 class TestExecuteNowAPI:
     """Verify the execute-now endpoint immediately runs a pending task."""
 
@@ -177,19 +103,13 @@ class TestExecuteNowAPI:
         3. Call POST /api/tasks/{id}/execute
         4. Task should start running immediately (not wait 5 min)
         """
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Execute now test",
-                "branch_name": "codify/test-execute-now",
-                "target_branch": "main",
-                "delay_seconds": 300,
-            },
-            headers=admin_auth_headers,
+        _issue, task_data = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Execute now test",
+            prompt="Execute now test",
+            delay_seconds=300,
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task_data["id"]
 
         # Verify task is pending with scheduled_at
         resp = await http_client.get(
@@ -246,18 +166,12 @@ class TestProjectLookupFailure:
             json={"fail_project_lookup": True},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Project lookup failure test",
-                "branch_name": "codify/test-project-404",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        _issue, task_data = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Project 404 test",
+            prompt="Project lookup failure test",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task_data["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -294,19 +208,13 @@ class TestTaskReschedule:
         """
         from datetime import datetime, timedelta, timezone
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Reschedule test",
-                "branch_name": "codify/test-reschedule",
-                "target_branch": "main",
-                "delay_seconds": 600,
-            },
-            headers=admin_auth_headers,
+        _issue, task_data = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title="Reschedule test",
+            prompt="Reschedule test",
+            delay_seconds=600,
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task_data["id"]
 
         # Reschedule to 5 seconds from now
         new_time = datetime.now(timezone.utc) + timedelta(seconds=5)
@@ -331,58 +239,3 @@ class TestTaskReschedule:
         )
         assert elapsed < 60, f"Rescheduled task took too long: {elapsed:.0f}s"
         logger.info(f"✅ Rescheduled task completed in {elapsed:.0f}s")
-
-
-class TestDuplicateWebhook:
-    """Verify handling of rapid duplicate webhook events."""
-
-    async def test_rapid_duplicate_webhooks_handled(
-        self,
-        http_client: httpx.AsyncClient,
-        backend_url: str,
-        mock_url: str,
-        admin_auth_headers: dict,
-    ):
-        """Send the same webhook payload twice rapidly.
-
-        The backend should create tasks for both, and the scheduler's issue
-        mutex should serialize execution. Both should eventually complete.
-        """
-        payload = build_webhook_payload(
-            project_id=1,
-            issue_iid=77,
-            prompt="Duplicate webhook test",
-        )
-
-        # Send same webhook twice in rapid succession
-        resp1 = await send_webhook(http_client, backend_url, payload)
-        resp2 = await send_webhook(http_client, backend_url, payload)
-
-        assert resp1.status_code == 200
-        assert resp2.status_code == 200
-
-        task1_id = resp1.json().get("task_id")
-        task2_id = resp2.json().get("task_id")
-
-        # Both should have created tasks (or second might be deduplicated)
-        if task1_id and task2_id:
-            logger.info(f"Two tasks created: {task1_id}, {task2_id}")
-            # Wait for both to complete
-            for tid in [task1_id, task2_id]:
-                task = await wait_for_task_status(
-                    http_client, backend_url, tid,
-                    target_statuses=["completed", "failed"],
-                    auth_headers=admin_auth_headers,
-                    timeout=180,
-                )
-                logger.info(f"Task {tid}: {task['status']}")
-        elif task1_id:
-            task = await wait_for_task_status(
-                http_client, backend_url, task1_id,
-                target_statuses=["completed", "failed"],
-                auth_headers=admin_auth_headers,
-                timeout=120,
-            )
-            assert task["status"] == "completed"
-
-        logger.info("✅ Duplicate webhook handling verified")

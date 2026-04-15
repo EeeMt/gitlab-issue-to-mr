@@ -5,7 +5,6 @@ and advanced task operations (slot capacity, reschedule, execute-now edge cases)
 """
 
 import random
-import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -14,8 +13,9 @@ import pytest
 from .conftest import (
     BACKEND_URL,
     MOCK_SERVICES_URL,
-    build_webhook_payload,
-    send_webhook,
+    create_issue,
+    create_task,
+    create_issue_and_task,
     wait_for_task_status,
 )
 
@@ -228,21 +228,19 @@ class TestTaskRescheduleOperations:
     async def test_reschedule_changes_time(self, admin_headers):
         """Create a scheduled task, then reschedule it to a different time."""
         async with httpx.AsyncClient(timeout=10) as client:
-            # Create a scheduled task via API
+            # Create issue, then a scheduled task under it
             future1 = (datetime.now(timezone.utc) + timedelta(hours=10)).isoformat()
-            resp = await client.post(
-                f"{BACKEND_URL}/api/tasks",
-                headers=admin_headers,
-                json={
-                    "project_id": 1,
-                    "user_prompt": "Scheduled task for reschedule test",
-                    "branch_name": f"codify/resched-{random.randint(1000, 9999)}",
-                    "target_branch": "main",
-                    "scheduled_datetime": future1,
-                },
+            issue = await create_issue(
+                client, BACKEND_URL, admin_headers,
+                title="Reschedule test issue",
+                description="Scheduled task for reschedule test",
             )
-            assert resp.status_code in (200, 201), f"Create failed: {resp.text}"
-            task_id = resp.json()["id"]
+            task_data = await create_task(
+                client, BACKEND_URL, admin_headers, issue["id"],
+                user_prompt="Scheduled task for reschedule test",
+                scheduled_datetime=future1,
+            )
+            task_id = task_data["id"]
 
             # Reschedule to a different time
             future2 = (datetime.now(timezone.utc) + timedelta(hours=20)).isoformat()
@@ -260,7 +258,6 @@ class TestTaskRescheduleOperations:
             )
             task = task_resp.json()
             assert task["scheduled_at"] is not None
-            # The new time should be later than the original
             assert "scheduled_at" in task
 
     @pytest.mark.asyncio
@@ -268,19 +265,17 @@ class TestTaskRescheduleOperations:
         """Execute-now on a scheduled task clears scheduled_at."""
         async with httpx.AsyncClient(timeout=10) as client:
             future = (datetime.now(timezone.utc) + timedelta(hours=10)).isoformat()
-            resp = await client.post(
-                f"{BACKEND_URL}/api/tasks",
-                headers=admin_headers,
-                json={
-                    "project_id": 1,
-                    "user_prompt": "Execute now test",
-                    "branch_name": f"codify/exec-now-{random.randint(1000, 9999)}",
-                    "target_branch": "main",
-                    "scheduled_datetime": future,
-                },
+            issue = await create_issue(
+                client, BACKEND_URL, admin_headers,
+                title="Execute now test issue",
+                description="Execute now test",
             )
-            assert resp.status_code in (200, 201)
-            task_id = resp.json()["id"]
+            task_data = await create_task(
+                client, BACKEND_URL, admin_headers, issue["id"],
+                user_prompt="Execute now test",
+                scheduled_datetime=future,
+            )
+            task_id = task_data["id"]
 
             # Execute now
             exec_resp = await client.post(
@@ -302,15 +297,13 @@ class TestTaskRescheduleOperations:
     async def test_reschedule_non_pending_rejected(self, admin_headers):
         """Reschedule on a completed task should be rejected."""
         async with httpx.AsyncClient(timeout=30) as client:
-            # Create and wait for completion
-            payload = build_webhook_payload(
-                project_id=1,
-                issue_iid=random.randint(10000, 89999),
+            # Create issue+task and wait for completion
+            _issue, task_data = await create_issue_and_task(
+                client, BACKEND_URL, admin_headers,
+                title=f"Reschedule reject test {random.randint(1000, 9999)}",
+                prompt="Create a hello.py file",
             )
-            payload["object_attributes"]["id"] = random.randint(100000, 999999)
-            resp = await send_webhook(client, BACKEND_URL, payload)
-            assert resp.status_code == 200
-            task_id = resp.json()["task_id"]
+            task_id = task_data["id"]
 
             task = await wait_for_task_status(
                 client, BACKEND_URL, task_id,
@@ -340,13 +333,12 @@ class TestRetryEdgeCases:
     async def test_retry_completed_task_rejected(self, admin_headers):
         """Retry on a COMPLETED task should be rejected."""
         async with httpx.AsyncClient(timeout=30) as client:
-            payload = build_webhook_payload(
-                project_id=1,
-                issue_iid=random.randint(10000, 89999),
+            _issue, task_data = await create_issue_and_task(
+                client, BACKEND_URL, admin_headers,
+                title=f"Retry reject test {random.randint(1000, 9999)}",
+                prompt="Create a hello.py file",
             )
-            payload["object_attributes"]["id"] = random.randint(100000, 999999)
-            resp = await send_webhook(client, BACKEND_URL, payload)
-            task_id = resp.json()["task_id"]
+            task_id = task_data["id"]
 
             task = await wait_for_task_status(
                 client, BACKEND_URL, task_id,
@@ -356,7 +348,7 @@ class TestRetryEdgeCases:
             )
             assert task["status"] == "completed"
 
-            # Retry should fail
+            # Retry on completed should fail
             retry_resp = await client.post(
                 f"{BACKEND_URL}/api/tasks/{task_id}/retry",
                 headers=admin_headers,

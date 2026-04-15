@@ -1,11 +1,11 @@
 """Gap analysis tests — scenarios identified from code review and coverage analysis.
 
 Covers previously untested paths:
-- No changes in MR mode → task FAILS (entrypoint.sh line 682)
-- No changes in no-MR mode → task COMPLETES (entrypoint.sh line 676-680)
-- MR creation failure → task continues without MR
-- Concurrent tasks for different issues → run in parallel
-- Non-existent base branch → entrypoint fallback logic
+- No changes in MR mode -> task FAILS (entrypoint.sh line 682)
+- No changes in no-MR mode -> task COMPLETES (entrypoint.sh line 676-680)
+- MR creation failure -> task continues without MR
+- Concurrent tasks for different issues -> run in parallel
+- Non-existent base branch -> entrypoint fallback logic
 
 Prerequisites:
     docker-compose -f backend/tests/mock_integration/docker-compose.mock-test.yml up -d
@@ -19,6 +19,9 @@ import httpx
 import pytest
 
 from .conftest import (
+    create_issue,
+    create_issue_and_task,
+    create_task,
     get_mock_calls,
     wait_for_task_status,
 )
@@ -37,29 +40,23 @@ class TestNoChangesInMRMode:
         mock_url: str,
         admin_auth_headers: dict,
     ):
-        """Claude succeeds (exit 0) but creates no files → 'No changes made'.
+        """Claude succeeds (exit 0) but creates no files -> No changes made.
 
-        entrypoint.sh checks `git status --porcelain` after claude runs.
-        If empty AND TARGET_BRANCH is set → exit 1 → task FAILED.
+        entrypoint.sh checks git status --porcelain after claude runs.
+        If empty AND TARGET_BRANCH is set -> exit 1 -> task FAILED.
         """
-        # Tell fake claude to skip file creation
         await http_client.patch(
             f"{mock_url}/mock/config",
             json={"claude_skip_files": True},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Review code quality",
-                "branch_name": "codify/no-changes-mr",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"No changes MR test {int(time.time())}",
+            prompt="Review code quality",
+            target_branch="main",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -71,12 +68,11 @@ class TestNoChangesInMRMode:
             f"No-changes task with target_branch should FAIL, got: {task['status']}"
         )
 
-        # Error message should mention "No changes"
         error_msg = task.get("error_message", "")
         assert "no changes" in error_msg.lower() or "No changes" in error_msg, (
-            f"Error should mention 'No changes', got: {error_msg[:200]}"
+            f"Error should mention No changes, got: {error_msg[:200]}"
         )
-        logger.info(f"✅ No changes in MR mode → FAILED: {error_msg[:80]}")
+        logger.info(f"No changes in MR mode -> FAILED: {error_msg[:80]}")
 
 
 class TestNoChangesInNoMRMode:
@@ -91,25 +87,25 @@ class TestNoChangesInNoMRMode:
     ):
         """Claude succeeds (exit 0) but creates no files in no-MR mode.
 
-        entrypoint.sh: "No-MR mode: task completed without code changes" → exit 0.
+        entrypoint.sh: No-MR mode: task completed without code changes -> exit 0.
         """
         await http_client.patch(
             f"{mock_url}/mock/config",
             json={"claude_skip_files": True},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Review code quality in no-MR mode",
-                "branch_name": "codify/no-changes-no-mr",
-                # target_branch omitted → no-MR mode
-            },
-            headers=admin_auth_headers,
+        # Create issue without target_branch (no-MR mode)
+        issue = await create_issue(
+            http_client, backend_url, admin_auth_headers,
+            title=f"No changes no-MR test {int(time.time())}",
+            description="Review code quality in no-MR mode",
+            target_branch=None,
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task = await create_task(
+            http_client, backend_url, admin_auth_headers, issue["id"],
+            user_prompt="Review code quality in no-MR mode",
+        )
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -121,7 +117,7 @@ class TestNoChangesInNoMRMode:
             f"No-changes task in no-MR mode should COMPLETE, got: {task['status']} "
             f"error: {task.get('error_message', '')[:200]}"
         )
-        logger.info("✅ No changes in no-MR mode → COMPLETED")
+        logger.info("No changes in no-MR mode -> COMPLETED")
 
 
 class TestMRCreationFailure:
@@ -137,7 +133,6 @@ class TestMRCreationFailure:
         """Mock returns 500 on POST merge_requests.
 
         worker.py catches the exception and continues with mr_iid=None.
-        The container runs without MR_IID env var.
         Task should still complete (code is pushed, just no MR created).
         """
         await http_client.patch(
@@ -145,18 +140,13 @@ class TestMRCreationFailure:
             json={"fail_mr_creation": True},
         )
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": "Test MR creation failure",
-                "branch_name": "codify/mr-creation-fail",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"MR creation fail test {int(time.time())}",
+            prompt="Test MR creation failure",
+            target_branch="main",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -164,19 +154,16 @@ class TestMRCreationFailure:
             auth_headers=admin_auth_headers,
             timeout=120,
         )
-        # Task should complete — MR creation failure is non-fatal
         assert task["status"] == "completed", (
             f"MR creation failure should not block task: {task.get('error_message')}"
         )
 
-        # The task should have no merge_request_iid since MR creation failed
-        # (or it may have one if worker retried or found existing — check either way)
+        mr_iid = task.get("issue", {}).get("merge_request_iid")
         logger.info(
-            f"✅ MR creation failure → task completed "
-            f"(mr_iid={task.get('merge_request_iid')})"
+            f"MR creation failure -> task completed "
+            f"(mr_iid={mr_iid})"
         )
 
-        # Verify MR creation was attempted
         gitlab_calls = await get_mock_calls(http_client, mock_url, service="gitlab")
         mr_create_calls = [
             c for c in gitlab_calls
@@ -198,39 +185,31 @@ class TestPositiveConcurrency:
         mock_url: str,
         admin_auth_headers: dict,
     ):
-        """Create tasks for 2 different issues — both should run concurrently.
+        """Create tasks for 2 different issues -- both should run concurrently.
 
-        docker-compose has MAX_CONCURRENCY=2, so two manual tasks
+        docker-compose has MAX_CONCURRENCY=2, so two tasks
         should start roughly at the same time.
         """
-        # Add delay to keep tasks running long enough to observe overlap
         await http_client.patch(
             f"{mock_url}/mock/config",
             json={"claude_delay_seconds": 8},
         )
 
-        # Create two manual tasks (different branch names → no mutex conflict)
+        ts = int(time.time())
         task_ids = []
         for i in range(2):
-            resp = await http_client.post(
-                f"{backend_url}/api/tasks",
-                json={
-                    "project_id": 1,
-                    "user_prompt": f"Concurrent task {i}",
-                    "branch_name": f"codify/concurrent-{i}",
-                    "target_branch": "main",
-                },
-                headers=admin_auth_headers,
+            issue, task = await create_issue_and_task(
+                http_client, backend_url, admin_auth_headers,
+                title=f"Concurrent task {i} {ts}",
+                prompt=f"Concurrent task {i}",
+                target_branch="main",
             )
-            assert resp.status_code in (200, 201), f"Task {i} creation failed: {resp.text}"
-            task_ids.append(resp.json()["id"])
+            task_ids.append(task["id"])
 
         logger.info(f"Created concurrent tasks: {task_ids}")
 
-        # Wait a bit for both to start
         await asyncio.sleep(10)
 
-        # Check that both are running (or at least both started)
         running_count = 0
         for tid in task_ids:
             resp = await http_client.get(
@@ -243,7 +222,6 @@ class TestPositiveConcurrency:
 
         logger.info(f"Running tasks: {running_count} / {len(task_ids)}")
 
-        # Both should eventually complete
         for tid in task_ids:
             task = await wait_for_task_status(
                 http_client, backend_url, tid,
@@ -255,7 +233,6 @@ class TestPositiveConcurrency:
                 f"Concurrent task {tid} should complete: {task.get('error_message')}"
             )
 
-        # Verify they ran in parallel: started_at times should be close
         tasks_data = []
         for tid in task_ids:
             resp = await http_client.get(
@@ -268,13 +245,13 @@ class TestPositiveConcurrency:
         t1_started = tasks_data[1].get("started_at", "")
         if t0_started and t1_started:
             logger.info(
-                f"✅ Concurrent: task0 started={t0_started}, task1 started={t1_started}"
+                f"Concurrent: task0 started={t0_started}, task1 started={t1_started}"
             )
-        logger.info("✅ Different tasks ran concurrently")
+        logger.info("Different tasks ran concurrently")
 
 
 class TestNonExistentBaseBranch:
-    """When BASE_BRANCH doesn't exist, entrypoint.sh falls back to detected default."""
+    """When BASE_BRANCH does not exist, entrypoint.sh falls back to detected default."""
 
     async def test_invalid_base_branch_falls_back(
         self,
@@ -283,26 +260,33 @@ class TestNonExistentBaseBranch:
         mock_url: str,
         admin_auth_headers: dict,
     ):
-        """Create task with base_branch that doesn't exist in the repo.
+        """Create task with base_branch that does not exist in the repo.
 
         entrypoint.sh lines 134-144:
-        - Checks `git rev-parse --verify origin/${BASE_BRANCH}`
-        - If not found, detects remote default via `git remote show origin`
+        - Checks git rev-parse --verify origin/BASE_BRANCH
+        - If not found, detects remote default via git remote show origin
         - Falls back or errors out
         """
+        # Create issue with non-existent base_branch via direct API call
         resp = await http_client.post(
-            f"{backend_url}/api/tasks",
+            f"{backend_url}/api/issues",
             json={
+                "title": f"Bad base branch test {int(time.time())}",
+                "description": "Test non-existent base branch",
                 "project_id": 1,
-                "user_prompt": "Test non-existent base branch",
-                "branch_name": "codify/bad-base-branch",
                 "base_branch": "this-branch-does-not-exist",
                 "target_branch": "main",
             },
             headers=admin_auth_headers,
         )
         assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        issue = resp.json()
+
+        task = await create_task(
+            http_client, backend_url, admin_auth_headers, issue["id"],
+            user_prompt="Test non-existent base branch",
+        )
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -311,20 +295,15 @@ class TestNonExistentBaseBranch:
             timeout=120,
         )
 
-        # The entrypoint should detect the bad branch and fall back to the
-        # remote default branch (main). Task may complete or fail depending on
-        # whether the fallback succeeds.
         error_msg = task.get("error_message") or "none"
         logger.info(
-            f"✅ Non-existent base branch: task {task_id} → {task['status']} "
+            f"Non-existent base branch: task {task_id} -> {task['status']} "
             f"(error: {error_msg[:100]})"
         )
-        # If fallback works, task completes. If not, it fails gracefully.
-        # Either way, it should not hang indefinitely.
 
 
 class TestLargePrompt:
-    """Verify that very large prompts don't crash the system."""
+    """Verify that very large prompts do not crash the system."""
 
     async def test_large_prompt_handled(
         self,
@@ -340,18 +319,13 @@ class TestLargePrompt:
         """
         large_prompt = "Create a comprehensive test suite. " * 300  # ~10KB
 
-        resp = await http_client.post(
-            f"{backend_url}/api/tasks",
-            json={
-                "project_id": 1,
-                "user_prompt": large_prompt,
-                "branch_name": "codify/large-prompt",
-                "target_branch": "main",
-            },
-            headers=admin_auth_headers,
+        issue, task = await create_issue_and_task(
+            http_client, backend_url, admin_auth_headers,
+            title=f"Large prompt test {int(time.time())}",
+            prompt=large_prompt,
+            target_branch="main",
         )
-        assert resp.status_code in (200, 201)
-        task_id = resp.json()["id"]
+        task_id = task["id"]
 
         task = await wait_for_task_status(
             http_client, backend_url, task_id,
@@ -362,7 +336,7 @@ class TestLargePrompt:
         assert task["status"] == "completed", (
             f"Large prompt task should complete: {task.get('error_message', '')[:200]}"
         )
-        logger.info(f"✅ Large prompt ({len(large_prompt)} chars) handled successfully")
+        logger.info(f"Large prompt ({len(large_prompt)} chars) handled successfully")
 
 
 class TestMultiplePriorityLevels:
@@ -375,7 +349,7 @@ class TestMultiplePriorityLevels:
         mock_url: str,
         admin_auth_headers: dict,
     ):
-        """Create P2, P1, P0 tasks in that order — verify P0 starts first.
+        """Create P2, P1, P0 tasks in that order -- verify P0 starts first.
 
         With MAX_CONCURRENCY=2 and claude_delay=5, the first task picked
         should be P0 (highest priority), then P1, then P2.
@@ -385,23 +359,18 @@ class TestMultiplePriorityLevels:
             json={"claude_delay_seconds": 5},
         )
 
+        ts = int(time.time())
         task_ids = {}
         for priority in [2, 1, 0]:
-            resp = await http_client.post(
-                f"{backend_url}/api/tasks",
-                json={
-                    "project_id": 1,
-                    "user_prompt": f"Priority P{priority} task",
-                    "branch_name": f"codify/p{priority}-ordering-test",
-                    "target_branch": "main",
-                    "priority": priority,
-                },
-                headers=admin_auth_headers,
+            issue, task = await create_issue_and_task(
+                http_client, backend_url, admin_auth_headers,
+                title=f"P{priority} ordering test {ts}",
+                prompt=f"Priority P{priority} task",
+                target_branch="main",
+                priority=priority,
             )
-            assert resp.status_code in (200, 201)
-            task_ids[priority] = resp.json()["id"]
+            task_ids[priority] = task["id"]
 
-        # Wait for all to complete
         tasks = {}
         for priority, tid in task_ids.items():
             task = await wait_for_task_status(
@@ -415,7 +384,6 @@ class TestMultiplePriorityLevels:
                 f"P{priority} task should complete: {task.get('error_message')}"
             )
 
-        # Verify ordering: P0 started before P2
         p0_started = tasks[0].get("started_at", "")
         p1_started = tasks[1].get("started_at", "")
         p2_started = tasks[2].get("started_at", "")
@@ -433,4 +401,4 @@ class TestMultiplePriorityLevels:
                 f"P0 should start before P1: P0={p0_started}, P1={p1_started}"
             )
 
-        logger.info("✅ P0 → P1 → P2 ordering verified")
+        logger.info("P0 -> P1 -> P2 ordering verified")
