@@ -100,7 +100,7 @@ async def test_list_tasks_applies_project_and_initiator_filters():
 
     with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
         result = await list_tasks(
-            project_id=202,
+            project_id="202",
             initiator_username="alice",
             db=db,
             access_scope=access_scope,

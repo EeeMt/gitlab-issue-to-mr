@@ -425,3 +425,461 @@ class TestListIssuesDateRange(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("items", result)
 
+
+# ---------------------------------------------------------------------------
+# Project ID filter with access scope (lines 254-284)
+# ---------------------------------------------------------------------------
+
+
+class TestListIssuesProjectFilter(unittest.IsolatedAsyncioTestCase):
+    """Test project_id comma-separated filter with access scope restrictions."""
+
+    async def test_single_project_id_unrestricted(self):
+        """Single project_id with unrestricted access should filter."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        result = await list_issues(
+            status=None, project_id="42", initiator_user_id=None,
+            search=None, created_after=None, created_before=None,
+            sort_by=None, sort_order=None, page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+
+    async def test_multi_project_ids_unrestricted(self):
+        """Multiple comma-separated project_ids with unrestricted access."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        result = await list_issues(
+            status=None, project_id="42,43,44", initiator_user_id=None,
+            search=None, created_after=None, created_before=None,
+            sort_by=None, sort_order=None, page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+
+    async def test_project_id_restricted_allowed(self):
+        """Restricted scope with matching project_id should pass."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(
+            is_unrestricted=False,
+            accessible_projects=[{"id": 42, "name": "Proj A"}],
+        )
+
+        result = await list_issues(
+            status=None, project_id="42", initiator_user_id=None,
+            search=None, created_after=None, created_before=None,
+            sort_by=None, sort_order=None, page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+
+    async def test_project_id_restricted_not_allowed(self):
+        """Restricted scope with non-matching project_id → false clause."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(
+            is_unrestricted=False,
+            accessible_projects=[{"id": 99, "name": "Other"}],
+        )
+
+        result = await list_issues(
+            status=None, project_id="42", initiator_user_id=None,
+            search=None, created_after=None, created_before=None,
+            sort_by=None, sort_order=None, page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+        self.assertEqual(result["total"], 0)
+
+    async def test_no_project_id_restricted_empty_scope(self):
+        """No project_id filter with restricted empty scope → false clause."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=False, accessible_projects=[])
+
+        result = await list_issues(
+            status=None, project_id=None, initiator_user_id=None,
+            search=None, created_after=None, created_before=None,
+            sort_by=None, sort_order=None, page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+        self.assertEqual(result["total"], 0)
+
+    async def test_no_project_id_restricted_with_projects(self):
+        """No project_id filter with restricted scope auto-filters to accessible projects."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(
+            is_unrestricted=False,
+            accessible_projects=[{"id": 10, "name": "P"}, {"id": 20, "name": "Q"}],
+        )
+
+        result = await list_issues(
+            status=None, project_id=None, initiator_user_id=None,
+            search=None, created_after=None, created_before=None,
+            sort_by=None, sort_order=None, page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+
+    async def test_project_id_invalid_values_skipped(self):
+        """Non-integer project_id values silently skipped."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        result = await list_issues(
+            status=None, project_id="abc", initiator_user_id=None,
+            search=None, created_after=None, created_before=None,
+            sort_by=None, sort_order=None, page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+
+    async def test_project_id_invalid_restricted_empty(self):
+        """Non-integer project_id with restricted empty scope → false clause."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=False, accessible_projects=[])
+
+        result = await list_issues(
+            status=None, project_id="abc", initiator_user_id=None,
+            search=None, created_after=None, created_before=None,
+            sort_by=None, sort_order=None, page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertEqual(result["total"], 0)
+
+    async def test_project_id_invalid_restricted_with_projects(self):
+        """Non-integer project_id with restricted scope + projects → filters to accessible."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(
+            is_unrestricted=False,
+            accessible_projects=[{"id": 10, "name": "P"}],
+        )
+
+        result = await list_issues(
+            status=None, project_id="abc", initiator_user_id=None,
+            search=None, created_after=None, created_before=None,
+            sort_by=None, sort_order=None, page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+
+
+# ---------------------------------------------------------------------------
+# Initiator username multi-value filter (lines 286-294)
+# ---------------------------------------------------------------------------
+
+
+class TestListIssuesInitiatorFilter(unittest.IsolatedAsyncioTestCase):
+    """Test initiator_username and initiator_user_id filters."""
+
+    async def test_single_initiator_username(self):
+        """Single initiator_username should filter."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        result = await list_issues(
+            status=None, project_id=None, initiator_user_id=None,
+            initiator_username="alice",
+            search=None, created_after=None, created_before=None,
+            sort_by=None, sort_order=None, page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+
+    async def test_multi_initiator_usernames(self):
+        """Comma-separated initiator_usernames should apply IN filter."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        result = await list_issues(
+            status=None, project_id=None, initiator_user_id=None,
+            initiator_username="alice,bob",
+            search=None, created_after=None, created_before=None,
+            sort_by=None, sort_order=None, page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+
+    async def test_initiator_user_id_filter(self):
+        """initiator_user_id should filter by user ID."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        result = await list_issues(
+            status=None, project_id=None, initiator_user_id=7,
+            search=None, created_after=None, created_before=None,
+            sort_by=None, sort_order=None, page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+
+
+# ---------------------------------------------------------------------------
+# Has MR filter (lines 297-301)
+# ---------------------------------------------------------------------------
+
+
+class TestListIssuesHasMrFilter(unittest.IsolatedAsyncioTestCase):
+    """Test has_mr boolean filter."""
+
+    async def test_has_mr_true(self):
+        """has_mr=True should filter for issues with merge_request_iid IS NOT NULL."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        result = await list_issues(
+            status=None, project_id=None, initiator_user_id=None,
+            has_mr=True,
+            search=None, created_after=None, created_before=None,
+            sort_by=None, sort_order=None, page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+
+    async def test_has_mr_false(self):
+        """has_mr=False should filter for issues with merge_request_iid IS NULL."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        result = await list_issues(
+            status=None, project_id=None, initiator_user_id=None,
+            has_mr=False,
+            search=None, created_after=None, created_before=None,
+            sort_by=None, sort_order=None, page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+
+
+# ---------------------------------------------------------------------------
+# Search too long (line 306)
+# ---------------------------------------------------------------------------
+
+
+class TestListIssuesSearchTooLong(unittest.IsolatedAsyncioTestCase):
+    """Test search param max length validation."""
+
+    async def test_search_too_long_returns_400(self):
+        """Search > 200 chars should return 400."""
+        from fastapi import HTTPException
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([])
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with self.assertRaises(HTTPException) as ctx:
+            await list_issues(
+                status=None, project_id=None, initiator_user_id=None,
+                search="x" * 201,
+                created_after=None, created_before=None,
+                sort_by=None, sort_order=None, page=1, page_size=20,
+                db=db, current_user=MagicMock(), access_scope=scope,
+            )
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("search too long", ctx.exception.detail)
+
+
+# ---------------------------------------------------------------------------
+# Sort by aggregate fields (line 214)
+# ---------------------------------------------------------------------------
+
+
+class TestListIssuesSortByAggregateFields(unittest.IsolatedAsyncioTestCase):
+    """Test sorting by aggregate fields that use the task_agg subquery."""
+
+    async def test_sort_by_total_changes(self):
+        """Sort by total_changes (aggregate) should use coalesce from subquery."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        result = await list_issues(
+            status=None, project_id=None, initiator_user_id=None,
+            search=None, created_after=None, created_before=None,
+            sort_by="total_changes", sort_order="asc",
+            page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+
+    async def test_sort_by_total_input_tokens(self):
+        """Sort by total_input_tokens aggregate field."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        result = await list_issues(
+            status=None, project_id=None, initiator_user_id=None,
+            search=None, created_after=None, created_before=None,
+            sort_by="total_input_tokens", sort_order="desc",
+            page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+
+    async def test_sort_by_total_output_tokens(self):
+        """Sort by total_output_tokens aggregate field."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        result = await list_issues(
+            status=None, project_id=None, initiator_user_id=None,
+            search=None, created_after=None, created_before=None,
+            sort_by="total_output_tokens", sort_order="asc",
+            page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+
+
+# ---------------------------------------------------------------------------
+# Update issue edge cases (lines 394, 403, 412)
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateIssueEdgeCases(unittest.IsolatedAsyncioTestCase):
+    """Test update_issue edge cases: not-found, description change, valid status change."""
+
+    async def test_update_issue_not_found_returns_404(self):
+        """PATCH on non-existent issue should return 404."""
+        from fastapi import HTTPException
+        from app.api.issues import update_issue, UpdateIssueRequest
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = None
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+
+        body = UpdateIssueRequest(title="New Title")
+        with self.assertRaises(HTTPException) as ctx:
+            await update_issue(issue_id=999, body=body, db=mock_db, current_user=MagicMock())
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    async def test_update_issue_description(self):
+        """Updating description field should persist."""
+        from app.api.issues import update_issue, UpdateIssueRequest
+
+        issue = _make_issue(id=1, title="Title", description="Old desc")
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        body = UpdateIssueRequest(description="New description")
+        await update_issue(issue_id=1, body=body, db=mock_db, current_user=MagicMock())
+
+        self.assertEqual(issue.description, "New description")
+        mock_db.commit.assert_awaited_once()
+
+    async def test_update_issue_valid_status(self):
+        """Updating to a valid status should persist."""
+        from app.api.issues import update_issue, UpdateIssueRequest
+
+        issue = _make_issue(id=1, status="open")
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        body = UpdateIssueRequest(status="in_progress")
+        await update_issue(issue_id=1, body=body, db=mock_db, current_user=MagicMock())
+
+        self.assertEqual(issue.status, "in_progress")
+
+
+# ---------------------------------------------------------------------------
+# Combined filters
+# ---------------------------------------------------------------------------
+
+
+class TestListIssuesCombinedFilters(unittest.IsolatedAsyncioTestCase):
+    """Test combining multiple filters at once."""
+
+    async def test_all_filters_combined(self):
+        """Should accept all filters simultaneously."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        result = await list_issues(
+            status="open",
+            project_id="42",
+            initiator_user_id=7,
+            initiator_username="alice",
+            has_mr=True,
+            search="test",
+            created_after="2025-01-01T00:00:00",
+            created_before="2025-12-31T23:59:59",
+            sort_by="total_changes",
+            sort_order="asc",
+            page=1,
+            page_size=20,
+            db=db,
+            current_user=MagicMock(),
+            access_scope=scope,
+        )
+        self.assertIn("items", result)
+
