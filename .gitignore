@@ -54,3 +54,6 @@ heatmap-check.png
 
 # Temporary images
 temporary/*.png
+
+# Worktrees
+.worktrees/
