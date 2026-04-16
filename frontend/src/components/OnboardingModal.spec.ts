@@ -2,9 +2,13 @@ import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { h } from 'vue'
 
+const messages: Record<string, string> = {
+  'onboarding.actions.closeOnboarding': 'Close onboarding',
+}
+
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: (key: string) => key,
+    t: (key: string) => messages[key] ?? key,
   }),
 }))
 
@@ -103,6 +107,26 @@ describe('OnboardingModal', () => {
     await wrapper.find('[data-testid="onboarding-previous"]').trigger('click')
     expect(wrapper.find('[data-testid="onboarding-step-title"]').text()).toBe('onboarding.concepts.title')
     expect(wrapper.find('.n-steps').attributes('data-current')).toBe('2')
+  })
+
+  it('resets to the first step when reopened', async () => {
+    const wrapper = mountComponent()
+
+    await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
+    await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
+    expect(wrapper.find('[data-testid="onboarding-step-title"]').text()).toBe('onboarding.workflow.title')
+
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+
+    expect(wrapper.find('[data-testid="onboarding-step-title"]').text()).toBe('onboarding.welcome.title')
+    expect(wrapper.find('.n-steps').attributes('data-current')).toBe('1')
+  })
+
+  it('uses a localized accessibility label for the close button', () => {
+    const wrapper = mountComponent()
+
+    expect(wrapper.find('.onboarding-modal__close').attributes('aria-label')).toBe('Close onboarding')
   })
 
   it('emits close when skip is clicked', async () => {

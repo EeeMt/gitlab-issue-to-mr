@@ -13,7 +13,7 @@
             </p>
           </div>
 
-          <n-button quaternary circle class="onboarding-modal__close" aria-label="Close onboarding" @click="emit('close')">
+          <n-button quaternary circle class="onboarding-modal__close" :aria-label="t('onboarding.actions.closeOnboarding')" @click="emit('close')">
             <span aria-hidden="true">×</span>
           </n-button>
         </div>
@@ -114,7 +114,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { NButton, NCard, NModal, NStep, NSteps, NThing } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 
@@ -132,7 +132,7 @@ interface OnboardingContentItem {
   bodyKey: string
 }
 
-defineProps<{
+const props = defineProps<{
   show: boolean
 }>()
 
@@ -206,6 +206,15 @@ const workflowItems: OnboardingContentItem[] = [
 
 const activeStep = computed(() => steps[currentStep.value])
 const isLastStep = computed(() => currentStep.value === steps.length - 1)
+
+watch(
+  () => props.show,
+  (isVisible, wasVisible) => {
+    if (isVisible && !wasVisible) {
+      currentStep.value = 0
+    }
+  },
+)
 
 function goToNext() {
   if (currentStep.value < steps.length - 1) {

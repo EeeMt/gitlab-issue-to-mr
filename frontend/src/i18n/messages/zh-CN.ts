@@ -240,6 +240,7 @@ const zhCN = {
     actions: {
       skip: '暂时跳过',
       close: '关闭',
+      closeOnboarding: '关闭引导弹窗',
       previous: '上一步',
       next: '下一步',
       viewDashboard: '查看仪表盘',

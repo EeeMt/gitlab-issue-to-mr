@@ -242,6 +242,7 @@ const en = {
     actions: {
       skip: 'Skip for now',
       close: 'Close',
+      closeOnboarding: 'Close onboarding',
       previous: 'Previous',
       next: 'Next',
       viewDashboard: 'View Dashboard',
