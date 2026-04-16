@@ -24,7 +24,8 @@ from app.core.mattermost_notifications import (
     MATTERMOST_EVENT_TASK_RETRY_SCHEDULED,
     notify_task_event,
 )
-from app.models import Task, TaskLog, TaskStatus, Issue, IssueStatus
+from app.models import Task, TaskLog, TaskStatus, Issue, IssueStatus, AIProvider
+from app.api.providers import _decrypt_provider_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -473,15 +474,58 @@ class WorkerExecutor:
         logger.info(f"[Task {task.id}] Created initial draft MR !{mr_iid}")
         return mr_iid, mr_web_url
 
+    async def _resolve_provider(self, db: AsyncSession, task: "Task") -> "AIProvider":
+        """Resolve the AI provider for a task.
+
+        Resolution chain: task.provider_id → default provider → legacy settings.
+        """
+        # 1. Task has explicit provider
+        if task.provider_id:
+            provider = await db.get(AIProvider, task.provider_id)
+            if provider:
+                return provider
+
+        # 2. System default provider
+        result = await db.execute(
+            select(AIProvider).where(AIProvider.is_default == True)
+        )
+        provider = result.scalar_one_or_none()
+        if provider:
+            return provider
+
+        # 3. Legacy fallback: build from settings
+        settings = get_settings()
+        return AIProvider(
+            name="legacy",
+            base_url=settings.anthropic_base_url,
+            api_key=settings.anthropic_api_key,
+            model=settings.anthropic_model,
+            max_turns=settings.claude_max_turns,
+            system_prompt=None,
+        )
+
     def _build_container_env(
         self,
-        task: Task,
-        issue: Issue,
+        task: "Task",
+        issue: "Issue",
         mr_iid: Optional[int],
         target_branch: Optional[str],
+        provider: "AIProvider" = None,
     ) -> dict[str, str]:
         """Build environment variables for the worker container."""
         settings = get_settings()
+
+        # Use provider values for AI config, fall back to settings
+        if provider and provider.id:
+            api_key = _decrypt_provider_api_key(provider)
+        elif provider:
+            api_key = provider.api_key or ""
+        else:
+            api_key = settings.anthropic_api_key
+
+        base_url = provider.base_url if provider else settings.anthropic_base_url
+        model = provider.model if provider else settings.anthropic_model
+        max_turns = str(provider.max_turns) if provider else str(settings.claude_max_turns)
 
         environment = {
             "GITLAB_URL": settings.gitlab_url,
@@ -490,15 +534,19 @@ class WorkerExecutor:
             "BRANCH_NAME": issue.branch_name,
             "USER_PROMPT": task.user_prompt,
             "TARGET_BRANCH": target_branch or "",
-            "ANTHROPIC_BASE_URL": settings.anthropic_base_url,
-            "ANTHROPIC_API_KEY": settings.anthropic_api_key,
-            "ANTHROPIC_MODEL": settings.anthropic_model,
-            "CLAUDE_MAX_TURNS": str(settings.claude_max_turns),
+            "ANTHROPIC_BASE_URL": base_url,
+            "ANTHROPIC_API_KEY": api_key,
+            "ANTHROPIC_MODEL": model,
+            "CLAUDE_MAX_TURNS": max_turns,
             "TASK_ID": str(task.id),
             "TASK_TIMEOUT": str(settings.task_timeout),
             "ISSUE_ID": str(issue.id),
             "ISSUE_TITLE": issue.title or "",
         }
+
+        # System prompt for Claude CLI
+        if provider and provider.system_prompt:
+            environment["APPEND_SYSTEM_PROMPT"] = provider.system_prompt
 
         # Pass session ID for resume
         if issue.claude_session_id:
@@ -906,8 +954,11 @@ class WorkerExecutor:
 
             target_branch = issue.target_branch if issue else None
 
+            # Resolve AI provider
+            provider = await self._resolve_provider(db, task)
+            
             # Build environment and volumes
-            environment = self._build_container_env(task, issue, mr_iid, target_branch)
+            environment = self._build_container_env(task, issue, mr_iid, target_branch, provider=provider)
             volumes = self._build_container_volumes(settings, issue)
 
             container_name = self._get_container_name(task)

@@ -23,6 +23,7 @@ TARGET_BRANCH="${TARGET_BRANCH:-}"
 ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-http://localhost:11434/v1}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}"
+APPEND_SYSTEM_PROMPT="${APPEND_SYSTEM_PROMPT:-}"
 
 echo "========================================"
 echo "GitLab Issue to MR Worker"
@@ -40,6 +41,7 @@ echo "Anthropic URL:  ${ANTHROPIC_BASE_URL}"
 echo "Model:          ${ANTHROPIC_MODEL}"
 echo "Max Turns:      ${CLAUDE_MAX_TURNS:-20}"
 echo "API Key set:    $([ -n "$ANTHROPIC_API_KEY" ] && echo 'yes' || echo 'no')"
+echo "System Prompt:  $([ -n "$APPEND_SYSTEM_PROMPT" ] && echo "set (${#APPEND_SYSTEM_PROMPT} chars)" || echo 'none')"
 echo "GitLab Token:   $([ -n "$GITLAB_TOKEN" ] && echo 'set' || echo 'missing')"
 echo "========================================"
 
@@ -453,6 +455,7 @@ export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="${CLAUDE_CODE_DISABLE_NONESSENT
 export SANDBOX_MODE=1
 export CLAUDE_MAX_TURNS="${CLAUDE_MAX_TURNS:-20}"
 export CLAUDE_MODEL="${ANTHROPIC_MODEL}"
+export APPEND_SYSTEM_PROMPT
 FINAL_SUMMARY_CONTENT=""
 FINAL_CHANGED_FILES_TEXT=""
 FINAL_MR_TITLE=""
