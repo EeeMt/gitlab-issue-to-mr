@@ -132,6 +132,14 @@
               <router-view />
             </div>
           </n-layout>
+
+          <OnboardingModal
+            :show="showOnboarding"
+            @close="dismissOnboarding"
+            @complete="dismissOnboarding"
+            @view-dashboard="navigateToDashboard"
+            @create-issue="navigateToCreateIssue"
+          />
         </n-layout>
       </n-layout>
     </n-dialog-provider>
@@ -175,7 +183,9 @@ import {
 } from '@vicons/ionicons5'
 import { authState, canAccessSharedPage, initializeAuth, isAdmin, logoutAndClearAuth } from './auth'
 import LanguageToggle from './components/LanguageToggle.vue'
+import OnboardingModal from './components/OnboardingModal.vue'
 import { useBreakpoints } from './composables/useBreakpoints'
+import { getOnboardingDismissed, setOnboardingDismissed } from './composables/useOnboarding'
 import {
   naiveUiDateLocale,
   naiveUiLocale,
@@ -209,6 +219,10 @@ const menuLabels: Record<string, string> = {
 
 const currentPageLabel = computed(() => t(menuLabels[activeKey.value] || 'app.navigation'))
 const showUserToolbar = computed(() => authState.authenticated)
+const onboardingDismissed = ref(getOnboardingDismissed())
+const showOnboarding = computed(
+  () => authState.initialized && authState.authenticated && showShell.value && !onboardingDismissed.value
+)
 const userDisplayName = computed(
   () => authState.user?.display_name || authState.user?.username || t('shell.gitlabUser')
 )
@@ -284,6 +298,25 @@ const menuOptions = computed<MenuOption[]>(() => {
 
 function handleMenuUpdate(key: string) {
   router.push({ name: key })
+}
+
+function dismissOnboarding() {
+  if (onboardingDismissed.value) {
+    return
+  }
+
+  onboardingDismissed.value = true
+  setOnboardingDismissed(true)
+}
+
+async function navigateToDashboard() {
+  dismissOnboarding()
+  await router.push({ name: 'Dashboard' })
+}
+
+async function navigateToCreateIssue() {
+  dismissOnboarding()
+  await router.push({ name: 'CreateIssue' })
 }
 
 async function handleLogout() {
