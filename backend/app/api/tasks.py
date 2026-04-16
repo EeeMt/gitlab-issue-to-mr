@@ -824,6 +824,13 @@ async def create_task(
             detail="No prompt provided and issue has no description",
         )
 
+    # Validate provider_id if provided
+    if request.provider_id is not None:
+        from app.models import AIProvider
+        provider = await db.get(AIProvider, request.provider_id)
+        if not provider:
+            raise HTTPException(status_code=404, detail="Provider not found")
+
     scheduled_at = resolve_scheduled_at(
         request.scheduled_datetime,
         request.delay_seconds,
@@ -851,6 +858,7 @@ async def create_task(
         initiator_username=current_user.username if current_user is not None else None,
         priority=request.priority,
         scheduled_at=scheduled_at,
+        provider_id=request.provider_id,
     )
     db.add(task)
     await db.commit()

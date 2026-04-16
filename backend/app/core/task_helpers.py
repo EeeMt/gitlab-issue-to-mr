@@ -50,6 +50,8 @@ def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = Non
         "output_tokens": task.output_tokens,
         "model_name": task.model_name,
         "merge_request_title": task.merge_request_title,
+        "provider_id": task.provider_id,
+        "provider_name": None,
         "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat(),
         "started_at": task.started_at.isoformat() if task.started_at else None,
@@ -73,6 +75,16 @@ def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = Non
             "merge_request_iid": issue.merge_request_iid,
             "merge_request_url": issue.merge_request_url,
         }
+    # Add provider name if loaded
+    provider = None
+    try:
+        insp = sa_inspect(task)
+        if "provider" not in insp.unloaded:
+            provider = task.provider
+    except Exception:
+        pass
+    if provider is not None:
+        data["provider_name"] = provider.name
     return data
 
 
