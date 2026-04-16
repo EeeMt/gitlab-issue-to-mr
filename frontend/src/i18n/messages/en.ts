@@ -185,6 +185,69 @@ const en = {
       default: 'Please sign in to continue.',
     },
   },
+  onboarding: {
+    progressLabel: 'Step {current} of {total}',
+    welcome: {
+      title: 'Welcome to Codify',
+      shortTitle: 'Welcome',
+      caption: 'What Codify helps you do',
+      description: 'Get oriented with the core workflow before you start creating work.',
+      heading: 'Turn a Codify Issue into an organized implementation workflow.',
+      body: 'Codify helps you capture work as a Codify Issue, break it into execution-ready tasks, and follow progress from idea to result in one place.',
+      summaryLabel: 'Start here',
+      summaryTitle: 'Every workflow begins with a Codify Issue',
+      summaryBody: 'Describe the outcome you want, keep the context together, and let Codify coordinate the work that follows.',
+    },
+    concepts: {
+      title: 'Understand the building blocks',
+      shortTitle: 'Concepts',
+      caption: 'Issues, tasks, and results',
+      description: 'These three concepts make it easier to plan work, track execution, and review outcomes.',
+      codifyIssue: {
+        title: 'Codify Issue',
+        body: 'A Codify Issue is the starting point for a workflow. It captures the goal, context, and desired outcome so your team can organize work around a shared source of truth.',
+      },
+      tasks: {
+        title: 'Tasks',
+        body: 'Tasks are the execution units created from the issue. Use them to schedule work, retry with updated instructions, and keep progress visible step by step.',
+      },
+      results: {
+        title: 'Results',
+        body: 'Each task produces logs, status changes, and code delivery details so you can review what happened and decide what to do next.',
+      },
+    },
+    workflow: {
+      title: 'Follow the workflow',
+      shortTitle: 'Workflow',
+      caption: 'Create, run, review',
+      description: 'A simple loop helps teams move from a request to visible delivery without losing context.',
+      steps: {
+        first: {
+          step: '1',
+          title: 'Create a Codify Issue',
+          body: 'Start by creating a Codify Issue that explains the problem to solve, the outcome you want, and any constraints that matter.',
+        },
+        second: {
+          step: '2',
+          title: 'Launch or schedule tasks',
+          body: 'Create tasks from the issue when you are ready to execute. You can run work immediately or schedule it to fit your queue and team cadence.',
+        },
+        third: {
+          step: '3',
+          title: 'Review progress and outcomes',
+          body: 'Track task status, inspect logs, and review delivery details from the dashboard so you know what completed successfully and what needs attention next.',
+        },
+      },
+    },
+    actions: {
+      skip: 'Skip for now',
+      close: 'Close',
+      previous: 'Previous',
+      next: 'Next',
+      viewDashboard: 'View Dashboard',
+      createIssue: 'Create Issue',
+    },
+  },
   dashboard: {
     title: 'Tasks',
     subtitle:

@@ -183,6 +183,69 @@ const zhCN = {
       default: '请登录以继续。',
     },
   },
+  onboarding: {
+    progressLabel: '第 {current} 步，共 {total} 步',
+    welcome: {
+      title: '欢迎使用 Codify',
+      shortTitle: '欢迎',
+      caption: '先了解 Codify 的作用',
+      description: '开始创建工作前，先快速了解核心流程。',
+      heading: '把 Codify Issue 转化为清晰的执行流程。',
+      body: 'Codify 帮助你围绕 Codify Issue 组织工作，把需求拆分为可执行的任务，并在同一个地方跟踪从想法到结果的全过程。',
+      summaryLabel: '从这里开始',
+      summaryTitle: '每个工作流都从 Codify Issue 开始',
+      summaryBody: '先描述你想达成的结果，把背景信息集中起来，再由 Codify 协调后续工作。',
+    },
+    concepts: {
+      title: '了解核心概念',
+      shortTitle: '概念',
+      caption: 'Issue、任务与结果',
+      description: '这三个概念能帮助你规划工作、跟踪执行，并回看最终产出。',
+      codifyIssue: {
+        title: 'Codify Issue',
+        body: 'Codify Issue 是工作流的起点。它用于记录目标、背景和预期结果，让团队围绕同一份上下文组织后续工作。',
+      },
+      tasks: {
+        title: '任务',
+        body: '任务是从该 Issue 派生出的执行单元。你可以用它安排执行、在更新指令后重试，并逐步查看整体进展。',
+      },
+      results: {
+        title: '结果',
+        body: '每个任务都会产生日志、状态变化和交付信息，方便你回顾执行情况并决定下一步。',
+      },
+    },
+    workflow: {
+      title: '查看工作流程',
+      shortTitle: '流程',
+      caption: '创建、执行、回顾',
+      description: '通过一个简单循环，把需求稳定地推进到可见结果，同时保持上下文完整。',
+      steps: {
+        first: {
+          step: '1',
+          title: '创建 Codify Issue',
+          body: '先创建一个 Codify Issue，说明要解决的问题、期望达成的结果，以及需要关注的限制条件。',
+        },
+        second: {
+          step: '2',
+          title: '发起或预约任务',
+          body: '准备执行时，从该 Issue 创建任务。你可以立即开始，也可以结合队列和团队节奏预约执行。',
+        },
+        third: {
+          step: '3',
+          title: '回顾进展与结果',
+          body: '在仪表盘中跟踪任务状态、查看日志并回顾交付信息，明确哪些工作已完成，哪些还需要继续处理。',
+        },
+      },
+    },
+    actions: {
+      skip: '暂时跳过',
+      close: '关闭',
+      previous: '上一步',
+      next: '下一步',
+      viewDashboard: '查看仪表盘',
+      createIssue: '创建 Issue',
+    },
+  },
   dashboard: {
     title: '任务',
     subtitle: '在一个视图中跟踪排队任务、运行中的任务和已完成的合并请求任务。',
