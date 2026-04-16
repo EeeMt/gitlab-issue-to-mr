@@ -55,6 +55,8 @@ const en = {
     admin: 'Admin',
     gitlabUser: 'GitLab user',
     signedInWithGitlab: 'Signed in with GitLab',
+    productTour: 'Product tour',
+    reopenOnboarding: 'Open product tour again',
     logout: 'Logout'
   },
   status: {
@@ -96,8 +98,10 @@ const en = {
     status: 'Status',
     project: 'Project',
     issue: 'Issue',
+    issues: 'Issues',
     mergeRequest: 'Merge Request',
     priority: 'Priority',
+    tasks: 'Tasks',
     initiator: 'Initiator',
     branch: 'Branch',
     targetBranch: 'Target Branch',
@@ -291,6 +295,12 @@ const en = {
     tokensUsedTip: 'Total input and output tokens consumed by your tasks in the last 90 days',
     activityTip: 'Number of tasks completed per day over the last 90 days',
     trendTip: 'Daily trends of your task completions, code changes, and token usage over the last 90 days',
+    myWorkBoard: {
+      title: 'My Work Board',
+      emptyBoard: 'No items in this view yet.',
+      emptyColumn: 'No items in this status.',
+      limitNotice: 'Showing the first {shown} items out of {total}. Refine filters or open the full list to see more.',
+    },
   },
   trend: {
     tasks: 'Tasks',

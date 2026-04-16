@@ -55,6 +55,8 @@ const zhCN = {
     admin: '管理员',
     gitlabUser: 'GitLab 用户',
     signedInWithGitlab: '通过 GitLab 登录',
+    productTour: '产品介绍',
+    reopenOnboarding: '再次查看产品介绍',
     logout: '退出登录'
   },
   status: {
@@ -96,8 +98,10 @@ const zhCN = {
     status: '状态',
     project: '项目',
     issue: '议题',
+    issues: '需求',
     mergeRequest: '合并请求',
     priority: '优先级',
+    tasks: '任务',
     initiator: '发起人',
     branch: '分支',
     targetBranch: '目标分支',
@@ -288,6 +292,12 @@ const zhCN = {
     tokensUsedTip: '最近 90 天内你的任务消耗的输入和输出 Token 总量',
     activityTip: '最近 90 天内每天完成的任务数量',
     trendTip: '最近 90 天内任务完成数、代码变更量和 Token 消耗的每日趋势',
+    myWorkBoard: {
+      title: '我的工作看板',
+      emptyBoard: '当前视图下暂无内容。',
+      emptyColumn: '该状态下暂无内容。',
+      limitNotice: '当前仅显示前 {shown} 条，共 {total} 条。请使用筛选条件或打开完整列表查看更多。',
+    },
   },
   trend: {
     tasks: '任务',

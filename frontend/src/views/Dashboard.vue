@@ -99,56 +99,23 @@
           </n-gi>
         </n-grid>
 
-        <n-card
-          :title="t('dashboard.recentIssues')"
-          :bordered="false"
-          class="dashboard-table-card"
-          data-testid="dashboard-recent-issues"
-        >
-          <template #header-extra>
-            <n-button
-              type="primary"
-              size="small"
-              data-testid="dashboard-new-issue-button"
-              @click="router.push('/issues/create')"
-            >
-              {{ t('dashboard.createIssue') }}
-            </n-button>
-          </template>
-          <n-data-table
-            :columns="issueColumns"
-            :data="recentIssues"
-            :loading="loading"
-            :row-key="(row: Issue) => row.id"
-            :row-props="issueRowProps"
-            :bordered="false"
-          />
-        </n-card>
-
-        <n-card
-          :title="t('dashboard.running')"
-          :bordered="false"
-          class="dashboard-table-card"
-          data-testid="dashboard-running-tasks"
-        >
-          <n-data-table
-            :columns="taskColumns"
-            :data="runningAndQueuedTasks"
-            :loading="loading"
-            :row-key="(row: Task) => row.id"
-            :row-props="taskRowProps"
-            :bordered="false"
-          />
-        </n-card>
-
+        <MyWorkBoard
+          :issue-columns="issueBoardColumns"
+          :task-columns="taskBoardColumns"
+          :issue-total="boardIssueTotal"
+          :task-total="boardTaskTotal"
+          :visible-limit="boardVisibleLimit"
+          :is-mobile="isMobile"
+          @select="router.push($event)"
+        />
       </n-space>
     </n-spin>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, h, computed } from 'vue'
-import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, NIcon, NTooltip, useMessage, type DataTableColumns } from 'naive-ui'
+import { ref, onMounted, computed } from 'vue'
+import { NSpace, NCard, NGrid, NGi, NSpin, NIcon, NTooltip, useMessage } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getIssues, getTasksPaginated, getStats, getAnalytics, getActivityHeatmap, type Issue, type Task, type ActivityHeatmapEntry, type AnalyticsTrendPoint } from '../api'
@@ -165,11 +132,17 @@ import {
 import StatusPieChart from '../components/StatusPieChart.vue'
 import ActivityHeatmap from '../components/ActivityHeatmap.vue'
 import TrendChart from '../components/TrendChart.vue'
+import MyWorkBoard, { type BoardCardItem, type BoardColumn } from '../components/dashboard/MyWorkBoard.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { usePolling } from '../composables/usePolling'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
 import { formatPriority } from '../utils/format'
 import { authState } from '../auth'
+
+const issueStatuses = ['open', 'in_progress', 'in_review', 'closed'] as const
+const taskStatuses = ['pending', 'queued', 'running', 'completed', 'failed', 'cancelled'] as const
+
+const boardVisibleLimit = 100
 
 const router = useRouter()
 const message = useMessage()
@@ -177,17 +150,10 @@ const { t } = useI18n()
 const { isMobile } = useBreakpoints()
 const tooltipStyle = { fontSize: '11px', borderRadius: '6px', padding: '6px 12px', maxWidth: '280px' }
 
-function issueRowProps(row: Issue) {
-  return { style: 'cursor: pointer', onClick: () => router.push(`/issues/${row.id}`) }
-}
-
-function taskRowProps(row: Task) {
-  return { style: 'cursor: pointer', onClick: () => router.push(`/tasks/${row.id}`) }
-}
-
-const recentIssues = ref<Issue[]>([])
-const runningTasks = ref<Task[]>([])
-const queuedTasks = ref<Task[]>([])
+const boardIssues = ref<Issue[]>([])
+const boardTasks = ref<Task[]>([])
+const boardIssueTotal = ref(0)
+const boardTaskTotal = ref(0)
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
 
@@ -207,14 +173,41 @@ const analyticsTotalTokens = ref(0)
 const heatmapData = ref<ActivityHeatmapEntry[]>([])
 const trendData = ref<AnalyticsTrendPoint[]>([])
 
-const runningAndQueuedTasks = computed(() => [...runningTasks.value, ...queuedTasks.value])
-
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
 function formatNumber(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
   if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K'
   return String(n)
+}
+
+function buildIssueCard(issue: Issue): BoardCardItem {
+  return {
+    id: issue.id,
+    title: issue.title,
+    subtitle: `#${issue.id}`,
+    meta: [
+      t('dashboard.projectFallback', { id: issue.project_id }),
+      `${issue.task_count ?? 0} ${t('issue.field.tasks')}`,
+      issue.created_at ? formatDateTimeUtc8Compact(issue.created_at) : '-',
+    ],
+    route: `/issues/${issue.id}`,
+  }
+}
+
+function buildTaskCard(task: Task): BoardCardItem {
+  return {
+    id: task.id,
+    title: task.user_prompt,
+    fullTitle: task.user_prompt,
+    subtitle: `#${task.id}`,
+    meta: [
+      task.project_path_with_namespace || t('dashboard.projectFallback', { id: task.project_id }),
+      formatPriority(task.priority),
+      formatDateTimeUtc8Compact(task.started_at || task.created_at),
+    ],
+    route: `/tasks/${task.id}`,
+  }
 }
 
 const issueChartData = computed(() => {
@@ -238,75 +231,29 @@ const taskChartData = computed(() => {
   ].filter((d) => d.value > 0)
 })
 
-const issueStatusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
-  open: 'default',
-  in_progress: 'warning',
-  in_review: 'info',
-  closed: 'success',
-}
+const issueBoardColumns = computed<BoardColumn[]>(() =>
+  issueStatuses.map((status) => {
+    const items = boardIssues.value.filter((issue) => issue.status === status).map(buildIssueCard)
+    return {
+      status,
+      label: t(`issue.status.${status}`),
+      count: items.length,
+      items,
+    }
+  }),
+)
 
-const issueColumns = computed<DataTableColumns<Issue>>(() => [
-  {
-    title: t('dashboard.id'),
-    key: 'id',
-    width: 60,
-  },
-  {
-    title: t('issue.field.title'),
-    key: 'title',
-    width: 200,
-    ellipsis: { tooltip: true },
-  },
-  {
-    title: t('dashboard.status'),
-    key: 'status',
-    width: 90,
-    render: (row) =>
-      h(
-        NTag,
-        { type: issueStatusColors[row.status] || 'default', size: 'small' },
-        () => t(`issue.status.${row.status}`),
-      ),
-  },
-  {
-    title: t('common.createTask'),
-    key: 'task_count',
-    width: 80,
-    render: (row) => String(row.task_count ?? 0),
-  },
-  {
-    title: t('common.created'),
-    key: 'created_at',
-    width: 140,
-    render: (row) => (row.created_at ? formatDateTimeUtc8Compact(row.created_at) : '-'),
-  },
-])
-
-const taskColumns = computed<DataTableColumns<Task>>(() => [
-  {
-    title: t('dashboard.id'),
-    key: 'id',
-    width: 60,
-  },
-  {
-    title: t('dashboard.task'),
-    key: 'user_prompt',
-    width: 200,
-    ellipsis: { tooltip: true },
-  },
-  {
-    title: t('dashboard.priority'),
-    key: 'priority',
-    width: 80,
-    render: (row) => formatPriority(row.priority),
-  },
-  {
-    title: t('common.started'),
-    key: 'started_at',
-    width: 140,
-    render: (row) => (row.started_at ? formatDateTimeUtc8Compact(row.started_at) : '-'),
-  },
-])
+const taskBoardColumns = computed<BoardColumn[]>(() =>
+  taskStatuses.map((status) => {
+    const items = boardTasks.value.filter((task) => task.status === status).map(buildTaskCard)
+    return {
+      status,
+      label: t(`status.${status}`),
+      count: items.length,
+      items,
+    }
+  }),
+)
 
 async function fetchData() {
   if (loading.value) return
@@ -314,14 +261,24 @@ async function fetchData() {
   try {
     const userId = authState.user?.id
     const username = authState.user?.username
-    const [issuesRes, runningRes, queuedRes] = await Promise.all([
-      getIssues({ page: 1, page_size: 5, ...(userId ? { initiator_user_id: userId } : {}) }),
-      getTasksPaginated({ status: 'running', page: 1, page_size: 10, ...(username ? { initiator_username: username } : {}) }),
-      getTasksPaginated({ status: 'queued', page: 1, page_size: 10, ...(username ? { initiator_username: username } : {}) }),
+
+    const [issuesRes, tasksRes] = await Promise.all([
+      getIssues({
+        page: 1,
+        page_size: boardVisibleLimit,
+        ...(userId ? { initiator_user_id: userId } : {}),
+      }),
+      getTasksPaginated({
+        page: 1,
+        page_size: boardVisibleLimit,
+        ...(username ? { initiator_username: username } : {}),
+      }),
     ])
-    recentIssues.value = issuesRes.items
-    runningTasks.value = runningRes.items
-    queuedTasks.value = queuedRes.items
+
+    boardIssues.value = issuesRes.items
+    boardTasks.value = tasksRes.items
+    boardIssueTotal.value = issuesRes.total
+    boardTaskTotal.value = tasksRes.total
   } catch {
     message.error(t('dashboard.failedToFetchTasks'))
   } finally {
@@ -426,7 +383,6 @@ onMounted(() => {
 .dashboard-metric-card--wide {
   height: 320px;
 }
-
 
 .dashboard-metric-card :deep(.n-card-content) {
   display: grid;

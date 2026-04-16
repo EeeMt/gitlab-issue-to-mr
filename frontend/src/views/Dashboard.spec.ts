@@ -6,9 +6,6 @@ import Dashboard from './Dashboard.vue'
 import { createMockTask } from '../test/mocks/api'
 import type { Issue, Task } from '../api'
 
-// ---------------------------------------------------------------------------
-// Hoisted mocks
-// ---------------------------------------------------------------------------
 const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
   const mock = {
     getIssues: vi.fn<() => Promise<any>>(),
@@ -24,9 +21,6 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
   return { mockApi: mock, resetMockApi, mockMessage: mockMsg }
 })
 
-// ---------------------------------------------------------------------------
-// Module mocks
-// ---------------------------------------------------------------------------
 vi.mock('../i18n', () => ({ currentLocale: ref('en') }))
 
 vi.mock('../utils/datetime', () => ({
@@ -59,9 +53,6 @@ vi.mock('@vueuse/core', () => ({
   useWindowSize: vi.fn(() => ({ width: { value: 1200 } })),
 }))
 
-// ---------------------------------------------------------------------------
-// Naive-UI stubs
-// ---------------------------------------------------------------------------
 vi.mock('naive-ui', () => ({
   NSpin: {
     name: 'NSpin',
@@ -80,32 +71,11 @@ vi.mock('naive-ui', () => ({
       return () => h('div', { class: 'n-space' }, slots.default?.())
     },
   },
-  NButton: {
-    name: 'NButton',
-    props: ['type', 'disabled', 'loading', 'text'],
-    setup(_p: any, { slots }: any) {
-      return () => h('button', { class: 'n-button' }, slots.default?.())
-    },
-  },
   NCard: {
     name: 'NCard',
     props: ['bordered', 'size', 'title'],
     setup(_p: any, { slots }: any) {
       return () => h('div', { class: 'n-card' }, [slots.header?.(), slots.default?.()])
-    },
-  },
-  NDataTable: {
-    name: 'NDataTable',
-    props: ['columns', 'data', 'loading', 'row-key', 'row-props', 'bordered'],
-    setup(props: any) {
-      return () =>
-        h(
-          'div',
-          { class: 'n-data-table' },
-          props.data?.map((row: any) =>
-            h('div', { class: 'n-data-table-row', 'data-id': row.id }),
-          ),
-        )
     },
   },
   NGrid: {
@@ -119,13 +89,6 @@ vi.mock('naive-ui', () => ({
     name: 'NGi',
     setup(_p: any, { slots }: any) {
       return () => h('div', { class: 'n-gi' }, slots.default?.())
-    },
-  },
-  NTag: {
-    name: 'NTag',
-    props: ['size', 'round', 'type'],
-    setup(_p: any, { slots }: any) {
-      return () => h('span', { class: 'n-tag' }, slots.default?.())
     },
   },
   NIcon: {
@@ -145,9 +108,6 @@ vi.mock('naive-ui', () => ({
   useMessage: () => mockMessage,
 }))
 
-// ---------------------------------------------------------------------------
-// Child component stubs
-// ---------------------------------------------------------------------------
 vi.mock('../components/StatusPieChart.vue', () => ({
   default: {
     name: 'StatusPieChart',
@@ -186,9 +146,6 @@ vi.mock('../components/TrendChart.vue', () => ({
   },
 }))
 
-// ---------------------------------------------------------------------------
-// Router
-// ---------------------------------------------------------------------------
 const router = createRouter({
   history: createMemoryHistory(),
   routes: [
@@ -199,9 +156,6 @@ const router = createRouter({
   ],
 })
 
-// ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
 const mockIssues: Issue[] = [
   {
     id: 1, title: 'Bug: login broken', description: null, project_id: 1, status: 'open',
@@ -219,18 +173,14 @@ const mockIssues: Issue[] = [
   },
 ]
 
-const mockRunningTasks = [
+const mockBoardTasks: Task[] = [
   createMockTask({ id: 10, status: 'running', user_prompt: 'Fix CSS', started_at: '2026-01-01T10:00:00Z' }),
-]
-const mockQueuedTasks = [
   createMockTask({ id: 20, status: 'queued', user_prompt: 'Add tests', priority: 2 }),
-]
-const mockCompletedTasks = [
   createMockTask({ id: 30, status: 'completed', user_prompt: 'Refactor', completed_at: '2024-01-10T09:00:00Z' }),
-]
-const mockFailedTasks = [
   createMockTask({ id: 40, status: 'failed', user_prompt: 'Deploy v2', completed_at: '2024-01-10T08:00:00Z' }),
 ]
+
+const longPrompt = 'A'.repeat(180)
 
 const mockStats = {
   total: 50, pending: 0, queued: 1, running: 3, completed: 30, failed: 10,
@@ -255,26 +205,14 @@ const mockAnalyticsResponse = {
   available_initiators: [], projects: [], initiators: [], trends: [], priority_waits: [], error_breakdown: [],
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 function setupDefaultMocks() {
-  mockApi.getIssues.mockResolvedValue({ items: mockIssues, total: mockIssues.length, page: 1, page_size: 5 })
+  mockApi.getIssues.mockResolvedValue({ items: mockIssues, total: mockIssues.length, page: 1, page_size: 100 })
   mockApi.getStats.mockResolvedValue(mockStats)
   mockApi.getActivityHeatmap.mockResolvedValue(mockHeatmapData)
   mockApi.getAnalytics.mockResolvedValue(mockAnalyticsResponse)
-  mockApi.getTasksPaginated.mockImplementation((params: any) => {
-    if (params.status === 'running') return Promise.resolve({ items: mockRunningTasks, total: 1, page: 1, page_size: 10 })
-    if (params.status === 'queued') return Promise.resolve({ items: mockQueuedTasks, total: 1, page: 1, page_size: 10 })
-    if (params.status === 'completed') return Promise.resolve({ items: mockCompletedTasks, total: 1, page: 1, page_size: 5 })
-    if (params.status === 'failed') return Promise.resolve({ items: mockFailedTasks, total: 1, page: 1, page_size: 5 })
-    return Promise.resolve({ items: [], total: 0, page: 1, page_size: 10 })
-  })
+  mockApi.getTasksPaginated.mockResolvedValue({ items: mockBoardTasks, total: mockBoardTasks.length, page: 1, page_size: 100 })
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 describe('Dashboard', () => {
   let wrapper: VueWrapper<any>
 
@@ -310,9 +248,6 @@ describe('Dashboard', () => {
     return wrapper
   }
 
-  // -----------------------------------------------------------------------
-  // 1. Basic rendering
-  // -----------------------------------------------------------------------
   describe('basic rendering', () => {
     it('renders the dashboard root element', async () => {
       await mountDashboard()
@@ -335,14 +270,12 @@ describe('Dashboard', () => {
       expect(titles[1].text()).toContain('dashboard.taskStatus')
     })
 
-    it('shows recent-issues section', async () => {
+    it('renders my work board instead of recent issues and running sections', async () => {
       await mountDashboard()
-      expect(wrapper.find('[data-testid="dashboard-recent-issues"]').exists()).toBe(true)
-    })
 
-    it('shows running-tasks section', async () => {
-      await mountDashboard()
-      expect(wrapper.find('[data-testid="dashboard-running-tasks"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="dashboard-my-work-board"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="dashboard-recent-issues"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="dashboard-running-tasks"]').exists()).toBe(false)
     })
 
     it('shows activity-heatmap section', async () => {
@@ -351,24 +284,16 @@ describe('Dashboard', () => {
     })
   })
 
-  // -----------------------------------------------------------------------
-  // 2. Initial data fetching
-  // -----------------------------------------------------------------------
   describe('initial data fetching', () => {
     it('calls getIssues on mount', async () => {
       await mountDashboard()
-      expect(mockApi.getIssues).toHaveBeenCalledWith({ page: 1, page_size: 5 })
+      expect(mockApi.getIssues).toHaveBeenCalledWith({ page: 1, page_size: 100 })
     })
 
-    it('calls getTasksPaginated for running and queued', async () => {
+    it('calls getTasksPaginated once for board tasks', async () => {
       await mountDashboard()
-      const calls = mockApi.getTasksPaginated.mock.calls
-      expect(calls).toEqual(
-        expect.arrayContaining([
-          [expect.objectContaining({ status: 'running' })],
-          [expect.objectContaining({ status: 'queued' })],
-        ]),
-      )
+      expect(mockApi.getTasksPaginated).toHaveBeenCalledWith({ page: 1, page_size: 100 })
+      expect(mockApi.getTasksPaginated).toHaveBeenCalledTimes(1)
     })
 
     it('calls getStats on mount', async () => {
@@ -381,10 +306,16 @@ describe('Dashboard', () => {
       expect(mockApi.getActivityHeatmap).toHaveBeenCalledTimes(1)
     })
 
-    it('populates recentIssues from response', async () => {
+    it('populates boardIssues from response', async () => {
       await mountDashboard()
-      expect(wrapper.vm.recentIssues).toHaveLength(2)
-      expect(wrapper.vm.recentIssues[0].id).toBe(1)
+      expect(wrapper.vm.boardIssues).toHaveLength(2)
+      expect(wrapper.vm.boardIssues[0].id).toBe(1)
+    })
+
+    it('populates boardTasks from response', async () => {
+      await mountDashboard()
+      expect(wrapper.vm.boardTasks).toHaveLength(4)
+      expect(wrapper.vm.boardTasks[0].id).toBe(10)
     })
 
     it('populates stats refs from response', async () => {
@@ -409,9 +340,103 @@ describe('Dashboard', () => {
     })
   })
 
-  // -----------------------------------------------------------------------
-  // 4. Chart data computed
-  // -----------------------------------------------------------------------
+  describe('my work board', () => {
+    it('defaults to the issues tab', async () => {
+      await mountDashboard()
+      expect(wrapper.find('[data-testid="my-work-board-tab-issues"]').attributes('data-active')).toBe('true')
+    })
+
+    it('groups issues into issue status columns', async () => {
+      await mountDashboard()
+      expect(wrapper.find('[data-testid="issue-column-open"]').text()).toContain('#1')
+      expect(wrapper.find('[data-testid="issue-column-in_progress"]').text()).toContain('#2')
+      expect(wrapper.find('[data-testid="issue-column-in_review"]').text()).toContain('dashboard.myWorkBoard.emptyColumn')
+      expect(wrapper.find('[data-testid="issue-column-closed"]').text()).toContain('dashboard.myWorkBoard.emptyColumn')
+    })
+
+    it('switches to the tasks tab and shows task status columns', async () => {
+      await mountDashboard()
+      await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
+      await nextTick()
+
+      expect(wrapper.find('[data-testid="task-column-running"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="task-column-queued"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="task-column-pending"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="task-column-completed"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="task-column-failed"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="task-column-cancelled"]').exists()).toBe(true)
+    })
+
+    it('keeps empty columns visible with empty text', async () => {
+      setupDefaultMocks()
+      mockApi.getIssues.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100 })
+      mockApi.getTasksPaginated.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100 })
+
+      wrapper = mount(Dashboard, { global: { plugins: [router] } })
+      await flushPromises()
+      await nextTick()
+
+      await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
+      await nextTick()
+      await wrapper.find('[data-testid="my-work-board-tab-issues"]').trigger('click')
+      await nextTick()
+
+      expect(wrapper.find('[data-testid="issue-column-open"]').text()).toContain('dashboard.myWorkBoard.emptyColumn')
+      expect(wrapper.find('[data-testid="my-work-board-empty-issues"]').exists()).toBe(true)
+    })
+
+    it('shows a notice when the board only displays the first 100 tasks', async () => {
+      setupDefaultMocks()
+      mockApi.getTasksPaginated.mockResolvedValue({ items: mockBoardTasks, total: 145, page: 1, page_size: 100 })
+
+      wrapper = mount(Dashboard, { global: { plugins: [router] } })
+      await flushPromises()
+      await nextTick()
+
+      await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
+      await nextTick()
+
+      expect(wrapper.find('[data-testid="my-work-board-notice-tasks"]').text()).toContain('dashboard.myWorkBoard.limitNotice')
+    })
+
+    it('truncates long task prompt text in task cards', async () => {
+      setupDefaultMocks()
+      mockApi.getTasksPaginated.mockResolvedValue({
+        items: [createMockTask({ id: 10, status: 'running', user_prompt: longPrompt })],
+        total: 1,
+        page: 1,
+        page_size: 100,
+      })
+
+      wrapper = mount(Dashboard, { global: { plugins: [router] } })
+      await flushPromises()
+      await nextTick()
+
+      await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
+      await nextTick()
+
+      const card = wrapper.find('[data-testid="task-card-10"]')
+      expect(card.text()).toContain(longPrompt)
+      expect(card.attributes('title')).toBe(longPrompt)
+    })
+
+    it('navigates to issue detail when an issue card is clicked', async () => {
+      await mountDashboard()
+      await wrapper.find('[data-testid="issue-card-1"]').trigger('click')
+      await flushPromises()
+      expect(router.currentRoute.value.fullPath).toBe('/issues/1')
+    })
+
+    it('navigates to task detail when a task card is clicked', async () => {
+      await mountDashboard()
+      await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
+      await nextTick()
+      await wrapper.find('[data-testid="task-card-10"]').trigger('click')
+      await flushPromises()
+      expect(router.currentRoute.value.fullPath).toBe('/tasks/10')
+    })
+  })
+
   describe('chart data computed', () => {
     it('issueChartData filters out zero-value entries', async () => {
       setupDefaultMocks()
@@ -429,7 +454,6 @@ describe('Dashboard', () => {
     it('taskChartData includes all non-zero statuses', async () => {
       await mountDashboard()
       const data = wrapper.vm.taskChartData
-      // From mockStats: queued=1, running=3, completed=30, failed=10 (pending=0, cancelled=0 filtered out)
       expect(data.length).toBe(4)
     })
 
@@ -441,32 +465,6 @@ describe('Dashboard', () => {
     })
   })
 
-  // -----------------------------------------------------------------------
-  // 5. Row navigation
-  // -----------------------------------------------------------------------
-  describe('row navigation', () => {
-    it('issueRowProps returns cursor style and navigates to /issues/:id', async () => {
-      await mountDashboard()
-      const pushSpy = vi.spyOn(router, 'push')
-      const props = wrapper.vm.issueRowProps(mockIssues[0])
-      expect(props.style).toBe('cursor: pointer')
-      props.onClick()
-      expect(pushSpy).toHaveBeenCalledWith('/issues/1')
-    })
-
-    it('taskRowProps returns cursor style and navigates to /tasks/:id', async () => {
-      await mountDashboard()
-      const pushSpy = vi.spyOn(router, 'push')
-      const props = wrapper.vm.taskRowProps(mockRunningTasks[0])
-      expect(props.style).toBe('cursor: pointer')
-      props.onClick()
-      expect(pushSpy).toHaveBeenCalledWith('/tasks/10')
-    })
-  })
-
-  // -----------------------------------------------------------------------
-  // 6. Polling
-  // -----------------------------------------------------------------------
   describe('polling', () => {
     it('sets up a 15-second interval', async () => {
       await mountDashboard()
@@ -520,9 +518,6 @@ describe('Dashboard', () => {
     })
   })
 
-  // -----------------------------------------------------------------------
-  // 7. Loading state
-  // -----------------------------------------------------------------------
   describe('loading state', () => {
     it('initialLoading is true before first fetch completes', async () => {
       let resolveIssues!: (v: any) => void
@@ -538,7 +533,7 @@ describe('Dashboard', () => {
       expect(wrapper.vm.loading).toBe(true)
       expect(wrapper.vm.hasLoadedOnce).toBe(false)
 
-      resolveIssues({ items: [], total: 0, page: 1, page_size: 5 })
+      resolveIssues({ items: [], total: 0, page: 1, page_size: 100 })
       await flushPromises()
       await nextTick()
 
@@ -553,21 +548,6 @@ describe('Dashboard', () => {
     })
   })
 
-  // -----------------------------------------------------------------------
-  // runningAndQueuedTasks computed
-  // -----------------------------------------------------------------------
-  describe('runningAndQueuedTasks computed', () => {
-    it('merges running and queued tasks', async () => {
-      await mountDashboard()
-      const combined = wrapper.vm.runningAndQueuedTasks as Task[]
-      expect(combined).toHaveLength(2)
-      expect(combined.map((t: Task) => t.id)).toEqual([10, 20])
-    })
-  })
-
-  // -----------------------------------------------------------------------
-  // Error handling
-  // -----------------------------------------------------------------------
   describe('error handling', () => {
     it('shows error message when main fetch fails', async () => {
       setupDefaultMocks()
@@ -612,9 +592,6 @@ describe('Dashboard', () => {
     })
   })
 
-  // -----------------------------------------------------------------------
-  // fetchData guard
-  // -----------------------------------------------------------------------
   describe('fetchData guard', () => {
     it('skips fetch when already loading', async () => {
       setupDefaultMocks()
@@ -627,12 +604,11 @@ describe('Dashboard', () => {
       expect(wrapper.vm.loading).toBe(true)
       const countBefore = mockApi.getIssues.mock.calls.length
 
-      // Second call should be blocked by the loading guard
       wrapper.vm.$forceUpdate()
       await nextTick()
       expect(mockApi.getIssues.mock.calls.length).toBe(countBefore)
 
-      resolveIssues({ items: [], total: 0, page: 1, page_size: 5 })
+      resolveIssues({ items: [], total: 0, page: 1, page_size: 100 })
       await flushPromises()
     })
   })
