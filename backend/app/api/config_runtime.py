@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._validators import _is_valid_http_url, _sanitize_string_list
@@ -233,6 +234,38 @@ def _normalize_runtime_updates(raw_updates: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+async def _sync_anthropic_to_default_provider(
+    db: AsyncSession,
+    updates: dict,
+) -> None:
+    """Sync anthropic_* runtime config changes to the default AI provider."""
+    from app.models import AIProvider
+    result = await db.execute(
+        select(AIProvider).where(AIProvider.is_default == True)
+    )
+    provider = result.scalar_one_or_none()
+    if not provider:
+        return
+
+    changed = False
+    if "anthropic_base_url" in updates:
+        provider.base_url = updates["anthropic_base_url"]
+        changed = True
+    if "anthropic_model" in updates:
+        provider.model = updates["anthropic_model"]
+        changed = True
+    if "claude_max_turns" in updates:
+        provider.max_turns = int(updates["claude_max_turns"])
+        changed = True
+    if "anthropic_api_key" in updates:
+        from app.core.config_crypto import encrypt_config_secret
+        provider.api_key = encrypt_config_secret(updates["anthropic_api_key"])
+        changed = True
+
+    if changed:
+        logger.info("Synced anthropic config changes to default AI provider")
+
+
 @router.get("/config/runtime")
 async def get_runtime_config(
     db: AsyncSession = Depends(get_db),
@@ -282,6 +315,10 @@ async def update_runtime_config(
         await load_runtime_config_from_db(db)
     except ConfigEncryptionError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+    # Sync anthropic_* changes to default AI provider
+    await _sync_anthropic_to_default_provider(db, runtime_updates)
+    await db.commit()
 
     return _serialize_runtime_config(get_effective_settings())
 
