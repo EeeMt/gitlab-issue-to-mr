@@ -86,6 +86,30 @@ class Issue(Base):
     )
 
 
+class AIProvider(Base):
+    """Named AI provider configuration."""
+
+    __tablename__ = "ai_providers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    base_url: Mapped[str] = mapped_column(Text, nullable=False)
+    api_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    max_turns: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
+    system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    tasks: Mapped[List["Task"]] = relationship("Task", back_populates="provider")
+
+
 class Task(Base):
     """Task model — one execution unit (one `claude -p` call). Belongs to an Issue."""
 
@@ -98,6 +122,11 @@ class Task(Base):
         Integer, ForeignKey("issues.id", ondelete="SET NULL"), nullable=True, index=True
     )
     project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+
+    # AI Provider
+    provider_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("ai_providers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     # Task details
     user_prompt: Mapped[str] = mapped_column(Text, nullable=False)
@@ -161,6 +190,7 @@ class Task(Base):
     retry_source: Mapped[Optional["Task"]] = relationship(
         "Task", remote_side="Task.id", foreign_keys=[retry_source_task_id]
     )
+    provider: Mapped[Optional["AIProvider"]] = relationship("AIProvider", back_populates="tasks")
 
     # Indexes for querying tasks
     __table_args__ = (
