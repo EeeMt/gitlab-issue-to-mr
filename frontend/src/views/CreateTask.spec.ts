@@ -16,7 +16,8 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     getScheduledTasks: vi.fn<() => Promise<any[]>>(),
     getSlotCapacity: vi.fn<() => Promise<any>>(),
     getConfig: vi.fn<() => Promise<any>>(),
-    getIssues: vi.fn<() => Promise<any>>()
+    getIssues: vi.fn<() => Promise<any>>(),
+    getProviders: vi.fn<() => Promise<any[]>>()
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => {
@@ -55,7 +56,8 @@ vi.mock('../api', () => ({
   getScheduledTasks: mockApi.getScheduledTasks,
   getSlotCapacity: mockApi.getSlotCapacity,
   getConfig: mockApi.getConfig,
-  getIssues: mockApi.getIssues
+  getIssues: mockApi.getIssues,
+  getProviders: mockApi.getProviders
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -384,6 +386,7 @@ describe('CreateTask', () => {
     ;(mockApi.getScheduledTasks as Mock).mockResolvedValue([])
     ;(mockApi.getSlotCapacity as Mock).mockResolvedValue({ is_full: false, enforce: false, count: 0, max: 0, hour_start: '', hour_end: '' })
     ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 0 } })
+    ;(mockApi.getProviders as Mock).mockResolvedValue([])
 
     wrapper = mount(CreateTask, {
       global: {
@@ -414,6 +417,7 @@ describe('CreateTask', () => {
     it('should show loading state during data fetch', async () => {
       ;(mockApi.getIssues as Mock).mockImplementation(() => new Promise(resolve => setTimeout(() => resolve(mockIssueListResponse), 100)))
       ;(mockApi.getPromptTemplates as Mock).mockResolvedValue([])
+      ;(mockApi.getProviders as Mock).mockResolvedValue([])
       ;(mockApi.createTask as Mock).mockResolvedValue(createMockTask())
 
       wrapper = mount(CreateTask, {
@@ -1138,6 +1142,7 @@ describe('CreateTask', () => {
     it('should handle fetchIssues error gracefully', async () => {
       ;(mockApi.getIssues as Mock).mockRejectedValue(new Error('API Error'))
       ;(mockApi.getPromptTemplates as Mock).mockResolvedValue([])
+      ;(mockApi.getProviders as Mock).mockResolvedValue([])
       ;(mockApi.createTask as Mock).mockResolvedValue(createMockTask())
       ;(mockApi.getScheduledTasks as Mock).mockResolvedValue([])
       ;(mockApi.getSlotCapacity as Mock).mockResolvedValue({ is_full: false })
@@ -1165,6 +1170,7 @@ describe('CreateTask', () => {
       ;(mockApi.getProjects as Mock).mockResolvedValue(mockProjects)
       ;(mockApi.getBranches as Mock).mockResolvedValue([])
       ;(mockApi.getPromptTemplates as Mock).mockRejectedValue(new Error('API Error'))
+      ;(mockApi.getProviders as Mock).mockResolvedValue([])
       ;(mockApi.createTask as Mock).mockResolvedValue(createMockTask())
       ;(mockApi.getScheduledTasks as Mock).mockResolvedValue([])
       ;(mockApi.getSlotCapacity as Mock).mockResolvedValue({ is_full: false })

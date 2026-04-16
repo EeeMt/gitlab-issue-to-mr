@@ -274,6 +274,8 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.output_tokens = 0
     task.model_name = None
     task.merge_request_title = None
+    task.provider_id = None
+    task.provider = None
     task.issue = None
     now = datetime(2024, 1, 1, 12, 0, 0)
     task.created_at = now
@@ -661,6 +663,49 @@ class RetryTaskAPITests(unittest.TestCase):
         self.assertTrue(data["is_retry"])
         self.assertEqual(data["retry_source_task_id"], 6)
 
+    def test_retry_task_preserves_provider_id(self):
+        """POST /api/tasks/{id}/retry should keep the original provider_id."""
+        from app.models import Task
+        task = _make_serializable_task(task_status=TaskStatus.FAILED)
+        task.id = 7
+        task.project_id = 1
+        task.provider_id = 23
+
+        mock_result_task = MagicMock()
+        mock_result_task.scalar_one_or_none.return_value = task
+        mock_result_no_retry = MagicMock()
+        mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_issue = MagicMock()
+        mock_result_issue.scalar_one_or_none.return_value = None
+
+        now = datetime(2024, 1, 1, 12, 0, 0)
+
+        async def fake_refresh(obj):
+            if isinstance(obj, Task):
+                obj.id = 107
+                obj.status = TaskStatus.PENDING
+                obj.created_at = now
+                obj.updated_at = now
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
+        mock_db.add = MagicMock()
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+
+        client, app = _make_app_client_with_db(mock_db)
+
+        with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
+            with patch("app.core.task_helpers._require_task_operator", return_value=None):
+                with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+                    response = client.post("/api/tasks/7/retry")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        created_task = mock_db.add.call_args.args[0]
+        self.assertEqual(created_task.provider_id, 23)
+
     def test_retry_task_returns_404_when_not_found(self):
         """POST /api/tasks/{id}/retry should return 404 when task does not exist."""
         mock_result = MagicMock()
@@ -674,8 +719,6 @@ class RetryTaskAPITests(unittest.TestCase):
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 404)
-
-    def test_retry_task_returns_400_for_running_task(self):
         """POST /api/tasks/{id}/retry should return 400 for a RUNNING task."""
         task = _make_serializable_task(task_status=TaskStatus.RUNNING)
         task.id = 7
@@ -1150,6 +1193,42 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
         self.assertTrue(data["is_retry"])
         self.assertEqual(data["retry_source_task_id"], 80)
         self.assertIsNotNone(data["scheduled_at"])
+
+
+class ListTasksProviderTests(unittest.TestCase):
+    """Tests for provider data in GET /api/tasks responses."""
+
+    def tearDown(self):
+        from app.main import app
+        app.dependency_overrides.clear()
+
+    def test_list_tasks_includes_provider_name_when_loaded(self):
+        """GET /api/tasks should serialize provider_name when provider is loaded."""
+        task = _make_serializable_task(project_id=1)
+        task.provider_id = 9
+        task.provider = MagicMock(name="provider")
+        task.provider.name = "OpenAI Prod"
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [task]
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        client, app = _make_app_client_with_db(mock_db)
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            response = client.get("/api/tasks")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data[0]["provider_id"], 9)
+        self.assertEqual(data[0]["provider_name"], "OpenAI Prod")
+
+        executed_query = mock_db.execute.await_args.args[0]
+        self.assertIn("provider", str(executed_query))
 
 
 # ---------------------------------------------------------------------------

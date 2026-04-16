@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.database import get_db
-from app.dependencies.auth import require_authenticated_user
+from app.dependencies.auth import require_authenticated_user, require_admin_user
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ class ProviderListTests(unittest.TestCase):
         self.mock_db.delete = AsyncMock()
 
         app.dependency_overrides[get_db] = lambda: self.mock_db
-        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
 
         self.client = TestClient(app, raise_server_exceptions=False)
 
@@ -161,7 +161,7 @@ class ProviderCreateTests(unittest.TestCase):
         self.mock_db.delete = AsyncMock()
 
         app.dependency_overrides[get_db] = lambda: self.mock_db
-        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
 
         self.client = TestClient(app, raise_server_exceptions=False)
 
@@ -248,7 +248,7 @@ class ProviderDeleteTests(unittest.TestCase):
         self.mock_db.delete = AsyncMock()
 
         app.dependency_overrides[get_db] = lambda: self.mock_db
-        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
 
         self.client = TestClient(app, raise_server_exceptions=False)
 
@@ -306,7 +306,7 @@ class ProviderSetDefaultTests(unittest.TestCase):
         self.mock_db.delete = AsyncMock()
 
         app.dependency_overrides[get_db] = lambda: self.mock_db
-        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
 
         self.client = TestClient(app, raise_server_exceptions=False)
 
@@ -327,5 +327,29 @@ class ProviderSetDefaultTests(unittest.TestCase):
         self.assertIn("not found", response.json()["detail"].lower())
 
 
-if __name__ == "__main__":
-    unittest.main()
+
+
+class ProviderAuthScopeTests(unittest.TestCase):
+    """Tests that provider routes use admin auth scope."""
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+
+    def test_list_providers_uses_admin_dependency(self):
+        """GET /api/providers should be gated by require_admin_user."""
+        mock_db = MagicMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_user] = lambda: (_ for _ in ()).throw(Exception("wrong dependency"))
+        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/api/providers")
+
+        self.assertEqual(response.status_code, 200)

@@ -98,7 +98,7 @@ async def list_tasks(
     else:
         order_clause = sort_column.desc().nullslast()
 
-    query = select(Task).options(selectinload(Task.issue)).order_by(order_clause)
+    query = select(Task).options(selectinload(Task.issue), selectinload(Task.provider)).order_by(order_clause)
 
     # Multi-status filter (comma-separated, raise 400 for invalid values)
     if status:
@@ -277,7 +277,7 @@ async def list_scheduled_tasks(
     """
     query = (
         select(Task)
-        .options(selectinload(Task.issue))
+        .options(selectinload(Task.issue), selectinload(Task.provider))
         .where(
             Task.scheduled_at.is_not(None),
             Task.status.in_([
@@ -358,7 +358,9 @@ async def get_task(
     """
     t0 = time.time()
     logger.info(f"[HANDLER START] get_task/{task_id} t={t0:.3f}")
-    result = await db.execute(select(Task).options(selectinload(Task.issue)).where(Task.id == task_id))
+    result = await db.execute(
+        select(Task).options(selectinload(Task.issue), selectinload(Task.provider)).where(Task.id == task_id)
+    )
     t1 = time.time()
     task = result.scalar_one_or_none()
 
@@ -710,6 +712,7 @@ async def retry_task(
         scheduled_at=scheduled_at,
         is_retry=True,
         retry_source_task_id=original_task.id,
+        provider_id=original_task.provider_id,
         initiator_user_id=current_user.id if current_user is not None else None,
         initiator_gitlab_user_id=current_user.gitlab_user_id if current_user is not None else None,
         initiator_username=current_user.username if current_user is not None else None,

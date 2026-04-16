@@ -75,12 +75,15 @@ def _make_worker(mock_gitlab=None, mock_docker=None):
 def _make_task(**kwargs):
     """Create a Task object with defaults."""
     from unittest.mock import MagicMock
+    from app.models import AIProvider
 
     # Separate issue-level kwargs
     issue_overrides = {}
     for key in ['branch_name', 'base_branch', 'target_branch', 'merge_request_iid', 'merge_request_url', 'title', 'description']:
         if key in kwargs:
             issue_overrides[key] = kwargs.pop(key)
+
+    provider = kwargs.pop('provider', None)
 
     defaults = dict(
         id=1, project_id=100, issue_id=1,
@@ -91,6 +94,19 @@ def _make_task(**kwargs):
     )
     defaults.update(kwargs)
     task = Task(**defaults)
+
+    if provider is None:
+        provider = AIProvider(
+            id=1,
+            name="legacy-test-provider",
+            base_url="http://localhost:11434/v1",
+            api_key="test-key",
+            model="claude-sonnet-4-20250514",
+            max_turns=20,
+            system_prompt=None,
+            is_default=True,
+        )
+    task.provider = provider
 
     # Attach mock issue
     if defaults.get('issue_id') is not None:
@@ -118,11 +134,22 @@ def _make_task(**kwargs):
 
 def _make_db(task=None):
     """Create a mock async DB session."""
+    from app.models import AIProvider, Issue
     db = MagicMock()
-    mock_result = MagicMock()
-    mock_result.scalar_one_or_none.return_value = task
-    mock_result.scalars.return_value.all.return_value = [task] if task else []
-    db.execute = AsyncMock(return_value=mock_result)
+
+    async def _mock_execute(statement, *args, **kwargs):
+        mock_result = MagicMock()
+        statement_str = str(statement)
+        if 'FROM ai_providers' in statement_str:
+            provider = getattr(task, 'provider', None) if task else None
+            mock_result.scalar_one_or_none.return_value = provider
+            mock_result.scalars.return_value.all.return_value = [provider] if provider else []
+        else:
+            mock_result.scalar_one_or_none.return_value = task
+            mock_result.scalars.return_value.all.return_value = [task] if task else []
+        return mock_result
+
+    db.execute = AsyncMock(side_effect=_mock_execute)
     db.commit = AsyncMock()
     db.add = MagicMock()
     db.flush = AsyncMock()
@@ -130,7 +157,12 @@ def _make_db(task=None):
 
     # Support db.get(Issue, issue_id) for loading issue from task
     async def _mock_get(model_cls, id_val):
-        if task and hasattr(task, 'issue') and task.issue is not None:
+        if model_cls is AIProvider:
+            provider = getattr(task, 'provider', None) if task else None
+            if provider is not None and getattr(provider, 'id', None) == id_val:
+                return provider
+            return None
+        if task and model_cls is Issue and hasattr(task, 'issue') and task.issue is not None:
             if hasattr(task.issue, 'id') and task.issue.id == id_val:
                 return task.issue
         return None

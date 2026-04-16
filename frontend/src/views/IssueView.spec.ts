@@ -19,6 +19,7 @@ const { mockApi, resetMockApi, mockMessage, mockDialog } = vi.hoisted(() => {
     getSlotCapacity: vi.fn<() => Promise<any>>(),
     getConfig: vi.fn<() => Promise<any>>(),
     getProjects: vi.fn<() => Promise<any[]>>(),
+    getProviders: vi.fn<() => Promise<any[]>>(),
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => fn.mockReset())
@@ -62,6 +63,7 @@ vi.mock('../api', () => ({
   getSlotCapacity: mockApi.getSlotCapacity,
   getConfig: mockApi.getConfig,
   getProjects: mockApi.getProjects,
+  getProviders: mockApi.getProviders,
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -398,6 +400,7 @@ function setupDefaultMocks(issueOverrides: Record<string, any> = {}) {
   mockApi.getScheduledTasks.mockResolvedValue([])
   mockApi.getSlotCapacity.mockResolvedValue(null)
   mockApi.getConfig.mockResolvedValue({ runtime: { slot_max_tasks: 5, slot_max_tasks_enforce: false } })
+  mockApi.getProviders.mockResolvedValue([])
   return issue
 }
 
@@ -435,6 +438,7 @@ describe('IssueView', () => {
       mockApi.getIssue.mockReturnValue(new Promise(() => {})) // never resolves
       mockApi.getProjects.mockResolvedValue([])
       mockApi.getPromptTemplates.mockResolvedValue([])
+      mockApi.getProviders.mockResolvedValue([])
       await router.push('/issues/1')
       await router.isReady()
       wrapper = mount(IssueView, { global: { plugins: [router] } })
@@ -916,6 +920,7 @@ describe('IssueView', () => {
       mockApi.getIssue.mockRejectedValue(new Error('Network error'))
       mockApi.getProjects.mockResolvedValue([])
       mockApi.getPromptTemplates.mockResolvedValue([])
+      mockApi.getProviders.mockResolvedValue([])
       wrapper = await mountComponent()
       expect(mockMessage.error).toHaveBeenCalledWith('issue.loadFailed')
     })
@@ -932,6 +937,7 @@ describe('IssueView', () => {
       mockApi.getIssue.mockRejectedValue(new Error('fail'))
       mockApi.getProjects.mockResolvedValue([])
       mockApi.getPromptTemplates.mockResolvedValue([])
+      mockApi.getProviders.mockResolvedValue([])
       wrapper = await mountComponent()
       // Issue is null → v-else renders the spinner
       const issueView = wrapper.find('[data-testid="issue-view-page"]')

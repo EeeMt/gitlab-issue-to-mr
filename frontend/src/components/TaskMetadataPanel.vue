@@ -63,6 +63,17 @@
         </span>
       </div>
 
+      <!-- Provider -->
+      <div v-if="task.provider_name || task.provider_id" class="metadata-row">
+        <span class="metadata-label">
+          <n-icon size="14" class="metadata-label-icon"><ServerOutline /></n-icon>
+          {{ t('taskView.provider') }}
+        </span>
+        <span class="metadata-value">
+          {{ task.provider_name || t('config.providers.systemDefault') }}
+        </span>
+      </div>
+
       <!-- Branch flow -->
       <div class="metadata-row">
         <span class="metadata-label">
@@ -154,7 +165,8 @@ import {
   GitBranchOutline,
   TimeOutline,
   GitPullRequest,
-  RefreshOutline
+  RefreshOutline,
+  ServerOutline
 } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import type { Task } from '../api'

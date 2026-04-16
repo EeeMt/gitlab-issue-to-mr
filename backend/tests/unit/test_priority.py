@@ -46,13 +46,35 @@ class MockContainer:
 
 def create_mock_db(task, issue=None):
     """Create a properly configured mock database session."""
+    from app.models import AIProvider, Issue
+
     mock_db = MagicMock()
-    mock_result = MagicMock()
-    mock_result.scalar_one_or_none.return_value = task
-    mock_db.execute = AsyncMock(return_value=mock_result)
+
+    async def _mock_execute(statement, *args, **kwargs):
+        mock_result = MagicMock()
+        statement_str = str(statement)
+        if 'FROM ai_providers' in statement_str:
+            provider = getattr(task, 'provider', None)
+            mock_result.scalar_one_or_none.return_value = provider
+            mock_result.scalars.return_value.all.return_value = [provider] if provider else []
+        else:
+            mock_result.scalar_one_or_none.return_value = task
+        return mock_result
+
+    mock_db.execute = AsyncMock(side_effect=_mock_execute)
     mock_db.commit = AsyncMock()
     mock_db.add = MagicMock()
-    mock_db.get = AsyncMock(return_value=issue)
+
+    async def _mock_get(model_cls, id_val):
+        if model_cls is Issue:
+            return issue
+        if model_cls is AIProvider:
+            provider = getattr(task, 'provider', None)
+            if provider is not None and getattr(provider, 'id', None) == id_val:
+                return provider
+        return None
+
+    mock_db.get = AsyncMock(side_effect=_mock_get)
     mock_db.refresh = AsyncMock()
     return mock_db
 

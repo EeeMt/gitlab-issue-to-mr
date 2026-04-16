@@ -178,6 +178,7 @@ const globalStubs = {
   },
   MattermostNotificationsPanel: { template: '<div class="mattermost-panel">Mattermost</div>' },
   WorkerSettingsPanel: { template: '<div class="worker-panel">Worker</div>' },
+  AIProvidersPanel: { template: '<div class="ai-providers-panel">AI Providers</div>' },
   PageHeader: { template: '<div class="page-header"><slot name="actions"/></div>' },
   SummaryCard: {
     props: ['label', 'value'],

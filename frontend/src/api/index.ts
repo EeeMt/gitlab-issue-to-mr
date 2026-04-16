@@ -132,6 +132,8 @@ export interface Task {
   output_tokens: number | null
   model_name?: string | null
   merge_request_title?: string | null
+  provider_id: number | null
+  provider_name?: string | null
   created_at: string
   updated_at: string
   started_at: string | null
@@ -159,6 +161,40 @@ export interface Branch {
   name: string
 }
 
+// AI Provider types
+export interface AIProvider {
+  id: number
+  name: string
+  base_url: string
+  api_key_configured: boolean
+  model: string
+  max_turns: number
+  system_prompt: string | null
+  is_default: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateProviderRequest {
+  name: string
+  base_url: string
+  api_key?: string
+  model: string
+  max_turns?: number
+  system_prompt?: string
+}
+
+export interface UpdateProviderRequest {
+  name?: string
+  base_url?: string
+  api_key?: string
+  clear_api_key?: boolean
+  model?: string
+  max_turns?: number
+  system_prompt?: string | null
+  clear_system_prompt?: boolean
+}
+
 // Request types
 export interface CreateTaskRequest {
   issue_id: number
@@ -166,6 +202,7 @@ export interface CreateTaskRequest {
   priority?: number
   delay_seconds?: number
   scheduled_datetime?: string
+  provider_id?: number | null
 }
 
 export interface RescheduleTaskRequest {
@@ -1099,6 +1136,36 @@ export async function closeIssue(id: number): Promise<Issue> {
 
 export async function deleteIssue(id: number): Promise<void> {
   await api.delete(`/issues/${id}`)
+}
+
+// AI Provider API functions
+export async function getProviders(): Promise<AIProvider[]> {
+  const { data } = await api.get('/providers')
+  return data
+}
+
+export async function getProvider(id: number): Promise<AIProvider> {
+  const { data } = await api.get(`/providers/${id}`)
+  return data
+}
+
+export async function createProvider(request: CreateProviderRequest): Promise<AIProvider> {
+  const { data } = await api.post('/providers', request)
+  return data
+}
+
+export async function updateProvider(id: number, request: UpdateProviderRequest): Promise<AIProvider> {
+  const { data } = await api.patch(`/providers/${id}`, request)
+  return data
+}
+
+export async function deleteProvider(id: number): Promise<void> {
+  await api.delete(`/providers/${id}`)
+}
+
+export async function setDefaultProvider(id: number): Promise<AIProvider> {
+  const { data } = await api.post(`/providers/${id}/set-default`)
+  return data
 }
 
 export default api

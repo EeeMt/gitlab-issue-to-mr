@@ -367,6 +367,16 @@
               </div>
             </div>
           </n-form-item>
+
+          <!-- AI Provider -->
+          <n-form-item :label="t('config.providers.providerLabel')">
+            <n-select
+              v-model:value="selectedProviderId"
+              :options="providerOptions"
+              clearable
+              :placeholder="t('config.providers.systemDefault')"
+            />
+          </n-form-item>
         </n-form>
 
         <!-- Slot capacity alert -->
@@ -435,7 +445,7 @@ import { ref, computed, h, onMounted, onUnmounted, reactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin,
-  NIcon, NDataTable, NInput, NDrawer, NDrawerContent,
+  NIcon, NDataTable, NInput, NDrawer, NDrawerContent, NSelect,
   NRadio, NRadioGroup, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NAlert,
   useMessage, useDialog,
   type DataTableColumns
@@ -457,8 +467,8 @@ import VariableEditor from '../components/VariableEditor.vue'
 import HeatmapChart from '../components/HeatmapChart.vue'
 import {
   getIssue, updateIssue, closeIssue, createTask, retryTask, getPromptTemplates,
-  getScheduledTasks, getSlotCapacity, getConfig, getProjects,
-  type Issue, type Task, type PromptTemplate, type SlotCapacityInfo, type Project
+  getScheduledTasks, getSlotCapacity, getConfig, getProjects, getProviders,
+  type Issue, type Task, type PromptTemplate, type SlotCapacityInfo, type Project, type AIProvider
 } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
@@ -500,6 +510,8 @@ const newTaskPrompt = ref('')
 const newTaskPriority = ref(1)
 const newTaskSchedule = ref<number | null>(null)
 const createTaskLoading = ref(false)
+const providers = ref<AIProvider[]>([])
+const selectedProviderId = ref<number | null>(null)
 const promptTemplates = ref<PromptTemplate[]>([])
 const promptTemplatesLoading = ref(false)
 const promptVariableTips = ref<Record<string, string> | undefined>(undefined)
@@ -828,10 +840,14 @@ async function handleCreateTask() {
     if (scheduleType.value === 'scheduled' && newTaskSchedule.value) {
       request.scheduled_datetime = new Date(newTaskSchedule.value).toISOString()
     }
+    if (selectedProviderId.value) {
+      request.provider_id = selectedProviderId.value
+    }
     await createTask(request)
     message.success(t('issue.taskCreated'))
     newTaskPrompt.value = ''
     newTaskSchedule.value = null
+    selectedProviderId.value = null
     scheduleType.value = 'now'
     showCreateDrawer.value = false
     await fetchIssue()
@@ -897,10 +913,18 @@ function openEditModal() {
   showEditModal.value = true
 }
 
+const providerOptions = computed(() =>
+  providers.value.map(p => ({
+    label: `${p.name} (${p.model})${p.is_default ? ' ★' : ''}`,
+    value: p.id,
+  }))
+)
+
 onMounted(() => {
   fetchIssue()
   fetchPromptTemplates()
   getProjects().then(p => { projects.value = p }).catch(() => {})
+  getProviders().then(data => { providers.value = data }).catch(() => {})
 })
 </script>
 

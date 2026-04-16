@@ -440,6 +440,39 @@ class RuntimeEndpointCoverageTests(unittest.TestCase):
         saved_keys = [c[1] for c in save_calls]
         self.assertIn("anthropic_api_key", saved_keys)
 
+    @patch("app.api.config_runtime.load_runtime_config_from_db", new_callable=AsyncMock)
+    @patch("app.api.config_runtime.get_effective_settings")
+    @patch("app.api.config_runtime.get_settings")
+    @patch("app.api.config_runtime.save_runtime_config_override", new_callable=AsyncMock)
+    @patch("app.api.config_runtime.reset_runtime_config_override", new_callable=AsyncMock)
+    @patch("app.api.config_runtime._sync_anthropic_to_default_provider", new_callable=AsyncMock)
+    def test_patch_clear_anthropic_api_key_syncs_provider_clear(
+        self,
+        mock_sync_provider,
+        mock_reset,
+        mock_save,
+        mock_get_settings,
+        mock_eff_settings,
+        mock_load,
+    ):
+        """PATCH clear_anthropic_api_key should sync the clear intent to the default provider."""
+        mock_settings = MagicMock()
+        mock_settings.alert_webhook_url = ""
+        mock_settings.anthropic_api_key = "sk-old-key"
+        mock_settings.model_dump.return_value = get_settings().model_dump()
+        mock_get_settings.return_value = mock_settings
+        mock_eff_settings.return_value = get_settings()
+
+        response = self.client.patch(
+            "/api/config/runtime",
+            json={"clear_anthropic_api_key": True},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_sync_provider.assert_awaited_once()
+        sync_updates = mock_sync_provider.await_args.args[1]
+        self.assertTrue(sync_updates.get("clear_anthropic_api_key"))
+
     # ── PATCH with ConfigEncryptionError (lines 283-284) ────────────
 
     @patch("app.api.config_runtime.load_runtime_config_from_db", new_callable=AsyncMock)

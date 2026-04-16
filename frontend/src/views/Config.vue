@@ -58,6 +58,10 @@
               <WorkerSettingsPanel :is-mobile="isMobile" />
             </n-tab-pane>
 
+            <n-tab-pane name="ai-providers" :tab="t('config.providers.title')">
+              <AIProvidersPanel :is-mobile="isMobile" />
+            </n-tab-pane>
+
             <n-tab-pane name="maintenance" :tab="t('config.maintenanceTab')">
               <MaintenancePanel />
             </n-tab-pane>
@@ -100,6 +104,7 @@ import PromptTemplatesPanel from './config/PromptTemplatesPanel.vue'
 // External components
 import MattermostNotificationsPanel from '../components/config/MattermostNotificationsPanel.vue'
 import WorkerSettingsPanel from '../components/config/WorkerSettingsPanel.vue'
+import AIProvidersPanel from '../components/config/AIProvidersPanel.vue'
 
 // Composable
 import { provideConfigForm } from './config/useConfigForm'
@@ -122,8 +127,8 @@ const gitlabPanelRef = ref<InstanceType<typeof GitLabSettingsPanel> | null>(null
 const promptTemplatesPanelRef = ref<InstanceType<typeof PromptTemplatesPanel> | null>(null)
 
 // Tab state
-const activeConfigTab = ref<'runtime' | 'notifications' | 'gitlab' | 'auth' | 'worker' | 'maintenance' | 'prompt-templates'>('runtime')
-const configTabs = ['runtime', 'notifications', 'gitlab', 'auth', 'worker', 'maintenance', 'prompt-templates'] as const
+const activeConfigTab = ref<'runtime' | 'notifications' | 'gitlab' | 'auth' | 'worker' | 'ai-providers' | 'maintenance' | 'prompt-templates'>('runtime')
+const configTabs = ['runtime', 'notifications', 'gitlab', 'auth', 'worker', 'ai-providers', 'maintenance', 'prompt-templates'] as const
 type ConfigTabKey = typeof configTabs[number]
 
 const notificationReloadKey = ref(0)

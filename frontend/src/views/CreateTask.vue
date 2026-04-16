@@ -225,6 +225,17 @@
                     </n-space>
                   </n-form-item>
                 </n-gi>
+
+                <n-gi :span="isMobile ? 1 : 2">
+                  <n-form-item :label="t('config.providers.providerLabel')">
+                    <n-select
+                      v-model:value="selectedProviderId"
+                      :options="providerOptions"
+                      clearable
+                      :placeholder="t('config.providers.systemDefault')"
+                    />
+                  </n-form-item>
+                </n-gi>
               </n-grid>
             </div>
 
@@ -312,7 +323,7 @@ import {
   useMessage, FormInst, FormRules
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { createTask, getIssues, getPromptTemplates, getScheduledTasks, getSlotCapacity, getConfig, type Issue, type CreateTaskRequest, type PromptTemplate, type Task, type SlotCapacityInfo } from '../api'
+import { createTask, getIssues, getPromptTemplates, getScheduledTasks, getSlotCapacity, getConfig, getProviders, type Issue, type CreateTaskRequest, type PromptTemplate, type Task, type SlotCapacityInfo, type AIProvider } from '../api'
 import { formatDateTimeUtc8, formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
 import { isSameLocalDay } from '../utils/format'
 import { extractSlotErrorMessage } from '../utils/slotError'
@@ -336,6 +347,8 @@ const promptTemplatesLoading = ref(false)
 // Data
 const issues = ref<Issue[]>([])
 const promptTemplates = ref<PromptTemplate[]>([])
+const providers = ref<AIProvider[]>([])
+const selectedProviderId = ref<number | null>(null)
 
 // Per-session variable tips from template (not persisted)
 const promptVariableTips = ref<Record<string, string> | undefined>(undefined)
@@ -347,6 +360,13 @@ const unreplacedVariables = computed(() => {
   if (!matches) return []
   return matches.map(m => m.replace(/\{\{|\}\}/g, ''))
 })
+
+const providerOptions = computed(() =>
+  providers.value.map(p => ({
+    label: `${p.name} (${p.model})${p.is_default ? ' ★' : ''}`,
+    value: p.id,
+  }))
+)
 
 const priorityOptions = computed(() => [
   { value: 0, label: t('createTask.p0'), desc: t('createTask.p0Desc') },
@@ -623,6 +643,7 @@ async function handleReset() {
   delayValue.value = 5
   delayUnit.value = 'minutes'
   scheduledDatetime.value = null
+  selectedProviderId.value = null
   createdTaskId.value = 0
   formResetKey.value += 1
 
@@ -689,6 +710,10 @@ async function handleSubmit() {
 
     Object.assign(request, buildScheduleRequest())
 
+    if (selectedProviderId.value) {
+      request.provider_id = selectedProviderId.value
+    }
+
     const task = await createTask(request)
     createdTaskId.value = task.id
     showSuccessModal.value = true
@@ -713,6 +738,7 @@ function createAnother() {
 onMounted(() => {
   fetchIssues()
   fetchPromptTemplates()
+  getProviders().then(data => { providers.value = data }).catch(() => {})
 })
 
 watch(scheduleType, (newType) => {

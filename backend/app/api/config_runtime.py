@@ -257,7 +257,10 @@ async def _sync_anthropic_to_default_provider(
     if "claude_max_turns" in updates:
         provider.max_turns = int(updates["claude_max_turns"])
         changed = True
-    if "anthropic_api_key" in updates:
+    if updates.get("clear_anthropic_api_key"):
+        provider.api_key = None
+        changed = True
+    elif "anthropic_api_key" in updates:
         from app.core.config_crypto import encrypt_config_secret
         provider.api_key = encrypt_config_secret(updates["anthropic_api_key"])
         changed = True
@@ -292,6 +295,10 @@ async def update_runtime_config(
     clear_alert_webhook = bool(runtime_updates.pop("clear_alert_webhook_url", False))
     clear_anthropic_api_key = bool(runtime_updates.pop("clear_anthropic_api_key", False))
 
+    provider_sync_updates = dict(runtime_updates)
+    if clear_anthropic_api_key:
+        provider_sync_updates["clear_anthropic_api_key"] = True
+
     preview_settings = _build_preview_settings(runtime_updates, get_settings())
 
     if clear_alert_webhook and "alert_webhook_url" not in runtime_updates:
@@ -317,7 +324,7 @@ async def update_runtime_config(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
     # Sync anthropic_* changes to default AI provider
-    await _sync_anthropic_to_default_provider(db, runtime_updates)
+    await _sync_anthropic_to_default_provider(db, provider_sync_updates)
     await db.commit()
 
     return _serialize_runtime_config(get_effective_settings())
