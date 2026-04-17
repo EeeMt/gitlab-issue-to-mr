@@ -83,6 +83,23 @@
             </div>
             <div class="app-shell__topbar-actions">
               <LanguageToggle size="small" class="app-shell__language-toggle" />
+              <n-tooltip trigger="hover" :style="onboardingTooltipStyle">
+                <template #trigger>
+                  <n-button
+                    tertiary
+                    circle
+                    class="app-shell__onboarding-button app-shell__onboarding-button--icon-only"
+                    data-testid="reopen-onboarding-desktop"
+                    :title="t('shell.reopenOnboarding')"
+                    @click="openOnboarding"
+                  >
+                    <template #icon>
+                      <n-icon :component="InformationCircleOutline" />
+                    </template>
+                  </n-button>
+                </template>
+                {{ t('shell.productTour') }}
+              </n-tooltip>
               <n-button tertiary class="app-shell__logout-button" @click="handleLogout">
                 <template #icon>
                   <n-icon :component="LogOutOutline" />
@@ -116,6 +133,19 @@
                 v-if="showUserToolbar"
                 quaternary
                 circle
+                data-testid="reopen-onboarding-mobile"
+                class="mobile-header__onboarding-button"
+                :title="t('shell.reopenOnboarding')"
+                @click="openOnboarding"
+              >
+                <template #icon>
+                  <n-icon :component="InformationCircleOutline" />
+                </template>
+              </n-button>
+              <n-button
+                v-if="showUserToolbar"
+                quaternary
+                circle
                 class="mobile-header__logout-button"
                 :title="t('shell.logout')"
                 @click="handleLogout"
@@ -135,8 +165,8 @@
 
           <OnboardingModal
             :show="showOnboarding"
-            @close="dismissOnboarding"
-            @complete="dismissOnboarding"
+            @close="handleOnboardingClose"
+            @complete="handleOnboardingComplete"
             @view-dashboard="navigateToDashboard"
             @create-issue="navigateToCreateIssue"
           />
@@ -162,6 +192,7 @@ import {
   NMenu,
   NMessageProvider,
   NSpin,
+  NTooltip,
   NText
 } from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
@@ -175,6 +206,7 @@ import {
   ListOutline,
   LogOutOutline,
   MenuOutline,
+  InformationCircleOutline,
   CalendarOutline,
   PeopleOutline,
   RocketOutline,
@@ -217,11 +249,18 @@ const menuLabels: Record<string, string> = {
   AccessManagement: 'nav.accessManagement'
 }
 
+const onboardingTooltipStyle = {
+  fontSize: '11px',
+  padding: '4px 8px',
+  borderRadius: '6px',
+}
+
 const currentPageLabel = computed(() => t(menuLabels[activeKey.value] || 'app.navigation'))
 const showUserToolbar = computed(() => authState.authenticated)
 const onboardingDismissed = ref(getOnboardingDismissed())
+const manualOnboardingOpen = ref(false)
 const showOnboarding = computed(
-  () => authState.initialized && authState.authenticated && showShell.value && !onboardingDismissed.value
+  () => authState.initialized && authState.authenticated && showShell.value && (!onboardingDismissed.value || manualOnboardingOpen.value)
 )
 const userDisplayName = computed(
   () => authState.user?.display_name || authState.user?.username || t('shell.gitlabUser')
@@ -300,22 +339,34 @@ function handleMenuUpdate(key: string) {
   router.push({ name: key })
 }
 
-function dismissOnboarding() {
-  if (onboardingDismissed.value) {
-    return
-  }
+function openOnboarding() {
+  manualOnboardingOpen.value = true
+}
 
-  onboardingDismissed.value = true
-  setOnboardingDismissed(true)
+function dismissOnboarding() {
+  if (!onboardingDismissed.value) {
+    onboardingDismissed.value = true
+    setOnboardingDismissed(true)
+  }
+}
+
+function handleOnboardingClose() {
+  dismissOnboarding()
+  manualOnboardingOpen.value = false
+}
+
+function handleOnboardingComplete() {
+  dismissOnboarding()
+  manualOnboardingOpen.value = false
 }
 
 async function navigateToDashboard() {
-  dismissOnboarding()
+  handleOnboardingComplete()
   await router.push({ name: 'Dashboard' })
 }
 
 async function navigateToCreateIssue() {
-  dismissOnboarding()
+  handleOnboardingComplete()
   await router.push({ name: 'CreateIssue' })
 }
 
@@ -423,8 +474,17 @@ body {
   min-width: 0;
 }
 
+.app-shell__onboarding-button,
 .app-shell__logout-button {
   flex-shrink: 0;
+}
+
+.app-shell__onboarding-button--icon-only {
+  color: rgba(15, 23, 42, 0.5);
+}
+
+.app-shell__onboarding-button--icon-only:hover {
+  color: rgba(15, 23, 42, 0.72);
 }
 
 /* Global button styling - unified rounded corners */

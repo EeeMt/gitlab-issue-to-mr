@@ -40,7 +40,7 @@ const {
   mockSetOnboardingDismissed: vi.fn(),
   mockIsAdmin: { value: true },
   mockDismissedState: { value: false },
-  mockIsMobileState: { value: false },
+  mockIsMobileState: { value: false, __v_isRef: true },
 }))
 
 vi.mock('./auth', () => ({
@@ -118,6 +118,7 @@ vi.mock('@vicons/ionicons5', () => ({
   PeopleOutline: {},
   RocketOutline: {},
   SettingsOutline: {},
+  InformationCircleOutline: {},
   SpeedometerOutline: {},
 }))
 
@@ -133,7 +134,8 @@ vi.mock('naive-ui', () => ({
   NLayoutSider: { name: 'NLayoutSider', setup(_p: any, { slots }: any) { return () => h('aside', { class: 'n-layout-sider' }, slots.default?.()) } },
   NMenu: { name: 'NMenu', setup() { return () => h('nav', { class: 'n-menu' }) } },
   NMessageProvider: { name: 'NMessageProvider', setup(_p: any, { slots }: any) { return () => h('div', { class: 'n-message-provider' }, slots.default?.()) } },
-  NSpin: { name: 'NSpin', setup() { return () => h('div', { class: 'n-spin' }) } },
+  NSpin: { name: 'NSpin', setup(_p: any, { slots }: any) { return () => h('div', { class: 'n-spin' }, slots.default?.()) } },
+  NTooltip: { name: 'NTooltip', setup(_p: any, { slots }: any) { return () => h('div', { class: 'n-tooltip' }, [slots.trigger?.(), slots.default?.()]) } },
   NText: { name: 'NText', setup(_p: any, { slots }: any) { return () => h('span', slots.default?.()) } },
 }))
 
@@ -197,6 +199,14 @@ describe('App onboarding integration', () => {
     vi.clearAllMocks()
   })
 
+  it('renders a loading spinner before auth initialization completes', async () => {
+    mockAuthState.initialized = false
+
+    const { wrapper } = await mountAppAt('/dashboard')
+
+    expect(wrapper.find('.n-spin').exists()).toBe(true)
+  })
+
   it('shows onboarding for authenticated users when not dismissed', async () => {
     const { wrapper } = await mountAppAt('/dashboard')
 
@@ -248,6 +258,31 @@ describe('App onboarding integration', () => {
     expect(router.currentRoute.value.name).toBe('CreateIssue')
     expect(mockSetOnboardingDismissed).toHaveBeenCalledTimes(1)
     expect(mockSetOnboardingDismissed).toHaveBeenCalledWith(true)
+  })
+
+  it('shows the desktop onboarding entry as icon-only trigger', async () => {
+    mockDismissedState.value = true
+
+    const { wrapper } = await mountAppAt('/dashboard')
+    const trigger = wrapper.find('[data-testid="reopen-onboarding-desktop"]')
+
+    expect(trigger.exists()).toBe(true)
+    expect(trigger.attributes('title')).toBe('shell.reopenOnboarding')
+    expect(trigger.text()).toBe('')
+  })
+
+  it('reopens onboarding from the mobile header entry after dismissal', async () => {
+    mockDismissedState.value = true
+    mockIsMobileState.value = true
+
+    const { wrapper } = await mountAppAt('/dashboard')
+
+    expect(wrapper.find('[data-testid="onboarding-modal"]').exists()).toBe(false)
+
+    await wrapper.find('[data-testid="reopen-onboarding-mobile"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="onboarding-modal"]').exists()).toBe(true)
   })
 
   it('keeps onboarding hidden on login and bootstrap routes', async () => {

@@ -2,14 +2,43 @@ import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { h } from 'vue'
 
+const { sparklesIconStub, gitMergeIconStub, calendarIconStub } = vi.hoisted(() => ({
+  sparklesIconStub: {
+    name: 'SparklesOutline',
+    setup() {
+      return () => h('svg', { class: 'icon-stub icon-stub--SparklesOutline' })
+    },
+  },
+  gitMergeIconStub: {
+    name: 'GitMergeOutline',
+    setup() {
+      return () => h('svg', { class: 'icon-stub icon-stub--GitMergeOutline' })
+    },
+  },
+  calendarIconStub: {
+    name: 'CalendarClearOutline',
+    setup() {
+      return () => h('svg', { class: 'icon-stub icon-stub--CalendarClearOutline' })
+    },
+  },
+}))
+
 const messages: Record<string, string> = {
   'onboarding.actions.closeOnboarding': 'Close onboarding',
+  'onboarding.welcome.heading': '让 AI 执行需求，生成代码并发起 MR。',
+  'onboarding.welcome.body': 'Codify 支持 <strong>任务调度</strong> 与 <u>排队执行</u>，让 AI 在有限计算资源下持续产出代码并发起 <strong>MR</strong>。',
 }
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string) => messages[key] ?? key,
   }),
+}))
+
+vi.mock('@vicons/ionicons5', () => ({
+  SparklesOutline: sparklesIconStub,
+  GitMergeOutline: gitMergeIconStub,
+  CalendarClearOutline: calendarIconStub,
 }))
 
 vi.mock('naive-ui', () => ({
@@ -72,6 +101,12 @@ vi.mock('naive-ui', () => ({
       ])
     },
   },
+  NIcon: {
+    name: 'NIcon',
+    setup(_props: any, { slots }: any) {
+      return () => h('i', { class: 'n-icon' }, slots.default?.())
+    },
+  },
 }))
 
 import OnboardingModal from './OnboardingModal.vue'
@@ -91,6 +126,29 @@ describe('OnboardingModal', () => {
     expect(wrapper.find('.onboarding-modal').exists()).toBe(true)
     expect(wrapper.find('[data-testid="onboarding-step-title"]').text()).toBe('onboarding.welcome.title')
     expect(wrapper.find('.n-steps').attributes('data-current')).toBe('1')
+  })
+
+  it('renders emphasized markup in the welcome copy', () => {
+    const wrapper = mountComponent()
+
+    expect(wrapper.find('.onboarding-modal__section-text strong').text()).toBe('任务调度')
+    expect(wrapper.find('.onboarding-modal__section-text u').text()).toBe('排队执行')
+    expect(wrapper.findAll('.onboarding-modal__section-text strong')[1].text()).toBe('MR')
+  })
+
+  it('renders decorative motif icons as full-size background shapes', () => {
+    const wrapper = mountComponent()
+    const motifs = wrapper.findAll('[data-testid="onboarding-background-motif"]')
+    const motifIcons = wrapper.findAll('.onboarding-modal__motif-icon')
+
+    expect(motifs).toHaveLength(3)
+    expect(motifIcons).toHaveLength(3)
+    expect(motifs[0].find('.onboarding-modal__motif-icon').exists()).toBe(true)
+    expect(motifs[1].find('.onboarding-modal__motif-icon').exists()).toBe(true)
+    expect(motifs[2].find('.onboarding-modal__motif-icon').exists()).toBe(true)
+    expect(wrapper.find('.icon-stub--SparklesOutline').exists()).toBe(true)
+    expect(wrapper.find('.icon-stub--GitMergeOutline').exists()).toBe(true)
+    expect(wrapper.find('.icon-stub--CalendarClearOutline').exists()).toBe(true)
   })
 
   it('moves between steps', async () => {

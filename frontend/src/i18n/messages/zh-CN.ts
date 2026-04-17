@@ -194,24 +194,24 @@ const zhCN = {
       shortTitle: '欢迎',
       caption: '先了解 Codify 的作用',
       description: '开始创建工作前，先快速了解核心流程。',
-      heading: '把 Codify Issue 转化为清晰的执行流程。',
-      body: 'Codify 帮助你围绕 Codify Issue 组织工作，把需求拆分为可执行的任务，并在同一个地方跟踪从想法到结果的全过程。',
+      heading: '从需求到代码',
+      body: 'Codify 借助 <strong>任务调度</strong>，擅长在有限计算资源下持续推动 AI <strong>生成代码</strong>并发起 <strong>MR</strong>。',
       summaryLabel: '从这里开始',
-      summaryTitle: '每个工作流都从 Codify Issue 开始',
-      summaryBody: '先描述你想达成的结果，把背景信息集中起来，再由 Codify 协调后续工作。',
+      summaryTitle: '每个工作流都从需求开始',
+      summaryBody: '说明你想实现的目标，并说明交付要求，再由 Codify 协调调度、执行与交付。',
     },
     concepts: {
       title: '了解核心概念',
       shortTitle: '概念',
-      caption: 'Issue、任务与结果',
+      caption: '需求、任务与结果',
       description: '这三个概念能帮助你规划工作、跟踪执行，并回看最终产出。',
       codifyIssue: {
-        title: 'Codify Issue',
-        body: 'Codify Issue 是工作流的起点。它用于记录目标、背景和预期结果，让团队围绕同一份上下文组织后续工作。',
+        title: '需求',
+        body: '需求是工作流的起点，用来记录目标、背景和预期结果，让 AI 任务基于同一份上下文执行。',
       },
       tasks: {
         title: '任务',
-        body: '任务是从该 Issue 派生出的执行单元。你可以用它安排执行、在更新指令后重试，并逐步查看整体进展。',
+        body: '任务是从该需求派生出的执行单元。你可以用它安排执行、在更新指令后重试，并逐步查看整体进展。',
       },
       results: {
         title: '结果',
@@ -226,13 +226,13 @@ const zhCN = {
       steps: {
         first: {
           step: '1',
-          title: '创建 Codify Issue',
-          body: '先创建一个 Codify Issue，说明要解决的问题、期望达成的结果，以及需要关注的限制条件。',
+          title: '创建需求',
+          body: '先创建一条需求，说明要解决的问题、期望达成的结果，以及需要关注的限制条件。',
         },
         second: {
           step: '2',
           title: '发起或预约任务',
-          body: '准备执行时，从该 Issue 创建任务。你可以立即开始，也可以结合队列和团队节奏预约执行。',
+          body: '准备执行时，从该需求创建任务。你可以立即开始，也可以结合队列和团队节奏预约执行。',
         },
         third: {
           step: '3',
@@ -248,7 +248,7 @@ const zhCN = {
       previous: '上一步',
       next: '下一步',
       viewDashboard: '查看仪表盘',
-      createIssue: '创建 Issue',
+      createIssue: '创建需求',
     },
   },
   dashboard: {

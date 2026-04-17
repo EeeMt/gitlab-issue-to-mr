@@ -1,121 +1,153 @@
 <template>
   <n-modal :show="show" :mask-closable="false" :close-on-esc="true" @close="emit('close')">
-    <n-card class="onboarding-modal" :bordered="false" role="dialog" aria-modal="true">
-      <template #header>
-        <div class="onboarding-modal__header">
-          <div class="onboarding-modal__header-main">
-            <span class="onboarding-modal__eyebrow">{{ t('onboarding.progressLabel', { current: activeStep.number, total: steps.length }) }}</span>
-            <h2 class="onboarding-modal__title" data-testid="onboarding-step-title">
-              {{ t(activeStep.titleKey) }}
-            </h2>
-            <p class="onboarding-modal__description">
-              {{ t(activeStep.descriptionKey) }}
-            </p>
-          </div>
-
-          <n-button quaternary circle class="onboarding-modal__close" :aria-label="t('onboarding.actions.closeOnboarding')" @click="emit('close')">
-            <span aria-hidden="true">×</span>
-          </n-button>
-        </div>
-
-        <n-steps :current="currentStep + 1" size="small" class="onboarding-modal__steps">
-          <n-step
-            v-for="step in steps"
-            :key="step.number"
-            :title="t(step.shortTitleKey)"
-            :description="t(step.captionKey)"
-          />
-        </n-steps>
-      </template>
-
-      <div class="onboarding-modal__body">
-        <template v-if="activeStep.number === 1">
-          <div class="onboarding-modal__hero">
-            <div class="onboarding-modal__hero-copy">
-              <h3 class="onboarding-modal__section-title">{{ t('onboarding.welcome.heading') }}</h3>
-              <p class="onboarding-modal__section-text">{{ t('onboarding.welcome.body') }}</p>
-            </div>
-            <div class="onboarding-modal__summary-card">
-              <span class="onboarding-modal__summary-label">{{ t('onboarding.welcome.summaryLabel') }}</span>
-              <strong class="onboarding-modal__summary-title">{{ t('onboarding.welcome.summaryTitle') }}</strong>
-              <p class="onboarding-modal__summary-text">{{ t('onboarding.welcome.summaryBody') }}</p>
-            </div>
-          </div>
-        </template>
-
-        <template v-else-if="activeStep.number === 2">
-          <div class="onboarding-modal__concept-grid">
-            <n-thing
-              v-for="item in conceptItems"
-              :key="item.titleKey"
-              class="onboarding-modal__concept-card"
-              :title="t(item.titleKey)"
-            >
-              <p class="onboarding-modal__section-text">{{ t(item.bodyKey) }}</p>
-            </n-thing>
-          </div>
-        </template>
-
-        <template v-else>
-          <div class="onboarding-modal__workflow-list">
+    <div
+      ref="shellRef"
+      class="onboarding-modal-shell"
+      :style="shellStyle"
+      @transitionend="handleShellTransitionEnd"
+    >
+      <div ref="contentRef" class="onboarding-modal-shell__content">
+        <n-card
+          class="onboarding-modal"
+          :bordered="false"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div class="onboarding-modal__background" aria-hidden="true">
             <div
-              v-for="item in workflowItems"
-              :key="item.stepKey"
-              class="onboarding-modal__workflow-item"
+              v-for="motif in decorativeMotifs"
+              :key="motif.key"
+              :class="['onboarding-modal__motif', motif.className]"
+              data-testid="onboarding-background-motif"
+              aria-hidden="true"
             >
-              <div class="onboarding-modal__workflow-index">{{ t(item.stepKey) }}</div>
-              <div>
-                <h3 class="onboarding-modal__section-title">{{ t(item.titleKey) }}</h3>
-                <p class="onboarding-modal__section-text">{{ t(item.bodyKey) }}</p>
-              </div>
+              <n-icon class="onboarding-modal__motif-icon">
+                <component :is="motif.icon" />
+              </n-icon>
+            </div>
+          </div>
+        <template #header>
+          <div class="onboarding-modal__header">
+            <div class="onboarding-modal__header-main">
+              <span class="onboarding-modal__eyebrow">{{ t('onboarding.progressLabel', { current: activeStep.number, total: steps.length }) }}</span>
+              <h2 class="onboarding-modal__title" data-testid="onboarding-step-title">
+                {{ t(activeStep.titleKey) }}
+              </h2>
+              <p class="onboarding-modal__description">
+                {{ t(activeStep.descriptionKey) }}
+              </p>
+            </div>
+
+            <n-button quaternary circle class="onboarding-modal__close" :aria-label="t('onboarding.actions.closeOnboarding')" @click="emit('close')">
+              <span aria-hidden="true">×</span>
+            </n-button>
+          </div>
+
+          <n-steps :current="currentStep + 1" size="small" class="onboarding-modal__steps">
+            <n-step
+              v-for="step in steps"
+              :key="step.number"
+              :title="t(step.shortTitleKey)"
+              :description="t(step.captionKey)"
+            />
+          </n-steps>
+        </template>
+
+        <div class="onboarding-modal__body">
+          <Transition name="onboarding-step" mode="out-in" @before-leave="handleBeforeStepLeave" @enter="handleStepEnter">
+            <div :key="activeStep.number" class="onboarding-modal__step-content">
+              <template v-if="activeStep.number === 1">
+                <div class="onboarding-modal__hero">
+                  <div class="onboarding-modal__hero-copy">
+                    <h3 class="onboarding-modal__section-title">{{ t('onboarding.welcome.heading') }}</h3>
+                    <p class="onboarding-modal__section-text" v-html="formatRichText(t('onboarding.welcome.body'))"></p>
+                  </div>
+                  <div class="onboarding-modal__summary-card">
+                    <span class="onboarding-modal__summary-label">{{ t('onboarding.welcome.summaryLabel') }}</span>
+                    <strong class="onboarding-modal__summary-title">{{ t('onboarding.welcome.summaryTitle') }}</strong>
+                    <p class="onboarding-modal__summary-text" v-html="formatRichText(t('onboarding.welcome.summaryBody'))"></p>
+                  </div>
+                </div>
+              </template>
+
+              <template v-else-if="activeStep.number === 2">
+                <div class="onboarding-modal__concept-grid">
+                  <n-thing
+                    v-for="item in conceptItems"
+                    :key="item.titleKey"
+                    class="onboarding-modal__concept-card"
+                    :title="t(item.titleKey)"
+                  >
+                    <p class="onboarding-modal__section-text">{{ t(item.bodyKey) }}</p>
+                  </n-thing>
+                </div>
+              </template>
+
+              <template v-else>
+                <div class="onboarding-modal__workflow-list">
+                  <div
+                    v-for="item in workflowItems"
+                    :key="item.stepKey"
+                    class="onboarding-modal__workflow-item"
+                  >
+                    <div class="onboarding-modal__workflow-index">{{ t(item.stepKey) }}</div>
+                    <div>
+                      <h3 class="onboarding-modal__section-title">{{ t(item.titleKey) }}</h3>
+                      <p class="onboarding-modal__section-text">{{ t(item.bodyKey) }}</p>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </Transition>
+        </div>
+
+        <template #action>
+          <div class="onboarding-modal__footer">
+            <div class="onboarding-modal__footer-start">
+              <n-button v-if="!isLastStep" text data-testid="onboarding-skip" @click="emit('close')">
+                {{ t('onboarding.actions.skip') }}
+              </n-button>
+              <n-button v-else text data-testid="onboarding-skip" @click="emit('close')">
+                {{ t('onboarding.actions.close') }}
+              </n-button>
+            </div>
+
+            <div class="onboarding-modal__footer-end">
+              <n-button
+                v-if="currentStep > 0"
+                data-testid="onboarding-previous"
+                @click="goToPrevious"
+              >
+                {{ t('onboarding.actions.previous') }}
+              </n-button>
+
+              <template v-if="!isLastStep">
+                <n-button type="primary" data-testid="onboarding-next" @click="goToNext">
+                  {{ t('onboarding.actions.next') }}
+                </n-button>
+              </template>
+              <template v-else>
+                <n-button data-testid="onboarding-create-issue" @click="handleCreateIssue">
+                  {{ t('onboarding.actions.createIssue') }}
+                </n-button>
+                <n-button type="primary" data-testid="onboarding-view-dashboard" @click="handleViewDashboard">
+                  {{ t('onboarding.actions.viewDashboard') }}
+                </n-button>
+              </template>
             </div>
           </div>
         </template>
+        </n-card>
       </div>
-
-      <template #action>
-        <div class="onboarding-modal__footer">
-          <div class="onboarding-modal__footer-start">
-            <n-button v-if="!isLastStep" text data-testid="onboarding-skip" @click="emit('close')">
-              {{ t('onboarding.actions.skip') }}
-            </n-button>
-            <n-button v-else text data-testid="onboarding-skip" @click="emit('close')">
-              {{ t('onboarding.actions.close') }}
-            </n-button>
-          </div>
-
-          <div class="onboarding-modal__footer-end">
-            <n-button
-              v-if="currentStep > 0"
-              data-testid="onboarding-previous"
-              @click="goToPrevious"
-            >
-              {{ t('onboarding.actions.previous') }}
-            </n-button>
-
-            <template v-if="!isLastStep">
-              <n-button type="primary" data-testid="onboarding-next" @click="goToNext">
-                {{ t('onboarding.actions.next') }}
-              </n-button>
-            </template>
-            <template v-else>
-              <n-button data-testid="onboarding-create-issue" @click="handleCreateIssue">
-                {{ t('onboarding.actions.createIssue') }}
-              </n-button>
-              <n-button type="primary" data-testid="onboarding-view-dashboard" @click="handleViewDashboard">
-                {{ t('onboarding.actions.viewDashboard') }}
-              </n-button>
-            </template>
-          </div>
-        </div>
-      </template>
-    </n-card>
+    </div>
   </n-modal>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { NButton, NCard, NModal, NStep, NSteps, NThing } from 'naive-ui'
+import { computed, nextTick, ref, watch } from 'vue'
+import { NButton, NCard, NIcon, NModal, NStep, NSteps, NThing } from 'naive-ui'
+import { SparklesOutline, GitMergeOutline, CalendarClearOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 
 interface OnboardingStep {
@@ -146,6 +178,10 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const currentStep = ref(0)
+const shellRef = ref<HTMLElement | null>(null)
+const contentRef = ref<HTMLElement | null>(null)
+const shellHeight = ref<string | null>(null)
+const pendingShellHeight = ref<string | null>(null)
 
 const steps: OnboardingStep[] = [
   {
@@ -204,28 +240,114 @@ const workflowItems: OnboardingContentItem[] = [
   },
 ]
 
+const decorativeMotifs = [
+  {
+    key: 'ai',
+    icon: SparklesOutline,
+    className: 'onboarding-modal__motif--ai',
+  },
+  {
+    key: 'merge',
+    icon: GitMergeOutline,
+    className: 'onboarding-modal__motif--merge',
+  },
+  {
+    key: 'schedule',
+    icon: CalendarClearOutline,
+    className: 'onboarding-modal__motif--schedule',
+  },
+]
+
 const activeStep = computed(() => steps[currentStep.value])
 const isLastStep = computed(() => currentStep.value === steps.length - 1)
+const shellStyle = computed(() => (
+  shellHeight.value ? { height: shellHeight.value } : undefined
+))
+
+async function measureContentHeight() {
+  await nextTick()
+  return contentRef.value?.scrollHeight ?? 0
+}
+
+async function initializeShellHeight() {
+  const height = await measureContentHeight()
+  shellHeight.value = height > 0 ? `${height}px` : null
+  pendingShellHeight.value = null
+}
+
+function animateShellHeight(stepUpdater: () => void) {
+  const fromHeight = shellRef.value?.offsetHeight ?? 0
+
+  if (fromHeight > 0) {
+    shellHeight.value = `${fromHeight}px`
+    void shellRef.value?.offsetHeight
+  }
+
+  pendingShellHeight.value = null
+  stepUpdater()
+}
 
 watch(
   () => props.show,
-  (isVisible, wasVisible) => {
+  async (isVisible, wasVisible) => {
     if (isVisible && !wasVisible) {
       currentStep.value = 0
+      await initializeShellHeight()
     }
   },
 )
 
+function handleBeforeStepLeave() {
+  const height = shellRef.value?.offsetHeight ?? 0
+  if (height > 0) {
+    shellHeight.value = `${height}px`
+  }
+}
+
+function handleStepEnter() {
+  requestAnimationFrame(async () => {
+    const height = await measureContentHeight()
+    const nextHeight = height > 0 ? `${height}px` : null
+    pendingShellHeight.value = nextHeight
+
+    if (pendingShellHeight.value === nextHeight) {
+      shellHeight.value = nextHeight
+    }
+  })
+}
+
+function handleShellTransitionEnd(event: TransitionEvent) {
+  if (event.target !== shellRef.value || event.propertyName !== 'height') {
+    return
+  }
+
+  shellHeight.value = null
+  pendingShellHeight.value = null
+}
+
 function goToNext() {
   if (currentStep.value < steps.length - 1) {
-    currentStep.value += 1
+    animateShellHeight(() => {
+      currentStep.value += 1
+    })
   }
 }
 
 function goToPrevious() {
   if (currentStep.value > 0) {
-    currentStep.value -= 1
+    animateShellHeight(() => {
+      currentStep.value -= 1
+    })
   }
+}
+
+function formatRichText(content: string) {
+  return content
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/&lt;(\/?)strong&gt;/g, '<$1strong>')
+    .replace(/&lt;(\/?)u&gt;/g, '<$1u>')
 }
 
 function handleViewDashboard() {
@@ -240,11 +362,88 @@ function handleCreateIssue() {
 </script>
 
 <style scoped>
-.onboarding-modal {
+.onboarding-modal-shell {
   width: min(880px, calc(100vw - 32px));
+  overflow: hidden;
+  transition: height 220ms ease;
+}
+
+.onboarding-modal-shell__content {
+  width: 100%;
+}
+
+.onboarding-modal {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
   border-radius: 24px;
   overflow: hidden;
   background: var(--n-card-color, #fff);
+}
+
+.onboarding-modal > :deep(.n-card-header),
+.onboarding-modal > :deep(.n-card__content),
+.onboarding-modal > :deep(.n-card__action) {
+  position: relative;
+  z-index: 1;
+}
+
+.onboarding-modal__background {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.onboarding-modal__motif {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, var(--n-primary-color, #18a058) 34%, transparent);
+  opacity: 0.11;
+  filter: saturate(0.9);
+  transform: translateZ(0);
+}
+
+.onboarding-modal__motif-icon {
+  width: 100%;
+  height: 100%;
+  font-size: inherit;
+}
+
+.onboarding-modal__motif-icon :deep(svg) {
+  width: 100%;
+  height: 100%;
+}
+
+.onboarding-modal__motif--ai {
+  top: -54px;
+  right: -36px;
+  width: clamp(220px, 30vw, 320px);
+  height: clamp(220px, 30vw, 320px);
+  transform: rotate(-10deg);
+}
+
+.onboarding-modal__motif--merge {
+  top: 34%;
+  left: -92px;
+  width: clamp(230px, 32vw, 330px);
+  height: clamp(230px, 32vw, 330px);
+  opacity: 0.085;
+  color: color-mix(in srgb, var(--n-text-color-3, #64748b) 40%, transparent);
+  transform: translateY(-50%) rotate(-18deg);
+}
+
+.onboarding-modal__motif--schedule {
+  right: 10%;
+  bottom: -138px;
+  width: clamp(250px, 34vw, 360px);
+  height: clamp(250px, 34vw, 360px);
+  opacity: 0.075;
+  color: color-mix(in srgb, var(--n-primary-color, #18a058) 30%, transparent);
+  transform: rotate(12deg);
 }
 
 .onboarding-modal__header {
@@ -260,26 +459,27 @@ function handleCreateIssue() {
 
 .onboarding-modal__eyebrow {
   display: inline-flex;
-  margin-bottom: 8px;
-  color: var(--n-text-color-3, rgba(15, 23, 42, 0.6));
-  font-size: 13px;
-  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--n-text-color-3, rgba(15, 23, 42, 0.56));
+  font-size: 12px;
+  font-weight: 500;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .onboarding-modal__title {
   margin: 0;
-  font-size: 28px;
+  font-size: 24px;
   line-height: 1.2;
+  font-weight: 600;
   color: var(--n-text-color-1, #0f172a);
 }
 
 .onboarding-modal__description {
-  margin: 12px 0 0;
-  font-size: 15px;
-  line-height: 1.6;
-  color: var(--n-text-color-2, rgba(15, 23, 42, 0.75));
+  margin: 10px 0 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--n-text-color-2, rgba(15, 23, 42, 0.7));
   max-width: 60ch;
 }
 
@@ -288,11 +488,32 @@ function handleCreateIssue() {
 }
 
 .onboarding-modal__steps {
-  margin-top: 20px;
+  margin-top: 18px;
 }
 
 .onboarding-modal__body {
   padding: 8px 0 4px;
+}
+
+.onboarding-modal__step-content {
+  min-height: 100%;
+}
+
+.onboarding-step-enter-active,
+.onboarding-step-leave-active {
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.onboarding-step-enter-from,
+.onboarding-step-leave-to {
+  opacity: 0;
+  transform: translateX(10px);
+}
+
+.onboarding-step-enter-to,
+.onboarding-step-leave-from {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .onboarding-modal__hero {
@@ -300,6 +521,14 @@ function handleCreateIssue() {
   grid-template-columns: minmax(0, 1.8fr) minmax(260px, 1fr);
   gap: 20px;
   align-items: stretch;
+  
+}
+
+.onboarding-modal__hero-copy {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .onboarding-modal__summary-card,
@@ -320,25 +549,29 @@ function handleCreateIssue() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 40px;
-  height: 40px;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 12px;
   border-radius: 999px;
   background: rgba(24, 160, 88, 0.12);
   color: var(--n-primary-color, #18a058);
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .onboarding-modal__summary-title {
   display: block;
-  margin-top: 16px;
-  font-size: 18px;
+  margin-top: 14px;
+  font-size: 16px;
+  font-weight: 600;
   color: var(--n-text-color-1, #0f172a);
 }
 
 .onboarding-modal__summary-text {
-  margin: 12px 0 0;
-  color: var(--n-text-color-2, rgba(15, 23, 42, 0.75));
-  line-height: 1.6;
+  margin: 10px 0 0;
+  font-size: 14px;
+  color: var(--n-text-color-2, rgba(15, 23, 42, 0.72));
+  line-height: 1.55;
 }
 
 .onboarding-modal__concept-grid {
@@ -365,16 +598,30 @@ function handleCreateIssue() {
 
 .onboarding-modal__section-title {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1.35;
+  font-weight: 600;
   color: var(--n-text-color-1, #0f172a);
 }
 
 .onboarding-modal__section-text {
-  margin: 10px 0 0;
-  font-size: 15px;
-  line-height: 1.6;
-  color: var(--n-text-color-2, rgba(15, 23, 42, 0.75));
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--n-text-color-2, rgba(15, 23, 42, 0.72));
+}
+
+.onboarding-modal__section-text :deep(strong),
+.onboarding-modal__summary-text :deep(strong) {
+  font-weight: 700;
+  color: var(--n-text-color-1, #0f172a);
+}
+
+.onboarding-modal__section-text :deep(u),
+.onboarding-modal__summary-text :deep(u) {
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.16em;
+  text-decoration-color: rgba(24, 160, 88, 0.45);
 }
 
 .onboarding-modal__footer {
@@ -394,7 +641,7 @@ function handleCreateIssue() {
 }
 
 @media (max-width: 900px) {
-  .onboarding-modal {
+  .onboarding-modal-shell {
     width: min(720px, calc(100vw - 24px));
   }
 
@@ -402,10 +649,29 @@ function handleCreateIssue() {
   .onboarding-modal__concept-grid {
     grid-template-columns: 1fr;
   }
+
+  .onboarding-modal__motif--ai {
+    right: -56px;
+    width: 220px;
+    height: 220px;
+  }
+
+  .onboarding-modal__motif--merge {
+    left: -82px;
+    width: 220px;
+    height: 220px;
+  }
+
+  .onboarding-modal__motif--schedule {
+    right: -12px;
+    bottom: -108px;
+    width: 240px;
+    height: 240px;
+  }
 }
 
 @media (max-width: 640px) {
-  .onboarding-modal {
+  .onboarding-modal-shell {
     width: calc(100vw - 16px);
   }
 
@@ -426,7 +692,29 @@ function handleCreateIssue() {
   }
 
   .onboarding-modal__title {
-    font-size: 24px;
+    font-size: 22px;
+  }
+
+  .onboarding-modal__motif--ai {
+    top: -36px;
+    right: -72px;
+    width: 180px;
+    height: 180px;
+  }
+
+  .onboarding-modal__motif--merge {
+    top: 44%;
+    left: -86px;
+    width: 180px;
+    height: 180px;
+  }
+
+  .onboarding-modal__motif--schedule {
+    right: -36px;
+    bottom: -84px;
+    width: 200px;
+    height: 200px;
   }
 }
 </style>
+

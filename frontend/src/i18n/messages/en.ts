@@ -196,11 +196,11 @@ const en = {
       shortTitle: 'Welcome',
       caption: 'What Codify helps you do',
       description: 'Get oriented with the core workflow before you start creating work.',
-      heading: 'Turn a Codify Issue into an organized implementation workflow.',
-      body: 'Codify helps you capture work as a Codify Issue, break it into execution-ready tasks, and follow progress from idea to result in one place.',
+      heading: 'From request to code',
+      body: 'Codify uses <strong>task scheduling</strong> to keep AI <strong>generating code</strong> and opening <strong>merge requests</strong> under limited compute capacity.',
       summaryLabel: 'Start here',
-      summaryTitle: 'Every workflow begins with a Codify Issue',
-      summaryBody: 'Describe the outcome you want, keep the context together, and let Codify coordinate the work that follows.',
+      summaryTitle: 'Every workflow begins with an issue',
+      summaryBody: 'Explain the goal and specify the delivery requirements, then let Codify coordinate scheduling, execution, and delivery.',
     },
     concepts: {
       title: 'Understand the building blocks',
@@ -208,8 +208,8 @@ const en = {
       caption: 'Issues, tasks, and results',
       description: 'These three concepts make it easier to plan work, track execution, and review outcomes.',
       codifyIssue: {
-        title: 'Codify Issue',
-        body: 'A Codify Issue is the starting point for a workflow. It captures the goal, context, and desired outcome so your team can organize work around a shared source of truth.',
+        title: 'Issue',
+        body: 'An issue is the starting point for a workflow. It captures the goal, context, and desired outcome so AI tasks can execute from a shared source of truth.',
       },
       tasks: {
         title: 'Tasks',
@@ -228,8 +228,8 @@ const en = {
       steps: {
         first: {
           step: '1',
-          title: 'Create a Codify Issue',
-          body: 'Start by creating a Codify Issue that explains the problem to solve, the outcome you want, and any constraints that matter.',
+          title: 'Create an issue',
+          body: 'Start by creating an issue that explains the problem to solve, the outcome you want, and any constraints that matter.',
         },
         second: {
           step: '2',
