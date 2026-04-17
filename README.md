@@ -2,25 +2,23 @@
 
 [中文说明](docs/README.zh-CN.md)
 
-Codify is an AI-powered code generation service. Create an issue describing the goal, launch tasks from it, and let Codify schedule execution, generate code via Claude CLI in isolated Docker containers, push commits, and open Merge Requests — all managed through a Vue-based dashboard with scheduling, monitoring, analytics, configuration, and access control.
+Codify turns your requirements into code. Describe what you need, and Codify handles the rest — scheduling AI tasks, generating code in isolated containers, pushing commits, and opening Merge Requests. Track everything from a single dashboard.
 
-## What it does
+## Three steps, from idea to MR
 
-- Create issues that capture goals, context, and delivery requirements
-- Launch or schedule tasks from issues with priority and retry support
-- Runs each task in an isolated Docker worker container
-- Uses a Claude CLI-compatible backend to generate and apply changes
-- Pushes commits, creates or updates Merge Requests, and tracks progress
-- Provides a dashboard for issues, tasks, logs, monitoring, analytics, sessions, config, and auth
+1. **Create an issue** — describe the problem and expected outcome
+2. **Launch a task** — kick it off now or schedule it for later
+3. **Review the results** — follow status, read logs, inspect the delivery
 
-## Request flow
+## What happens behind the scenes
 
-1. User creates an issue in the dashboard describing the goal and constraints
-2. Tasks are launched or scheduled from the issue
-3. Scheduler selects runnable tasks by status, priority, schedule, and concurrency
-4. Worker executor launches a dedicated Docker container
-5. The worker clones the repo, runs Claude CLI, commits, pushes, and updates the MR
-6. Dashboard users track status, logs, containers, analytics, and configuration
+Once a task is launched, Codify will:
+
+1. Queue it based on priority and concurrency limits
+2. Spin up a dedicated Docker container
+3. Clone the repo and run Claude CLI to generate code
+4. Commit, push to a new branch, and create or update a Merge Request
+5. Log every step so you can trace what happened
 
 ## Key components
 
@@ -32,34 +30,34 @@ Codify is an AI-powered code generation service. Create an issue describing the 
 - `frontend/src/views/` — dashboard pages
 - `deploy/` — Dockerfiles, compose deployment, worker entrypoint
 
-## Dashboard pages
+## Dashboard at a glance
 
-- Dashboard (overview, heatmap, trends)
-- Issues list and detail
-- Create issue (with prompt templates)
-- Task list and detail (with logs)
-- Create task (manual)
-- Schedule overview
-- Analytics
-- Monitor
-- Sessions
-- Configuration
-- Access management
-- OIDC diagnostics
+| Page | Purpose |
+|------|---------|
+| Dashboard | Overview, heatmap, trends |
+| Issues | Issue list and detail |
+| Create issue | Describe goals with prompt templates |
+| Tasks | Task list and detail with live logs |
+| Create task | Create a task without an issue |
+| Schedule overview | Queue and scheduling status |
+| Analytics | Execution trends and success rates |
+| Monitor | Runtime status and health checks |
+| Sessions | View and manage login sessions |
+| Configuration | Runtime parameters and integrations |
+| Access management | Users and permissions |
+| OIDC diagnostics | Debug SSO login issues |
 
 ## Quick start
 
-### Prerequisites
+### What you need
 
 - Docker and Docker Compose
 - A reachable GitLab instance
 - A Claude CLI-compatible model endpoint
 
-### 1. Prepare config
+### 1. Configure
 
-For the bundled Docker deployment, `deploy/docker-compose.yml` loads `deploy/.env.test` for `backend` and `scheduler`.
-
-Important values include:
+`deploy/docker-compose.yml` reads from `deploy/.env.test`. At minimum, set:
 
 - `GITLAB_URL`
 - `GITLAB_BOT_TOKEN`
@@ -70,7 +68,7 @@ Important values include:
 - `SECRET_KEY`
 - `SESSION_SECRET`
 
-Notes:
+Good to know:
 
 - Runtime overrides are persisted in PostgreSQL `system_config`
 - Secrets entered in the dashboard are stored encrypted at rest
@@ -88,9 +86,9 @@ Default ports:
 - Frontend: `http://localhost:8880`
 - Backend API: `http://localhost:8000`
 
-### 3. Configure dashboard auth (optional but recommended)
+### 3. Set up login (recommended)
 
-See [docs/GITLAB_OIDC_SETUP.md](docs/GITLAB_OIDC_SETUP.md).
+Start with OIDC disabled, make sure everything works, then enable it. See [docs/GITLAB_OIDC_SETUP.md](docs/GITLAB_OIDC_SETUP.md).
 
 Recommended rollout:
 
@@ -124,11 +122,11 @@ make rebuild-worker         # Rebuild worker image
 
 ## Usage
 
-### Dashboard workflow
+The workflow lives entirely in the dashboard:
 
-1. **Create an issue** — describe the problem, expected outcome, and any constraints
-2. **Launch or schedule tasks** — create tasks from the issue to run immediately or queue for later
-3. **Review progress** — track task status, inspect logs, and review delivery details from the dashboard
+1. **Create an issue** — explain the problem, expected outcome, and constraints
+2. **Launch a task** — run immediately or schedule for later
+3. **Review the results** — track status, read logs, and check the MR
 
 ## Operational notes
 

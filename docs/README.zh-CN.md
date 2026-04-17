@@ -2,25 +2,23 @@
 
 [English README](../README.md)
 
-Codify 是一个 AI 驱动的代码生成服务。在 Dashboard 中创建需求、从需求发起任务，Codify 会协调调度、在隔离的 Docker 容器中通过 Claude CLI 生成代码、推送提交并创建 Merge Request。项目同时提供 Web Dashboard，用于需求管理、任务管理、调度、监控、统计、配置和访问控制。
+Codify 帮你把需求变成代码。写清楚目标和约束，剩下的交给 Codify——它会调度 AI 任务、在隔离容器里生成代码、推送提交、开 MR，整个过程在 Dashboard 里一目了然。
 
-## 它能做什么
+## 从需求到代码，三步搞定
 
-- 创建需求，记录目标、背景和交付要求
-- 从需求发起或预约任务，支持优先级和重试
-- 每个任务都在独立 Docker 容器中运行
-- 使用兼容 Claude CLI 的模型后端生成并修改代码
-- 自动推送提交、创建或更新 MR，并跟踪进展
-- 提供 Dashboard 用于需求、任务、日志、监控、统计、会话、配置和认证管理
+1. **写需求** — 描述要解决的问题和期望结果
+2. **发起任务** — 从需求创建任务，立即执行或排队等候
+3. **查看结果** — 跟踪状态、翻阅日志、检查交付物
 
-## 请求流程
+## 幕后发生了什么
 
-1. 用户在 Dashboard 创建需求，说明目标和约束
-2. 从需求发起或预约任务
-3. 调度器按状态、优先级、计划时间和并发限制挑选可执行任务
-4. Worker 执行器启动独立 Docker 容器
-5. 容器克隆仓库、执行 Claude CLI、提交代码、推送分支并更新 MR
-6. Dashboard 用于查看任务状态、日志、容器、统计和配置
+当你发起一个任务后，Codify 会：
+
+1. 根据优先级和并发限制把任务排入调度队列
+2. 启动一个独立的 Docker 容器
+3. 在容器里克隆仓库、运行 Claude CLI 生成代码
+4. 把改动提交、推送到新分支，创建或更新 MR
+5. 全程在 Dashboard 记录日志和状态变化
 
 ## 关键组件
 
@@ -32,34 +30,34 @@ Codify 是一个 AI 驱动的代码生成服务。在 Dashboard 中创建需求�
 - `frontend/src/views/` — Dashboard 页面
 - `deploy/` — Dockerfile、Compose、Worker 启动脚本
 
-## Dashboard 页面
+## Dashboard 一览
 
-- 仪表盘（概览、热力图、趋势）
-- 需求列表与详情
-- 创建需求（含提示词模板）
-- 任务列表与详情（含日志）
-- 手动创建任务
-- 调度总览
-- 统计分析
-- 监控页面
-- 会话管理
-- 系统配置
-- 访问管理
-- OIDC 诊断
+| 页面 | 用途 |
+|------|------|
+| 仪表盘 | 概览、热力图、趋势 |
+| 需求 | 需求列表与详情 |
+| 创建需求 | 用提示词模板快速描述需求 |
+| 任务 | 任务列表与详情，含实时日志 |
+| 手动创建任务 | 不经过需求直接创建任务 |
+| 调度总览 | 查看队列和调度状态 |
+| 统计分析 | 执行趋势与成功率 |
+| 监控 | 运行时状态与健康检查 |
+| 会话管理 | 查看和管理登录会话 |
+| 系统配置 | 运行时参数和集成配置 |
+| 访问管理 | 用户与权限 |
+| OIDC 诊断 | 调试 SSO 登录问题 |
 
 ## 快速开始
 
-### 前置条件
+### 你需要
 
 - Docker 与 Docker Compose
-- 可访问的 GitLab 实例
-- 可供 Claude CLI 使用的模型服务
+- 一个可访问的 GitLab 实例
+- 一个兼容 Claude CLI 的模型服务端点
 
-### 1. 准备配置
+### 1. 填写配置
 
-默认 Docker 部署中，`deploy/docker-compose.yml` 会给 `backend` 和 `scheduler` 加载 `deploy/.env.test`。
-
-至少需要准备这些配置项：
+`deploy/docker-compose.yml` 默认从 `deploy/.env.test` 读取环境变量，至少填好这几项：
 
 - `GITLAB_URL`
 - `GITLAB_BOT_TOKEN`
@@ -70,13 +68,13 @@ Codify 是一个 AI 驱动的代码生成服务。在 Dashboard 中创建需求�
 - `SECRET_KEY`
 - `SESSION_SECRET`
 
-说明：
+小贴士：
 
 - 运行时覆盖配置会持久化到 PostgreSQL 的 `system_config`
 - 在 Dashboard 中录入的敏感配置会加密存储
 - 如果 PostgreSQL volume 被删除，运行时配置、用户、会话和认证状态都会丢失
 
-### 2. 启动服务
+### 2. 一键启动
 
 ```bash
 cd deploy
@@ -88,17 +86,16 @@ docker-compose up -d --build
 - 前端：`http://localhost:8880`
 - 后端 API：`http://localhost:8000`
 
-### 3. 配置 Dashboard 登录（推荐）
+### 3. 配置登录（推荐）
 
-见 [GITLAB_OIDC_SETUP.md](GITLAB_OIDC_SETUP.md)。
+首次部署建议先跳过 OIDC，跑通基本流程后再开启。详见 [GITLAB_OIDC_SETUP.md](GITLAB_OIDC_SETUP.md)。
 
-推荐顺序：
+推荐步骤：
 
-1. 初次部署先保持 OIDC 关闭
-2. 确保配置了 `CONFIG_ENCRYPTION_KEY`
-3. 打开 Dashboard 的 Configuration 页面
-4. 填写并验证 OIDC 参数
-5. 验证通过后再启用 OIDC
+1. 先保持 OIDC 关闭，确认服务正常运行
+2. 确保 `CONFIG_ENCRYPTION_KEY` 已设置
+3. 在 Dashboard → 系统配置 页面填写 OIDC 参数
+4. 验证通过后再启用
 
 ## 常用命令
 
@@ -138,13 +135,13 @@ docker build -f deploy/Dockerfile.worker -t codify-worker:latest .
 
 ## 使用方式
 
-### Dashboard 工作流
+在 Dashboard 里走完三步即可：
 
-1. **创建需求** — 说明要解决的问题、期望结果和限制条件
-2. **发起或预约任务** — 从需求创建任务，可以立即运行或预约执行
-3. **回顾进展** — 在仪表盘中跟踪任务状态、查看日志并回顾交付信息
+1. **写需求** — 说明要解决的问题、期望结果和限制条件
+2. **发起任务** — 可以立即运行，也可以排到指定时间
+3. **查看结果** — 在仪表盘跟踪状态、翻阅日志、检查交付物
 
-## 运维说明
+## 运维备忘
 
 - `deploy/docker-compose.yml` 中，`backend` 和 `scheduler` 共用同一个 backend 镜像
 - 默认 Compose 中，`backend` 使用 `AUTO_MIGRATE=false`，`scheduler` 使用 `AUTO_MIGRATE=true`
