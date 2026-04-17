@@ -2,21 +2,21 @@
 
 [English README](../README.md)
 
-Codify 是一个基于 GitLab Issue 的 AI 代码生成服务。用户在 Issue 评论中输入 `@ai-bot <需求>` 后，系统会创建任务、调度 Worker 容器执行 Claude CLI、提交代码并创建 Merge Request。项目同时提供一个 Web Dashboard，用于任务管理、调度、监控、统计、配置和访问控制。
+Codify 是一个 AI 驱动的代码生成服务。在 Dashboard 中创建需求、从需求发起任务，Codify 会协调调度、在隔离的 Docker 容器中通过 Claude CLI 生成代码、推送提交并创建 Merge Request。项目同时提供 Web Dashboard，用于需求管理、任务管理、调度、监控、统计、配置和访问控制。
 
 ## 它能做什么
 
-- 监听 GitLab Issue 评论 Webhook，例如 `@ai-bot <prompt>`
-- 支持优先级、延迟执行、重试和手动触发任务
+- 创建需求，记录目标、背景和交付要求
+- 从需求发起或预约任务，支持优先级和重试
 - 每个任务都在独立 Docker 容器中运行
 - 使用兼容 Claude CLI 的模型后端生成并修改代码
-- 自动推送提交、创建或更新 MR，并把进度回写到 GitLab
-- 提供 Dashboard 用于任务、日志、监控、统计、会话、配置和认证管理
+- 自动推送提交、创建或更新 MR，并跟踪进展
+- 提供 Dashboard 用于需求、任务、日志、监控、统计、会话、配置和认证管理
 
 ## 请求流程
 
-1. GitLab 将评论事件发送到 `/api/webhook/gitlab`
-2. 后端解析命令并创建 `Task`
+1. 用户在 Dashboard 创建需求，说明目标和约束
+2. 从需求发起或预约任务
 3. 调度器按状态、优先级、计划时间和并发限制挑选可执行任务
 4. Worker 执行器启动独立 Docker 容器
 5. 容器克隆仓库、执行 Claude CLI、提交代码、推送分支并更新 MR
@@ -24,8 +24,8 @@ Codify 是一个基于 GitLab Issue 的 AI 代码生成服务。用户在 Issue 
 
 ## 关键组件
 
-- `backend/app/api/webhook.py` — GitLab Webhook 入口
 - `backend/app/api/tasks.py` — 任务 API 与队列视图
+- `backend/app/api/issues.py` — 需求管理 API
 - `backend/app/core/worker.py` — 任务执行与 MR 更新
 - `backend/app/scheduler.py` — 优先级调度与崩溃恢复
 - `backend/app/api/config.py` — 运行时与认证配置
@@ -34,8 +34,10 @@ Codify 是一个基于 GitLab Issue 的 AI 代码生成服务。用户在 Issue 
 
 ## Dashboard 页面
 
-- 任务列表
-- 任务详情与日志
+- 仪表盘（概览、热力图、趋势）
+- 需求列表与详情
+- 创建需求（含提示词模板）
+- 任务列表与详情（含日志）
 - 手动创建任务
 - 调度总览
 - 统计分析
@@ -61,7 +63,6 @@ Codify 是一个基于 GitLab Issue 的 AI 代码生成服务。用户在 Issue 
 
 - `GITLAB_URL`
 - `GITLAB_BOT_TOKEN`
-- `GITLAB_WEBHOOK_SECRET`
 - `ANTHROPIC_BASE_URL`
 - `ANTHROPIC_API_KEY`
 - `ANTHROPIC_MODEL`
@@ -87,11 +88,7 @@ docker-compose up -d --build
 - 前端：`http://localhost:8880`
 - 后端 API：`http://localhost:8000`
 
-### 3. 配置 GitLab Webhook
-
-见 [GITLAB_WEBHOOK_SETUP.md](GITLAB_WEBHOOK_SETUP.md)。
-
-### 4. 配置 Dashboard 登录（推荐）
+### 3. 配置 Dashboard 登录（推荐）
 
 见 [GITLAB_OIDC_SETUP.md](GITLAB_OIDC_SETUP.md)。
 
@@ -104,6 +101,8 @@ docker-compose up -d --build
 5. 验证通过后再启用 OIDC
 
 ## 常用命令
+
+运行 `make help` 查看所有可用命令。
 
 ### 后端
 
@@ -126,7 +125,7 @@ cd frontend && npm run build
 
 ```bash
 # backend / scheduler
-docker build -f deploy/Dockerfile.backend -t deploy-backend .
+docker build -f deploy/Dockerfile.backend -t codify-backend:latest .
 cd deploy && docker-compose up -d backend scheduler
 
 # frontend / nginx
@@ -139,19 +138,11 @@ docker build -f deploy/Dockerfile.worker -t codify-worker:latest .
 
 ## 使用方式
 
-### GitLab Issue 工作流
+### Dashboard 工作流
 
-在 Issue 评论中输入：
-
-```text
-@ai-bot create a hello world function
-```
-
-Codify 会创建任务、启动 Worker、推送代码、创建或更新 MR，并把进度回写到 GitLab。
-
-### 手动任务
-
-也可以直接在 Dashboard 中创建任务。手动任务不会向 GitLab Issue 发送通知。
+1. **创建需求** — 说明要解决的问题、期望结果和限制条件
+2. **发起或预约任务** — 从需求创建任务，可以立即运行或预约执行
+3. **回顾进展** — 在仪表盘中跟踪任务状态、查看日志并回顾交付信息
 
 ## 运维说明
 
@@ -167,10 +158,8 @@ Codify 会创建任务、启动 Worker、推送代码、创建或更新 MR，并
 - [USER_GUIDE.zh-CN.md](USER_GUIDE.zh-CN.md)
 - [DEPLOYMENT.md](DEPLOYMENT.md)
 - [DEVELOPMENT.md](DEVELOPMENT.md)
-- [GITLAB_WEBHOOK_SETUP.md](GITLAB_WEBHOOK_SETUP.md)
 - [GITLAB_OIDC_SETUP.md](GITLAB_OIDC_SETUP.md)
 - [e2e-debugging.md](e2e-debugging.md)
-- [SCREENSHOTS.md](SCREENSHOTS.md)
 - [../deploy/offline-bundle/README.md](../deploy/offline-bundle/README.md)
 
 ## License

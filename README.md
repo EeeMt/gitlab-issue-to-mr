@@ -2,21 +2,21 @@
 
 [中文说明](docs/README.zh-CN.md)
 
-Codify is an AI-assisted service that turns GitLab issue comments into code changes, branches, commits, and Merge Requests. It also ships with a Vue-based dashboard for task operations, scheduling, monitoring, analytics, configuration, and access control.
+Codify is an AI-powered code generation service. Create an issue describing the goal, launch tasks from it, and let Codify schedule execution, generate code via Claude CLI in isolated Docker containers, push commits, and open Merge Requests — all managed through a Vue-based dashboard with scheduling, monitoring, analytics, configuration, and access control.
 
 ## What it does
 
-- Watches GitLab issue comments such as `@ai-bot <prompt>`
-- Creates tasks with priority, scheduling, retry, and manual execution support
+- Create issues that capture goals, context, and delivery requirements
+- Launch or schedule tasks from issues with priority and retry support
 - Runs each task in an isolated Docker worker container
 - Uses a Claude CLI-compatible backend to generate and apply changes
-- Pushes commits, creates or updates Merge Requests, and posts progress back to GitLab
-- Provides a dashboard for tasks, logs, monitoring, analytics, sessions, config, and auth
+- Pushes commits, creates or updates Merge Requests, and tracks progress
+- Provides a dashboard for issues, tasks, logs, monitoring, analytics, sessions, config, and auth
 
 ## Request flow
 
-1. GitLab sends a webhook to `/api/webhook/gitlab`
-2. Backend parses the command and stores a `Task`
+1. User creates an issue in the dashboard describing the goal and constraints
+2. Tasks are launched or scheduled from the issue
 3. Scheduler selects runnable tasks by status, priority, schedule, and concurrency
 4. Worker executor launches a dedicated Docker container
 5. The worker clones the repo, runs Claude CLI, commits, pushes, and updates the MR
@@ -24,8 +24,8 @@ Codify is an AI-assisted service that turns GitLab issue comments into code chan
 
 ## Key components
 
-- `backend/app/api/webhook.py` — GitLab webhook receiver
 - `backend/app/api/tasks.py` — task APIs and queue views
+- `backend/app/api/issues.py` — issue management APIs
 - `backend/app/core/worker.py` — task execution and MR updates
 - `backend/app/scheduler.py` — priority scheduling and crash recovery
 - `backend/app/api/config.py` — runtime and auth configuration
@@ -34,9 +34,11 @@ Codify is an AI-assisted service that turns GitLab issue comments into code chan
 
 ## Dashboard pages
 
-- Task dashboard
-- Task detail and logs
-- Manual task creation
+- Dashboard (overview, heatmap, trends)
+- Issues list and detail
+- Create issue (with prompt templates)
+- Task list and detail (with logs)
+- Create task (manual)
 - Schedule overview
 - Analytics
 - Monitor
@@ -61,7 +63,6 @@ Important values include:
 
 - `GITLAB_URL`
 - `GITLAB_BOT_TOKEN`
-- `GITLAB_WEBHOOK_SECRET`
 - `ANTHROPIC_BASE_URL`
 - `ANTHROPIC_API_KEY`
 - `ANTHROPIC_MODEL`
@@ -87,11 +88,7 @@ Default ports:
 - Frontend: `http://localhost:8880`
 - Backend API: `http://localhost:8000`
 
-### 3. Configure GitLab webhook
-
-See [docs/GITLAB_WEBHOOK_SETUP.md](docs/GITLAB_WEBHOOK_SETUP.md).
-
-### 4. Configure dashboard auth (optional but recommended)
+### 3. Configure dashboard auth (optional but recommended)
 
 See [docs/GITLAB_OIDC_SETUP.md](docs/GITLAB_OIDC_SETUP.md).
 
@@ -127,19 +124,11 @@ make rebuild-worker         # Rebuild worker image
 
 ## Usage
 
-### GitLab issue flow
+### Dashboard workflow
 
-Comment on an issue with:
-
-```text
-@ai-bot create a hello world function
-```
-
-Codify will queue a task, run the worker, push changes, create or update an MR, and report progress back to GitLab.
-
-### Manual task flow
-
-You can also create tasks directly from the dashboard. Manual tasks skip GitLab issue notifications.
+1. **Create an issue** — describe the problem, expected outcome, and any constraints
+2. **Launch or schedule tasks** — create tasks from the issue to run immediately or queue for later
+3. **Review progress** — track task status, inspect logs, and review delivery details from the dashboard
 
 ## Operational notes
 
@@ -154,10 +143,8 @@ You can also create tasks directly from the dashboard. Manual tasks skip GitLab 
 - [docs/README.zh-CN.md](docs/README.zh-CN.md)
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
-- [docs/GITLAB_WEBHOOK_SETUP.md](docs/GITLAB_WEBHOOK_SETUP.md)
 - [docs/GITLAB_OIDC_SETUP.md](docs/GITLAB_OIDC_SETUP.md)
 - [docs/e2e-debugging.md](docs/e2e-debugging.md)
-- [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md)
 - [deploy/offline-bundle/README.md](deploy/offline-bundle/README.md)
 
 ## License
