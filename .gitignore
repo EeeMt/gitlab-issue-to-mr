@@ -57,3 +57,9 @@ temporary/*.png
 
 # Worktrees
 .worktrees/
+
+# Superpowers
+.superpowers/
+
+# Logs
+logs/
