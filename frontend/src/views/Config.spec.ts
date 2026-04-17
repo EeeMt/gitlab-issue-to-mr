@@ -266,19 +266,21 @@ describe('Config', () => {
     expect(wrapper.vm.activeConfigTab).toBe('runtime')
   })
 
-  it('shows summary cards with config values', async () => {
+  it('renders tabs in the configured order', async () => {
     wrapper = mount(Config, { global: { stubs: globalStubs } })
     await flushPromises()
 
-    const items = wrapper.vm.summaryItems as any[]
-    expect(items).toHaveLength(4)
-    // max_concurrency = 4
-    expect(items[0].value).toBe('4')
-    // task_timeout = 3600
-    expect(items[1].value).toBe('3600s')
-    // oidc_enabled = true → t('common.enabled') = 'common.enabled'
-    expect(items[2].value).toBe('common.enabled')
-    // allow_monitor + allow_analytics = 2 of 3 shared pages enabled
-    expect(items[3].value).toBe('2')
+    const tabNames = wrapper.findAll('.n-tab-pane').map((pane) => pane.attributes('data-name'))
+
+    expect(tabNames).toEqual([
+      'runtime',
+      'auth',
+      'gitlab',
+      'ai-providers',
+      'prompt-templates',
+      'worker',
+      'notifications',
+      'maintenance'
+    ])
   })
 })

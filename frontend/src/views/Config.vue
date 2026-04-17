@@ -42,32 +42,32 @@
               <RuntimeSettingsPanel :is-mobile="isMobile" />
             </n-tab-pane>
 
-            <n-tab-pane name="gitlab" :tab="t('config.gitlabTab')">
-              <GitLabSettingsPanel ref="gitlabPanelRef" :is-mobile="isMobile" />
-            </n-tab-pane>
-
-            <n-tab-pane name="notifications" :tab="t('config.notificationsTab')">
-              <MattermostNotificationsPanel :is-mobile="isMobile" :reload-key="notificationReloadKey" />
-            </n-tab-pane>
-
             <n-tab-pane name="auth" :tab="t('config.authenticationTab')">
               <AuthSettingsPanel :is-mobile="isMobile" />
             </n-tab-pane>
 
-            <n-tab-pane name="worker" :tab="t('config.workerTab')">
-              <WorkerSettingsPanel :is-mobile="isMobile" />
+            <n-tab-pane name="gitlab" :tab="t('config.gitlabTab')">
+              <GitLabSettingsPanel ref="gitlabPanelRef" :is-mobile="isMobile" />
             </n-tab-pane>
 
             <n-tab-pane name="ai-providers" :tab="t('config.providers.title')">
               <AIProvidersPanel :is-mobile="isMobile" />
             </n-tab-pane>
 
-            <n-tab-pane name="maintenance" :tab="t('config.maintenanceTab')">
-              <MaintenancePanel />
-            </n-tab-pane>
-
             <n-tab-pane name="prompt-templates" :tab="t('config.promptTemplatesTab')">
               <PromptTemplatesPanel ref="promptTemplatesPanelRef" :is-mobile="isMobile" />
+            </n-tab-pane>
+
+            <n-tab-pane name="worker" :tab="t('config.workerTab')">
+              <WorkerSettingsPanel :is-mobile="isMobile" />
+            </n-tab-pane>
+
+            <n-tab-pane name="notifications" :tab="t('config.notificationsTab')">
+              <MattermostNotificationsPanel :is-mobile="isMobile" :reload-key="notificationReloadKey" />
+            </n-tab-pane>
+
+            <n-tab-pane name="maintenance" :tab="t('config.maintenanceTab')">
+              <MaintenancePanel />
             </n-tab-pane>
           </n-tabs>
         </div>
@@ -127,8 +127,8 @@ const gitlabPanelRef = ref<InstanceType<typeof GitLabSettingsPanel> | null>(null
 const promptTemplatesPanelRef = ref<InstanceType<typeof PromptTemplatesPanel> | null>(null)
 
 // Tab state
-const activeConfigTab = ref<'runtime' | 'notifications' | 'gitlab' | 'auth' | 'worker' | 'ai-providers' | 'maintenance' | 'prompt-templates'>('runtime')
-const configTabs = ['runtime', 'notifications', 'gitlab', 'auth', 'worker', 'ai-providers', 'maintenance', 'prompt-templates'] as const
+const activeConfigTab = ref<'runtime' | 'auth' | 'gitlab' | 'ai-providers' | 'prompt-templates' | 'worker' | 'notifications' | 'maintenance'>('runtime')
+const configTabs = ['runtime', 'auth', 'gitlab', 'ai-providers', 'prompt-templates', 'worker', 'notifications', 'maintenance'] as const
 type ConfigTabKey = typeof configTabs[number]
 
 const notificationReloadKey = ref(0)

@@ -2,7 +2,15 @@ import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { h } from 'vue'
 
-const { sparklesIconStub, gitMergeIconStub, calendarIconStub } = vi.hoisted(() => ({
+const {
+  sparklesIconStub,
+  gitMergeIconStub,
+  calendarIconStub,
+  documentIconStub,
+  layersIconStub,
+  checkmarkDoneIconStub,
+  playIconStub,
+} = vi.hoisted(() => ({
   sparklesIconStub: {
     name: 'SparklesOutline',
     setup() {
@@ -21,12 +29,39 @@ const { sparklesIconStub, gitMergeIconStub, calendarIconStub } = vi.hoisted(() =
       return () => h('svg', { class: 'icon-stub icon-stub--CalendarClearOutline' })
     },
   },
+  documentIconStub: {
+    name: 'DocumentTextOutline',
+    setup() {
+      return () => h('svg', { class: 'icon-stub icon-stub--DocumentTextOutline' })
+    },
+  },
+  layersIconStub: {
+    name: 'LayersOutline',
+    setup() {
+      return () => h('svg', { class: 'icon-stub icon-stub--LayersOutline' })
+    },
+  },
+  checkmarkDoneIconStub: {
+    name: 'CheckmarkDoneCircleOutline',
+    setup() {
+      return () => h('svg', { class: 'icon-stub icon-stub--CheckmarkDoneCircleOutline' })
+    },
+  },
+  playIconStub: {
+    name: 'PlayCircleOutline',
+    setup() {
+      return () => h('svg', { class: 'icon-stub icon-stub--PlayCircleOutline' })
+    },
+  },
 }))
 
 const messages: Record<string, string> = {
   'onboarding.actions.closeOnboarding': 'Close onboarding',
   'onboarding.welcome.heading': '让 AI 执行需求，生成代码并发起 MR。',
-  'onboarding.welcome.body': 'Codify 支持 <strong>任务调度</strong> 与 <u>排队执行</u>，让 AI 在有限计算资源下持续产出代码并发起 <strong>MR</strong>。',
+  'onboarding.welcome.body': 'Codify uses [[scheduling]] to keep AI [[code]] and opening [[mr]] under limited compute capacity.',
+  'onboarding.welcome.bodyScheduling': 'task scheduling',
+  'onboarding.welcome.bodyCode': 'generating code',
+  'onboarding.welcome.bodyMr': 'merge requests',
 }
 
 vi.mock('vue-i18n', () => ({
@@ -39,6 +74,10 @@ vi.mock('@vicons/ionicons5', () => ({
   SparklesOutline: sparklesIconStub,
   GitMergeOutline: gitMergeIconStub,
   CalendarClearOutline: calendarIconStub,
+  DocumentTextOutline: documentIconStub,
+  LayersOutline: layersIconStub,
+  CheckmarkDoneCircleOutline: checkmarkDoneIconStub,
+  PlayCircleOutline: playIconStub,
 }))
 
 vi.mock('naive-ui', () => ({
@@ -128,43 +167,72 @@ describe('OnboardingModal', () => {
     expect(wrapper.find('.n-steps').attributes('data-current')).toBe('1')
   })
 
-  it('renders emphasized markup in the welcome copy', () => {
+  it('renders emphasized welcome copy without html messages', () => {
     const wrapper = mountComponent()
 
-    expect(wrapper.find('.onboarding-modal__section-text strong').text()).toBe('任务调度')
-    expect(wrapper.find('.onboarding-modal__section-text u').text()).toBe('排队执行')
-    expect(wrapper.findAll('.onboarding-modal__section-text strong')[1].text()).toBe('MR')
+    const emphasis = wrapper.findAll('.onboarding-modal__section-text strong')
+
+    expect(wrapper.find('.onboarding-modal__section-text').text()).toContain('Codify uses')
+    expect(wrapper.find('.onboarding-modal__section-text u').exists()).toBe(false)
+    expect(emphasis).toHaveLength(3)
+    expect(emphasis[0].text()).toBe('task scheduling')
+    expect(emphasis[1].text()).toBe('generating code')
+    expect(emphasis[2].text()).toBe('merge requests')
   })
 
-  it('renders decorative motif icons as full-size background shapes', () => {
+  it('applies emphasis styling to highlighted welcome segments', () => {
     const wrapper = mountComponent()
-    const motifs = wrapper.findAll('[data-testid="onboarding-background-motif"]')
-    const motifIcons = wrapper.findAll('.onboarding-modal__motif-icon')
 
-    expect(motifs).toHaveLength(3)
-    expect(motifIcons).toHaveLength(3)
-    expect(motifs[0].find('.onboarding-modal__motif-icon').exists()).toBe(true)
-    expect(motifs[1].find('.onboarding-modal__motif-icon').exists()).toBe(true)
-    expect(motifs[2].find('.onboarding-modal__motif-icon').exists()).toBe(true)
+    const emphasis = wrapper.findAll('.onboarding-modal__section-emphasis')
+
+    expect(emphasis).toHaveLength(3)
+    expect(emphasis[0].text()).toBe('task scheduling')
+    expect(emphasis[1].text()).toBe('generating code')
+    expect(emphasis[2].text()).toBe('merge requests')
+  })
+
+  it('shows step-specific motifs tied to the active theme', async () => {
+    const wrapper = mountComponent()
+
     expect(wrapper.find('.icon-stub--SparklesOutline').exists()).toBe(true)
     expect(wrapper.find('.icon-stub--GitMergeOutline').exists()).toBe(true)
+    expect(wrapper.find('.icon-stub--DocumentTextOutline').exists()).toBe(true)
+    expect(wrapper.find('.icon-stub--LayersOutline').exists()).toBe(false)
+    expect(wrapper.find('.icon-stub--PlayCircleOutline').exists()).toBe(false)
+
+    await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
+
+    expect(wrapper.find('.icon-stub--DocumentTextOutline').exists()).toBe(true)
+    expect(wrapper.find('.icon-stub--LayersOutline').exists()).toBe(true)
+    expect(wrapper.find('.icon-stub--CheckmarkDoneCircleOutline').exists()).toBe(true)
+    expect(wrapper.find('.icon-stub--GitMergeOutline').exists()).toBe(false)
+
+    await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
+
     expect(wrapper.find('.icon-stub--CalendarClearOutline').exists()).toBe(true)
+    expect(wrapper.find('.icon-stub--PlayCircleOutline').exists()).toBe(true)
+    expect(wrapper.find('.icon-stub--GitMergeOutline').exists()).toBe(true)
+    expect(wrapper.find('.icon-stub--LayersOutline').exists()).toBe(false)
   })
 
-  it('moves between steps', async () => {
+  it('renders motifs through a single crossfade transition', () => {
+    const wrapper = mountComponent()
+
+    expect(wrapper.findComponent({ name: 'TransitionGroup' }).exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'Transition' }).exists()).toBe(true)
+    expect(wrapper.find('.onboarding-modal__background-set').exists()).toBe(true)
+  })
+
+
+  it('uses translucent surfaces for concept and workflow cards', async () => {
     const wrapper = mountComponent()
 
     await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
-    expect(wrapper.find('[data-testid="onboarding-step-title"]').text()).toBe('onboarding.concepts.title')
-    expect(wrapper.find('.n-steps').attributes('data-current')).toBe('2')
+    expect(wrapper.findAll('.onboarding-modal__surface').length).toBeGreaterThan(0)
+    expect(wrapper.findAll('.onboarding-modal__concept-card.onboarding-modal__surface')).toHaveLength(3)
 
     await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
-    expect(wrapper.find('[data-testid="onboarding-step-title"]').text()).toBe('onboarding.workflow.title')
-    expect(wrapper.find('.n-steps').attributes('data-current')).toBe('3')
-
-    await wrapper.find('[data-testid="onboarding-previous"]').trigger('click')
-    expect(wrapper.find('[data-testid="onboarding-step-title"]').text()).toBe('onboarding.concepts.title')
-    expect(wrapper.find('.n-steps').attributes('data-current')).toBe('2')
+    expect(wrapper.findAll('.onboarding-modal__workflow-item.onboarding-modal__surface')).toHaveLength(3)
   })
 
   it('resets to the first step when reopened', async () => {

@@ -14,17 +14,21 @@
           aria-modal="true"
         >
           <div class="onboarding-modal__background" aria-hidden="true">
-            <div
-              v-for="motif in decorativeMotifs"
-              :key="motif.key"
-              :class="['onboarding-modal__motif', motif.className]"
-              data-testid="onboarding-background-motif"
-              aria-hidden="true"
-            >
-              <n-icon class="onboarding-modal__motif-icon">
-                <component :is="motif.icon" />
-              </n-icon>
-            </div>
+            <Transition name="onboarding-motif-fade" mode="out-in">
+              <div :key="activeStep.number" class="onboarding-modal__background-set">
+                <div
+                  v-for="motif in activeMotifs"
+                  :key="motif.key"
+                  :class="['onboarding-modal__motif', motif.className]"
+                  data-testid="onboarding-background-motif"
+                  aria-hidden="true"
+                >
+                  <n-icon class="onboarding-modal__motif-icon">
+                    <component :is="motif.icon" />
+                  </n-icon>
+                </div>
+              </div>
+            </Transition>
           </div>
         <template #header>
           <div class="onboarding-modal__header">
@@ -60,12 +64,17 @@
                 <div class="onboarding-modal__hero">
                   <div class="onboarding-modal__hero-copy">
                     <h3 class="onboarding-modal__section-title">{{ t('onboarding.welcome.heading') }}</h3>
-                    <p class="onboarding-modal__section-text" v-html="formatRichText(t('onboarding.welcome.body'))"></p>
+                    <p class="onboarding-modal__section-text">
+                      <template v-for="segment in welcomeBodySegments" :key="segment.key">
+                        <strong v-if="segment.emphasized" class="onboarding-modal__section-emphasis">{{ segment.text }}</strong>
+                        <template v-else>{{ segment.text }}</template>
+                      </template>
+                    </p>
                   </div>
                   <div class="onboarding-modal__summary-card">
                     <span class="onboarding-modal__summary-label">{{ t('onboarding.welcome.summaryLabel') }}</span>
                     <strong class="onboarding-modal__summary-title">{{ t('onboarding.welcome.summaryTitle') }}</strong>
-                    <p class="onboarding-modal__summary-text" v-html="formatRichText(t('onboarding.welcome.summaryBody'))"></p>
+                    <p class="onboarding-modal__summary-text">{{ t('onboarding.welcome.summaryBody') }}</p>
                   </div>
                 </div>
               </template>
@@ -75,7 +84,7 @@
                   <n-thing
                     v-for="item in conceptItems"
                     :key="item.titleKey"
-                    class="onboarding-modal__concept-card"
+                    class="onboarding-modal__concept-card onboarding-modal__surface"
                     :title="t(item.titleKey)"
                   >
                     <p class="onboarding-modal__section-text">{{ t(item.bodyKey) }}</p>
@@ -88,7 +97,7 @@
                   <div
                     v-for="item in workflowItems"
                     :key="item.stepKey"
-                    class="onboarding-modal__workflow-item"
+                    class="onboarding-modal__workflow-item onboarding-modal__surface"
                   >
                     <div class="onboarding-modal__workflow-index">{{ t(item.stepKey) }}</div>
                     <div>
@@ -147,7 +156,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { NButton, NCard, NIcon, NModal, NStep, NSteps, NThing } from 'naive-ui'
-import { SparklesOutline, GitMergeOutline, CalendarClearOutline } from '@vicons/ionicons5'
+import { SparklesOutline, GitMergeOutline, CalendarClearOutline, DocumentTextOutline, LayersOutline, CheckmarkDoneCircleOutline, PlayCircleOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 
 interface OnboardingStep {
@@ -162,6 +171,12 @@ interface OnboardingContentItem {
   stepKey?: string
   titleKey: string
   bodyKey: string
+}
+
+interface OnboardingMotif {
+  key: string
+  icon: unknown
+  className: string
 }
 
 const props = defineProps<{
@@ -240,25 +255,89 @@ const workflowItems: OnboardingContentItem[] = [
   },
 ]
 
-const decorativeMotifs = [
-  {
-    key: 'ai',
-    icon: SparklesOutline,
-    className: 'onboarding-modal__motif--ai',
-  },
-  {
-    key: 'merge',
-    icon: GitMergeOutline,
-    className: 'onboarding-modal__motif--merge',
-  },
-  {
-    key: 'schedule',
-    icon: CalendarClearOutline,
-    className: 'onboarding-modal__motif--schedule',
-  },
-]
+const stepMotifs: Record<number, OnboardingMotif[]> = {
+  1: [
+    {
+      key: 'ai',
+      icon: SparklesOutline,
+      className: 'onboarding-modal__motif--ai',
+    },
+    {
+      key: 'merge',
+      icon: GitMergeOutline,
+      className: 'onboarding-modal__motif--merge',
+    },
+    {
+      key: 'request',
+      icon: DocumentTextOutline,
+      className: 'onboarding-modal__motif--request',
+    },
+  ],
+  2: [
+    {
+      key: 'request',
+      icon: DocumentTextOutline,
+      className: 'onboarding-modal__motif--request',
+    },
+    {
+      key: 'layers',
+      icon: LayersOutline,
+      className: 'onboarding-modal__motif--layers',
+    },
+    {
+      key: 'result',
+      icon: CheckmarkDoneCircleOutline,
+      className: 'onboarding-modal__motif--result',
+    },
+  ],
+  3: [
+    {
+      key: 'schedule',
+      icon: CalendarClearOutline,
+      className: 'onboarding-modal__motif--schedule',
+    },
+    {
+      key: 'run',
+      icon: PlayCircleOutline,
+      className: 'onboarding-modal__motif--run',
+    },
+    {
+      key: 'merge',
+      icon: GitMergeOutline,
+      className: 'onboarding-modal__motif--merge',
+    },
+  ],
+}
 
 const activeStep = computed(() => steps[currentStep.value])
+const activeMotifs = computed(() => stepMotifs[activeStep.value.number] ?? [])
+const welcomeBodySegments = computed(() => {
+  const template = t('onboarding.welcome.body')
+  const replacements = {
+    scheduling: t('onboarding.welcome.bodyScheduling'),
+    code: t('onboarding.welcome.bodyCode'),
+    mr: t('onboarding.welcome.bodyMr'),
+  }
+
+  return template.split(/(\[\[scheduling\]\]|\[\[code\]\]|\[\[mr\]\])/g)
+    .filter(Boolean)
+    .map((segment, index) => {
+      const match = segment.match(/^\[\[(scheduling|code|mr)\]\]$/)
+      if (!match) {
+        return {
+          key: `text-${index}`,
+          text: segment,
+          emphasized: false,
+        }
+      }
+
+      return {
+        key: `${match[1]}-${index}`,
+        text: replacements[match[1] as keyof typeof replacements],
+        emphasized: true,
+      }
+    })
+})
 const isLastStep = computed(() => currentStep.value === steps.length - 1)
 const shellStyle = computed(() => (
   shellHeight.value ? { height: shellHeight.value } : undefined
@@ -341,15 +420,6 @@ function goToPrevious() {
   }
 }
 
-function formatRichText(content: string) {
-  return content
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/&lt;(\/?)strong&gt;/g, '<$1strong>')
-    .replace(/&lt;(\/?)u&gt;/g, '<$1u>')
-}
-
 function handleViewDashboard() {
   emit('complete')
   emit('view-dashboard')
@@ -396,6 +466,26 @@ function handleCreateIssue() {
   z-index: 0;
 }
 
+.onboarding-modal__background-set {
+  position: absolute;
+  inset: 0;
+}
+
+.onboarding-motif-fade-enter-active,
+.onboarding-motif-fade-leave-active {
+  transition: opacity 280ms ease;
+}
+
+.onboarding-motif-fade-enter-from,
+.onboarding-motif-fade-leave-to {
+  opacity: 0;
+}
+
+.onboarding-motif-fade-enter-to,
+.onboarding-motif-fade-leave-from {
+  opacity: 1;
+}
+
 .onboarding-modal__motif {
   position: absolute;
   display: flex;
@@ -406,7 +496,6 @@ function handleCreateIssue() {
   filter: saturate(0.9);
   transform: translateZ(0);
 }
-
 .onboarding-modal__motif-icon {
   width: 100%;
   height: 100%;
@@ -436,14 +525,44 @@ function handleCreateIssue() {
   transform: translateY(-50%) rotate(-18deg);
 }
 
-.onboarding-modal__motif--schedule {
-  right: 10%;
-  bottom: -138px;
-  width: clamp(250px, 34vw, 360px);
-  height: clamp(250px, 34vw, 360px);
-  opacity: 0.075;
+.onboarding-modal__motif--request {
+  top: 12%;
+  right: 14%;
+  width: clamp(210px, 28vw, 300px);
+  height: clamp(210px, 28vw, 300px);
+  opacity: 0.08;
+  color: color-mix(in srgb, var(--n-primary-color, #18a058) 24%, transparent);
+  transform: rotate(14deg);
+}
+
+.onboarding-modal__motif--layers {
+  top: 30%;
+  left: -70px;
+  width: clamp(220px, 30vw, 320px);
+  height: clamp(220px, 30vw, 320px);
+  opacity: 0.08;
+  color: color-mix(in srgb, var(--n-text-color-3, #64748b) 46%, transparent);
+  transform: translateY(-50%) rotate(-10deg);
+}
+
+.onboarding-modal__motif--result {
+  right: 6%;
+  bottom: -108px;
+  width: clamp(230px, 31vw, 330px);
+  height: clamp(230px, 31vw, 330px);
+  opacity: 0.072;
+  color: color-mix(in srgb, var(--n-primary-color, #18a058) 34%, transparent);
+  transform: rotate(8deg);
+}
+
+.onboarding-modal__motif--run {
+  top: 10%;
+  right: -34px;
+  width: clamp(220px, 29vw, 310px);
+  height: clamp(220px, 29vw, 310px);
+  opacity: 0.09;
   color: color-mix(in srgb, var(--n-primary-color, #18a058) 30%, transparent);
-  transform: rotate(12deg);
+  transform: rotate(-8deg);
 }
 
 .onboarding-modal__header {
@@ -536,8 +655,12 @@ function handleCreateIssue() {
 .onboarding-modal__workflow-item {
   border: 1px solid var(--n-border-color, rgba(148, 163, 184, 0.25));
   border-radius: 20px;
-  background: linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(255, 255, 255, 0.98));
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
+}
+
+.onboarding-modal__surface {
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.78), rgba(255, 255, 255, 0.62));
+  backdrop-filter: blur(14px);
 }
 
 .onboarding-modal__summary-card {
@@ -611,8 +734,8 @@ function handleCreateIssue() {
   color: var(--n-text-color-2, rgba(15, 23, 42, 0.72));
 }
 
-.onboarding-modal__section-text :deep(strong),
-.onboarding-modal__summary-text :deep(strong) {
+.onboarding-modal__section-emphasis,
+.onboarding-modal__summary-text strong {
   font-weight: 700;
   color: var(--n-text-color-1, #0f172a);
 }
