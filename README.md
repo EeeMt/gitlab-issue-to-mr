@@ -20,6 +20,12 @@ Once a task is launched, Codify will:
 4. Commit, push to a new branch, and create or update a Merge Request
 5. Log every step so you can trace what happened
 
+## Application feature overview
+
+
+https://github.com/user-attachments/assets/08dd2ed5-12aa-4e82-97c0-695baeb527c9
+
+
 ## Key components
 
 - `backend/app/api/tasks.py` — task APIs and queue views
