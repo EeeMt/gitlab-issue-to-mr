@@ -24,10 +24,16 @@ type MetricKey = 'tasks' | 'changes' | 'tokens'
 
 const activeMetric = ref<MetricKey>('tasks')
 
+const metricPalette = {
+  tasks: { tab: '#0ea5e9', primary: '#0ea5e9', secondary: '#14b8a6' },
+  changes: { tab: '#14b8a6', primary: '#14b8a6', secondary: '#8b5cf6' },
+  tokens: { tab: '#8b5cf6', primary: '#8b5cf6', secondary: '#0ea5e9' },
+} as const
+
 const metrics = computed<{ key: MetricKey; label: string; color: string }[]>(() => [
-  { key: 'tasks', label: t('trend.tasks'), color: '#2080f0' },
-  { key: 'changes', label: t('trend.changes'), color: '#18a058' },
-  { key: 'tokens', label: t('trend.tokens'), color: '#f0a020' },
+  { key: 'tasks', label: t('trend.tasks'), color: metricPalette.tasks.tab },
+  { key: 'changes', label: t('trend.changes'), color: metricPalette.changes.tab },
+  { key: 'tokens', label: t('trend.tokens'), color: metricPalette.tokens.tab },
 ])
 
 const option = computed(() => {
@@ -47,8 +53,8 @@ const option = computed(() => {
         smooth: true,
         symbol: 'none',
         lineStyle: { width: 2 },
-        itemStyle: { color: '#18a058' },
-        areaStyle: { color: 'rgba(24,160,88,0.08)' },
+        itemStyle: { color: '#0ea5e9' },
+        areaStyle: { color: 'rgba(14,165,233,0.10)' },
       },
       {
         name: t('trend.failed'),
@@ -57,8 +63,8 @@ const option = computed(() => {
         smooth: true,
         symbol: 'none',
         lineStyle: { width: 2 },
-        itemStyle: { color: '#d03050' },
-        areaStyle: { color: 'rgba(208,48,80,0.06)' },
+        itemStyle: { color: '#14b8a6' },
+        areaStyle: { color: 'rgba(20,184,166,0.08)' },
       },
     )
   } else if (m === 'changes') {
@@ -70,8 +76,8 @@ const option = computed(() => {
         smooth: true,
         symbol: 'none',
         lineStyle: { width: 2 },
-        itemStyle: { color: '#18a058' },
-        areaStyle: { color: 'rgba(24,160,88,0.08)' },
+        itemStyle: { color: '#14b8a6' },
+        areaStyle: { color: 'rgba(20,184,166,0.10)' },
       },
       {
         name: t('trend.deletions'),
@@ -80,8 +86,8 @@ const option = computed(() => {
         smooth: true,
         symbol: 'none',
         lineStyle: { width: 2 },
-        itemStyle: { color: '#d03050' },
-        areaStyle: { color: 'rgba(208,48,80,0.06)' },
+        itemStyle: { color: '#8b5cf6' },
+        areaStyle: { color: 'rgba(139,92,246,0.08)' },
       },
     )
   } else {
@@ -93,8 +99,8 @@ const option = computed(() => {
         smooth: true,
         symbol: 'none',
         lineStyle: { width: 2 },
-        itemStyle: { color: '#2080f0' },
-        areaStyle: { color: 'rgba(32,128,240,0.08)' },
+        itemStyle: { color: '#8b5cf6' },
+        areaStyle: { color: 'rgba(139,92,246,0.10)' },
       },
       {
         name: t('trend.output'),
@@ -103,8 +109,8 @@ const option = computed(() => {
         smooth: true,
         symbol: 'none',
         lineStyle: { width: 2 },
-        itemStyle: { color: '#f0a020' },
-        areaStyle: { color: 'rgba(240,160,32,0.06)' },
+        itemStyle: { color: '#0ea5e9' },
+        areaStyle: { color: 'rgba(14,165,233,0.08)' },
       },
     )
   }
@@ -121,7 +127,7 @@ const option = computed(() => {
       left: 'center',
       itemWidth: 12,
       itemHeight: 8,
-      textStyle: { fontSize: 11, color: '#666' },
+      textStyle: { fontSize: 11, color: '#64748b' },
     },
     grid: {
       top: 8,
@@ -137,16 +143,16 @@ const option = computed(() => {
       axisTick: { show: false },
       axisLabel: {
         fontSize: 10,
-        color: '#999',
+        color: '#94a3b8',
         interval: Math.max(Math.floor(dates.length / 6) - 1, 0),
       },
     },
     yAxis: {
       type: 'value',
-      splitLine: { lineStyle: { color: '#f0f0f0' } },
+      splitLine: { lineStyle: { color: '#e2e8f0' } },
       axisLabel: {
         fontSize: 10,
-        color: '#999',
+        color: '#94a3b8',
         formatter: (v: number) => {
           if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M'
           if (v >= 1_000) return (v / 1_000).toFixed(1) + 'K'
@@ -195,13 +201,13 @@ const option = computed(() => {
   padding: 2px 10px;
   font-size: 12px;
   font-weight: 500;
-  color: #999;
+  color: #94a3b8;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .trend-chart__tab:hover {
-  color: #666;
+  color: #64748b;
 }
 
 .trend-chart__tab--active {
@@ -213,3 +219,4 @@ const option = computed(() => {
   height: 220px;
 }
 </style>
+

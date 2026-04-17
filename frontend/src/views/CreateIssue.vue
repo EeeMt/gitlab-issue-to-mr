@@ -261,6 +261,11 @@ const rules: FormRules = {
     message: t('issue.field.title'),
     trigger: 'blur',
   },
+  base_branch: {
+    required: true,
+    message: t('createTask.selectBaseBranch'),
+    trigger: 'change',
+  },
 }
 
 // Options
@@ -369,6 +374,11 @@ async function handleSubmit() {
     return
   }
 
+  if (!formValue.value.base_branch) {
+    message.error(t('createTask.selectBaseBranch'))
+    return
+  }
+
   submitting.value = true
 
   try {
@@ -376,7 +386,7 @@ async function handleSubmit() {
       title: formValue.value.title,
       project_id: formValue.value.project_id!,
       description: formValue.value.description || undefined,
-      base_branch: formValue.value.base_branch || undefined,
+      base_branch: formValue.value.base_branch,
       target_branch: formValue.value.create_mr ? formValue.value.target_branch || undefined : undefined,
     }
 

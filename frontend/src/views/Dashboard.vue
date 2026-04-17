@@ -213,21 +213,21 @@ function buildTaskCard(task: Task): BoardCardItem {
 const issueChartData = computed(() => {
   const s = statsIssueByStatus.value
   return [
-    { name: t('issue.status.open'), value: s.open ?? 0, color: '#909399' },
-    { name: t('issue.status.in_progress'), value: s.in_progress ?? 0, color: '#f0a020' },
-    { name: t('issue.status.in_review'), value: s.in_review ?? 0, color: '#2080f0' },
-    { name: t('issue.status.closed'), value: s.closed ?? 0, color: '#18a058' },
+    { name: t('issue.status.open'), value: s.open ?? 0, color: '#64748b' },
+    { name: t('issue.status.in_progress'), value: s.in_progress ?? 0, color: '#0ea5e9' },
+    { name: t('issue.status.in_review'), value: s.in_review ?? 0, color: '#14b8a6' },
+    { name: t('issue.status.closed'), value: s.closed ?? 0, color: '#8b5cf6' },
   ].filter((d) => d.value > 0)
 })
 
 const taskChartData = computed(() => {
   return [
-    { name: t('status.pending'), value: statsPending.value, color: '#909399' },
-    { name: t('status.queued'), value: statsQueued.value, color: '#2080f0' },
-    { name: t('status.running'), value: statsRunning.value, color: '#f0a020' },
-    { name: t('status.completed'), value: statsCompleted.value, color: '#18a058' },
-    { name: t('status.failed'), value: statsFailed.value, color: '#d03050' },
-    { name: t('status.cancelled'), value: statsCancelled.value, color: '#909399' },
+    { name: t('status.pending'), value: statsPending.value, color: '#64748b' },
+    { name: t('status.queued'), value: statsQueued.value, color: '#0ea5e9' },
+    { name: t('status.running'), value: statsRunning.value, color: '#14b8a6' },
+    { name: t('status.completed'), value: statsCompleted.value, color: '#8b5cf6' },
+    { name: t('status.failed'), value: statsFailed.value, color: '#475569' },
+    { name: t('status.cancelled'), value: statsCancelled.value, color: '#94a3b8' },
   ].filter((d) => d.value > 0)
 })
 

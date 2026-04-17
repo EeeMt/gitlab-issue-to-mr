@@ -78,6 +78,7 @@ class ProviderListTests(unittest.TestCase):
         self.mock_db.delete = AsyncMock()
 
         app.dependency_overrides[get_db] = lambda: self.mock_db
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
         app.dependency_overrides[require_admin_user] = lambda: MagicMock()
 
         self.client = TestClient(app, raise_server_exceptions=False)
@@ -161,6 +162,7 @@ class ProviderCreateTests(unittest.TestCase):
         self.mock_db.delete = AsyncMock()
 
         app.dependency_overrides[get_db] = lambda: self.mock_db
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
         app.dependency_overrides[require_admin_user] = lambda: MagicMock()
 
         self.client = TestClient(app, raise_server_exceptions=False)
@@ -248,6 +250,7 @@ class ProviderDeleteTests(unittest.TestCase):
         self.mock_db.delete = AsyncMock()
 
         app.dependency_overrides[get_db] = lambda: self.mock_db
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
         app.dependency_overrides[require_admin_user] = lambda: MagicMock()
 
         self.client = TestClient(app, raise_server_exceptions=False)
@@ -306,6 +309,7 @@ class ProviderSetDefaultTests(unittest.TestCase):
         self.mock_db.delete = AsyncMock()
 
         app.dependency_overrides[get_db] = lambda: self.mock_db
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
         app.dependency_overrides[require_admin_user] = lambda: MagicMock()
 
         self.client = TestClient(app, raise_server_exceptions=False)
@@ -330,13 +334,13 @@ class ProviderSetDefaultTests(unittest.TestCase):
 
 
 class ProviderAuthScopeTests(unittest.TestCase):
-    """Tests that provider routes use admin auth scope."""
+    """Tests that provider routes use the expected auth scopes."""
 
     def tearDown(self):
         app.dependency_overrides.clear()
 
-    def test_list_providers_uses_admin_dependency(self):
-        """GET /api/providers should be gated by require_admin_user."""
+    def test_list_providers_uses_authenticated_dependency(self):
+        """GET /api/providers should be available to authenticated users."""
         mock_db = MagicMock()
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = []
@@ -346,10 +350,28 @@ class ProviderAuthScopeTests(unittest.TestCase):
             yield mock_db
 
         app.dependency_overrides[get_db] = override_db
-        app.dependency_overrides[require_authenticated_user] = lambda: (_ for _ in ()).throw(Exception("wrong dependency"))
-        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        app.dependency_overrides[require_admin_user] = lambda: (_ for _ in ()).throw(Exception("wrong dependency"))
+
+    def test_write_provider_routes_still_use_admin_dependency(self):
+        """POST /api/providers should still require admin access."""
+        mock_db = MagicMock()
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        app.dependency_overrides[require_admin_user] = lambda: (_ for _ in ()).throw(Exception("wrong dependency"))
 
         client = TestClient(app, raise_server_exceptions=False)
-        response = client.get("/api/providers")
+        response = client.post(
+            "/api/providers",
+            json={
+                "name": "test-provider",
+                "base_url": "http://localhost:11434/v1",
+                "model": "claude-sonnet-4-20250514",
+            },
+        )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 500)

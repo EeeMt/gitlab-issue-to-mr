@@ -284,5 +284,5 @@ app.include_router(
     providers.router,
     prefix="/api",
     tags=["providers"],
-    dependencies=[Depends(require_admin_user)],
+    dependencies=[Depends(require_authenticated_user)],
 )

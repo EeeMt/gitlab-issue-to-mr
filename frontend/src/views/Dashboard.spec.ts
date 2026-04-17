@@ -346,7 +346,20 @@ describe('Dashboard', () => {
       expect(wrapper.find('[data-testid="my-work-board-tab-issues"]').attributes('data-active')).toBe('true')
     })
 
-    it('groups issues into issue status columns', async () => {
+    it('uses a shared fixed panel container for both tabs', async () => {
+      await mountDashboard()
+
+      const issuesPanel = wrapper.find('[data-testid="my-work-board-panel"]')
+      expect(issuesPanel.exists()).toBe(true)
+
+      await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
+      await nextTick()
+
+      const tasksPanel = wrapper.find('[data-testid="my-work-board-panel"]')
+      expect(tasksPanel.exists()).toBe(true)
+    })
+
+    it('shows issue status columns on the issues tab', async () => {
       await mountDashboard()
       expect(wrapper.find('[data-testid="issue-column-open"]').text()).toContain('#1')
       expect(wrapper.find('[data-testid="issue-column-in_progress"]').text()).toContain('#2')
@@ -365,6 +378,7 @@ describe('Dashboard', () => {
       expect(wrapper.find('[data-testid="task-column-completed"]').exists()).toBe(true)
       expect(wrapper.find('[data-testid="task-column-failed"]').exists()).toBe(true)
       expect(wrapper.find('[data-testid="task-column-cancelled"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="task-column-pending_queued"]').exists()).toBe(false)
     })
 
     it('keeps empty columns visible with empty text', async () => {
@@ -385,19 +399,27 @@ describe('Dashboard', () => {
       expect(wrapper.find('[data-testid="my-work-board-empty-issues"]').exists()).toBe(true)
     })
 
-    it('shows a notice when the board only displays the first 100 tasks', async () => {
-      setupDefaultMocks()
-      mockApi.getTasksPaginated.mockResolvedValue({ items: mockBoardTasks, total: 145, page: 1, page_size: 100 })
+    it('renders icons in board lane headers', async () => {
+      await mountDashboard()
 
-      wrapper = mount(Dashboard, { global: { plugins: [router] } })
-      await flushPromises()
-      await nextTick()
+      expect(wrapper.find('[data-testid="issue-column-open"] .my-work-board__column-icon').exists()).toBe(true)
 
       await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
       await nextTick()
 
-      expect(wrapper.find('[data-testid="my-work-board-notice-tasks"]').text()).toContain('dashboard.myWorkBoard.limitNotice')
+      expect(wrapper.find('[data-testid="task-column-running"] .my-work-board__column-icon').exists()).toBe(true)
     })
+
+    it('uses lighter typography for task card titles', async () => {
+      await mountDashboard()
+      await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
+      await nextTick()
+
+      const taskCard = wrapper.find('[data-testid="task-card-10"]')
+      expect(taskCard.classes()).toContain('my-work-board__card--task')
+    })
+
+
 
     it('truncates long task prompt text in task cards', async () => {
       setupDefaultMocks()

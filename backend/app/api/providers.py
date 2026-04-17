@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config_crypto import decrypt_config_secret, encrypt_config_secret, ConfigEncryptionError
 from app.database import get_db
-from app.models import AIProvider, Task, TaskStatus
+from app.dependencies.auth import require_admin_user
+from app.models import AIProvider, Task, TaskStatus, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -184,6 +185,7 @@ async def get_provider(provider_id: int, db: AsyncSession = Depends(get_db)):
 async def create_provider(
     request: CreateProviderRequest,
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin_user),
 ):
     """Create a new AI provider."""
     # Check name uniqueness
@@ -233,6 +235,7 @@ async def update_provider(
     provider_id: int,
     request: UpdateProviderRequest,
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin_user),
 ):
     """Update an existing AI provider."""
     provider = await db.get(AIProvider, provider_id)
@@ -289,6 +292,7 @@ async def update_provider(
 async def delete_provider(
     provider_id: int,
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin_user),
 ):
     """Delete an AI provider."""
     provider = await db.get(AIProvider, provider_id)
@@ -339,6 +343,7 @@ async def delete_provider(
 async def set_default_provider(
     provider_id: int,
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin_user),
 ):
     """Set a provider as the system default."""
     provider = await db.get(AIProvider, provider_id)

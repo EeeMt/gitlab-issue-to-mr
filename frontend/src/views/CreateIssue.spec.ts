@@ -572,6 +572,23 @@ describe('CreateIssue', () => {
       expect(mockApi.createIssue).not.toHaveBeenCalled()
     })
 
+    it('should require base_branch before submitting', async () => {
+      await mountComponent()
+
+      const formRef = wrapper.vm.formRef
+      formRef.validate.mockResolvedValue(undefined)
+
+      wrapper.vm.formValue.title = 'Test Issue'
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = undefined
+
+      await wrapper.vm.handleSubmit()
+      await flushPromises()
+
+      expect(mockApi.createIssue).not.toHaveBeenCalled()
+      expect(mockMessage.error).toHaveBeenCalledWith('createTask.selectBaseBranch')
+    })
+
     it('should have required project_id rule', async () => {
       await mountComponent()
 
@@ -624,6 +641,7 @@ describe('CreateIssue', () => {
 
       wrapper.vm.formValue.title = 'Test Issue'
       wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -638,6 +656,7 @@ describe('CreateIssue', () => {
 
       wrapper.vm.formValue.title = 'Test Issue'
       wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -682,6 +701,7 @@ describe('CreateIssue', () => {
 
       wrapper.vm.formValue.title = 'Test Issue'
       wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
       wrapper.vm.formValue.description = ''
 
       await wrapper.vm.handleSubmit()
@@ -691,7 +711,7 @@ describe('CreateIssue', () => {
       expect(call.description).toBeUndefined()
     })
 
-    it('should send base_branch as undefined when empty', async () => {
+    it('should reject empty base_branch on submit', async () => {
       await mountComponent()
 
       wrapper.vm.formValue.title = 'Test Issue'
@@ -701,8 +721,8 @@ describe('CreateIssue', () => {
       await wrapper.vm.handleSubmit()
       await flushPromises()
 
-      const call = (mockApi.createIssue as Mock).mock.calls[0][0]
-      expect(call.base_branch).toBeUndefined()
+      expect(mockApi.createIssue).not.toHaveBeenCalled()
+      expect(mockMessage.error).toHaveBeenCalledWith('createTask.selectBaseBranch')
     })
 
     it('should set submitting to true during submission and false after', async () => {
@@ -715,6 +735,7 @@ describe('CreateIssue', () => {
 
       wrapper.vm.formValue.title = 'Test Issue'
       wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
 
       expect(wrapper.vm.submitting).toBe(false)
 
@@ -742,6 +763,7 @@ describe('CreateIssue', () => {
 
       wrapper.vm.formValue.title = 'Test Issue'
       wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -757,6 +779,7 @@ describe('CreateIssue', () => {
 
       wrapper.vm.formValue.title = 'Test Issue'
       wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
 
       await wrapper.vm.handleSubmit()
       await flushPromises()
@@ -771,6 +794,7 @@ describe('CreateIssue', () => {
 
       wrapper.vm.formValue.title = 'Test Issue'
       wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
 
       await wrapper.vm.handleSubmit()
       await flushPromises()

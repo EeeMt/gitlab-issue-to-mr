@@ -29,62 +29,80 @@
       </button>
     </div>
 
-    <div
-      v-if="hasMoreItems"
-      class="my-work-board__notice"
-      :data-testid="`my-work-board-notice-${activeTab}`"
-    >
-      {{ t('dashboard.myWorkBoard.limitNotice', { shown: visibleLimit, total: activeTotal }) }}
-    </div>
-
-    <div
-      v-if="activeColumns.every((column) => column.count === 0)"
-      :data-testid="`my-work-board-empty-${activeTab}`"
-      class="my-work-board__empty"
-    >
-      {{ t('dashboard.myWorkBoard.emptyBoard') }}
-    </div>
-
-    <div class="my-work-board__columns" :class="{ 'my-work-board__columns--mobile': isMobile }">
-      <section
-        v-for="column in activeColumns"
-        :key="`${activeTab}-${column.status}`"
-        class="my-work-board__column"
-        :data-testid="`${activeTab === 'issues' ? 'issue' : 'task'}-column-${column.status}`"
+    <div class="my-work-board__panel" data-testid="my-work-board-panel">
+      <div
+        v-if="hasMoreItems"
+        class="my-work-board__notice"
+        :data-testid="`my-work-board-notice-${activeTab}`"
       >
-        <header class="my-work-board__column-header">
-          <span>{{ column.label }}</span>
-          <span>{{ column.count }}</span>
-        </header>
+        {{ t('dashboard.myWorkBoard.limitNotice', { shown: visibleLimit, total: activeTotal }) }}
+      </div>
 
-        <div class="my-work-board__column-body">
-          <button
-            v-for="item in column.items"
-            :key="item.id"
-            type="button"
-            class="my-work-board__card"
-            :data-testid="`${activeTab === 'issues' ? 'issue' : 'task'}-card-${item.id}`"
-            :title="item.fullTitle || item.title"
-            @click="emit('select', item.route)"
-          >
-            <div class="my-work-board__card-title">{{ item.title }}</div>
-            <div class="my-work-board__card-subtitle">{{ item.subtitle }}</div>
-            <div class="my-work-board__card-meta">{{ item.meta.join(' · ') }}</div>
-          </button>
+      <div
+        v-if="activeColumns.every((column) => column.count === 0)"
+        :data-testid="`my-work-board-empty-${activeTab}`"
+        class="my-work-board__empty"
+      >
+        {{ t('dashboard.myWorkBoard.emptyBoard') }}
+      </div>
 
-          <div v-if="column.items.length === 0" class="my-work-board__column-empty">
-            {{ t('dashboard.myWorkBoard.emptyColumn') }}
+      <div class="my-work-board__columns" :class="{ 'my-work-board__columns--mobile': isMobile }">
+        <section
+          v-for="column in activeColumns"
+          :key="`${activeTab}-${column.status}`"
+          class="my-work-board__column"
+          :data-testid="`${activeTab === 'issues' ? 'issue' : 'task'}-column-${column.status}`"
+        >
+          <header class="my-work-board__column-header">
+            <div class="my-work-board__column-title">
+              <n-icon size="14" class="my-work-board__column-icon">
+                <component :is="getColumnIcon(column.status)" />
+              </n-icon>
+              <span>{{ column.label }}</span>
+            </div>
+            <span>{{ column.count }}</span>
+          </header>
+
+          <div class="my-work-board__column-body">
+            <button
+              v-for="item in column.items"
+              :key="item.id"
+              type="button"
+              class="my-work-board__card"
+              :class="{ 'my-work-board__card--task': activeTab === 'tasks' }"
+              :data-testid="`${activeTab === 'issues' ? 'issue' : 'task'}-card-${item.id}`"
+              :title="item.fullTitle || item.title"
+              @click="emit('select', item.route)"
+            >
+              <div class="my-work-board__card-title">{{ item.title }}</div>
+              <div class="my-work-board__card-subtitle">{{ item.subtitle }}</div>
+              <div class="my-work-board__card-meta">{{ item.meta.join(' · ') }}</div>
+            </button>
+
+            <div v-if="column.items.length === 0" class="my-work-board__column-empty">
+              {{ t('dashboard.myWorkBoard.emptyColumn') }}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
     </div>
   </n-card>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { NCard } from 'naive-ui'
+import { NCard, NIcon } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
+import {
+  CheckmarkCircleOutline,
+  CloseCircleOutline,
+  EllipseOutline,
+  PauseCircleOutline,
+  PlayCircleOutline,
+  RadioButtonOffOutline,
+  SearchOutline,
+  TimeOutline,
+} from '@vicons/ionicons5'
 
 export type BoardKind = 'issues' | 'tasks'
 
@@ -120,6 +138,19 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const activeTab = ref<BoardKind>('issues')
 
+const columnIcons = {
+  open: EllipseOutline,
+  in_progress: PlayCircleOutline,
+  in_review: SearchOutline,
+  closed: CheckmarkCircleOutline,
+  pending: PauseCircleOutline,
+  queued: TimeOutline,
+  running: PlayCircleOutline,
+  completed: CheckmarkCircleOutline,
+  failed: CloseCircleOutline,
+  cancelled: RadioButtonOffOutline,
+} as const
+
 const activeColumns = computed(() =>
   activeTab.value === 'issues' ? props.issueColumns : props.taskColumns,
 )
@@ -129,6 +160,10 @@ const activeTotal = computed(() =>
 )
 
 const hasMoreItems = computed(() => activeTotal.value > props.visibleLimit)
+
+function getColumnIcon(status: string) {
+  return columnIcons[status as keyof typeof columnIcons] ?? EllipseOutline
+}
 </script>
 
 <style scoped>
@@ -156,14 +191,45 @@ const hasMoreItems = computed(() => activeTotal.value > props.visibleLimit)
   color: #18a058;
 }
 
+.my-work-board__panel {
+  height: clamp(280px, 45vh, 360px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.my-work-board__notice {
+  margin-bottom: 12px;
+}
+
+.my-work-board__empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
 .my-work-board__columns {
+  flex: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(220px, 1fr);
   gap: 12px;
+  min-height: 0;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  align-items: stretch;
 }
 
 .my-work-board__columns--mobile {
+  grid-auto-flow: row;
+  grid-auto-columns: unset;
   grid-template-columns: 1fr;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .my-work-board__column {
@@ -171,6 +237,10 @@ const hasMoreItems = computed(() => activeTotal.value > props.visibleLimit)
   border-radius: 12px;
   padding: 12px;
   background: rgba(248, 250, 252, 0.8);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 220px;
 }
 
 .my-work-board__column-header {
@@ -181,11 +251,24 @@ const hasMoreItems = computed(() => activeTotal.value > props.visibleLimit)
   font-weight: 600;
 }
 
+.my-work-board__column-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.my-work-board__column-icon {
+  color: rgba(15, 23, 42, 0.55);
+  flex-shrink: 0;
+}
+
 .my-work-board__column-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 440px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -215,6 +298,11 @@ const hasMoreItems = computed(() => activeTotal.value > props.visibleLimit)
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.my-work-board__card--task .my-work-board__card-title {
+  font-weight: 500;
+  color: rgba(15, 23, 42, 0.82);
 }
 
 .my-work-board__notice,
