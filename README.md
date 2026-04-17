@@ -2,7 +2,9 @@
 
 [中文说明](docs/README.zh-CN.md)
 
-Codify turns your requirements into code. Describe what you need, and Codify handles the rest — generating code in isolated containers, pushing commits, and opening Merge Requests. Schedule tasks ahead so AI works around the clock, making the most of your time and compute resources. Track everything from a single dashboard.
+Codify turns your requirements into code. Describe what you need, and Codify handles the rest — generating code in isolated containers, pushing commits, and opening Merge Requests. 
+
+Schedule tasks ahead so AI works around the clock, making the most of your time and compute resources. Track everything from a single dashboard.
 
 ## Three steps, from idea to MR
 
