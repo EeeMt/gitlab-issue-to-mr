@@ -3,7 +3,7 @@ import * as dotenv from 'dotenv';
 import * as path from 'path';
 import * as fs from 'fs';
 import {
-  pause, humanType, smoothScroll, scrollToTop, scrollIntoView,
+  pause, humanType, smoothScroll, scrollToTop, scrollToBottom, scrollIntoView,
   clickWithDelay, navigateSidebar, waitForVisible, selectNaiveOption,
   humanTypeCodeMirror, logStep
 } from './helpers';
@@ -129,15 +129,15 @@ async function segment1_login(page: Page): Promise<void> {
   const onboardingNext = page.locator('[data-testid="onboarding-next"]');
   if (await onboardingNext.isVisible({ timeout: 3000 }).catch(() => false)) {
     logStep('Segment 1', 'Onboarding step 1 — viewing');
-    await pause(3000); // Let viewer read step 1
+    await pause(2000);
 
     logStep('Segment 1', 'Onboarding step 2');
     await onboardingNext.click();
-    await pause(3000); // Let viewer read step 2
+    await pause(2000);
 
     logStep('Segment 1', 'Onboarding step 3');
     await onboardingNext.click();
-    await pause(3000); // Let viewer read step 3
+    await pause(2000);
 
     // On last step, click "View Dashboard" to close
     const viewDashboard = page.locator('[data-testid="onboarding-view-dashboard"]');
@@ -161,14 +161,14 @@ async function segment1_login(page: Page): Promise<void> {
 async function segment2_dashboard(page: Page): Promise<void> {
   logStep('Segment 2', 'Viewing dashboard summary cards');
   await waitForVisible(page, '[data-testid="dashboard-summary"]');
-  await pause(3000);
-
-  logStep('Segment 2', 'Scrolling to activity heatmap and trend chart');
-  await smoothScroll(page, 500, 2000);
   await pause(2500);
 
-  logStep('Segment 2', 'Scrolling to work board');
-  await smoothScroll(page, 400, 1500);
+  logStep('Segment 2', 'Scrolling through dashboard');
+  await smoothScroll(page, 500, 2000);
+  await pause(2000);
+
+  logStep('Segment 2', 'Scrolling to bottom');
+  await scrollToBottom(page, 2000);
   await pause(2000);
 
   logStep('Segment 2', 'Scrolling back to top');
@@ -184,6 +184,11 @@ async function segment3_createIssue(page: Page): Promise<void> {
   await navigateSidebar(page, '需求', 1500);
   await waitForVisible(page, '[data-testid="issue-list-page"]');
   await pause(1500);
+
+  logStep('Segment 3', 'Scrolling through issues list');
+  await scrollToBottom(page, 1500);
+  await pause(1500);
+  await scrollToTop(page, 1000);
 
   logStep('Segment 3', 'Clicking Create Issue button');
   await clickWithDelay(page, '[data-testid="issue-list-create-button"]', { prePause: 500, postPause: 1500 });
@@ -373,32 +378,61 @@ async function segment4_taskExecution(page: Page): Promise<void> {
 // ─── Segment 5: Monitoring & Analytics (~45s) ──────────────────────────────
 
 async function segment5_monitoring(page: Page): Promise<void> {
-  logStep('Segment 5', 'Navigating to Monitor page');
-  await navigateSidebar(page, '监控', 2000);
+  // Show Tasks list first
+  logStep('Segment 5', 'Navigating to Tasks page');
+  await navigateSidebar(page, '任务', 2000);
   await page.waitForLoadState('networkidle');
-  await pause(2500);
-
-  logStep('Segment 5', 'Showing monitor overview and Kanban view');
-  await smoothScroll(page, 300, 1500);
   await pause(2000);
-  await scrollToTop(page, 1000);
 
-  logStep('Segment 5', 'Navigating to Analytics page');
-  await navigateSidebar(page, '统计分析', 2000);
-  await page.waitForLoadState('networkidle');
-  await pause(2500);
-
-  logStep('Segment 5', 'Scrolling through trend charts');
-  await smoothScroll(page, 500, 2000);
-  await pause(2000);
-  await smoothScroll(page, 400, 1500);
+  logStep('Segment 5', 'Scrolling through tasks list');
+  await scrollToBottom(page, 1500);
   await pause(1500);
   await scrollToTop(page, 1000);
 
+  // Monitor page with tabs
+  logStep('Segment 5', 'Navigating to Monitor page');
+  await navigateSidebar(page, '监控', 2000);
+  await page.waitForLoadState('networkidle');
+  await pause(2000);
+
+  logStep('Segment 5', 'Scrolling monitor page');
+  await scrollToBottom(page, 1500);
+  await pause(1500);
+  await scrollToTop(page, 1000);
+
+  // Switch monitor tabs: runtime → debug → health
+  logStep('Segment 5', 'Switching monitor tabs');
+  const monitorTabs = page.locator('.n-tabs .n-tabs-tab');
+  const monitorTabCount = await monitorTabs.count();
+  for (let i = 1; i < monitorTabCount && i < 3; i++) {
+    await monitorTabs.nth(i).click();
+    await pause(1500);
+    await scrollToBottom(page, 1200);
+    await pause(1000);
+    await scrollToTop(page, 800);
+  }
+
+  // Analytics page
+  logStep('Segment 5', 'Navigating to Analytics page');
+  await navigateSidebar(page, '统计分析', 2000);
+  await page.waitForLoadState('networkidle');
+  await pause(2000);
+
+  logStep('Segment 5', 'Scrolling through analytics');
+  await scrollToBottom(page, 2000);
+  await pause(1500);
+  await scrollToTop(page, 1000);
+
+  // Schedule Overview
   logStep('Segment 5', 'Navigating to Schedule Overview page');
   await navigateSidebar(page, '调度总览', 2000);
   await page.waitForLoadState('networkidle');
-  await pause(2500);
+  await pause(2000);
+
+  logStep('Segment 5', 'Scrolling schedule overview');
+  await scrollToBottom(page, 1500);
+  await pause(1500);
+  await scrollToTop(page, 1000);
 
   logStep('Segment 5', '✅ Monitoring & analytics segment complete');
 }
@@ -411,7 +445,8 @@ async function segment6_configuration(page: Page): Promise<void> {
   await page.waitForLoadState('networkidle');
   await pause(2000);
 
-  await smoothScroll(page, 200, 1000);
+  logStep('Segment 6', 'Scrolling access management');
+  await scrollToBottom(page, 1500);
   await pause(1500);
   await scrollToTop(page, 800);
 
@@ -420,17 +455,30 @@ async function segment6_configuration(page: Page): Promise<void> {
   await page.waitForLoadState('networkidle');
   await pause(2000);
 
+  logStep('Segment 6', 'Scrolling configuration page');
+  await scrollToBottom(page, 1500);
+  await pause(1000);
+  await scrollToTop(page, 800);
+
   logStep('Segment 6', 'Switching config tabs');
-  // Try clicking AI Providers tab
   const tabs = page.locator('.n-tabs .n-tabs-tab');
   const tabCount = await tabs.count();
-  if (tabCount >= 3) {
-    // Click the 3rd tab (typically AI Providers or similar)
-    await tabs.nth(2).click();
-    await pause(1500);
-    // Click another tab (GitLab settings)
-    await tabs.nth(1).click();
-    await pause(1500);
+  // Walk through key tabs: auth, gitlab, AI providers, prompt templates, worker
+  const tabsToShow = [1, 2, 3, 4, 5]; // indices of tabs to visit
+  for (const idx of tabsToShow) {
+    if (idx < tabCount) {
+      await tabs.nth(idx).click();
+      await pause(1200);
+      await scrollToBottom(page, 1000);
+      await pause(800);
+      await scrollToTop(page, 600);
+    }
+  }
+
+  // Return to first tab
+  if (tabCount > 0) {
+    await tabs.nth(0).click();
+    await pause(1000);
   }
 
   logStep('Segment 6', 'Final pause for closing shot');

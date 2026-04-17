@@ -74,6 +74,17 @@ export async function scrollToTop(page: Page, durationMs: number = 1500): Promis
 }
 
 /**
+ * Scroll to the bottom of the page smoothly.
+ */
+export async function scrollToBottom(page: Page, durationMs: number = 2000): Promise<void> {
+  await page.evaluate(() => {
+    const container = document.querySelector('.n-layout-scroll-container') || document.documentElement;
+    container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+  });
+  await pause(durationMs);
+}
+
+/**
  * Scroll a specific element into view smoothly.
  */
 export async function scrollIntoView(page: Page, selector: string, pauseAfterMs: number = 1000): Promise<void> {
