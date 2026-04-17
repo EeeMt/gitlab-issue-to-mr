@@ -368,4 +368,3 @@ codify-{task_id}-p{project_id}-i{issue_iid}
 - [DEPLOYMENT.md](DEPLOYMENT.md) — 详细部署指南
 - [GITLAB_OIDC_SETUP.md](GITLAB_OIDC_SETUP.md) — GitLab OIDC 登录配置
 - [e2e-debugging.md](e2e-debugging.md) — 端到端调试指南
-- [DESIGN.md](DESIGN.md) — 系统架构设计文档

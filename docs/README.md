@@ -9,8 +9,3 @@ This directory aggregates the main project documentation. Start from the root [R
 - [Development environment guide](DEVELOPMENT.md)
 - [GitLab OIDC setup](GITLAB_OIDC_SETUP.md)
 - [E2E debugging guide](e2e-debugging.md)
-
-## Project background
-
-- [Design notes](DESIGN.md)
-- [Progress summary](PROGRESS.md)
