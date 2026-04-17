@@ -25,13 +25,14 @@ const option = computed(() => ({
     left: 'center',
     itemWidth: 10,
     itemHeight: 10,
+    itemGap: 8,
     textStyle: { fontSize: 11, color: '#666' },
   },
   series: [
     {
       type: 'pie',
-      radius: ['40%', '70%'],
-      center: ['50%', '45%'],
+      radius: ['35%', '62%'],
+      center: ['50%', '40%'],
       avoidLabelOverlap: false,
       itemStyle: { borderRadius: 4, borderColor: '#fff', borderWidth: 2 },
       label: { show: false },
@@ -57,6 +58,6 @@ const option = computed(() => ({
 <style scoped>
 .status-pie-chart {
   width: 100%;
-  height: 170px;
+  height: 200px;
 }
 </style>
