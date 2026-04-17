@@ -38,7 +38,7 @@ Once a task is launched, Codify will:
 | Issues | Issue list and detail |
 | Create issue | Describe goals with prompt templates |
 | Tasks | Task list and detail with live logs |
-| Create task | Create a task without an issue |
+| Create task | Manually configure and launch a task |
 | Schedule overview | Queue and scheduling status |
 | Analytics | Execution trends and success rates |
 | Monitor | Runtime status and health checks |
@@ -61,12 +61,7 @@ Once a task is launched, Codify will:
 
 - `GITLAB_URL`
 - `GITLAB_BOT_TOKEN`
-- `ANTHROPIC_BASE_URL`
 - `ANTHROPIC_API_KEY`
-- `ANTHROPIC_MODEL`
-- `CONFIG_ENCRYPTION_KEY`
-- `SECRET_KEY`
-- `SESSION_SECRET`
 
 Good to know:
 

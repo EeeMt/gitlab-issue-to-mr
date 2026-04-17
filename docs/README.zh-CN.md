@@ -38,7 +38,7 @@ Codify 帮你把需求变成代码。写清楚目标和约束，剩下的交给 
 | 需求 | 需求列表与详情 |
 | 创建需求 | 用提示词模板快速描述需求 |
 | 任务 | 任务列表与详情，含实时日志 |
-| 手动创建任务 | 不经过需求直接创建任务 |
+| 手动创建任务 | 手动配置并发起任务 |
 | 调度总览 | 查看队列和调度状态 |
 | 统计分析 | 执行趋势与成功率 |
 | 监控 | 运行时状态与健康检查 |
@@ -61,12 +61,7 @@ Codify 帮你把需求变成代码。写清楚目标和约束，剩下的交给 
 
 - `GITLAB_URL`
 - `GITLAB_BOT_TOKEN`
-- `ANTHROPIC_BASE_URL`
 - `ANTHROPIC_API_KEY`
-- `ANTHROPIC_MODEL`
-- `CONFIG_ENCRYPTION_KEY`
-- `SECRET_KEY`
-- `SESSION_SECRET`
 
 小贴士：
 
