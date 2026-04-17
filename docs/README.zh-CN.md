@@ -20,6 +20,12 @@ Codify 帮你把需求变成代码。写清楚目标和约束，剩下的交给 
 4. 把改动提交、推送到新分支，创建或更新 MR
 5. 全程在 Dashboard 记录日志和状态变化
 
+## 系统功能概览
+
+
+https://github.com/user-attachments/assets/19d0dd54-25d0-4449-9df1-aec66a04652d
+
+
 ## 关键组件
 
 - `backend/app/api/tasks.py` — 任务 API 与队列视图
