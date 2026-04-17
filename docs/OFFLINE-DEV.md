@@ -46,7 +46,7 @@
 | Python | 3.11+ | 用于本地后端开发 |
 | Node.js | 18+ (推荐 22.x) | 用于本地前端开发 |
 | Git | 2.x | 用于版本控制 |
-| GitLab | 内网实例 | Codify 的 webhook/MR/issue 操作目标 |
+| GitLab | 内网实例 | Codify 的 MR/issue 操作目标 |
 | LLM API | Claude 兼容端点 | 内网 Claude API 代理或兼容服务 |
 | 存储 | ≥20 GB 可用空间 | 镜像 + 数据库 + 工作目录 |
 
@@ -353,7 +353,6 @@ vi deploy/offline-bundle/config/.env.offline
 # === 必填 ===
 GITLAB_URL=http://gitlab.internal:8080         # 内网 GitLab 地址
 GITLAB_BOT_TOKEN=glpat-xxxxx                   # GitLab Bot Token
-GITLAB_WEBHOOK_SECRET=your-webhook-secret      # Webhook 验证密钥
 
 ANTHROPIC_BASE_URL=http://llm-gateway:8080/v1  # 内网 LLM API 端点
 ANTHROPIC_API_KEY=sk-xxxxx                     # LLM API Key

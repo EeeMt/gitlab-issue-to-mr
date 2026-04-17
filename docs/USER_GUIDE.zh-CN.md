@@ -8,21 +8,21 @@
 
 1. [产品概述](#1-产品概述)
 2. [工作流程](#2-工作流程)
-3. [通过 GitLab Issue 触发任务](#3-通过-gitlab-issue-触发任务)
-4. [Dashboard 使用指南](#4-dashboard-使用指南)
-   - 4.1 [登录](#41-登录)
-   - 4.2 [任务列表](#42-任务列表)
-   - 4.3 [任务详情](#43-任务详情)
-   - 4.4 [手动创建任务](#44-手动创建任务)
-   - 4.5 [调度总览](#45-调度总览)
-   - 4.6 [监控页面](#46-监控页面)
-   - 4.7 [统计分析](#47-统计分析)
-   - 4.8 [配置管理](#48-配置管理)
-   - 4.9 [访问管理](#49-访问管理)
-5. [任务优先级说明](#5-任务优先级说明)
-6. [任务状态说明](#6-任务状态说明)
-7. [配置项参考](#7-配置项参考)
-8. [常见问题](#8-常见问题)
+3. [Dashboard 使用指南](#3-dashboard-使用指南)
+   - 3.1 [登录](#31-登录)
+   - 3.2 [需求管理](#32-需求管理)
+   - 3.3 [任务列表](#33-任务列表)
+   - 3.4 [任务详情](#34-任务详情)
+   - 3.5 [手动创建任务](#35-手动创建任务)
+   - 3.6 [调度总览](#36-调度总览)
+   - 3.7 [监控页面](#37-监控页面)
+   - 3.8 [统计分析](#38-统计分析)
+   - 3.9 [配置管理](#39-配置管理)
+   - 3.10 [访问管理](#310-访问管理)
+4. [任务优先级说明](#4-任务优先级说明)
+5. [任务状态说明](#5-任务状态说明)
+6. [配置项参考](#6-配置项参考)
+7. [常见问题](#7-常见问题)
 
 ---
 
@@ -30,11 +30,10 @@
 
 Codify（Codify）是一个 AI 驱动的代码生成服务，核心能力如下：
 
-- 监听 GitLab Issue 评论，识别 `@ai-bot <需求>` 指令
-- 将每条需求封装为**任务（Task）**，按优先级调度执行
+- 在 Dashboard 中创建需求（Issue），描述目标和约束
+- 从需求发起**任务（Task）**，按优先级调度执行
 - 在隔离的 Docker 容器中运行 Claude CLI 生成代码
 - 自动完成：创建分支 → 生成代码 → 提交 → 推送 → 发起 Merge Request
-- 将执行结果（MR 链接、错误信息）回写到 GitLab Issue 评论
 - 提供 Web Dashboard 供管理员和用户查看任务状态、日志、统计信息
 
 ---
@@ -42,10 +41,10 @@ Codify（Codify）是一个 AI 驱动的代码生成服务，核心能力如下�
 ## 2. 工作流程
 
 ```
-GitLab Issue 评论 "@ai-bot 需求"
+在 Dashboard 创建需求（Issue）
         │
         ▼
-  Webhook 接收（/api/webhook/gitlab）
+  从需求发起任务（或手动创建任务）
         │
         ▼
   创建 Task（状态: PENDING）
@@ -67,71 +66,15 @@ GitLab Issue 评论 "@ai-bot 需求"
         ▼
   更新 Task（状态: COMPLETED / FAILED）
   存储：MR URL、token 用量、代码变更量
-        │
-        ▼
-  在 GitLab Issue 发表评论（MR 链接 / 错误摘要）
 ```
 
 ---
 
-## 3. 通过 GitLab Issue 触发任务
-
-### 3.1 基本用法
-
-在任意 GitLab Issue 的**评论**中输入：
-
-```
-@ai-bot <你的需求描述>
-```
-
-示例：
-
-```
-@ai-bot 在 src/utils/math.py 中实现一个快速排序函数，并添加单元测试
-```
-
-```
-@ai-bot 修复用户登录时如果邮箱包含大写字母导致的 404 问题
-```
-
-### 3.2 触发条件
-
-- 评论必须包含 `@ai-bot`（大小写不敏感）
-- Webhook 需要已正确配置（见 [GITLAB_WEBHOOK_SETUP.md](GITLAB_WEBHOOK_SETUP.md)）
-- Bot 账号需要对目标项目有 Developer 及以上权限
-
-### 3.3 执行反馈
-
-任务创建后，Bot 会在 Issue 中：
-
-1. **开始时**（可选）：发帖说明任务已接受
-2. **完成后**：发帖附上 Merge Request 链接
-3. **失败时**：发帖附上错误摘要
-
-示例回复：
-
-```
-✅ 代码已生成，Merge Request 已创建：
-https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
-```
-
-### 3.4 指定基础分支（Base Branch）
-
-如需在特定分支上开发，可在评论中注明：
-
-```
-@ai-bot 基于 feature/v2 分支，实现新的缓存层
-```
-
-系统会尽可能根据上下文推断，或使用配置的默认目标分支。
-
----
-
-## 4. Dashboard 使用指南
+## 3. Dashboard 使用指南
 
 访问地址：`http://<部署主机>:8880`（默认端口）
 
-### 4.1 登录
+### 3.1 登录
 
 系统支持两种认证方式：
 
@@ -144,7 +87,16 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 - 若管理员未启用 OIDC，直接访问 Dashboard 即可（无鉴权）
 - 仅适合内网私有部署
 
-### 4.2 任务列表
+### 3.2 需求管理
+
+页面路由：`/issues`
+
+在需求页面创建和管理需求（Issue）：
+- 点击「创建需求」描述目标、选择项目
+- 可使用提示词模板快速填写
+- 从需求详情页可直接发起任务
+
+### 3.3 任务列表
 
 主页（`/`）展示任务队列，按优先级分为三个标签页：
 
@@ -165,7 +117,7 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 - 代码变更量（`+添加 -删除`）
 - 创建时间 / 计划时间
 
-### 4.3 任务详情
+### 3.4 任务详情
 
 点击任意任务进入详情页（`/tasks/:id`）。
 
@@ -200,11 +152,11 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 - 完整显示 emoji（如 Claude 的 ✅ ❌ 🔧 等）
 - 任务执行中每约 10 秒自动刷新一次
 
-### 4.4 手动创建任务
+### 3.5 手动创建任务
 
 页面路由：`/create-task`，或点击侧边栏"创建任务"。
 
-不依赖 GitLab Issue，直接输入参数创建任务：
+直接输入参数创建任务（无需关联需求）：
 
 | 字段 | 说明 |
 |------|------|
@@ -215,9 +167,9 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 | 优先级 | P0 / P1 / P2 |
 | 计划时间 | 延迟到指定时间再执行（可选） |
 
-> 手动任务不会向 GitLab Issue 发送评论通知。
+> 手动任务不会关联需求，适合快速验证或临时任务。
 
-### 4.5 调度总览
+### 3.6 调度总览
 
 页面路由：`/schedule`
 
@@ -225,7 +177,7 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 - 待执行任务的计划时间分布
 - 当前正在运行的任务
 
-### 4.6 监控页面
+### 3.7 监控页面
 
 页面路由：`/monitor`
 
@@ -234,7 +186,7 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 - 每个容器的任务 ID、运行时长、项目信息
 - 实时容器日志查看（仅管理员）
 
-### 4.7 统计分析
+### 3.8 统计分析
 
 页面路由：`/analytics`
 
@@ -244,7 +196,7 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 - 成功率、平均执行时长
 - 按项目、发起人的任务分布
 
-### 4.8 配置管理
+### 3.9 配置管理
 
 页面路由：`/configuration`（仅管理员）
 
@@ -287,15 +239,7 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 | GitLab URL | GitLab 实例地址 |
 | GitLab Bot Token | Bot 账号的 Personal Access Token |
 
-#### Webhook 配置
-
-展示各项目的 Webhook 配置状态：
-- **已配置**：Webhook 存在且 Secret 匹配
-- **需关注**：Webhook 存在但配置可能不一致
-- **缺失**：项目尚未配置 Webhook
-- 支持直接在 Dashboard 中为项目创建/更新 Webhook
-
-### 4.9 访问管理
+### 3.10 访问管理
 
 页面路由：`/access`（仅管理员）
 
@@ -308,7 +252,7 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 
 ---
 
-## 5. 任务优先级说明
+## 4. 任务优先级说明
 
 | 优先级 | 值 | 典型使用场景 |
 |--------|---|------------|
@@ -316,13 +260,11 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 | P1 | 1 | 常规功能开发 |
 | P2 | 2 | 低优先级、后台任务 |
 
-调度器按 **P0 → P1 → P2** 顺序出队，相同优先级按创建时间先后排序。
-
-通过 GitLab Issue 触发的任务默认为 P1，手动创建任务时可自由选择优先级。
+调度器按 **P0 → P1 → P2** 顺序出队，相同优先级按创建时间先后排序。创建任务时可自由选择优先级。
 
 ---
 
-## 6. 任务状态说明
+## 5. 任务状态说明
 
 | 状态 | 颜色 | 说明 |
 |------|------|------|
@@ -335,7 +277,7 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 
 ---
 
-## 7. 配置项参考
+## 6. 配置项参考
 
 以下环境变量在部署时配置（`deploy/.env` 或 Docker Compose 环境变量）：
 
@@ -343,7 +285,6 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 |--------|------|------|
 | `GITLAB_URL` | GitLab 实例地址 | `https://gitlab.example.com` |
 | `GITLAB_BOT_TOKEN` | Bot 账号 PAT（`api` 权限） | `glpat-xxxx` |
-| `GITLAB_WEBHOOK_SECRET` | 全局 Webhook 验签密钥 | 随机字符串 |
 | `ANTHROPIC_BASE_URL` | Claude API 端点 | `https://api.anthropic.com` |
 | `ANTHROPIC_API_KEY` | Claude API 密钥 | `sk-ant-xxxx` |
 | `ANTHROPIC_MODEL` | 使用的模型 | `claude-opus-4-5` |
@@ -360,16 +301,7 @@ https://gitlab.example.com/mygroup/myproject/-/merge_requests/42
 
 ---
 
-## 8. 常见问题
-
-**Q: 评论了 `@ai-bot` 但没有任何反应？**
-
-1. 检查 Webhook 是否已配置并触发（GitLab → 项目 → Settings → Webhooks → 查看最近的请求）
-2. 检查 Bot 账号是否有项目的 Developer 权限
-3. 检查 Webhook Secret 是否与服务端配置一致
-4. 查看 backend 服务日志：`docker logs codify-backend --tail 50`
-
----
+## 7. 常见问题
 
 **Q: 任务显示 FAILED，如何排查？**
 
@@ -434,7 +366,6 @@ codify-{task_id}-p{project_id}-i{issue_iid}
 ## 相关文档
 
 - [DEPLOYMENT.md](DEPLOYMENT.md) — 详细部署指南
-- [GITLAB_WEBHOOK_SETUP.md](GITLAB_WEBHOOK_SETUP.md) — Webhook 配置步骤
 - [GITLAB_OIDC_SETUP.md](GITLAB_OIDC_SETUP.md) — GitLab OIDC 登录配置
 - [e2e-debugging.md](e2e-debugging.md) — 端到端调试指南
 - [DESIGN.md](DESIGN.md) — 系统架构设计文档

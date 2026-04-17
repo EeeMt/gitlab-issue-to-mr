@@ -7,7 +7,6 @@ This directory aggregates the main project documentation. Start from the root [R
 - [Chinese README](README.zh-CN.md)
 - [Production deployment guide](DEPLOYMENT.md)
 - [Development environment guide](DEVELOPMENT.md)
-- [GitLab webhook setup](GITLAB_WEBHOOK_SETUP.md)
 - [GitLab OIDC setup](GITLAB_OIDC_SETUP.md)
 - [E2E debugging guide](e2e-debugging.md)
 

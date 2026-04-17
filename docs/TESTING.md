@@ -129,22 +129,21 @@ make test-mock-integration-down     # 停止环境
 
 | 文件 | 测试数 | 覆盖范围 |
 |------|--------|----------|
-| test_happy_path.py | 4 | 核心 webhook→task→MR 流程 |
+| test_happy_path.py | 4 | 核心 task→MR 流程 |
 | test_entrypoint.py | 11 | entrypoint.sh 逻辑 |
 | test_failure_paths.py | 3 | Claude 失败、超时、取消 |
 | test_edge_cases.py | 7 | 边缘场景 |
 | test_scheduling.py | 2 | 优先级、并发 |
 | test_advanced.py | 6 | Base branch、mutex、crash recovery |
-| test_additional.py | 8 | 超时、webhook 验证 |
+| test_additional.py | 8 | 超时、验证 |
 | test_gap_analysis.py | 7 | No-changes、MR 失败、并发 |
 | test_coverage_gaps.py | 9 | 事件过滤、CODIFY markers |
 | test_api_endpoints.py | 12 | 分页、SSE、重试、日志 |
 | test_system_apis.py | 14 | 统计、分析、配置、认证 |
 | test_admin_and_templates.py | 13 | 模板、用户管理、会话 |
-| test_webhook_and_lifecycle.py | 14 | 提示词、运行时配置、生命周期 |
-| test_notifications_and_operations.py | 17 | 通知、slot capacity |
+| test_webhook_and_lifecycle.py | 14 | 提示词、运行时配置、生命周期 || test_notifications_and_operations.py | 17 | 通知、slot capacity |
 | test_mr_followup_and_env.py | 12 | MR follow-up、容器环境、重试 |
-| test_health_access_sse.py | 25 | 健康检查、访问控制、SSE、webhook配置 |
+| test_health_access_sse.py | 25 | 健康检查、访问控制、SSE |
 | test_remaining_endpoints.py | 27 | 剩余端点覆盖 |
 | test_failure_injection.py | 15 | 故障注入（项目404、退出码、git clone、组合故障） |
 | test_mutex_and_scheduling.py | 16 | 互斥锁、调度、分支验证、快速创建 |
@@ -388,7 +387,7 @@ make test-e2e-gitlab
 | 文件 | 说明 | 依赖 |
 |------|------|------|
 | `test_manual_task.py` | 手动任务创建 (GitLab API) | 真实 GitLab |
-| `test_integration.py` | Webhook 集成流程 | 真实 GitLab |
+| `test_integration.py` | 集成流程 | 真实 GitLab |
 | `test_task_execution.py` | 任务创建 API + 执行完整流程 | 见下表 |
 
 #### `test_task_execution.py` 各测试类依赖

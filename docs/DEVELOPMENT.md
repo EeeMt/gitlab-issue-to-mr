@@ -64,7 +64,6 @@ cp .env.example .env
 
 - `GITLAB_URL`
 - `GITLAB_BOT_TOKEN`
-- `GITLAB_WEBHOOK_SECRET`
 
 #### 模型服务
 
@@ -306,6 +305,5 @@ cd frontend && npm run build
 - [项目总览 README](../README.md)
 - [README.zh-CN.md](README.zh-CN.md)
 - [DEPLOYMENT.md](DEPLOYMENT.md)
-- [GITLAB_WEBHOOK_SETUP.md](GITLAB_WEBHOOK_SETUP.md)
 - [GITLAB_OIDC_SETUP.md](GITLAB_OIDC_SETUP.md)
 - [e2e-debugging.md](e2e-debugging.md)
