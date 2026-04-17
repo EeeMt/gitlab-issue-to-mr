@@ -2,19 +2,19 @@
 
 [中文说明](docs/README.zh-CN.md)
 
-Codify turns your requirements into code. Describe what you need, and Codify handles the rest — scheduling AI tasks, generating code in isolated containers, pushing commits, and opening Merge Requests. Track everything from a single dashboard.
+Codify turns your requirements into code. Describe what you need, and Codify handles the rest — generating code in isolated containers, pushing commits, and opening Merge Requests. Schedule tasks ahead so AI works around the clock, making the most of your time and compute resources. Track everything from a single dashboard.
 
 ## Three steps, from idea to MR
 
 1. **Create an issue** — describe the problem and expected outcome
-2. **Launch a task** — kick it off now or schedule it for later
+2. **Launch a task** — run it now, or schedule it for off-peak hours to keep resources busy
 3. **Review the results** — follow status, read logs, inspect the delivery
 
 ## What happens behind the scenes
 
 Once a task is launched, Codify will:
 
-1. Queue it based on priority and concurrency limits
+1. Queue it by priority and scheduled time, respecting concurrency limits
 2. Spin up a dedicated Docker container
 3. Clone the repo and run Claude CLI to generate code
 4. Commit, push to a new branch, and create or update a Merge Request
