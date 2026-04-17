@@ -410,6 +410,33 @@ describe('Dashboard', () => {
       expect(wrapper.find('[data-testid="task-column-running"] .my-work-board__column-icon').exists()).toBe(true)
     })
 
+    it('keeps visible spacing between task lanes', async () => {
+      await mountDashboard()
+      await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
+      await nextTick()
+
+      const columns = wrapper.find('.my-work-board__columns')
+      const taskColumn = wrapper.find('[data-testid="task-column-running"]')
+
+      expect(columns.classes()).toContain('my-work-board__columns')
+      expect(columns.classes()).not.toContain('my-work-board__columns--tasks')
+      expect(taskColumn.classes()).toContain('my-work-board__column')
+      expect(taskColumn.classes()).not.toContain('my-work-board__column--tasks')
+    })
+
+    it('uses the same lane background treatment for issues and tasks', async () => {
+      await mountDashboard()
+
+      const issueColumn = wrapper.find('[data-testid="issue-column-open"]')
+      expect(issueColumn.classes()).toContain('my-work-board__column--board')
+
+      await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
+      await nextTick()
+
+      const taskColumn = wrapper.find('[data-testid="task-column-running"]')
+      expect(taskColumn.classes()).toContain('my-work-board__column--board')
+    })
+
     it('uses lighter typography for task card titles', async () => {
       await mountDashboard()
       await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')

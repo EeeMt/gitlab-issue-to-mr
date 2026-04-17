@@ -794,6 +794,35 @@ describe('IssueView', () => {
       expect(editor.exists()).toBe(true)
     })
 
+    it('refreshes schedule preview data after creating another task', async () => {
+      setupDefaultMocks()
+      mockApi.createTask.mockResolvedValue({ id: 3 })
+      mockApi.getScheduledTasks
+        .mockResolvedValueOnce([{ id: 1 }])
+        .mockResolvedValueOnce([{ id: 1 }, { id: 2 }])
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+
+      await vm.openScheduleDrawer()
+      await flushPromises()
+      expect(mockApi.getScheduledTasks).toHaveBeenCalledTimes(1)
+      expect(vm.scheduledTasksForPreview).toEqual([{ id: 1 }])
+
+      vm.showScheduleDrawer = false
+      await nextTick()
+
+      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
+      await nextTick()
+      await wrapper.find('[data-testid="issue-create-task-button"]').trigger('click')
+      await flushPromises()
+
+      await vm.openScheduleDrawer()
+      await flushPromises()
+
+      expect(mockApi.getScheduledTasks).toHaveBeenCalledTimes(2)
+      expect(vm.scheduledTasksForPreview).toEqual([{ id: 1 }, { id: 2 }])
+    })
+
     it('calls createTask with correct payload (execute now)', async () => {
       const newTask = { id: 3 }
       setupDefaultMocks()

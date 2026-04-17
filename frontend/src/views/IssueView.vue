@@ -845,6 +845,18 @@ async function handleCreateTask() {
     }
     await createTask(request)
     message.success(t('issue.taskCreated'))
+    if (showScheduleDrawer.value) {
+      scheduledTasksLoading.value = true
+      try {
+        scheduledTasksForPreview.value = await getScheduledTasks()
+      } catch {
+        scheduledTasksForPreview.value = []
+      } finally {
+        scheduledTasksLoading.value = false
+      }
+    } else {
+      scheduledTasksForPreview.value = []
+    }
     newTaskPrompt.value = ''
     newTaskSchedule.value = null
     selectedProviderId.value = null

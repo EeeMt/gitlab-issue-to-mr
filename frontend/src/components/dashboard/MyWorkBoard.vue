@@ -50,7 +50,7 @@
         <section
           v-for="column in activeColumns"
           :key="`${activeTab}-${column.status}`"
-          class="my-work-board__column"
+          class="my-work-board__column my-work-board__column--board"
           :data-testid="`${activeTab === 'issues' ? 'issue' : 'task'}-column-${column.status}`"
         >
           <header class="my-work-board__column-header">
@@ -236,11 +236,15 @@ function getColumnIcon(status: string) {
   border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 12px;
   padding: 12px;
-  background: rgba(248, 250, 252, 0.8);
   display: flex;
   flex-direction: column;
   min-height: 0;
   min-width: 220px;
+  box-sizing: border-box;
+}
+
+.my-work-board__column--board {
+  background: #fff;
 }
 
 .my-work-board__column-header {
