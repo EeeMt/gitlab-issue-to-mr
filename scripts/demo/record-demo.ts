@@ -125,12 +125,31 @@ async function segment1_login(page: Page): Promise<void> {
   await page.waitForLoadState('networkidle');
   await pause(2000);
 
-  // Dismiss onboarding modal if present
-  const skipButton = page.locator('[data-testid="onboarding-skip"]');
-  if (await skipButton.isVisible({ timeout: 3000 }).catch(() => false)) {
-    logStep('Segment 1', 'Dismissing onboarding modal');
-    await pause(1500); // Let viewer see the modal briefly
-    await skipButton.click();
+  // Walk through onboarding modal if present (3 steps)
+  const onboardingNext = page.locator('[data-testid="onboarding-next"]');
+  if (await onboardingNext.isVisible({ timeout: 3000 }).catch(() => false)) {
+    logStep('Segment 1', 'Onboarding step 1 — viewing');
+    await pause(3000); // Let viewer read step 1
+
+    logStep('Segment 1', 'Onboarding step 2');
+    await onboardingNext.click();
+    await pause(3000); // Let viewer read step 2
+
+    logStep('Segment 1', 'Onboarding step 3');
+    await onboardingNext.click();
+    await pause(3000); // Let viewer read step 3
+
+    // On last step, click "View Dashboard" to close
+    const viewDashboard = page.locator('[data-testid="onboarding-view-dashboard"]');
+    if (await viewDashboard.isVisible({ timeout: 2000 }).catch(() => false)) {
+      logStep('Segment 1', 'Clicking View Dashboard');
+      await viewDashboard.click();
+    } else {
+      const skipBtn = page.locator('[data-testid="onboarding-skip"]');
+      if (await skipBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await skipBtn.click();
+      }
+    }
     await pause(1000);
   }
 

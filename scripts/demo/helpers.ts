@@ -48,20 +48,18 @@ export async function humanTypeCodeMirror(
 
 /**
  * Smooth scroll the page by deltaY pixels over the given duration.
- * Breaks the scroll into small increments for a smooth visual effect.
+ * Uses CSS smooth scrolling on the NaiveUI scroll container for jitter-free motion.
  */
 export async function smoothScroll(
   page: Page,
   deltaY: number,
   durationMs: number = 2000
 ): Promise<void> {
-  const steps = 30;
-  const stepDelay = durationMs / steps;
-  const stepDelta = deltaY / steps;
-  for (let i = 0; i < steps; i++) {
-    await page.mouse.wheel(0, stepDelta);
-    await pause(stepDelay);
-  }
+  await page.evaluate((dy) => {
+    const container = document.querySelector('.n-layout-scroll-container') || document.documentElement;
+    container.scrollBy({ top: dy, behavior: 'smooth' });
+  }, deltaY);
+  await pause(durationMs);
 }
 
 /**
@@ -111,6 +109,11 @@ export async function navigateSidebar(
   const menuItem = page.locator('.nav-menu').getByText(menuText, { exact: true });
   await menuItem.click();
   await page.waitForLoadState('domcontentloaded');
+  // Reset scroll position so new page shows from the top
+  await page.evaluate(() => {
+    const container = document.querySelector('.n-layout-scroll-container') || document.documentElement;
+    container.scrollTo({ top: 0 });
+  });
   await pause(waitMs);
 }
 
