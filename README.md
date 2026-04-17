@@ -40,18 +40,21 @@ https://github.com/user-attachments/assets/08dd2ed5-12aa-4e82-97c0-695baeb527c9
 
 | Page | Purpose |
 |------|---------|
+| **Workspace** | |
 | Dashboard | Overview, heatmap, trends |
 | Issues | Issue list and detail |
-| Create issue | Describe goals with prompt templates |
+| &ensp;↳ Create issue | Describe goals with prompt templates |
 | Tasks | Task list and detail with live logs |
-| Create task | Manually configure and launch a task |
-| Schedule overview | Queue and scheduling status |
-| Analytics | Execution trends and success rates |
-| Monitor | Runtime status and health checks |
+| &ensp;↳ Create task | Manually configure and launch a task |
 | Sessions | View and manage login sessions |
-| Configuration | Runtime parameters and integrations |
+| **Insights** | |
+| Analytics | Execution trends and success rates |
+| Schedule overview | Queue and scheduling status |
+| Monitor | Runtime status and health checks |
+| **Administration** | |
 | Access management | Users and permissions |
-| OIDC diagnostics | Debug SSO login issues |
+| Configuration | Runtime parameters and integrations |
+| &ensp;↳ OIDC diagnostics | Debug SSO login issues |
 
 ## Quick start
 
