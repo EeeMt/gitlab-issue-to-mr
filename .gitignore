@@ -63,3 +63,4 @@ temporary/*.png
 
 # Logs
 logs/
+scripts/demo/.env

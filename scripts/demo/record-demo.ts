@@ -85,25 +85,54 @@ async function segment1_login(page: Page): Promise<void> {
   logStep('Segment 1', 'Showing login page');
   await pause(2500);
 
-  // Check if language needs switching to Chinese
-  const htmlLang = await page.locator('html').getAttribute('lang');
-  logStep('Segment 1', `Current lang: ${htmlLang}`);
+  // Detect login mode: tabs (not initialized) vs toggle (initialized)
+  const hasTabs = await page.locator('[data-testid="login-tabs"]').isVisible({ timeout: 3000 }).catch(() => false);
+  let usernameSelector: string;
+  let passwordSelector: string;
+  let submitSelector: string;
+
+  if (hasTabs) {
+    logStep('Segment 1', 'Login mode: tabs (local auth tab)');
+    usernameSelector = '[data-testid="login-username-input"] input';
+    passwordSelector = '[data-testid="login-password-input"] input';
+    submitSelector = '[data-testid="login-submit-button"]';
+  } else {
+    logStep('Segment 1', 'Login mode: toggle (password login)');
+    // Need to click toggle to show password form
+    const toggleBtn = page.locator('.login-card__toggle button');
+    if (await toggleBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await toggleBtn.click();
+      await pause(800);
+    }
+    usernameSelector = '[data-testid="login-password-toggle-username-input"] input';
+    passwordSelector = '[data-testid="login-password-toggle-password-input"] input';
+    submitSelector = '[data-testid="login-password-toggle-submit-button"]';
+  }
 
   logStep('Segment 1', 'Typing username');
-  await humanType(page, '[data-testid="login-username-input"] input', USERNAME);
+  await humanType(page, usernameSelector, USERNAME);
   await pause(500);
 
   logStep('Segment 1', 'Typing password');
-  await humanType(page, '[data-testid="login-password-input"] input', PASSWORD);
+  await humanType(page, passwordSelector, PASSWORD);
   await pause(500);
 
   logStep('Segment 1', 'Clicking login button');
-  await clickWithDelay(page, '[data-testid="login-submit-button"]', { prePause: 500, postPause: 300 });
+  await clickWithDelay(page, submitSelector, { prePause: 500, postPause: 300 });
 
   logStep('Segment 1', 'Waiting for dashboard');
   await page.waitForURL('**/dashboard', { timeout: 10000 });
   await page.waitForLoadState('networkidle');
   await pause(2000);
+
+  // Dismiss onboarding modal if present
+  const skipButton = page.locator('[data-testid="onboarding-skip"]');
+  if (await skipButton.isVisible({ timeout: 3000 }).catch(() => false)) {
+    logStep('Segment 1', 'Dismissing onboarding modal');
+    await pause(1500); // Let viewer see the modal briefly
+    await skipButton.click();
+    await pause(1000);
+  }
 
   logStep('Segment 1', '✅ Login complete');
 }
@@ -204,26 +233,51 @@ async function segment4_taskExecution(page: Page): Promise<void> {
   logStep('Segment 4', 'On issue detail page, showing initial state');
   await pause(2000);
 
-  logStep('Segment 4', 'Looking for associated task');
-  const tasksCard = page.locator('[data-testid="issue-tasks-card"]');
-  const tasksVisible = await waitForVisible(page, '[data-testid="issue-tasks-card"]', 15000);
-
-  if (tasksVisible) {
+  // Create a task from the issue
+  logStep('Segment 4', 'Opening Create Task drawer');
+  const createTaskBtn = page.locator('[data-testid="issue-toggle-create-task"]');
+  if (await createTaskBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+    await createTaskBtn.click();
     await pause(1500);
-    // Click the first task row in the data table
-    logStep('Segment 4', 'Clicking task to view details');
-    const taskRow = tasksCard.locator('tbody tr').first();
-    if (await taskRow.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await taskRow.click();
-    } else {
-      // Fallback: look for any clickable element with a task ID
-      const taskLink = tasksCard.locator('td').first();
-      await taskLink.click();
+
+    logStep('Segment 4', 'Showing task creation form');
+    await pause(2000); // Let viewer see the drawer with prompt, priority, etc.
+
+    logStep('Segment 4', 'Submitting task');
+    await clickWithDelay(page, '[data-testid="issue-create-task-button"]', { prePause: 500, postPause: 1000 });
+    await pause(2000);
+  }
+
+  // Wait for task to appear in the issue's task list
+  logStep('Segment 4', 'Waiting for task to appear');
+  const tasksCard = page.locator('[data-testid="issue-tasks-card"]');
+  let taskFound = false;
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const row = tasksCard.locator('.n-data-table-tbody tr.n-data-table-tr');
+    if (await row.first().isVisible({ timeout: 2000 }).catch(() => false)) {
+      const text = await row.first().textContent().catch(() => '');
+      if (text && text.trim().length > 0 && !/暂无|no data/i.test(text)) {
+        taskFound = true;
+        break;
+      }
     }
+    logStep('Segment 4', `Waiting for task (attempt ${attempt + 1})...`);
+    await pause(2000);
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+  }
+
+  if (taskFound) {
+    await pause(1500);
+    logStep('Segment 4', 'Clicking task to view details');
+    const taskRow = tasksCard.locator('.n-data-table-tbody tr.n-data-table-tr').first();
+    await taskRow.click();
   } else {
-    logStep('Segment 4', '⚠️ Tasks card not visible, navigating to tasks list');
+    logStep('Segment 4', '⚠️ No task found on issue, navigating to tasks list');
     await navigateSidebar(page, '任务', 1500);
-    const firstRow = page.locator('.n-data-table tbody tr').first();
+    await page.waitForLoadState('networkidle');
+    await pause(1500);
+    const firstRow = page.locator('.n-data-table-tbody tr.n-data-table-tr').first();
     await firstRow.click();
   }
 
@@ -240,8 +294,9 @@ async function segment4_taskExecution(page: Page): Promise<void> {
   let hasScrolledToLogs = false;
 
   while (elapsed < maxWaitMs) {
-    const statusTag = page.locator('[data-testid="task-view-page"]').locator('.n-tag').first();
-    const statusText = (await statusTag.textContent().catch(() => '')) || '';
+    // Read the status tag in the header
+    const statusTag = page.locator('[data-testid="task-view-header"] .n-tag').first();
+    const statusText = (await statusTag.textContent({ timeout: 3000 }).catch(() => '')) || '';
     logStep('Segment 4', `Current status: ${statusText.trim()}`);
 
     // Check terminal states
@@ -257,17 +312,13 @@ async function segment4_taskExecution(page: Page): Promise<void> {
 
     // Show live logs when running
     if (!hasScrolledToLogs && /运行|running|RUNNING/i.test(statusText)) {
-      const processPanel = page.locator('.task-process-panel');
-      if (await processPanel.isVisible({ timeout: 2000 }).catch(() => false)) {
-        logStep('Segment 4', 'Scrolling to process panel for live logs');
-        await scrollIntoView(page, '.task-process-panel', 500);
-        await pause(8000); // Let viewer see live log streaming
-        hasScrolledToLogs = true;
-      }
+      logStep('Segment 4', 'Scrolling to view execution details');
+      await smoothScroll(page, 400, 1500);
+      await pause(8000); // Let viewer see live execution
+      hasScrolledToLogs = true;
     }
 
     await pause(pollIntervalMs);
-    // Refresh to get updated status
     await page.reload();
     await page.waitForLoadState('networkidle');
     elapsed += pollIntervalMs + 2000;
@@ -280,15 +331,11 @@ async function segment4_taskExecution(page: Page): Promise<void> {
     await scrollToTop(page, 1000);
     await pause(1500);
 
-    // Scroll through result info
+    // Scroll through full task details
     await smoothScroll(page, 300, 1500);
     await pause(2000);
-
-    // Show result panel if present
-    const resultPanel = page.locator('.task-result-panel');
-    if (await resultPanel.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await scrollIntoView(page, '.task-result-panel', 2000);
-    }
+    await smoothScroll(page, 300, 1500);
+    await pause(2000);
   } else {
     logStep('Segment 4', '⚠️ Task did not complete within timeout');
     await pause(2000);
