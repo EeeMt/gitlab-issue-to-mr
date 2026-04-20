@@ -60,13 +60,14 @@ class GitLabClient:
         admin_token = self.settings.gitlab_admin_token.strip() if self.settings.gitlab_admin_token else ""
         if not admin_token:
             raise ValueError("gitlab_admin_token is required for sudo operations")
-        return gitlab.Gitlab(
+        gl = gitlab.Gitlab(
             self.base_url,
             private_token=admin_token,
-            sudo=str(gitlab_user_id),
             ssl_verify=get_ssl_verify(self.settings),
             keep_base_url=True,
         )
+        gl.headers["Sudo"] = str(gitlab_user_id)
+        return gl
 
     def ensure_project_label(self, project_id: int, label_name: str, color: str) -> None:
         """Ensure a label exists in the project, creating it if necessary.

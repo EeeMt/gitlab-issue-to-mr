@@ -976,16 +976,18 @@ class TestCreateSudoGl(unittest.TestCase):
         settings = _make_settings(gitlab_admin_token="glpat-admin-token")
         client = _make_client(settings=settings)
 
+        mock_instance = MockGitlab.return_value
+        mock_instance.headers = {}
         result = client.create_sudo_gl(42)
 
         MockGitlab.assert_called_with(
             "http://gitlab.example.com",
             private_token="glpat-admin-token",
-            sudo="42",
             ssl_verify=True,
             keep_base_url=True,
         )
-        self.assertEqual(result, MockGitlab.return_value)
+        self.assertEqual(mock_instance.headers["Sudo"], "42")
+        self.assertEqual(result, mock_instance)
 
     def test_raises_when_no_admin_token(self):
         """Should raise ValueError when gitlab_admin_token is empty."""
