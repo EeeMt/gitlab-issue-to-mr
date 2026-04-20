@@ -42,7 +42,11 @@
           :bordered="false"
           :scroll-x="1000"
           :row-key="(row: WebhookEvent) => row.id"
-        />
+        >
+          <template #empty>
+            <span>{{ t('config.webhookEventsEmpty') }}</span>
+          </template>
+        </n-data-table>
 
         <n-space justify="end">
           <n-pagination

@@ -247,6 +247,158 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(resp.status_code, 401)
 
+    def test_mr_merge_closes_multiple_matching_issues(self):
+        """When multiple issues share the same project_id + merge_request_iid, all are closed."""
+        issue1 = MagicMock()
+        issue1.id = 10
+        issue1.status = "in_review"
+        issue1.project_id = 42
+        issue1.merge_request_iid = 7
+
+        issue2 = MagicMock()
+        issue2.id = 20
+        issue2.status = "open"
+        issue2.project_id = 42
+        issue2.merge_request_iid = 7
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [issue1, issue2]
+        self.mock_db.execute = AsyncMock(return_value=mock_result)
+
+        payload = _build_mr_merge_payload(project_id=42, mr_iid=7)
+        resp = self.client.post(
+            "/api/webhook/gitlab",
+            json=payload,
+            headers={"X-Gitlab-Token": "global-secret"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(issue1.status, "closed")
+        self.assertEqual(issue2.status, "closed")
+        data = resp.json()
+        self.assertEqual(len(data["results"]), 2)
+        self.assertTrue(all(r["result"] == "issue_closed" for r in data["results"]))
+
+
+class TestWebhookEventsEndpoint(unittest.IsolatedAsyncioTestCase):
+    """Tests for GET /api/webhook/events."""
+
+    def setUp(self):
+        self.mock_db = MagicMock()
+        self.mock_db.execute = AsyncMock()
+
+        async def override_db():
+            yield self.mock_db
+
+        from app.main import app
+        from app.database import get_db
+        from app.dependencies.auth import require_authenticated_user
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        from app.main import app
+        from app.database import get_db
+        from app.dependencies.auth import require_authenticated_user
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(require_authenticated_user, None)
+
+    def _mock_db_results(self, events, total):
+        """Set up mock DB to return the given events and total count."""
+        from datetime import datetime
+
+        count_result = MagicMock()
+        count_result.scalar.return_value = total
+
+        rows_result = MagicMock()
+        rows_result.scalars.return_value.all.return_value = events
+
+        self.mock_db.execute = AsyncMock(side_effect=[count_result, rows_result])
+
+    def _make_event(self, id=1, event_type="merge_request", event_action="merge",
+                    project_id=42, result="issue_closed"):
+        from datetime import datetime
+        e = MagicMock()
+        e.id = id
+        e.event_type = event_type
+        e.event_action = event_action
+        e.project_id = project_id
+        e.merge_request_iid = 7
+        e.issue_id = 1
+        e.source_ip = "10.0.0.1"
+        e.result = result
+        e.result_detail = None
+        e.payload_summary = {"mr_title": "Fix bug"}
+        e.created_at = datetime(2026, 1, 1, 12, 0, 0)
+        return e
+
+    def test_list_events_returns_items(self):
+        event = self._make_event()
+        self._mock_db_results([event], 1)
+
+        resp = self.client.get("/api/webhook/events")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(len(data["items"]), 1)
+        self.assertEqual(data["items"][0]["result"], "issue_closed")
+        self.assertEqual(data["page"], 1)
+        self.assertEqual(data["page_size"], 20)
+
+    def test_list_events_empty(self):
+        self._mock_db_results([], 0)
+
+        resp = self.client.get("/api/webhook/events")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["total"], 0)
+        self.assertEqual(len(data["items"]), 0)
+
+    def test_pagination_params(self):
+        self._mock_db_results([], 0)
+
+        resp = self.client.get("/api/webhook/events?page=2&page_size=10")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["page"], 2)
+        self.assertEqual(data["page_size"], 10)
+
+    def test_page_size_clamped_to_100(self):
+        self._mock_db_results([], 0)
+
+        resp = self.client.get("/api/webhook/events?page_size=500")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["page_size"], 100)
+
+    def test_filter_by_result(self):
+        event = self._make_event(result="issue_closed")
+        self._mock_db_results([event], 1)
+
+        resp = self.client.get("/api/webhook/events?result=issue_closed")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["total"], 1)
+
+    def test_filter_by_event_type(self):
+        event = self._make_event(event_type="merge_request")
+        self._mock_db_results([event], 1)
+
+        resp = self.client.get("/api/webhook/events?event_type=merge_request")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["total"], 1)
+
+    def test_filter_by_project_id(self):
+        event = self._make_event(project_id=42)
+        self._mock_db_results([event], 1)
+
+        resp = self.client.get("/api/webhook/events?project_id=42")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["total"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
