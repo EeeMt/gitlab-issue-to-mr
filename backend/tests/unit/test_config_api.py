@@ -203,6 +203,7 @@ class ConfigApiHelperTests(unittest.TestCase):
                 "url": "https://bot.example.com/api/webhook/gitlab",
                 "note_events": True,
                 "enable_ssl_verification": True,
+                "merge_requests_events": True,
             },
         )
 
@@ -224,6 +225,7 @@ class ConfigApiHelperTests(unittest.TestCase):
                 "url": "https://bot.example.com/api/webhook/gitlab",
                 "note_events": False,
                 "enable_ssl_verification": True,
+                "merge_requests_events": True,
             },
         )
 

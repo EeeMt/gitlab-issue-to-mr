@@ -30,7 +30,8 @@ vi.mock('../api', () => ({
   createMattermostNotificationProfile: vi.fn(),
   updateMattermostNotificationProfile: vi.fn(),
   deleteMattermostNotificationProfile: vi.fn(),
-  getPromptTemplates: vi.fn().mockResolvedValue([])
+  getPromptTemplates: vi.fn().mockResolvedValue([]),
+  getWebhookEvents: vi.fn().mockResolvedValue({ items: [], total: 0 })
 }))
 
 vi.mock('vue-router', () => ({
@@ -179,6 +180,7 @@ const globalStubs = {
   MattermostNotificationsPanel: { template: '<div class="mattermost-panel">Mattermost</div>' },
   WorkerSettingsPanel: { template: '<div class="worker-panel">Worker</div>' },
   AIProvidersPanel: { template: '<div class="ai-providers-panel">AI Providers</div>' },
+  WebhookEventsPanel: { template: '<div class="webhook-events-panel">Webhook Events</div>' },
   PageHeader: { template: '<div class="page-header"><slot name="actions"/></div>' },
   SummaryCard: {
     props: ['label', 'value'],
@@ -280,7 +282,8 @@ describe('Config', () => {
       'prompt-templates',
       'worker',
       'notifications',
-      'maintenance'
+      'maintenance',
+      'webhook-events'
     ])
   })
 })
