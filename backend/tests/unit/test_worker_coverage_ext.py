@@ -868,7 +868,7 @@ class TestResumeTaskSuccess(unittest.TestCase):
             with patch.object(worker, '_remove_mr_draft_status_for_issue') as mock_remove_draft:
                 asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
-        mock_remove_draft.assert_called_once_with(task, task.issue)
+        mock_remove_draft.assert_called_once_with(task, task.issue, sudo_gl=None)
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)

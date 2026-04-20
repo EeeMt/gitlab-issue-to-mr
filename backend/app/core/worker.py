@@ -934,6 +934,17 @@ class WorkerExecutor:
         logger.info(f"[Task {task_id}] Executing for project={task.project_id} issue_id={task.issue_id} priority={task.priority}")
         had_existing_mr = (issue.merge_request_iid is not None) if issue else False
 
+        # Create sudo GL for MR operations if initiator has a GitLab user ID
+        sudo_gl: Optional[Gitlab] = None
+        if task.initiator_gitlab_user_id and self.gitlab.settings.gitlab_admin_token:
+            try:
+                sudo_gl = self.gitlab.create_sudo_gl(task.initiator_gitlab_user_id)
+                logger.info(
+                    f"[Task {task_id}] Using sudo impersonation for GitLab user {task.initiator_gitlab_user_id}"
+                )
+            except ValueError as e:
+                logger.warning(f"[Task {task_id}] Cannot use sudo: {e}, falling back to bot token")
+
         # Clear logs from any previous execution so the event stream starts fresh
         del_result = await db.execute(
             delete(TaskLog).where(TaskLog.task_id == task_id)
@@ -970,7 +981,15 @@ class WorkerExecutor:
 
             # Create or reuse MR (skip when target_branch is None — no-MR mode)
             if issue and issue.target_branch:
-                mr_iid, mr_web_url = self._create_mr_if_needed(task, issue, mr_iid, mr_web_url)
+                # Ensure "Codify" label exists in the project
+                try:
+                    self.gitlab.ensure_project_label(task.project_id, "Codify", "#6699cc")
+                except Exception as e:
+                    logger.warning(f"[Task {task_id}] Failed to ensure Codify label: {e}")
+
+                mr_iid, mr_web_url = self._create_mr_if_needed(
+                    task, issue, mr_iid, mr_web_url, sudo_gl=sudo_gl
+                )
 
             # Save MR info to Issue if new MR was created
             if issue and mr_iid and mr_iid != issue.merge_request_iid:
@@ -1039,7 +1058,7 @@ class WorkerExecutor:
                 logger.info(f"Task {task_id} completed successfully")
                 if issue and issue.merge_request_iid:
                     try:
-                        self._remove_mr_draft_status_for_issue(task, issue)
+                        self._remove_mr_draft_status_for_issue(task, issue, sudo_gl=sudo_gl)
                     except Exception as e:
                         logger.warning(f"[Task {task_id}] Failed to update MR draft status: {e}")
                 await self._send_notifications(task, success=True, had_existing_mr=had_existing_mr, logs=logs, issue=issue)
@@ -1073,8 +1092,7 @@ class WorkerExecutor:
 
             # Update MR description with comprehensive issue context + all tasks
             if issue and issue.merge_request_iid:
-                await self._update_mr_description_for_issue(task, issue, db)
-
+                await self._update_mr_description_for_issue(task, issue, db, sudo_gl=sudo_gl)
             try:
                 self.docker.remove_container(container, force=True)
             except Exception as e:
@@ -1134,6 +1152,14 @@ class WorkerExecutor:
         )
         had_existing_mr = (issue.merge_request_iid is not None) if issue else False
 
+        # Create sudo GL for MR operations if initiator has a GitLab user ID
+        sudo_gl: Optional[Gitlab] = None
+        if task.initiator_gitlab_user_id and self.gitlab.settings.gitlab_admin_token:
+            try:
+                sudo_gl = self.gitlab.create_sudo_gl(task.initiator_gitlab_user_id)
+            except ValueError:
+                pass  # Fall back to bot token silently
+
         # Find the running container
         try:
             container = self.docker.client.containers.get(container_name)
@@ -1184,7 +1210,7 @@ class WorkerExecutor:
                 logger.info(f"[Task {task_id}] Resume: completed successfully")
                 if issue and issue.merge_request_iid:
                     try:
-                        self._remove_mr_draft_status_for_issue(task, issue)
+                        self._remove_mr_draft_status_for_issue(task, issue, sudo_gl=sudo_gl)
                     except Exception as e:
                         logger.warning(f"[Task {task_id}] Resume: failed to update MR draft status: {e}")
                 await self._send_notifications(task, success=True, had_existing_mr=had_existing_mr, logs=logs, issue=issue)
@@ -1206,7 +1232,7 @@ class WorkerExecutor:
 
             # Update MR description with comprehensive issue context + all tasks
             if issue and issue.merge_request_iid:
-                await self._update_mr_description_for_issue(task, issue, db)
+                await self._update_mr_description_for_issue(task, issue, db, sudo_gl=sudo_gl)
 
             try:
                 self.docker.remove_container(container, force=True)
