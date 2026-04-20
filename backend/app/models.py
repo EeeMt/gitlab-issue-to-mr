@@ -435,3 +435,31 @@ class SystemBootstrap(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow
     )
+
+
+class WebhookEvent(Base):
+    """Log entry for a received GitLab webhook event."""
+
+    __tablename__ = "webhook_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    event_action: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    merge_request_iid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    issue_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("issues.id", ondelete="SET NULL"), nullable=True
+    )
+    source_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    result: Mapped[str] = mapped_column(String(50), nullable=False)
+    result_detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    payload_summary: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+
+    issue: Mapped[Optional["Issue"]] = relationship("Issue")
+
+    __table_args__ = (
+        Index("ix_webhook_events_project_created", "project_id", "created_at"),
+    )
