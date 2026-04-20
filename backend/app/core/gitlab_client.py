@@ -45,6 +45,50 @@ class GitLabClient:
         )
         logger.info(f"GitLab client initialized: {self.base_url}")
 
+    def create_sudo_gl(self, gitlab_user_id: int) -> Gitlab:
+        """Create a Gitlab instance with admin token + sudo for impersonation.
+
+        Args:
+            gitlab_user_id: The GitLab user ID to impersonate.
+
+        Returns:
+            A Gitlab instance configured with sudo.
+
+        Raises:
+            ValueError: If gitlab_admin_token is not configured.
+        """
+        admin_token = self.settings.gitlab_admin_token.strip() if self.settings.gitlab_admin_token else ""
+        if not admin_token:
+            raise ValueError("gitlab_admin_token is required for sudo operations")
+        return gitlab.Gitlab(
+            self.base_url,
+            private_token=admin_token,
+            sudo=str(gitlab_user_id),
+            ssl_verify=get_ssl_verify(self.settings),
+            keep_base_url=True,
+        )
+
+    def ensure_project_label(self, project_id: int, label_name: str, color: str) -> None:
+        """Ensure a label exists in the project, creating it if necessary.
+
+        Uses the bot token (not sudo) to ensure label exists regardless of
+        impersonated user's permissions.
+
+        Args:
+            project_id: GitLab project ID
+            label_name: Label name (e.g., "Codify")
+            color: Label color hex (e.g., "#6699cc")
+        """
+        project = self.get_project(project_id)
+        try:
+            project.labels.get(label_name)
+        except GitlabGetError:
+            try:
+                project.labels.create({"name": label_name, "color": color})
+                logger.info(f"Created label '{label_name}' in project {project_id}")
+            except Exception as e:
+                logger.warning(f"Failed to create label '{label_name}' in project {project_id}: {e}")
+
     @staticmethod
     def _normalize_hook_url(url: str) -> str:
         return url.strip().rstrip("/")

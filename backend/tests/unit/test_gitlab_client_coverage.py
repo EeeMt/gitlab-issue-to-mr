@@ -962,5 +962,94 @@ class TestGetCachedProjects(unittest.TestCase):
         asyncio.run(run_test())
 
 
+# ===================================================================
+# create_sudo_gl
+# ===================================================================
+
+class TestCreateSudoGl(unittest.TestCase):
+    """Tests for GitLabClient.create_sudo_gl."""
+
+    @patch('app.core.gitlab_client.get_ssl_verify', return_value=True)
+    @patch('app.core.gitlab_client.gitlab.Gitlab')
+    def test_creates_gitlab_instance_with_sudo(self, MockGitlab, mock_ssl):
+        """Should create Gitlab instance with admin token and sudo user ID."""
+        settings = _make_settings(gitlab_admin_token="glpat-admin-token")
+        client = _make_client(settings=settings)
+
+        result = client.create_sudo_gl(42)
+
+        MockGitlab.assert_called_with(
+            "http://gitlab.example.com",
+            private_token="glpat-admin-token",
+            sudo="42",
+            ssl_verify=True,
+            keep_base_url=True,
+        )
+        self.assertEqual(result, MockGitlab.return_value)
+
+    def test_raises_when_no_admin_token(self):
+        """Should raise ValueError when gitlab_admin_token is empty."""
+        settings = _make_settings(gitlab_admin_token="")
+        client = _make_client(settings=settings)
+
+        with self.assertRaises(ValueError) as ctx:
+            client.create_sudo_gl(42)
+        self.assertIn("gitlab_admin_token", str(ctx.exception))
+
+    def test_raises_when_admin_token_whitespace(self):
+        """Should raise ValueError when gitlab_admin_token is whitespace."""
+        settings = _make_settings(gitlab_admin_token="   ")
+        client = _make_client(settings=settings)
+
+        with self.assertRaises(ValueError) as ctx:
+            client.create_sudo_gl(42)
+        self.assertIn("gitlab_admin_token", str(ctx.exception))
+
+
+# ===================================================================
+# ensure_project_label
+# ===================================================================
+
+class TestEnsureProjectLabel(unittest.TestCase):
+    """Tests for GitLabClient.ensure_project_label."""
+
+    def test_label_already_exists(self):
+        """Should not create label if it already exists."""
+        client = _make_client()
+        mock_project = MagicMock()
+        client.gl.projects.get.return_value = mock_project
+        mock_project.labels.get.return_value = MagicMock()  # exists
+
+        client.ensure_project_label(1, "Codify", "#6699cc")
+
+        mock_project.labels.get.assert_called_once_with("Codify")
+        mock_project.labels.create.assert_not_called()
+
+    def test_label_not_exists_creates_it(self):
+        """Should create label when it doesn't exist."""
+        client = _make_client()
+        mock_project = MagicMock()
+        client.gl.projects.get.return_value = mock_project
+        mock_project.labels.get.side_effect = GitlabGetError("404")
+
+        client.ensure_project_label(1, "Codify", "#6699cc")
+
+        mock_project.labels.create.assert_called_once_with({
+            "name": "Codify",
+            "color": "#6699cc",
+        })
+
+    def test_label_create_failure_does_not_raise(self):
+        """Should log warning but not raise if label creation fails."""
+        client = _make_client()
+        mock_project = MagicMock()
+        client.gl.projects.get.return_value = mock_project
+        mock_project.labels.get.side_effect = GitlabGetError("404")
+        mock_project.labels.create.side_effect = Exception("forbidden")
+
+        # Should not raise
+        client.ensure_project_label(1, "Codify", "#6699cc")
+
+
 if __name__ == "__main__":
     unittest.main()
