@@ -413,7 +413,7 @@ class GitLabClient:
             "enable_ssl_verification": True,
             "note_events": True,
             "issues_events": False,
-            "merge_requests_events": False,
+            "merge_requests_events": True,
             "push_events": False,
             "tag_push_events": False,
             "job_events": False,

@@ -449,7 +449,7 @@ class GetGitlabProjectWebhookStatusTests(unittest.TestCase):
         mock_client_instance = MagicMock()
         mock_client_instance.get_project.return_value = mock_project
         mock_client_instance.get_project_hooks.return_value = [
-            {"id": 10, "url": target_url, "note_events": True, "enable_ssl_verification": True},
+            {"id": 10, "url": target_url, "note_events": True, "enable_ssl_verification": True, "merge_requests_events": True},
         ]
 
         with patch("app.api.project_webhooks.load_runtime_config_from_db", new=AsyncMock()):
@@ -617,7 +617,7 @@ class ListGitlabProjectWebhookStatusesTests(unittest.TestCase):
             {"id": 2, "name": "project-b", "path_with_namespace": "group/project-b"},
         ]
         mock_client_instance.get_project_hooks.side_effect = [
-            [{"id": 10, "url": target_url, "note_events": True, "enable_ssl_verification": True}],
+            [{"id": 10, "url": target_url, "note_events": True, "enable_ssl_verification": True, "merge_requests_events": True}],
             [],  # project-b has no hooks
         ]
 

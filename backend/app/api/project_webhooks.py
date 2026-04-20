@@ -54,6 +54,7 @@ class GitLabProjectWebhookStatusResponse(BaseModel):
     hook_id: Optional[int] = None
     hook_url: Optional[str] = None
     note_events: Optional[bool] = None
+    merge_requests_events: Optional[bool] = None
     enable_ssl_verification: Optional[bool] = None
     managed_secret_configured: bool
     global_secret_fallback_configured: bool
@@ -98,6 +99,7 @@ def _build_gitlab_project_webhook_status_response(
     secret_mode = "project" if managed_secret_configured else "global_fallback" if global_secret_fallback_configured else "none"
     hook_found = matched_hook is not None
     note_events = bool(matched_hook.get("note_events")) if matched_hook is not None else None
+    merge_requests_events = bool(matched_hook.get("merge_requests_events")) if matched_hook is not None else None
     enable_ssl_verification = bool(matched_hook.get("enable_ssl_verification")) if matched_hook is not None else None
 
     if inspection_error:
@@ -106,7 +108,7 @@ def _build_gitlab_project_webhook_status_response(
     elif not hook_found:
         status_value = "missing"
         status_detail = "No webhook matches the configured callback URL"
-    elif note_events and enable_ssl_verification:
+    elif note_events and enable_ssl_verification and merge_requests_events:
         status_value = "configured"
         status_detail = None
     else:
@@ -116,6 +118,8 @@ def _build_gitlab_project_webhook_status_response(
             issues.append("note events disabled")
         if not enable_ssl_verification:
             issues.append("SSL verification disabled")
+        if not merge_requests_events:
+            issues.append("MR events disabled")
         status_detail = ", ".join(issues) if issues else "Webhook settings need attention"
 
     return GitLabProjectWebhookStatusResponse(
@@ -129,6 +133,7 @@ def _build_gitlab_project_webhook_status_response(
         hook_id=int(matched_hook["id"]) if matched_hook is not None else None,
         hook_url=str(matched_hook.get("url", "")) if matched_hook is not None else None,
         note_events=note_events,
+        merge_requests_events=merge_requests_events,
         enable_ssl_verification=enable_ssl_verification,
         managed_secret_configured=managed_secret_configured,
         global_secret_fallback_configured=global_secret_fallback_configured,
