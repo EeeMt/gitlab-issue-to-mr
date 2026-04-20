@@ -507,14 +507,15 @@ class GitLabClient:
 
 # Singleton instance
 _gitlab_client: Optional[GitLabClient] = None
-_gitlab_client_config: Optional[tuple[str, str]] = None
+_gitlab_client_config: Optional[tuple[str, str, str]] = None
 
 
-def _build_gitlab_client_config_snapshot(settings: Optional[Settings] = None) -> tuple[str, str]:
+def _build_gitlab_client_config_snapshot(settings: Optional[Settings] = None) -> tuple[str, str, str]:
     active_settings = settings or get_effective_settings()
     return (
         active_settings.gitlab_url.strip(),
         active_settings.gitlab_bot_token,
+        active_settings.gitlab_admin_token or "",
     )
 
 
