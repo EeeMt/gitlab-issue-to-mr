@@ -9,7 +9,7 @@ from urllib.parse import urlsplit, urlunsplit
 import gitlab
 import httpx
 from gitlab import Gitlab
-from gitlab.exceptions import GitlabGetError
+from gitlab.exceptions import GitlabCreateError, GitlabGetError
 from gitlab.v4.objects import MergeRequest, Project
 
 from app.config import Settings, get_effective_settings
@@ -86,6 +86,9 @@ class GitLabClient:
             try:
                 project.labels.create({"name": label_name, "color": color})
                 logger.info(f"Created label '{label_name}' in project {project_id}")
+            except GitlabCreateError:
+                # Race condition: another task created the label between our check and create
+                logger.debug(f"Label '{label_name}' was created concurrently in project {project_id}")
             except Exception as e:
                 logger.warning(f"Failed to create label '{label_name}' in project {project_id}: {e}")
 

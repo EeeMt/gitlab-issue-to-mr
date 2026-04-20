@@ -1050,6 +1050,18 @@ class TestEnsureProjectLabel(unittest.TestCase):
         # Should not raise
         client.ensure_project_label(1, "Codify", "#6699cc")
 
+    def test_label_race_condition_handles_conflict(self):
+        """Should handle GitlabCreateError (race condition) gracefully."""
+        from gitlab.exceptions import GitlabCreateError
+        client = _make_client()
+        mock_project = MagicMock()
+        client.gl.projects.get.return_value = mock_project
+        mock_project.labels.get.side_effect = GitlabGetError("404")
+        mock_project.labels.create.side_effect = GitlabCreateError("409 Conflict")
+
+        # Should not raise — another task created the label concurrently
+        client.ensure_project_label(1, "Codify", "#6699cc")
+
 
 if __name__ == "__main__":
     unittest.main()
