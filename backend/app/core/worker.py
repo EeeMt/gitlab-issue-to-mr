@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings as get_settings
 from app.core.docker_client import DockerClientWrapper, get_docker_client
+from gitlab import Gitlab
 from app.core.gitlab_client import GitLabClient, get_gitlab_client
 from app.core.ssl_utils import get_ssl_verify
 from app.core.utcnow import utcnow
@@ -156,9 +157,12 @@ class WorkerExecutor:
         """Remove draft status from an MR by normalizing its title (legacy)."""
         pass
 
-    def _remove_mr_draft_status_for_issue(self, task: Task, issue: Issue) -> None:
+    def _remove_mr_draft_status_for_issue(
+        self, task: Task, issue: Issue, *, sudo_gl: Optional["Gitlab"] = None
+    ) -> None:
         """Remove draft status from an MR by normalizing its title."""
-        project = self.gitlab.gl.projects.get(task.project_id)
+        gl = sudo_gl or self.gitlab.gl
+        project = gl.projects.get(task.project_id)
         mr = project.mergerequests.get(issue.merge_request_iid)
 
         title = getattr(mr, "title", "")
@@ -413,6 +417,8 @@ class WorkerExecutor:
         issue: Issue,
         mr_iid: Optional[int],
         mr_web_url: Optional[str],
+        *,
+        sudo_gl: Optional["Gitlab"] = None,
     ) -> tuple[Optional[int], Optional[str]]:
         """Create or reuse MR for the task's issue."""
         if mr_iid:
@@ -422,7 +428,7 @@ class WorkerExecutor:
         if existing:
             return existing
 
-        return self._create_new_mr(task, issue)
+        return self._create_new_mr(task, issue, sudo_gl=sudo_gl)
 
     def _find_existing_mr(
         self,
@@ -450,6 +456,8 @@ class WorkerExecutor:
         self,
         task: Task,
         issue: Issue,
+        *,
+        sudo_gl: Optional["Gitlab"] = None,
     ) -> tuple[Optional[int], Optional[str]]:
         """Create a new draft MR for the task's issue."""
         settings = get_settings()
@@ -457,17 +465,31 @@ class WorkerExecutor:
         mr_title = self._build_initial_mr_title(task)
         initial_mr_desc = self._build_initial_mr_description(task)
 
+        mr_data = {
+            "source_branch": issue.branch_name,
+            "target_branch": target_branch,
+            "title": mr_title,
+            "description": initial_mr_desc,
+            "draft": True,
+            "labels": ["Codify"],
+        }
+
         try:
-            mr_response = self.gitlab.gl.projects.get(task.project_id).mergerequests.create({
-                "source_branch": issue.branch_name,
-                "target_branch": target_branch,
-                "title": mr_title,
-                "description": initial_mr_desc,
-                "draft": True,
-            })
+            gl = sudo_gl or self.gitlab.gl
+            mr_response = gl.projects.get(task.project_id).mergerequests.create(mr_data)
         except Exception as e:
-            logger.warning(f"[Task {task.id}] Failed to create initial MR: {e}, continuing without MR")
-            return None, None
+            if sudo_gl:
+                logger.warning(
+                    f"[Task {task.id}] Sudo MR creation failed: {e}, retrying with bot token"
+                )
+                try:
+                    mr_response = self.gitlab.gl.projects.get(task.project_id).mergerequests.create(mr_data)
+                except Exception as e2:
+                    logger.warning(f"[Task {task.id}] Bot token MR creation also failed: {e2}")
+                    return None, None
+            else:
+                logger.warning(f"[Task {task.id}] Failed to create initial MR: {e}, continuing without MR")
+                return None, None
 
         mr_iid = mr_response.iid
         mr_web_url = self.gitlab.normalize_web_url(mr_response.web_url)
@@ -756,6 +778,8 @@ class WorkerExecutor:
         task: Task,
         issue: Issue,
         db: AsyncSession,
+        *,
+        sudo_gl: Optional["Gitlab"] = None,
     ) -> None:
         """Rebuild MR description from issue context + all tasks.
 
@@ -811,13 +835,15 @@ class WorkerExecutor:
 
             description = "\n".join(lines)
 
-            mr = self.gitlab.get_merge_request(task.project_id, mr_iid)
-            if not mr:
+            gl = sudo_gl or self.gitlab.gl
+            project = gl.projects.get(task.project_id)
+            try:
+                mr = project.mergerequests.get(mr_iid)
+            except Exception:
                 logger.warning(f"Could not find MR !{mr_iid} to update description")
                 return
 
             mr.description = description
-            # Set MR title to issue title (remove "Draft: " prefix if MR is no longer draft)
             if issue.title:
                 mr.title = issue.title
             mr.save()

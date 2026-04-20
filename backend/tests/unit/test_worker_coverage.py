@@ -900,7 +900,7 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
         mock_mr.description = ""
 
         mock_gitlab = MagicMock()
-        mock_gitlab.get_merge_request.return_value = mock_mr
+        mock_gitlab.gl.projects.get.return_value.mergerequests.get.return_value = mock_mr
         worker = _make_worker(mock_gitlab=mock_gitlab)
 
         issue = MagicMock()
