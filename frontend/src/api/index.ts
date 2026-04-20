@@ -68,6 +68,7 @@ export interface Issue {
   description: string | null
   project_id: number
   status: IssueStatus
+  closed_via: string | null
   branch_name: string | null
   base_branch: string | null
   target_branch: string | null

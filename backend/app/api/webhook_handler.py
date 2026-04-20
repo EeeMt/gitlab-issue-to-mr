@@ -246,6 +246,7 @@ async def receive_gitlab_webhook(
         else:
             prev_status = issue.status
             issue.status = IssueStatus.CLOSED.value
+            issue.closed_via = "webhook_mr_merged"
             await _log_event(
                 db,
                 event_type=event_type,

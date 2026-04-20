@@ -51,6 +51,7 @@ class Issue(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(20), default=IssueStatus.OPEN.value, nullable=False)
+    closed_via: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
 
     # Branch & MR (promoted from Task)
     branch_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

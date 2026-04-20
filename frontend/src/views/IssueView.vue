@@ -59,6 +59,19 @@
                 </span>
               </div>
 
+              <!-- Closed Via -->
+              <div v-if="issue.status === 'closed' && issue.closed_via" class="metadata-row">
+                <span class="metadata-label">
+                  <n-icon size="14" class="metadata-label-icon"><InformationCircleOutline /></n-icon>
+                  {{ t('issue.closedViaLabel') }}
+                </span>
+                <span class="metadata-value">
+                  <n-tag size="small" round :type="issue.closed_via === 'webhook_mr_merged' ? 'info' : 'default'">
+                    {{ issue.closed_via === 'webhook_mr_merged' ? t('issue.closedViaWebhookMrMerged') : t('issue.closedViaManual') }}
+                  </n-tag>
+                </span>
+              </div>
+
               <!-- Project -->
               <div class="metadata-row">
                 <span class="metadata-label">

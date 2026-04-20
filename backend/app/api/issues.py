@@ -57,6 +57,7 @@ def _serialize_issue(issue: Issue, task_count: Optional[int] = None) -> dict:
         "description": issue.description,
         "project_id": issue.project_id,
         "status": issue.status,
+        "closed_via": issue.closed_via,
         "branch_name": issue.branch_name,
         "base_branch": issue.base_branch,
         "target_branch": issue.target_branch,
@@ -437,6 +438,7 @@ async def close_issue(
     _require_issue_operator(issue, current_user)
 
     issue.status = IssueStatus.CLOSED.value
+    issue.closed_via = "manual"
     await db.commit()
     await db.refresh(issue, attribute_names=["tasks"])
     return _serialize_issue_detail(issue)
