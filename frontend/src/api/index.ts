@@ -574,9 +574,31 @@ export interface GitLabProjectWebhookStatusResult {
   hook_url: string | null
   note_events: boolean | null
   enable_ssl_verification: boolean | null
+  merge_requests_events: boolean | null
   managed_secret_configured: boolean
   global_secret_fallback_configured: boolean
   secret_mode: 'project' | 'global_fallback' | 'none' | string
+}
+
+export interface WebhookEvent {
+  id: number
+  event_type: string
+  event_action: string | null
+  project_id: number
+  merge_request_iid: number | null
+  issue_id: number | null
+  source_ip: string | null
+  result: string
+  result_detail: string | null
+  payload_summary: Record<string, unknown> | null
+  created_at: string
+}
+
+export interface WebhookEventsResponse {
+  items: WebhookEvent[]
+  total: number
+  page: number
+  page_size: number
 }
 
 export interface OidcDiagnosticsCheck {
@@ -950,6 +972,17 @@ export async function getGitLabProjectWebhookStatus(
 
 export async function listGitLabProjectWebhookStatuses(): Promise<GitLabProjectWebhookStatusResult[]> {
   const response = await api.get('/config/gitlab/webhooks')
+  return response.data
+}
+
+export async function getWebhookEvents(params: {
+  page?: number
+  page_size?: number
+  event_type?: string
+  result?: string
+  project_id?: number
+} = {}): Promise<WebhookEventsResponse> {
+  const response = await api.get('/webhook/events', { params })
   return response.data
 }
 
