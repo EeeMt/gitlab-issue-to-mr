@@ -364,9 +364,19 @@ async def get_analytics(
         ),
         else_=None,
     )
+    output_tokens_expr = case(
+        (Task.output_tokens.is_not(None), Task.output_tokens),
+        else_=None,
+    )
     token_tracked_expr = case(
         (Task.input_tokens.is_not(None) | Task.output_tokens.is_not(None), 1),
         else_=0,
+    )
+
+    throughput_eligible_expr = (
+        output_tokens_expr.is_not(None)
+        & execution_seconds_expr.is_not(None)
+        & (execution_seconds_expr > 0)
     )
 
     summary_query = _apply_analytics_filters(
@@ -651,15 +661,11 @@ async def get_analytics(
             func.avg(case((token_total_expr.is_not(None), token_total_expr), else_=None)).label(
                 "avg_tokens_per_task"
             ),
-            func.avg(
-                case(
-                    (
-                        (token_total_expr.is_not(None))
-                        & (execution_seconds_expr.is_not(None))
-                        & (execution_seconds_expr > 0),
-                        token_total_expr / execution_seconds_expr,
-                    ),
-                    else_=None,
+            (
+                func.sum(case((throughput_eligible_expr, output_tokens_expr), else_=None))
+                / func.nullif(
+                    func.sum(case((throughput_eligible_expr, execution_seconds_expr), else_=None)),
+                    0,
                 )
             ).label("avg_tokens_per_second"),
             func.avg(

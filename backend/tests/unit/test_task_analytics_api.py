@@ -459,7 +459,7 @@ async def test_get_analytics_returns_provider_metrics_and_unknown_legacy_bucket(
                     total_output_tokens=600,
                     total_tokens=1000,
                     avg_tokens_per_task=500.0,
-                    avg_tokens_per_second=4.0,
+                    avg_tokens_per_second=1.0909090909090908,
                     avg_tokens_per_changed_line=12.0,
                     avg_execution_seconds=300.0,
                     avg_execution_seconds_per_changed_line=3.0,
@@ -527,7 +527,7 @@ async def test_get_analytics_returns_provider_metrics_and_unknown_legacy_bucket(
     }
 
     claude_sonnet_46 = provider_rows[("Claude Sonnet", "claude-sonnet-4-6")]
-    assert claude_sonnet_46["avg_tokens_per_second"] == pytest.approx(4.0)
+    assert claude_sonnet_46["avg_tokens_per_second"] == pytest.approx(1.0909090909090908)
 
     unknown_legacy = provider_rows[("Unknown / Legacy", None)]
     assert unknown_legacy["avg_tokens_per_second"] is None
@@ -558,7 +558,7 @@ async def test_get_analytics_returns_provider_metrics_and_unknown_legacy_bucket(
         {
             "provider_id": 1,
             "label": "Claude Sonnet / claude-sonnet-4-6",
-            "value": pytest.approx(4.0),
+            "value": pytest.approx(1.0909090909090908),
         },
         {
             "provider_id": 1,
@@ -597,6 +597,10 @@ async def test_get_analytics_provider_query_groups_by_provider_and_model():
             return MockResult([])
         if AnalyticsQueryStub._is_provider_query(sql):
             assert "GROUP BY tasks.provider_id, ai_providers.name, tasks.model_name" in sql
+            provider_metric_sql = sql.split(" AS avg_tokens_per_second")[0].rsplit(" AS avg_tokens_per_task, ", 1)[-1]
+            assert "tasks.output_tokens" in provider_metric_sql
+            assert "tasks.input_tokens" not in provider_metric_sql
+            assert "EXTRACT(epoch FROM tasks.completed_at - tasks.started_at)" in provider_metric_sql
             return MockResult([])
 
         raise AssertionError(f"unrecognized analytics query: {sql}")
