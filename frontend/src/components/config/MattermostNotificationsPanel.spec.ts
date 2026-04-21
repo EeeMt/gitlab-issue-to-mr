@@ -23,8 +23,7 @@ const { mockApi, resetMockApi } = vi.hoisted(() => {
     getMattermostNotificationConfig: vi.fn<() => Promise<any>>(() => Promise.resolve({ integration: {}, profiles: [] })),
     createMattermostNotificationProfile: vi.fn<() => Promise<any>>(() => Promise.resolve()),
     updateMattermostNotificationProfile: vi.fn<() => Promise<any>>(() => Promise.resolve()),
-    deleteMattermostNotificationProfile: vi.fn<() => Promise<any>>(() => Promise.resolve()),
-    getMattermostNotificationConfig: vi.fn<() => Promise<any>>(() => Promise.resolve({ integration: {}, profiles: [] }))
+    deleteMattermostNotificationProfile: vi.fn<() => Promise<any>>(() => Promise.resolve())
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => {

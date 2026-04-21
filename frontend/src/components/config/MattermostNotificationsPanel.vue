@@ -631,13 +631,7 @@ function closeProfileModal() {
   editingProfileId.value = null
   Object.assign(profileForm, createEmptyProfileForm())
   // reset form validation if available
-  if (profileFormRef.value) {
-    try {
-      ;(profileFormRef.value as any).reset?.()
-    } catch (e) {
-      // ignore
-    }
-  }
+  profileFormRef.value?.restoreValidation?.()
 }
 
 async function handleSaveProfile() {
