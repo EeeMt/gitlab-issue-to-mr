@@ -19,10 +19,11 @@
       </template>
 
       <n-modal
-        v-model:show="promptTemplateModalVisible"
+        :show="promptTemplateModalVisible"
         preset="card"
         :style="{ width: isMobile ? '96vw' : '860px' }"
         data-testid="prompt-template-modal"
+        @update:show="handlePromptTemplateModalVisibilityChange"
       >
         <div class="prompt-template-editor">
           <div class="prompt-template-editor__header">
@@ -341,11 +342,21 @@ function handleEditPromptTemplate(template: PromptTemplate) {
   promptTemplateForm.variable_tips = template.variable_tips ? { ...template.variable_tips } : {}
   promptTemplateForm.is_active = template.is_active
   promptTemplateModalVisible.value = true
+  promptTemplateFormRef.value?.restoreValidation?.()
 }
 
 function handleCancelPromptTemplateEditing() {
   promptTemplateModalVisible.value = false
   resetPromptTemplateForm()
+  promptTemplateFormRef.value?.restoreValidation?.()
+}
+
+function handlePromptTemplateModalVisibilityChange(show: boolean) {
+  if (show) {
+    promptTemplateModalVisible.value = true
+    return
+  }
+  handleCancelPromptTemplateEditing()
 }
 
 async function handleSavePromptTemplate() {

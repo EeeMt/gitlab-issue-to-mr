@@ -301,13 +301,15 @@ describe('PromptTemplatesPanel', () => {
   })
 
   describe('handleCancelPromptTemplateEditing', () => {
-    it('should close modal editor and reset form state', async () => {
+    it('should close modal editor, reset form state, and clear validation', async () => {
       const wrapper = mountComponent()
       await vi.waitFor(() => {})
 
       wrapper.vm.handleCreatePromptTemplate()
       wrapper.vm.promptTemplateForm.name = 'Draft'
       wrapper.vm.promptTemplateForm.content = 'Draft content'
+      const restoreValidation = vi.fn()
+      wrapper.vm.promptTemplateFormRef = { restoreValidation }
 
       wrapper.vm.handleCancelPromptTemplateEditing()
 
@@ -315,6 +317,7 @@ describe('PromptTemplatesPanel', () => {
       expect(wrapper.vm.promptTemplateEditingId).toBeNull()
       expect(wrapper.vm.promptTemplateForm.name).toBe('')
       expect(wrapper.vm.promptTemplateForm.content).toBe('')
+      expect(restoreValidation).toHaveBeenCalled()
     })
   })
 

@@ -71,6 +71,43 @@ describe('AIProvidersPanel', () => {
     expect(wrapper.vm.formValue.max_turns).toBe(20)
   })
 
+  it('resets edit state and validation when closing before create', async () => {
+    const provider = {
+      id: 'p1',
+      name: 'provider1',
+      base_url: 'https://api.example',
+      model: 'model-x',
+      max_turns: 50,
+      api_key_configured: true,
+      system_prompt: 'hello',
+      is_default: false
+    }
+
+    const wrapper = mount(AIProvidersPanel, {
+      props: { isMobile: false },
+      global: {
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NTag']
+      }
+    })
+
+    const restoreValidation = vi.fn()
+    // @ts-ignore
+    wrapper.vm.formRef = { restoreValidation }
+
+    // @ts-ignore
+    await wrapper.vm.openEdit(provider)
+    // @ts-ignore
+    wrapper.vm.closeModal()
+    // @ts-ignore
+    await wrapper.vm.openCreate()
+
+    // @ts-ignore
+    expect(wrapper.vm.editingProvider).toBe(null)
+    // @ts-ignore
+    expect(wrapper.vm.formValue.name).toBe('')
+    expect(restoreValidation).toHaveBeenCalled()
+  })
+
   it('opens edit modal with provider values', async () => {
     const provider = {
       id: 'p1',
@@ -143,5 +180,9 @@ describe('AIProvidersPanel', () => {
     // modal should be closed
     // @ts-ignore
     expect(wrapper.vm.modalVisible).toBe(false)
+    // @ts-ignore
+    expect(wrapper.vm.editingProvider).toBe(null)
+    // @ts-ignore
+    expect(wrapper.vm.formValue.name).toBe('')
   })
 })

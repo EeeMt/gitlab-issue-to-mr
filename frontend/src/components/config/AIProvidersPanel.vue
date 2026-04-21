@@ -27,7 +27,12 @@
       </div>
     </n-card>
 
-    <n-modal v-model:show="modalVisible" preset="card" :style="{ width: isMobile ? '96vw' : '560px' }">
+    <n-modal
+      :show="modalVisible"
+      preset="card"
+      :style="{ width: isMobile ? '96vw' : '560px' }"
+      @update:show="handleModalVisibilityChange"
+    >
       <template #header>
         <div>{{ editingProvider ? t('config.providers.edit') : t('config.providers.create') }}</div>
       </template>
@@ -111,11 +116,11 @@
             class="config-form__input"
           />
         </n-form-item>
-      </n-form>
+        </n-form>
 
       <template #footer>
         <n-space justify="end">
-          <n-button @click="modalVisible = false">{{ t('common.cancel') }}</n-button>
+          <n-button @click="closeModal">{{ t('common.cancel') }}</n-button>
           <n-button type="primary" :loading="saving" @click="handleSave">
             {{ t('common.save') }}
           </n-button>
@@ -340,10 +345,30 @@ function resetForm() {
   }
 }
 
-function openCreate() {
+function clearFormValidation() {
+  formRef.value?.restoreValidation?.()
+}
+
+function closeModal() {
+  modalVisible.value = false
   editingProvider.value = null
   resetForm()
+  clearFormValidation()
+}
+
+function handleModalVisibilityChange(show: boolean) {
+  if (show) {
+    modalVisible.value = true
+    return
+  }
+  closeModal()
+}
+
+function openCreate() {
   modalVisible.value = true
+  editingProvider.value = null
+  resetForm()
+  clearFormValidation()
 }
 
 function openEdit(provider: AIProvider) {
@@ -357,6 +382,7 @@ function openEdit(provider: AIProvider) {
     system_prompt: provider.system_prompt || ''
   }
   modalVisible.value = true
+  clearFormValidation()
 }
 
 async function handleSave() {
@@ -405,7 +431,7 @@ async function handleSave() {
       message.success(t('config.providers.created'))
     }
 
-    modalVisible.value = false
+    closeModal()
     await fetchProviders()
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('config.saveError'))
