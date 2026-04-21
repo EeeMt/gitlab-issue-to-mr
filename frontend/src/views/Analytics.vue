@@ -73,6 +73,7 @@
                         class="analytics-chart-toggle__button"
                         :class="{ 'analytics-chart-toggle__button--active': issueStatusChartMode === 'bar' }"
                         data-testid="issue-status-chart-mode-bar"
+                        :disabled="!hasIssueStatusData"
                         @click="issueStatusChartMode = 'bar'"
                       >
                         {{ t('analytics.barChart') }}
@@ -82,6 +83,7 @@
                         class="analytics-chart-toggle__button"
                         :class="{ 'analytics-chart-toggle__button--active': issueStatusChartMode === 'donut' }"
                         data-testid="issue-status-chart-mode-donut"
+                        :disabled="!hasIssueStatusData"
                         @click="issueStatusChartMode = 'donut'"
                       >
                         {{ t('analytics.donutChart') }}
@@ -148,6 +150,7 @@
                         class="analytics-chart-toggle__button"
                         :class="{ 'analytics-chart-toggle__button--active': taskStatusChartMode === 'bar' }"
                         data-testid="task-status-chart-mode-bar"
+                        :disabled="!hasTaskStatusData"
                         @click="taskStatusChartMode = 'bar'"
                       >
                         {{ t('analytics.barChart') }}
@@ -157,6 +160,7 @@
                         class="analytics-chart-toggle__button"
                         :class="{ 'analytics-chart-toggle__button--active': taskStatusChartMode === 'donut' }"
                         data-testid="task-status-chart-mode-donut"
+                        :disabled="!hasTaskStatusData"
                         @click="taskStatusChartMode = 'donut'"
                       >
                         {{ t('analytics.donutChart') }}
@@ -605,10 +609,11 @@ function buildStatusDonutStyle(rows: StatusChartRow[]) {
   let cursor = 0
   const segments = rows
     .filter((row) => row.count > 0)
-    .map((row) => {
+    .map((row, idx, arr) => {
       const start = cursor
       cursor += row.share * 100
-      return `${row.color} ${start}% ${cursor}%`
+      const end = idx === arr.length - 1 ? 100 : cursor
+      return `${row.color} ${start}% ${end}%`
     })
 
   return {

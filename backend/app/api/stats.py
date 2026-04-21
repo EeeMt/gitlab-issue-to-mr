@@ -160,14 +160,20 @@ async def get_stats(
     }
 
 
-def _apply_project_scope(query, access_scope: ProjectAccessScope):
+def _apply_project_column_scope(query, project_column, access_scope: ProjectAccessScope):
+    """Apply project-based access control to a query using the specified project column."""
     if access_scope.is_unrestricted:
         return query
 
     allowed_project_ids = access_scope.accessible_project_ids
     if not allowed_project_ids:
         return query.where(false())
-    return query.where(Task.project_id.in_(allowed_project_ids))
+    return query.where(project_column.in_(allowed_project_ids))
+
+
+def _apply_project_scope(query, access_scope: ProjectAccessScope):
+    """Apply project-based access control to a Task query."""
+    return _apply_project_column_scope(query, Task.project_id, access_scope)
 
 
 def _apply_analytics_filters(
@@ -190,20 +196,12 @@ def _apply_issue_analytics_filters(
     project_id: Optional[int] = None,
     initiator_username: Optional[str] = None,
 ):
-    if access_scope.is_unrestricted:
-        scoped_query = query
-    else:
-        allowed_project_ids = access_scope.accessible_project_ids
-        if not allowed_project_ids:
-            scoped_query = query.where(false())
-        else:
-            scoped_query = query.where(Issue.project_id.in_(allowed_project_ids))
-
+    query = _apply_project_column_scope(query, Issue.project_id, access_scope)
     if project_id is not None:
-        scoped_query = scoped_query.where(Issue.project_id == project_id)
+        query = query.where(Issue.project_id == project_id)
     if initiator_username:
-        scoped_query = scoped_query.where(Issue.initiator_username == initiator_username)
-    return scoped_query
+        query = query.where(Issue.initiator_username == initiator_username)
+    return query
 
 
 def _build_status_breakdown_rows(statuses, raw_rows: list) -> list[dict]:
@@ -547,7 +545,6 @@ async def get_analytics(
         select(Issue.status.label("status"), func.count(Issue.id).label("count"))
         .where(Issue.created_at >= since)
         .group_by(Issue.status)
-        .order_by(Issue.status.asc())
     )
     issue_status_query = _apply_issue_analytics_filters(
         issue_status_query,
@@ -564,7 +561,6 @@ async def get_analytics(
         select(Task.status.label("status"), func.count(Task.id).label("count"))
         .where(Task.created_at >= since)
         .group_by(Task.status)
-        .order_by(Task.status.asc())
     )
     task_status_query = _apply_analytics_filters(
         task_status_query,

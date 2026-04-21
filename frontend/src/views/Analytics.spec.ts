@@ -475,9 +475,20 @@ describe('Analytics', () => {
     expect(wrapper.findAll('.status-chart__bar-row')).toHaveLength(0)
 
     // Controls should still exist even when charts are empty
-    expect(wrapper.find('[data-testid="issue-status-chart-mode-bar"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="issue-status-chart-mode-donut"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="task-status-chart-mode-bar"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="task-status-chart-mode-donut"]').exists()).toBe(true)
+    const issueBarBtn = wrapper.find('[data-testid="issue-status-chart-mode-bar"]')
+    const issueDonutBtn = wrapper.find('[data-testid="issue-status-chart-mode-donut"]')
+    const taskBarBtn = wrapper.find('[data-testid="task-status-chart-mode-bar"]')
+    const taskDonutBtn = wrapper.find('[data-testid="task-status-chart-mode-donut"]')
+
+    expect(issueBarBtn.exists()).toBe(true)
+    expect(issueDonutBtn.exists()).toBe(true)
+    expect(taskBarBtn.exists()).toBe(true)
+    expect(taskDonutBtn.exists()).toBe(true)
+
+    // All toggles should be disabled when there's no data
+    expect(issueBarBtn.element.hasAttribute('disabled')).toBe(true)
+    expect(issueDonutBtn.element.hasAttribute('disabled')).toBe(true)
+    expect(taskBarBtn.element.hasAttribute('disabled')).toBe(true)
+    expect(taskDonutBtn.element.hasAttribute('disabled')).toBe(true)
   })
 })
