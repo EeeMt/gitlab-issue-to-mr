@@ -18,73 +18,80 @@
         </div>
       </template>
 
-      <div v-if="promptTemplateEditorVisible" class="prompt-template-editor" data-testid="prompt-template-editor">
-        <div class="prompt-template-editor__header">
-          <div class="config-card-header__title">
-            {{ promptTemplateEditingId ? t('config.editPromptTemplate') : t('config.createPromptTemplate') }}
+      <n-modal
+        v-model:show="promptTemplateModalVisible"
+        preset="card"
+        :style="{ width: isMobile ? '96vw' : '860px' }"
+        data-testid="prompt-template-modal"
+      >
+        <div class="prompt-template-editor">
+          <div class="prompt-template-editor__header">
+            <div class="config-card-header__title">
+              {{ promptTemplateEditingId ? t('config.editPromptTemplate') : t('config.createPromptTemplate') }}
+            </div>
+            <div class="config-card-header__subtitle">
+              {{ t('config.promptTemplatesSubtitle') }}
+            </div>
           </div>
-          <div class="config-card-header__subtitle">
-            {{ t('config.promptTemplatesSubtitle') }}
+
+          <n-form ref="promptTemplateFormRef" :model="promptTemplateForm" label-placement="top" class="config-section-form">
+            <div class="config-form__section">
+              <div class="config-form__section-title">{{ t('config.promptTemplateEditorSection') }}</div>
+              <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+                <n-gi>
+                  <n-form-item :label="t('config.promptTemplateName')" path="name" required>
+                    <n-input
+                      v-model:value="promptTemplateForm.name"
+                      class="config-form__input"
+                      data-testid="prompt-template-name-input"
+                      :placeholder="t('config.promptTemplateNamePlaceholder')"
+                    />
+                    <template #feedback>
+                      {{ t('config.promptTemplateNameHint') }}
+                    </template>
+                  </n-form-item>
+                </n-gi>
+                <n-gi>
+                  <n-form-item :label="t('config.promptTemplateActive')" path="is_active">
+                    <n-switch
+                      v-model:value="promptTemplateForm.is_active"
+                      data-testid="prompt-template-active-switch"
+                    />
+                    <template #feedback>
+                      {{ t('config.promptTemplateActiveHint') }}
+                    </template>
+                  </n-form-item>
+                </n-gi>
+                <n-gi :span="isMobile ? 1 : 2">
+                  <n-form-item :label="t('config.promptTemplateContent')" path="content" required>
+                    <VariableEditor
+                      data-testid="prompt-template-content-editor"
+                      v-model="promptTemplateForm.content"
+                      :variable-tips="promptTemplateForm.variable_tips"
+                      editable
+                      @update:variable-tips="handlePromptTemplateVariableTipsUpdate"
+                    />
+                    <template #feedback>
+                      {{ t('config.promptTemplateContentHint') }}
+                    </template>
+                  </n-form-item>
+                </n-gi>
+              </n-grid>
+            </div>
+          </n-form>
+
+          <div class="config-card-actions prompt-template-editor__actions">
+            <n-space justify="end">
+              <n-button data-testid="prompt-template-cancel-button" @click="handleCancelPromptTemplateEditing">
+                {{ t('common.cancel') }}
+              </n-button>
+              <n-button type="primary" data-testid="prompt-template-save-button" @click="handleSavePromptTemplate">
+                {{ t('common.save') }}
+              </n-button>
+            </n-space>
           </div>
         </div>
-
-        <n-form ref="promptTemplateFormRef" :model="promptTemplateForm" label-placement="top" class="config-section-form">
-          <div class="config-form__section">
-            <div class="config-form__section-title">{{ t('config.promptTemplateEditorSection') }}</div>
-            <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-              <n-gi>
-                <n-form-item :label="t('config.promptTemplateName')" path="name" required>
-                  <n-input
-                    v-model:value="promptTemplateForm.name"
-                    class="config-form__input"
-                    data-testid="prompt-template-name-input"
-                    :placeholder="t('config.promptTemplateNamePlaceholder')"
-                  />
-                  <template #feedback>
-                    {{ t('config.promptTemplateNameHint') }}
-                  </template>
-                </n-form-item>
-              </n-gi>
-              <n-gi>
-                <n-form-item :label="t('config.promptTemplateActive')" path="is_active">
-                  <n-switch
-                    v-model:value="promptTemplateForm.is_active"
-                    data-testid="prompt-template-active-switch"
-                  />
-                  <template #feedback>
-                    {{ t('config.promptTemplateActiveHint') }}
-                  </template>
-                </n-form-item>
-              </n-gi>
-              <n-gi :span="isMobile ? 1 : 2">
-                <n-form-item :label="t('config.promptTemplateContent')" path="content" required>
-                  <VariableEditor
-                    data-testid="prompt-template-content-editor"
-                    v-model="promptTemplateForm.content"
-                    :variable-tips="promptTemplateForm.variable_tips"
-                    editable
-                    @update:variable-tips="handlePromptTemplateVariableTipsUpdate"
-                  />
-                  <template #feedback>
-                    {{ t('config.promptTemplateContentHint') }}
-                  </template>
-                </n-form-item>
-              </n-gi>
-            </n-grid>
-          </div>
-        </n-form>
-
-        <div class="config-card-actions prompt-template-editor__actions">
-          <n-space justify="end">
-            <n-button data-testid="prompt-template-cancel-button" @click="handleCancelPromptTemplateEditing">
-              {{ t('common.cancel') }}
-            </n-button>
-            <n-button type="primary" data-testid="prompt-template-save-button" @click="handleSavePromptTemplate">
-              {{ t('common.save') }}
-            </n-button>
-          </n-space>
-        </div>
-      </div>
+      </n-modal>
 
       <div v-if="!isMobile" class="config-table-wrapper prompt-template-table-wrapper">
         <n-data-table
@@ -162,6 +169,7 @@ import {
   NSpin,
   NSwitch,
   NTag,
+  NModal,
   type DataTableColumns,
   type FormInst
 } from 'naive-ui'
@@ -188,7 +196,7 @@ const props = withDefaults(defineProps<{
 // Prompt Templates state
 const promptTemplates = ref<PromptTemplate[]>([])
 const promptTemplatesLoading = ref(false)
-const promptTemplateEditorVisible = ref(false)
+const promptTemplateModalVisible = ref(false)
 const promptTemplateEditingId = ref<number | null>(null)
 const promptTemplateFormRef = ref<FormInst | null>(null)
 const promptTemplateForm = reactive({
@@ -323,7 +331,7 @@ function resetPromptTemplateForm() {
 
 function handleCreatePromptTemplate() {
   resetPromptTemplateForm()
-  promptTemplateEditorVisible.value = true
+  promptTemplateModalVisible.value = true
 }
 
 function handleEditPromptTemplate(template: PromptTemplate) {
@@ -332,11 +340,11 @@ function handleEditPromptTemplate(template: PromptTemplate) {
   promptTemplateForm.content = template.content
   promptTemplateForm.variable_tips = template.variable_tips ? { ...template.variable_tips } : {}
   promptTemplateForm.is_active = template.is_active
-  promptTemplateEditorVisible.value = true
+  promptTemplateModalVisible.value = true
 }
 
 function handleCancelPromptTemplateEditing() {
-  promptTemplateEditorVisible.value = false
+  promptTemplateModalVisible.value = false
   resetPromptTemplateForm()
 }
 

@@ -41,6 +41,14 @@ vi.mock('naive-ui', () => ({
       ])
     }
   },
+  NModal: {
+    name: 'NModal',
+    props: ['show', 'preset', 'style', 'width'],
+    setup(_props: any, { slots, attrs }: any) {
+      // Render modal container and pass attrs through so data-testid is available
+      return () => h('div', { class: 'n-modal', ...attrs }, slots.default?.())
+    }
+  },
   NDataTable: {
     name: 'NDataTable',
     props: ['columns', 'data', 'loading', 'rowKey', 'pagination', 'bordered'],
@@ -264,14 +272,14 @@ describe('PromptTemplatesPanel', () => {
   })
 
   describe('handleCreatePromptTemplate', () => {
-    it('should reset form and open inline editor', async () => {
+    it('should reset form and open modal editor', async () => {
       const wrapper = mountComponent()
       await vi.waitFor(() => {})
 
       wrapper.vm.handleCreatePromptTemplate()
 
       expect(wrapper.vm.promptTemplateEditingId).toBeNull()
-      expect(wrapper.vm.promptTemplateEditorVisible).toBe(true)
+      expect(wrapper.vm.promptTemplateModalVisible).toBe(true)
       expect(wrapper.vm.promptTemplateForm.name).toBe('')
       expect(wrapper.vm.promptTemplateForm.content).toBe('')
     })
@@ -288,12 +296,12 @@ describe('PromptTemplatesPanel', () => {
       expect(wrapper.vm.promptTemplateEditingId).toBe(template.id)
       expect(wrapper.vm.promptTemplateForm.name).toBe(template.name)
       expect(wrapper.vm.promptTemplateForm.content).toBe(template.content)
-      expect(wrapper.vm.promptTemplateEditorVisible).toBe(true)
+      expect(wrapper.vm.promptTemplateModalVisible).toBe(true)
     })
   })
 
   describe('handleCancelPromptTemplateEditing', () => {
-    it('should close editor and reset form state', async () => {
+    it('should close modal editor and reset form state', async () => {
       const wrapper = mountComponent()
       await vi.waitFor(() => {})
 
@@ -303,7 +311,7 @@ describe('PromptTemplatesPanel', () => {
 
       wrapper.vm.handleCancelPromptTemplateEditing()
 
-      expect(wrapper.vm.promptTemplateEditorVisible).toBe(false)
+      expect(wrapper.vm.promptTemplateModalVisible).toBe(false)
       expect(wrapper.vm.promptTemplateEditingId).toBeNull()
       expect(wrapper.vm.promptTemplateForm.name).toBe('')
       expect(wrapper.vm.promptTemplateForm.content).toBe('')
@@ -354,7 +362,7 @@ describe('PromptTemplatesPanel', () => {
       await wrapper.vm.handleSavePromptTemplate()
 
       expect(mockApi.createPromptTemplate).toHaveBeenCalled()
-      expect(wrapper.vm.promptTemplateEditorVisible).toBe(false)
+      expect(wrapper.vm.promptTemplateModalVisible).toBe(false)
     })
 
     it('should call update API for existing template', async () => {
@@ -369,7 +377,7 @@ describe('PromptTemplatesPanel', () => {
       await wrapper.vm.handleSavePromptTemplate()
 
       expect(mockApi.updatePromptTemplate).toHaveBeenCalledWith(template.id, expect.any(Object))
-      expect(wrapper.vm.promptTemplateEditorVisible).toBe(false)
+      expect(wrapper.vm.promptTemplateModalVisible).toBe(false)
     })
 
     it('should warn about invalid variable tips', async () => {
@@ -397,15 +405,15 @@ describe('PromptTemplatesPanel', () => {
     })
   })
 
-  describe('inline editor rendering', () => {
-    it('should render inline editor after create action', async () => {
+  describe('modal rendering', () => {
+    it('should render modal editor after create action', async () => {
       const wrapper = mountComponent()
       await vi.waitFor(() => {})
 
       wrapper.vm.handleCreatePromptTemplate()
       await wrapper.vm.$nextTick()
 
-      expect(wrapper.find('[data-testid="prompt-template-editor"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="prompt-template-modal"]').exists()).toBe(true)
     })
   })
 
