@@ -179,7 +179,7 @@
           />
         </n-card>
 
-        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
+        <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
           <n-gi class="analytics-grid-cell">
             <n-card class="analytics-card analytics-card--stretch" :bordered="false" data-testid="analytics-issue-status-card">
               <template #header>
