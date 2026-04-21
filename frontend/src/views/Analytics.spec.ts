@@ -195,6 +195,20 @@ const mockAnalytics = {
   ],
   projects: [],
   initiators: [],
+  issue_status_breakdown: [
+    { status: 'open', count: 3, share: 0.5 },
+    { status: 'in_progress', count: 1, share: 0.1667 },
+    { status: 'in_review', count: 1, share: 0.1667 },
+    { status: 'closed', count: 1, share: 0.1667 }
+  ],
+  task_status_breakdown: [
+    { status: 'pending', count: 2, share: 0.2 },
+    { status: 'queued', count: 1, share: 0.1 },
+    { status: 'running', count: 1, share: 0.1 },
+    { status: 'completed', count: 4, share: 0.4 },
+    { status: 'failed', count: 1, share: 0.1 },
+    { status: 'cancelled', count: 1, share: 0.1 }
+  ],
   trends: [],
   priority_waits: [],
   error_breakdown: []
@@ -394,5 +408,26 @@ describe('Analytics', () => {
     expect(wrapper.vm.analyticsBreakdownTab).toBe('initiator')
     expect(wrapper.vm.analyticsBreakdownTitle).toBe('analytics.byInitiator')
     expect(wrapper.vm.analyticsBreakdownData).toEqual([])
+  })
+
+  it('renders status distribution cards with independent default chart modes', async () => {
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="analytics-issue-status-card"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="analytics-task-status-card"]').exists()).toBe(true)
+    expect(wrapper.vm.issueStatusChartMode).toBe('bar')
+    expect(wrapper.vm.taskStatusChartMode).toBe('bar')
+  })
+
+  it('switches task status chart mode without changing issue status chart mode', async () => {
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="task-status-chart-mode-donut"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.vm.taskStatusChartMode).toBe('donut')
+    expect(wrapper.vm.issueStatusChartMode).toBe('bar')
   })
 })

@@ -208,9 +208,24 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
                     max_queue_wait_seconds=300.0,
                 ),
             ])
-
-        # Error breakdown query (call 7)
+ 
+        # Issue status breakdown query (call 7)
         elif call_count[0] == 7:
+            return MockResult([
+                SimpleNamespace(status="open", count=3),
+                SimpleNamespace(status="in_review", count=1),
+            ])
+
+        # Task status breakdown query (call 8)
+        elif call_count[0] == 8:
+            return MockResult([
+                SimpleNamespace(status=TaskStatus.PENDING, count=2),
+                SimpleNamespace(status=TaskStatus.COMPLETED, count=1),
+                SimpleNamespace(status=TaskStatus.FAILED, count=1),
+            ])
+
+        # Error breakdown query (call 9)
+        elif call_count[0] == 9:
             return MockResult([
                 SimpleNamespace(error_message="Task timed out after 30m", count=2),
                 SimpleNamespace(error_message="docker container exited unexpectedly", count=1),
@@ -253,6 +268,20 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
     assert response["trends"][-1]["avg_execution_seconds"] == pytest.approx(720.0)
     assert response["priority_waits"][0]["priority"] == 0
     assert response["priority_waits"][1]["avg_queue_wait_seconds"] == pytest.approx(300.0)
+    assert response["issue_status_breakdown"] == [
+        {"status": "open", "count": 3, "share": pytest.approx(0.75)},
+        {"status": "in_progress", "count": 0, "share": pytest.approx(0.0)},
+        {"status": "in_review", "count": 1, "share": pytest.approx(0.25)},
+        {"status": "closed", "count": 0, "share": pytest.approx(0.0)},
+    ]
+    assert response["task_status_breakdown"] == [
+        {"status": "pending", "count": 2, "share": pytest.approx(0.5)},
+        {"status": "queued", "count": 0, "share": pytest.approx(0.0)},
+        {"status": "running", "count": 0, "share": pytest.approx(0.0)},
+        {"status": "completed", "count": 1, "share": pytest.approx(0.25)},
+        {"status": "failed", "count": 1, "share": pytest.approx(0.25)},
+        {"status": "cancelled", "count": 0, "share": pytest.approx(0.0)},
+    ]
     assert response["error_breakdown"][0]["category"] == "Timeout"
     assert response["error_breakdown"][0]["count"] == 2
     assert response["error_breakdown"][1]["category"] == "Docker"
