@@ -883,7 +883,9 @@ const en = {
     example: 'Example',
     gitlabId: 'GitLab ID: {id}',
     failedToLoad: 'Failed to load analytics',
-    failedToLoadProjects: 'Failed to load project options'
+    failedToLoadProjects: 'Failed to load project options',
+    issueStatusDistributionEmpty: 'No issues match the current filters and time window yet.',
+    taskStatusDistributionEmpty: 'No tasks match the current filters and time window yet.'
   },
   config: {
     title: 'Configuration',

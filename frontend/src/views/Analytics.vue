@@ -57,6 +57,158 @@
           </n-gi>
         </n-grid>
 
+        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
+          <n-gi class="analytics-grid-cell">
+            <n-card class="analytics-card analytics-card--stretch" :bordered="false" data-testid="analytics-issue-status-card">
+              <template #header>
+                <div class="analytics-card__header">
+                  <div>
+                    <div class="analytics-card__title">{{ t('analytics.issueStatusDistribution') }}</div>
+                    <div class="analytics-card__subtitle">{{ t('analytics.issueStatusDistributionSubtitle') }}</div>
+                  </div>
+                  <div class="analytics-card__header-actions analytics-card__header-actions--status">
+                    <div class="analytics-chart-toggle" role="tablist" :aria-label="t('analytics.issueStatusDistribution')">
+                      <button
+                        type="button"
+                        class="analytics-chart-toggle__button"
+                        :class="{ 'analytics-chart-toggle__button--active': issueStatusChartMode === 'bar' }"
+                        data-testid="issue-status-chart-mode-bar"
+                        @click="issueStatusChartMode = 'bar'"
+                      >
+                        {{ t('analytics.barChart') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="analytics-chart-toggle__button"
+                        :class="{ 'analytics-chart-toggle__button--active': issueStatusChartMode === 'donut' }"
+                        data-testid="issue-status-chart-mode-donut"
+                        @click="issueStatusChartMode = 'donut'"
+                      >
+                        {{ t('analytics.donutChart') }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <div v-if="!hasIssueStatusData" class="analytics-empty-state">
+                <div class="analytics-empty-state__title">{{ t('analytics.issueStatusDistributionEmpty') }}</div>
+              </div>
+              <div v-else-if="issueStatusChartMode === 'bar'" class="status-chart status-chart--bar">
+                <div v-for="row in issueStatusRows" :key="`issue-${row.status}`" class="status-chart__bar-row">
+                  <div class="status-chart__row-meta">
+                    <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                    <span class="status-chart__row-label">{{ row.label }}</span>
+                  </div>
+                  <div class="status-chart__bar-track">
+                    <div class="status-chart__bar-fill" :style="{ width: `${row.barWidthPercent}%`, background: row.color }" />
+                  </div>
+                  <div class="status-chart__row-value">{{ row.count }}</div>
+                  <div class="status-chart__row-share">{{ row.shareLabel }}</div>
+                </div>
+              </div>
+
+              <div v-else class="status-chart status-chart--donut">
+                <div class="status-chart__donut-shell">
+                  <div class="status-chart__donut" :style="issueStatusDonutStyle">
+                    <div class="status-chart__donut-hole">
+                      <div class="status-chart__donut-total">{{ issueStatusTotal }}</div>
+                      <div class="status-chart__donut-total-label">{{ t('analytics.issues') }}</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="status-chart__legend">
+                  <div v-for="row in issueStatusRows" :key="`issue-legend-${row.status}`" class="status-chart__legend-row">
+                    <div class="status-chart__row-meta">
+                      <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                      <span class="status-chart__row-label">{{ row.label }}</span>
+                    </div>
+                    <div class="status-chart__legend-values">
+                      <span class="status-chart__row-value">{{ row.count }}</span>
+                      <span class="status-chart__row-share">{{ row.shareLabel }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </n-card>
+          </n-gi>
+
+          <n-gi class="analytics-grid-cell">
+            <n-card class="analytics-card analytics-card--stretch" :bordered="false" data-testid="analytics-task-status-card">
+              <template #header>
+                <div class="analytics-card__header">
+                  <div>
+                    <div class="analytics-card__title">{{ t('analytics.taskStatusDistribution') }}</div>
+                    <div class="analytics-card__subtitle">{{ t('analytics.taskStatusDistributionSubtitle') }}</div>
+                  </div>
+                  <div class="analytics-card__header-actions analytics-card__header-actions--status">
+                    <div class="analytics-chart-toggle" role="tablist" :aria-label="t('analytics.taskStatusDistribution')">
+                      <button
+                        type="button"
+                        class="analytics-chart-toggle__button"
+                        :class="{ 'analytics-chart-toggle__button--active': taskStatusChartMode === 'bar' }"
+                        data-testid="task-status-chart-mode-bar"
+                        @click="taskStatusChartMode = 'bar'"
+                      >
+                        {{ t('analytics.barChart') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="analytics-chart-toggle__button"
+                        :class="{ 'analytics-chart-toggle__button--active': taskStatusChartMode === 'donut' }"
+                        data-testid="task-status-chart-mode-donut"
+                        @click="taskStatusChartMode = 'donut'"
+                      >
+                        {{ t('analytics.donutChart') }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <div v-if="!hasTaskStatusData" class="analytics-empty-state">
+                <div class="analytics-empty-state__title">{{ t('analytics.taskStatusDistributionEmpty') }}</div>
+              </div>
+              <div v-else-if="taskStatusChartMode === 'bar'" class="status-chart status-chart--bar">
+                <div v-for="row in taskStatusRows" :key="`task-${row.status}`" class="status-chart__bar-row">
+                  <div class="status-chart__row-meta">
+                    <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                    <span class="status-chart__row-label">{{ row.label }}</span>
+                  </div>
+                  <div class="status-chart__bar-track">
+                    <div class="status-chart__bar-fill" :style="{ width: `${row.barWidthPercent}%`, background: row.color }" />
+                  </div>
+                  <div class="status-chart__row-value">{{ row.count }}</div>
+                  <div class="status-chart__row-share">{{ row.shareLabel }}</div>
+                </div>
+              </div>
+
+              <div v-else class="status-chart status-chart--donut">
+                <div class="status-chart__donut-shell">
+                  <div class="status-chart__donut" :style="taskStatusDonutStyle">
+                    <div class="status-chart__donut-hole">
+                      <div class="status-chart__donut-total">{{ taskStatusTotal }}</div>
+                      <div class="status-chart__donut-total-label">{{ t('analytics.tasks') }}</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="status-chart__legend">
+                  <div v-for="row in taskStatusRows" :key="`task-legend-${row.status}`" class="status-chart__legend-row">
+                    <div class="status-chart__row-meta">
+                      <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                      <span class="status-chart__row-label">{{ row.label }}</span>
+                    </div>
+                    <div class="status-chart__legend-values">
+                      <span class="status-chart__row-value">{{ row.count }}</span>
+                      <span class="status-chart__row-share">{{ row.shareLabel }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </n-card>
+          </n-gi>
+        </n-grid>
+
         <n-space vertical :size="16">
           <n-card class="analytics-card" :bordered="false">
             <template #header>
@@ -178,152 +330,6 @@
             :scroll-x="analyticsBreakdownScrollX"
           />
         </n-card>
-
-        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
-          <n-gi class="analytics-grid-cell">
-            <n-card class="analytics-card analytics-card--stretch" :bordered="false" data-testid="analytics-issue-status-card">
-              <template #header>
-                <div class="analytics-card__header">
-                  <div>
-                    <div class="analytics-card__title">{{ t('analytics.issueStatusDistribution') }}</div>
-                    <div class="analytics-card__subtitle">{{ t('analytics.issueStatusDistributionSubtitle') }}</div>
-                  </div>
-                  <div class="analytics-card__header-actions analytics-card__header-actions--status">
-                    <div class="analytics-chart-toggle" role="tablist" :aria-label="t('analytics.issueStatusDistribution')">
-                      <button
-                        type="button"
-                        class="analytics-chart-toggle__button"
-                        :class="{ 'analytics-chart-toggle__button--active': issueStatusChartMode === 'bar' }"
-                        data-testid="issue-status-chart-mode-bar"
-                        @click="issueStatusChartMode = 'bar'"
-                      >
-                        {{ t('analytics.barChart') }}
-                      </button>
-                      <button
-                        type="button"
-                        class="analytics-chart-toggle__button"
-                        :class="{ 'analytics-chart-toggle__button--active': issueStatusChartMode === 'donut' }"
-                        data-testid="issue-status-chart-mode-donut"
-                        @click="issueStatusChartMode = 'donut'"
-                      >
-                        {{ t('analytics.donutChart') }}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </template>
-
-              <div v-if="issueStatusChartMode === 'bar'" class="status-chart status-chart--bar">
-                <div v-for="row in issueStatusRows" :key="`issue-${row.status}`" class="status-chart__bar-row">
-                  <div class="status-chart__row-meta">
-                    <span class="status-chart__legend-dot" :style="{ background: row.color }" />
-                    <span class="status-chart__row-label">{{ row.label }}</span>
-                  </div>
-                  <div class="status-chart__bar-track">
-                    <div class="status-chart__bar-fill" :style="{ width: `${row.barWidthPercent}%`, background: row.color }" />
-                  </div>
-                  <div class="status-chart__row-value">{{ row.count }}</div>
-                  <div class="status-chart__row-share">{{ row.shareLabel }}</div>
-                </div>
-              </div>
-
-              <div v-else class="status-chart status-chart--donut">
-                <div class="status-chart__donut-shell">
-                  <div class="status-chart__donut" :style="issueStatusDonutStyle">
-                    <div class="status-chart__donut-hole">
-                      <div class="status-chart__donut-total">{{ issueStatusTotal }}</div>
-                      <div class="status-chart__donut-total-label">{{ t('analytics.issues') }}</div>
-                    </div>
-                  </div>
-                </div>
-                <div class="status-chart__legend">
-                  <div v-for="row in issueStatusRows" :key="`issue-legend-${row.status}`" class="status-chart__legend-row">
-                    <div class="status-chart__row-meta">
-                      <span class="status-chart__legend-dot" :style="{ background: row.color }" />
-                      <span class="status-chart__row-label">{{ row.label }}</span>
-                    </div>
-                    <div class="status-chart__legend-values">
-                      <span class="status-chart__row-value">{{ row.count }}</span>
-                      <span class="status-chart__row-share">{{ row.shareLabel }}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </n-card>
-          </n-gi>
-
-          <n-gi class="analytics-grid-cell">
-            <n-card class="analytics-card analytics-card--stretch" :bordered="false" data-testid="analytics-task-status-card">
-              <template #header>
-                <div class="analytics-card__header">
-                  <div>
-                    <div class="analytics-card__title">{{ t('analytics.taskStatusDistribution') }}</div>
-                    <div class="analytics-card__subtitle">{{ t('analytics.taskStatusDistributionSubtitle') }}</div>
-                  </div>
-                  <div class="analytics-card__header-actions analytics-card__header-actions--status">
-                    <div class="analytics-chart-toggle" role="tablist" :aria-label="t('analytics.taskStatusDistribution')">
-                      <button
-                        type="button"
-                        class="analytics-chart-toggle__button"
-                        :class="{ 'analytics-chart-toggle__button--active': taskStatusChartMode === 'bar' }"
-                        data-testid="task-status-chart-mode-bar"
-                        @click="taskStatusChartMode = 'bar'"
-                      >
-                        {{ t('analytics.barChart') }}
-                      </button>
-                      <button
-                        type="button"
-                        class="analytics-chart-toggle__button"
-                        :class="{ 'analytics-chart-toggle__button--active': taskStatusChartMode === 'donut' }"
-                        data-testid="task-status-chart-mode-donut"
-                        @click="taskStatusChartMode = 'donut'"
-                      >
-                        {{ t('analytics.donutChart') }}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </template>
-
-              <div v-if="taskStatusChartMode === 'bar'" class="status-chart status-chart--bar">
-                <div v-for="row in taskStatusRows" :key="`task-${row.status}`" class="status-chart__bar-row">
-                  <div class="status-chart__row-meta">
-                    <span class="status-chart__legend-dot" :style="{ background: row.color }" />
-                    <span class="status-chart__row-label">{{ row.label }}</span>
-                  </div>
-                  <div class="status-chart__bar-track">
-                    <div class="status-chart__bar-fill" :style="{ width: `${row.barWidthPercent}%`, background: row.color }" />
-                  </div>
-                  <div class="status-chart__row-value">{{ row.count }}</div>
-                  <div class="status-chart__row-share">{{ row.shareLabel }}</div>
-                </div>
-              </div>
-
-              <div v-else class="status-chart status-chart--donut">
-                <div class="status-chart__donut-shell">
-                  <div class="status-chart__donut" :style="taskStatusDonutStyle">
-                    <div class="status-chart__donut-hole">
-                      <div class="status-chart__donut-total">{{ taskStatusTotal }}</div>
-                      <div class="status-chart__donut-total-label">{{ t('analytics.tasks') }}</div>
-                    </div>
-                  </div>
-                </div>
-                <div class="status-chart__legend">
-                  <div v-for="row in taskStatusRows" :key="`task-legend-${row.status}`" class="status-chart__legend-row">
-                    <div class="status-chart__row-meta">
-                      <span class="status-chart__legend-dot" :style="{ background: row.color }" />
-                      <span class="status-chart__row-label">{{ row.label }}</span>
-                    </div>
-                    <div class="status-chart__legend-values">
-                      <span class="status-chart__row-value">{{ row.count }}</span>
-                      <span class="status-chart__row-share">{{ row.shareLabel }}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </n-card>
-          </n-gi>
-        </n-grid>
 
         <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
           <n-gi class="analytics-grid-cell">
@@ -744,6 +750,9 @@ const issueStatusTotal = computed(() =>
 const taskStatusTotal = computed(() =>
   taskStatusRows.value.reduce((sum, row) => sum + row.count, 0)
 )
+
+const hasIssueStatusData = computed(() => issueStatusTotal.value > 0)
+const hasTaskStatusData = computed(() => taskStatusTotal.value > 0)
 
 const issueStatusDonutStyle = computed(() =>
   buildStatusDonutStyle(issueStatusRows.value)
@@ -1353,6 +1362,25 @@ onMounted(() => {
 .analytics-table__secondary {
   font-size: 12px;
   color: rgba(15, 23, 42, 0.58);
+}
+
+.analytics-empty-state {
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  border-radius: 18px;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px dashed rgba(148, 163, 184, 0.28);
+}
+
+.analytics-empty-state__title {
+  max-width: 320px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: rgba(15, 23, 42, 0.6);
 }
 
 @media (max-width: 768px) {
