@@ -93,41 +93,43 @@
                 </div>
               </template>
 
-              <div v-if="!hasIssueStatusData" class="analytics-empty-state">
-                <div class="analytics-empty-state__title">{{ t('analytics.issueStatusDistributionEmpty') }}</div>
-              </div>
-              <div v-else-if="issueStatusChartMode === 'bar'" class="status-chart status-chart--bar">
-                <div v-for="row in issueStatusRows" :key="`issue-${row.status}`" class="status-chart__bar-row">
-                  <div class="status-chart__row-meta">
-                    <span class="status-chart__legend-dot" :style="{ background: row.color }" />
-                    <span class="status-chart__row-label">{{ row.label }}</span>
-                  </div>
-                  <div class="status-chart__bar-track">
-                    <div class="status-chart__bar-fill" :style="{ width: `${row.barWidthPercent}%`, background: row.color }" />
-                  </div>
-                  <div class="status-chart__row-value">{{ row.count }}</div>
-                  <div class="status-chart__row-share">{{ row.shareLabel }}</div>
+              <div class="analytics-status-card__body">
+                <div v-if="!hasIssueStatusData" class="analytics-empty-state">
+                  <div class="analytics-empty-state__title">{{ t('analytics.issueStatusDistributionEmpty') }}</div>
                 </div>
-              </div>
-
-              <div v-else-if="issueStatusChartMode === 'donut'" class="status-chart status-chart--donut">
-                <div class="status-chart__donut-shell">
-                  <div class="status-chart__donut" :style="issueStatusDonutStyle">
-                    <div class="status-chart__donut-hole">
-                      <div class="status-chart__donut-total">{{ issueStatusTotal }}</div>
-                      <div class="status-chart__donut-total-label">{{ t('analytics.issues') }}</div>
-                    </div>
-                  </div>
-                </div>
-                <div class="status-chart__legend">
-                  <div v-for="row in issueStatusRows" :key="`issue-legend-${row.status}`" class="status-chart__legend-row">
+                <div v-else-if="issueStatusChartMode === 'bar'" class="status-chart status-chart--bar">
+                  <div v-for="row in issueStatusRows" :key="`issue-${row.status}`" class="status-chart__bar-row">
                     <div class="status-chart__row-meta">
                       <span class="status-chart__legend-dot" :style="{ background: row.color }" />
                       <span class="status-chart__row-label">{{ row.label }}</span>
                     </div>
-                    <div class="status-chart__legend-values">
-                      <span class="status-chart__row-value">{{ row.count }}</span>
-                      <span class="status-chart__row-share">{{ row.shareLabel }}</span>
+                    <div class="status-chart__bar-track">
+                      <div class="status-chart__bar-fill" :style="{ width: `${row.barWidthPercent}%`, background: row.color }" />
+                    </div>
+                    <div class="status-chart__row-value">{{ row.count }}</div>
+                    <div class="status-chart__row-share">{{ row.shareLabel }}</div>
+                  </div>
+                </div>
+
+                <div v-else-if="issueStatusChartMode === 'donut'" class="status-chart status-chart--donut">
+                  <div class="status-chart__donut-shell">
+                    <div class="status-chart__donut" :style="issueStatusDonutStyle">
+                      <div class="status-chart__donut-hole">
+                        <div class="status-chart__donut-total">{{ issueStatusTotal }}</div>
+                        <div class="status-chart__donut-total-label">{{ t('analytics.issues') }}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="status-chart__legend">
+                    <div v-for="row in issueStatusRows" :key="`issue-legend-${row.status}`" class="status-chart__legend-row">
+                      <div class="status-chart__row-meta">
+                        <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                        <span class="status-chart__row-label">{{ row.label }}</span>
+                      </div>
+                      <div class="status-chart__legend-values">
+                        <span class="status-chart__row-value">{{ row.count }}</span>
+                        <span class="status-chart__row-share">{{ row.shareLabel }}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -170,41 +172,43 @@
                 </div>
               </template>
 
-              <div v-if="!hasTaskStatusData" class="analytics-empty-state">
-                <div class="analytics-empty-state__title">{{ t('analytics.taskStatusDistributionEmpty') }}</div>
-              </div>
-              <div v-else-if="taskStatusChartMode === 'bar'" class="status-chart status-chart--bar">
-                <div v-for="row in taskStatusRows" :key="`task-${row.status}`" class="status-chart__bar-row">
-                  <div class="status-chart__row-meta">
-                    <span class="status-chart__legend-dot" :style="{ background: row.color }" />
-                    <span class="status-chart__row-label">{{ row.label }}</span>
-                  </div>
-                  <div class="status-chart__bar-track">
-                    <div class="status-chart__bar-fill" :style="{ width: `${row.barWidthPercent}%`, background: row.color }" />
-                  </div>
-                  <div class="status-chart__row-value">{{ row.count }}</div>
-                  <div class="status-chart__row-share">{{ row.shareLabel }}</div>
+              <div class="analytics-status-card__body">
+                <div v-if="!hasTaskStatusData" class="analytics-empty-state">
+                  <div class="analytics-empty-state__title">{{ t('analytics.taskStatusDistributionEmpty') }}</div>
                 </div>
-              </div>
-
-              <div v-else-if="taskStatusChartMode === 'donut'" class="status-chart status-chart--donut">
-                <div class="status-chart__donut-shell">
-                  <div class="status-chart__donut" :style="taskStatusDonutStyle">
-                    <div class="status-chart__donut-hole">
-                      <div class="status-chart__donut-total">{{ taskStatusTotal }}</div>
-                      <div class="status-chart__donut-total-label">{{ t('analytics.tasks') }}</div>
-                    </div>
-                  </div>
-                </div>
-                <div class="status-chart__legend">
-                  <div v-for="row in taskStatusRows" :key="`task-legend-${row.status}`" class="status-chart__legend-row">
+                <div v-else-if="taskStatusChartMode === 'bar'" class="status-chart status-chart--bar">
+                  <div v-for="row in taskStatusRows" :key="`task-${row.status}`" class="status-chart__bar-row">
                     <div class="status-chart__row-meta">
                       <span class="status-chart__legend-dot" :style="{ background: row.color }" />
                       <span class="status-chart__row-label">{{ row.label }}</span>
                     </div>
-                    <div class="status-chart__legend-values">
-                      <span class="status-chart__row-value">{{ row.count }}</span>
-                      <span class="status-chart__row-share">{{ row.shareLabel }}</span>
+                    <div class="status-chart__bar-track">
+                      <div class="status-chart__bar-fill" :style="{ width: `${row.barWidthPercent}%`, background: row.color }" />
+                    </div>
+                    <div class="status-chart__row-value">{{ row.count }}</div>
+                    <div class="status-chart__row-share">{{ row.shareLabel }}</div>
+                  </div>
+                </div>
+
+                <div v-else-if="taskStatusChartMode === 'donut'" class="status-chart status-chart--donut">
+                  <div class="status-chart__donut-shell">
+                    <div class="status-chart__donut" :style="taskStatusDonutStyle">
+                      <div class="status-chart__donut-hole">
+                        <div class="status-chart__donut-total">{{ taskStatusTotal }}</div>
+                        <div class="status-chart__donut-total-label">{{ t('analytics.tasks') }}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="status-chart__legend">
+                    <div v-for="row in taskStatusRows" :key="`task-legend-${row.status}`" class="status-chart__legend-row">
+                      <div class="status-chart__row-meta">
+                        <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                        <span class="status-chart__row-label">{{ row.label }}</span>
+                      </div>
+                      <div class="status-chart__legend-values">
+                        <span class="status-chart__row-value">{{ row.count }}</span>
+                        <span class="status-chart__row-share">{{ row.shareLabel }}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1369,8 +1373,15 @@ onMounted(() => {
   color: rgba(15, 23, 42, 0.58);
 }
 
+.analytics-status-card__body {
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
 .analytics-empty-state {
-  min-height: 220px;
+  min-height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;

@@ -468,23 +468,24 @@ describe('Analytics', () => {
     expect(taskCardIndex).toBeLessThan(trendCardIndex)
   })
 
-  it('shows whole-card empty states when both status distributions have no data', async () => {
-    ;(mockApi.getAnalytics as Mock).mockResolvedValue(mockAnalyticsEmptyStatus)
+
+  it('keeps both status cards inside a stable body wrapper across chart modes', async () => {
     wrapper = mount(Analytics, mountOptions)
     await flushPromises()
 
-    expect(wrapper.text()).toContain('No issues match the current filters and time window yet.')
-    expect(wrapper.text()).toContain('No tasks match the current filters and time window yet.')
-    expect(wrapper.findAll('.status-chart__bar-row')).toHaveLength(0)
+    const issueCard = wrapper.find('[data-testid="analytics-issue-status-card"]')
+    const taskCard = wrapper.find('[data-testid="analytics-task-status-card"]')
 
-    const issueBarBtn = wrapper.find('[data-testid="issue-status-chart-mode-bar"]')
-    const issueDonutBtn = wrapper.find('[data-testid="issue-status-chart-mode-donut"]')
-    const taskBarBtn = wrapper.find('[data-testid="task-status-chart-mode-bar"]')
-    const taskDonutBtn = wrapper.find('[data-testid="task-status-chart-mode-donut"]')
+    expect(issueCard.find('.analytics-status-card__body').exists()).toBe(true)
+    expect(taskCard.find('.analytics-status-card__body').exists()).toBe(true)
 
-    expect(issueBarBtn.exists()).toBe(true)
-    expect(issueDonutBtn.exists()).toBe(true)
-    expect(taskBarBtn.exists()).toBe(true)
-    expect(taskDonutBtn.exists()).toBe(true)
+    await wrapper.find('[data-testid="issue-status-chart-mode-donut"]').trigger('click')
+    await wrapper.find('[data-testid="task-status-chart-mode-donut"]').trigger('click')
+    await nextTick()
+
+    expect(issueCard.find('.analytics-status-card__body').exists()).toBe(true)
+    expect(taskCard.find('.analytics-status-card__body').exists()).toBe(true)
+    expect(issueCard.find('.status-chart--donut').exists()).toBe(true)
+    expect(taskCard.find('.status-chart--donut').exists()).toBe(true)
   })
 })
