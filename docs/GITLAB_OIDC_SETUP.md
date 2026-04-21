@@ -1,6 +1,6 @@
 # GitLab OIDC Login Setup
 
-This document explains how to enable GitLab OIDC login for the GIMR dashboard.
+This document explains how to enable GitLab OIDC login for the Codify dashboard.
 
 ## Overview
 
@@ -28,7 +28,7 @@ Open your GitLab instance and create an OAuth application:
 1. Go to **User Settings** -> **Applications**
 2. Click **Add new application**
 3. Fill in:
-   - **Name**: `GIMR Dashboard`
+   - **Name**: `Codify Dashboard`
    - **Redirect URI**: `https://your-domain.example.com/api/auth/callback`
    - **Scopes**:
       - `openid`
@@ -59,7 +59,7 @@ OIDC_REDIRECT_URI=https://your-domain.example.com/api/auth/callback
 
 # Session settings
 SESSION_SECRET=replace-with-a-long-random-secret
-SESSION_COOKIE_NAME=gimr_session
+SESSION_COOKIE_NAME=codify_session
 SESSION_TTL_SECONDS=28800
 COOKIE_SECURE=true
 COOKIE_SAMESITE=lax
@@ -118,7 +118,7 @@ Recommended usage now:
 
 - `SESSION_COOKIE_NAME`
   - Cookie name used by the dashboard session.
-  - Default is `gimr_session`.
+  - Default is `codify_session`.
 
 - `SESSION_TTL_SECONDS`
   - Session lifetime in seconds.
@@ -227,7 +227,7 @@ After GitLab sign-in and callback:
 - browser is redirected back to the dashboard
 - `/api/auth/me` returns the logged-in user
 - a session cookie is set in the browser
-- if GitLab returns a refresh token, GIMR stores it encrypted and can refresh GitLab API access automatically
+- if GitLab returns a refresh token, Codify stores it encrypted and can refresh GitLab API access automatically
 
 ### Review your sessions
 

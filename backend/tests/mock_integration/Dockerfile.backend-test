@@ -1,0 +1,9 @@
+# Extends the production backend image with test dependencies and test code.
+# Test files can be overridden at runtime via volume mount for fast iteration.
+FROM codify-backend:latest
+
+# Install test dependencies (baked into image to avoid runtime pip install)
+RUN pip install pytest pytest-asyncio httpx
+
+# Copy test files (overridden by volume mount in docker-compose for dev)
+COPY backend/tests/ /app/tests/

@@ -6,6 +6,7 @@ from typing import Any, BinaryIO, Optional
 
 import docker
 from docker.client import DockerClient
+from docker.models.containers import Container
 
 from app.config import get_settings
 
@@ -73,7 +74,7 @@ class DockerClientWrapper:
         working_dir: Optional[str] = None,
         network: Optional[str] = None,
         name: Optional[str] = None,
-    ) -> Any:
+    ) -> Container:
         """Create and start a Docker container.
 
         Args:
@@ -89,6 +90,14 @@ class DockerClientWrapper:
             Container object
         """
         logger.info(f"Creating container with image: {image}, name: {name}")
+
+        if name:
+            try:
+                existing = self.client.containers.get(name)
+                logger.info(f"Removing stale container {name} (status: {existing.status})")
+                existing.remove(force=True)
+            except docker.errors.NotFound:
+                pass
 
         container = self.client.containers.run(
             image,
@@ -106,7 +115,7 @@ class DockerClientWrapper:
         return container
 
     def wait_for_container(
-        self, container: Any, timeout: int = 600
+        self, container: Container, timeout: int = 600
     ) -> tuple[int, str]:
         """Wait for container to complete execution.
 
@@ -132,8 +141,8 @@ class DockerClientWrapper:
             # Try to get logs even if wait failed
             try:
                 logs = container.logs(stdout=True, stderr=True).decode("utf-8")
-            except:
-                logs = f"Failed to get logs: {e}"
+            except Exception as inner_e:
+                logs = f"Failed to get logs: {inner_e}"
             return -1, logs
 
         # Get logs

@@ -31,7 +31,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NIcon, NInput } from 'naive-ui'
 import { InformationCircleOutline } from '@vicons/ionicons5'
-import { EditorView, basicSetup } from 'codemirror'
+import { EditorView, minimalSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
 import { Decoration, DecorationSet, ViewPlugin, ViewUpdate, hoverTooltip } from '@codemirror/view'
 import { RangeSetBuilder } from '@codemirror/state'
@@ -64,7 +64,7 @@ const hasVariables = computed(() => content.value.includes('{{') && content.valu
 // Use composable logic inline since we need reactive access
 const variablesRef = ref(content.value)
 const tipsRef = ref(templateTips.value)
-const { variables, mergedTips, variablesWithTips } = useVariableEditor(variablesRef, tipsRef)
+const { variables, mergedTips, updateTip, variablesWithTips } = useVariableEditor(variablesRef, tipsRef)
 
 // Keep reactive refs in sync
 watch(content, (val) => {
@@ -74,25 +74,66 @@ watch(templateTips, (val) => {
   tipsRef.value = val
 })
 
-// When content changes, emit cleaned tips (without orphan tips) if editable
-// Use flush: 'post' to ensure this runs AFTER the migration in useVariableEditor
-watch(variables, () => {
-  if (props.editable && mergedTips.value) {
-    emit('update:variableTips', { ...mergedTips.value })
+function areTipsEqual(
+  left: Record<string, string> | undefined,
+  right: Record<string, string> | undefined
+) {
+  const leftEntries = Object.entries(left ?? {}).sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+  const rightEntries = Object.entries(right ?? {}).sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+
+  if (leftEntries.length !== rightEntries.length) {
+    return false
   }
-}, { flush: 'post' })
+
+  return leftEntries.every(([key, value], index) => {
+    const [otherKey, otherValue] = rightEntries[index] ?? []
+    return key === otherKey && value === otherValue
+  })
+}
+
+const lastSyncedTips = ref<Record<string, string>>({ ...(props.variableTips ?? {}) })
+
+watch(
+  () => props.variableTips,
+  (newTips) => {
+    lastSyncedTips.value = { ...(newTips ?? {}) }
+  },
+  { deep: true, immediate: true }
+)
+
+function syncVariableTips(nextTips: Record<string, string>) {
+  if (areTipsEqual(nextTips, lastSyncedTips.value)) {
+    return
+  }
+
+  const clonedTips = { ...nextTips }
+  lastSyncedTips.value = clonedTips
+  emit('update:variableTips', clonedTips)
+}
+
+// Only emit when merged tips actually diverge from the parent prop.
+// This avoids re-emitting equivalent objects on every keystroke.
+watch(mergedTips, (newTips) => {
+  if (props.editable && newTips) {
+    syncVariableTips(newTips)
+  }
+}, { flush: 'post', deep: true })
 
 // Whether tips are editable
 const editable = computed(() => props.editable ?? false)
 
 // Handle tip change when editable - use mergedTips which is already cleaned
 function handleTipChange(varName: string, tip: string) {
+  updateTip(varName, tip)
   const newTips = { ...mergedTips.value, [varName]: tip }
-  emit('update:variableTips', newTips)
+  syncVariableTips(newTips)
 }
 
-// Variable pattern decoration
-const variableMark = Decoration.mark({ class: 'cm-variable-highlight' })
+// Variable pattern decoration - use inclusive: false to not interfere with selection
+const variableMark = Decoration.mark({
+  class: 'cm-variable-highlight',
+  inclusive: false
+})
 
 // Create a view plugin that highlights variables
 const variableHighlightPlugin = ViewPlugin.fromClass(class {
@@ -103,7 +144,8 @@ const variableHighlightPlugin = ViewPlugin.fromClass(class {
   }
 
   update(update: ViewUpdate) {
-    if (update.docChanged || update.viewportChanged) {
+    // Always rebuild decorations on any update to ensure sync
+    if (update.docChanged || update.viewportChanged || update.geometryChanged) {
       this.decorations = this.buildDecorations(update.view)
     }
   }
@@ -128,7 +170,13 @@ const variableHighlightPlugin = ViewPlugin.fromClass(class {
 
 // Tooltip for hovering over variables
 function createTooltip(view: EditorView, pos: number) {
-  const line = view.state.doc.lineAt(pos)
+  const docLength = view.state.doc.length
+  if (docLength === 0) {
+    return null
+  }
+
+  const safePos = Math.min(Math.max(pos, 0), docLength)
+  const line = view.state.doc.lineAt(safePos)
   const lineText = line.text
   const lineStart = line.from
 
@@ -140,12 +188,13 @@ function createTooltip(view: EditorView, pos: number) {
     const matchStart = lineStart + match.index
     const matchEnd = matchStart + match[0].length
 
-    if (pos >= matchStart && pos <= matchEnd) {
+    if (safePos >= matchStart && safePos <= matchEnd && matchStart >= 0 && matchEnd <= docLength) {
       const varName = match[1]
       const tip = mergedTips.value[varName] || ''
 
       return {
-        pos: line.from,
+        pos: matchStart,
+        end: matchEnd,
         above: true,
         create: () => {
           const dom = document.createElement('div')
@@ -164,43 +213,46 @@ function createTooltip(view: EditorView, pos: number) {
 }
 
 const variableTooltip = hoverTooltip((view, pos) => createTooltip(view, pos), {
-  hoverTime: 300
+  hoverTime: 300,
+  hideOnChange: true
 })
 
 function createEditor() {
   if (!editorContainer.value) return
 
+  const editorExtensions = [
+    minimalSetup,
+    variableHighlightPlugin,
+    variableTooltip,
+    EditorView.updateListener.of((update) => {
+      if (update.docChanged) {
+        const newContent = update.state.doc.toString()
+        content.value = newContent
+      }
+    }),
+    EditorView.theme({
+      '&': {
+        fontSize: '14px',
+        maxHeight: '200px',
+        width: '100%',
+        display: 'block'
+      },
+      '.cm-scroller': {
+        fontFamily: 'monospace',
+        overflow: 'auto'
+      },
+      '.cm-content': {
+        padding: '8px 0'
+      },
+      '.cm-line': {
+        padding: '0 12px'
+      }
+    })
+  ]
+
   const startState = EditorState.create({
     doc: content.value,
-    extensions: [
-      basicSetup,
-      variableHighlightPlugin,
-      variableTooltip,
-      EditorView.updateListener.of((update) => {
-        if (update.docChanged) {
-          const newContent = update.state.doc.toString()
-          content.value = newContent
-        }
-      }),
-      EditorView.theme({
-        '&': {
-          fontSize: '14px',
-          maxHeight: '200px',
-          width: '100%',
-          display: 'block'
-        },
-        '.cm-scroller': {
-          fontFamily: 'monospace',
-          overflow: 'auto'
-        },
-        '.cm-content': {
-          padding: '8px 0'
-        },
-        '.cm-line': {
-          padding: '0 12px'
-        }
-      })
-    ]
+    extensions: editorExtensions
   })
 
   editorView = new EditorView({
@@ -311,10 +363,19 @@ watch(() => props.modelValue, (newVal) => {
 
 /* Global styles for CodeMirror variable highlighting */
 :deep(.cm-variable-highlight) {
-  background: #fef3c7;
-  color: #92400e;
+  background-color: rgba(245, 158, 11, 0.18) !important;
+  color: #92400e !important;
   padding: 1px 2px;
   border-radius: 3px;
+}
+
+/* Keep variable highlighting visible while making text selection clearly distinct */
+:deep(.cm-editor .cm-selectionBackground) {
+  background-color: rgba(59, 130, 246, 0.28) !important;
+}
+
+:deep(.cm-editor .cm-content ::selection) {
+  background-color: rgba(59, 130, 246, 0.34) !important;
 }
 
 /* Tooltip styling */

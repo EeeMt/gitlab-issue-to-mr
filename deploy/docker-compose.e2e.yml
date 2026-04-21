@@ -1,0 +1,150 @@
+# Docker Compose for E2E Testing
+# Uses isolated PostgreSQL without persistent volume for clean test environment
+#
+# Usage:
+#   cd deploy
+#   docker-compose -f docker-compose.e2e.yml up -d --build  # Start services and build images
+#   docker-compose -f docker-compose.e2e.yml run --rm e2e    # Run tests
+#   docker-compose -f docker-compose.e2e.yml down            # Clean up
+
+name: codify-e2e
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: codify-e2e-postgres
+    environment:
+      POSTGRES_USER: codify
+      POSTGRES_PASSWORD: codify_password
+      POSTGRES_DB: codify
+    # No persistent volume - fresh database on each start
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks:
+      - codify-e2e-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codify -d codify"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  backend:
+    image: codify-backend:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    container_name: codify-e2e-backend
+    # Single worker for E2E: config PATCH + webhook must hit the same process
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    env_file:
+      - .env.test
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://codify:codify_password@postgres:5432/codify
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DOCKER_TLS_CA=
+      - DOCKER_TLS_CERT=
+      - DOCKER_TLS_KEY=
+      - AUTO_MIGRATE=true
+      - COOKIE_SECURE=false
+      - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - type: bind
+        source: /opt/ca.crt
+        target: /etc/ssl/certs/custom-ca.crt
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - codify-e2e-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  nginx:
+    image: codify-nginx:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+    container_name: codify-e2e-nginx
+    ports:
+      - "18980:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - codify-e2e-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/ || exit 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  scheduler:
+    image: codify-backend:latest
+    container_name: codify-e2e-scheduler
+    command: ["python3", "-m", "app.scheduler_service"]
+    env_file:
+      - .env.test
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://codify:codify_password@postgres:5432/codify
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DOCKER_TLS_CA=
+      - DOCKER_TLS_CERT=
+      - DOCKER_TLS_KEY=
+      - AUTO_MIGRATE=false
+      - COOKIE_SECURE=false
+      - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
+      - WORKER_CA_CERT_HOST_PATH=/opt/ca.crt
+      - WORKER_VOLUME_MOUNTS=${WORKER_VOLUME_MOUNTS:-}
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - type: bind
+        source: /opt/ca.crt
+        target: /etc/ssl/certs/custom-ca.crt
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - codify-e2e-network
+
+  e2e:
+    image: codify-e2e:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.e2e
+    container_name: codify-e2e-tester
+    # Note: Do NOT add default command here. Use: docker-compose run --rm e2e pytest ...
+    env_file:
+      - .env.test
+    environment:
+      - E2E_BASE_URL=http://nginx:80
+      - E2E_BACKEND_URL=http://backend:8000
+      - E2E_GITLAB_URL=http://gitlab:8080
+      - E2E_POSTGRES_URL=postgresql://codify:codify_password@postgres:5432/codify
+      - E2E_RECORD_VIDEO=${E2E_RECORD_VIDEO:-}
+      - BACKEND_URL=http://backend:8000
+    depends_on:
+      nginx:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - codify-e2e-network
+    shm_size: '2gb'
+
+networks:
+  codify-e2e-network:
+    driver: bridge

@@ -1,6 +1,6 @@
 # 生产环境部署指南
 
-本文档面向运维和部署人员，说明如何在长期运行的环境中部署 GIMR（GitLab Issue to MR Bot），以及如何安全地更新、备份和排障。
+本文档面向运维和部署人员，说明如何在长期运行的环境中部署 Codify（Codify），以及如何安全地更新、备份和排障。
 
 ## 1. 部署目标与架构
 
@@ -13,7 +13,7 @@
 
 当前 compose 约定：
 
-- `backend` 与 `scheduler` 共用 `gimr-backend:latest`
+- `backend` 与 `scheduler` 共用 `codify-backend:latest`
 - `backend` 使用 `AUTO_MIGRATE=false`
 - `scheduler` 使用 `AUTO_MIGRATE=true`
 - PostgreSQL 数据挂载在 Docker volume `postgres_data`
@@ -37,7 +37,6 @@
 
 - `GITLAB_URL`
 - `GITLAB_BOT_TOKEN`
-- `GITLAB_WEBHOOK_SECRET`
 
 #### 模型服务
 
@@ -141,15 +140,7 @@ curl -f http://<host>:8000/health
 
 ## 5. 上线后的初始化配置
 
-### 5.1 GitLab Webhook
-
-请按照 [GITLAB_WEBHOOK_SETUP.md](GITLAB_WEBHOOK_SETUP.md) 配置：
-
-- GitLab 项目或群组 Webhook
-- Secret 校验
-- 指向 `/api/webhook/gitlab` 的可访问地址
-
-### 5.2 OIDC 登录
+### 5.1 OIDC 登录
 
 建议在服务基础可用后，再通过 Dashboard 配置 OIDC：
 
@@ -162,7 +153,7 @@ curl -f http://<host>:8000/health
 
 详细步骤见 [GITLAB_OIDC_SETUP.md](GITLAB_OIDC_SETUP.md)。
 
-### 5.3 Break-glass 紧急入口
+### 5.2 Break-glass 紧急入口
 
 如果生产环境启用了 break-glass：
 
@@ -179,7 +170,7 @@ curl -f http://<host>:8000/health
 当 `backend/`、调度逻辑或 API 变更时：
 
 ```bash
-docker build -f deploy/Dockerfile.backend -t deploy-backend .
+docker build -f deploy/Dockerfile.backend -t codify-backend:latest .
 cd deploy && docker-compose up -d backend scheduler
 ```
 
@@ -208,7 +199,7 @@ cd ../deploy && docker-compose build nginx && docker-compose up -d nginx
 请重建 Worker 镜像：
 
 ```bash
-docker build -f deploy/Dockerfile.worker -t gimr-worker:latest .
+docker build -f deploy/Dockerfile.worker -t codify-worker:latest .
 ```
 
 如果 `WORKER_IMAGE` 使用了其他标签，请同步更新配置。
@@ -227,14 +218,14 @@ docker-compose logs -f nginx
 ### 7.2 查看数据库中的任务状态
 
 ```bash
-docker exec gimr-postgres psql -U gimr -d gimr -c \
+docker exec codify-postgres psql -U codify -d codify -c \
   "SELECT id, status, error_message FROM tasks ORDER BY id DESC LIMIT 10;"
 ```
 
 ### 7.3 查看最近任务日志
 
 ```bash
-docker exec gimr-postgres psql -U gimr -d gimr -c \
+docker exec codify-postgres psql -U codify -d codify -c \
   "SELECT task_id, level, message, created_at FROM task_logs ORDER BY id DESC LIMIT 20;"
 ```
 
@@ -286,7 +277,7 @@ docker exec gimr-postgres psql -U gimr -d gimr -c \
 建议采用以下原则：
 
 - 一次只发布一类改动，便于定位问题
-- 保留上一版 `deploy-backend` 和 Worker 镜像标签
+- 保留上一版 `codify-backend:latest` 和 Worker 镜像标签
 - 在升级前导出数据库
 - 升级后优先验证：
   - `/health`
@@ -315,6 +306,5 @@ docker exec gimr-postgres psql -U gimr -d gimr -c \
 - [文档索引](README.md)
 - [项目总览 README](../README.md)
 - [README.zh-CN.md](README.zh-CN.md)
-- [GITLAB_WEBHOOK_SETUP.md](GITLAB_WEBHOOK_SETUP.md)
 - [GITLAB_OIDC_SETUP.md](GITLAB_OIDC_SETUP.md)
 - [e2e-debugging.md](e2e-debugging.md)

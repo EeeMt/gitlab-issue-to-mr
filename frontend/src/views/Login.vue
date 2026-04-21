@@ -1,36 +1,44 @@
 <template>
-  <div class="login-page">
-    <n-card class="login-card" :bordered="false">
-      <div class="login-card__header">
+  <div class="login-page" data-testid="login-page">
+    <n-card class="login-card" :bordered="false" data-testid="login-card">
+      <div class="login-card__header" data-testid="login-header">
+        <LanguageToggle size="small" class="login-card__lang" />
         <div class="login-card__brand">
           <div class="login-card__mark">
-            <n-icon size="26" :component="RocketOutline" />
+            <n-icon :size="24" :component="RocketOutline" />
           </div>
-          <div>
-            <h1 class="login-card__title">{{ t('app.brandTitle') }}</h1>
-            <p class="login-card__subtitle">{{ t('login.subtitle') }}</p>
-          </div>
+          <h1 class="login-card__title">{{ t('app.brandTitle') }}</h1>
+          <p class="login-card__subtitle">{{ t('login.subtitle') }}</p>
         </div>
-        <LanguageToggle size="small" class="login-card__language-switcher" />
       </div>
 
-      <n-alert v-if="loginReason" type="warning" :show-icon="false" class="login-card__alert">
-        {{ loginReason }}
-      </n-alert>
+      <Transition name="login-alert">
+        <n-alert v-if="loginReason" type="warning" class="login-card__alert" data-testid="login-reason-alert">
+          {{ loginReason }}
+        </n-alert>
+      </Transition>
 
       <n-alert v-if="authState.breakGlassEnabled" type="info" :show-icon="false" class="login-card__alert">
         {{ t('login.breakGlassEnabled') }}
       </n-alert>
 
-      <n-tabs v-if="!authState.systemInitialized" type="card" animated class="login-card__tabs">
+      <n-tabs
+        v-if="!authState.systemInitialized"
+        type="card"
+        animated
+        class="login-card__tabs"
+        data-testid="login-tabs"
+      >
         <n-tab-pane name="local" :tab="t('login.localAuth')">
-          <n-space vertical :size="16">
+          <n-space vertical :size="16" class="login-form">
             <n-input
+              data-testid="login-username-input"
               v-model:value="localUsername"
               :placeholder="t('login.username')"
               autocomplete="username"
             />
             <n-input
+              data-testid="login-password-input"
               v-model:value="localPassword"
               type="password"
               show-password-on="click"
@@ -39,6 +47,7 @@
               @keyup.enter="handleLocalLogin"
             />
             <n-button
+              data-testid="login-submit-button"
               type="primary"
               strong
               block
@@ -60,7 +69,7 @@
             >
               {{ t('login.continueWithGitlab') }}
             </n-button>
-            <n-text v-else depth="3" style="text-align: center; display: block;">
+            <n-text v-else depth="3" style="display: block;">
               {{ t('login.oidcNotConfigured') }}
             </n-text>
           </n-space>
@@ -74,14 +83,13 @@
           type="primary"
           size="large"
           block
-          class="login-card__gitlab-btn"
           @click="handleLogin"
         >
           {{ t('login.continueWithGitlab') }}
         </n-button>
 
         <!-- Password Login Toggle -->
-        <div class="login-card__password-toggle">
+        <div class="login-card__toggle">
           <n-button
             quaternary
             @click="showPasswordLogin = !showPasswordLogin"
@@ -95,13 +103,15 @@
 
         <!-- Password Login Form -->
         <n-collapse-transition :show="showPasswordLogin">
-          <n-space vertical :size="12">
+          <n-space vertical :size="12" data-testid="login-password-form">
             <n-input
+              data-testid="login-password-toggle-username-input"
               v-model:value="localUsername"
               :placeholder="t('login.username')"
               autocomplete="username"
             />
             <n-input
+              data-testid="login-password-toggle-password-input"
               v-model:value="localPassword"
               type="password"
               show-password-on="click"
@@ -110,6 +120,7 @@
               @keyup.enter="handleLocalLogin"
             />
             <n-button
+              data-testid="login-password-toggle-submit-button"
               type="primary"
               strong
               block
@@ -123,7 +134,7 @@
 
         <div v-if="authState.breakGlassEnabled" class="login-card__break-glass">
           <n-divider>{{ t('login.emergencyAccess') }}</n-divider>
-          <n-space vertical :size="12">
+          <n-space vertical :size="12" class="login-form">
             <n-input
               v-model:value="breakGlassUsername"
               :placeholder="t('login.emergencyUsername')"
@@ -181,7 +192,23 @@ const nextTarget = computed(() => {
 })
 const loginReason = computed(() => {
   const reason = route.query.reason
-  return typeof reason === 'string' ? reason : ''
+  if (typeof reason !== 'string' || !reason) return ''
+
+  const reasonLower = reason.toLowerCase()
+  if (reasonLower.includes('authentication required') || reasonLower.includes('not authenticated') || reasonLower.includes('could not validate')) {
+    return t('login.redirectReasons.authRequired')
+  }
+  if (reasonLower.includes('expired')) {
+    return t('login.redirectReasons.sessionExpired')
+  }
+  if (reasonLower.includes('revoked')) {
+    return t('login.redirectReasons.sessionRevoked')
+  }
+  if (reasonLower.includes('denied') || reasonLower.includes('forbidden') || reasonLower.includes('not authorized')) {
+    return t('login.redirectReasons.accessDenied')
+  }
+  // Unknown reason — show the raw string
+  return reason
 })
 
 const localUsername = ref('')
@@ -264,7 +291,6 @@ async function handleBreakGlassLogin() {
 .login-page {
   min-height: 100dvh;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
   width: 100%;
@@ -272,35 +298,39 @@ async function handleBreakGlassLogin() {
   padding: 24px;
   padding-top: max(24px, env(safe-area-inset-top));
   padding-bottom: max(24px, env(safe-area-inset-bottom));
+  background:
+    radial-gradient(circle at top left, rgba(32, 128, 240, 0.12), transparent 28%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.94), rgba(241, 245, 249, 0.98));
 }
 
 .login-card {
-  width: min(460px, 100%);
+  width: min(420px, 100%);
   margin: 0 auto;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.86);
+  border-radius: var(--app-card-radius, 18px);
+  background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(14px);
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.14);
 }
 
+/* ─── Header ─── */
 .login-card__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+  position: relative;
+  padding-top: 4px;
+}
+
+.login-card__lang {
+  position: absolute;
+  top: 0;
+  right: 0;
 }
 
 .login-card__brand {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 16px;
-  min-width: 0;
-  flex: 1;
-}
-
-.login-card__language-switcher {
-  flex-shrink: 0;
-  margin-top: 2px;
+  text-align: center;
+  gap: 0;
 }
 
 .login-card__mark {
@@ -313,73 +343,88 @@ async function handleBreakGlassLogin() {
   background: linear-gradient(135deg, #2080f0, #36ad6a);
   color: #fff;
   box-shadow: 0 12px 24px rgba(32, 128, 240, 0.24);
-  flex-shrink: 0;
+  margin-bottom: 16px;
 }
 
 .login-card__title {
   margin: 0;
-  font-size: 28px;
+  font-size: 26px;
+  font-weight: 700;
   line-height: 1.2;
 }
 
 .login-card__subtitle {
-  margin: 8px 0 0;
-  color: rgba(15, 23, 42, 0.66);
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--app-page-subtitle-color, rgba(15, 23, 42, 0.55));
 }
 
+/* ─── Content ─── */
 .login-card__body {
-  margin-top: 20px;
+  margin-top: 24px;
 }
 
-.login-card__gitlab-btn {
-  margin-top: 16px;
+.login-card__tabs {
+  margin-top: 24px;
 }
 
 .login-card__alert {
   border-radius: 12px;
   font-size: 13px;
-  padding: 10px 14px;
+  line-height: 1.6;
+  margin-top: 20px;
+}
+
+.login-card__alert :deep(.n-alert__icon) {
+  top: 50%;
+  transform: translateY(-50%);
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.login-alert-enter-active {
+  transition: all 0.3s ease-out;
+}
+
+.login-alert-leave-active {
+  transition: all 0.2s ease-in;
+}
+
+.login-alert-enter-from {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+.login-alert-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* ─── Actions ─── */
+.login-card__toggle {
   text-align: center;
-  margin-top: 16px;
+}
+
+.login-card__hint {
+  display: block;
+  text-align: center;
+  line-height: 1.5;
+  font-size: 13px;
 }
 
 .login-card__break-glass {
   width: 100%;
 }
 
-.login-card__hint {
-  display: block;
-  line-height: 1.5;
-}
-
-.login-card__password-toggle {
-  text-align: center;
-}
-
-@media (max-width: 767px) {
+/* ─── Responsive ─── */
+@media (max-width: 480px) {
   .login-page {
     padding-left: 16px;
     padding-right: 16px;
   }
 
-  .login-card__header {
-    gap: 12px;
-  }
-
-  .login-card__brand {
-    gap: 14px;
-  }
-}
-
-@media (max-width: 480px) {
-  .login-card__header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .login-card__language-switcher {
-    align-self: flex-end;
-    margin-top: 0;
+  .login-card__title {
+    font-size: 22px;
   }
 }
 </style>

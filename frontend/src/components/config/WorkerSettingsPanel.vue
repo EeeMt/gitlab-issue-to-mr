@@ -10,106 +10,9 @@
             </div>
           </div>
         </template>
-
-        <n-form
-          ref="aiFormRef"
-          :model="aiFormValue"
-          :rules="aiRules"
-          label-placement="top"
-          class="config-section-form"
-        >
-          <div class="config-form__section">
-            <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-              <n-gi>
-                <n-form-item :label="t('config.anthropicBaseUrl')" path="anthropic_base_url">
-                  <n-input
-                    v-model:value="aiFormValue.anthropic_base_url"
-                    placeholder="http://host.docker.internal:11434/v1"
-                    class="config-form__input"
-                  />
-                  <template #feedback>
-                    {{ t('config.anthropicBaseUrlHint') }}
-                  </template>
-                </n-form-item>
-              </n-gi>
-              <n-gi>
-                <n-form-item :label="t('config.anthropicModel')" path="anthropic_model">
-                  <n-input
-                    v-model:value="aiFormValue.anthropic_model"
-                    placeholder="claude-sonnet-4-20250514"
-                    class="config-form__input"
-                  />
-                  <template #feedback>
-                    {{ t('config.anthropicModelHint') }}
-                  </template>
-                </n-form-item>
-              </n-gi>
-              <n-gi>
-                <n-form-item :label="t('config.claudeMaxTurns')" path="claude_max_turns">
-                  <n-input-number
-                    v-model:value="aiFormValue.claude_max_turns"
-                    :min="1"
-                    :max="1000"
-                    class="config-form__input"
-                  />
-                  <template #feedback>
-                    {{ t('config.claudeMaxTurnsHint') }}
-                  </template>
-                </n-form-item>
-              </n-gi>
-              <n-gi>
-                <n-form-item :label="t('config.anthropicApiKeyStatus')">
-                  <n-tag :type="aiFormValue.anthropic_api_key_configured ? 'success' : 'warning'" round>
-                    {{ aiFormValue.anthropic_api_key_configured ? t('config.configured') : t('config.missing') }}
-                  </n-tag>
-                  <template #feedback>
-                    {{ t('config.anthropicApiKeyStatusHint') }}
-                  </template>
-                </n-form-item>
-              </n-gi>
-              <n-gi :span="isMobile ? 1 : 2">
-                <n-form-item :label="t('config.anthropicApiKey')">
-                  <n-input
-                    v-model:value="aiFormValue.anthropic_api_key_input"
-                    type="password"
-                    show-password-on="click"
-                    :placeholder="
-                      aiFormValue.anthropic_api_key_configured
-                        ? t('config.configuredEnterNew')
-                        : t('config.enterAnthropicApiKey')
-                    "
-                    class="config-form__input"
-                  />
-                  <template #feedback>
-                    {{ t('config.anthropicApiKeyHint') }}
-                  </template>
-                </n-form-item>
-              </n-gi>
-            </n-grid>
-          </div>
-
-          <div class="config-card-actions">
-            <n-space :size="12" wrap>
-              <n-button
-                type="primary"
-                :loading="aiSaving"
-                :disabled="isAiBusy || !isAiDirty"
-                @click="handleSaveAi"
-              >
-                {{ t('config.saveChanges') }}
-              </n-button>
-              <n-button secondary :disabled="isAiBusy || !isAiDirty" @click="resetAi">
-                {{ t('config.revertChanges') }}
-              </n-button>
-              <n-button
-                :disabled="isAiBusy || !aiFormValue.anthropic_api_key_configured"
-                @click="handleClearApiKey"
-              >
-                {{ t('config.clearAnthropicApiKey') }}
-              </n-button>
-            </n-space>
-          </div>
-        </n-form>
+        <n-alert type="info" :show-icon="true">
+          {{ t('config.providers.movedNotice') }}
+        </n-alert>
       </n-card>
 
       <n-card class="config-form-card" :bordered="false">
@@ -235,6 +138,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import {
+  NAlert,
   NButton,
   NCard,
   NForm,
@@ -242,25 +146,13 @@ import {
   NGi,
   NGrid,
   NInput,
-  NInputNumber,
   NSelect,
   NSpace,
   NSpin,
-  NTag,
-  useMessage,
-  type FormInst,
-  type FormRules
+  useMessage
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getConfig, updateConfig, resetConfigKey } from '../../api'
-
-type AiFormValue = {
-  anthropic_base_url: string
-  anthropic_api_key_configured: boolean
-  anthropic_api_key_input: string
-  anthropic_model: string
-  claude_max_turns: number
-}
+import { getConfig, updateConfig } from '../../api'
 
 type MountItem = {
   host_path: string
@@ -283,8 +175,6 @@ const message = useMessage()
 const { t } = useI18n()
 
 const loading = ref(false)
-const aiFormRef = ref<FormInst | null>(null)
-const aiSaving = ref(false)
 const workerSaving = ref(false)
 
 const mountModeOptions = [
@@ -292,52 +182,19 @@ const mountModeOptions = [
   { label: 'Read-write (rw)', value: 'rw' }
 ]
 
-const aiFormValue = ref<AiFormValue>({
-  anthropic_base_url: 'http://localhost:11434/v1',
-  anthropic_api_key_configured: false,
-  anthropic_api_key_input: '',
-  anthropic_model: 'claude-sonnet-4-20250514',
-  claude_max_turns: 20
-})
-
 const workerFormValue = ref<WorkerFormValue>({
   mounts: [],
   maven_cache_host_path: '',
   maven_settings_host_path: ''
 })
 
-const lastLoadedAi = ref({ ...aiFormValue.value })
-const lastLoadedWorker = ref<WorkerFormValue>({ mounts: [], maven_cache_host_path: '', maven_settings_host_path: '' })
-
-const isAiDirty = computed(() =>
-  JSON.stringify(aiFormValue.value) !== JSON.stringify(lastLoadedAi.value)
-)
+const lastLoadedWorker = ref<WorkerFormValue>(createEmptyWorkerFormValue())
 
 const isWorkerDirty = computed(() =>
   JSON.stringify(workerFormValue.value) !== JSON.stringify(lastLoadedWorker.value)
 )
 
-const isAiBusy = computed(() => loading.value || aiSaving.value || workerSaving.value)
-const isWorkerBusy = computed(() => loading.value || aiSaving.value || workerSaving.value)
-
-const aiRules: FormRules = {
-  anthropic_base_url: {
-    required: true,
-    message: t('config.enterAnthropicBaseUrl'),
-    trigger: 'blur'
-  },
-  anthropic_model: {
-    required: true,
-    message: t('config.enterAnthropicModel'),
-    trigger: 'blur'
-  },
-  claude_max_turns: {
-    required: true,
-    type: 'number',
-    message: t('config.enterClaudeMaxTurns'),
-    trigger: 'blur'
-  }
-}
+const isWorkerBusy = computed(() => loading.value || workerSaving.value)
 
 function parseMounts(jsonStr: string): MountItem[] {
   if (!jsonStr || !jsonStr.trim()) return []
@@ -364,19 +221,11 @@ async function fetchConfig() {
   loading.value = true
   try {
     const config = await getConfig()
-    aiFormValue.value = {
-      anthropic_base_url: config.runtime.anthropic_base_url,
-      anthropic_api_key_configured: config.runtime.anthropic_api_key_configured,
-      anthropic_api_key_input: '',
-      anthropic_model: config.runtime.anthropic_model,
-      claude_max_turns: config.runtime.claude_max_turns
-    }
     workerFormValue.value = {
       mounts: parseMounts(config.runtime.worker_volume_mounts),
       maven_cache_host_path: config.runtime.maven_cache_host_path || '',
       maven_settings_host_path: config.runtime.maven_settings_host_path || ''
     }
-    lastLoadedAi.value = { ...aiFormValue.value }
     lastLoadedWorker.value = JSON.parse(JSON.stringify(workerFormValue.value))
   } catch {
     message.error(t('config.loadError'))
@@ -385,70 +234,20 @@ async function fetchConfig() {
   }
 }
 
-async function handleSaveAi() {
-  if (!aiFormRef.value) return
-
-  try {
-    await aiFormRef.value.validate()
-  } catch {
-    return
-  }
-
-  aiSaving.value = true
-  try {
-    const update: any = {
-      runtime: {
-        anthropic_base_url: aiFormValue.value.anthropic_base_url.trim(),
-        anthropic_model: aiFormValue.value.anthropic_model.trim(),
-        claude_max_turns: aiFormValue.value.claude_max_turns
-      }
-    }
-
-    if (aiFormValue.value.anthropic_api_key_input.trim()) {
-      update.runtime.anthropic_api_key = aiFormValue.value.anthropic_api_key_input.trim()
-    }
-
-    await updateConfig(update)
-    lastLoadedAi.value = {
-      ...aiFormValue.value,
-      anthropic_api_key_input: '',
-      anthropic_api_key_configured: true
-    }
-    aiFormValue.value.anthropic_api_key_input = ''
-    aiFormValue.value.anthropic_api_key_configured = true
-    message.success(t('config.saved'))
-  } catch (error: any) {
-    message.error(error?.response?.data?.detail || t('config.saveError'))
-  } finally {
-    aiSaving.value = false
-  }
-}
-
-async function handleClearApiKey() {
-  workerSaving.value = true
-  try {
-    await resetConfigKey('anthropic_api_key')
-    aiFormValue.value.anthropic_api_key_configured = false
-    lastLoadedAi.value.anthropic_api_key_configured = false
-    message.success(t('config.cleared'))
-  } catch (error: any) {
-    message.error(error?.response?.data?.detail || t('config.clearError'))
-  } finally {
-    workerSaving.value = false
-  }
-}
-
-function resetAi() {
-  aiFormValue.value = { ...lastLoadedAi.value }
-  aiFormValue.value.anthropic_api_key_input = ''
-}
-
 function addMount() {
   workerFormValue.value.mounts.push({
     host_path: '',
     container_path: '',
     mode: 'ro'
   })
+}
+
+function createEmptyWorkerFormValue(): WorkerFormValue {
+  return {
+    mounts: [],
+    maven_cache_host_path: '',
+    maven_settings_host_path: ''
+  }
 }
 
 function removeMount(index: number) {
@@ -465,7 +264,13 @@ async function handleSaveWorker() {
         maven_settings_host_path: workerFormValue.value.maven_settings_host_path.trim()
       }
     })
-    lastLoadedWorker.value = JSON.parse(JSON.stringify(workerFormValue.value))
+    // Safely clone the form value to preserve current state
+    try {
+      lastLoadedWorker.value = JSON.parse(JSON.stringify(workerFormValue.value))
+    } catch {
+      // Cloning failed, but save succeeded - use empty object as fallback
+      lastLoadedWorker.value = createEmptyWorkerFormValue()
+    }
     message.success(t('config.saved'))
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('config.saveError'))
@@ -475,7 +280,17 @@ async function handleSaveWorker() {
 }
 
 function resetWorker() {
-  workerFormValue.value = JSON.parse(JSON.stringify(lastLoadedWorker.value))
+  // Safely clone last loaded worker config with error boundary
+  if (!lastLoadedWorker.value) {
+    workerFormValue.value = createEmptyWorkerFormValue()
+    return
+  }
+  try {
+    workerFormValue.value = JSON.parse(JSON.stringify(lastLoadedWorker.value))
+  } catch {
+    // If cloning fails, reset to empty mounts
+    workerFormValue.value = createEmptyWorkerFormValue()
+  }
 }
 
 onMounted(() => {
@@ -488,78 +303,6 @@ watch(() => props.reloadKey, () => {
 </script>
 
 <style scoped>
-:deep(.config-card-header) {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-:deep(.config-card-header__title) {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-:deep(.config-card-header__subtitle) {
-  font-size: 13px;
-  color: rgba(15, 23, 42, 0.58);
-  margin-top: 4px;
-}
-
-.config-mounts-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.config-mount-item {
-  background: rgba(15, 23, 42, 0.02);
-  border: 1px solid rgba(15, 23, 42, 0.09);
-  border-radius: 8px;
-  padding: 12px;
-  position: relative;
-}
-
-.config-mount-remove {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-}
-
-.config-empty {
-  color: rgba(15, 23, 42, 0.45);
-  font-size: 14px;
-  text-align: center;
-  padding: 24px;
-}
-
-.config-form__section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-:deep(.config-form__section-title) {
-  margin-bottom: 0;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: rgba(15, 23, 42, 0.62);
-  text-transform: uppercase;
-}
-
-:deep(.config-section-form) {
-  display: grid;
-  gap: 0;
-}
-
-:deep(.config-card-actions) {
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(15, 23, 42, 0.08);
-}
-
 .config-maven-section {
   margin-top: 20px;
 }

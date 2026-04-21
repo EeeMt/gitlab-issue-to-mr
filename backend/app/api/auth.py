@@ -10,7 +10,7 @@ from typing import Any, Optional
 import httpx
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +19,7 @@ from app.config import get_effective_settings
 from app.core.bootstrap import get_bootstrap_state, initialize_system
 from app.core.break_glass import get_break_glass_identity, verify_break_glass_password
 from app.core.local_auth import hash_password, verify_password
+from app.core.utcnow import utcnow
 from app.core.oidc import (
     OIDCConfigurationError,
     build_authorization_url,
@@ -44,9 +45,9 @@ from app.page_permissions import get_page_permissions
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-STATE_COOKIE_NAME = "gimr_oidc_state"
-NONCE_COOKIE_NAME = "gimr_oidc_nonce"
-NEXT_COOKIE_NAME = "gimr_oidc_next"
+STATE_COOKIE_NAME = "codify_oidc_state"
+NONCE_COOKIE_NAME = "codify_oidc_nonce"
+NEXT_COOKIE_NAME = "codify_oidc_next"
 
 
 class LocalLoginRequestBody(BaseModel):
@@ -118,6 +119,68 @@ def _sanitize_next_path(next_path: Optional[str]) -> str:
     return next_path
 
 
+def _build_redirect_html(target_url: str, username: str = "") -> str:
+    """Build a styled HTML page that auto-redirects to target_url."""
+    import html as html_mod
+
+    safe_url = html_mod.escape(target_url, quote=True)
+    safe_user = html_mod.escape(username) if username else ""
+    greeting = f"<p class='greeting'>Welcome back, <strong>{safe_user}</strong></p>" if safe_user else ""
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="1;url={safe_url}">
+<title>Codify — Redirecting</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{
+  min-height:100dvh;display:flex;align-items:center;justify-content:center;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:radial-gradient(circle at top left,rgba(32,128,240,.12),transparent 28%),
+             linear-gradient(180deg,rgba(248,250,252,.94),rgba(241,245,249,.98));
+  color:#1e293b;
+}}
+.card{{
+  text-align:center;padding:48px 40px;
+  border-radius:18px;
+  background:rgba(255,255,255,.88);backdrop-filter:blur(14px);
+  box-shadow:0 24px 60px rgba(15,23,42,.12);
+  border:1px solid rgba(148,163,184,.14);
+  max-width:380px;width:100%;
+}}
+.mark{{
+  width:52px;height:52px;display:inline-flex;align-items:center;justify-content:center;
+  border-radius:18px;background:linear-gradient(135deg,#2080f0,#36ad6a);
+  color:#fff;font-size:24px;margin-bottom:20px;
+  box-shadow:0 12px 24px rgba(32,128,240,.24);
+}}
+.greeting{{margin-bottom:16px;font-size:15px;color:#334155}}
+.spinner{{
+  width:28px;height:28px;border:3px solid rgba(32,128,240,.18);
+  border-top-color:#2080f0;border-radius:50%;
+  animation:spin .7s linear infinite;display:inline-block;margin-bottom:14px;
+}}
+@keyframes spin{{to{{transform:rotate(360deg)}}}}
+.hint{{font-size:14px;color:#64748b}}
+.link{{display:inline-block;margin-top:12px;font-size:13px;color:#2080f0;text-decoration:none}}
+.link:hover{{text-decoration:underline}}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="mark">&#x1F680;</div>
+  {greeting}
+  <div class="spinner"></div>
+  <p class="hint">Redirecting&hellip;</p>
+  <a class="link" href="{safe_url}">Click here if not redirected</a>
+</div>
+<script>setTimeout(function(){{window.location.replace("{safe_url}")}},200)</script>
+</body>
+</html>"""
+
+
 async def _record_auth_audit(
     db: AsyncSession,
     *,
@@ -169,7 +232,7 @@ async def _get_or_create_break_glass_user(db: AsyncSession, username: str) -> Us
     user.platform_role = "platform_admin"
     user.platform_role_source = ROLE_SOURCE_BREAK_GLASS
     user.state = "active"
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = utcnow()
     await db.flush()
     return user
 
@@ -196,7 +259,11 @@ async def _upsert_user(db: AsyncSession, claims: dict[str, Any], userinfo: dict[
             detail="OIDC sub is not a valid GitLab user ID",
         ) from exc
 
-    result = await db.execute(select(User).where(User.oidc_sub == oidc_sub))
+    result = await db.execute(
+        select(User).where(
+            (User.oidc_sub == oidc_sub) | (User.gitlab_user_id == gitlab_user_id)
+        )
+    )
     user = result.scalar_one_or_none()
     if user is None:
         user = User(
@@ -205,6 +272,12 @@ async def _upsert_user(db: AsyncSession, claims: dict[str, Any], userinfo: dict[
             username=username,
         )
         db.add(user)
+    else:
+        # Backfill identity fields for users created before oidc_sub was populated
+        if not user.oidc_sub:
+            user.oidc_sub = oidc_sub
+        if not user.gitlab_user_id:
+            user.gitlab_user_id = gitlab_user_id
 
     display_name = userinfo.get("name") or claims.get("name") or username
     email = userinfo.get("email") or claims.get("email")
@@ -213,7 +286,8 @@ async def _upsert_user(db: AsyncSession, claims: dict[str, Any], userinfo: dict[
     user.display_name = display_name
     user.email = email
     user.avatar_url = avatar_url
-    user.last_login_at = datetime.utcnow()
+    user.auth_provider = "gitlab_oidc"
+    user.last_login_at = utcnow()
 
     settings = get_effective_settings()
     groups = set()
@@ -622,13 +696,14 @@ async def callback(
         gitlab_access_token=tokens.get("access_token"),
         gitlab_refresh_token=tokens.get("refresh_token"),
         max_expires_at=(
-            datetime.utcnow() + timedelta(seconds=int(tokens["expires_in"]))
+            utcnow() + timedelta(seconds=int(tokens["expires_in"]))
             if tokens.get("expires_in")
             else None
         ),
     )
 
-    response = RedirectResponse(next_path, status_code=status.HTTP_302_FOUND)
+    redirect_html = _build_redirect_html(next_path, username=user.display_name or user.username)
+    response = HTMLResponse(content=redirect_html, status_code=200)
     cookie_kwargs = _build_cookie_kwargs()
     response.set_cookie(
         settings.session_cookie_name,
@@ -667,7 +742,7 @@ async def list_sessions(
         .where(UserSession.user_id == auth_context.user.id)
         .order_by(UserSession.created_at.desc())
     )
-    now = datetime.utcnow()
+    now = utcnow()
     sessions = result.scalars().all()
     return [
         SessionInfoResponse(

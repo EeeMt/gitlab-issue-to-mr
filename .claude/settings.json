@@ -1,5 +1,7 @@
 {
   "enabledPlugins": {
-    "frontend-design@claude-plugins-official": true
+    "frontend-design@claude-plugins-official": false,
+    "full-stack-orchestration@claude-code-workflows": true,
+    "unit-testing@claude-code-workflows": true
   }
 }

@@ -16,7 +16,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python3.11 -m venv /venv
 
 COPY backend/requirements.txt .
-RUN /venv/bin/pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    /venv/bin/pip install --no-cache-dir -r requirements.txt
 
 # Stage 2: Runtime image.
 # System tools and Java are stable layers; only the app source is frequently changing.
@@ -67,9 +68,6 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 # Copy pre-built venv from builder stage (cached until requirements.txt changes)
 COPY --from=python-builder /venv /venv
-
-# Copy custom CA certificate into the image
-COPY ca.crt /etc/ssl/certs/custom-ca.crt
 
 # Copy entrypoint script
 COPY deploy/entrypoint.backend.sh /entrypoint.sh

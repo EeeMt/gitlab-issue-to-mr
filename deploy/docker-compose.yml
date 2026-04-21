@@ -1,10 +1,10 @@
 services:
   nginx:
-    image: gimr-nginx:latest
+    image: codify-nginx:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile.frontend
-    container_name: gimr-nginx
+    container_name: codify-nginx
     ports:
       - "8880:80"
     depends_on:
@@ -12,37 +12,45 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - gimr-network
+      - codify-network
 
   backend:
-    image: gimr-backend:latest
+    image: codify-backend:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile.backend
-    container_name: gimr-backend
+    container_name: codify-backend
     ports:
       - "8000:8000"
     env_file:
       - .env.test
     environment:
-      - DATABASE_URL=postgresql+asyncpg://gimr:gimr_password@postgres:5432/gimr
+      - DATABASE_URL=postgresql+asyncpg://codify:codify_password@postgres:5432/codify
       - DOCKER_HOST=unix:///var/run/docker.sock
       - DOCKER_TLS_CA=
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
       - AUTO_MIGRATE=true
       - COOKIE_SECURE=false
-      # Custom CA certificate for HTTPS connections (GitLab, Mattermost, etc.)
-      # The CA certificate is baked into the image at /etc/ssl/certs/custom-ca.crt
+      # Custom CA certificate — mount from local file (not baked into image).
+      # Place deploy/ca.crt on the Docker host; see .env.test for CUSTOM_CA_BUNDLE.
+      # If absent, entrypoint falls back to git http.sslVerify=false.
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Mount CA cert (local-only, not in git — place /opt/ca.crt on Docker host)
+      - type: bind
+        source: /opt/ca.crt
+        target: /etc/ssl/certs/custom-ca.crt
+        read_only: true
+        bind:
+          create_host_path: false
     restart: unless-stopped
     networks:
-      - gimr-network
+      - codify-network
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 5s
@@ -51,22 +59,26 @@ services:
       start_period: 30s
 
   scheduler:
-    image: gimr-backend:latest
-    container_name: gimr-scheduler
+    image: codify-backend:latest
+    container_name: codify-scheduler
     command: ["python3", "-m", "app.scheduler_service"]
     env_file:
       - .env.test
     environment:
-      - DATABASE_URL=postgresql+asyncpg://gimr:gimr_password@postgres:5432/gimr
+      - DATABASE_URL=postgresql+asyncpg://codify:codify_password@postgres:5432/codify
       - DOCKER_HOST=unix:///var/run/docker.sock
       - DOCKER_TLS_CA=
       - DOCKER_TLS_CERT=
       - DOCKER_TLS_KEY=
       - AUTO_MIGRATE=true
-      # Custom CA certificate — mounted into scheduler and passed to workers
+      # Custom CA certificate is mounted from local file (not baked into image).
+      # CUSTOM_CA_BUNDLE tells the scheduler and worker entrypoints where to find it.
       - CUSTOM_CA_BUNDLE=/etc/ssl/certs/custom-ca.crt
-      # Generic volume mounts for worker containers (JSON array)
-      - "WORKER_VOLUME_MOUNTS=[{\"host_path\": \"/etc/ssl/certs/custom-ca.crt\", \"container_path\": \"/etc/ssl/certs/custom-ca.crt\", \"mode\": \"ro\"}]"
+      # WORKER_CA_CERT_HOST_PATH: pass CA cert into spawned worker containers.
+      # Set in .env.test to the absolute path of deploy/ca.crt on the Docker host.
+      # Alternative: use WORKER_VOLUME_MOUNTS for a full JSON mount list.
+      - WORKER_CA_CERT_HOST_PATH=${WORKER_CA_CERT_HOST_PATH:-}
+      - WORKER_VOLUME_MOUNTS=${WORKER_VOLUME_MOUNTS:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -74,55 +86,41 @@ services:
         condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # Mount CA certificate into scheduler (enable when CA cert file is provided at deployment)
-      # - ./ca.crt:/etc/ssl/certs/custom-ca.crt:ro
+      # Session storage — shared with worker containers via host path
+      - /var/codify/sessions:/var/codify/sessions
+      # Mount CA cert (local-only, not in git — place /opt/ca.crt on Docker host)
+      - type: bind
+        source: /opt/ca.crt
+        target: /etc/ssl/certs/custom-ca.crt
+        read_only: true
+        bind:
+          create_host_path: false
     restart: unless-stopped
     networks:
-      - gimr-network
+      - codify-network
 
   postgres:
     image: postgres:16-alpine
-    container_name: gimr-postgres
+    container_name: codify-postgres
     environment:
-      POSTGRES_USER: gimr
-      POSTGRES_PASSWORD: gimr_password
-      POSTGRES_DB: gimr
+      POSTGRES_USER: codify
+      POSTGRES_PASSWORD: codify_password
+      POSTGRES_DB: codify
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     networks:
-      - gimr-network
+      - codify-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gimr -d gimr"]
+      test: ["CMD-SHELL", "pg_isready -U codify -d codify"]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 10s
 
-  e2e:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.e2e
-    container_name: gimr-e2e
-    environment:
-      - E2E_BASE_URL=http://nginx:80
-      - E2E_BACKEND_URL=http://backend:8000
-      - E2E_GITLAB_URL=http://gitlab:8080
-      - E2E_POSTGRES_URL=postgresql://gimr:gimr_password@postgres:5432/gimr
-      - PYTEST_ARGS=-v
-    depends_on:
-      - nginx
-      - backend
-      - postgres
-    networks:
-      - gimr-network
-    # Only run when explicitly started (not auto-started)
-    profiles:
-      - e2e
-
 volumes:
   postgres_data:
 
 networks:
-  gimr-network:
+  codify-network:
     driver: bridge

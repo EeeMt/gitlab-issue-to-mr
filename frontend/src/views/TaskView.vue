@@ -1,111 +1,47 @@
 <template>
-  <div class="task-view">
+  <div class="task-view" data-testid="task-view-page">
     <n-space vertical :size="16">
-      <div class="task-view__hero">
-        <div>
-          <div class="task-view__headline">
-            <h2 class="task-view__title">{{ t('taskView.title', { id: taskId }) }}</h2>
-            <n-tag v-if="task" :type="statusColors[task.status]" round>{{ t(`status.${task.status}`) }}</n-tag>
-          </div>
-          <p class="task-view__subtitle">
-            {{ t('taskView.subtitle') }}
-          </p>
-        </div>
-        <n-button @click="refreshTask" :loading="loading">
-          {{ t('common.refresh') }}
-        </n-button>
-      </div>
+      <PageHeader
+        data-testid="task-view-header"
+        root-class="task-view__hero"
+        subtitle-class="task-view__subtitle"
+        actions-class="task-view__actions"
+        :subtitle="t('taskView.subtitle')"
+      >
+        <template #title>
+          <h2 class="task-view__title">{{ t('taskView.title', { id: taskId }) }}</h2>
+          <n-tag v-if="task" :type="statusColors[task.status]" round>{{ t(`status.${task.status}`) }}</n-tag>
+        </template>
+        <template #actions>
+          <n-button @click="refreshTask" :loading="loading">
+            {{ t('common.refresh') }}
+          </n-button>
+        </template>
+      </PageHeader>
 
       <n-spin :show="initialLoading">
         <div class="task-view__content">
-          <n-grid :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16" class="task-view__summary" v-if="task">
-            <n-gi v-for="item in summaryItems" :key="item.label">
-              <n-card size="small" class="task-summary-card" :bordered="false">
-                <div class="task-summary-card__label">{{ item.label }}</div>
-                <div class="task-summary-card__value">{{ item.value }}</div>
+          <!-- Top row: Metadata Panel + User Prompt side-by-side -->
+          <n-grid :cols="task?.user_prompt ? (isMobile ? 1 : 2) : 1" :x-gap="16" :y-gap="16">
+            <n-gi>
+              <TaskMetadataPanel v-if="task" :task="task" />
+            </n-gi>
+            <n-gi v-if="task?.user_prompt">
+              <n-card class="task-card task-card--equal" :bordered="false" data-testid="task-prompt-card">
+                <template #header>
+                  <div class="task-card__header">
+                    <div class="task-card__title">{{ t('taskView.userPrompt') }}</div>
+                  </div>
+                </template>
+                <div class="task-prompt-wrap">
+                  <div class="task-prompt-content">{{ task.user_prompt }}</div>
+                </div>
               </n-card>
             </n-gi>
           </n-grid>
 
-          <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
-            <n-gi>
-              <n-card class="task-card" :bordered="false">
-                <template #header>
-                  <div class="task-card__header">
-                    <div>
-                      <div class="task-card__title">{{ t('taskView.taskDetails') }}</div>
-                      <div class="task-card__subtitle">{{ t('taskView.taskDetailsSubtitle') }}</div>
-                    </div>
-                  </div>
-                </template>
-                <n-descriptions :column="1" label-placement="left" v-if="task">
-                  <n-descriptions-item :label="t('common.status')">
-                    <n-tag :type="statusColors[task.status]">{{ t(`status.${task.status}`) }}</n-tag>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('common.project')">
-                    <div>
-                      <a v-if="task.project_url" :href="task.project_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ projectDisplayName }}</a>
-                      <span v-else>{{ projectDisplayName }}</span>
-                    </div>
-                    <div style="font-size: 12px; color: #888">ID: {{ task.project_id }}</div>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('common.issue')">
-                    <a v-if="task.issue_iid && task.issue_url" :href="task.issue_url" target="_blank" rel="noopener noreferrer" class="app-link">!{{ task.issue_iid }}</a>
-                    <span v-else>{{ task.issue_iid ? `!${task.issue_iid}` : '-' }}</span>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('common.priority')">{{ formatPriority(task.priority) }}</n-descriptions-item>
-                  <n-descriptions-item :label="t('common.initiator')">
-                    <n-tag v-if="task.initiator_username" :type="task.is_manual ? 'info' : 'success'" size="small" round>
-                      <template #icon>
-                        <n-icon :component="task.is_manual ? PersonOutline : LogoGitlab" />
-                      </template>
-                      {{ task.initiator_username }}
-                    </n-tag>
-                    <span v-else>-</span>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('common.branch')">
-                    <a v-if="task.branch_name && task.branch_url" :href="task.branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.branch_name }}</a>
-                    <span v-else>{{ task.branch_name || '-' }}</span>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('common.targetBranch')">
-                    <a v-if="task.target_branch && task.target_branch_url" :href="task.target_branch_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.target_branch }}</a>
-                    <span v-else>{{ task.target_branch }}</span>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('taskView.containerId')">{{ task.container_id || '-' }}</n-descriptions-item>
-                  <n-descriptions-item :label="t('taskView.mrUrl')">
-                    <a v-if="task.merge_request_url" :href="task.merge_request_url" target="_blank" rel="noopener noreferrer" class="app-link">{{ task.merge_request_url }}</a>
-                    <span v-else>-</span>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('common.changes')">
-                    <span v-if="task.additions !== undefined || task.deletions !== undefined">
-                      <span v-if="task.additions || task.deletions">
-                        <span style="color: #18a053">+{{ task.additions || 0 }}</span>
-                        <span style="color: #db3b21; margin-left: 8px">-{{ task.deletions || 0 }}</span>
-                        <span style="color: #888; margin-left: 8px">({{ t('taskView.totalSuffix', { total: task.total_changes || 0 }) }})</span>
-                      </span>
-                      <span v-else>-</span>
-                    </span>
-                    <span v-else>-</span>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('taskView.tokenUsage')">
-                    <span v-if="task.input_tokens != null || task.output_tokens != null">
-                      <span style="color: #888">{{ t('taskView.inputTokens') }}:</span>
-                      <span style="margin-left: 4px">{{ (task.input_tokens ?? 0).toLocaleString() }}</span>
-                      <span style="color: #888; margin-left: 12px">{{ t('taskView.outputTokens') }}:</span>
-                      <span style="margin-left: 4px">{{ (task.output_tokens ?? 0).toLocaleString() }}</span>
-                    </span>
-                    <span v-else>-</span>
-                  </n-descriptions-item>
-                  <n-descriptions-item :label="t('common.created')">{{ formatDate(task.created_at) }}</n-descriptions-item>
-                  <n-descriptions-item :label="t('common.scheduled')">{{ task.scheduled_at ? formatDate(task.scheduled_at) : '-' }}</n-descriptions-item>
-                  <n-descriptions-item :label="t('common.started')">{{ task.started_at ? formatDate(task.started_at) : '-' }}</n-descriptions-item>
-                  <n-descriptions-item :label="t('common.completed')">{{ task.completed_at ? formatDate(task.completed_at) : '-' }}</n-descriptions-item>
-                </n-descriptions>
-              </n-card>
-            </n-gi>
-
-            <n-gi>
-              <n-card class="task-card" :bordered="false">
+          <!-- Actions card -->
+          <n-card class="task-card" :bordered="false" data-testid="task-actions-card">
                 <template #header>
                   <div class="task-card__header">
                     <div>
@@ -115,7 +51,7 @@
                   </div>
                 </template>
 
-                <div class="task-actions">
+                <div class="task-actions" data-testid="task-actions">
                   <div class="task-actions__intro" v-if="hasActions">
                     {{ t('taskView.actionsIntro') }}
                   </div>
@@ -147,8 +83,28 @@
                     </n-button>
                   </div>
 
+                  <!-- Existing active retry — link to it instead of showing retry buttons -->
                   <div
-                    v-if="task && ['failed', 'cancelled'].includes(task.status)"
+                    v-if="task && ['failed', 'cancelled'].includes(task.status) && activeRetryTask"
+                    class="task-actions__item task-actions__item--info"
+                  >
+                    <div class="task-actions__meta">
+                      <div class="task-actions__label">{{ t('taskView.retryExists') }}</div>
+                      <div class="task-actions__description">
+                        {{ t('taskView.retryExistsDescription') }}
+                      </div>
+                    </div>
+                    <n-button
+                      type="primary"
+                      text
+                      @click="router.push(`/tasks/${activeRetryTask.id}`)"
+                    >
+                      Task #{{ activeRetryTask.id }}
+                    </n-button>
+                  </div>
+
+                  <div
+                    v-if="task && ['failed', 'cancelled'].includes(task.status) && !activeRetryTask"
                     class="task-actions__item task-actions__item--warning"
                   >
                     <div class="task-actions__meta">
@@ -171,7 +127,7 @@
                   </div>
 
                   <div
-                    v-if="task && ['failed', 'cancelled'].includes(task.status)"
+                    v-if="task && ['failed', 'cancelled'].includes(task.status) && !activeRetryTask"
                     class="task-actions__item task-actions__item--info"
                   >
                     <div class="task-actions__meta">
@@ -223,6 +179,16 @@
                         :disabled="!canManageTask"
                       />
                       <n-button
+                        secondary
+                        round
+                        :loading="scheduledTasksLoading"
+                        @click="openScheduleDrawer"
+                        :disabled="!canManageTask"
+                      >
+                        <template #icon><n-icon :component="CalendarOutline" /></template>
+                        {{ t('taskView.viewScheduleHeatmap') }}
+                      </n-button>
+                      <n-button
                         type="info"
                         secondary
                         strong
@@ -259,89 +225,89 @@
                     </n-button>
                   </div>
 
+                  <!-- QUEUED info -->
+                  <div
+                    v-if="task && task.status === 'queued'"
+                    class="task-actions__item task-actions__item--info"
+                  >
+                    <div class="task-actions__meta">
+                      <div class="task-actions__label">{{ t('taskView.queuedStatus') }}</div>
+                      <div class="task-actions__description">
+                        {{ t('taskView.queuedStatusDescription') }}
+                      </div>
+                    </div>
+                    <n-tag type="info" round>{{ t('status.queued') }}</n-tag>
+                  </div>
+
                   <div v-if="!hasActions" class="task-actions__empty">
                     {{ t('taskView.noManualAction') }}
                   </div>
                 </div>
               </n-card>
 
-              <n-card class="task-card task-card--spaced" :bordered="false" v-if="task?.error_message">
-                <template #header>
-                  <div class="task-card__header">
-                    <div>
-                        <div class="task-card__title">{{ t('taskView.error') }}</div>
-                        <div class="task-card__subtitle">{{ t('taskView.errorSubtitle') }}</div>
-                      </div>
-                    </div>
-                </template>
-                <n-alert type="error">{{ task.error_message }}</n-alert>
-              </n-card>
-            </n-gi>
-          </n-grid>
+          <!-- Process Panel -->
+          <TaskProcessPanel
+            :task="task ?? null"
+            :task-logs="taskLogs"
+            :is-active="isActiveTaskStatus(task?.status)"
+            :terminal-html="terminalLogHtml"
+            :task-status="task?.status ?? ''"
+            @raw-tab-open="onRawTabOpen"
+            @raw-tab-close="onRawTabClose"
+          />
 
-          <n-card class="task-card" :bordered="false" v-if="task">
-            <template #header>
-              <div class="task-card__header">
-                <div>
-                    <div class="task-card__title">{{ t('taskView.userPrompt') }}</div>
-                    <div class="task-card__subtitle">{{ t('taskView.userPromptSubtitle') }}</div>
-                  </div>
-                </div>
-            </template>
-            <n-text>{{ task.user_prompt }}</n-text>
-          </n-card>
-
-          <n-card class="task-card" :bordered="false">
-            <template #header-extra>
-              <n-space>
-                <n-tag v-if="task?.status === 'running'" type="warning" size="small">{{ t('taskView.realTime') }}</n-tag>
-                <n-button size="small" @click="refreshLogs">{{ t('common.refresh') }}</n-button>
-              </n-space>
-            </template>
-            <template #header>
-              <div class="task-card__header">
-                <div>
-                  <div class="task-card__title">{{ t('taskView.logs') }}</div>
-                  <div class="task-card__subtitle">{{ t('taskView.logsSubtitle') }}</div>
-                </div>
-              </div>
-            </template>
-            <n-spin :show="logsLoading">
-              <!-- DB log entries are streamed every ~10s during execution,
-                   so the same <pre> works for both running and completed tasks. -->
-              <pre
-                class="log-content"
-                v-if="renderedLogs"
-                v-html="renderedLogs"
-              ></pre>
-              <pre class="log-content" v-else>{{ isActiveTaskStatus(task?.status) ? t('taskView.waitingForLogs') : t('taskView.noLogsAvailable') }}</pre>
-            </n-spin>
-          </n-card>
+          <!-- Result Panel (only for terminal tasks) -->
+          <TaskResultPanel v-if="task && isTerminal" :task="task" />
         </div>
       </n-spin>
     </n-space>
   </div>
+
+  <!-- Schedule Heatmap Drawer -->
+  <n-drawer v-model:show="showScheduleDrawer" :width="isMobile ? '100%' : 580" placement="right">
+    <n-drawer-content :title="t('taskView.schedulePreviewTitle')" closable>
+      <n-spin v-if="scheduledTasksLoading" />
+      <template v-else>
+        <p style="margin-bottom: 12px; color: rgba(15, 23, 42, 0.58); font-size: 13px;">
+          {{ t('taskView.schedulePreviewHint') }}
+        </p>
+        <HeatmapChart
+          :tasks="scheduledTasksForPreview"
+          :selected-ms="rescheduleDatetime"
+          :max-per-slot="slotMaxTasks"
+          :enforce-capacity="slotEnforce"
+          @cell-click="handleScheduleHeatmapCellClick"
+        />
+      </template>
+    </n-drawer-content>
+  </n-drawer>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
-import { useRoute } from 'vue-router'
-import { NButton, NSpace, NCard, NDescriptions, NDescriptionsItem, NTag, NGrid, NGi, NSpin, NAlert, NText, NDatePicker, useMessage, NIcon } from 'naive-ui'
-import { PersonOutline, LogoGitlab } from '@vicons/ionicons5'
-import { useWindowSize } from '@vueuse/core'
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin, NDatePicker, NDrawer, NDrawerContent, NIcon, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, type Task } from '../api'
+import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, streamTaskLogs, getScheduledTasks, getConfig, getIssue, type Task, type TaskLog } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
-import { formatDateTimeUtc8, parseUtcDate } from '../utils/datetime'
+import PageHeader from '../components/PageHeader.vue'
+import TaskMetadataPanel from '../components/TaskMetadataPanel.vue'
+import TaskProcessPanel from '../components/TaskProcessPanel.vue'
+import TaskResultPanel from '../components/TaskResultPanel.vue'
+import { useBreakpoints } from '../composables/useBreakpoints'
+import { parseUtcDate } from '../utils/datetime'
+import { extractSlotErrorMessage } from '../utils/slotError'
+import { CalendarOutline } from '@vicons/ionicons5'
+import HeatmapChart from '../components/HeatmapChart.vue'
 import AnsiToHtml from 'ansi-to-html'
 
 const ansiConverter = new AnsiToHtml({ escapeXML: true })
 
 const route = useRoute()
+const router = useRouter()
 const message = useMessage()
 const { t } = useI18n()
-const { width } = useWindowSize()
-const isMobile = computed(() => width.value < 768)
+const { isMobile } = useBreakpoints()
 
 const taskId = computed(() => Number(route.params.id))
 
@@ -357,16 +323,30 @@ const taskRequestInFlight = ref(false)
 const containerRequestInFlight = ref(false)
 const rescheduleDatetime = ref<number | null>(null)
 const retryScheduleDatetime = ref<number | null>(null)
+const showScheduleDrawer = ref(false)
+const scheduledTasksForPreview = ref<Task[]>([])
+const scheduledTasksLoading = ref(false)
+const slotMaxTasks = ref(0)
+const slotEnforce = ref(false)
+const taskLogs = ref<TaskLog[]>([])
+const activeRetryTask = ref<Task | null>(null)
 let pollTimer: number | null = null
 let logEventSource: EventSource | null = null
 let logStreamContainerId: string | null = null
+let structuredLogSse: EventSource | null = null
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
-const renderedLogs = computed(() => {
-  const text = logs.value
+const terminalLogHtml = computed(() => {
+  // For completed/failed tasks: use structured logs formatted as text
+  // For active tasks: use live container logs streamed via SSE
+  const text = containerLogs.value || logs.value
   if (!text) return ''
   return ansiConverter.toHtml(text)
 })
+
+const isTerminal = computed(() =>
+  task.value?.status === 'completed' || task.value?.status === 'failed'
+)
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
   pending: 'default',
@@ -377,35 +357,16 @@ const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 
   cancelled: 'default'
 }
 
-const projectDisplayName = computed(() => {
-  if (!task.value) return '-'
-  return task.value.project_path_with_namespace || task.value.project_name || t('dashboard.projectFallback', { id: task.value.project_id })
-})
-
-const summaryItems = computed(() => {
-  if (!task.value) {
-    return []
-  }
-
-  const changeValue =
-    task.value.additions !== undefined || task.value.deletions !== undefined
-      ? `${task.value.additions || 0} / ${task.value.deletions || 0}`
-      : '-'
-
-  return [
-    { label: t('common.priority'), value: formatPriority(task.value.priority) },
-    { label: t('common.targetBranch'), value: task.value.target_branch || '-' },
-    { label: t('common.mergeRequest'), value: task.value.merge_request_url ? t('taskView.mergeRequestCreated') : t('taskView.mergeRequestPending') },
-    { label: `${t('common.changes')} (+/-)`, value: changeValue }
-  ]
-})
-
 const hasActions = computed(() => {
   if (!task.value) return false
   return ['pending', 'queued', 'running', 'failed', 'cancelled'].includes(task.value.status)
 })
 
-const canReschedule = computed(() => task.value?.status === 'pending' && !!task.value?.scheduled_at)
+const canReschedule = computed(() => {
+  const s = task.value?.status
+  if (s === 'queued') return true
+  return s === 'pending' && !!task.value?.scheduled_at
+})
 const canManageTask = computed(() => {
   if (!task.value) return false
   if (!authState.oidcEnabled) return true
@@ -420,24 +381,6 @@ const canManageTask = computed(() => {
     )
   )
 })
-
-function formatDate(dateStr: string): string {
-  return formatDateTimeUtc8(dateStr)
-}
-
-function formatPriority(priority?: string | number | null): string {
-  if (priority === null || priority === undefined || priority === '') {
-    return '-'
-  }
-
-  const normalized = String(priority).toLowerCase().trim()
-
-  if (normalized === '0' || normalized === 'p0') return 'P0'
-  if (normalized === '1' || normalized === 'p1') return 'P1'
-  if (normalized === '2' || normalized === 'p2') return 'P2'
-
-  return String(priority)
-}
 
 function syncRescheduleDatetime() {
   rescheduleDatetime.value = task.value?.scheduled_at ? parseUtcDate(task.value.scheduled_at).getTime() : null
@@ -457,6 +400,32 @@ function isActiveTaskStatus(status?: string | null): boolean {
   return status === 'running' || status === 'pending' || status === 'queued'
 }
 
+async function checkActiveRetry() {
+  if (!task.value || !['failed', 'cancelled'].includes(task.value.status)) {
+    activeRetryTask.value = null
+    return
+  }
+  try {
+    const issueId = task.value.issue?.id
+    if (issueId) {
+      const issueData = await getIssue(issueId)
+      if (issueData.tasks) {
+        // Find the latest retry task for this task (any status)
+        const retryMatch = issueData.tasks
+          .filter(t => t.retry_source_task_id === task.value!.id)
+          .sort((a, b) => b.id - a.id)[0]
+        activeRetryTask.value = retryMatch ?? null
+      } else {
+        activeRetryTask.value = null
+      }
+    } else {
+      activeRetryTask.value = null
+    }
+  } catch {
+    activeRetryTask.value = null
+  }
+}
+
 function trimLogBuffer(content: string): string {
   const maxLogSize = 200_000
   return content.length > maxLogSize ? content.slice(-maxLogSize) : content
@@ -468,6 +437,45 @@ function closeLogStream() {
     logEventSource = null
   }
   logStreamContainerId = null
+}
+
+function closeStructuredLogStream() {
+  if (structuredLogSse) {
+    structuredLogSse.close()
+    structuredLogSse = null
+  }
+}
+
+function connectStructuredLogStream() {
+  if (typeof EventSource === 'undefined') return
+  if (!isActiveTaskStatus(task.value?.status)) return
+  if (structuredLogSse) return // already connected
+
+  const sinceId = taskLogs.value.length > 0
+    ? Math.max(...taskLogs.value.map(l => l.id ?? 0))
+    : 0
+
+  structuredLogSse = streamTaskLogs(
+    taskId.value,
+    sinceId,
+    (log) => {
+      // Avoid duplicates (safety check)
+      if (!taskLogs.value.some(l => l.id === log.id)) {
+        taskLogs.value = [...taskLogs.value, log]
+      }
+    },
+    () => {
+      // SSE signaled task is done
+      closeStructuredLogStream()
+      fetchTask()
+      fetchLogs()
+    },
+  )
+
+  structuredLogSse.onerror = () => {
+    // Don't auto-reconnect — the poll timer will call connectStructuredLogStream() again in 5s
+    closeStructuredLogStream()
+  }
 }
 
 function connectLogStream() {
@@ -483,8 +491,12 @@ function connectLogStream() {
     return
   }
 
+  const previousContainerId = logStreamContainerId
   closeLogStream()
-  containerLogs.value = ''
+  // Only clear logs when connecting to a different container (not a reconnect to the same)
+  if (previousContainerId !== containerId) {
+    containerLogs.value = ''
+  }
   containerLogsLoading.value = true
   logStreamContainerId = containerId
   let receivedFirstMessage = false
@@ -499,8 +511,6 @@ function connectLogStream() {
 
   logEventSource.onerror = () => {
     containerLogsLoading.value = false
-    // If we never received data, this is likely an auth failure (403) — close
-    // the stream to avoid infinite reconnect loops for non-admin users.
     const likelyAuthFailure = !receivedFirstMessage
     if (likelyAuthFailure || !isActiveTaskStatus(task.value?.status) || task.value?.container_id !== logStreamContainerId) {
       closeLogStream()
@@ -516,16 +526,22 @@ async function fetchTask() {
     const previousStatus = task.value?.status
     const previousScheduledAt = task.value?.scheduled_at
     task.value = await getTask(taskId.value)
-    // Only sync the date picker when loading for the first time or when scheduled_at
-    // changed externally (not during user editing).
     if (!hasLoadedOnce.value || task.value?.scheduled_at !== previousScheduledAt) {
       syncRescheduleDatetime()
     }
-    connectLogStream()
 
     if (isActiveTaskStatus(previousStatus) && !isActiveTaskStatus(task.value.status)) {
       await fetchLogs()
     }
+
+    // Auto-retry detection: task restarted (non-active → active) while we were watching.
+    // Clear stale in-memory logs so the event stream starts fresh.
+    if (!isActiveTaskStatus(previousStatus) && isActiveTaskStatus(task.value.status)) {
+      resetLogsState()
+      connectStructuredLogStream()
+    }
+
+    await checkActiveRetry()
   } catch (error) {
     message.error(t('taskView.failedToFetchTask'))
   } finally {
@@ -539,6 +555,7 @@ async function fetchLogs() {
   logsLoading.value = true
   try {
     const logEntries = await getTaskLogs(taskId.value)
+    taskLogs.value = logEntries
     logs.value = logEntries.map(l => `[${l.created_at}] [${l.log_level}] ${l.message}`).join('\n')
   } catch (error) {
     logs.value = t('taskView.failedToFetchLogs')
@@ -572,19 +589,32 @@ async function fetchContainerLogs() {
 
 async function refreshTask() {
   await fetchTask()
-  if (isActiveTaskStatus(task.value?.status)) {
-    await fetchContainerLogs()
-    return
+  if (!isActiveTaskStatus(task.value?.status)) {
+    await fetchLogs()
   }
-  await fetchLogs()
 }
 
-async function refreshLogs() {
+async function onRawTabOpen() {
   if (isActiveTaskStatus(task.value?.status)) {
+    // Fetch stored DB chunks first to show historical content, then connect live SSE
+    if (!containerLogs.value && task.value?.container_id) {
+      try {
+        const result = await getTaskContainerLogs(taskId.value, 'db')
+        if (result.logs) containerLogs.value = result.logs
+      } catch {
+        // Ignore — live SSE will fill content
+      }
+    }
+    connectLogStream()
+  } else {
+    // Fetch once for completed tasks (DB fallback handles gone containers)
     await fetchContainerLogs()
-    return
   }
-  await fetchLogs()
+}
+
+function onRawTabClose() {
+  // Close SSE when leaving raw tab to free the backend thread
+  closeLogStream()
 }
 
 async function handleCancel() {
@@ -600,14 +630,28 @@ async function handleCancel() {
   }
 }
 
+function resetLogsState() {
+  taskLogs.value = []
+  logs.value = ''
+  containerLogs.value = ''
+  closeStructuredLogStream()
+  closeLogStream()
+}
+
 async function handleRetry() {
   actionLoading.value = true
   try {
-    await retryTask(taskId.value)
+    const newTask = await retryTask(taskId.value)
+    resetLogsState()
     message.success(t('taskView.taskRetryScheduled'))
-    refreshTask()
-  } catch (error) {
-    message.error(t('taskView.failedToRetryTask'))
+    router.push(`/tasks/${newTask.id}`)
+  } catch (error: any) {
+    if (error?.response?.status === 409) {
+      message.warning(t('taskView.retryAlreadyExists'))
+      await checkActiveRetry()
+    } else {
+      message.error(t('taskView.failedToRetryTask'))
+    }
   } finally {
     actionLoading.value = false
   }
@@ -624,12 +668,18 @@ async function handleRetryWithSchedule() {
   }
   actionLoading.value = true
   try {
-    await retryTask(taskId.value, new Date(retryScheduleDatetime.value).toISOString())
+    const newTask = await retryTask(taskId.value, new Date(retryScheduleDatetime.value).toISOString())
     retryScheduleDatetime.value = null
+    resetLogsState()
     message.success(t('taskView.taskRetryRescheduled'))
-    refreshTask()
-  } catch (error) {
-    message.error(t('taskView.failedToRetryTask'))
+    router.push(`/tasks/${newTask.id}`)
+  } catch (error: any) {
+    if (error?.response?.status === 409) {
+      message.warning(t('taskView.retryAlreadyExists'))
+      await checkActiveRetry()
+    } else {
+      message.error(t('taskView.failedToRetryTask'))
+    }
   } finally {
     actionLoading.value = false
   }
@@ -666,38 +716,71 @@ async function handleReschedule() {
     })
     syncRescheduleDatetime()
     message.success(t('taskView.taskRescheduled'))
-  } catch (error) {
-    message.error(t('taskView.failedToRescheduleTask'))
+  } catch (error: any) {
+    message.error(extractSlotErrorMessage(error, t, 'taskView.failedToRescheduleTask'))
   } finally {
     actionLoading.value = false
   }
 }
 
+async function openScheduleDrawer() {
+  showScheduleDrawer.value = true
+  scheduledTasksLoading.value = true
+  try {
+    scheduledTasksForPreview.value = await getScheduledTasks()
+  } catch {
+    scheduledTasksForPreview.value = []
+  } finally {
+    scheduledTasksLoading.value = false
+  }
+  try {
+    const config = await getConfig()
+    slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
+    slotEnforce.value = config.runtime?.slot_max_tasks_enforce ?? false
+  } catch { /* ignore */ }
+}
+
+function handleScheduleHeatmapCellClick(startMs: number) {
+  rescheduleDatetime.value = startMs
+  showScheduleDrawer.value = false
+}
+
 onMounted(async () => {
   await initializeAuth()
   await fetchTask()
-  if (isActiveTaskStatus(task.value?.status)) {
-    await fetchContainerLogs()
-  }
   await fetchLogs()
-  // Auto-refresh for active tasks; skip when tab is not visible.
+  if (isActiveTaskStatus(task.value?.status)) {
+    connectStructuredLogStream()
+  }
   pollTimer = window.setInterval(() => {
     if (document.visibilityState !== 'visible') return
- 
+
     if (isActiveTaskStatus(task.value?.status)) {
       fetchTask()
-      if (!logEventSource) {
-        fetchContainerLogs()
-      }
-      fetchLogs()  // Poll DB logs so non-admin users see streaming chunks
+      if (!structuredLogSse) connectStructuredLogStream() // reconnect if disconnected
     } else {
       closeLogStream()
+      closeStructuredLogStream()
     }
   }, 5000)
 })
 
+watch(
+  () => route.params.id,
+  (newId, oldId) => {
+    if (newId && newId !== oldId) {
+      resetLogsState()
+      task.value = null
+      activeRetryTask.value = null
+      hasLoadedOnce.value = false
+      fetchTask()
+    }
+  }
+)
+
 onBeforeUnmount(() => {
   closeLogStream()
+  closeStructuredLogStream()
   if (pollTimer !== null) {
     clearInterval(pollTimer)
     pollTimer = null
@@ -718,8 +801,17 @@ onBeforeUnmount(() => {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
 .task-view {
-  max-width: 1240px;
+  max-width: var(--app-page-max-width);
+}
+
+.task-view__actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .task-view__content {
@@ -727,53 +819,46 @@ onBeforeUnmount(() => {
   gap: 20px;
 }
 
-.task-view__hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: 16px;
-}
-
-.task-view__headline {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
 .task-view__title {
   margin: 0;
-  font-size: 28px;
+  font-size: var(--app-page-title-size);
   line-height: 1.2;
 }
 
-.task-view__subtitle {
-  margin: 8px 0 0;
-  color: rgba(15, 23, 42, 0.68);
-  max-width: 760px;
-}
-
-.task-summary-card {
-  border-radius: 12px;
-  background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
-}
-
-.task-summary-card__label {
-  margin-bottom: 8px;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.6);
-}
-
-.task-summary-card__value {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--n-text-color-1);
-  word-break: break-word;
-}
-
 .task-card {
-  border-radius: 18px;
+  border-radius: var(--app-card-radius);
+}
+
+.task-card--equal {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.task-card--equal :deep(.n-card__content) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.task-prompt-wrap {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.task-prompt-content {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  color: rgba(15, 23, 42, 0.82);
+  background: rgba(15, 23, 42, 0.035);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-y: auto;
+  max-height: 320px;
+  flex: 1;
 }
 
 .task-card--spaced {
@@ -883,14 +968,14 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 768px) {
-  .task-view__hero,
+  .task-view__actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .task-card__header {
     flex-direction: column;
     align-items: flex-start;
-  }
-
-  .task-view__title {
-    font-size: 24px;
   }
 
   .task-actions__item {

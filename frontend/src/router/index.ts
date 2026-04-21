@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { authState, canAccessSharedPage, initializeAuth } from '../auth'
 import type { PagePermissions } from '../api'
 import Dashboard from '../views/Dashboard.vue'
+import TaskList from '../views/TaskList.vue'
 import TaskView from '../views/TaskView.vue'
 import Monitor from '../views/Monitor.vue'
 import ScheduleOverview from '../views/ScheduleOverview.vue'
@@ -9,7 +10,6 @@ import Analytics from '../views/Analytics.vue'
 import Config from '../views/Config.vue'
 import AccessManagement from '../views/AccessManagement.vue'
 import Sessions from '../views/Sessions.vue'
-import CreateTask from '../views/CreateTask.vue'
 import Login from '../views/Login.vue'
 import Bootstrap from '../views/Bootstrap.vue'
 
@@ -40,8 +40,30 @@ const router = createRouter({
     },
     {
       path: '/create-task',
-      name: 'CreateTask',
-      component: CreateTask,
+      redirect: '/issues/create',
+    },
+    {
+      path: '/tasks',
+      name: 'TaskList',
+      component: TaskList,
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/issues',
+      name: 'Issues',
+      component: () => import('../views/IssueList.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/issues/create',
+      name: 'CreateIssue',
+      component: () => import('../views/CreateIssue.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/issues/:id',
+      name: 'IssueView',
+      component: () => import('../views/IssueView.vue'),
       meta: { requiresAuth: true }
     },
     {

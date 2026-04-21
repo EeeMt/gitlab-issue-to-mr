@@ -1,5 +1,12 @@
 import axios from 'axios'
 
+// Augment AxiosError so callers can access error.apiError with type safety
+declare module 'axios' {
+  interface AxiosError {
+    apiError?: ApiError
+  }
+}
+
 const api = axios.create({
   baseURL: '/api',
   timeout: 30000,
@@ -24,35 +31,99 @@ api.interceptors.response.use(
       const reason = detail ? `&reason=${encodeURIComponent(detail)}` : ''
       window.location.assign(`/login?next=${encodeURIComponent(next)}${reason}`)
     }
+
+    // Normalize error for callers
+    const apiError: ApiError = {
+      status: error?.response?.status ?? 0,
+      message: error?.message ?? 'Unknown error',
+      traceId: error?.response?.data?.trace_id,
+      detail: typeof error?.response?.data?.detail === 'string' ? error.response.data.detail : undefined,
+    }
+    // Attach structured error info to the rejected error
+    if (error) {
+      error.apiError = apiError
+    }
+
     return Promise.reject(error)
   }
 )
 
+// Status union types
+export type TaskStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type IssueStatus = 'open' | 'in_progress' | 'in_review' | 'closed'
+export type ContainerStatus = 'created' | 'running' | 'paused' | 'restarting' | 'removing' | 'exited' | 'dead'
+
+// API error type
+export interface ApiError {
+  status: number
+  message: string
+  traceId?: string
+  detail?: string
+}
+
+// Issue types
+export interface Issue {
+  id: number
+  title: string
+  description: string | null
+  project_id: number
+  status: IssueStatus
+  closed_via: string | null
+  branch_name: string | null
+  base_branch: string | null
+  target_branch: string | null
+  merge_request_iid: number | null
+  merge_request_url: string | null
+  claude_session_id: string | null
+  initiator_user_id: number | null
+  initiator_username: string | null
+  created_at: string
+  updated_at: string
+  task_count?: number
+  tasks?: Task[]
+  totals?: {
+    additions: number
+    deletions: number
+    total_changes: number
+    input_tokens: number
+    output_tokens: number
+  }
+}
+
+export interface CreateIssueRequest {
+  title: string
+  description?: string
+  project_id: number
+  base_branch?: string
+  target_branch?: string
+}
+
+export interface IssueListResponse {
+  items: Issue[]
+  total: number
+  page: number
+  page_size: number
+}
+
 // Task types
 export interface Task {
   id: number
+  issue_id: number | null
   project_id: number
   project_name?: string | null
   project_path_with_namespace?: string | null
   project_url?: string | null
-  issue_iid: number | null
-  issue_url?: string | null
-  issue_id: number | null
-  note_id: number | null
   user_prompt: string
   initiator_user_id?: number | null
   initiator_gitlab_user_id?: number | null
   initiator_username?: string | null
-  branch_name: string | null
-  branch_url?: string | null
-  merge_request_iid: number | null
-  merge_request_url: string | null
-  status: string
+  status: TaskStatus
   priority: number
+  is_retry: boolean
+  retry_source_task_id: number | null
   scheduled_at: string | null
   container_id: string | null
-  target_branch: string
-  target_branch_url?: string | null
+  container_name: string | null
   commit_sha: string | null
   error_message: string | null
   additions: number
@@ -60,11 +131,23 @@ export interface Task {
   total_changes: number
   input_tokens: number | null
   output_tokens: number | null
-  is_manual: boolean
+  model_name?: string | null
+  merge_request_title?: string | null
+  provider_id: number | null
+  provider_name?: string | null
   created_at: string
   updated_at: string
   started_at: string | null
   completed_at: string | null
+  issue?: {
+    id: number
+    title: string
+    branch_name: string | null
+    base_branch: string | null
+    target_branch: string | null
+    merge_request_iid: number | null
+    merge_request_url: string | null
+  }
 }
 
 // Project and Branch types for manual task creation
@@ -79,16 +162,48 @@ export interface Branch {
   name: string
 }
 
+// AI Provider types
+export interface AIProvider {
+  id: number
+  name: string
+  base_url: string
+  api_key_configured: boolean
+  model: string
+  max_turns: number
+  system_prompt: string | null
+  is_default: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateProviderRequest {
+  name: string
+  base_url: string
+  api_key?: string
+  model: string
+  max_turns?: number
+  system_prompt?: string
+}
+
+export interface UpdateProviderRequest {
+  name?: string
+  base_url?: string
+  api_key?: string
+  clear_api_key?: boolean
+  model?: string
+  max_turns?: number
+  system_prompt?: string | null
+  clear_system_prompt?: boolean
+}
+
 // Request types
 export interface CreateTaskRequest {
-  project_id?: number | null
-  branch_name: string
-  base_branch?: string
-  target_branch: string
-  user_prompt: string
+  issue_id: number
+  user_prompt?: string
   priority?: number
   delay_seconds?: number
   scheduled_datetime?: string
+  provider_id?: number | null
 }
 
 export interface RescheduleTaskRequest {
@@ -99,8 +214,19 @@ export interface TaskLog {
   id: number
   task_id: number
   log_level: string
+  log_type?: string | null
+  metadata?: string | null
   message: string
   created_at: string
+}
+
+export interface ToolCall {
+  name: string
+  input: Record<string, unknown>
+  output: string | null
+  error: boolean
+  /** ISO timestamp present on real-time individual log entries (log_type='tool_call'). */
+  timestamp?: string
 }
 
 export interface TaskStats {
@@ -112,10 +238,10 @@ export interface TaskStats {
 export interface Container {
   id: string
   name: string
-  status: string
+  status: ContainerStatus
   task_id: number | null
   project_id: number | null
-  issue_iid: number | null
+  issue_id: number | null
   created_at: string
 }
 
@@ -127,6 +253,13 @@ export interface Stats {
   completed: number
   failed: number
   cancelled: number
+  completed_24h: number
+  failed_cancelled_24h: number
+  running_long_30min: number
+  issues?: {
+    total: number
+    by_status: Record<string, number>
+  }
 }
 
 export interface AnalyticsSummary {
@@ -228,15 +361,66 @@ export interface AnalyticsErrorRow {
   sample_message: string | null
 }
 
+export interface AnalyticsStatusRow {
+  status: IssueStatus | TaskStatus
+  count: number
+  share: number
+}
+
+export interface AnalyticsProviderRow {
+  provider_id: number | null
+  provider_name: string | null
+  provider_model: string | null
+  task_count: number
+  completed_task_count: number
+  failed_task_count: number
+  cancelled_task_count: number
+  finished_task_count: number
+  success_rate: number | null
+  total_input_tokens: number
+  total_output_tokens: number
+  total_tokens: number
+  avg_tokens_per_task: number | null
+  avg_tokens_per_second: number | null
+  avg_tokens_per_changed_line: number | null
+  avg_execution_seconds: number | null
+  avg_execution_seconds_per_changed_line: number | null
+}
+
+export interface AnalyticsProviderSummary {
+  active_provider_count: number
+  provider_covered_task_count: number
+  provider_covered_total_tokens: number
+  provider_success_rate: number | null
+}
+
+export interface AnalyticsProviderChartPoint {
+  provider_id: number | null
+  label: string
+  value: number
+}
+
+export interface AnalyticsProviderChartSeries {
+  success_rate: AnalyticsProviderChartPoint[]
+  avg_tokens_per_second: AnalyticsProviderChartPoint[]
+  avg_tokens_per_changed_line: AnalyticsProviderChartPoint[]
+  avg_execution_seconds_per_changed_line: AnalyticsProviderChartPoint[]
+}
+
 export interface AnalyticsResponse {
   window_days: number
   generated_at: string
   summary: AnalyticsSummary
+  provider_summary: AnalyticsProviderSummary
   available_initiators: AnalyticsInitiatorOption[]
   projects: AnalyticsProjectRow[]
   initiators: AnalyticsInitiatorRow[]
+  providers: AnalyticsProviderRow[]
+  provider_chart_series: AnalyticsProviderChartSeries
   trends: AnalyticsTrendPoint[]
   priority_waits: AnalyticsPriorityWaitRow[]
+  issue_status_breakdown: AnalyticsStatusRow[]
+  task_status_breakdown: AnalyticsStatusRow[]
   error_breakdown: AnalyticsErrorRow[]
 }
 
@@ -267,6 +451,8 @@ export interface RuntimeConfig {
   worker_volume_mounts: string
   maven_cache_host_path: string
   maven_settings_host_path: string
+  slot_max_tasks: number
+  slot_max_tasks_enforce: boolean
 }
 
 export interface AuthConfig {
@@ -328,14 +514,20 @@ export interface MattermostNotificationProfile {
   name: string
   enabled: boolean
   target_type: MattermostNotificationTargetType
-  team_name: string | null
-  channel_name: string | null
+  channel_id: string | null
   mention_in_channel: boolean
-  send_for_manual_tasks: boolean
   event_types: MattermostNotificationEventType[]
   field_keys: MattermostNotificationFieldKey[]
   created_at: string
   updated_at: string
+}
+
+export interface MattermostChannelTarget {
+  channel_id: string
+  team_name: string
+  team_display_name: string
+  channel_name: string
+  channel_display_name: string
 }
 
 export interface MattermostNotificationConfig {
@@ -358,12 +550,15 @@ export interface MattermostNotificationProfilePayload {
   name: string
   enabled: boolean
   target_type: MattermostNotificationTargetType
-  team_name?: string | null
-  channel_name?: string | null
+  channel_id?: string | null
   mention_in_channel: boolean
-  send_for_manual_tasks: boolean
   event_types: MattermostNotificationEventType[]
   field_keys: MattermostNotificationFieldKey[]
+}
+
+export interface MattermostResolveChannelTargetPayload {
+  team_name: string
+  channel_name: string
 }
 
 export interface RuntimeConfigUpdate
@@ -440,9 +635,31 @@ export interface GitLabProjectWebhookStatusResult {
   hook_url: string | null
   note_events: boolean | null
   enable_ssl_verification: boolean | null
+  merge_requests_events: boolean | null
   managed_secret_configured: boolean
   global_secret_fallback_configured: boolean
   secret_mode: 'project' | 'global_fallback' | 'none' | string
+}
+
+export interface WebhookEvent {
+  id: number
+  event_type: string
+  event_action: string | null
+  project_id: number
+  merge_request_iid: number | null
+  issue_id: number | null
+  source_ip: string | null
+  result: string
+  result_detail: string | null
+  payload_summary: Record<string, unknown> | null
+  created_at: string
+}
+
+export interface WebhookEventsResponse {
+  items: WebhookEvent[]
+  total: number
+  page: number
+  page_size: number
 }
 
 export interface OidcDiagnosticsCheck {
@@ -562,8 +779,73 @@ export async function getTasks(params?: {
   return response.data
 }
 
-export async function getScheduledTasks(params?: { project_id?: number }): Promise<Task[]> {
+export interface PaginatedResponse<T> {
+  items: T[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export async function getTasksPaginated(params: {
+  page: number
+  page_size?: number
+  status?: string
+  project_id?: number
+  initiator_username?: string
+  priority?: string
+  search?: string
+  created_after?: string
+  created_before?: string
+  sort_by?: string
+  sort_order?: string
+}): Promise<PaginatedResponse<Task>> {
+  const response = await api.get('/tasks', { params })
+  return response.data
+}
+
+export async function getScheduledTasks(params?: { project_id?: number; hour_start?: string }): Promise<Task[]> {
   const response = await api.get('/tasks/scheduled', { params })
+  return response.data
+}
+
+export interface ScheduledStatsSummary {
+  total: number
+  ready_now: number
+  next_24h: number
+  later: number
+  queued_count: number
+  running_count: number
+  busiest_hour_count: number
+  busiest_hour_label: string
+}
+
+export interface HourlyBucket {
+  hour_start: string
+  count: number
+}
+
+export interface ScheduledStatsResponse {
+  summary: ScheduledStatsSummary
+  hourly_distribution: HourlyBucket[]
+  max_count: number
+}
+
+export async function getScheduledStats(params?: { project_id?: number }): Promise<ScheduledStatsResponse> {
+  const response = await api.get('/stats/scheduled', { params })
+  return response.data
+}
+
+export interface SlotCapacityInfo {
+  hour_start: string
+  hour_end: string
+  count: number
+  max: number
+  is_full: boolean
+  enforce: boolean
+}
+
+export async function getSlotCapacity(scheduledAt: string): Promise<SlotCapacityInfo> {
+  const response = await api.get('/tasks/slot-capacity', { params: { scheduled_at: scheduledAt } })
   return response.data
 }
 
@@ -577,13 +859,57 @@ export async function getTaskLogs(id: number): Promise<TaskLog[]> {
   return response.data
 }
 
-export async function getTaskContainerLogs(id: number): Promise<{
+/**
+ * Open an SSE connection to stream task log entries in real-time.
+ *
+ * @param id - Task ID
+ * @param sinceId - Only receive entries with id > sinceId (for resuming a stream)
+ * @param onLog - Callback invoked for each new log entry
+ * @param onDone - Callback invoked when the task reaches a terminal state
+ * @returns EventSource instance (call .close() to stop streaming)
+ */
+export function streamTaskLogs(
+  id: number,
+  sinceId: number,
+  onLog: (log: TaskLog) => void,
+  onDone?: () => void,
+): EventSource {
+  const url = `/api/tasks/${id}/log-stream?since_id=${sinceId}`
+  const source = new EventSource(url)
+
+  source.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      if (data.error) {
+        console.error(`[streamTaskLogs] server error: ${data.error}`)
+      } else {
+        onLog(data as TaskLog)
+      }
+    } catch (e) {
+      console.warn('[streamTaskLogs] failed to parse SSE message', e)
+    }
+  }
+
+  source.addEventListener('done', () => {
+    source.close()
+    onDone?.()
+  })
+
+  source.onerror = (e) => {
+    console.warn('[streamTaskLogs] SSE connection error', e)
+  }
+
+  return source
+}
+
+export async function getTaskContainerLogs(id: number, source?: 'db' | 'auto'): Promise<{
   container_id: string | null
   container_status: string
   logs: string
   status: string
 }> {
-  const response = await api.get(`/tasks/${id}/container-logs`)
+  const params = source ? { source } : {}
+  const response = await api.get(`/tasks/${id}/container-logs`, { params })
   return response.data
 }
 
@@ -596,9 +922,10 @@ export async function cancelTask(id: number): Promise<void> {
   await api.post(`/tasks/${id}/cancel`)
 }
 
-export async function retryTask(id: number, scheduledDatetime?: string): Promise<void> {
+export async function retryTask(id: number, scheduledDatetime?: string): Promise<Task> {
   const body = scheduledDatetime ? { scheduled_datetime: scheduledDatetime } : undefined
-  await api.post(`/tasks/${id}/retry`, body)
+  const { data } = await api.post(`/tasks/${id}/retry`, body)
+  return data
 }
 
 export async function executeTask(id: number): Promise<void> {
@@ -615,9 +942,23 @@ export async function getContainerLogs(containerId: string): Promise<string> {
   return response.data
 }
 
-export async function getStats(): Promise<Stats> {
-  const response = await api.get('/stats')
+export async function getStats(params?: {
+  my?: boolean
+}): Promise<Stats> {
+  const response = await api.get('/stats', { params })
   return response.data
+}
+
+export interface ActivityHeatmapEntry {
+  date: string
+  count: number
+}
+
+export async function getActivityHeatmap(days = 365, my = false): Promise<ActivityHeatmapEntry[]> {
+  const res = await api.get<ActivityHeatmapEntry[]>('/stats/activity-heatmap', {
+    params: { days, ...(my ? { my: true } : {}) },
+  })
+  return res.data
 }
 
 export async function getAnalytics(
@@ -695,6 +1036,17 @@ export async function listGitLabProjectWebhookStatuses(): Promise<GitLabProjectW
   return response.data
 }
 
+export async function getWebhookEvents(params: {
+  page?: number
+  page_size?: number
+  event_type?: string
+  result?: string
+  project_id?: number
+} = {}): Promise<WebhookEventsResponse> {
+  const response = await api.get('/webhook/events', { params })
+  return response.data
+}
+
 export async function getOidcDiagnostics(): Promise<OidcDiagnosticsResult> {
   const response = await api.get('/config/oidc/diagnostics', {
     // Skip global 401 interceptor redirect for OIDC diagnostics
@@ -740,6 +1092,18 @@ export async function updateMattermostNotificationProfile(
 
 export async function deleteMattermostNotificationProfile(profileId: number): Promise<void> {
   await api.delete(`/config/notifications/profiles/${profileId}`)
+}
+
+export async function resolveMattermostChannelTarget(
+  payload: MattermostResolveChannelTargetPayload
+): Promise<MattermostChannelTarget> {
+  const response = await api.post('/config/notifications/channel-targets/resolve', payload)
+  return response.data
+}
+
+export async function getMattermostChannelTarget(channelId: string): Promise<MattermostChannelTarget> {
+  const response = await api.get(`/config/notifications/channel-targets/${encodeURIComponent(channelId)}`)
+  return response.data
 }
 
 export async function getAuthStatus(): Promise<AuthStatus> {
@@ -833,6 +1197,81 @@ export async function updatePromptTemplate(templateId: number, template: { name?
 
 export async function deletePromptTemplate(templateId: number): Promise<void> {
   await api.delete(`/prompt-templates/${templateId}`)
+}
+
+// Issue APIs
+export async function getIssues(params?: {
+  status?: string
+  project_id?: number
+  initiator_user_id?: number
+  search?: string
+  created_after?: string
+  created_before?: string
+  sort_by?: string
+  sort_order?: string
+  page?: number
+  page_size?: number
+}): Promise<IssueListResponse> {
+  const response = await api.get('/issues', { params })
+  return response.data
+}
+
+export async function getIssue(id: number): Promise<Issue> {
+  const response = await api.get(`/issues/${id}`)
+  return response.data
+}
+
+export async function createIssue(data: CreateIssueRequest): Promise<Issue> {
+  const response = await api.post('/issues', data)
+  return response.data
+}
+
+export async function updateIssue(id: number, data: Partial<{
+  title: string
+  description: string
+  status: string
+}>): Promise<Issue> {
+  const response = await api.patch(`/issues/${id}`, data)
+  return response.data
+}
+
+export async function closeIssue(id: number): Promise<Issue> {
+  const response = await api.post(`/issues/${id}/close`)
+  return response.data
+}
+
+export async function deleteIssue(id: number): Promise<void> {
+  await api.delete(`/issues/${id}`)
+}
+
+// AI Provider API functions
+export async function getProviders(): Promise<AIProvider[]> {
+  const { data } = await api.get('/providers')
+  return data
+}
+
+export async function getProvider(id: number): Promise<AIProvider> {
+  const { data } = await api.get(`/providers/${id}`)
+  return data
+}
+
+export async function createProvider(request: CreateProviderRequest): Promise<AIProvider> {
+  const { data } = await api.post('/providers', request)
+  return data
+}
+
+export async function updateProvider(id: number, request: UpdateProviderRequest): Promise<AIProvider> {
+  const { data } = await api.patch(`/providers/${id}`, request)
+  return data
+}
+
+export async function deleteProvider(id: number): Promise<void> {
+  await api.delete(`/providers/${id}`)
+}
+
+export async function setDefaultProvider(id: number): Promise<AIProvider> {
+  const { data } = await api.post(`/providers/${id}/set-default`)
+  return data
 }
 
 export default api

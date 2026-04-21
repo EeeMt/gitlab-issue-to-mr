@@ -125,50 +125,18 @@
                   <div class="schedule-card__title">{{ t('scheduleOverview.heatmap') }}</div>
                   <div class="schedule-card__subtitle">{{ t('scheduleOverview.heatmapSubtitle') }}</div>
               </div>
-              <div class="heatmap-legend">
-                <span class="heatmap-legend__label">{{ t('scheduleOverview.light') }}</span>
-                <div class="heatmap-legend__scale">
-                  <span class="heatmap-legend__swatch heatmap-legend__swatch--1"></span>
-                  <span class="heatmap-legend__swatch heatmap-legend__swatch--2"></span>
-                  <span class="heatmap-legend__swatch heatmap-legend__swatch--3"></span>
-                  <span class="heatmap-legend__swatch heatmap-legend__swatch--4"></span>
-                </div>
-                <span class="heatmap-legend__label">{{ t('scheduleOverview.busy') }}</span>
-                <span class="schedule-chip schedule-chip--interactive">
-                  {{ t('scheduleOverview.clickableHint') }}
-                </span>
-              </div>
+
             </div>
           </template>
 
-          <div class="heatmap">
-            <div class="heatmap__header heatmap__header--spacer"></div>
-            <div
-              v-for="day in heatmapDays"
-              :key="day.dateKey"
-              class="heatmap__header"
-            >
-              {{ day.label }}
-            </div>
-
-            <template v-for="row in heatmapRows" :key="row.hour">
-              <div class="heatmap__hour">{{ row.label }}</div>
-                <div
-                  v-for="cell in row.cells"
-                  :key="cell.key"
-                  class="heatmap__cell"
-                  :class="{
-                    'heatmap__cell--clickable': cell.count > 0,
-                    'heatmap__cell--active': isSelectedWindow(cell.startMs, cell.endMs)
-                  }"
-                  :style="heatmapCellStyle(cell.count, heatmapMax)"
-                  :title="t('scheduleOverview.taskCountTitle', { label: cell.label, count: cell.count })"
-                  @click="handleHeatmapCellSelect(cell)"
-                >
-                  {{ cell.count > 0 ? cell.count : '' }}
-                </div>
-            </template>
-          </div>
+          <HeatmapChart
+            :tasks="scheduledTasks"
+            :selected-ms="selectedWindow?.startMs ?? null"
+            :max-per-slot="slotMaxTasks"
+            :enforce-capacity="slotEnforce"
+            :allow-full-selection="true"
+            @cell-click="handleHeatmapCellClick"
+          />
           <div class="schedule-section-tip">
             {{ t('scheduleOverview.heatmapTip') }}
           </div>
@@ -200,8 +168,13 @@
           <div class="slot-detail">
             <div class="slot-detail__summary">
               <div class="slot-detail__window">{{ selectedWindow.label }}</div>
-              <div class="slot-detail__meta">
-                {{ t('scheduleOverview.slotTaskCount', { count: selectedWindowTasks.length }) }}
+              <div class="slot-detail__meta-row">
+                <div class="slot-detail__meta">
+                  {{ t('scheduleOverview.slotTaskCount', { count: selectedWindowTasks.length }) }}
+                </div>
+                <span v-if="selectedWindowLoadLabel" class="schedule-chip schedule-chip--soft">
+                  {{ selectedWindowLoadLabel }}
+                </span>
               </div>
             </div>
 
@@ -231,7 +204,7 @@
                     {{ t('scheduleOverview.currentSchedule') }}: {{ formatShortDateTime(task.scheduled_at) }}
                   </div>
                   <div class="slot-task-card__branch">
-                    {{ t('common.branch') }}: {{ task.branch_name || '-' }}
+                    {{ t('common.branch') }}: {{ task.issue?.branch_name || '-' }}
                   </div>
                   <div class="slot-task-card__prompt">{{ task.user_prompt }}</div>
                 </div>
@@ -245,6 +218,7 @@
                       :placeholder="t('scheduleOverview.selectNewTime')"
                       :is-date-disabled="isScheduledDateDisabled"
                       :is-time-disabled="isScheduledTimeDisabled"
+                      @update:value="() => onDraftChange(task.id)"
                     />
                     <n-button
                       type="info"
@@ -275,39 +249,16 @@
             </div>
           </div>
         </n-card>
-
-        <n-card class="schedule-card" :bordered="false">
-          <template #header>
-            <div class="schedule-card__header">
-              <div>
-                  <div class="schedule-card__title">{{ t('scheduleOverview.scheduledTasks') }}</div>
-                  <div class="schedule-card__subtitle">{{ t('scheduleOverview.scheduledTasksSubtitle') }}</div>
-              </div>
-            </div>
-          </template>
-
-          <n-data-table
-            :columns="columns"
-            :data="tasks"
-            :loading="tableLoading"
-            :bordered="false"
-            :row-key="(row: Task) => row.id"
-            :row-props="getRowProps"
-            :pagination="pagination"
-            :scroll-x="isMobile ? undefined : 980"
-          />
-        </n-card>
       </n-space>
     </n-spin>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   NButton,
   NCard,
-  NDataTable,
   NDatePicker,
   NGrid,
   NGi,
@@ -315,14 +266,16 @@ import {
   NSpin,
   NTag,
   useMessage,
-  type DataTableColumns,
 } from 'naive-ui'
 import { useWindowSize } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { authState, isAdmin, initializeAuth } from '../auth'
-import { getScheduledTasks, rescheduleTask, type Task } from '../api'
-import { formatDateTimeUtc8Compact, formatMonthDayTimeUtc8, formatMonthDayWeekdayUtc8, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
+import { getScheduledTasks, getScheduledStats, rescheduleTask, getConfig, type Task, type ScheduledStatsResponse } from '../api'
+import { formatDateTimeUtc8Compact, formatMonthDayTimeUtc8, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
+import { formatPriority, getProjectLabel as _getProjectLabel, isSameLocalDay } from '../utils/format'
+import { extractSlotErrorMessage } from '../utils/slotError'
+import HeatmapChart from '../components/HeatmapChart.vue'
 
 type HourBucket = {
   key: string
@@ -333,18 +286,6 @@ type HourBucket = {
   startMs: number
 }
 
-type HeatmapDay = {
-  dateKey: string
-  label: string
-}
-
-type HeatmapCell = {
-  key: string
-  label: string
-  count: number
-  startMs: number
-  endMs: number
-}
 
 type SelectedWindow = {
   key: string
@@ -353,69 +294,28 @@ type SelectedWindow = {
   endMs: number
 }
 
-type HeatmapRow = {
-  hour: number
-  label: string
-  cells: HeatmapCell[]
-}
-
 const message = useMessage()
 const router = useRouter()
 const { t } = useI18n()
 const { width } = useWindowSize()
 const isMobile = computed(() => width.value < 768)
 
-const tasks = ref<Task[]>([])
+const scheduledTasks = ref<Task[]>([])
+const scheduledStats = ref<ScheduledStatsResponse | null>(null)
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
+const slotMaxTasks = ref(0)
+const slotEnforce = ref(false)
 const selectedWindow = ref<SelectedWindow | null>(null)
 const scheduleDrafts = ref<Record<number, number | null>>({})
+const dirtyDraftIds = ref<Set<number>>(new Set())
 const savingTaskId = ref<number | null>(null)
 let pollTimer: number | null = null
 
-const pagination = {
-  pageSize: 20,
-  responsive: true,
-}
-
 const canEditScheduleOverview = computed(() => !authState.oidcEnabled || isAdmin.value)
 
-const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
-  pending: 'default',
-  queued: 'info',
-  running: 'warning',
-  completed: 'success',
-  failed: 'error',
-  cancelled: 'default',
-}
-
-const shanghaiPartsFormatter = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'Asia/Shanghai',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  hour12: false,
-})
-
 function getProjectLabel(task: Task): string {
-  return task.project_path_with_namespace || task.project_name || t('dashboard.projectFallback', { id: task.project_id })
-}
-
-function getStatusTagType(status: string) {
-  return statusColors[status] || 'default'
-}
-
-function formatPriority(priority?: string | number | null): string {
-  if (priority === null || priority === undefined || priority === '') {
-    return '-'
-  }
-
-  const normalized = String(priority).toLowerCase().trim()
-  if (normalized === '0' || normalized === 'p0') return 'P0'
-  if (normalized === '1' || normalized === 'p1') return 'P1'
-  if (normalized === '2' || normalized === 'p2') return 'P2'
-  return String(priority)
+  return _getProjectLabel(task, t('dashboard.projectFallback', { id: task.project_id }))
 }
 
 function formatShortDateTime(value?: string | null): string {
@@ -428,84 +328,70 @@ function getScheduledTimestamp(value?: string | null): number | null {
   return parseUtcDate(value).getTime()
 }
 
-function getShanghaiParts(date: Date): Record<string, string> {
-  return shanghaiPartsFormatter.formatToParts(date).reduce<Record<string, string>>((acc, part) => {
-    if (part.type !== 'literal') {
-      acc[part.type] = part.value
-    }
-    return acc
-  }, {})
-}
-
-function getShanghaiDateKey(date: Date): string {
-  const parts = getShanghaiParts(date)
-  return `${parts.year}-${parts.month}-${parts.day}`
-}
-
-function buildHeatmapDays(days: number): HeatmapDay[] {
-  const nowParts = getShanghaiParts(new Date())
-  const baseDate = new Date(
-    Date.UTC(Number(nowParts.year), Number(nowParts.month) - 1, Number(nowParts.day))
-  )
-
-  return Array.from({ length: days }, (_, index) => {
-    const date = new Date(baseDate.getTime() + index * 24 * 60 * 60 * 1000)
-    const year = date.getUTCFullYear()
-    const month = String(date.getUTCMonth() + 1).padStart(2, '0')
-    const day = String(date.getUTCDate()).padStart(2, '0')
-      return {
-        dateKey: `${year}-${month}-${day}`,
-        label: formatMonthDayWeekdayUtc8(date),
-      }
-    })
-}
-
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
-const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
+
+const fullSlotCount = computed(() => {
+  if (slotMaxTasks.value <= 0) return 0
+  // Count full slots across 7-day range (matching the heatmap scope)
+  const now = new Date()
+  const utc8Offset = 8 * 60 * 60 * 1000
+  const nowUtc8 = new Date(now.getTime() + utc8Offset)
+  const startHour = new Date(Date.UTC(nowUtc8.getUTCFullYear(), nowUtc8.getUTCMonth(), nowUtc8.getUTCDate()) - utc8Offset)
+  const endMs = startHour.getTime() + 7 * 24 * 60 * 60 * 1000
+
+  const bucketCounts = new Map<number, number>()
+  for (const task of scheduledTasks.value) {
+    if (!task.scheduled_at) continue
+    const ts = parseUtcDate(task.scheduled_at).getTime()
+    if (ts < startHour.getTime() || ts >= endMs) continue
+    const hourKey = Math.floor(ts / (60 * 60 * 1000))
+    bucketCounts.set(hourKey, (bucketCounts.get(hourKey) ?? 0) + 1)
+  }
+  let count = 0
+  for (const c of bucketCounts.values()) {
+    if (c >= slotMaxTasks.value) count++
+  }
+  return count
+})
 
 const summaryItems = computed(() => {
-  const now = Date.now()
-  const next24Hours = now + 24 * 60 * 60 * 1000
-  const readyNow = tasks.value.filter((task) => {
-    const scheduledMs = getScheduledTimestamp(task.scheduled_at)
-    if (scheduledMs === null) return false
-    return scheduledMs <= now
-  }).length
-  const next24HoursCount = tasks.value.filter((task) => {
-    const scheduledMs = getScheduledTimestamp(task.scheduled_at)
-    if (scheduledMs === null) return false
-    return scheduledMs > now && scheduledMs <= next24Hours
-  }).length
-  const laterCount = tasks.value.filter((task) => {
-    const scheduledMs = getScheduledTimestamp(task.scheduled_at)
-    if (scheduledMs === null) return false
-    return scheduledMs > next24Hours
-  }).length
-  const queuedCount = tasks.value.filter((task) => task.status === 'queued').length
-  const runningCount = tasks.value.filter((task) => task.status === 'running').length
-  const busiest = [...hourlyBuckets.value].sort((left, right) => right.count - left.count)[0]
+  const s = scheduledStats.value?.summary
+  if (!s) return []
 
-  return [
-    { label: t('scheduleOverview.scheduledQueue'), value: String(tasks.value.length), note: t('scheduleOverview.activeScheduledTasks') },
-    { label: t('scheduleOverview.readyNow'), value: String(readyNow), note: t('scheduleOverview.alreadyDue') },
-    { label: t('scheduleOverview.upcoming24h'), value: String(next24HoursCount), note: t('scheduleOverview.upcomingScheduledWork') },
-    { label: t('scheduleOverview.after24h'), value: String(laterCount), note: t('scheduleOverview.laterBacklog') },
-    { label: t('scheduleOverview.queuedRunning'), value: `${queuedCount} / ${runningCount}`, note: t('scheduleOverview.executionStateSplit') },
+  const baseItems = [
+    { label: t('scheduleOverview.scheduledQueue'), value: String(s.total), note: t('scheduleOverview.activeScheduledTasks') },
+    { label: t('scheduleOverview.readyNow'), value: String(s.ready_now), note: t('scheduleOverview.alreadyDue') },
+    { label: t('scheduleOverview.upcoming24h'), value: String(s.next_24h), note: t('scheduleOverview.upcomingScheduledWork') },
+    { label: t('scheduleOverview.after24h'), value: String(s.later), note: t('scheduleOverview.laterBacklog') },
     {
       label: t('scheduleOverview.busiestHour'),
-      value: busiest && busiest.count > 0 ? String(busiest.count) : '0',
-      note: busiest && busiest.count > 0 ? busiest.label : t('scheduleOverview.noScheduledWork'),
+      value: s.busiest_hour_count > 0 ? String(s.busiest_hour_count) : '0',
+      note: s.busiest_hour_count > 0 ? formatMonthDayTimeUtc8(parseUtcDate(s.busiest_hour_label)) : t('scheduleOverview.noScheduledWork'),
     },
   ]
+
+  if (slotMaxTasks.value > 0) {
+    baseItems.push({
+      label: t('scheduleOverview.fullSlots'),
+      value: String(fullSlotCount.value),
+      note: fullSlotCount.value > 0
+        ? t('scheduleOverview.fullSlotsNote', { capacity: slotMaxTasks.value })
+        : t('scheduleOverview.noSlotsAtCapacity', { capacity: slotMaxTasks.value }),
+    })
+  }
+
+  return baseItems
 })
 
 const hourlyBuckets = computed<HourBucket[]>(() => {
-  const start = new Date()
-  start.setMinutes(0, 0, 0)
-  const startMs = start.getTime()
-  const buckets = Array.from({ length: 24 }, (_, index) => {
-    const bucketStartMs = startMs + index * 60 * 60 * 1000
-    const bucketDate = new Date(bucketStartMs)
+  const dist = scheduledStats.value?.hourly_distribution
+  if (!dist || dist.length === 0) {
+    // Fallback: generate empty 24 buckets
+    const start = new Date()
+    start.setMinutes(0, 0, 0)
+    return Array.from({ length: 24 }, (_, index) => {
+      const bucketStartMs = start.getTime() + index * 60 * 60 * 1000
+      const bucketDate = new Date(bucketStartMs)
       return {
         key: `${bucketStartMs}`,
         label: formatMonthDayTimeUtc8(bucketDate),
@@ -513,27 +399,23 @@ const hourlyBuckets = computed<HourBucket[]>(() => {
         count: 0,
         heightPercent: 0,
         startMs: bucketStartMs,
+      }
+    })
+  }
+
+  const maxCount = scheduledStats.value?.max_count ?? 0
+  return dist.map((bucket) => {
+    const bucketDate = parseUtcDate(bucket.hour_start)
+    const bucketStartMs = bucketDate.getTime()
+    return {
+      key: `${bucketStartMs}`,
+      label: formatMonthDayTimeUtc8(bucketDate),
+      shortLabel: formatTimeUtc8(bucketDate),
+      count: bucket.count,
+      heightPercent: maxCount > 0 ? (bucket.count > 0 ? Math.max((bucket.count / maxCount) * 100, 2) : 0) : 0,
+      startMs: bucketStartMs,
     }
   })
-
-  tasks.value.forEach((task) => {
-    const scheduledMs = getScheduledTimestamp(task.scheduled_at)
-    if (scheduledMs === null) return
-    if (scheduledMs < startMs || scheduledMs >= startMs + 24 * 60 * 60 * 1000) {
-      return
-    }
-
-    const bucketIndex = Math.floor((scheduledMs - startMs) / (60 * 60 * 1000))
-    if (bucketIndex >= 0 && bucketIndex < buckets.length) {
-      buckets[bucketIndex].count += 1
-    }
-  })
-
-  const maxCount = Math.max(...buckets.map((bucket) => bucket.count), 0)
-  return buckets.map((bucket) => ({
-    ...bucket,
-    heightPercent: maxCount > 0 ? Math.max((bucket.count / maxCount) * 100, bucket.count > 0 ? 10 : 0) : 0,
-  }))
 })
 
 const busyWindows = computed(() =>
@@ -548,71 +430,6 @@ const idleWindows = computed(() =>
     .filter((bucket) => bucket.count === 0)
     .slice(0, 5)
 )
-
-const heatmapDays = computed(() => buildHeatmapDays(7))
-
-const heatmapRows = computed<HeatmapRow[]>(() => {
-  const dayKeys = heatmapDays.value.map((day) => day.dateKey)
-  const counts = new Map<string, number>()
-
-  tasks.value.forEach((task) => {
-    if (!task.scheduled_at) return
-    const scheduledDate = parseUtcDate(task.scheduled_at)
-    const dateKey = getShanghaiDateKey(scheduledDate)
-    if (!dayKeys.includes(dateKey)) return
-
-    const parts = getShanghaiParts(scheduledDate)
-    const hour = Number(parts.hour)
-    const key = `${dateKey}-${hour}`
-    counts.set(key, (counts.get(key) || 0) + 1)
-  })
-
-  return Array.from({ length: 24 }, (_, hour) => ({
-    hour,
-    label: `${String(hour).padStart(2, '0')}:00`,
-    cells: heatmapDays.value.map((day) => {
-      const key = `${day.dateKey}-${hour}`
-      const startMs = new Date(`${day.dateKey}T${String(hour).padStart(2, '0')}:00:00+08:00`).getTime()
-      return {
-        key,
-        label: `${day.label} ${String(hour).padStart(2, '0')}:00`,
-        count: counts.get(key) || 0,
-        startMs,
-        endMs: startMs + 60 * 60 * 1000,
-      }
-    }),
-  }))
-})
-
-const heatmapMax = computed(() =>
-  heatmapRows.value.reduce((max, row) => {
-    return Math.max(max, ...row.cells.map((cell) => cell.count))
-  }, 0)
-)
-
-function heatmapCellStyle(count: number, maxCount: number) {
-  if (count === 0 || maxCount === 0) {
-    return {
-      background: 'rgba(148, 163, 184, 0.12)',
-      color: 'rgba(15, 23, 42, 0.45)',
-    }
-  }
-
-  const intensity = count / maxCount
-  const alpha = 0.18 + intensity * 0.52
-  return {
-    background: `rgba(32, 128, 240, ${alpha.toFixed(3)})`,
-    color: intensity > 0.58 ? '#fff' : '#0f172a',
-  }
-}
-
-function isSameLocalDay(left: Date, right: Date): boolean {
-  return (
-    left.getFullYear() === right.getFullYear()
-    && left.getMonth() === right.getMonth()
-    && left.getDate() === right.getDate()
-  )
-}
 
 function isScheduledDateDisabled(timestamp: number): boolean {
   const candidate = new Date(timestamp)
@@ -661,6 +478,7 @@ function setSelectedWindow(nextWindow: SelectedWindow) {
 function clearSelectedWindow() {
   selectedWindow.value = null
   scheduleDrafts.value = {}
+  dirtyDraftIds.value.clear()
 }
 
 function isSelectedWindow(startMs: number, endMs: number): boolean {
@@ -680,13 +498,14 @@ function handleHourlyBucketSelect(bucket: HourBucket) {
   })
 }
 
-function handleHeatmapCellSelect(cell: HeatmapCell) {
-  if (cell.count === 0) return
+function handleHeatmapCellClick(startMs: number) {
+  const endMs = startMs + 60 * 60 * 1000
+  const label = formatMonthDayTimeUtc8(new Date(startMs))
   setSelectedWindow({
-    key: cell.key,
-    label: cell.label,
-    startMs: cell.startMs,
-    endMs: cell.endMs,
+    key: `heatmap-${startMs}`,
+    label,
+    startMs,
+    endMs,
   })
 }
 
@@ -703,7 +522,7 @@ function isTaskInSelectedWindow(task: Task, window: SelectedWindow): boolean {
 const selectedWindowTasks = computed(() => {
   if (!selectedWindow.value) return []
 
-  return tasks.value
+  return scheduledTasks.value
     .filter((task) => isTaskInSelectedWindow(task, selectedWindow.value!))
     .sort((left, right) => {
       const leftMs = getScheduledTimestamp(left.scheduled_at) ?? 0
@@ -712,115 +531,62 @@ const selectedWindowTasks = computed(() => {
     })
 })
 
+const selectedWindowLoadLabel = computed(() => {
+  if (!selectedWindow.value || slotMaxTasks.value <= 0) {
+    return null
+  }
+
+  return t('scheduleOverview.capacityLabel', {
+    count: selectedWindowTasks.value.length,
+    max: slotMaxTasks.value,
+  })
+})
+
 function syncScheduleDrafts() {
   if (!selectedWindow.value) {
     scheduleDrafts.value = {}
+    dirtyDraftIds.value.clear()
     return
   }
 
-  scheduleDrafts.value = Object.fromEntries(
-    selectedWindowTasks.value.map((task) => [
-      task.id,
-      task.scheduled_at ? parseUtcDate(task.scheduled_at).getTime() : null,
-    ])
-  )
+  const newDrafts: Record<number, number | null> = {}
+  for (const task of selectedWindowTasks.value) {
+    if (dirtyDraftIds.value.has(task.id)) {
+      // Preserve user's unsaved change during auto-refresh
+      newDrafts[task.id] = scheduleDrafts.value[task.id] ?? null
+    } else {
+      newDrafts[task.id] = task.scheduled_at ? parseUtcDate(task.scheduled_at).getTime() : null
+    }
+  }
+  scheduleDrafts.value = newDrafts
+}
+
+function onDraftChange(taskId: number) {
+  dirtyDraftIds.value.add(taskId)
 }
 
 function goToTask(task: Task) {
   router.push({ name: 'TaskView', params: { id: task.id } })
 }
 
-function isInteractiveTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) {
-    return false
-  }
-
-  return Boolean(target.closest('a, button, input, textarea, select, summary, [role="button"], .n-button, .n-base-selection'))
-}
-
-function getRowProps(row: Task) {
-  return {
-    style: 'cursor: pointer;',
-    onClick: (event: MouseEvent) => {
-      if (isInteractiveTarget(event.target)) {
-        return
-      }
-      goToTask(row)
-    },
-  }
-}
-
-const columns = computed<DataTableColumns<Task>>(() => {
-  const mobileColumns: DataTableColumns<Task> = [
-    {
-      title: t('scheduleOverview.task'),
-      key: 'task',
-      render: (row) =>
-        h('div', { style: 'line-height: 1.45' }, [
-          h('div', { style: 'font-weight: 600;' }, `#${row.id} · ${getProjectLabel(row)}`),
-          h('div', { style: 'font-size: 12px; color: rgba(15, 23, 42, 0.58);' }, formatShortDateTime(row.scheduled_at)),
-        ]),
-    },
-    {
-      title: t('common.status'),
-      key: 'status',
-      width: 92,
-      render: (row) => h(NTag, { size: 'small', type: getStatusTagType(row.status) }, () => t(`status.${row.status}`)),
-    },
-  ]
-
-  const desktopColumns: DataTableColumns<Task> = [
-    { title: t('scheduleOverview.id'), key: 'id', width: 64 },
-    {
-      title: t('common.project'),
-      key: 'project',
-      width: 180,
-      ellipsis: { tooltip: true },
-      render: (row) => getProjectLabel(row),
-    },
-    {
-      title: t('common.status'),
-      key: 'status',
-      width: 96,
-      render: (row) => h(NTag, { size: 'small', type: getStatusTagType(row.status) }, () => t(`status.${row.status}`)),
-    },
-    {
-      title: t('common.priority'),
-      key: 'priority',
-      width: 72,
-      render: (row) => formatPriority(row.priority),
-    },
-    {
-      title: t('common.scheduled'),
-      key: 'scheduled_at',
-      width: 150,
-      render: (row) => formatShortDateTime(row.scheduled_at),
-    },
-    {
-      title: t('common.branch'),
-      key: 'branch_name',
-      width: 150,
-      ellipsis: { tooltip: true },
-      render: (row) => row.branch_name || '-',
-    },
-    {
-      title: t('scheduleOverview.prompt'),
-      key: 'user_prompt',
-      width: 320,
-      render: (row) => h('div', { class: 'schedule-table__ellipsis', title: row.user_prompt }, row.user_prompt),
-    },
-  ]
-
-  return isMobile.value ? mobileColumns : desktopColumns
-})
-
 async function fetchData() {
   if (loading.value) return
   loading.value = true
   try {
-    tasks.value = await getScheduledTasks()
-    syncScheduleDrafts()
-    hasLoadedOnce.value = true
+    const [statsData, scheduledTaskData, config] = await Promise.all([
+      getScheduledStats(),
+      getScheduledTasks(),
+      getConfig().catch(() => null),
+    ])
+    scheduledStats.value = statsData
+    scheduledTasks.value = scheduledTaskData
+    if (config) {
+      slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
+      slotEnforce.value = config.runtime?.slot_max_tasks_enforce ?? false
+    }
+    if (selectedWindow.value) {
+      syncScheduleDrafts()
+    }
   } catch (error) {
     message.error(t('scheduleOverview.failedToFetch'))
   } finally {
@@ -848,14 +614,14 @@ async function handleTaskReschedule(task: Task) {
 
   savingTaskId.value = task.id
   try {
-    const updatedTask = await rescheduleTask(task.id, {
+    await rescheduleTask(task.id, {
       scheduled_datetime: new Date(draft).toISOString()
     })
-    tasks.value = tasks.value.map((item) => (item.id === updatedTask.id ? updatedTask : item))
     clearSelectedWindow()
+    await fetchData()
     message.success(t('scheduleOverview.taskRescheduled'))
-  } catch (error) {
-    message.error(t('scheduleOverview.failedToRescheduleTask'))
+  } catch (error: any) {
+    message.error(extractSlotErrorMessage(error, t, 'scheduleOverview.failedToRescheduleTask'))
   } finally {
     savingTaskId.value = null
   }
@@ -992,13 +758,21 @@ onBeforeUnmount(() => {
 }
 
 .schedule-chip--active {
-  background: rgba(24, 160, 88, 0.12);
-  color: rgba(24, 160, 88, 0.95);
+  background: linear-gradient(180deg, rgba(24, 160, 88, 0.92), rgba(24, 160, 88, 0.82));
+  color: rgba(255, 255, 255, 0.96);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 8px 18px -16px rgba(24, 160, 88, 0.56);
 }
 
 .schedule-chip--readonly {
   background: rgba(240, 160, 32, 0.12);
   color: rgba(163, 94, 12, 0.92);
+}
+
+.schedule-chip--soft {
+  background: rgba(148, 163, 184, 0.14);
+  color: rgba(15, 23, 42, 0.68);
 }
 
 .schedule-section-tip {
@@ -1007,24 +781,18 @@ onBeforeUnmount(() => {
   color: rgba(15, 23, 42, 0.58);
 }
 
-.schedule-table__ellipsis {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .hourly-chart {
   display: grid;
   grid-template-columns: repeat(24, minmax(0, 1fr));
-  gap: 8px;
-  align-items: end;
+  gap: 10px;
+  align-items: stretch;
   min-height: 240px;
 }
 
 .hourly-chart__item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  display: grid;
+  grid-template-rows: 20px 148px 48px;
+  justify-items: center;
   gap: 6px;
   min-width: 0;
 }
@@ -1034,44 +802,57 @@ onBeforeUnmount(() => {
 }
 
 .hourly-chart__item--clickable:hover .hourly-chart__bar-wrap {
-  background: rgba(32, 128, 240, 0.14);
+  background: rgba(148, 163, 184, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.18);
 }
 
 .hourly-chart__item--active .hourly-chart__bar-wrap {
-  outline: 2px solid rgba(32, 128, 240, 0.45);
-  outline-offset: 2px;
-  background: rgba(32, 128, 240, 0.16);
+  background: rgba(148, 163, 184, 0.18);
+  box-shadow:
+    inset 0 0 0 1px rgba(32, 128, 240, 0.18),
+    0 0 0 2px rgba(32, 128, 240, 0.12);
 }
 
 .hourly-chart__count {
   min-height: 20px;
+  line-height: 20px;
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
   color: rgba(15, 23, 42, 0.64);
 }
 
 .hourly-chart__bar-wrap {
-  width: 100%;
+  width: min(100%, 26px);
   height: 148px;
   display: flex;
-  align-items: flex-end;
+  align-items: end;
   justify-content: center;
-  background: rgba(148, 163, 184, 0.08);
-  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
   overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12);
+  transition: background 0.18s ease, box-shadow 0.18s ease;
 }
 
 .hourly-chart__bar {
   width: 100%;
-  min-height: 0;
-  border-radius: 999px;
-  background: linear-gradient(180deg, rgba(32, 128, 240, 0.95), rgba(54, 173, 106, 0.78));
+  min-height: 6px;
+  border-radius: 10px 10px 0 0;
+  background: linear-gradient(180deg, rgba(32, 128, 240, 0.92), rgba(32, 128, 240, 0.55));
 }
 
 .hourly-chart__label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 100%;
   font-size: 11px;
   color: rgba(15, 23, 42, 0.58);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-variant-numeric: tabular-nums;
   writing-mode: vertical-rl;
-  text-orientation: mixed;
+  transform: rotate(180deg);
 }
 
 .window-insights {
@@ -1125,80 +906,6 @@ onBeforeUnmount(() => {
   color: rgba(15, 23, 42, 0.58);
 }
 
-.heatmap-legend {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.58);
-}
-
-.heatmap-legend__scale {
-  display: flex;
-  gap: 6px;
-}
-
-.heatmap-legend__swatch {
-  width: 16px;
-  height: 10px;
-  border-radius: 999px;
-}
-
-.heatmap-legend__swatch--1 { background: rgba(32, 128, 240, 0.2); }
-.heatmap-legend__swatch--2 { background: rgba(32, 128, 240, 0.34); }
-.heatmap-legend__swatch--3 { background: rgba(32, 128, 240, 0.5); }
-.heatmap-legend__swatch--4 { background: rgba(32, 128, 240, 0.68); }
-
-.heatmap {
-  display: grid;
-  grid-template-columns: 64px repeat(7, minmax(0, 1fr));
-  gap: 8px;
-  align-items: center;
-}
-
-.heatmap__header {
-  text-align: center;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.64);
-}
-
-.heatmap__header--spacer {
-  visibility: hidden;
-}
-
-.heatmap__hour {
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.58);
-}
-
-.heatmap__cell {
-  min-height: 30px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.heatmap__cell--clickable {
-  cursor: pointer;
-}
-
-.heatmap__cell--clickable:not(.heatmap__cell--active):hover {
-  transform: translateY(-1px);
-  box-shadow: inset 0 0 0 1px rgba(32, 128, 240, 0.22);
-}
-
-.heatmap__cell--active {
-  box-shadow: inset 0 0 0 2px rgba(15, 23, 42, 0.32), 0 0 0 2px rgba(24, 160, 88, 0.16);
-}
-
-.heatmap__cell--active:hover {
-  transform: none;
-  box-shadow: inset 0 0 0 2px rgba(15, 23, 42, 0.32), 0 0 0 2px rgba(24, 160, 88, 0.16);
-}
-
 .slot-detail {
   display: flex;
   flex-direction: column;
@@ -1209,12 +916,21 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 8px 16px;
 }
 
 .slot-detail__window {
   font-size: 16px;
   font-weight: 600;
+}
+
+.slot-detail__meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .slot-detail__meta,
@@ -1344,17 +1060,6 @@ onBeforeUnmount(() => {
 
   .window-insights {
     grid-template-columns: 1fr;
-  }
-
-  .heatmap {
-    grid-template-columns: 54px repeat(7, minmax(44px, 1fr));
-    gap: 6px;
-    overflow-x: auto;
-  }
-
-  .heatmap__cell {
-    min-height: 28px;
-    font-size: 11px;
   }
 
   .slot-task-card {

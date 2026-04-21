@@ -7,11 +7,11 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from app.models import Task, TaskStatus
 
 
-def test_timeout_detection():
+def check_timeout_detection():
     """Test task timeout detection logic."""
     print("=" * 60)
     print("Testing Timeout Detection")
@@ -21,11 +21,11 @@ def test_timeout_detection():
 
     test_cases = [
         # (started_at, expected_timed_out)
-        (datetime.utcnow() - timedelta(minutes=10), False),   # 10 min ago - not timed out
-        (datetime.utcnow() - timedelta(minutes=25), False),    # 25 min ago - not timed out (within 30min)
-        (datetime.utcnow() - timedelta(minutes=30), True),      # 30 min ago - exactly timed out
-        (datetime.utcnow() - timedelta(minutes=31), True),      # 31 min ago - timed out
-        (datetime.utcnow() - timedelta(hours=1), True),         # 1 hour ago - definitely timed out
+        (datetime.now(UTC) - timedelta(minutes=10), False),   # 10 min ago - not timed out
+        (datetime.now(UTC) - timedelta(minutes=25), False),    # 25 min ago - not timed out (within 30min)
+        (datetime.now(UTC) - timedelta(minutes=30), True),      # 30 min ago - exactly timed out
+        (datetime.now(UTC) - timedelta(minutes=31), True),      # 31 min ago - timed out
+        (datetime.now(UTC) - timedelta(hours=1), True),         # 1 hour ago - definitely timed out
         (None, False),                                         # Not started - not timed out
     ]
 
@@ -37,7 +37,7 @@ def test_timeout_detection():
         if started_at is None:
             is_timed_out = False
         else:
-            elapsed = (datetime.utcnow() - started_at).total_seconds()
+            elapsed = (datetime.now(UTC) - started_at).total_seconds()
             is_timed_out = elapsed > task_timeout
 
         if is_timed_out == expected_timed_out:
@@ -51,7 +51,7 @@ def test_timeout_detection():
     return failed == 0
 
 
-def test_container_naming():
+def check_container_naming():
     """Test container naming convention."""
     print("\n" + "=" * 60)
     print("Testing Container Naming Convention")
@@ -59,9 +59,9 @@ def test_container_naming():
 
     test_cases = [
         # (task_id, project_id, issue_iid, expected_name)
-        (1, 123, 456, "gimr-1-p123-i456"),
-        (10, 1, 99, "gimr-10-p1-i99"),
-        (100, 999, 1000, "gimr-100-p999-i1000"),
+        (1, 123, 456, "codify-1-p123-i456"),
+        (10, 1, 99, "codify-10-p1-i99"),
+        (100, 999, 1000, "codify-100-p999-i1000"),
     ]
 
     passed = 0
@@ -69,7 +69,7 @@ def test_container_naming():
 
     for task_id, project_id, issue_iid, expected in test_cases:
         # Generate container name using the convention
-        actual = f"gimr-{task_id}-p{project_id}-i{issue_iid}"
+        actual = f"codify-{task_id}-p{project_id}-i{issue_iid}"
 
         if actual == expected:
             print(f"✅ PASS: {actual}")
@@ -82,7 +82,7 @@ def test_container_naming():
     return failed == 0
 
 
-def test_crash_recovery_logic():
+def check_crash_recovery_logic():
     """Test crash recovery logic."""
     print("\n" + "=" * 60)
     print("Testing Crash Recovery Logic")
@@ -90,11 +90,11 @@ def test_crash_recovery_logic():
 
     # Simulate tasks that were running when crash happened
     tasks = [
-        {"id": 1, "status": TaskStatus.RUNNING, "started_at": datetime.utcnow() - timedelta(minutes=10)},
-        {"id": 2, "status": TaskStatus.RUNNING, "started_at": datetime.utcnow() - timedelta(hours=1)},
+        {"id": 1, "status": TaskStatus.RUNNING, "started_at": datetime.now(UTC) - timedelta(minutes=10)},
+        {"id": 2, "status": TaskStatus.RUNNING, "started_at": datetime.now(UTC) - timedelta(hours=1)},
         {"id": 3, "status": TaskStatus.PENDING, "started_at": None},
-        {"id": 4, "status": TaskStatus.COMPLETED, "started_at": datetime.utcnow() - timedelta(hours=2)},
-        {"id": 5, "status": TaskStatus.RUNNING, "started_at": datetime.utcnow() - timedelta(minutes=5)},
+        {"id": 4, "status": TaskStatus.COMPLETED, "started_at": datetime.now(UTC) - timedelta(hours=2)},
+        {"id": 5, "status": TaskStatus.RUNNING, "started_at": datetime.now(UTC) - timedelta(minutes=5)},
     ]
 
     task_timeout = 1800  # 30 minutes
@@ -106,7 +106,7 @@ def test_crash_recovery_logic():
         if task["status"] == TaskStatus.RUNNING:
             # Check if task was running too long (likely crashed)
             if task["started_at"]:
-                elapsed = (datetime.utcnow() - task["started_at"]).total_seconds()
+                elapsed = (datetime.now(UTC) - task["started_at"]).total_seconds()
                 if elapsed > task_timeout:
                     print(f"✅ RECOVER: Task {task['id']} timed out (ran {elapsed/60:.1f} min), marking as FAILED")
                     task["status"] = TaskStatus.FAILED
@@ -135,23 +135,23 @@ def test_crash_recovery_logic():
     return passed
 
 
-def test_container_cleanup_pattern():
+def check_container_cleanup_pattern():
     """Test container cleanup pattern matching."""
     print("\n" + "=" * 60)
     print("Testing Container Cleanup Pattern")
     print("=" * 60)
 
     import re
-    WORKER_CONTAINER_PATTERN = re.compile(r"^gimr-\d+-p\d+-i\d+$")
+    WORKER_CONTAINER_PATTERN = re.compile(r"^codify-\d+-p\d+-i\d+$")
 
     test_cases = [
         # (container_name, should_clean)
-        ("gimr-1-p123-i456", True),      # Worker container - clean
-        ("gimr-10-p1-i99", True),        # Worker container - clean
-        ("gimr-backend", False),         # Backend service - skip
-        ("gimr-postgres", False),         # Postgres service - skip
+        ("codify-1-p123-i456", True),      # Worker container - clean
+        ("codify-10-p1-i99", True),        # Worker container - clean
+        ("codify-backend", False),         # Backend service - skip
+        ("codify-postgres", False),         # Postgres service - skip
         ("random-container", False),       # Unrelated - skip
-        ("gimr-", False),                # Invalid pattern - skip
+        ("codify-", False),                # Invalid pattern - skip
     ]
 
     passed = 0
@@ -172,7 +172,7 @@ def test_container_cleanup_pattern():
     return failed == 0
 
 
-def test_status_transition_on_timeout():
+def check_status_transition_on_timeout():
     """Test that timeout properly transitions task status."""
     print("\n" + "=" * 60)
     print("Testing Status Transition on Timeout")
@@ -182,14 +182,14 @@ def test_status_transition_on_timeout():
     task = {
         "id": 1,
         "status": TaskStatus.RUNNING,
-        "started_at": datetime.utcnow() - timedelta(hours=1),
+        "started_at": datetime.now(UTC) - timedelta(hours=1),
         "error_message": None
     }
 
     task_timeout = 1800  # 30 minutes
 
     # Check if timed out
-    elapsed = (datetime.utcnow() - task["started_at"]).total_seconds()
+    elapsed = (datetime.now(UTC) - task["started_at"]).total_seconds()
     is_timed_out = elapsed > task_timeout
 
     print(f"Task {task['id']}: elapsed={elapsed}s, timeout={task_timeout}s, timed_out={is_timed_out}")
@@ -212,16 +212,16 @@ def test_status_transition_on_timeout():
 def main():
     """Run all timeout and crash recovery tests."""
     print("\n" + "=" * 60)
-    print("GIMR Timeout & Crash Recovery Tests")
+    print("Codify Timeout & Crash Recovery Tests")
     print("=" * 60)
 
     results = []
 
-    results.append(("Timeout Detection", test_timeout_detection()))
-    results.append(("Container Naming", test_container_naming()))
-    results.append(("Crash Recovery Logic", test_crash_recovery_logic()))
-    results.append(("Container Cleanup Pattern", test_container_cleanup_pattern()))
-    results.append(("Status Transition on Timeout", test_status_transition_on_timeout()))
+    results.append(("Timeout Detection", check_timeout_detection()))
+    results.append(("Container Naming", check_container_naming()))
+    results.append(("Crash Recovery Logic", check_crash_recovery_logic()))
+    results.append(("Container Cleanup Pattern", check_container_cleanup_pattern()))
+    results.append(("Status Transition on Timeout", check_status_transition_on_timeout()))
 
     print("\n" + "=" * 60)
     print("Test Summary")

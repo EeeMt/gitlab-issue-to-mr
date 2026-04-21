@@ -1,5 +1,7 @@
 # E2E Tests with Playwright
 
+> **注意**：完整的测试指南请参阅 [docs/TESTING.md](../../docs/TESTING.md)
+
 This directory contains end-to-end tests using Playwright for headless browser automation.
 
 ## Setup
@@ -43,20 +45,20 @@ pytest tests/e2e/ -v --html=report.html --self-contained-html
 ### Build Image
 
 ```bash
-docker build -f deploy/Dockerfile.e2e -t gimr-e2e:latest .
+docker build -f deploy/Dockerfile.e2e -t codify-e2e:latest .
 ```
 
 ### Run with Docker Compose
 
 ```bash
-# Start all services including E2E
-docker-compose --profile e2e up
+# Start all services
+docker-compose -f deploy/docker-compose.e2e.yml up -d
 
 # Run E2E tests against running services
-docker-compose --profile e2e run --rm e2e
+docker-compose -f deploy/docker-compose.e2e.yml run --rm e2e
 
 # Run specific tests
-docker-compose --profile e2e run --rm e2e pytest tests/e2e/ -v -k "bootstrap"
+docker-compose -f deploy/docker-compose.e2e.yml run --rm e2e pytest tests/e2e/ -v -k "bootstrap"
 ```
 
 ## Environment Variables
@@ -102,7 +104,7 @@ For GitLab CI, add a job like:
 
 ```yaml
 e2e-tests:
-  image: gimr-e2e:latest
+  image: codify-e2e:latest
   services:
     - postgres:16-alpine
     - nginx

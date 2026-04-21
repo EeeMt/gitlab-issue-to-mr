@@ -29,5 +29,39 @@ build/
 # Node
 node_modules/
 
-# Test
-*.log
+# Coverage reports
+frontend/coverage/
+backend/.coverage
+backend/coverage.json
+backend/htmlcov/
+
+# Logs
+backend/logs/
+
+
+# E2E video recordings
+deploy/e2e-videos/*.webm
+
+# Local-only deployment files (not committed; place on Docker host manually)
+deploy/ca.crt
+deploy/.env.test
+
+# Playwright CLI snapshots
+.playwright-cli/
+
+# Temporary screenshots
+heatmap-check.png
+
+# Temporary images
+temporary/*.png
+
+# Worktrees
+.worktrees/
+
+# Superpowers
+.superpowers/
+
+# Logs
+logs/
+scripts/demo/.env
+.claude/

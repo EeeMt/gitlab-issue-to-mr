@@ -1,0 +1,178 @@
+import { ref, computed, type Ref, type ComputedRef, type Component } from 'vue'
+
+export interface FilterField {
+  key: string
+  label: string
+  icon?: Component
+  type: 'multi-select' | 'single-select' | 'date-range'
+  options?: () => { label: string; value: any; color?: string; count?: number }[]
+  apiParam?: string
+}
+
+export interface SortField {
+  key: string
+  label: string
+}
+
+export interface ColumnDef {
+  key: string
+  label: string
+  defaultVisible: boolean
+  alwaysVisible?: boolean
+}
+
+export interface FilterSortConfig {
+  storageKey: string
+  filterFields: FilterField[]
+  sortFields: SortField[]
+  columns: ColumnDef[]
+  defaultSort: { field: string; order: 'asc' | 'desc' }
+}
+
+interface PersistedState {
+  filters: Record<string, any>
+  sort: { field: string; order: 'asc' | 'desc' }
+  visibleColumns: string[]
+}
+
+function loadFromStorage(key: string): PersistedState | null {
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object' && 'filters' in parsed) {
+      return parsed as PersistedState
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function saveToStorage(key: string, state: PersistedState) {
+  try {
+    localStorage.setItem(key, JSON.stringify(state))
+  } catch (err) {
+    console.warn('[useFilterSort] Failed to persist state:', err)
+  }
+}
+
+export function useFilterSort(config: FilterSortConfig) {
+  const saved = loadFromStorage(config.storageKey)
+
+  const filters: Ref<Record<string, any>> = ref(saved?.filters ?? {})
+  const sort: Ref<{ field: string; order: 'asc' | 'desc' }> = ref(
+    saved?.sort ?? { ...config.defaultSort }
+  )
+
+  const defaultVisibleColumns = config.columns
+    .filter((c) => c.defaultVisible)
+    .map((c) => c.key)
+  const visibleColumns: Ref<string[]> = ref(saved?.visibleColumns ?? [...defaultVisibleColumns])
+
+  function persist() {
+    saveToStorage(config.storageKey, {
+      filters: filters.value,
+      sort: sort.value,
+      visibleColumns: visibleColumns.value,
+    })
+  }
+
+  function addFilter(key: string, value: any) {
+    filters.value = { ...filters.value, [key]: value }
+    persist()
+  }
+
+  function removeFilter(key: string) {
+    const next = { ...filters.value }
+    delete next[key]
+    filters.value = next
+    persist()
+  }
+
+  function clearAllFilters() {
+    filters.value = {}
+    persist()
+  }
+
+  function setSort(field: string, order: 'asc' | 'desc') {
+    sort.value = { field, order }
+    persist()
+  }
+
+  function resetSort() {
+    sort.value = { ...config.defaultSort }
+    persist()
+  }
+
+  function toggleColumn(key: string) {
+    const col = config.columns.find((c) => c.key === key)
+    if (col?.alwaysVisible) return
+    const current = visibleColumns.value
+    if (current.includes(key)) {
+      visibleColumns.value = current.filter((k) => k !== key)
+    } else {
+      visibleColumns.value = [...current, key]
+    }
+    persist()
+  }
+
+  function resetColumns() {
+    visibleColumns.value = [...defaultVisibleColumns]
+    persist()
+  }
+
+  const activeFilterCount: ComputedRef<number> = computed(() => {
+    return Object.keys(filters.value).length
+  })
+
+  const hasActiveFilters: ComputedRef<boolean> = computed(() => {
+    return activeFilterCount.value > 0
+  })
+
+  const apiParams: ComputedRef<Record<string, string>> = computed(() => {
+    const params: Record<string, string> = {}
+
+    // Filters
+    for (const field of config.filterFields) {
+      const val = filters.value[field.key]
+      if (val === undefined || val === null) continue
+
+      if (field.type === 'date-range' && field.apiParam) {
+        const [afterKey, beforeKey] = field.apiParam.split(',').map((s) => s.trim())
+        if (Array.isArray(val) && val.length === 2) {
+          if (val[0]) params[afterKey] = new Date(val[0]).toISOString()
+          if (val[1]) params[beforeKey] = new Date(val[1]).toISOString()
+        }
+      } else if (field.type === 'multi-select' && Array.isArray(val)) {
+        if (val.length > 0) {
+          params[field.apiParam ?? field.key] = val.join(',')
+        }
+      } else {
+        params[field.apiParam ?? field.key] = String(val)
+      }
+    }
+
+    // Sort
+    params.sort_by = sort.value.field
+    params.sort_order = sort.value.order
+
+    return params
+  })
+
+  return {
+    filters,
+    sort,
+    visibleColumns,
+    apiParams,
+    addFilter,
+    removeFilter,
+    clearAllFilters,
+    setSort,
+    resetSort,
+    toggleColumn,
+    resetColumns,
+    activeFilterCount,
+    hasActiveFilters,
+  }
+}

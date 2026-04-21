@@ -1,7 +1,7 @@
 [project]
-name = "gitlab-issues-to-mr"
+name = "codify"
 version = "0.1.0"
-description = "GitLab Issue to MR Bot - AI-powered code generation from issues"
+description = "Codify - AI-powered code generation from issues"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -26,6 +26,12 @@ build-backend = "setuptools.build_meta"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow-running (use -m 'not slow' to skip)",
+]
+filterwarnings = [
+    "ignore:datetime.datetime.utcnow:DeprecationWarning:sqlalchemy",
+]
 
 [tool.ruff]
 line-length = 100

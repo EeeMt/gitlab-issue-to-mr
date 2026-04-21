@@ -4,6 +4,7 @@
 import os
 import sys
 import unittest
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -14,7 +15,9 @@ from app.runtime_config import (
     _deserialize_runtime_value,
     _serialize_runtime_value,
     load_runtime_config_from_db,
+    refresh_runtime_config_if_stale,
     reset_all_runtime_config_overrides,
+    reset_runtime_config_sync_state,
     save_runtime_config_override,
 )
 
@@ -24,9 +27,11 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
         self._original_config_encryption_key = os.environ.get("CONFIG_ENCRYPTION_KEY")
         os.environ["CONFIG_ENCRYPTION_KEY"] = "unit-test-config-key"
         get_settings.cache_clear()
+        reset_runtime_config_sync_state()
 
     def tearDown(self) -> None:
         reset_runtime_config()
+        reset_runtime_config_sync_state()
         if self._original_config_encryption_key is None:
             os.environ.pop("CONFIG_ENCRYPTION_KEY", None)
         else:
@@ -139,7 +144,7 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
         set_runtime_config({
             "oidc_enabled": True,
             "oidc_issuer_url": "https://gitlab.example.com",
-            "oidc_client_id": "gimr",
+            "oidc_client_id": "codify",
             "oidc_client_secret": "stored-secret",
             "oidc_redirect_uri": "https://bot.example.com/api/auth/callback",
         })
@@ -160,6 +165,128 @@ class RuntimeConfigTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(existing.value, "600")
         self.assertEqual(existing.value_type, "int")
+        self.assertEqual(get_effective_settings().task_timeout, 600)
+
+    async def test_refresh_runtime_config_if_stale_skips_reload_when_timestamp_unchanged(self) -> None:
+        timestamp = datetime(2024, 1, 1, 12, 0, 0)
+
+        max_result_first = MagicMock()
+        max_result_first.one.return_value = (1, timestamp)
+        rows_result = MagicMock()
+        rows_result.scalars.return_value.all.return_value = [
+            SystemConfig(
+                key="max_concurrency",
+                value="4",
+                value_type="int",
+                updated_at=timestamp,
+            )
+        ]
+        max_result_second = MagicMock()
+        max_result_second.one.return_value = (1, timestamp)
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[max_result_first, rows_result, max_result_second])
+
+        refreshed_first = await refresh_runtime_config_if_stale(mock_db, min_check_interval=0.0)
+        refreshed_second = await refresh_runtime_config_if_stale(mock_db, min_check_interval=0.0)
+
+        self.assertTrue(refreshed_first)
+        self.assertFalse(refreshed_second)
+        self.assertEqual(get_effective_settings().max_concurrency, 4)
+        self.assertEqual(mock_db.execute.await_count, 3)
+
+    async def test_refresh_runtime_config_if_stale_reloads_when_timestamp_changes(self) -> None:
+        timestamp_first = datetime(2024, 1, 1, 12, 0, 0)
+        timestamp_second = datetime(2024, 1, 1, 12, 0, 5)
+
+        max_result_first = MagicMock()
+        max_result_first.one.return_value = (1, timestamp_first)
+        rows_result_first = MagicMock()
+        rows_result_first.scalars.return_value.all.return_value = [
+            SystemConfig(
+                key="max_concurrency",
+                value="4",
+                value_type="int",
+                updated_at=timestamp_first,
+            )
+        ]
+        max_result_second = MagicMock()
+        max_result_second.one.return_value = (1, timestamp_second)
+        rows_result_second = MagicMock()
+        rows_result_second.scalars.return_value.all.return_value = [
+            SystemConfig(
+                key="max_concurrency",
+                value="6",
+                value_type="int",
+                updated_at=timestamp_second,
+            )
+        ]
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(
+            side_effect=[
+                max_result_first,
+                rows_result_first,
+                max_result_second,
+                rows_result_second,
+            ]
+        )
+
+        await refresh_runtime_config_if_stale(mock_db, min_check_interval=0.0)
+        refreshed_second = await refresh_runtime_config_if_stale(mock_db, min_check_interval=0.0)
+
+        self.assertTrue(refreshed_second)
+        self.assertEqual(get_effective_settings().max_concurrency, 6)
+
+    async def test_refresh_runtime_config_if_stale_reloads_when_row_count_changes(self) -> None:
+        timestamp = datetime(2024, 1, 1, 12, 0, 5)
+
+        max_result_first = MagicMock()
+        max_result_first.one.return_value = (2, timestamp)
+        rows_result_first = MagicMock()
+        rows_result_first.scalars.return_value.all.return_value = [
+            SystemConfig(
+                key="max_concurrency",
+                value="4",
+                value_type="int",
+                updated_at=datetime(2024, 1, 1, 12, 0, 0),
+            ),
+            SystemConfig(
+                key="task_timeout",
+                value="600",
+                value_type="int",
+                updated_at=timestamp,
+            ),
+        ]
+        max_result_second = MagicMock()
+        max_result_second.one.return_value = (1, timestamp)
+        rows_result_second = MagicMock()
+        rows_result_second.scalars.return_value.all.return_value = [
+            SystemConfig(
+                key="task_timeout",
+                value="600",
+                value_type="int",
+                updated_at=timestamp,
+            )
+        ]
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(
+            side_effect=[
+                max_result_first,
+                rows_result_first,
+                max_result_second,
+                rows_result_second,
+            ]
+        )
+
+        await refresh_runtime_config_if_stale(mock_db, min_check_interval=0.0)
+        self.assertEqual(get_effective_settings().max_concurrency, 4)
+
+        refreshed_second = await refresh_runtime_config_if_stale(mock_db, min_check_interval=0.0)
+
+        self.assertTrue(refreshed_second)
+        self.assertEqual(get_effective_settings().max_concurrency, get_settings().max_concurrency)
         self.assertEqual(get_effective_settings().task_timeout, 600)
 
     async def test_reset_all_runtime_config_overrides_clears_cache(self) -> None:

@@ -9,7 +9,7 @@ from urllib.parse import urlsplit, urlunsplit
 import gitlab
 import httpx
 from gitlab import Gitlab
-from gitlab.exceptions import GitlabGetError
+from gitlab.exceptions import GitlabCreateError, GitlabGetError
 from gitlab.v4.objects import MergeRequest, Project
 
 from app.config import Settings, get_effective_settings
@@ -41,8 +41,57 @@ class GitLabClient:
             self.base_url,
             private_token=self.private_token,
             ssl_verify=get_ssl_verify(self.settings),
+            keep_base_url=True,
         )
         logger.info(f"GitLab client initialized: {self.base_url}")
+
+    def create_sudo_gl(self, gitlab_user_id: int) -> Gitlab:
+        """Create a Gitlab instance with admin token + sudo for impersonation.
+
+        Args:
+            gitlab_user_id: The GitLab user ID to impersonate.
+
+        Returns:
+            A Gitlab instance configured with sudo.
+
+        Raises:
+            ValueError: If gitlab_admin_token is not configured.
+        """
+        admin_token = self.settings.gitlab_admin_token.strip() if self.settings.gitlab_admin_token else ""
+        if not admin_token:
+            raise ValueError("gitlab_admin_token is required for sudo operations")
+        gl = gitlab.Gitlab(
+            self.base_url,
+            private_token=admin_token,
+            ssl_verify=get_ssl_verify(self.settings),
+            keep_base_url=True,
+        )
+        gl.headers["Sudo"] = str(gitlab_user_id)
+        return gl
+
+    def ensure_project_label(self, project_id: int, label_name: str, color: str) -> None:
+        """Ensure a label exists in the project, creating it if necessary.
+
+        Uses the bot token (not sudo) to ensure label exists regardless of
+        impersonated user's permissions.
+
+        Args:
+            project_id: GitLab project ID
+            label_name: Label name (e.g., "Codify")
+            color: Label color hex (e.g., "#6699cc")
+        """
+        project = self.get_project(project_id)
+        try:
+            project.labels.get(label_name)
+        except GitlabGetError:
+            try:
+                project.labels.create({"name": label_name, "color": color})
+                logger.info(f"Created label '{label_name}' in project {project_id}")
+            except GitlabCreateError:
+                # Race condition: another task created the label between our check and create
+                logger.debug(f"Label '{label_name}' was created concurrently in project {project_id}")
+            except Exception as e:
+                logger.warning(f"Failed to create label '{label_name}' in project {project_id}: {e}")
 
     @staticmethod
     def _normalize_hook_url(url: str) -> str:
@@ -197,7 +246,7 @@ class GitLabClient:
             "issue_iid": getattr(mr, 'issue_iid', None),
         }
 
-    def get_merge_request_stats(
+    async def get_merge_request_stats(
         self, project_id: int, mr_iid: int
     ) -> Optional[dict]:
         """Get merge request change statistics.
@@ -214,13 +263,12 @@ class GitLabClient:
             deletions = 0
 
             # Use GitLab API directly via HTTP request
-            import requests
             url = f"{self.base_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/changes"
-            response = requests.get(
-                url,
-                headers={"PRIVATE-TOKEN": self.private_token},
-                timeout=30
-            )
+            async with httpx.AsyncClient(timeout=30.0, verify=get_ssl_verify()) as client:
+                response = await client.get(
+                    url,
+                    headers={"PRIVATE-TOKEN": self.private_token},
+                )
             response.raise_for_status()
             data = response.json()
 
@@ -386,12 +434,12 @@ class GitLabClient:
             List of branch dicts with name
         """
         logger.info(f"Fetching branches for project: {project_id}")
-        # Use http_list with iterator to get all branches
-        # The correct endpoint is /projects/:id/repository/branches
-        all_branches = list(self.gl.http_list(
+        # Use http_list with get_all=True to ensure all pages are fetched
+        all_branches = self.gl.http_list(
             f"/projects/{project_id}/repository/branches",
-            per_page=100
-        ))
+            per_page=100,
+            get_all=True,
+        )
         return [{"name": b["name"]} for b in all_branches]
 
     def get_project_hooks(self, project_id: int) -> list[dict[str, Any]]:
@@ -413,7 +461,7 @@ class GitLabClient:
             "enable_ssl_verification": True,
             "note_events": True,
             "issues_events": False,
-            "merge_requests_events": False,
+            "merge_requests_events": True,
             "push_events": False,
             "tag_push_events": False,
             "job_events": False,
@@ -459,14 +507,15 @@ class GitLabClient:
 
 # Singleton instance
 _gitlab_client: Optional[GitLabClient] = None
-_gitlab_client_config: Optional[tuple[str, str]] = None
+_gitlab_client_config: Optional[tuple[str, str, str]] = None
 
 
-def _build_gitlab_client_config_snapshot(settings: Optional[Settings] = None) -> tuple[str, str]:
+def _build_gitlab_client_config_snapshot(settings: Optional[Settings] = None) -> tuple[str, str, str]:
     active_settings = settings or get_effective_settings()
     return (
         active_settings.gitlab_url.strip(),
         active_settings.gitlab_bot_token,
+        active_settings.gitlab_admin_token or "",
     )
 
 

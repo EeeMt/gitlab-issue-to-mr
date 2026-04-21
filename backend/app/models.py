@@ -2,16 +2,25 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Optional, List
 
 from sqlalchemy import Boolean, DateTime, Enum as SQLEnum, ForeignKey, Index, Integer, JSON, String, Text
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
     """Base class for all database models."""
 
     pass
+
+
+class IssueStatus(str, Enum):
+    """Issue status enumeration."""
+
+    OPEN = "open"
+    IN_PROGRESS = "in_progress"
+    IN_REVIEW = "in_review"
+    CLOSED = "closed"
 
 
 class TaskStatus(str, Enum):
@@ -32,21 +41,93 @@ task_status_enum = SQLEnum(
 )
 
 
+class Issue(Base):
+    """Issue model — requirement container that groups Tasks. One Issue = one branch + one MR."""
+
+    __tablename__ = "issues"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(512), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), default=IssueStatus.OPEN.value, nullable=False)
+    closed_via: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+
+    # Branch & MR (promoted from Task)
+    branch_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    base_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    target_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    merge_request_iid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    merge_request_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+
+    # Claude session persistence
+    claude_session_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    session_storage_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+
+    # Creator
+    initiator_user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    initiator_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Relationships
+    tasks: Mapped[List["Task"]] = relationship("Task", back_populates="issue", order_by="Task.created_at")
+
+    __table_args__ = (
+        Index("ix_issues_status_created", "status", "created_at"),
+        Index("ix_issues_project_status", "project_id", "status"),
+    )
+
+
+class AIProvider(Base):
+    """Named AI provider configuration."""
+
+    __tablename__ = "ai_providers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    base_url: Mapped[str] = mapped_column(Text, nullable=False)
+    api_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    max_turns: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
+    system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    tasks: Mapped[List["Task"]] = relationship("Task", back_populates="provider")
+
+
 class Task(Base):
-    """Task model for storing AI code generation tasks."""
+    """Task model — one execution unit (one `claude -p` call). Belongs to an Issue."""
 
     __tablename__ = "tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
-    # GitLab identifiers
+    # Parent issue
+    issue_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("issues.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    issue_iid: Mapped[int] = mapped_column(Integer, nullable=True)
-    issue_id: Mapped[int] = mapped_column(Integer, nullable=True)
-    note_id: Mapped[int] = mapped_column(Integer, nullable=True, unique=True)
 
-    # Manual task flag
-    is_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # AI Provider
+    provider_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("ai_providers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     # Task details
     user_prompt: Mapped[str] = mapped_column(Text, nullable=False)
@@ -56,11 +137,11 @@ class Task(Base):
     initiator_gitlab_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     initiator_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
 
-    # Branch and MR info
-    branch_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    base_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    merge_request_iid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    merge_request_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    # Retry tracking
+    is_retry: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    retry_source_task_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("tasks.id"), nullable=True
+    )
 
     # Status
     status: Mapped[TaskStatus] = mapped_column(
@@ -71,13 +152,10 @@ class Task(Base):
 
     # Scheduling
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    scheduled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    scheduled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
 
     # Container tracking
     container_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-
-    # Branch configuration
-    target_branch: Mapped[str] = mapped_column(String(255), nullable=False, default="main")
 
     # Results
     commit_sha: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
@@ -92,8 +170,11 @@ class Task(Base):
     input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
-    # Retry tracking
-    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # AI model used for this task (populated from CODIFY_SYSTEM_INIT marker)
+    model_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+
+    # MR title generated by AI post-execution (populated from CODIFY_MR_TITLE marker)
+    merge_request_title: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -105,11 +186,18 @@ class Task(Base):
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    # Relationships
+    issue: Mapped[Optional["Issue"]] = relationship("Issue", back_populates="tasks")
+    retry_source: Mapped[Optional["Task"]] = relationship(
+        "Task", remote_side="Task.id", foreign_keys=[retry_source_task_id]
+    )
+    provider: Mapped[Optional["AIProvider"]] = relationship("AIProvider", back_populates="tasks")
+
     # Indexes for querying tasks
     __table_args__ = (
         Index("ix_tasks_status_created", "status", "created_at"),
         Index("ix_tasks_status_priority", "status", "priority", "scheduled_at"),
-        Index("ix_tasks_project_issue", "project_id", "issue_iid"),
+        Index("ix_tasks_issue_id_status", "issue_id", "status"),
         Index("ix_tasks_created_at_project", "created_at", "project_id"),
         Index("ix_tasks_created_at_status", "created_at", "status"),
     )
@@ -130,6 +218,11 @@ class TaskLog(Base):
     # Log content
     log_level: Mapped[str] = mapped_column(String(20), nullable=False, default="INFO")
     message: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Structured log support: log_type distinguishes plain output from structured entries.
+    # 'tool_calls_json' entries store a JSON array of {name, input, output, error} in log_metadata.
+    log_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    log_metadata: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Timestamp
     created_at: Mapped[datetime] = mapped_column(
@@ -192,12 +285,10 @@ class MattermostNotificationProfile(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     target_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    team_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    channel_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    channel_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     mention_in_channel: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     event_types_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     field_keys_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    send_for_manual_tasks: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow
     )
@@ -342,4 +433,32 @@ class SystemBootstrap(Base):
     initialized_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow
+    )
+
+
+class WebhookEvent(Base):
+    """Log entry for a received GitLab webhook event."""
+
+    __tablename__ = "webhook_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    event_action: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    merge_request_iid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    issue_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("issues.id", ondelete="SET NULL"), nullable=True
+    )
+    source_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    result: Mapped[str] = mapped_column(String(50), nullable=False)
+    result_detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    payload_summary: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+
+    issue: Mapped[Optional["Issue"]] = relationship("Issue")
+
+    __table_args__ = (
+        Index("ix_webhook_events_project_created", "project_id", "created_at"),
     )

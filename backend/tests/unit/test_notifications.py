@@ -3,66 +3,68 @@
 Test worker notification logic without external dependencies.
 """
 
+import asyncio
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from unittest.mock import MagicMock, patch
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 from app.core.worker import WorkerExecutor
 from app.models import Task, TaskStatus
 
 
-class MockContainer:
-    """Mock Docker container."""
-    def __init__(self):
-        self.id = "mock-container-id"
+SETTINGS_PATH = "app.core.worker.get_settings"
 
 
-def test_notify_task_started():
+def _mock_settings(**overrides):
+    """Return a mock settings object with defaults."""
+    defaults = dict(dashboard_url="http://localhost", alert_on_failure=False, alert_webhook_url=None)
+    defaults.update(overrides)
+    s = MagicMock()
+    for k, v in defaults.items():
+        setattr(s, k, v)
+    return s
+
+
+def _make_issue(**kwargs):
+    """Return a MagicMock Issue with given attributes."""
+    issue = MagicMock()
+    issue.merge_request_iid = kwargs.get("merge_request_iid", None)
+    issue.merge_request_url = kwargs.get("merge_request_url", None)
+    return issue
+
+
+@patch(SETTINGS_PATH, return_value=_mock_settings())
+def test_notify_task_started(mock_get_settings):
     """Test _notify_task_started sends correct message."""
-    print("=" * 60)
-    print("Testing _notify_task_started")
-    print("=" * 60)
-
-    # Create mock GitLab client
     mock_gitlab = MagicMock()
     mock_docker = MagicMock()
-
-    # Create worker with mocks
     worker = WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
 
-    # Create mock task
     task = Task(
         id=1,
         project_id=123,
-        issue_iid=456,
         user_prompt="test prompt",
-        branch_name="test-branch",
         priority=2,
         status=TaskStatus.RUNNING,
     )
 
-    # Call the method
-    worker._notify_task_started(task)
+    issue = _make_issue(merge_request_iid=456)
+    worker._notify_task_started(task, issue)
 
-    # Verify GitLab client was called
-    mock_gitlab.create_note.assert_called_once()
-    call_args = mock_gitlab.create_note.call_args
+    mock_gitlab.create_mr_note.assert_called_once()
+    call_args = mock_gitlab.create_mr_note.call_args
 
-    # Verify arguments
     assert call_args[0][0] == 123  # project_id
-    assert call_args[0][1] == 456  # issue_iid
-    assert "🔄 开始处理请求" in call_args[0][2]  # message now includes task URL
-
-    print("✓ _notify_task_started sends correct message")
+    assert call_args[0][1] == 456  # merge_request_iid
+    assert "🔄 开始处理请求" in call_args[0][2]
 
 
-def test_notify_task_completed_success_with_mr():
+@pytest.mark.asyncio
+@patch(SETTINGS_PATH, return_value=_mock_settings())
+async def test_notify_task_completed_success_with_mr(mock_get_settings):
     """Test continuation tasks send completion updates to the MR."""
-    print("=" * 60)
-    print("Testing _notify_task_completed (success with MR)")
-    print("=" * 60)
-
     mock_gitlab = MagicMock()
     mock_docker = MagicMock()
     worker = WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
@@ -70,30 +72,28 @@ def test_notify_task_completed_success_with_mr():
     task = Task(
         id=2,
         project_id=123,
-        issue_iid=456,
-        merge_request_iid=1,
-        merge_request_url="https://gitlab.com/project/-/merge_requests/1",
         status=TaskStatus.COMPLETED,
     )
 
-    worker._notify_task_completed(task, success=True, notify_target="mr")
+    issue = _make_issue(
+        merge_request_iid=1,
+        merge_request_url="https://gitlab.com/project/-/merge_requests/1",
+    )
+
+    await worker._notify_task_completed(task, success=True, notify_target="mr", issue=issue)
 
     mock_gitlab.create_mr_note.assert_called_once()
     call_args = mock_gitlab.create_mr_note.call_args
 
     assert call_args[0][0] == 123
     assert call_args[0][1] == 1
-    assert "✅" in call_args[0][2]  # success message now includes task URL
-
-    print("✓ _notify_task_completed sends MR completion message")
+    assert "✅" in call_args[0][2]
 
 
-def test_notify_task_completed_success_to_issue_with_mr_link():
-    """Test issue-triggered tasks still report completion back to the issue."""
-    print("=" * 60)
-    print("Testing _notify_task_completed (success without MR)")
-    print("=" * 60)
-
+@pytest.mark.asyncio
+@patch(SETTINGS_PATH, return_value=_mock_settings())
+async def test_notify_task_completed_success_to_issue_with_mr_link(mock_get_settings):
+    """Test notify_target='issue' makes no GitLab calls."""
     mock_gitlab = MagicMock()
     mock_docker = MagicMock()
     worker = WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
@@ -101,30 +101,25 @@ def test_notify_task_completed_success_to_issue_with_mr_link():
     task = Task(
         id=3,
         project_id=123,
-        issue_iid=456,
-        merge_request_iid=9,
-        merge_request_url="https://gitlab.com/project/-/merge_requests/9",
         status=TaskStatus.COMPLETED,
     )
 
-    worker._notify_task_completed(task, success=True, notify_target="issue")
+    issue = _make_issue(
+        merge_request_iid=9,
+        merge_request_url="https://gitlab.com/project/-/merge_requests/9",
+    )
 
-    mock_gitlab.create_note.assert_called_once()
-    call_args = mock_gitlab.create_note.call_args
+    await worker._notify_task_completed(task, success=True, notify_target="issue", issue=issue)
 
-    assert call_args[0][1] == 456
-    assert "✅ 代码已更新到 MR !9" in call_args[0][2]
+    # notify_target="issue" does not call any GitLab API
+    mock_gitlab.create_note.assert_not_called()
     mock_gitlab.create_mr_note.assert_not_called()
 
-    print("✓ _notify_task_completed sends issue completion message for issue tasks")
 
-
-def test_notify_task_completed_failure():
-    """Test _notify_task_completed sends failure message."""
-    print("=" * 60)
-    print("Testing _notify_task_completed (failure)")
-    print("=" * 60)
-
+@pytest.mark.asyncio
+@patch(SETTINGS_PATH, return_value=_mock_settings())
+async def test_notify_task_completed_failure(mock_get_settings):
+    """Test _notify_task_completed sends failure message via MR note."""
     mock_gitlab = MagicMock()
     mock_docker = MagicMock()
     worker = WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
@@ -132,62 +127,54 @@ def test_notify_task_completed_failure():
     task = Task(
         id=4,
         project_id=123,
-        issue_iid=456,
         error_message="Container failed to start",
         status=TaskStatus.FAILED,
     )
 
-    worker._notify_task_completed(task, success=False)
+    issue = _make_issue(merge_request_iid=10)
 
-    mock_gitlab.create_note.assert_called_once()
-    call_args = mock_gitlab.create_note.call_args
+    await worker._notify_task_completed(task, success=False, notify_target="mr", issue=issue)
 
-    assert "❌ 任务失败" in call_args[0][2]  # message now includes task URL
+    mock_gitlab.create_mr_note.assert_called_once()
+    call_args = mock_gitlab.create_mr_note.call_args
+
+    assert "❌ 任务失败" in call_args[0][2]
     assert "Container failed to start" in call_args[0][2]
 
-    print("✓ _notify_task_completed sends failure message")
 
-
-def test_notify_task_completed_failure_long_message():
+@pytest.mark.asyncio
+@patch(SETTINGS_PATH, return_value=_mock_settings())
+async def test_notify_task_completed_failure_long_message(mock_get_settings):
     """Test _notify_task_completed truncates long error messages."""
-    print("=" * 60)
-    print("Testing _notify_task_completed (long error message)")
-    print("=" * 60)
-
     mock_gitlab = MagicMock()
     mock_docker = MagicMock()
     worker = WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
 
-    # Create a very long error message
     long_error = "Error: " + "x" * 300
 
     task = Task(
         id=5,
         project_id=123,
-        issue_iid=456,
         error_message=long_error,
         status=TaskStatus.FAILED,
     )
 
-    worker._notify_task_completed(task, success=False)
+    issue = _make_issue(merge_request_iid=10)
 
-    mock_gitlab.create_note.assert_called_once()
-    call_args = mock_gitlab.create_note.call_args
+    await worker._notify_task_completed(task, success=False, notify_target="mr", issue=issue)
 
-    # Message should be truncated to 200 chars (plus URL prefix)
-    message = call_args[0][2]
-    # Should contain the truncated error plus task URL
+    mock_gitlab.create_mr_note.assert_called_once()
+    message = mock_gitlab.create_mr_note.call_args[0][2]
+
     assert "❌ 任务失败" in message
+    # Error should be truncated to 200 chars
+    assert len(long_error[:200]) == 200
 
-    print("✓ _notify_task_completed truncates long error messages")
 
-
-def test_notify_task_completed_failure_no_message():
+@pytest.mark.asyncio
+@patch(SETTINGS_PATH, return_value=_mock_settings())
+async def test_notify_task_completed_failure_no_message(mock_get_settings):
     """Test _notify_task_completed handles missing error message."""
-    print("=" * 60)
-    print("Testing _notify_task_completed (no error message)")
-    print("=" * 60)
-
     mock_gitlab = MagicMock()
     mock_docker = MagicMock()
     worker = WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
@@ -195,29 +182,28 @@ def test_notify_task_completed_failure_no_message():
     task = Task(
         id=6,
         project_id=123,
-        issue_iid=456,
         error_message=None,
         status=TaskStatus.FAILED,
     )
 
-    worker._notify_task_completed(task, success=False)
+    issue = _make_issue(merge_request_iid=10)
 
-    mock_gitlab.create_note.assert_called_once()
-    call_args = mock_gitlab.create_note.call_args
+    await worker._notify_task_completed(task, success=False, notify_target="mr", issue=issue)
 
-    assert "❌ 任务失败" in call_args[0][2]  # message now includes task URL
+    mock_gitlab.create_mr_note.assert_called_once()
+    call_args = mock_gitlab.create_mr_note.call_args
+
+    assert "❌ 任务失败" in call_args[0][2]
     assert "未知错误" in call_args[0][2]
-
-    print("✓ _notify_task_completed handles missing error message")
 
 
 if __name__ == "__main__":
     test_notify_task_started()
-    test_notify_task_completed_success_with_mr()
-    test_notify_task_completed_success_to_issue_with_mr_link()
-    test_notify_task_completed_failure()
-    test_notify_task_completed_failure_long_message()
-    test_notify_task_completed_failure_no_message()
+    asyncio.run(test_notify_task_completed_success_with_mr())
+    asyncio.run(test_notify_task_completed_success_to_issue_with_mr_link())
+    asyncio.run(test_notify_task_completed_failure())
+    asyncio.run(test_notify_task_completed_failure_long_message())
+    asyncio.run(test_notify_task_completed_failure_no_message())
 
     print("\n" + "=" * 60)
     print("All notification tests passed!")

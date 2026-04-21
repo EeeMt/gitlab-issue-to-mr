@@ -14,13 +14,16 @@ USER_PROMPT="${USER_PROMPT:?Missing USER_PROMPT}"
 # Optional environment variables
 # ISSUE_IID - required for webhook-triggered tasks, optional for manual tasks
 ISSUE_IID="${ISSUE_IID:-}"
+ISSUE_ID="${ISSUE_ID:-}"
+ISSUE_TITLE="${ISSUE_TITLE:-}"
 # BASE_BRANCH - base branch to create new branch from (defaults to TARGET_BRANCH if not set)
 BASE_BRANCH="${BASE_BRANCH:-}"
-TARGET_BRANCH="${TARGET_BRANCH:-main}"
+TARGET_BRANCH="${TARGET_BRANCH:-}"
 
 ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-http://localhost:11434/v1}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}"
+APPEND_SYSTEM_PROMPT="${APPEND_SYSTEM_PROMPT:-}"
 
 echo "========================================"
 echo "GitLab Issue to MR Worker"
@@ -32,19 +35,15 @@ echo "MR IID:       ${MR_IID:-N/A}"
 echo "Task ID:      ${TASK_ID:-N/A}"
 echo "Branch:       ${BRANCH_NAME}"
 echo "Base Branch:  ${BASE_BRANCH:-${TARGET_BRANCH}}"
-echo "Target:       ${TARGET_BRANCH}"
+echo "Target:       ${TARGET_BRANCH:-N/A (no-MR mode)}"
 echo "----------------------------------------"
 echo "Anthropic URL:  ${ANTHROPIC_BASE_URL}"
 echo "Model:          ${ANTHROPIC_MODEL}"
 echo "Max Turns:      ${CLAUDE_MAX_TURNS:-20}"
 echo "API Key set:    $([ -n "$ANTHROPIC_API_KEY" ] && echo 'yes' || echo 'no')"
+echo "System Prompt:  $([ -n "$APPEND_SYSTEM_PROMPT" ] && echo "set (${#APPEND_SYSTEM_PROMPT} chars)" || echo 'none')"
 echo "GitLab Token:   $([ -n "$GITLAB_TOKEN" ] && echo 'set' || echo 'missing')"
 echo "========================================"
-
-# Set BASE_BRANCH to TARGET_BRANCH if not explicitly set
-if [ -z "${BASE_BRANCH}" ]; then
-    BASE_BRANCH="${TARGET_BRANCH}"
-fi
 
 # Extract hostname from GITLAB_URL for git operations
 GITLAB_HOST=$(echo "${GITLAB_URL}" | sed 's|https://||' | sed 's|http://||')
@@ -55,6 +54,17 @@ GITLAB_API_RESPONSE=$(curl -s -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
     "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}")
 GIT_REPO_URL=$(echo "${GITLAB_API_RESPONSE}" | grep -o '"http_url_to_repo":"[^"]*"' | cut -d'"' -f4)
 PROJECT_PATH=$(echo "${GITLAB_API_RESPONSE}" | grep -o '"path_with_namespace":"[^"]*"' | cut -d'"' -f4)
+DEFAULT_BRANCH=$(echo "${GITLAB_API_RESPONSE}" | grep -o '"default_branch":"[^"]*"' | cut -d'"' -f4)
+
+# Set BASE_BRANCH: explicit > TARGET_BRANCH > project default branch (now that DEFAULT_BRANCH is known)
+if [ -z "${BASE_BRANCH}" ]; then
+    if [ -n "${TARGET_BRANCH}" ]; then
+        BASE_BRANCH="${TARGET_BRANCH}"
+    else
+        BASE_BRANCH="${DEFAULT_BRANCH:-main}"
+        echo "No TARGET_BRANCH set (no-MR mode); using default branch '${BASE_BRANCH}' as base"
+    fi
+fi
 
 # Fallback to constructed URL if API fails
 if [ -z "${PROJECT_PATH}" ] && [ -n "${GIT_REPO_URL}" ]; then
@@ -117,8 +127,8 @@ git clone "${GIT_REPO_URL}" /workspace
 cd /workspace
 
 # Configure git
-git config --global user.email "bot@gimr.local"
-git config --global user.name "GIMR Bot"
+git config --global user.email "bot@codify.local"
+git config --global user.name "Codify Bot"
 git config --global --add safe.directory /workspace
 
 # Checkout/create branch
@@ -198,10 +208,11 @@ update_mr_description() {
 
 build_running_mr_description() {
     cat <<EOF
-## 🚀 AI 正在执行
+## ${ISSUE_TITLE:-AI 正在执行}
 
-### 需求
-${USER_PROMPT}
+### 🔄 任务 #${TASK_ID} 正在执行
+
+**提示:** ${USER_PROMPT}
 
 ---
 
@@ -344,12 +355,14 @@ EOF
 build_mr_title_prompt() {
     local changed_files_text="$1"
     cat <<EOF
-请根据下面的需求和最终改动，生成一个简洁明确的 GitLab Merge Request 标题。
+直接输出一个简洁的 GitLab Merge Request 标题。
+
+重要：直接输出标题文本本身，不要有任何前言、解释或说明。第一个字就是标题内容。
 
 要求：
-1. 只输出标题文本，不要引号、编号、前缀、解释或 markdown。
-2. 中文优先，尽量控制在 30 个字以内。
-3. 体现主要结果，不要写“实现功能”“更新代码”这类空泛表述。
+1. 只输出标题，不要引号、编号、前缀或 markdown。
+2. 中文优先，控制在 30 字以内。
+3. 体现主要结果。
 
 需求：
 ${USER_PROMPT}
@@ -364,16 +377,18 @@ build_commit_message_prompt() {
     local diff_stats_text="$2"
     local summary_text="$3"
     cat <<EOF
-请根据下面的信息，生成一条符合 Conventional Commits 规范的 git commit message。
+根据下面的信息，直接输出一条 Conventional Commits 规范的 git commit message。
 
-要求：
+重要：直接输出 commit message 本身，第一个字符必须是 type（如 feat:、fix: 等），不要有任何前言、解释或说明文字。
+
+格式：
 1. 使用中文。
-2. 第一行必须使用 Conventional Commits 格式：<type>: <description>。
-3. type 从 feat、fix、refactor、docs、test、build、chore、ci 中选择最合适的一个；如果是新增可交付能力、初始化可运行项目、补充用户可见结果，优先使用 feat。
-4. description 简洁明确，尽量控制在 50 个字符内，最多不超过 72 个字符。
-5. 如果需要正文，subject 后空一行，再用 1-3 行简短说明“做了什么/为什么”。
+2. 第一行格式：<type>: <description>
+3. type 从 feat、fix、refactor、docs、test、build、chore、ci 中选择。
+4. description 简洁明确，控制在 50 字符内。
+5. 如需正文，subject 后空一行，用 1-3 行简短说明。
 6. 最后添加 footer：AI-Generated: true
-7. 不要使用 markdown、代码块、引号，也不要包含 Co-authored-by trailer，我会自行追加。
+7. 不要使用 markdown、代码块、引号，不要包含 Co-authored-by。
 
 用户需求：
 ${USER_PROMPT}
@@ -414,7 +429,24 @@ ${USER_PROMPT}
 EOF
 
 chmod 644 /tmp/claude_prompt.txt
-chown -R gimr:gimr /workspace /tmp/claude_prompt.txt
+chown -R codify:codify /workspace /tmp/claude_prompt.txt
+# Ensure session storage directory is writable by the codify user
+if [ -d /home/codify/.claude ]; then
+    chown -R codify:codify /home/codify/.claude
+fi
+
+# Restore .claude.json if missing (volume mount persists backups but not the config file)
+if [ ! -f /home/codify/.claude.json ]; then
+    LATEST_BACKUP=$(ls -t /home/codify/.claude/backups/.claude.json.backup.* 2>/dev/null | head -1)
+    if [ -n "$LATEST_BACKUP" ]; then
+        echo "Restoring .claude.json from backup: $LATEST_BACKUP"
+        cp "$LATEST_BACKUP" /home/codify/.claude.json
+    else
+        echo "Creating minimal .claude.json"
+        echo '{}' > /home/codify/.claude.json
+    fi
+    chown codify:codify /home/codify/.claude.json
+fi
 
 export ANTHROPIC_BASE_URL
 export ANTHROPIC_API_KEY
@@ -423,6 +455,7 @@ export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="${CLAUDE_CODE_DISABLE_NONESSENT
 export SANDBOX_MODE=1
 export CLAUDE_MAX_TURNS="${CLAUDE_MAX_TURNS:-20}"
 export CLAUDE_MODEL="${ANTHROPIC_MODEL}"
+export APPEND_SYSTEM_PROMPT
 FINAL_SUMMARY_CONTENT=""
 FINAL_CHANGED_FILES_TEXT=""
 FINAL_MR_TITLE=""
@@ -434,7 +467,7 @@ update_mr_description "$(build_running_mr_description)" || true
 
 echo "Starting Claude CLI (streaming mode)..."
 set +e
-env HOME=/home/gimr timeout 300 su -m -s /bin/bash gimr -c \
+env HOME=/home/codify timeout "${TASK_TIMEOUT:-1800}" su -m -s /bin/bash codify -c \
     'cd /workspace && export PATH="/usr/local/bin:/usr/bin:/bin:${JAVA_HOME}/bin" && /usr/local/bin/ci-claude.sh "$(cat /tmp/claude_prompt.txt)"' \
     > /tmp/claude_result.json
 SCRIPT_RESULT=$?
@@ -443,11 +476,8 @@ echo "Claude CLI exited with code: ${SCRIPT_RESULT}"
 
 RESULT=${SCRIPT_RESULT}
 
-if [ $RESULT -ne 0 ]; then
-    echo "Claude execution failed with exit code: ${RESULT}"
-    exit $RESULT
-fi
-
+# Always emit structured tool calls if the JSON file exists, even on failure.
+# This lets the frontend show a timeline of what was attempted before the failure.
 if [ -f /tmp/claude_result.json ] && [ -s /tmp/claude_result.json ]; then
     SUMMARY_CONTENT=$(jq -r '.result // ""' /tmp/claude_result.json 2>/dev/null || true)
     if [ ${#SUMMARY_CONTENT} -gt 45000 ]; then
@@ -459,7 +489,26 @@ if [ -f /tmp/claude_result.json ] && [ -s /tmp/claude_result.json ]; then
 
     # Emit machine-parseable usage stats for backend collection
     USAGE_JSON=$(jq -c '.usage // {}' /tmp/claude_result.json 2>/dev/null || echo '{}')
-    echo "GIMR_STATS:${USAGE_JSON}"
+    echo "CODIFY_STATS:${USAGE_JSON}"
+
+    # Emit structured tool calls for backend to store and frontend to render as timeline.
+    # Each tool output is truncated to 2000 chars to keep the payload manageable.
+    TOOL_CALLS_JSON=$(jq -c '[
+      .tool_calls[]? |
+      .output = ((.output // "") | if length > 2000 then .[:2000] + "…(truncated)" else . end)
+    ]' /tmp/claude_result.json 2>/dev/null || echo '[]')
+    echo "CODIFY_TOOL_CALLS:${TOOL_CALLS_JSON}"
+
+    # Extract and emit session ID for backend to store on the Issue
+    SESSION_ID=$(jq -r '.session_id // ""' /tmp/claude_result.json 2>/dev/null || echo '')
+    if [ -n "${SESSION_ID}" ]; then
+        echo "CODIFY_SESSION_ID:${SESSION_ID}"
+    fi
+fi
+
+if [ $RESULT -ne 0 ]; then
+    echo "Claude execution failed with exit code: ${RESULT}"
+    exit $RESULT
 fi
 
 # Now commit and push the changes
@@ -512,7 +561,7 @@ if [ -n "$CHANGES" ]; then
     TOTAL_CHANGES=$((ADDITIONS + DELETIONS))
 
     echo "Changes: +${ADDITIONS} -${DELETIONS} (${TOTAL_CHANGES} total)"
-    echo "GIMR_DIFF:+${ADDITIONS}-${DELETIONS}"
+    echo "CODIFY_DIFF:+${ADDITIONS}-${DELETIONS}"
 
     # Collect changed file lists from the staged diff before committing.
     NEW_FILES=""
@@ -544,15 +593,20 @@ if [ -n "$CHANGES" ]; then
     COMMIT_MESSAGE_PROMPT=$(build_commit_message_prompt "${CHANGED_FILES_TEXT}" "${COMMIT_DIFF_STATS}" "${FINAL_SUMMARY_CONTENT}")
     printf '%s\n' "${COMMIT_MESSAGE_PROMPT}" > /tmp/commit_message_prompt.txt
     chmod 644 /tmp/commit_message_prompt.txt
-    chown gimr:gimr /tmp/commit_message_prompt.txt
+    chown codify:codify /tmp/commit_message_prompt.txt
 
     set +e
-    GENERATED_COMMIT_MESSAGE=$(env HOME=/home/gimr timeout 60 su -m -s /bin/bash gimr -c '/usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" "$(cat /tmp/commit_message_prompt.txt)"' 2>/dev/null)
+    GENERATED_COMMIT_MESSAGE=$(env HOME=/home/codify timeout 60 su -m -s /bin/bash codify -c '/usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" "$(cat /tmp/commit_message_prompt.txt)"' 2>/dev/null)
     COMMIT_MESSAGE_RESULT=$?
     set -e
 
     if [ ${COMMIT_MESSAGE_RESULT} -eq 0 ]; then
         FINAL_COMMIT_MESSAGE=$(printf '%s\n' "${GENERATED_COMMIT_MESSAGE}" | sed 's/\r$//')
+        # Strip preamble: remove lines before the first conventional commit type
+        STRIPPED=$(printf '%s\n' "${FINAL_COMMIT_MESSAGE}" | sed -n '/^\(feat\|fix\|refactor\|docs\|test\|build\|chore\|ci\)[:(]/,$p')
+        if [ -n "${STRIPPED}" ]; then
+            FINAL_COMMIT_MESSAGE="${STRIPPED}"
+        fi
     fi
 
     if [ -z "${FINAL_COMMIT_MESSAGE}" ]; then
@@ -587,11 +641,14 @@ AI-Generated: true"
     # Get commit SHA
     COMMIT_SHA=$(git rev-parse HEAD)
     echo "Committed: ${COMMIT_SHA}"
+    echo "CODIFY_COMMIT_SHA:${COMMIT_SHA}"
 
-    # MR was already created by backend before worker started
-    # Just get the MR info if MR_IID was provided
+    # MR was already created by backend before worker started.
+    # In no-MR mode (TARGET_BRANCH is empty), skip all MR operations.
     MR_WEB_URL=""
-    if [ -n "${MR_IID}" ]; then
+    if [ -z "${TARGET_BRANCH:-}" ]; then
+        echo "No-MR mode: skipping MR lookup and update"
+    elif [ -n "${MR_IID}" ]; then
         echo "Using existing MR: !${MR_IID}"
         MR_WEB_URL=$(curl -s -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
             "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests/${MR_IID}" | \
@@ -610,19 +667,26 @@ AI-Generated: true"
         fi
     fi
 
-    if [ -z "$MR_WEB_URL" ]; then
-        MR_WEB_URL=$(cat /workspace/mr_response.json | grep -o '"web_url":"[^"]*"' | cut -d'"' -f4)
+    if [ -z "${TARGET_BRANCH:-}" ]; then
+        echo "No-MR mode: branch pushed, no MR created"
+    else
+        if [ -z "$MR_WEB_URL" ]; then
+            MR_WEB_URL=$(cat /workspace/mr_response.json 2>/dev/null | grep -o '"web_url":"[^"]*"' | cut -d'"' -f4)
+        fi
+        echo "MR: ${MR_WEB_URL:-none}"
     fi
-    echo "MR created: ${MR_WEB_URL}"
 
     if [ -n "${MR_IID}" ]; then
+        # MR title is managed by the backend (based on issue title).
+        # We only generate a title here for logging / CODIFY_MR_TITLE marker;
+        # we do NOT call update_mr to overwrite the MR title.
         TITLE_PROMPT=$(build_mr_title_prompt "${CHANGED_FILES_TEXT}")
         printf '%s\n' "${TITLE_PROMPT}" > /tmp/mr_title_prompt.txt
         chmod 644 /tmp/mr_title_prompt.txt
-        chown gimr:gimr /tmp/mr_title_prompt.txt
+        chown codify:codify /tmp/mr_title_prompt.txt
 
         set +e
-        GENERATED_MR_TITLE=$(env HOME=/home/gimr timeout 60 su -m -s /bin/bash gimr -c '/usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" "$(cat /tmp/mr_title_prompt.txt)"' 2>/dev/null)
+        GENERATED_MR_TITLE=$(env HOME=/home/codify timeout 60 su -m -s /bin/bash codify -c '/usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" "$(cat /tmp/mr_title_prompt.txt)"' 2>/dev/null)
         TITLE_RESULT=$?
         set -e
 
@@ -635,11 +699,7 @@ AI-Generated: true"
             FINAL_MR_TITLE="AI: ${USER_PROMPT:0:60}"
         fi
 
-        if [ -n "${FINAL_SUMMARY_CONTENT}" ]; then
-            update_mr "${FINAL_MR_TITLE}" "$(build_completed_mr_description "${FINAL_SUMMARY_CONTENT}" "${FINAL_CHANGED_FILES_TEXT}")" || true
-        else
-            update_mr "${FINAL_MR_TITLE}" "" || true
-        fi
+        echo "CODIFY_MR_TITLE:${FINAL_MR_TITLE}"
     fi
 
     echo "========================================"
@@ -647,5 +707,12 @@ AI-Generated: true"
     echo "========================================"
 else
     echo "No changes made by Claude CLI"
+    if [ -z "${TARGET_BRANCH:-}" ]; then
+        echo "No-MR mode: task completed without code changes"
+        echo "========================================"
+        echo "Task completed successfully!"
+        echo "========================================"
+        exit 0
+    fi
     exit 1
 fi

@@ -17,6 +17,7 @@ from app.config import get_effective_settings
 from app.core.gitlab_client import get_accessible_projects_for_oauth_token
 from app.core.oidc import exchange_refresh_token
 from app.core.session import update_session_gitlab_tokens
+from app.core.utcnow import utcnow
 from app.database import get_db
 from app.dependencies.auth import AuthContext, require_authenticated_context
 
@@ -145,10 +146,11 @@ async def require_project_access_scope(
                         status_code=status.HTTP_401_UNAUTHORIZED,
                         detail="GitLab login expired and refresh is unavailable. Please sign in again.",
                     ) from exc
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Failed to resolve GitLab project access for the current user.",
-            ) from exc
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Failed to resolve GitLab project access for the current user.",
+                ) from exc
         except httpx.HTTPError as exc:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
@@ -196,7 +198,7 @@ async def _refresh_auth_context_tokens(auth_context: AuthContext, db: AsyncSessi
                 auth_context.user.id,
                 exc.response.status_code,
             )
-            auth_context.session.revoked_at = datetime.utcnow()
+            auth_context.session.revoked_at = utcnow()
             await db.flush()
             _project_access_cache.pop(auth_context.session.id, None)
             return False
@@ -222,14 +224,14 @@ async def _refresh_auth_context_tokens(auth_context: AuthContext, db: AsyncSessi
             auth_context.session.id,
             auth_context.user.id,
         )
-        auth_context.session.revoked_at = datetime.utcnow()
+        auth_context.session.revoked_at = utcnow()
         await db.flush()
         _project_access_cache.pop(auth_context.session.id, None)
         return False
 
     refresh_token = tokens.get("refresh_token") or auth_context.gitlab_refresh_token
     max_expires_at = (
-        datetime.utcnow() + timedelta(seconds=int(tokens["expires_in"]))
+        utcnow() + timedelta(seconds=int(tokens["expires_in"]))
         if tokens.get("expires_in")
         else None
     )

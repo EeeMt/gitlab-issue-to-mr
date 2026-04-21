@@ -2,14 +2,15 @@
   <div class="analytics-page">
     <n-spin :show="initialLoading" :description="t('analytics.loading')">
       <n-space vertical :size="20">
-        <div class="analytics-page__hero">
-          <div>
-            <h2 class="analytics-page__title">{{ t('analytics.title') }}</h2>
-            <p class="analytics-page__subtitle">
-              {{ t('analytics.subtitle') }}
-            </p>
-          </div>
-          <n-space align="center" wrap class="analytics-page__controls">
+        <PageHeader
+          :title="t('analytics.title')"
+          :subtitle="t('analytics.subtitle')"
+          root-class="analytics-page__hero"
+          title-class="analytics-page__title"
+          subtitle-class="analytics-page__subtitle"
+          actions-class="analytics-page__controls"
+        >
+          <template #actions>
             <n-select
               v-model:value="windowDays"
               :options="windowOptions"
@@ -35,205 +36,497 @@
             <n-button @click="refresh" :loading="loading" :style="{ width: isMobile ? '100%' : undefined }">
               {{ t('common.refresh') }}
             </n-button>
-          </n-space>
-        </div>
+          </template>
+        </PageHeader>
 
         <n-alert type="info" :show-icon="false">
           {{ t('analytics.projectInfo') }}
         </n-alert>
 
-        <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 2 : 3" :x-gap="16" :y-gap="16">
-          <n-gi v-for="item in summaryItems" :key="item.label" class="analytics-grid-cell">
-            <n-card size="small" class="analytics-summary-card" :bordered="false">
-              <div class="analytics-summary-card__label">{{ item.label }}</div>
-              <div class="analytics-summary-card__value">{{ item.value }}</div>
-              <div v-if="item.note" class="analytics-summary-card__note">{{ item.note }}</div>
-            </n-card>
-          </n-gi>
-        </n-grid>
+        <n-tabs v-if="hasLoadedOnce" v-model:value="analyticsTab" type="line" size="large" class="analytics-top-tabs">
+          <n-tab-pane name="overview" :tab="t('analytics.overviewTab')">
+            <n-space vertical :size="16" data-testid="analytics-overview-panel">
+              <n-grid :cols="isMobile ? 2 : 3" :x-gap="16" :y-gap="16">
+                <n-gi v-for="item in summaryItems" :key="item.label" class="analytics-grid-cell">
+                  <SummaryCard
+                    :label="item.label"
+                    :value="item.value"
+                    :note="item.note"
+                    card-class="analytics-summary-card"
+                    label-class="analytics-summary-card__label"
+                    value-class="analytics-summary-card__value"
+                    note-class="analytics-summary-card__note"
+                  />
+                </n-gi>
+              </n-grid>
 
-        <n-space vertical :size="16">
-          <n-card class="analytics-card" :bordered="false">
-            <template #header>
-              <div class="analytics-card__header">
-                <div>
-                    <div class="analytics-card__title">{{ t('analytics.taskVolumeTrend') }}</div>
-                    <div class="analytics-card__subtitle">{{ t('analytics.taskVolumeTrendSubtitle') }}</div>
-                </div>
-              </div>
-            </template>
+              <n-space vertical :size="16" class="analytics-overview-sections" data-testid="analytics-overview-sections">
+                <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
+                <n-gi class="analytics-grid-cell">
+                  <n-card class="analytics-card analytics-card--stretch" :bordered="false" data-testid="analytics-issue-status-card">
+                    <template #header>
+                      <div class="analytics-card__header">
+                        <div>
+                          <div class="analytics-card__title">{{ t('analytics.issueStatusDistribution') }}</div>
+                          <div class="analytics-card__subtitle">{{ t('analytics.issueStatusDistributionSubtitle') }}</div>
+                        </div>
+                        <div class="analytics-card__header-actions analytics-card__header-actions--status">
+                          <div class="analytics-chart-toggle" role="tablist" :aria-label="t('analytics.issueStatusDistribution')">
+                            <button
+                              type="button"
+                              class="analytics-chart-toggle__button"
+                              :class="{ 'analytics-chart-toggle__button--active': issueStatusChartMode === 'bar' }"
+                              data-testid="issue-status-chart-mode-bar"
+                              :disabled="!hasIssueStatusData"
+                              @click="issueStatusChartMode = 'bar'"
+                            >
+                              {{ t('analytics.barChart') }}
+                            </button>
+                            <button
+                              type="button"
+                              class="analytics-chart-toggle__button"
+                              :class="{ 'analytics-chart-toggle__button--active': issueStatusChartMode === 'donut' }"
+                              data-testid="issue-status-chart-mode-donut"
+                              :disabled="!hasIssueStatusData"
+                              @click="issueStatusChartMode = 'donut'"
+                            >
+                              {{ t('analytics.donutChart') }}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
 
-            <div v-if="taskTrendBars.length" ref="taskChartRef" class="trend-chart-scroll">
-              <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
-                <div v-for="bar in taskTrendBars" :key="bar.key" class="trend-chart__item">
-                  <div class="trend-chart__count">{{ bar.displayValue }}</div>
-                  <div class="trend-chart__bar-wrap">
-                    <div class="trend-chart__bar" :style="{ height: `${bar.heightPercent}%` }" />
+                    <div class="analytics-status-card__body">
+                      <div v-if="!hasIssueStatusData" class="analytics-empty-state">
+                        <div class="analytics-empty-state__title">{{ t('analytics.issueStatusDistributionEmpty') }}</div>
+                      </div>
+                      <div v-else-if="issueStatusChartMode === 'bar'" class="status-chart status-chart--bar">
+                        <div v-for="row in issueStatusRows" :key="`issue-${row.status}`" class="status-chart__bar-row">
+                          <div class="status-chart__row-meta">
+                            <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                            <span class="status-chart__row-label">{{ row.label }}</span>
+                          </div>
+                          <div class="status-chart__bar-track">
+                            <div class="status-chart__bar-fill" :style="{ width: `${row.barWidthPercent}%`, background: row.color }" />
+                          </div>
+                          <div class="status-chart__row-value">{{ row.count }}</div>
+                          <div class="status-chart__row-share">{{ row.shareLabel }}</div>
+                        </div>
+                      </div>
+
+                      <div v-else-if="issueStatusChartMode === 'donut'" class="status-chart status-chart--donut">
+                        <div class="status-chart__donut-shell">
+                          <div class="status-chart__donut" :style="issueStatusDonutStyle">
+                            <div class="status-chart__donut-hole">
+                              <div class="status-chart__donut-total">{{ issueStatusTotal }}</div>
+                              <div class="status-chart__donut-total-label">{{ t('analytics.issues') }}</div>
+                            </div>
+                          </div>
+                        </div>
+                        <div class="status-chart__legend">
+                          <div v-for="row in issueStatusRows" :key="`issue-legend-${row.status}`" class="status-chart__legend-row">
+                            <div class="status-chart__row-meta">
+                              <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                              <span class="status-chart__row-label">{{ row.label }}</span>
+                            </div>
+                            <div class="status-chart__legend-values">
+                              <span class="status-chart__row-value">{{ row.count }}</span>
+                              <span class="status-chart__row-share">{{ row.shareLabel }}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </n-card>
+                </n-gi>
+
+                <n-gi class="analytics-grid-cell">
+                  <n-card class="analytics-card analytics-card--stretch" :bordered="false" data-testid="analytics-task-status-card">
+                    <template #header>
+                      <div class="analytics-card__header">
+                        <div>
+                          <div class="analytics-card__title">{{ t('analytics.taskStatusDistribution') }}</div>
+                          <div class="analytics-card__subtitle">{{ t('analytics.taskStatusDistributionSubtitle') }}</div>
+                        </div>
+                        <div class="analytics-card__header-actions analytics-card__header-actions--status">
+                          <div class="analytics-chart-toggle" role="tablist" :aria-label="t('analytics.taskStatusDistribution')">
+                            <button
+                              type="button"
+                              class="analytics-chart-toggle__button"
+                              :class="{ 'analytics-chart-toggle__button--active': taskStatusChartMode === 'bar' }"
+                              data-testid="task-status-chart-mode-bar"
+                              :disabled="!hasTaskStatusData"
+                              @click="taskStatusChartMode = 'bar'"
+                            >
+                              {{ t('analytics.barChart') }}
+                            </button>
+                            <button
+                              type="button"
+                              class="analytics-chart-toggle__button"
+                              :class="{ 'analytics-chart-toggle__button--active': taskStatusChartMode === 'donut' }"
+                              data-testid="task-status-chart-mode-donut"
+                              :disabled="!hasTaskStatusData"
+                              @click="taskStatusChartMode = 'donut'"
+                            >
+                              {{ t('analytics.donutChart') }}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+
+                    <div class="analytics-status-card__body">
+                      <div v-if="!hasTaskStatusData" class="analytics-empty-state">
+                        <div class="analytics-empty-state__title">{{ t('analytics.taskStatusDistributionEmpty') }}</div>
+                      </div>
+                      <div v-else-if="taskStatusChartMode === 'bar'" class="status-chart status-chart--bar">
+                        <div v-for="row in taskStatusRows" :key="`task-${row.status}`" class="status-chart__bar-row">
+                          <div class="status-chart__row-meta">
+                            <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                            <span class="status-chart__row-label">{{ row.label }}</span>
+                          </div>
+                          <div class="status-chart__bar-track">
+                            <div class="status-chart__bar-fill" :style="{ width: `${row.barWidthPercent}%`, background: row.color }" />
+                          </div>
+                          <div class="status-chart__row-value">{{ row.count }}</div>
+                          <div class="status-chart__row-share">{{ row.shareLabel }}</div>
+                        </div>
+                      </div>
+
+                      <div v-else-if="taskStatusChartMode === 'donut'" class="status-chart status-chart--donut">
+                        <div class="status-chart__donut-shell">
+                          <div class="status-chart__donut" :style="taskStatusDonutStyle">
+                            <div class="status-chart__donut-hole">
+                              <div class="status-chart__donut-total">{{ taskStatusTotal }}</div>
+                              <div class="status-chart__donut-total-label">{{ t('analytics.tasks') }}</div>
+                            </div>
+                          </div>
+                        </div>
+                        <div class="status-chart__legend">
+                          <div v-for="row in taskStatusRows" :key="`task-legend-${row.status}`" class="status-chart__legend-row">
+                            <div class="status-chart__row-meta">
+                              <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                              <span class="status-chart__row-label">{{ row.label }}</span>
+                            </div>
+                            <div class="status-chart__legend-values">
+                              <span class="status-chart__row-value">{{ row.count }}</span>
+                              <span class="status-chart__row-share">{{ row.shareLabel }}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </n-card>
+                </n-gi>
+              </n-grid>
+
+              <div class="analytics-overview-trend-section" data-testid="analytics-overview-trend-section">
+                <n-card class="analytics-card" :bordered="false" data-testid="analytics-trend-card">
+                <template #header>
+                  <div class="analytics-card__header">
+                    <div>
+                      <div class="analytics-card__title">{{ activeTrendConfig.title }}</div>
+                      <div class="analytics-card__subtitle">{{ activeTrendConfig.subtitle }}</div>
+                    </div>
+                    <div class="analytics-chart-toggle" role="tablist" :aria-label="t('analytics.taskVolumeTrend')">
+                      <button
+                        type="button"
+                        class="analytics-chart-toggle__button"
+                        :class="{ 'analytics-chart-toggle__button--active': selectedTrendMetric === 'tasks' }"
+                        data-testid="trend-metric-tasks"
+                        @click="selectedTrendMetric = 'tasks'"
+                      >
+                        {{ t('analytics.taskVolumeTrend') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="analytics-chart-toggle__button"
+                        :class="{ 'analytics-chart-toggle__button--active': selectedTrendMetric === 'changes' }"
+                        data-testid="trend-metric-changes"
+                        @click="selectedTrendMetric = 'changes'"
+                      >
+                        {{ t('analytics.changedLinesTrend') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="analytics-chart-toggle__button"
+                        :class="{ 'analytics-chart-toggle__button--active': selectedTrendMetric === 'duration' }"
+                        data-testid="trend-metric-duration"
+                        @click="selectedTrendMetric = 'duration'"
+                      >
+                        {{ t('analytics.executionDurationTrend') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="analytics-chart-toggle__button"
+                        :class="{ 'analytics-chart-toggle__button--active': selectedTrendMetric === 'tokens' }"
+                        data-testid="trend-metric-tokens"
+                        @click="selectedTrendMetric = 'tokens'"
+                      >
+                        {{ t('analytics.tokenTrend') }}
+                      </button>
+                    </div>
                   </div>
-                  <div class="trend-chart__label">{{ bar.label }}</div>
-                </div>
-              </div>
-            </div>
-          </n-card>
+                </template>
 
-          <n-card class="analytics-card" :bordered="false">
-            <template #header>
-              <div class="analytics-card__header">
-                <div>
-                    <div class="analytics-card__title">{{ t('analytics.changedLinesTrend') }}</div>
-                    <div class="analytics-card__subtitle">{{ t('analytics.changedLinesTrendSubtitle') }}</div>
-                </div>
-              </div>
-            </template>
-
-            <div v-if="changeTrendBars.length" ref="changeChartRef" class="trend-chart-scroll">
-              <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
-                <div v-for="bar in changeTrendBars" :key="bar.key" class="trend-chart__item">
-                  <div class="trend-chart__count">{{ bar.displayValue }}</div>
-                  <div class="trend-chart__bar-wrap">
-                    <div class="trend-chart__bar trend-chart__bar--secondary" :style="{ height: `${bar.heightPercent}%` }" />
-                  </div>
-                  <div class="trend-chart__label">{{ bar.label }}</div>
-                </div>
-              </div>
-            </div>
-          </n-card>
-
-          <n-card class="analytics-card" :bordered="false">
-            <template #header>
-              <div class="analytics-card__header">
-                <div>
-                    <div class="analytics-card__title">{{ t('analytics.executionDurationTrend') }}</div>
-                    <div class="analytics-card__subtitle">{{ t('analytics.executionDurationTrendSubtitle') }}</div>
-                </div>
-              </div>
-            </template>
-
-            <div v-if="durationTrendBars.length" ref="durationChartRef" class="trend-chart-scroll">
-              <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
-                <div v-for="bar in durationTrendBars" :key="bar.key" class="trend-chart__item">
-                  <div class="trend-chart__count">{{ bar.displayValue }}</div>
-                  <div class="trend-chart__bar-wrap">
-                    <div class="trend-chart__bar trend-chart__bar--accent" :style="{ height: `${bar.heightPercent}%` }" />
-                  </div>
-                  <div class="trend-chart__label">{{ bar.label }}</div>
-                </div>
-              </div>
-            </div>
-          </n-card>
-
-          <n-card class="analytics-card" :bordered="false">
-            <template #header>
-              <div class="analytics-card__header">
-                <div>
-                    <div class="analytics-card__title">{{ t('analytics.tokenTrend') }}</div>
-                    <div class="analytics-card__subtitle">{{ t('analytics.tokenTrendSubtitle') }}</div>
-                </div>
-              </div>
-            </template>
-
-            <div v-if="tokenTrendBars.length" ref="tokenChartRef" class="trend-chart-scroll">
-              <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
-                <div v-for="bar in tokenTrendBars" :key="bar.key" class="trend-chart__item">
-                  <div class="trend-chart__count">{{ bar.displayValue }}</div>
-                  <div class="trend-chart__bar-wrap">
-                    <div class="trend-chart__bar trend-chart__bar--token" :style="{ height: `${bar.heightPercent}%` }" />
-                  </div>
-                  <div class="trend-chart__label">{{ bar.label }}</div>
-                </div>
-              </div>
-            </div>
-          </n-card>
-        </n-space>
-
-        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
-          <n-gi class="analytics-grid-cell">
-            <n-card class="analytics-card analytics-card--stretch" :bordered="false">
-              <template #header>
-                <div class="analytics-card__header">
-                  <div>
-                      <div class="analytics-card__title">{{ t('analytics.byProject') }}</div>
-                      <div class="analytics-card__subtitle">{{ t('analytics.byProjectSubtitle') }}</div>
+                <div v-if="activeTrendConfig.bars.length" :ref="setActiveTrendChartRef" class="trend-chart-scroll">
+                  <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
+                    <div v-for="bar in activeTrendConfig.bars" :key="bar.key" class="trend-chart__item">
+                      <div class="trend-chart__count">{{ bar.displayValue }}</div>
+                      <div class="trend-chart__bar-wrap">
+                        <div class="trend-chart__bar" :class="activeTrendConfig.barClass" :style="{ height: `${bar.heightPercent}%` }" />
+                      </div>
+                      <div class="trend-chart__label">{{ bar.label }}</div>
+                    </div>
                   </div>
                 </div>
+              </n-card>
+              </div>
+
+              <div class="analytics-breakdown-section" data-testid="analytics-breakdown-section">
+                <n-card class="analytics-card analytics-card--stretch analytics-breakdown-card" :bordered="false" data-testid="analytics-breakdown-card">
+                <template #header>
+                  <div class="analytics-card__header analytics-card__header--breakdown">
+                    <div>
+                      <div class="analytics-card__title">{{ analyticsBreakdownTitle }}</div>
+                      <div class="analytics-card__subtitle">{{ analyticsBreakdownSubtitle }}</div>
+                    </div>
+                    <div class="analytics-card__header-actions analytics-card__header-actions--breakdown">
+                      <div class="analytics-chart-toggle analytics-chart-toggle--breakdown" role="tablist" :aria-label="t('analytics.byProject')">
+                        <button
+                          type="button"
+                          class="analytics-chart-toggle__button"
+                          :class="{ 'analytics-chart-toggle__button--active': analyticsBreakdownTab === 'project' }"
+                          data-testid="analytics-breakdown-tab-project"
+                          @click="analyticsBreakdownTab = 'project'"
+                        >
+                          {{ t('analytics.byProject') }}
+                        </button>
+                        <button
+                          type="button"
+                          class="analytics-chart-toggle__button"
+                          :class="{ 'analytics-chart-toggle__button--active': analyticsBreakdownTab === 'initiator' }"
+                          data-testid="analytics-breakdown-tab-initiator"
+                          @click="analyticsBreakdownTab = 'initiator'"
+                        >
+                          {{ t('analytics.byInitiator') }}
+                        </button>
+                      </div>
+                      <n-button text size="small" @click="showBreakdownModal = true" class="analytics-card__expand-btn" :title="t('analytics.expand')">
+                        <template #icon><n-icon :component="ExpandOutline" /></template>
+                      </n-button>
+                    </div>
+                  </div>
+                </template>
+
+                <n-data-table
+                  :columns="analyticsBreakdownColumns"
+                  :data="analyticsBreakdownData"
+                  :bordered="false"
+                  :pagination="{ pageSize: 8 }"
+                  :scroll-x="analyticsBreakdownScrollX"
+                />
+              </n-card>
+              </div>
+
+              <div class="analytics-overview-bottom-section" data-testid="analytics-overview-bottom-section">
+                <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
+                  <n-gi class="analytics-grid-cell">
+                    <n-card class="analytics-card analytics-card--stretch" :bordered="false">
+                      <template #header>
+                        <div class="analytics-card__header">
+                          <div>
+                            <div class="analytics-card__title">{{ t('analytics.queueWaitByPriority') }}</div>
+                            <div class="analytics-card__subtitle">{{ t('analytics.queueWaitByPrioritySubtitle') }}</div>
+                          </div>
+                        </div>
+                      </template>
+
+                      <n-data-table
+                        :columns="priorityColumns"
+                        :data="analytics?.priority_waits || []"
+                        :bordered="false"
+                        :pagination="false"
+                      />
+                    </n-card>
+                  </n-gi>
+
+                  <n-gi class="analytics-grid-cell">
+                    <n-card class="analytics-card analytics-card--stretch" :bordered="false">
+                      <template #header>
+                        <div class="analytics-card__header">
+                          <div>
+                            <div class="analytics-card__title">{{ t('analytics.failureBreakdown') }}</div>
+                            <div class="analytics-card__subtitle">{{ t('analytics.failureBreakdownSubtitle') }}</div>
+                          </div>
+                        </div>
+                      </template>
+
+                      <n-data-table
+                        :columns="errorColumns"
+                        :data="analytics?.error_breakdown || []"
+                        :bordered="false"
+                        :pagination="{ pageSize: 8 }"
+                        :scroll-x="isMobile ? undefined : 760"
+                      />
+                    </n-card>
+                  </n-gi>
+                </n-grid>
+              </div>
+            </n-space>
+            </n-space>
+          </n-tab-pane>
+
+          <n-tab-pane name="providers" :tab="t('analytics.providersTab')">
+            <n-space vertical :size="16" data-testid="analytics-providers-panel">
+              <div v-if="!hasProviderData" class="analytics-empty-state">
+                <div class="analytics-empty-state__title">{{ t('analytics.providersEmpty') }}</div>
+              </div>
+
+              <template v-else>
+                <n-grid :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
+                  <n-gi v-for="item in providerSummaryItems" :key="item.label" class="analytics-grid-cell">
+                    <SummaryCard
+                      :label="item.label"
+                      :value="item.value"
+                      card-class="analytics-summary-card"
+                      label-class="analytics-summary-card__label"
+                      value-class="analytics-summary-card__value"
+                    />
+                  </n-gi>
+                </n-grid>
+
+                <n-card class="analytics-card" :bordered="false">
+                  <template #header>
+                    <div class="analytics-card__header">
+                      <div>
+                        <div class="analytics-card__title">{{ t('analytics.providerComparison') }}</div>
+                        <div class="analytics-card__subtitle" data-testid="provider-comparison-subtitle">{{ t('analytics.providerComparisonSubtitle') }}</div>
+                      </div>
+                    </div>
+                  </template>
+
+                  <n-data-table
+                    :columns="providerColumns"
+                    :data="providerRows"
+                    :bordered="false"
+                    :pagination="{ pageSize: 8 }"
+                    :scroll-x="1200"
+                  />
+                </n-card>
+
+                <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
+                  <n-gi class="analytics-grid-cell">
+                    <n-card class="analytics-card analytics-card--stretch" :bordered="false" data-testid="analytics-provider-success-rate-card">
+                      <template #header>
+                        <div class="analytics-card__header">
+                          <div>
+                            <div class="analytics-card__title">{{ t('analytics.providerSuccessRateByProvider') }}</div>
+                            <div class="analytics-card__subtitle">{{ t('analytics.providerSuccessRateByProviderSubtitle') }}</div>
+                          </div>
+                        </div>
+                      </template>
+
+                      <div v-if="!providerSuccessRateBars.length" class="analytics-empty-state analytics-empty-state--compact">
+                        <div class="analytics-empty-state__title">{{ t('analytics.providersEmpty') }}</div>
+                      </div>
+                      <div v-else class="provider-chart provider-chart--bars">
+                        <div v-for="bar in providerSuccessRateBars" :key="bar.key" class="provider-chart__row">
+                          <div class="provider-chart__label">{{ bar.label }}</div>
+                          <div class="provider-chart__track">
+                            <div class="provider-chart__fill provider-chart__fill--success" :style="{ width: `${bar.heightPercent}%` }" />
+                          </div>
+                          <div class="provider-chart__value">{{ formatPercentage(bar.value) }}</div>
+                        </div>
+                      </div>
+                    </n-card>
+                  </n-gi>
+
+                  <n-gi class="analytics-grid-cell">
+                    <n-card class="analytics-card analytics-card--stretch analytics-card--provider-efficiency" :bordered="false">
+                      <template #header>
+                        <div class="analytics-card__header analytics-card__header--provider-efficiency">
+                          <div class="analytics-card__header-copy analytics-card__header-copy--provider-efficiency">
+                            <div class="analytics-card__title">{{ t('analytics.providerEfficiencyByProvider') }}</div>
+                            <div class="analytics-card__subtitle">{{ providerEfficiencyMetricTitle }}</div>
+                          </div>
+                          <div class="analytics-chart-toggle" role="tablist" :aria-label="t('analytics.providerEfficiencyByProvider')">
+                            <button
+                              type="button"
+                              class="analytics-chart-toggle__button"
+                              :class="{ 'analytics-chart-toggle__button--active': providersEfficiencyMetric === 'avg_tokens_per_second' }"
+                              data-testid="provider-efficiency-metric-tokens-per-second"
+                              @click="providersEfficiencyMetric = 'avg_tokens_per_second'"
+                            >
+                              {{ t('analytics.avgTokensPerSecond') }}
+                            </button>
+                            <button
+                              type="button"
+                              class="analytics-chart-toggle__button"
+                              :class="{ 'analytics-chart-toggle__button--active': providersEfficiencyMetric === 'avg_tokens_per_changed_line' }"
+                              data-testid="provider-efficiency-metric-tokens-per-line"
+                              @click="providersEfficiencyMetric = 'avg_tokens_per_changed_line'"
+                            >
+                              {{ t('analytics.avgTokensPerChangedLine') }}
+                            </button>
+                            <button
+                              type="button"
+                              class="analytics-chart-toggle__button"
+                              :class="{ 'analytics-chart-toggle__button--active': providersEfficiencyMetric === 'avg_execution_seconds_per_changed_line' }"
+                              data-testid="provider-efficiency-metric-seconds-per-line"
+                              @click="providersEfficiencyMetric = 'avg_execution_seconds_per_changed_line'"
+                            >
+                              {{ t('analytics.avgSecondsPerChangedLine') }}
+                            </button>
+                          </div>
+                        </div>
+                      </template>
+
+                      <div v-if="!providerEfficiencyBars.length" class="analytics-empty-state analytics-empty-state--compact">
+                        <div class="analytics-empty-state__title">{{ t('analytics.providersEmpty') }}</div>
+                      </div>
+                      <div v-else class="provider-chart provider-chart--bars provider-chart--provider-efficiency">
+                        <div v-for="bar in providerEfficiencyBars" :key="bar.key" class="provider-chart__row">
+                          <div class="provider-chart__label">{{ bar.label }}</div>
+                          <div class="provider-chart__track">
+                            <div class="provider-chart__fill provider-chart__fill--efficiency" :style="{ width: `${bar.heightPercent}%` }" />
+                          </div>
+                          <div class="provider-chart__value">{{ bar.displayValue }}</div>
+                        </div>
+                      </div>
+                    </n-card>
+                  </n-gi>
+                </n-grid>
               </template>
-
-              <n-data-table
-                :columns="projectColumns"
-                :data="analytics?.projects || []"
-                :bordered="false"
-                :pagination="{ pageSize: 8 }"
-                :scroll-x="isMobile ? undefined : 1130"
-              />
-            </n-card>
-          </n-gi>
-
-          <n-gi class="analytics-grid-cell">
-            <n-card class="analytics-card analytics-card--stretch" :bordered="false">
-              <template #header>
-                <div class="analytics-card__header">
-                  <div>
-                      <div class="analytics-card__title">{{ t('analytics.byInitiator') }}</div>
-                      <div class="analytics-card__subtitle">{{ t('analytics.byInitiatorSubtitle') }}</div>
-                  </div>
-                </div>
-              </template>
-
-              <n-data-table
-                :columns="initiatorColumns"
-                :data="analytics?.initiators || []"
-                :bordered="false"
-                :pagination="{ pageSize: 8 }"
-                :scroll-x="isMobile ? undefined : 1050"
-              />
-            </n-card>
-          </n-gi>
-        </n-grid>
-
-        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
-          <n-gi class="analytics-grid-cell">
-            <n-card class="analytics-card analytics-card--stretch" :bordered="false">
-              <template #header>
-                <div class="analytics-card__header">
-                  <div>
-                      <div class="analytics-card__title">{{ t('analytics.queueWaitByPriority') }}</div>
-                      <div class="analytics-card__subtitle">{{ t('analytics.queueWaitByPrioritySubtitle') }}</div>
-                  </div>
-                </div>
-              </template>
-
-              <n-data-table
-                :columns="priorityColumns"
-                :data="analytics?.priority_waits || []"
-                :bordered="false"
-                :pagination="false"
-              />
-            </n-card>
-          </n-gi>
-
-          <n-gi class="analytics-grid-cell">
-            <n-card class="analytics-card analytics-card--stretch" :bordered="false">
-              <template #header>
-                <div class="analytics-card__header">
-                  <div>
-                      <div class="analytics-card__title">{{ t('analytics.failureBreakdown') }}</div>
-                      <div class="analytics-card__subtitle">{{ t('analytics.failureBreakdownSubtitle') }}</div>
-                  </div>
-                </div>
-              </template>
-
-              <n-data-table
-                :columns="errorColumns"
-                :data="analytics?.error_breakdown || []"
-                :bordered="false"
-                :pagination="{ pageSize: 8 }"
-                :scroll-x="isMobile ? undefined : 760"
-              />
-            </n-card>
-          </n-gi>
-        </n-grid>
+            </n-space>
+          </n-tab-pane>
+        </n-tabs>
       </n-space>
     </n-spin>
+
+    <n-modal v-model:show="showBreakdownModal" :mask-closable="true" style="width: 90vw; max-width: 1400px;">
+      <n-card class="analytics-card" :bordered="false">
+        <template #header>
+          <div class="analytics-card__header">
+            <div>
+              <div class="analytics-card__title">{{ analyticsBreakdownTitle }}</div>
+              <div class="analytics-card__subtitle">{{ analyticsBreakdownSubtitle }}</div>
+            </div>
+            <n-button text size="small" @click="showBreakdownModal = false">
+              <template #icon><n-icon :component="CloseOutline" /></template>
+            </n-button>
+          </div>
+        </template>
+        <n-data-table
+          :columns="analyticsBreakdownColumns"
+          :data="analyticsBreakdownData"
+          :bordered="false"
+          :pagination="{ pageSize: 20 }"
+          :scroll-x="analyticsBreakdownModalScrollX"
+        />
+      </n-card>
+    </n-modal>
   </div>
 </template>
 
@@ -246,26 +539,39 @@ import {
   NDataTable,
   NGi,
   NGrid,
+  NModal,
+  NTabPane,
+  NTabs,
   NSelect,
   NSpace,
   NSpin,
+  NIcon,
   useMessage,
   type DataTableColumns
 } from 'naive-ui'
-import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import {
   getAnalytics,
   getProjects,
+  getStats,
   type AnalyticsErrorRow,
   type AnalyticsInitiatorOption,
   type AnalyticsInitiatorRow,
   type AnalyticsPriorityWaitRow,
   type AnalyticsProjectRow,
+  type AnalyticsProviderChartPoint,
+  type AnalyticsProviderChartSeries,
+  type AnalyticsProviderRow,
   type AnalyticsResponse,
+  type AnalyticsStatusRow,
   type Project
 } from '../api'
+import PageHeader from '../components/PageHeader.vue'
+import SummaryCard from '../components/SummaryCard.vue'
+import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeLocal, formatMonthDayLocal } from '../utils/datetime'
+import { formatDurationSec } from '../utils/format'
+import { ExpandOutline, CloseOutline } from '@vicons/ionicons5'
 
 type TrendBar = {
   key: string
@@ -275,16 +581,58 @@ type TrendBar = {
   heightPercent: number
 }
 
+type TrendMetric = 'tasks' | 'changes' | 'duration' | 'tokens'
+
+type StatusChartMode = 'bar' | 'donut'
+type AnalyticsTopLevelTab = 'overview' | 'providers'
+type ProviderEfficiencyMetric = 'avg_tokens_per_second' | 'avg_tokens_per_changed_line' | 'avg_execution_seconds_per_changed_line'
+
+type StatusChartRow = AnalyticsStatusRow & {
+  label: string
+  color: string
+  barWidthPercent: number
+  shareLabel: string
+}
+
+type ProviderMetricBar = TrendBar & {
+  providerId: number | null
+}
+
 const message = useMessage()
 const { t } = useI18n()
-const { width } = useWindowSize()
-const isMobile = computed(() => width.value < 768)
+const { isMobile } = useBreakpoints()
+
+const ISSUE_STATUS_COLORS: Record<string, string> = {
+  open: 'rgba(59, 130, 246, 0.9)',
+  in_progress: 'rgba(245, 158, 11, 0.9)',
+  in_review: 'rgba(168, 85, 247, 0.9)',
+  closed: 'rgba(34, 197, 94, 0.9)'
+}
+
+const TASK_STATUS_COLORS: Record<string, string> = {
+  pending: 'rgba(148, 163, 184, 0.95)',
+  queued: 'rgba(56, 189, 248, 0.9)',
+  running: 'rgba(245, 158, 11, 0.9)',
+  completed: 'rgba(34, 197, 94, 0.9)',
+  failed: 'rgba(239, 68, 68, 0.9)',
+  cancelled: 'rgba(100, 116, 139, 0.9)'
+}
+
+const FALLBACK_STATUS_COLORS = [
+  'rgba(59, 130, 246, 0.9)',
+  'rgba(245, 158, 11, 0.9)',
+  'rgba(168, 85, 247, 0.9)',
+  'rgba(34, 197, 94, 0.9)',
+  'rgba(239, 68, 68, 0.9)',
+  'rgba(100, 116, 139, 0.9)'
+]
 
 const analytics = ref<AnalyticsResponse | null>(null)
 const availableProjects = ref<Project[]>([])
 const loading = ref(false)
 const projectsLoading = ref(false)
 const hasLoadedOnce = ref(false)
+const issueTotal = ref(0)
 const windowDays = ref<number>(30)
 const selectedProjectId = ref<number | null>(null)
 const selectedInitiatorUsername = ref<string | null>(null)
@@ -292,6 +640,13 @@ const taskChartRef = ref<HTMLElement | null>(null)
 const changeChartRef = ref<HTMLElement | null>(null)
 const durationChartRef = ref<HTMLElement | null>(null)
 const tokenChartRef = ref<HTMLElement | null>(null)
+const analyticsTab = ref<AnalyticsTopLevelTab>('overview')
+const selectedTrendMetric = ref<TrendMetric>('tasks')
+const analyticsBreakdownTab = ref<'project' | 'initiator'>('project')
+const showBreakdownModal = ref(false)
+const issueStatusChartMode = ref<StatusChartMode>('bar')
+const taskStatusChartMode = ref<StatusChartMode>('bar')
+const providersEfficiencyMetric = ref<ProviderEfficiencyMetric>('avg_tokens_per_second')
 
 const windowOptions = computed(() => [
   { label: t('analytics.last7Days'), value: 7 },
@@ -313,7 +668,7 @@ const initiatorOptions = computed(() =>
 
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 const trendChartMinWidth = computed(() => {
-  const points = analytics.value?.trends.length || 0
+  const points = analytics.value?.trends?.length ?? 0
   const barWidth = isMobile.value ? 24 : 32
   const gap = isMobile.value ? 8 : 10
   return `${Math.max(points * barWidth + Math.max(points - 1, 0) * gap, isMobile.value ? 0 : 760)}px`
@@ -328,27 +683,6 @@ function formatDateTime(value: string | null) {
     return '—'
   }
   return formatDateTimeLocal(value)
-}
-
-function formatDuration(value: number | null | undefined) {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return '—'
-  }
-
-  const seconds = Math.max(Math.round(value), 0)
-  if (seconds < 60) {
-    return `${seconds}s`
-  }
-
-  if (seconds < 3600) {
-    const minutes = Math.floor(seconds / 60)
-    const remainder = seconds % 60
-    return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`
-  }
-
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`
 }
 
 function formatNumber(value: number | null | undefined) {
@@ -375,12 +709,57 @@ function formatPercentage(value: number | null | undefined) {
     return `${(value * 100).toFixed(1)}%`
 }
 
+function formatNumericValue(value: number | null | undefined, digits = 1) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return 'N/A'
+  }
+  return new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: digits
+  }).format(value)
+}
+
+function formatProviderMetricValue(metric: ProviderEfficiencyMetric, value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return 'N/A'
+  }
+
+  if (metric === 'avg_execution_seconds_per_changed_line') {
+    return formatDurationSec(value)
+  }
+
+  return formatNumericValue(value)
+}
+
+function formatProviderName(row: AnalyticsProviderRow) {
+  if (!row.provider_name) {
+    return 'Unknown / Legacy'
+  }
+  return row.provider_model ? `${row.provider_name} / ${row.provider_model}` : row.provider_name
+}
+
+function buildProviderMetricBars(rows: AnalyticsProviderChartPoint[], metric: ProviderEfficiencyMetric): ProviderMetricBar[] {
+  return buildTrendBars(
+    rows.map((row) => ({
+      key: `${metric}-${row.label}`,
+      label: row.label,
+      value: row.value,
+      displayValue: formatProviderMetricValue(metric, row.value)
+    }))
+  ).map((row, index) => ({
+    ...row,
+    providerId: rows[index]?.provider_id ?? null
+  }))
+}
+
 function formatTokenBreakdown(inputTokens: number, outputTokens: number) {
   return t('analytics.tokenBreakdown', {
     input: formatNumber(inputTokens),
     output: formatNumber(outputTokens)
   })
 }
+
+const secondaryTextStyle = { fontSize: '11px', color: 'rgba(15,23,42,0.45)', marginTop: '2px', lineHeight: '1.4' }
 
 function buildTrendBars(values: { key: string; label: string; value: number; displayValue?: string }[]) {
   const max = Math.max(...values.map((item) => item.value), 1)
@@ -391,13 +770,56 @@ function buildTrendBars(values: { key: string; label: string; value: number; dis
   }))
 }
 
+function resolveStatusLabel(kind: 'issue' | 'task', status: string) {
+  return kind === 'issue' ? t(`issue.status.${status}`) : t(`status.${status}`)
+}
+
+function buildStatusChartRows(kind: 'issue' | 'task', rows: AnalyticsStatusRow[]) {
+  const palette = kind === 'issue' ? ISSUE_STATUS_COLORS : TASK_STATUS_COLORS
+  const max = Math.max(...rows.map((row) => row.count), 1)
+
+  return rows.map<StatusChartRow>((row, index) => ({
+    ...row,
+    label: resolveStatusLabel(kind, row.status),
+    color: palette[row.status] ?? FALLBACK_STATUS_COLORS[index % FALLBACK_STATUS_COLORS.length],
+    barWidthPercent: row.count === 0 ? 0 : Math.max((row.count / max) * 100, 8),
+    shareLabel: formatPercentage(row.share)
+  }))
+}
+
+function buildStatusDonutStyle(rows: StatusChartRow[]) {
+  let cursor = 0
+  const segments = rows
+    .filter((row) => row.count > 0)
+    .map((row, idx, arr) => {
+      const start = cursor
+      cursor += row.share * 100
+      const end = idx === arr.length - 1 ? 100 : cursor
+      return `${row.color} ${start}% ${end}%`
+    })
+
+  return {
+    background: segments.length
+      ? `conic-gradient(${segments.join(', ')})`
+      : 'conic-gradient(rgba(148, 163, 184, 0.18) 0% 100%)'
+  }
+}
+
 const summaryItems = computed(() => {
   const summary = analytics.value?.summary
+  const items: Array<{ label: string; value: string; note?: string }> = []
+
+  // Always show Issues card
+  items.push({
+    label: t('analytics.issues'),
+    value: String(issueTotal.value)
+  })
+
   if (!summary) {
-    return []
+    return items
   }
 
-  return [
+  items.push(
     { label: t('analytics.tasks'), value: String(summary.total_tasks), note: t('analytics.dayWindow', { days: windowDays.value }) },
     {
       label: t('analytics.successRate'),
@@ -409,18 +831,18 @@ const summaryItems = computed(() => {
     },
     {
       label: t('analytics.avgDuration'),
-      value: formatDuration(summary.avg_execution_seconds),
+      value: formatDurationSec(summary.avg_execution_seconds),
       note:
         summary.max_execution_seconds !== null
-          ? t('analytics.maxDuration', { value: formatDuration(summary.max_execution_seconds) })
+          ? t('analytics.maxDuration', { value: formatDurationSec(summary.max_execution_seconds) })
           : t('analytics.noExecutionData')
     },
     {
       label: t('analytics.avgQueueWait'),
-      value: formatDuration(summary.avg_queue_wait_seconds),
+      value: formatDurationSec(summary.avg_queue_wait_seconds),
       note:
         summary.max_queue_wait_seconds !== null
-          ? t('analytics.maxQueueWait', { value: formatDuration(summary.max_queue_wait_seconds) })
+          ? t('analytics.maxQueueWait', { value: formatDurationSec(summary.max_queue_wait_seconds) })
           : t('analytics.noQueueData')
     },
     {
@@ -451,7 +873,9 @@ const summaryItems = computed(() => {
         ? t('analytics.since', { time: formatDateTime(summary.initiator_tracking_started_at) })
         : t('analytics.noTrackedInitiators')
     }
-  ]
+  )
+
+  return items
 })
 
 const taskTrendBars = computed(() =>
@@ -482,7 +906,7 @@ const durationTrendBars = computed(() =>
       key: `${point.date}-duration`,
       label: formatShortDate(point.date),
       value: point.avg_execution_seconds ?? 0,
-      displayValue: formatDuration(point.avg_execution_seconds)
+      displayValue: formatDurationSec(point.avg_execution_seconds)
     }))
   )
 )
@@ -498,62 +922,277 @@ const tokenTrendBars = computed(() =>
   )
 )
 
+const activeTrendConfig = computed(() => {
+  if (selectedTrendMetric.value === 'changes') {
+    return {
+      title: t('analytics.changedLinesTrend'),
+      subtitle: t('analytics.changedLinesTrendSubtitle'),
+      bars: changeTrendBars.value,
+      barClass: 'trend-chart__bar--secondary'
+    }
+  }
+
+  if (selectedTrendMetric.value === 'duration') {
+    return {
+      title: t('analytics.executionDurationTrend'),
+      subtitle: t('analytics.executionDurationTrendSubtitle'),
+      bars: durationTrendBars.value,
+      barClass: 'trend-chart__bar--accent'
+    }
+  }
+
+  if (selectedTrendMetric.value === 'tokens') {
+    return {
+      title: t('analytics.tokenTrend'),
+      subtitle: t('analytics.tokenTrendSubtitle'),
+      bars: tokenTrendBars.value,
+      barClass: 'trend-chart__bar--token'
+    }
+  }
+
+  return {
+    title: t('analytics.taskVolumeTrend'),
+    subtitle: t('analytics.taskVolumeTrendSubtitle'),
+    bars: taskTrendBars.value,
+    barClass: ''
+  }
+})
+
+function setActiveTrendChartRef(
+  el: Element | { $el?: Element | null } | null | undefined
+) {
+  const element = el instanceof HTMLElement ? el : el && '$el' in el && el.$el instanceof HTMLElement ? el.$el : null
+  if (selectedTrendMetric.value === 'tasks') {
+    taskChartRef.value = element
+  } else if (selectedTrendMetric.value === 'changes') {
+    changeChartRef.value = element
+  } else if (selectedTrendMetric.value === 'duration') {
+    durationChartRef.value = element
+  } else {
+    tokenChartRef.value = element
+  }
+}
+
+const issueStatusRows = computed(() =>
+  buildStatusChartRows('issue', analytics.value?.issue_status_breakdown || [])
+)
+
+const taskStatusRows = computed(() =>
+  buildStatusChartRows('task', analytics.value?.task_status_breakdown || [])
+)
+
+const issueStatusTotal = computed(() =>
+  issueStatusRows.value.reduce((sum, row) => sum + row.count, 0)
+)
+
+const taskStatusTotal = computed(() =>
+  taskStatusRows.value.reduce((sum, row) => sum + row.count, 0)
+)
+
+const hasIssueStatusData = computed(() => issueStatusTotal.value > 0)
+const hasTaskStatusData = computed(() => taskStatusTotal.value > 0)
+
+const issueStatusDonutStyle = computed(() =>
+  buildStatusDonutStyle(issueStatusRows.value)
+)
+
+const taskStatusDonutStyle = computed(() =>
+  buildStatusDonutStyle(taskStatusRows.value)
+)
+
+const providerSummary = computed(() => analytics.value?.provider_summary ?? null)
+
+const providerRows = computed(() => analytics.value?.providers || [])
+
+const providerChartSeries = computed<AnalyticsProviderChartSeries>(() =>
+  analytics.value?.provider_chart_series || {
+    success_rate: [],
+    avg_tokens_per_second: [],
+    avg_tokens_per_changed_line: [],
+    avg_execution_seconds_per_changed_line: []
+  }
+)
+
+const hasProviderData = computed(() => providerRows.value.length > 0)
+
+const providerSummaryItems = computed(() => [
+  {
+    label: t('analytics.activeProviders'),
+    value: String(providerSummary.value?.active_provider_count ?? 0)
+  },
+  {
+    label: t('analytics.providerCoveredTasks'),
+    value: String(providerSummary.value?.provider_covered_task_count ?? 0)
+  },
+  {
+    label: t('analytics.providerCoveredTokens'),
+    value: formatNumber(providerSummary.value?.provider_covered_total_tokens ?? 0)
+  },
+  {
+    label: t('analytics.providerSuccessRate'),
+    value: formatPercentage(providerSummary.value?.provider_success_rate)
+  }
+])
+
+const providerSuccessRateBars = computed(() =>
+  buildProviderMetricBars(providerChartSeries.value.success_rate, 'avg_tokens_per_second')
+)
+
+const providerEfficiencyBars = computed(() =>
+  buildProviderMetricBars(
+    providerChartSeries.value[providersEfficiencyMetric.value],
+    providersEfficiencyMetric.value
+  )
+)
+
+const providerEfficiencyMetricTitle = computed(() => {
+  if (providersEfficiencyMetric.value === 'avg_execution_seconds_per_changed_line') {
+    return t('analytics.avgSecondsPerChangedLine')
+  }
+  if (providersEfficiencyMetric.value === 'avg_tokens_per_changed_line') {
+    return t('analytics.avgTokensPerChangedLine')
+  }
+  return t('analytics.avgTokensPerSecond')
+})
+
+const providerColumns = computed<DataTableColumns<AnalyticsProviderRow>>(() => [
+  {
+    title: t('analytics.provider'),
+    key: 'provider_name',
+    minWidth: 220,
+    sorter: (a, b) => formatProviderName(a).localeCompare(formatProviderName(b)),
+    render: (row) =>
+      h('div', { class: 'analytics-table__primary' }, [
+        h('div', { style: { fontWeight: 500 } }, row.provider_name || 'Unknown / Legacy'),
+        row.provider_model
+          ? h('div', { class: 'analytics-table__secondary' }, row.provider_model)
+          : null
+      ])
+  },
+  {
+    title: t('analytics.tasks'),
+    key: 'task_count',
+    width: 90,
+    sorter: (a, b) => b.task_count - a.task_count
+  },
+  {
+    title: t('analytics.successRate'),
+    key: 'success_rate',
+    width: 120,
+    sorter: (a, b) => (a.success_rate ?? -1) - (b.success_rate ?? -1),
+    render: (row) => formatPercentage(row.success_rate)
+  },
+  {
+    title: t('analytics.totalTokens'),
+    key: 'total_tokens',
+    width: 130,
+    sorter: (a, b) => (a.total_tokens ?? 0) - (b.total_tokens ?? 0),
+    render: (row) => formatNumber(row.total_tokens)
+  },
+  {
+    title: t('analytics.avgTokensPerTask'),
+    key: 'avg_tokens_per_task',
+    width: 130,
+    sorter: (a, b) => (a.avg_tokens_per_task ?? -1) - (b.avg_tokens_per_task ?? -1),
+    render: (row) => formatNumericValue(row.avg_tokens_per_task)
+  },
+  {
+    title: t('analytics.avgTokensPerSecond'),
+    key: 'avg_tokens_per_second',
+    width: 130,
+    sorter: (a, b) => (a.avg_tokens_per_second ?? -1) - (b.avg_tokens_per_second ?? -1),
+    render: (row) => formatProviderMetricValue('avg_tokens_per_second', row.avg_tokens_per_second)
+  },
+  {
+    title: t('analytics.avgTokensPerChangedLine'),
+    key: 'avg_tokens_per_changed_line',
+    width: 150,
+    sorter: (a, b) => (a.avg_tokens_per_changed_line ?? -1) - (b.avg_tokens_per_changed_line ?? -1),
+    render: (row) => formatProviderMetricValue('avg_tokens_per_changed_line', row.avg_tokens_per_changed_line)
+  },
+  {
+    title: t('analytics.avgSecondsPerChangedLine'),
+    key: 'avg_execution_seconds_per_changed_line',
+    width: 160,
+    sorter: (a, b) => (a.avg_execution_seconds_per_changed_line ?? -1) - (b.avg_execution_seconds_per_changed_line ?? -1),
+    render: (row) => formatProviderMetricValue('avg_execution_seconds_per_changed_line', row.avg_execution_seconds_per_changed_line)
+  }
+])
+
+const analyticsBreakdownTitle = computed(() =>
+  analyticsBreakdownTab.value === 'project' ? t('analytics.byProject') : t('analytics.byInitiator')
+)
+
+const analyticsBreakdownSubtitle = computed(() =>
+  analyticsBreakdownTab.value === 'project'
+    ? t('analytics.byProjectSubtitle')
+    : t('analytics.byInitiatorSubtitle')
+)
+
 const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
   {
     title: t('common.project'),
     key: 'project_name',
     minWidth: 180,
+    sorter: (a, b) => a.project_name.localeCompare(b.project_name),
     render: (row) =>
-      h('div', { class: 'analytics-table__primary' }, [
-        h('div', row.project_name),
+      h('div', [
+        h('div', { style: { fontWeight: 500 } }, row.project_name),
         row.project_path_with_namespace
-          ? h('div', { class: 'analytics-table__secondary' }, row.project_path_with_namespace)
+          ? h('div', { style: secondaryTextStyle }, row.project_path_with_namespace)
           : null
       ])
   },
-  { title: t('analytics.tasks'), key: 'task_count', width: 80 },
+  { title: t('analytics.tasks'), key: 'task_count', width: 80, sorter: (a, b) => a.task_count - b.task_count },
   {
     title: t('analytics.success'),
     key: 'success_rate',
     width: 110,
+    sorter: (a, b) => (a.success_rate ?? -1) - (b.success_rate ?? -1),
     render: (row) => formatPercentage(row.success_rate)
   },
   {
     title: t('analytics.avgDuration'),
     key: 'avg_execution_seconds',
     width: 120,
-    render: (row) => formatDuration(row.avg_execution_seconds)
+    sorter: (a, b) => (a.avg_execution_seconds ?? -1) - (b.avg_execution_seconds ?? -1),
+    render: (row) => formatDurationSec(row.avg_execution_seconds)
   },
   {
     title: t('analytics.avgWait'),
     key: 'avg_queue_wait_seconds',
     width: 120,
-    render: (row) => formatDuration(row.avg_queue_wait_seconds)
+    sorter: (a, b) => (a.avg_queue_wait_seconds ?? -1) - (b.avg_queue_wait_seconds ?? -1),
+    render: (row) => formatDurationSec(row.avg_queue_wait_seconds)
   },
   {
     title: t('common.changes'),
     key: 'total_changes',
     width: 110,
+    sorter: (a, b) => a.total_changes - b.total_changes,
     render: (row) =>
-      h('div', { class: 'analytics-table__primary' }, [
+      h('div', [
         h('div', String(row.total_changes)),
-        h('div', { class: 'analytics-table__secondary' }, t('analytics.changeBreakdown', { additions: row.additions, deletions: row.deletions }))
+        h('div', { style: secondaryTextStyle }, t('analytics.changeBreakdown', { additions: row.additions, deletions: row.deletions }))
       ])
   },
   {
     title: t('analytics.tokens'),
     key: 'total_tokens',
-    width: 150,
+    width: 140,
+    sorter: (a, b) => a.total_tokens - b.total_tokens,
     render: (row) =>
-      h('div', { class: 'analytics-table__primary' }, [
+      h('div', [
         h('div', formatNumber(row.total_tokens)),
-        h('div', { class: 'analytics-table__secondary' }, formatTokenBreakdown(row.input_tokens, row.output_tokens))
+        h('div', { style: secondaryTextStyle }, t('analytics.tokenInputLine', { value: formatNumber(row.input_tokens) })),
+        h('div', { style: secondaryTextStyle }, t('analytics.tokenOutputLine', { value: formatNumber(row.output_tokens) }))
       ])
   },
   {
     title: t('analytics.lastTask'),
     key: 'last_task_at',
     width: 150,
+    sorter: (a, b) => (a.last_task_at ?? '').localeCompare(b.last_task_at ?? ''),
     render: (row) => formatDateTime(row.last_task_at)
   }
 ])
@@ -563,60 +1202,90 @@ const initiatorColumns = computed<DataTableColumns<AnalyticsInitiatorRow>>(() =>
     title: t('analytics.initiator'),
     key: 'initiator_username',
     minWidth: 160,
+    sorter: (a, b) => a.initiator_username.localeCompare(b.initiator_username),
     render: (row) =>
-      h('div', { class: 'analytics-table__primary' }, [
-        h('div', row.initiator_username),
+      h('div', [
+        h('div', { style: { fontWeight: 500 } }, row.initiator_username),
         row.initiator_gitlab_user_id !== null
-          ? h('div', { class: 'analytics-table__secondary' }, t('analytics.gitlabId', { id: row.initiator_gitlab_user_id }))
+          ? h('div', { style: secondaryTextStyle }, t('analytics.gitlabId', { id: row.initiator_gitlab_user_id }))
           : null
       ])
   },
-  { title: t('analytics.tasks'), key: 'task_count', width: 80 },
+  { title: t('analytics.tasks'), key: 'task_count', width: 80, sorter: (a, b) => a.task_count - b.task_count },
   {
     title: t('analytics.success'),
     key: 'success_rate',
     width: 110,
+    sorter: (a, b) => (a.success_rate ?? -1) - (b.success_rate ?? -1),
     render: (row) => formatPercentage(row.success_rate)
   },
   {
     title: t('analytics.avgDuration'),
     key: 'avg_execution_seconds',
     width: 120,
-    render: (row) => formatDuration(row.avg_execution_seconds)
+    sorter: (a, b) => (a.avg_execution_seconds ?? -1) - (b.avg_execution_seconds ?? -1),
+    render: (row) => formatDurationSec(row.avg_execution_seconds)
   },
   {
     title: t('analytics.avgWait'),
     key: 'avg_queue_wait_seconds',
     width: 120,
-    render: (row) => formatDuration(row.avg_queue_wait_seconds)
+    sorter: (a, b) => (a.avg_queue_wait_seconds ?? -1) - (b.avg_queue_wait_seconds ?? -1),
+    render: (row) => formatDurationSec(row.avg_queue_wait_seconds)
   },
   {
     title: t('common.changes'),
     key: 'total_changes',
     width: 110,
+    sorter: (a, b) => a.total_changes - b.total_changes,
     render: (row) =>
-      h('div', { class: 'analytics-table__primary' }, [
+      h('div', [
         h('div', String(row.total_changes)),
-        h('div', { class: 'analytics-table__secondary' }, t('analytics.changeBreakdown', { additions: row.additions, deletions: row.deletions }))
+        h('div', { style: secondaryTextStyle }, t('analytics.changeBreakdown', { additions: row.additions, deletions: row.deletions }))
       ])
   },
   {
     title: t('analytics.tokens'),
     key: 'total_tokens',
-    width: 150,
+    width: 140,
+    sorter: (a, b) => a.total_tokens - b.total_tokens,
     render: (row) =>
-      h('div', { class: 'analytics-table__primary' }, [
+      h('div', [
         h('div', formatNumber(row.total_tokens)),
-        h('div', { class: 'analytics-table__secondary' }, formatTokenBreakdown(row.input_tokens, row.output_tokens))
+        h('div', { style: secondaryTextStyle }, t('analytics.tokenInputLine', { value: formatNumber(row.input_tokens) })),
+        h('div', { style: secondaryTextStyle }, t('analytics.tokenOutputLine', { value: formatNumber(row.output_tokens) }))
       ])
   },
   {
     title: t('analytics.lastTask'),
     key: 'last_task_at',
     width: 150,
+    sorter: (a, b) => (a.last_task_at ?? '').localeCompare(b.last_task_at ?? ''),
     render: (row) => formatDateTime(row.last_task_at)
   }
 ])
+
+const analyticsBreakdownColumns = computed(() =>
+  analyticsBreakdownTab.value === 'project' ? projectColumns.value : initiatorColumns.value
+)
+
+const analyticsBreakdownData = computed(() =>
+  analyticsBreakdownTab.value === 'project'
+    ? (analytics.value?.projects || [])
+    : (analytics.value?.initiators || [])
+)
+
+const analyticsBreakdownScrollX = computed(() => {
+  if (isMobile.value) {
+    return undefined
+  }
+
+  return analyticsBreakdownTab.value === 'project' ? 1130 : 1050
+})
+
+const analyticsBreakdownModalScrollX = computed(() =>
+  analyticsBreakdownTab.value === 'project' ? 1130 : 1050
+)
 
 const priorityColumns = computed<DataTableColumns<AnalyticsPriorityWaitRow>>(() => [
   { title: t('common.priority'), key: 'priority', width: 90 },
@@ -625,13 +1294,13 @@ const priorityColumns = computed<DataTableColumns<AnalyticsPriorityWaitRow>>(() 
     title: t('analytics.avgWait'),
     key: 'avg_queue_wait_seconds',
     width: 130,
-    render: (row) => formatDuration(row.avg_queue_wait_seconds)
+    render: (row) => formatDurationSec(row.avg_queue_wait_seconds)
   },
   {
     title: t('analytics.maxWait'),
     key: 'max_queue_wait_seconds',
     width: 130,
-    render: (row) => formatDuration(row.max_queue_wait_seconds)
+    render: (row) => formatDurationSec(row.max_queue_wait_seconds)
   }
 ])
 
@@ -690,8 +1359,18 @@ async function fetchProjects() {
   }
 }
 
+async function fetchIssueStats() {
+  try {
+    const stats = await getStats()
+    issueTotal.value = stats.issues?.total ?? 0
+  } catch {
+    // Non-critical — don't block analytics
+  }
+}
+
 function refresh() {
   fetchAnalytics()
+  fetchIssueStats()
 }
 
 watch(windowDays, () => {
@@ -724,42 +1403,18 @@ watch(selectedInitiatorUsername, () => {
 onMounted(() => {
   fetchProjects()
   fetchAnalytics()
+  fetchIssueStats()
 })
 </script>
 
 <style scoped>
 .analytics-page {
-  max-width: 1280px;
-}
-
-.analytics-page__hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.analytics-page__controls {
-  flex: 1;
-  justify-content: flex-end;
-}
-
-.analytics-page__title {
-  margin: 0;
-  font-size: 28px;
-  line-height: 1.2;
-}
-
-.analytics-page__subtitle {
-  margin: 8px 0 0;
-  color: rgba(15, 23, 42, 0.68);
-  max-width: 760px;
+  max-width: var(--app-page-max-width);
 }
 
 .analytics-summary-card,
 .analytics-card {
-  border-radius: 18px;
+  border-radius: var(--app-card-radius);
 }
 
 .analytics-grid-cell {
@@ -775,40 +1430,80 @@ onMounted(() => {
   height: 100%;
 }
 
-.analytics-summary-card {
-  background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
-}
-
-.analytics-summary-card :deep(.n-card__content) {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.analytics-summary-card__label {
-  margin-bottom: 8px;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.6);
-}
-
 .analytics-summary-card__value {
   font-size: 22px;
-  font-weight: 600;
-  color: var(--n-text-color-1);
 }
 
 .analytics-summary-card__note {
-  margin-top: auto;
-  padding-top: 6px;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.56);
+  margin-top: 10px;
 }
 
 .analytics-card__header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.analytics-card__header--breakdown {
+  align-items: flex-start;
+}
+
+.analytics-card__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.analytics-card__header-actions--breakdown {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.analytics-card__header--provider-efficiency {
+  align-items: flex-start;
+}
+
+.analytics-card__header-copy--provider-efficiency {
+  min-height: 40px;
+}
+
+.analytics-card--provider-efficiency {
+  height: 100%;
+}
+
+.provider-chart--provider-efficiency {
+  min-height: 150px;
+}
+.analytics-overview-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.analytics-overview-trend-section,
+.analytics-breakdown-section,
+.analytics-overview-bottom-section {
+  margin-top: 0;
+}
+
+.analytics-breakdown-card {
+  width: 100%;
+}
+
+.analytics-breakdown-tabs {
+  flex: 1 1 auto;
+  min-width: 280px;
+}
+
+.analytics-card__expand-btn {
+  flex-shrink: 0;
+  color: rgba(15, 23, 42, 0.45);
+  font-size: 16px;
+}
+
+.analytics-card__expand-btn:hover {
+  color: rgba(15, 23, 42, 0.8);
 }
 
 .analytics-card__title {
@@ -820,6 +1515,170 @@ onMounted(() => {
   margin-top: 4px;
   font-size: 13px;
   color: rgba(15, 23, 42, 0.58);
+}
+
+.analytics-chart-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.analytics-chart-toggle__button {
+  position: relative;
+  z-index: 1;
+  border: none;
+  background: transparent;
+  color: rgba(15, 23, 42, 0.62);
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transform: translateY(0);
+  transition: background-color 0.22s ease, color 0.22s ease, box-shadow 0.22s ease, transform 0.22s ease;
+}
+
+.analytics-chart-toggle__button:hover {
+  color: rgba(15, 23, 42, 0.88);
+}
+
+.analytics-chart-toggle__button--active {
+  background: rgba(255, 255, 255, 0.92);
+  color: rgba(15, 23, 42, 0.92);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+  transform: translateY(-1px);
+}
+
+.analytics-chart-toggle__button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.18), 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+
+.status-chart {
+  display: flex;
+  gap: 20px;
+}
+
+.status-chart--bar {
+  flex-direction: column;
+}
+
+.status-chart__bar-row,
+.status-chart__legend-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 150px) minmax(0, 1fr) 44px 60px;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-chart__bar-row + .status-chart__bar-row,
+.status-chart__legend-row + .status-chart__legend-row {
+  margin-top: 12px;
+}
+
+.status-chart__row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.status-chart__row-label {
+  min-width: 0;
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.84);
+}
+
+.status-chart__legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.status-chart__bar-track {
+  position: relative;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  overflow: hidden;
+}
+
+.status-chart__bar-fill {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.status-chart__row-value,
+.status-chart__row-share {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.status-chart__row-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.88);
+}
+
+.status-chart__row-share {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.55);
+}
+
+.status-chart--donut {
+  align-items: center;
+}
+
+.status-chart__donut-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 180px;
+}
+
+.status-chart__donut {
+  position: relative;
+  width: 168px;
+  height: 168px;
+  border-radius: 50%;
+}
+
+.status-chart__donut-hole {
+  position: absolute;
+  inset: 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12);
+}
+
+.status-chart__donut-total {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  color: rgba(15, 23, 42, 0.92);
+}
+
+.status-chart__donut-total-label {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.52);
+}
+
+.status-chart__legend {
+  flex: 1;
+}
+
+.status-chart__legend-values {
+  display: contents;
 }
 
 .trend-chart {
@@ -841,6 +1700,8 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   gap: 8px;
+  flex: 0 0 auto;
+  min-width: 36px;
 }
 
 .trend-chart__count {
@@ -882,6 +1743,8 @@ onMounted(() => {
   color: rgba(15, 23, 42, 0.62);
   writing-mode: vertical-rl;
   transform: rotate(180deg);
+  font-variant-numeric: tabular-nums;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
 }
 
 .analytics-table__primary {
@@ -895,18 +1758,138 @@ onMounted(() => {
   color: rgba(15, 23, 42, 0.58);
 }
 
+.analytics-status-card__body {
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.analytics-empty-state {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  border-radius: 18px;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px dashed rgba(148, 163, 184, 0.28);
+}
+
+.analytics-empty-state__title {
+  max-width: 320px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: rgba(15, 23, 42, 0.6);
+}
+
+.analytics-top-tabs {
+  width: 100%;
+}
+
+.provider-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.provider-chart__row {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) minmax(0, 1fr) 96px;
+  gap: 12px;
+  align-items: center;
+}
+
+.provider-chart__label {
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.84);
+  word-break: break-word;
+}
+
+.provider-chart__track {
+  position: relative;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  overflow: hidden;
+}
+
+.provider-chart__fill {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.provider-chart__fill--success {
+  background: linear-gradient(180deg, rgba(34, 197, 94, 0.92), rgba(34, 197, 94, 0.55));
+}
+
+.provider-chart__fill--efficiency {
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.92), rgba(59, 130, 246, 0.55));
+}
+
+.provider-chart__value {
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(15, 23, 42, 0.68);
+}
+
 @media (max-width: 768px) {
-  .analytics-page__title {
-    font-size: 24px;
+  .analytics-page__controls {
+    width: 100%;
   }
 
-  .analytics-page__controls {
+  .analytics-page__controls > * {
     width: 100%;
   }
 
   .trend-chart__label {
     writing-mode: horizontal-tb;
     transform: none;
+    font-variant-numeric: tabular-nums;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  }
+
+  .analytics-card__header,
+  .analytics-card__header-actions,
+  .analytics-card__header-actions--breakdown,
+  .analytics-card__header-actions--status,
+  .analytics-breakdown-tabs,
+  .analytics-chart-toggle {
+    width: 100%;
+  }
+
+  .analytics-card__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .status-chart,
+  .status-chart--donut {
+    flex-direction: column;
+  }
+
+  .status-chart__bar-row,
+  .status-chart__legend-row,
+  .provider-chart__row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .status-chart__row-value,
+  .status-chart__row-share,
+  .provider-chart__value {
+    text-align: left;
+  }
+
+  .status-chart__legend-values {
+    display: flex;
+    gap: 12px;
+  }
+
+  .status-chart__donut-shell {
+    min-width: 0;
   }
 }
 </style>

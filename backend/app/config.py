@@ -47,6 +47,10 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "auth_admin_usernames": str,
     "auth_admin_gitlab_groups": str,
     "worker_volume_mounts": str,  # JSON array of {host_path, container_path, mode}
+    "worker_ca_cert_host_path": str,  # Absolute path to CA cert on Docker host; auto-added to volume mounts
+    "slot_max_tasks": int,  # Max tasks per 1-hour slot (0 = unlimited)
+    "slot_max_tasks_enforce": bool,  # Enforce slot limit (True = hard reject, False = soft warning)
+    "session_storage_root": str,
 }
 
 SECRET_CONFIG_KEYS = {
@@ -83,7 +87,7 @@ class Settings(BaseSettings):
     claude_max_turns: int = Field(default=20)
 
     # Database Configuration - require via env var
-    database_url: str = Field(default="postgresql+asyncpg://gimr:gimr_password@localhost:5432/gimr")
+    database_url: str = Field(default="postgresql+asyncpg://codify:codify_password@localhost:5432/codify")
 
     # Docker Engine HTTP API Configuration
     docker_host: str = Field(default="tcp://localhost:2376")
@@ -117,7 +121,7 @@ class Settings(BaseSettings):
     oidc_client_id: str = Field(default="")
     oidc_client_secret: str = Field(default="")
     oidc_redirect_uri: str = Field(default="")
-    session_cookie_name: str = Field(default="gimr_session")
+    session_cookie_name: str = Field(default="codify_session")
     session_ttl_seconds: int = Field(default=28800)
     cookie_secure: bool = Field(default=True)
     cookie_samesite: str = Field(default="lax")
@@ -128,11 +132,20 @@ class Settings(BaseSettings):
     auth_break_glass_password_hash: str = Field(default="")
 
     # Worker Configuration
-    worker_image: str = Field(default="gimr-worker:latest")
+    worker_image: str = Field(default="codify-worker:latest")
+    worker_network: str = Field(default="bridge")  # Docker network for worker containers
+    worker_container_prefix: str = Field(default="codify")  # Prefix for worker container names
+    worker_skip_image_pull: bool = Field(default=False)  # Skip pull_image for local/test environments
     maven_cache_host_path: str = Field(default="")  # Host path to .m2/repository dir; empty = disabled
     maven_settings_host_path: str = Field(default="")  # Host path to settings.xml; empty = disabled
     # JSON array of volume mounts: [{"host_path": "/path", "container_path": "/path", "mode": "ro"}]
     worker_volume_mounts: str = Field(default="")
+    # Shortcut: absolute path to CA cert on Docker host → automatically mounted into workers.
+    # Simpler alternative to encoding a full JSON entry in worker_volume_mounts.
+    worker_ca_cert_host_path: str = Field(default="")
+
+    # Session storage for Claude session persistence (Issue→Task model)
+    session_storage_root: str = Field(default="/var/codify/sessions")
 
     # Scheduler Configuration
     max_concurrency: int = Field(default=3)
@@ -153,6 +166,10 @@ class Settings(BaseSettings):
     # Retry Configuration
     max_retries: int = Field(default=0)  # Max retry attempts for failed tasks
     retry_delay: int = Field(default=60)  # Delay between retries in seconds
+
+    # Slot Capacity Configuration
+    slot_max_tasks: int = Field(default=0)  # Max tasks per 1-hour slot (0 = unlimited)
+    slot_max_tasks_enforce: bool = Field(default=False)  # True = hard reject, False = soft warning
 
     @property
     def project_root(self) -> Path:
@@ -177,16 +194,29 @@ class Settings(BaseSettings):
 
     @property
     def worker_volume_mounts_parsed(self) -> list[dict]:
-        """Parse worker_volume_mounts JSON string into a list of mount dicts."""
-        if not self.worker_volume_mounts:
-            return []
-        try:
-            mounts = json.loads(self.worker_volume_mounts)
-            if isinstance(mounts, list):
-                return mounts
-            return []
-        except json.JSONDecodeError:
-            return []
+        """Parse worker_volume_mounts JSON string into a list of mount dicts.
+
+        Also appends a CA cert mount when worker_ca_cert_host_path is set,
+        so callers don't need to encode the full JSON for the common case.
+        """
+        mounts: list[dict] = []
+        if self.worker_volume_mounts:
+            try:
+                parsed = json.loads(self.worker_volume_mounts)
+                if isinstance(parsed, list):
+                    mounts = parsed
+            except json.JSONDecodeError:
+                pass
+        if self.worker_ca_cert_host_path:
+            mounts = [m for m in mounts if m.get("container_path") != "/etc/ssl/certs/custom-ca.crt"]
+            mounts.append(
+                {
+                    "host_path": self.worker_ca_cert_host_path,
+                    "container_path": "/etc/ssl/certs/custom-ca.crt",
+                    "mode": "ro",
+                }
+            )
+        return mounts
 
 
 @lru_cache

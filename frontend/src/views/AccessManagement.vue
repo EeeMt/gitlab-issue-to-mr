@@ -1,41 +1,56 @@
 <template>
-  <div class="access-page">
+  <div class="access-page" data-testid="access-management-page">
     <n-space vertical :size="16">
-      <div class="access-page__hero">
-        <div>
-          <h2 class="access-page__title">{{ t('accessManagement.title') }}</h2>
-          <p class="access-page__subtitle">
-            {{ t('accessManagement.subtitle') }}
-          </p>
-        </div>
-        <n-button @click="fetchUsers" :loading="usersLoading" :disabled="usersLoading">
-          {{ t('accessManagement.reloadUsers') }}
-        </n-button>
-      </div>
+      <PageHeader
+        data-testid="access-management-header"
+        :title="t('accessManagement.title')"
+        :subtitle="t('accessManagement.subtitle')"
+        root-class="access-page__hero"
+        title-class="access-page__title"
+        subtitle-class="access-page__subtitle"
+      >
+        <template #actions>
+          <n-button @click="fetchUsers" :loading="usersLoading" :disabled="usersLoading">
+            {{ t('accessManagement.reloadUsers') }}
+          </n-button>
+        </template>
+      </PageHeader>
 
       <n-alert type="info" :show-icon="false" class="user-management__intro">
         {{ t('accessManagement.intro') }}
       </n-alert>
 
-      <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
+      <n-grid
+        v-if="hasLoadedOnce"
+        data-testid="access-management-summary"
+        :cols="isMobile ? 2 : 4"
+        :x-gap="16"
+        :y-gap="16"
+      >
         <n-gi v-for="item in summaryItems" :key="item.label">
-          <n-card size="small" class="access-summary-card" :bordered="false">
-            <div class="access-summary-card__label">{{ item.label }}</div>
-            <div class="access-summary-card__value">{{ item.value }}</div>
-          </n-card>
+          <SummaryCard
+            :label="item.label"
+            :value="item.value"
+            data-testid="access-management-summary-card"
+            card-class="access-summary-card"
+            label-class="access-summary-card__label"
+            value-class="access-summary-card__value"
+          />
         </n-gi>
       </n-grid>
 
-      <n-card class="access-card" :bordered="false">
+      <n-card class="access-card" :bordered="false" data-testid="access-management-card">
         <div class="user-management__toolbar">
           <n-space :size="12" wrap>
             <n-input
+              data-testid="access-management-search"
               v-model:value="userSearch"
                :placeholder="t('accessManagement.searchPlaceholder')"
               clearable
               class="user-management__search"
             />
             <n-select
+              data-testid="access-management-role-filter"
               v-model:value="roleFilter"
               :options="roleFilterOptions"
               clearable
@@ -43,6 +58,7 @@
               class="user-management__filter"
             />
             <n-select
+              data-testid="access-management-state-filter"
               v-model:value="stateFilter"
               :options="stateFilterOptions"
               clearable
@@ -60,6 +76,7 @@
               size="small"
               class="user-management__card"
               :bordered="false"
+              data-testid="access-management-user-card"
             >
               <div class="user-management__card-top">
                 <div class="user-management__identity">
@@ -137,17 +154,19 @@
               </n-grid>
 
               <div class="user-management__actions">
-                <n-button
-                  type="primary"
-                  secondary
-                  @click="handleSaveUser(user)"
+                 <n-button
+                   type="primary"
+                   secondary
+                   data-testid="access-management-save-button"
+                   @click="handleSaveUser(user)"
                   :loading="isUserSaving(user.id)"
                   :disabled="user.is_current_user || !isUserDirty(user)"
                 >
                    {{ t('accessManagement.saveAccess') }}
                 </n-button>
-                <n-button
-                  @click="handleRevokeUserSessions(user)"
+                 <n-button
+                   data-testid="access-management-revoke-button"
+                   @click="handleRevokeUserSessions(user)"
                   :loading="isUserRevoking(user.id)"
                   :disabled="user.is_current_user || isUserRevoking(user.id)"
                 >
@@ -186,7 +205,6 @@ import {
   NTag,
   useMessage
 } from 'naive-ui'
-import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import {
   getAdminUsers,
@@ -194,6 +212,9 @@ import {
   updateAdminUser,
   type AdminUser
 } from '../api'
+import PageHeader from '../components/PageHeader.vue'
+import SummaryCard from '../components/SummaryCard.vue'
+import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeLocal } from '../utils/datetime'
 
 type AdminUserDraft = {
@@ -203,8 +224,7 @@ type AdminUserDraft = {
 
 const message = useMessage()
 const { t } = useI18n()
-const { width } = useWindowSize()
-const isMobile = computed(() => width.value < 768)
+const { isMobile } = useBreakpoints()
 
 const usersLoading = ref(false)
 const hasLoadedOnce = ref(false)
@@ -407,43 +427,15 @@ onMounted(() => {
 
 <style scoped>
 .access-page {
-  max-width: 1240px;
-}
-
-.access-page__hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.access-page__title {
-  margin: 0;
-  font-size: 28px;
-  line-height: 1.2;
-}
-
-.access-page__subtitle {
-  margin: 8px 0 0;
-  color: rgba(15, 23, 42, 0.68);
-  max-width: 760px;
+  max-width: var(--app-page-max-width);
 }
 
 .access-summary-card {
-  background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
-  border-radius: 12px;
-}
-
-.access-summary-card__label {
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.6);
-  margin-bottom: 8px;
+  border-radius: var(--app-card-radius);
 }
 
 .access-summary-card__value {
   font-size: 20px;
-  font-weight: 600;
-  color: var(--n-text-color-1);
   word-break: break-word;
 }
 
@@ -570,19 +562,6 @@ onMounted(() => {
 }
 
 @media (max-width: 767px) {
-  .access-page__hero {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .access-page__title {
-    font-size: 24px;
-  }
-
-  .access-page__subtitle {
-    max-width: none;
-  }
-
   .user-management__card-top {
     flex-direction: column;
   }

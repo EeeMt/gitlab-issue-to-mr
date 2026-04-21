@@ -67,7 +67,6 @@ CLAUDE_ARGS=(
   --output-format stream-json
   --verbose
   --include-partial-messages
-  --no-session-persistence
 )
 
 if [[ "$SANDBOX_MODE" == "1" ]]; then
@@ -118,14 +117,25 @@ touch "$TOOL_CALLS_FILE" "$RESULT_FILE"
 process_stream() {
   local prev_block=""
   local cur_tool_name=""
+  local cur_tool_id=""
   local cur_tool_input=""
+  local cur_thinking_buf=""
+  local cur_text_buf=""
 
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
 
     local type
-    type=$(printf '%s' "$line" | jq -r '.type // empty' 2>/dev/null) || continue
-    [[ -z "$type" ]] && continue
+    type=$(printf '%s' "$line" | jq -r '.type // empty' 2>/dev/null) || {
+      # Non-JSON line (e.g. plain-text error from CLI) — pass through to stderr
+      _e "%s\n" "$line"
+      continue
+    }
+    if [[ -z "$type" ]]; then
+      # JSON but no .type field — pass through to stderr
+      _e "%s\n" "$line"
+      continue
+    fi
 
     case "$type" in
 
@@ -142,15 +152,18 @@ process_stream() {
             prev_block="$block_type"
             case "$block_type" in
               thinking)
+                cur_thinking_buf=""
                 _e "\n${DIM}${CYAN}╔═ 🧠 Thinking ════════════════════════════════${RESET}\n"
                 ;;
               tool_use)
                 cur_tool_name=$(printf '%s' "$line" | jq -r '.event.content_block.name // empty' 2>/dev/null)
+                cur_tool_id=$(printf '%s' "$line" | jq -r '.event.content_block.id // empty' 2>/dev/null)
                 cur_tool_input=""
                 _e "\n${YELLOW}┌─ ⚡ Tool: ${BOLD}${cur_tool_name}${RESET}\n"
                 _e "${YELLOW}│  Input: ${DIM}"
                 ;;
               text)
+                cur_text_buf=""
                 _e "\n${GREEN}${BOLD}── Response ───────────────────────────────────${RESET}\n"
                 ;;
             esac
@@ -163,11 +176,13 @@ process_stream() {
               text_delta)
                 local text
                 text=$(printf '%s' "$line" | jq -rj '.event.delta.text // empty' 2>/dev/null)
+                cur_text_buf+="$text"
                 _e '%s' "$text"
                 ;;
               thinking_delta)
                 local thinking
                 thinking=$(printf '%s' "$line" | jq -rj '.event.delta.thinking // empty' 2>/dev/null)
+                cur_thinking_buf+="$thinking"
                 _e "${DIM}%s${RESET}" "$thinking"
                 ;;
               input_json_delta)
@@ -183,10 +198,14 @@ process_stream() {
             case "$prev_block" in
               thinking)
                 _e "\n${DIM}${CYAN}╚══════════════════════════════════════════════${RESET}\n"
+                local stripped_thinking
+                stripped_thinking=$(printf '%s' "$cur_thinking_buf" | sed '/./,$!d')
+                printf 'CODIFY_THINKING:%s\n' "$(jq -c -n --arg text "$stripped_thinking" '{text: $text}')" >&2
+                cur_thinking_buf=""
                 ;;
               tool_use)
                 _e "${RESET}\n${YELLOW}└──────────────────────────────────────────────${RESET}\n"
-                # Persist tool call stub; output filled in below by tool_result
+                # Persist tool call stub for the final batch JSON (entrypoint.sh reads this)
                 local safe_input
                 safe_input=$(printf '%s' "${cur_tool_input:-{\}}" | jq -c '.' 2>/dev/null || echo '{}')
                 jq -nc \
@@ -194,10 +213,20 @@ process_stream() {
                   --argjson input "$safe_input" \
                   '{name: $name, input: $input, output: null, error: false}' \
                   >> "$TOOL_CALLS_FILE"
+                # Emit structured tool-use event to stderr for worker.py Python parsing
+                printf 'CODIFY_TOOL_USE_START:%s\n' \
+                  "$(jq -c -n --arg id "$cur_tool_id" --arg name "$cur_tool_name" --argjson input "$safe_input" \
+                     '{id: $id, name: $name, input: $input}')" >&2
                 cur_tool_input=""
+                cur_tool_id=""
                 ;;
               text)
                 _e "\n"
+                # Strip leading newlines from text before emitting
+                local stripped_text
+                stripped_text=$(printf '%s' "$cur_text_buf" | sed '/./,$!d')
+                printf 'CODIFY_ASSISTANT_TEXT:%s\n' "$(jq -c -n --arg text "$stripped_text" '{text: $text}')" >&2
+                cur_text_buf=""
                 ;;
             esac
             prev_block=""
@@ -205,36 +234,59 @@ process_stream() {
         esac
         ;;
 
-      # ── Tool execution result ───────────────────────────────────────────────
-      tool_result)
-        local output is_error
-        output=$(printf '%s' "$line" | jq -r '
-          if (.content | type) == "array" then .content[0].text
-          elif (.content | type) == "string" then .content
-          else "" end' 2>/dev/null)
-        is_error=$(printf '%s' "$line" | jq -r '.is_error // false' 2>/dev/null)
+      # ── Tool execution results (delivered in user messages after each assistant turn)
+      # NOTE: This handler fires only when the API emits user-turn events in stream-json.
+      # Tested with MiniMax-M2.5 (minimaxi.com Anthropic API): user-turn events are NOT
+      # emitted, so CODIFY_TOOL_RESULT is never sent and tool outputs remain null.
+      # If a future API/model supports it, this handler will work as intended.
+      user)
+        local count
+        count=$(printf '%s' "$line" | jq '[.content[]? | select(.type == "tool_result")] | length' 2>/dev/null || echo 0)
+        local i
+        for (( i=0; i<count; i++ )); do
+          local tool_use_id output is_error stored_out
+          # Use filtered-array indexing to avoid off-by-one if content has mixed types
+          tool_use_id=$(printf '%s' "$line" | jq -r --argjson i "$i" \
+            '[.content[]? | select(.type == "tool_result")][$i].tool_use_id // ""' 2>/dev/null)
+          output=$(printf '%s' "$line" | jq -r --argjson i "$i" \
+            '[.content[]? | select(.type == "tool_result")][$i] |
+            if (.content | type) == "array" then (.content | map(.text // "") | join(""))
+            elif (.content | type) == "string" then .content
+            else (.output // "") end' 2>/dev/null)
+          is_error=$(printf '%s' "$line" | jq -r --argjson i "$i" \
+            '[.content[]? | select(.type == "tool_result")][$i].is_error // false' 2>/dev/null)
 
-        if [[ "$is_error" == "true" ]]; then
-          _e "${RED}  ╰─ ❌ Error:  ${DIM}%.400s${RESET}\n" "$output"
-        else
-          _e "${CYAN}  ╰─ ✅ Output: ${DIM}%.400s${RESET}\n" "$output"
-        fi
+          if [[ "$is_error" == "true" ]]; then
+            _e "${RED}  ╰─ ❌ Error:  ${DIM}%.400s${RESET}\n" "$output"
+          else
+            _e "${CYAN}  ╰─ ✅ Output: ${DIM}%.400s${RESET}\n" "$output"
+          fi
 
-        # Patch the last tool-call stub with its output and error flag
-        if [[ -s "$TOOL_CALLS_FILE" ]]; then
-          local total_lines last_line updated
-          total_lines=$(wc -l < "$TOOL_CALLS_FILE")
-          last_line=$(tail -1 "$TOOL_CALLS_FILE")
-          updated=$(printf '%s' "$last_line" | jq -c \
-            --arg out "$output" \
-            --argjson err "$is_error" \
-            '.output = $out | .error = $err')
-          {
-            head -n $(( total_lines - 1 )) "$TOOL_CALLS_FILE" 2>/dev/null || true
-            printf '%s\n' "$updated"
-          } > "$TOOL_CALLS_FILE.tmp"
-          mv "$TOOL_CALLS_FILE.tmp" "$TOOL_CALLS_FILE"
-        fi
+          # Emit tool result to stderr for worker.py to correlate with CODIFY_TOOL_USE_START
+          stored_out="${output:0:2000}"
+          [[ ${#output} -gt 2000 ]] && stored_out+="…(truncated)"
+          printf 'CODIFY_TOOL_RESULT:%s\n' \
+            "$(jq -c -n --arg id "$tool_use_id" --arg out "$stored_out" --argjson err "$is_error" \
+               '{id: $id, output: $out, error: $err}')" >&2
+
+          # Also update TOOL_CALLS_FILE stub (for backward-compat batch in entrypoint.sh)
+          if [[ -s "$TOOL_CALLS_FILE" ]]; then
+            local stub_line updated
+            stub_line=$(grep -nm 1 '"output":null' "$TOOL_CALLS_FILE" | cut -d: -f1)
+            if [[ -n "$stub_line" ]]; then
+              updated=$(sed -n "${stub_line}p" "$TOOL_CALLS_FILE" | jq -c \
+                --arg out "$stored_out" \
+                --argjson err "$is_error" \
+                '.output = $out | .error = $err')
+              {
+                head -n $(( stub_line - 1 )) "$TOOL_CALLS_FILE" 2>/dev/null || true
+                printf '%s\n' "$updated"
+                tail -n +$(( stub_line + 1 )) "$TOOL_CALLS_FILE" 2>/dev/null || true
+              } > "$TOOL_CALLS_FILE.tmp"
+              mv "$TOOL_CALLS_FILE.tmp" "$TOOL_CALLS_FILE"
+            fi
+          fi
+        done
         ;;
 
       # ── System init ─────────────────────────────────────────────────────────
@@ -247,6 +299,7 @@ process_stream() {
           cwd=$(printf '%s' "$line" | jq -r '.cwd // empty' 2>/dev/null)
           [[ -n "$model" ]] && log "Model : $model"
           [[ -n "$cwd" ]]   && log "CWD   : $cwd"
+          printf 'CODIFY_SYSTEM_INIT:%s\n' "$(jq -c -n --arg model "$model" --arg cwd "$cwd" '{model: $model, cwd: $cwd}')" >&2
         fi
         ;;
 
@@ -272,12 +325,32 @@ process_stream() {
           fail "Task failed: $subtype"
         fi
         ;;
+
+      *)
+        ;;
     esac
   done
 }
 
 # ── Run claude and stream-process its output ──────────────────────────────────
 /usr/local/bin/claude "${CLAUDE_ARGS[@]}" 2>&1 | process_stream
+
+# ── Fallback: if --resume was used and produced no result, retry without it ───
+if [[ -n "$RESUME" && ! -s "$RESULT_FILE" ]]; then
+  fail "Session resume failed (session $RESUME not found in container). Retrying without --resume..."
+  # Remove --resume from CLAUDE_ARGS
+  NEW_ARGS=()
+  skip_next=false
+  for arg in "${CLAUDE_ARGS[@]}"; do
+    if $skip_next; then skip_next=false; continue; fi
+    if [[ "$arg" == "--resume" ]]; then skip_next=true; continue; fi
+    NEW_ARGS+=("$arg")
+  done
+  # Reset temp files
+  : > "$TOOL_CALLS_FILE"
+  : > "$RESULT_FILE"
+  /usr/local/bin/claude "${NEW_ARGS[@]}" 2>&1 | process_stream
+fi
 
 # ── Build and emit structured JSON to stdout ──────────────────────────────────
 if [[ ! -s "$RESULT_FILE" ]]; then

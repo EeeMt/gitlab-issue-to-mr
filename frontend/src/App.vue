@@ -1,6 +1,7 @@
 <template>
   <n-config-provider :locale="naiveUiLocale" :date-locale="naiveUiDateLocale">
     <n-message-provider>
+    <n-dialog-provider>
       <div v-if="!authState.initialized" class="app-loading">
         <n-spin size="large" />
       </div>
@@ -82,6 +83,23 @@
             </div>
             <div class="app-shell__topbar-actions">
               <LanguageToggle size="small" class="app-shell__language-toggle" />
+              <n-tooltip trigger="hover" :style="onboardingTooltipStyle">
+                <template #trigger>
+                  <n-button
+                    tertiary
+                    circle
+                    class="app-shell__onboarding-button app-shell__onboarding-button--icon-only"
+                    data-testid="reopen-onboarding-desktop"
+                    :title="t('shell.reopenOnboarding')"
+                    @click="openOnboarding"
+                  >
+                    <template #icon>
+                      <n-icon :component="InformationCircleOutline" />
+                    </template>
+                  </n-button>
+                </template>
+                {{ t('shell.productTour') }}
+              </n-tooltip>
               <n-button tertiary class="app-shell__logout-button" @click="handleLogout">
                 <template #icon>
                   <n-icon :component="LogOutOutline" />
@@ -115,6 +133,19 @@
                 v-if="showUserToolbar"
                 quaternary
                 circle
+                data-testid="reopen-onboarding-mobile"
+                class="mobile-header__onboarding-button"
+                :title="t('shell.reopenOnboarding')"
+                @click="openOnboarding"
+              >
+                <template #icon>
+                  <n-icon :component="InformationCircleOutline" />
+                </template>
+              </n-button>
+              <n-button
+                v-if="showUserToolbar"
+                quaternary
+                circle
                 class="mobile-header__logout-button"
                 :title="t('shell.logout')"
                 @click="handleLogout"
@@ -131,8 +162,17 @@
               <router-view />
             </div>
           </n-layout>
+
+          <OnboardingModal
+            :show="showOnboarding"
+            @close="handleOnboardingClose"
+            @complete="handleOnboardingComplete"
+            @view-dashboard="navigateToDashboard"
+            @create-issue="navigateToCreateIssue"
+          />
         </n-layout>
       </n-layout>
+    </n-dialog-provider>
     </n-message-provider>
   </n-config-provider>
 </template>
@@ -143,6 +183,7 @@ import {
   NAvatar,
   NButton,
   NConfigProvider,
+  NDialogProvider,
   NDrawer,
   NDrawerContent,
   NIcon,
@@ -151,27 +192,32 @@ import {
   NMenu,
   NMessageProvider,
   NSpin,
+  NTooltip,
   NText
 } from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
-  AddCircleOutline,
   BarChartOutline,
+  DocumentTextOutline,
   FingerPrintOutline,
   GridOutline,
+  ListOutline,
   LogOutOutline,
   MenuOutline,
+  InformationCircleOutline,
   CalendarOutline,
   PeopleOutline,
   RocketOutline,
   SettingsOutline,
   SpeedometerOutline
 } from '@vicons/ionicons5'
-import { useWindowSize } from '@vueuse/core'
 import { authState, canAccessSharedPage, initializeAuth, isAdmin, logoutAndClearAuth } from './auth'
 import LanguageToggle from './components/LanguageToggle.vue'
+import OnboardingModal from './components/OnboardingModal.vue'
+import { useBreakpoints } from './composables/useBreakpoints'
+import { getOnboardingDismissed, setOnboardingDismissed } from './composables/useOnboarding'
 import {
   naiveUiDateLocale,
   naiveUiLocale,
@@ -183,8 +229,7 @@ const { t } = useI18n()
 const collapsed = ref(false)
 const showDrawer = ref(false)
 
-const { width } = useWindowSize()
-const isMobile = computed(() => width.value < 768)
+const { isMobile } = useBreakpoints()
 
 const activeKey = computed(() => route.name as string)
 const isLoginRoute = computed(() => route.name === 'Login')
@@ -193,7 +238,9 @@ const showShell = computed(() => !isLoginRoute.value && !isBootstrapRoute.value)
 
 const menuLabels: Record<string, string> = {
   Dashboard: 'nav.dashboard',
-  CreateTask: 'nav.createTask',
+  TaskList: 'nav.tasks',
+  Issues: 'nav.issues',
+  CreateIssue: 'nav.createIssue',
   Sessions: 'nav.sessions',
   Monitor: 'nav.monitor',
   ScheduleOverview: 'nav.scheduleOverview',
@@ -202,8 +249,19 @@ const menuLabels: Record<string, string> = {
   AccessManagement: 'nav.accessManagement'
 }
 
+const onboardingTooltipStyle = {
+  fontSize: '11px',
+  padding: '4px 8px',
+  borderRadius: '6px',
+}
+
 const currentPageLabel = computed(() => t(menuLabels[activeKey.value] || 'app.navigation'))
 const showUserToolbar = computed(() => authState.authenticated)
+const onboardingDismissed = ref(getOnboardingDismissed())
+const manualOnboardingOpen = ref(false)
+const showOnboarding = computed(
+  () => authState.initialized && authState.authenticated && showShell.value && (!onboardingDismissed.value || manualOnboardingOpen.value)
+)
 const userDisplayName = computed(
   () => authState.user?.display_name || authState.user?.username || t('shell.gitlabUser')
 )
@@ -241,7 +299,8 @@ function buildMenuSection(labelKey: string, children: MenuOption[]): MenuOption[
 const menuOptions = computed<MenuOption[]>(() => {
   const workspaceItems: MenuOption[] = [
     buildMenuItem('nav.dashboard', 'Dashboard', GridOutline),
-    buildMenuItem('nav.createTask', 'CreateTask', AddCircleOutline)
+    buildMenuItem('nav.issues', 'Issues', DocumentTextOutline),
+    buildMenuItem('nav.tasks', 'TaskList', ListOutline),
   ]
 
   if (authState.authenticated) {
@@ -280,6 +339,37 @@ function handleMenuUpdate(key: string) {
   router.push({ name: key })
 }
 
+function openOnboarding() {
+  manualOnboardingOpen.value = true
+}
+
+function dismissOnboarding() {
+  if (!onboardingDismissed.value) {
+    onboardingDismissed.value = true
+    setOnboardingDismissed(true)
+  }
+}
+
+function handleOnboardingClose() {
+  dismissOnboarding()
+  manualOnboardingOpen.value = false
+}
+
+function handleOnboardingComplete() {
+  dismissOnboarding()
+  manualOnboardingOpen.value = false
+}
+
+async function navigateToDashboard() {
+  handleOnboardingComplete()
+  await router.push({ name: 'Dashboard' })
+}
+
+async function navigateToCreateIssue() {
+  handleOnboardingComplete()
+  await router.push({ name: 'CreateIssue' })
+}
+
 async function handleLogout() {
   await logoutAndClearAuth()
 }
@@ -290,11 +380,27 @@ onMounted(() => {
 </script>
 
 <style>
+:root {
+  --app-page-max-width: 1240px;
+  --app-page-max-width-wide: 1400px;
+  --app-page-gap: 16px;
+  --app-page-gap-large: 20px;
+  --app-card-radius: 18px;
+  --app-card-radius-small: 12px;
+  --app-card-shadow-soft: 0 10px 24px rgba(15, 23, 42, 0.05);
+  --app-page-title-size: 28px;
+  --app-page-title-size-mobile: 24px;
+  --app-page-subtitle-max-width: 760px;
+  --app-page-subtitle-color: rgba(15, 23, 42, 0.68);
+  --app-page-header-gap: 16px;
+  --app-summary-card-background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
+}
+
 html, body, #app {
   margin: 0;
   padding: 0;
   height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   background: #f5f7fb;
 }
 
@@ -333,7 +439,7 @@ body {
 }
 
 .app-shell__content-inner {
-  max-width: 1400px;
+  max-width: var(--app-page-max-width);
   margin: 0 auto;
 }
 
@@ -351,7 +457,9 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin: 14px 20px 0;
+  width: min(calc(100% - 40px), var(--app-page-max-width));
+  margin: 14px auto 0;
+  box-sizing: border-box;
   padding: 12px 14px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.72);
@@ -366,8 +474,17 @@ body {
   min-width: 0;
 }
 
+.app-shell__onboarding-button,
 .app-shell__logout-button {
   flex-shrink: 0;
+}
+
+.app-shell__onboarding-button--icon-only {
+  color: rgba(15, 23, 42, 0.5);
+}
+
+.app-shell__onboarding-button--icon-only:hover {
+  color: rgba(15, 23, 42, 0.72);
 }
 
 /* Global button styling - unified rounded corners */

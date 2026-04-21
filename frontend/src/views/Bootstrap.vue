@@ -1,18 +1,22 @@
 <template>
-  <div class="bootstrap-page">
-    <n-card class="bootstrap-card" :bordered="false">
-      <div class="bootstrap-card__header">
-        <div class="bootstrap-card__brand">
-          <div class="bootstrap-card__mark">
-            <n-icon size="26" :component="RocketOutline" />
+  <div class="bootstrap-page" data-testid="bootstrap-page">
+    <n-card class="bootstrap-card" :bordered="false" data-testid="bootstrap-card">
+      <PageHeader data-testid="bootstrap-header" root-class="bootstrap-card__header">
+        <template #title>
+          <div class="bootstrap-card__brand">
+            <div class="bootstrap-card__mark">
+              <n-icon :size="isCompact ? 22 : 26" :component="RocketOutline" />
+            </div>
+            <div>
+              <h1 class="bootstrap-card__title">{{ t('app.brandTitle') }}</h1>
+              <p class="bootstrap-card__subtitle">{{ t('bootstrap.subtitle') }}</p>
+            </div>
           </div>
-          <div>
-            <h1 class="bootstrap-card__title">{{ t('app.brandTitle') }}</h1>
-            <p class="bootstrap-card__subtitle">{{ t('bootstrap.subtitle') }}</p>
-          </div>
-        </div>
-        <LanguageToggle size="small" class="bootstrap-card__language-switcher" />
-      </div>
+        </template>
+        <template #actions>
+          <LanguageToggle size="small" class="bootstrap-card__language-switcher" />
+        </template>
+      </PageHeader>
 
       <n-alert type="info" :show-icon="false" class="bootstrap-card__intro">
         {{ t('bootstrap.intro') }}
@@ -24,9 +28,11 @@
         :rules="formRules()"
         label-placement="top"
         class="bootstrap-form"
+        data-testid="bootstrap-form"
       >
         <n-form-item :label="t('bootstrap.username')" path="username">
           <n-input
+            data-testid="bootstrap-username-input"
             v-model:value="formData.username"
             placeholder="Enter administrator username"
             autocomplete="username"
@@ -35,6 +41,7 @@
 
         <n-form-item :label="t('bootstrap.displayName')" path="displayName">
           <n-input
+            data-testid="bootstrap-display-name-input"
             v-model:value="formData.displayName"
             :placeholder="t('bootstrap.displayNamePlaceholder')"
           />
@@ -42,6 +49,7 @@
 
         <n-form-item :label="t('bootstrap.email')" path="email">
           <n-input
+            data-testid="bootstrap-email-input"
             v-model:value="formData.email"
             :placeholder="t('bootstrap.emailPlaceholder')"
             autocomplete="email"
@@ -50,6 +58,7 @@
 
         <n-form-item :label="t('bootstrap.password')" path="password">
           <n-input
+            data-testid="bootstrap-password-input"
             v-model:value="formData.password"
             type="password"
             show-password-on="click"
@@ -60,6 +69,7 @@
 
         <n-form-item :label="t('bootstrap.confirmPassword')" path="confirmPassword">
           <n-input
+            data-testid="bootstrap-confirm-password-input"
             v-model:value="formData.confirmPassword"
             type="password"
             show-password-on="click"
@@ -70,6 +80,7 @@
 
         <n-space vertical :size="16" class="bootstrap-form__actions">
           <n-button
+            data-testid="bootstrap-submit-button"
             type="primary"
             size="large"
             block
@@ -108,9 +119,12 @@ import {
 } from 'naive-ui'
 import { RocketOutline } from '@vicons/ionicons5'
 import LanguageToggle from '../components/LanguageToggle.vue'
+import PageHeader from '../components/PageHeader.vue'
+import { useBreakpoints } from '../composables/useBreakpoints'
 
 const message = useMessage()
 const { t } = useI18n()
+const { isCompact } = useBreakpoints()
 
 const formRef = ref<FormInst | null>(null)
 const submitting = ref(false)
@@ -217,22 +231,25 @@ async function handleSubmit() {
   padding: 24px;
   padding-top: max(24px, env(safe-area-inset-top));
   padding-bottom: max(24px, env(safe-area-inset-bottom));
+  background:
+    radial-gradient(circle at top left, rgba(32, 128, 240, 0.12), transparent 28%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.94), rgba(241, 245, 249, 0.98));
 }
 
 .bootstrap-card {
   width: min(520px, 100%);
   margin: 0 auto;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.86);
+  border-radius: var(--app-card-radius, 18px);
+  background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(14px);
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.14);
 }
 
+/* bootstrap-card__header is now PageHeader's root (via root-class). PageHeader provides
+   the flex layout; preserve margin-bottom and override the 767 px column-stack so the
+   header only stacks at the compact (480 px) breakpoint. */
 .bootstrap-card__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
   margin-bottom: 24px;
 }
 
@@ -269,7 +286,7 @@ async function handleSubmit() {
 
 .bootstrap-card__subtitle {
   margin: 8px 0 0;
-  color: rgba(15, 23, 42, 0.66);
+  color: var(--app-page-subtitle-color, rgba(15, 23, 42, 0.66));
 }
 
 .bootstrap-card__intro {
@@ -296,8 +313,16 @@ async function handleSubmit() {
     padding-right: 16px;
   }
 
-  .bootstrap-card__header {
+  /* Keep header horizontal until the compact breakpoint */
+  .bootstrap-card :deep(.page-header) {
+    flex-direction: row;
+    align-items: flex-start;
     gap: 12px;
+  }
+
+  .bootstrap-card :deep(.page-header__actions) {
+    width: auto;
+    justify-content: flex-end;
   }
 
   .bootstrap-card__brand {
@@ -306,13 +331,14 @@ async function handleSubmit() {
 }
 
 @media (max-width: 480px) {
-  .bootstrap-card__header {
+  /* Stack header at compact size */
+  .bootstrap-card :deep(.page-header) {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .bootstrap-card__language-switcher {
-    align-self: flex-end;
+  .bootstrap-card :deep(.page-header__actions) {
+    justify-content: flex-end;
   }
 }
 </style>

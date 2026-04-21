@@ -1,377 +1,285 @@
 <template>
-  <div class="dashboard">
+  <div class="dashboard" data-testid="dashboard-page">
     <n-spin :show="initialLoading" :description="t('common.loadingTasks')">
       <n-space vertical :size="16">
-        <div class="dashboard__hero">
-          <div>
-            <h2 class="dashboard__title">{{ t('dashboard.title') }}</h2>
-            <p class="dashboard__subtitle">
-              {{ t('dashboard.subtitle') }}
-            </p>
-          </div>
-          <n-space align="center" wrap class="dashboard__filters">
-            <n-select
-              v-model:value="statusFilter"
-              :options="statusOptions"
-              :placeholder="t('dashboard.status')"
-              clearable
-              style="width: 140px"
-            />
-            <n-select
-              v-model:value="projectFilter"
-              :options="projectOptions"
-              :placeholder="t('dashboard.project')"
-              clearable
-              filterable
-              style="width: min(280px, 70vw)"
-            />
-            <n-select
-              v-model:value="initiatorFilter"
-              :options="initiatorOptions"
-              :placeholder="t('dashboard.initiator')"
-              clearable
-              filterable
-              style="width: 180px"
-            />
-            <n-button @click="refreshTasks" :loading="loading" size="small">
-              {{ t('common.refresh') }}
-            </n-button>
-          </n-space>
-        </div>
-
-        <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
-          <n-gi v-for="item in summaryItems" :key="item.label">
-            <n-card size="small" class="dashboard-summary-card" :bordered="false">
-              <div class="dashboard-summary-card__label">{{ item.label }}</div>
-              <div class="dashboard-summary-card__value">{{ item.value }}</div>
+        <n-grid
+          v-if="hasLoadedOnce"
+          data-testid="dashboard-summary"
+          :cols="isMobile ? 2 : 4"
+          :x-gap="12"
+          :y-gap="12"
+        >
+          <n-gi>
+            <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
+              <n-icon size="18" :component="DocumentTextOutline" class="metric-corner-icon" />
+              <div class="metric-title">
+                <span>{{ t('dashboard.issueStatus') }}</span>
+                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.issueStatusTip') }}</n-tooltip>
+              </div>
+              <div class="metric-body">
+                <StatusPieChart :data="issueChartData" />
+              </div>
+            </n-card>
+          </n-gi>
+          <n-gi>
+            <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
+              <n-icon size="18" :component="PlayCircleOutline" class="metric-corner-icon" />
+              <div class="metric-title">
+                <span>{{ t('dashboard.taskStatus') }}</span>
+                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.taskStatusTip') }}</n-tooltip>
+              </div>
+              <div class="metric-body">
+                <StatusPieChart :data="taskChartData" />
+              </div>
+            </n-card>
+          </n-gi>
+          <n-gi>
+            <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
+              <n-icon size="18" :component="CodeSlashOutline" class="metric-corner-icon" />
+              <div class="metric-title">
+                <span>{{ t('dashboard.linesChanged') }}</span>
+                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.linesChangedTip') }}</n-tooltip>
+              </div>
+              <div class="metric-body">
+                <div class="dashboard-stat__value">{{ formatNumber(analyticsTotalChanges) }}</div>
+                <div class="dashboard-stat__detail">
+                  <span class="dashboard-stat__add">+{{ formatNumber(analyticsTotalAdditions) }}</span>
+                  <span class="dashboard-stat__del">-{{ formatNumber(analyticsTotalDeletions) }}</span>
+                </div>
+              </div>
+            </n-card>
+          </n-gi>
+          <n-gi>
+            <n-card size="small" class="dashboard-metric-card" data-testid="dashboard-summary-card">
+              <n-icon size="18" :component="FlashOutline" class="metric-corner-icon" />
+              <div class="metric-title">
+                <span>{{ t('dashboard.tokensUsed') }}</span>
+                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.tokensUsedTip') }}</n-tooltip>
+              </div>
+              <div class="metric-body">
+                <div class="dashboard-stat__value">{{ formatNumber(analyticsTotalTokens) }}</div>
+                <div class="dashboard-stat__detail">
+                  <n-icon size="12" :component="FlashOutline" style="margin-right:2px" />
+                  <span>{{ formatNumber(analyticsInputTokens) }} in / {{ formatNumber(analyticsOutputTokens) }} out</span>
+                </div>
+              </div>
             </n-card>
           </n-gi>
         </n-grid>
 
-        <n-card class="dashboard-table-card" :bordered="false">
-          <n-data-table
-            :columns="columns"
-            :data="tasks"
-            :loading="tableLoading"
-            :row-key="(row: Task) => row.id"
-            :row-props="getRowProps"
-            :pagination="pagination"
-            :bordered="false"
-            :scroll-x="isMobile ? undefined : undefined"
-          />
-        </n-card>
+        <n-grid
+          v-if="hasLoadedOnce"
+          :cols="isMobile ? 1 : 2"
+          :x-gap="12"
+          :y-gap="12"
+        >
+          <n-gi>
+            <n-card size="small" class="dashboard-metric-card dashboard-metric-card--wide" data-testid="dashboard-activity-heatmap">
+              <n-icon size="18" :component="CalendarOutline" class="metric-corner-icon" />
+              <div class="metric-title">
+                <span>{{ t('dashboard.activity') }}</span>
+                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.activityTip') }}</n-tooltip>
+              </div>
+              <div class="metric-body">
+                <ActivityHeatmap :data="heatmapData" />
+              </div>
+            </n-card>
+          </n-gi>
+          <n-gi>
+            <n-card size="small" class="dashboard-metric-card dashboard-metric-card--wide dashboard-metric-card--trend" data-testid="dashboard-trend-chart">
+              <n-icon size="18" :component="TrendingUpOutline" class="metric-corner-icon" />
+              <div class="metric-title">
+                <span>{{ t('dashboard.trend') }}</span>
+                <n-tooltip trigger="hover" :style="tooltipStyle"><template #trigger><n-icon size="14" class="metric-info-icon" :component="InformationCircleOutline" /></template>{{ t('dashboard.trendTip') }}</n-tooltip>
+              </div>
+              <div class="metric-body">
+                <TrendChart :data="trendData" />
+              </div>
+            </n-card>
+          </n-gi>
+        </n-grid>
+
+        <MyWorkBoard
+          :issue-columns="issueBoardColumns"
+          :task-columns="taskBoardColumns"
+          :issue-total="boardIssueTotal"
+          :task-total="boardTaskTotal"
+          :visible-limit="boardVisibleLimit"
+          :is-mobile="isMobile"
+          @select="router.push($event)"
+        />
       </n-space>
     </n-spin>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, h, watch, computed } from 'vue'
-import { NButton, NSpace, NSelect, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, DataTableColumns } from 'naive-ui'
+import { ref, onMounted, computed } from 'vue'
+import { NSpace, NCard, NGrid, NGi, NSpin, NIcon, NTooltip, useMessage } from 'naive-ui'
 import { useRouter } from 'vue-router'
-import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { getProjects, getTasks, type Project, type Task } from '../api'
+import { getIssues, getTasksPaginated, getStats, getAnalytics, getActivityHeatmap, type Issue, type Task, type ActivityHeatmapEntry, type AnalyticsTrendPoint } from '../api'
+import {
+  CalendarOutline,
+  CodeSlashOutline,
+  DocumentTextOutline,
+  FlashOutline,
+  InformationCircleOutline,
+  PlayCircleOutline,
+  TrendingUpOutline,
+} from '@vicons/ionicons5'
+
+import StatusPieChart from '../components/StatusPieChart.vue'
+import ActivityHeatmap from '../components/ActivityHeatmap.vue'
+import TrendChart from '../components/TrendChart.vue'
+import MyWorkBoard, { type BoardCardItem, type BoardColumn } from '../components/dashboard/MyWorkBoard.vue'
+import { useBreakpoints } from '../composables/useBreakpoints'
+import { usePolling } from '../composables/usePolling'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
+import { formatPriority } from '../utils/format'
+import { authState } from '../auth'
+
+const issueStatuses = ['open', 'in_progress', 'in_review', 'closed'] as const
+const taskStatuses = ['pending', 'queued', 'running', 'completed', 'failed', 'cancelled'] as const
+
+const boardVisibleLimit = 100
 
 const router = useRouter()
 const message = useMessage()
 const { t } = useI18n()
-const { width } = useWindowSize()
+const { isMobile } = useBreakpoints()
+const tooltipStyle = { fontSize: '11px', borderRadius: '6px', padding: '6px 12px', maxWidth: '280px' }
 
-const isMobile = computed(() => width.value < 768)
-
-const tasks = ref<Task[]>([])
-const projects = ref<Project[]>([])
+const boardIssues = ref<Issue[]>([])
+const boardTasks = ref<Task[]>([])
+const boardIssueTotal = ref(0)
+const boardTaskTotal = ref(0)
 const loading = ref(false)
 const hasLoadedOnce = ref(false)
-const statusFilter = ref<string | null>(null)
-const projectFilter = ref<number | null>(null)
-const initiatorFilter = ref<string | null>(null)
-let pollTimer: number | null = null
 
-const pagination = {
-  pageSize: 20,
-  responsive: true
-}
+const statsIssueByStatus = ref<Record<string, number>>({})
+const statsPending = ref(0)
+const statsQueued = ref(0)
+const statsRunning = ref(0)
+const statsCompleted = ref(0)
+const statsFailed = ref(0)
+const statsCancelled = ref(0)
+const analyticsTotalAdditions = ref(0)
+const analyticsTotalDeletions = ref(0)
+const analyticsTotalChanges = ref(0)
+const analyticsInputTokens = ref(0)
+const analyticsOutputTokens = ref(0)
+const analyticsTotalTokens = ref(0)
+const heatmapData = ref<ActivityHeatmapEntry[]>([])
+const trendData = ref<AnalyticsTrendPoint[]>([])
 
-const statusOptions = computed(() => [
-  { label: t('status.pending'), value: 'pending' },
-  { label: t('status.queued'), value: 'queued' },
-  { label: t('status.running'), value: 'running' },
-  { label: t('status.completed'), value: 'completed' },
-  { label: t('status.failed'), value: 'failed' },
-  { label: t('status.cancelled'), value: 'cancelled' }
-])
-const projectOptions = computed(() =>
-  projects.value.map((project) => ({
-    label: project.path_with_namespace,
-    value: project.id
-  }))
-)
-const initiatorOptions = computed(() => {
-  const values = Array.from(
-    new Set(tasks.value.map((task) => task.initiator_username?.trim()).filter(Boolean) as string[])
-  ).sort((left, right) => left.localeCompare(right))
-
-  return values.map((username) => ({
-    label: username,
-    value: username
-  }))
-})
-
-const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
-  pending: 'default',
-  queued: 'info',
-  running: 'warning',
-  completed: 'success',
-  failed: 'error',
-  cancelled: 'default'
-}
-
-function getProjectLabel(task: Task): string {
-  return task.project_path_with_namespace || task.project_name || t('dashboard.projectFallback', { id: task.project_id })
-}
-
-function renderExternalLink(label: string, href?: string | null) {
-  if (!href) {
-    return label
-  }
-  return h('a', { href, target: '_blank', rel: 'noopener noreferrer', class: 'app-link' }, label)
-}
-
-function getProjectSecondaryLabel(task: Task): string {
-  const issueLabel = task.issue_iid ? `!${task.issue_iid}` : '-'
-  return `${getProjectLabel(task)} · ${issueLabel}`
-}
-
-function getInitiatorLabel(task: Task): string {
-  return task.initiator_username?.trim() || '-'
-}
-
-function formatPriority(priority?: string | number | null): string {
-  if (priority === null || priority === undefined || priority === '') {
-    return '-'
-  }
-
-  const normalized = String(priority).toLowerCase().trim()
-  if (normalized === '0' || normalized === 'p0') return 'P0'
-  if (normalized === '1' || normalized === 'p1') return 'P1'
-  if (normalized === '2' || normalized === 'p2') return 'P2'
-  return String(priority)
-}
-
-function formatCompactDateTime(value?: string | null): string {
-  if (!value) {
-    return '-'
-  }
-
-  return formatDateTimeUtc8Compact(value)
-}
-
-function goToTask(task: Task) {
-  router.push({ name: 'TaskView', params: { id: task.id } })
-}
-
-function isInteractiveTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) {
-    return false
-  }
-
-  return Boolean(
-    target.closest('a, button, input, textarea, select, summary, [role="button"], .n-button, .n-base-selection')
-  )
-}
-
-function getRowProps(row: Task) {
-  return {
-    style: 'cursor: pointer;',
-    onClick: (event: MouseEvent) => {
-      if (isInteractiveTarget(event.target)) {
-        return
-      }
-      goToTask(row)
-    }
-  }
-}
-
-const columns = computed<DataTableColumns<Task>>(() => {
-  const renderStatus = (row: Task) =>
-    h(NTag, { type: statusColors[row.status], size: 'small' }, () => t(`status.${row.status}`))
-
-  const mobileColumns: DataTableColumns<Task> = [
-    {
-      title: t('dashboard.id'),
-      key: 'id',
-      width: 45
-    },
-    {
-      title: t('dashboard.task'),
-      key: 'task_info',
-      render: (row) =>
-        h('div', { style: 'line-height: 1.4' }, [
-          h(
-            'div',
-            {
-              style:
-                'font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px'
-            },
-            getProjectSecondaryLabel(row)
-          ),
-          h(
-            'div',
-            {
-              style:
-                'font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px'
-            },
-            row.branch_name ? renderExternalLink(row.branch_name, row.branch_url) : '-'
-          )
-        ])
-    },
-    {
-      title: t('dashboard.status'),
-      key: 'status',
-      width: 85,
-      render: renderStatus
-    }
-  ]
-
-  const desktopColumns: DataTableColumns<Task> = [
-    {
-      title: t('dashboard.id'),
-      key: 'id',
-      width: 52
-    },
-    {
-      title: t('dashboard.project'),
-      key: 'project',
-      width: 156,
-      ellipsis: { tooltip: true },
-      render: (row) =>
-        h('div', { style: 'line-height: 1.4' }, [
-          h('div', renderExternalLink(getProjectLabel(row), row.project_url)),
-          h(
-            'div',
-            { style: 'font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;' },
-            `ID: ${row.project_id}`
-          )
-        ])
-    },
-    {
-      title: t('dashboard.initiator'),
-      key: 'initiator_username',
-      width: 112,
-      ellipsis: { tooltip: true },
-      render: (row) => getInitiatorLabel(row)
-    },
-    {
-      title: t('dashboard.issue'),
-      key: 'issue_iid',
-      width: 68,
-      render: (row) => (row.issue_iid ? renderExternalLink(`!${row.issue_iid}`, row.issue_url) : '-')
-    },
-    {
-      title: t('dashboard.status'),
-      key: 'status',
-      width: 84,
-      render: renderStatus
-    },
-    {
-      title: t('dashboard.priority'),
-      key: 'priority',
-      width: 84,
-      render: (row) => formatPriority(row.priority)
-    },
-    {
-      title: t('dashboard.branch'),
-      key: 'branch_name',
-      width: 120,
-      ellipsis: { tooltip: true },
-      render: (row) => (row.branch_name ? renderExternalLink(row.branch_name, row.branch_url) : '-')
-    },
-    {
-      title: t('dashboard.mergeRequest'),
-      key: 'merge_request_url',
-      width: 72,
-      render: (row) => {
-        if (!row.merge_request_url) return '-'
-        const label = row.merge_request_iid ? `!${row.merge_request_iid}` : t('dashboard.open')
-        return h(
-          'a',
-          { href: row.merge_request_url, target: '_blank', rel: 'noopener noreferrer', class: 'app-link' },
-          label
-        )
-      }
-    },
-    {
-      title: t('dashboard.changes'),
-      key: 'changes',
-      width: 84,
-      render: (row) => {
-        if (row.additions === undefined && row.deletions === undefined) return '-'
-        if (!row.additions && !row.deletions) return '-'
-        return h('span', { style: 'display: flex; align-items: center; gap: 4px; font-size: 12px;' }, [
-          h('span', { style: 'color: #18a053' }, '+' + (row.additions || 0)),
-          h('span', { style: 'color: #db3b21; margin-left: 4px' }, '-' + (row.deletions || 0))
-        ])
-      }
-    },
-    {
-      title: t('common.created'),
-      key: 'created_at',
-      width: 118,
-      render: (row) => formatCompactDateTime(row.created_at)
-    },
-    {
-      title: t('dashboard.scheduled'),
-      key: 'scheduled_at',
-      width: 118,
-      render: (row) => formatCompactDateTime(row.scheduled_at)
-    }
-  ]
-
-  return isMobile.value ? mobileColumns : desktopColumns
-})
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
-const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 
-const summaryItems = computed(() => {
-  const summary = tasks.value.reduce(
-    (acc, task) => {
-      acc.total += 1
-      if (task.status === 'running') acc.running += 1
-      if (task.status === 'completed') acc.completed += 1
-      if (task.status === 'pending' || task.status === 'queued') acc.pending += 1
-      if (task.status === 'failed') acc.failed += 1
-      return acc
-    },
-    { total: 0, running: 0, completed: 0, pending: 0, failed: 0 }
-  )
+function formatNumber(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K'
+  return String(n)
+}
 
+function buildIssueCard(issue: Issue): BoardCardItem {
+  return {
+    id: issue.id,
+    title: issue.title,
+    subtitle: `#${issue.id}`,
+    meta: [
+      t('dashboard.projectFallback', { id: issue.project_id }),
+      `${issue.task_count ?? 0} ${t('issue.field.tasks')}`,
+      issue.created_at ? formatDateTimeUtc8Compact(issue.created_at) : '-',
+    ],
+    route: `/issues/${issue.id}`,
+  }
+}
+
+function buildTaskCard(task: Task): BoardCardItem {
+  return {
+    id: task.id,
+    title: task.user_prompt,
+    fullTitle: task.user_prompt,
+    subtitle: `#${task.id}`,
+    meta: [
+      task.project_path_with_namespace || t('dashboard.projectFallback', { id: task.project_id }),
+      formatPriority(task.priority),
+      formatDateTimeUtc8Compact(task.started_at || task.created_at),
+    ],
+    route: `/tasks/${task.id}`,
+  }
+}
+
+const issueChartData = computed(() => {
+  const s = statsIssueByStatus.value
   return [
-    { label: t('dashboard.visibleTasks'), value: String(summary.total) },
-    { label: t('dashboard.running'), value: String(summary.running) },
-    { label: t('dashboard.pendingQueued'), value: String(summary.pending) },
-    { label: t('dashboard.completed'), value: String(summary.completed) }
-  ]
+    { name: t('issue.status.open'), value: s.open ?? 0, color: '#64748b' },
+    { name: t('issue.status.in_progress'), value: s.in_progress ?? 0, color: '#0ea5e9' },
+    { name: t('issue.status.in_review'), value: s.in_review ?? 0, color: '#14b8a6' },
+    { name: t('issue.status.closed'), value: s.closed ?? 0, color: '#8b5cf6' },
+  ].filter((d) => d.value > 0)
 })
 
-async function fetchTasks() {
+const taskChartData = computed(() => {
+  return [
+    { name: t('status.pending'), value: statsPending.value, color: '#64748b' },
+    { name: t('status.queued'), value: statsQueued.value, color: '#0ea5e9' },
+    { name: t('status.running'), value: statsRunning.value, color: '#14b8a6' },
+    { name: t('status.completed'), value: statsCompleted.value, color: '#8b5cf6' },
+    { name: t('status.failed'), value: statsFailed.value, color: '#475569' },
+    { name: t('status.cancelled'), value: statsCancelled.value, color: '#94a3b8' },
+  ].filter((d) => d.value > 0)
+})
+
+const issueBoardColumns = computed<BoardColumn[]>(() =>
+  issueStatuses.map((status) => {
+    const items = boardIssues.value.filter((issue) => issue.status === status).map(buildIssueCard)
+    return {
+      status,
+      label: t(`issue.status.${status}`),
+      count: items.length,
+      items,
+    }
+  }),
+)
+
+const taskBoardColumns = computed<BoardColumn[]>(() =>
+  taskStatuses.map((status) => {
+    const items = boardTasks.value.filter((task) => task.status === status).map(buildTaskCard)
+    return {
+      status,
+      label: t(`status.${status}`),
+      count: items.length,
+      items,
+    }
+  }),
+)
+
+async function fetchData() {
   if (loading.value) return
   loading.value = true
   try {
-    const params: { status?: string; project_id?: number; initiator_username?: string } = {}
-    if (statusFilter.value) {
-      params.status = statusFilter.value
-    }
-    if (projectFilter.value !== null) {
-      params.project_id = projectFilter.value
-    }
-    if (initiatorFilter.value) {
-      params.initiator_username = initiatorFilter.value
-    }
-    tasks.value = await getTasks(params)
-  } catch (error) {
+    const userId = authState.user?.id
+    const username = authState.user?.username
+
+    const [issuesRes, tasksRes] = await Promise.all([
+      getIssues({
+        page: 1,
+        page_size: boardVisibleLimit,
+        ...(userId ? { initiator_user_id: userId } : {}),
+      }),
+      getTasksPaginated({
+        page: 1,
+        page_size: boardVisibleLimit,
+        ...(username ? { initiator_username: username } : {}),
+      }),
+    ])
+
+    boardIssues.value = issuesRes.items
+    boardTasks.value = tasksRes.items
+    boardIssueTotal.value = issuesRes.total
+    boardTaskTotal.value = tasksRes.total
+  } catch {
     message.error(t('dashboard.failedToFetchTasks'))
   } finally {
     hasLoadedOnce.value = true
@@ -379,112 +287,178 @@ async function fetchTasks() {
   }
 }
 
-async function fetchProjects() {
+async function fetchStats() {
   try {
-    projects.value = await getProjects()
-  } catch (error) {
-    // Keep the task list usable even if the optional filter options fail to load.
+    const stats = await getStats({ my: true })
+    statsPending.value = stats.pending
+    statsQueued.value = stats.queued
+    statsRunning.value = stats.running
+    statsCompleted.value = stats.completed
+    statsFailed.value = stats.failed ?? 0
+    statsCancelled.value = stats.cancelled ?? 0
+    statsIssueByStatus.value = stats.issues?.by_status ?? {}
+  } catch {
+    // Stats are supplementary; don't block UI
   }
 }
 
-function refreshTasks() {
-  fetchTasks()
+async function fetchHeatmap() {
+  try {
+    heatmapData.value = await getActivityHeatmap(90, true)
+  } catch {
+    // Heatmap is supplementary
+  }
 }
 
-watch([statusFilter, projectFilter, initiatorFilter], () => {
-  fetchTasks()
-})
+async function fetchAnalytics() {
+  try {
+    const username = authState.user?.username
+    const res = await getAnalytics(90, null, username || null)
+    const s = res.summary
+    analyticsTotalAdditions.value = s.total_additions
+    analyticsTotalDeletions.value = s.total_deletions
+    analyticsTotalChanges.value = s.total_changes
+    analyticsInputTokens.value = s.total_input_tokens
+    analyticsOutputTokens.value = s.total_output_tokens
+    analyticsTotalTokens.value = s.total_tokens
+    trendData.value = res.trends
+  } catch {
+    // Analytics are supplementary
+  }
+}
+
+function refreshAll() {
+  fetchData()
+  fetchStats()
+  fetchHeatmap()
+  fetchAnalytics()
+}
+
+const { start: startPolling } = usePolling(
+  () => refreshAll(),
+  { interval: 15_000, immediate: false },
+)
 
 onMounted(() => {
-  fetchProjects()
-  fetchTasks()
-  // Auto-refresh every 15 seconds and skip when tab is not visible
-  pollTimer = window.setInterval(() => {
-    if (document.visibilityState !== 'visible') return
-    fetchTasks()
-  }, 15000)
-})
-
-onBeforeUnmount(() => {
-  if (pollTimer !== null) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
+  fetchStats()
+  fetchHeatmap()
+  fetchAnalytics()
+  fetchData()
+  startPolling()
 })
 </script>
 
 <style scoped>
 .dashboard {
-  max-width: 1240px;
+  max-width: var(--app-page-max-width);
 }
 
-.dashboard__hero {
+.dashboard__top-bar {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: 16px;
-}
-
-.dashboard__title {
-  margin: 0;
-  font-size: 28px;
-  line-height: 1.2;
-}
-
-.dashboard__filters {
   justify-content: flex-end;
-}
-
-.dashboard__subtitle {
-  margin: 8px 0 0;
-  color: rgba(15, 23, 42, 0.68);
-  max-width: 760px;
-}
-
-.dashboard-summary-card {
-  border-radius: 12px;
-  background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
-}
-
-.dashboard-summary-card__label {
-  margin-bottom: 8px;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.6);
-}
-
-.dashboard-summary-card__value {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--n-text-color-1);
+  margin-bottom: 4px;
 }
 
 .dashboard-table-card {
-  border-radius: 18px;
+  border-radius: var(--app-card-radius);
 }
 
-@media (max-width: 768px) {
-  .dashboard__hero {
-    flex-direction: column;
-    align-items: flex-start;
-  }
+.dashboard-metric-card {
+  height: 240px;
+  border-radius: var(--app-card-radius);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.03);
+  border-color: rgba(15, 23, 42, 0.06) !important;
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
+}
 
-  .dashboard__filters {
-    width: 100%;
-    justify-content: flex-start;
-  }
+.dashboard-metric-card :deep(.n-card__content) {
+  position: relative;
+}
 
-  .dashboard__filters :deep(.n-space-item) {
-    width: 100%;
-  }
+.dashboard-metric-card:hover {
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06), 0 8px 20px rgba(15, 23, 42, 0.05);
+  transform: translateY(-1px);
+}
 
-  .dashboard__filters :deep(.n-base-selection),
-  .dashboard__filters :deep(.n-button) {
-    width: 100%;
-  }
+.dashboard-metric-card--wide {
+  height: 320px;
+}
 
-  .dashboard__title {
-    font-size: 24px;
+.dashboard-metric-card :deep(.n-card-content) {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+  overflow: hidden;
+}
+
+.metric-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #666;
+  text-align: center;
+  position: relative;
+}
+
+.metric-title-icon {
+  margin-right: 4px;
+  vertical-align: -2px;
+  opacity: 0.7;
+}
+
+.metric-corner-icon {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  color: #aaa;
+  opacity: 0.6;
+}
+
+.metric-info-icon {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #bbb;
+  cursor: pointer;
+  transition: color 0.2s;
+  &:hover {
+    color: #888;
   }
+}
+
+.metric-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dashboard-stat__value {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--n-text-color, #333);
+  line-height: 1.1;
+  text-align: center;
+}
+
+.dashboard-stat__detail {
+  font-size: 12px;
+  color: #999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboard-stat__add {
+  color: #18a058;
+  font-weight: 600;
+}
+
+.dashboard-stat__del {
+  color: #d03050;
+  font-weight: 600;
 }
 </style>

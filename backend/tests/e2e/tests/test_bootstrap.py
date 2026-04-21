@@ -4,10 +4,24 @@ Bootstrap Page E2E Tests
 Tests for the initial setup/bootstrap page that should have no sidebar navigation.
 """
 
+import os
 import re
 
 import pytest
 from playwright.sync_api import Page, expect
+
+# Requires exclusive access to system_bootstrap and shared user tables.
+# Run with: make test-e2e-serial
+pytestmark = pytest.mark.serial
+
+# Skip the entire module when running under pytest-xdist (parallel mode).
+# Bootstrap tests need the system to be uninitialized, which is impossible
+# when xdist workers each create their own admin user on startup.
+if os.environ.get("PYTEST_XDIST_WORKER"):
+    pytest.skip(
+        "Bootstrap tests require exclusive DB access; run with -m serial",
+        allow_module_level=True,
+    )
 
 
 @pytest.mark.bootstrap
@@ -20,7 +34,7 @@ class TestBootstrapPage:
 
         # Wait for bootstrap card to be visible (system should be uninitialized)
         page.wait_for_selector(".bootstrap-card", timeout=10000)
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
     def test_bootstrap_page_has_no_sider(self, page: Page, reset_database):
         """
@@ -78,7 +92,6 @@ class TestBootstrapPage:
         inputs = page.locator(".bootstrap-form input")
         inputs.nth(0).fill("testuser")
         inputs.nth(2).fill("test@example.com")
-
         password_inputs = page.locator("input[type='password']")
         password_inputs.nth(0).fill("short")
         password_inputs.nth(1).fill("short")
@@ -102,7 +115,7 @@ class TestBootstrapPage:
     def test_bootstrap_card_is_centered(self, page: Page, reset_database):
         """Test that the bootstrap card is properly centered on the page."""
         page.goto("/bootstrap")
-        page.wait_for_selector(".bootstrap-card", timeout=10000)
+        page.wait_for_selector("[data-testid='bootstrap-card']", timeout=10000)
 
         # The bootstrap card should be visible and centered
         bootstrap_card = page.locator(".bootstrap-card")
@@ -130,7 +143,7 @@ class TestBootstrapPage:
         page.wait_for_selector(".bootstrap-card", timeout=10000)
 
         # Set Chinese locale
-        page.evaluate("window.localStorage.setItem('gimr-locale', 'zh-CN')")
+        page.evaluate("window.localStorage.setItem('codify-locale', 'zh-CN')")
 
         # Reload to apply Chinese locale
         page.reload()
@@ -139,11 +152,7 @@ class TestBootstrapPage:
         # Count all form inputs - should be 5 (username, displayName, email, password, confirmPassword)
         all_inputs = page.locator(".bootstrap-form input")
         input_count = all_inputs.count()
-
-        # Assert we have 5 inputs
         assert input_count == 5, f"Expected 5 inputs in bootstrap form (Chinese), found {input_count}"
-
-        # Check that email input (3rd input, index 2) is visible and is a text input (not password)
         email_input = all_inputs.nth(2)
         expect(email_input).to_be_visible()
         expect(email_input).to_have_attribute("type", "text")
@@ -171,8 +180,6 @@ class TestBootstrapPage:
         inputs.nth(0).fill("e2e_admin")
         inputs.nth(1).fill("E2E Test Admin")
         inputs.nth(2).fill("e2e_admin@test.com")
-
-        # Fill password fields (type='password')
         password_inputs = page.locator("input[type='password']")
         password_inputs.nth(0).fill("securepassword123")
         password_inputs.nth(1).fill("securepassword123")
@@ -188,7 +195,7 @@ class TestBootstrapPage:
         expect(page).to_have_url(re.compile(r".*dashboard"))
 
         # Verify the dashboard loaded (should have main content area)
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
 
     def test_bootstrap_redirects_when_already_initialized(
         self, page: Page, reset_database
@@ -206,8 +213,6 @@ class TestBootstrapPage:
         inputs.nth(0).fill("initial_admin")
         inputs.nth(1).fill("Initial Admin")
         inputs.nth(2).fill("initial@test.com")
-
-        # Fill password fields
         password_inputs = page.locator("input[type='password']")
         password_inputs.nth(0).fill("securepassword123")
         password_inputs.nth(1).fill("securepassword123")

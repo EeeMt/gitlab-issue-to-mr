@@ -9,13 +9,12 @@ from fastapi import HTTPException
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from app.api.config import (
-    MattermostNotificationProfileInput,
+from app.api.config import _serialize_effective_config
+from app.api._validators import _validate_config_value, _normalize_updates
+from app.api.mattermost import MattermostNotificationProfileInput
+from app.api.project_webhooks import (
     _build_gitlab_project_webhook_status_response,
     _build_gitlab_webhook_target_url,
-    _normalize_updates,
-    _serialize_effective_config,
-    _validate_config_value,
     _validate_gitlab_webhook_ready,
 )
 from app.config import get_settings, reset_runtime_config, set_runtime_config
@@ -148,16 +147,15 @@ class ConfigApiHelperTests(unittest.TestCase):
         payload = MattermostNotificationProfileInput(
             name=" Team Alerts ",
             target_type="channel",
-            team_name=" engineering ",
-            channel_name=" ai-bot ",
+            channel_id=" engineering__ai-bot ",
             mention_in_channel=True,
             event_types=["task_completed", "task_completed", "task_failed"],
             field_keys=["task_id", "status", "status"],
         )
 
         self.assertEqual(payload.name, "Team Alerts")
-        self.assertEqual(payload.team_name, "engineering")
-        self.assertEqual(payload.channel_name, "ai-bot")
+        self.assertEqual(payload.channel_id, "engineering__ai-bot")
+        self.assertTrue(payload.mention_in_channel)
         self.assertEqual(payload.event_types, ["task_completed", "task_failed"])
         self.assertEqual(payload.field_keys, ["task_id", "status"])
 
@@ -204,6 +202,7 @@ class ConfigApiHelperTests(unittest.TestCase):
                 "url": "https://bot.example.com/api/webhook/gitlab",
                 "note_events": True,
                 "enable_ssl_verification": True,
+                "merge_requests_events": True,
             },
         )
 
@@ -225,6 +224,7 @@ class ConfigApiHelperTests(unittest.TestCase):
                 "url": "https://bot.example.com/api/webhook/gitlab",
                 "note_events": False,
                 "enable_ssl_verification": True,
+                "merge_requests_events": True,
             },
         )
 
@@ -257,5 +257,331 @@ class ConfigApiHelperTests(unittest.TestCase):
         self.assertEqual(error_response.status_detail, "forbidden")
 
 
+class ConfigSerializationTests(unittest.TestCase):
+    """Tests for _serialize_auth_config and OIDC serialization."""
+
+    def setUp(self) -> None:
+        self._original_config_encryption_key = os.environ.get("CONFIG_ENCRYPTION_KEY")
+        os.environ["CONFIG_ENCRYPTION_KEY"] = "unit-test-config-key"
+        get_settings.cache_clear()
+
+    def tearDown(self) -> None:
+        reset_runtime_config()
+        if self._original_config_encryption_key is None:
+            os.environ.pop("CONFIG_ENCRYPTION_KEY", None)
+        else:
+            os.environ["CONFIG_ENCRYPTION_KEY"] = self._original_config_encryption_key
+        get_settings.cache_clear()
+
+    def test_serialize_auth_config_redacts_oidc_secret(self) -> None:
+        """When oidc_client_secret is set, oidc_client_secret_configured should be True."""
+        from app.api.config import _serialize_auth_config
+
+        settings = get_settings().model_copy(update={"oidc_client_secret": "my-secret"})
+        auth_section = _serialize_auth_config(settings)
+
+        self.assertTrue(auth_section.oidc_client_secret_configured)
+        # The actual secret must NOT be present in the section
+        self.assertFalse(hasattr(auth_section, "oidc_client_secret"))
+
+    def test_serialize_auth_config_without_oidc_secret(self) -> None:
+        """When oidc_client_secret is empty, oidc_client_secret_configured should be False."""
+        from app.api.config import _serialize_auth_config
+
+        settings = get_settings().model_copy(update={"oidc_client_secret": ""})
+        auth_section = _serialize_auth_config(settings)
+
+        self.assertFalse(auth_section.oidc_client_secret_configured)
+
+    def test_validate_oidc_ready_raises_when_missing_fields(self) -> None:
+        """_validate_oidc_ready should raise HTTPException when required OIDC fields are missing."""
+        from app.api.config import _validate_oidc_ready
+
+        # Empty settings — all OIDC fields are blank
+        settings = get_settings().model_copy(update={
+            "oidc_issuer_url": "",
+            "oidc_client_id": "",
+            "oidc_redirect_uri": "",
+            "oidc_client_secret": "",
+        })
+
+        with self.assertRaises(HTTPException) as ctx:
+            _validate_oidc_ready(settings)
+
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_validate_oidc_ready_succeeds_when_all_fields_set(self) -> None:
+        """_validate_oidc_ready should not raise when all required OIDC fields are set."""
+        from app.api.config import _validate_oidc_ready
+
+        settings = get_settings().model_copy(update={
+            "oidc_issuer_url": "https://idp.example.com",
+            "oidc_client_id": "my-client-id",
+            "oidc_redirect_uri": "https://app.example.com/callback",
+            "oidc_client_secret": "my-secret",
+        })
+
+        _validate_oidc_ready(settings)  # should not raise
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Config API endpoints — GET /config, PATCH /config, POST /config/reset
+# ---------------------------------------------------------------------------
+
+from unittest.mock import AsyncMock, MagicMock, patch
+from fastapi.testclient import TestClient
+
+
+def _make_config_admin_client():
+    """Build a TestClient with admin auth and DB overridden for config endpoints."""
+    from app.main import app
+    from app.database import get_db
+    from app.dependencies.auth import require_admin_user, require_authenticated_user
+
+    mock_db = MagicMock()
+
+    async def override_db():
+        yield mock_db
+
+    # require_admin_user returns a User with platform_admin role
+    mock_admin = MagicMock()
+    mock_admin.platform_role = "platform_admin"
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[require_admin_user] = lambda: mock_admin
+    app.dependency_overrides[require_authenticated_user] = lambda: mock_admin
+
+    return TestClient(app, raise_server_exceptions=False), app, mock_db
+
+
+class GetConfigEndpointTests(unittest.TestCase):
+    """Tests for GET /api/config endpoint."""
+
+    def setUp(self):
+        self._original_key = os.environ.get("CONFIG_ENCRYPTION_KEY")
+        os.environ["CONFIG_ENCRYPTION_KEY"] = "test-encryption-key"
+        get_settings.cache_clear()
+
+    def tearDown(self):
+        from app.main import app
+        app.dependency_overrides.clear()
+        reset_runtime_config()
+        if self._original_key is None:
+            os.environ.pop("CONFIG_ENCRYPTION_KEY", None)
+        else:
+            os.environ["CONFIG_ENCRYPTION_KEY"] = self._original_key
+        get_settings.cache_clear()
+
+    def test_get_config_returns_200_and_config_structure(self):
+        """GET /api/config should return 200 with the full config response."""
+        from unittest.mock import patch, AsyncMock
+        client, app, mock_db = _make_config_admin_client()
+
+        with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
+            response = client.get("/api/config")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("runtime", data)
+        self.assertIn("auth", data)
+        self.assertIn("integration", data)
+
+
+class ResetConfigEndpointTests(unittest.TestCase):
+    """Tests for POST /api/config/reset endpoint."""
+
+    def setUp(self):
+        self._original_key = os.environ.get("CONFIG_ENCRYPTION_KEY")
+        os.environ["CONFIG_ENCRYPTION_KEY"] = "test-encryption-key"
+        get_settings.cache_clear()
+
+    def tearDown(self):
+        from app.main import app
+        app.dependency_overrides.clear()
+        reset_runtime_config()
+        if self._original_key is None:
+            os.environ.pop("CONFIG_ENCRYPTION_KEY", None)
+        else:
+            os.environ["CONFIG_ENCRYPTION_KEY"] = self._original_key
+        get_settings.cache_clear()
+
+    def test_reset_config_returns_200(self):
+        """POST /api/config/reset should return 200 and the reset config."""
+        from unittest.mock import patch, AsyncMock
+        client, app, mock_db = _make_config_admin_client()
+
+        with patch("app.api.config.reset_all_runtime_config_overrides", new=AsyncMock()):
+            with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
+                response = client.post("/api/config/reset")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("runtime", data)
+
+
+class UpdateConfigEndpointTests(unittest.TestCase):
+    """Tests for PATCH /api/config endpoint."""
+
+    def setUp(self):
+        self._original_key = os.environ.get("CONFIG_ENCRYPTION_KEY")
+        os.environ["CONFIG_ENCRYPTION_KEY"] = "test-encryption-key"
+        get_settings.cache_clear()
+
+    def tearDown(self):
+        from app.main import app
+        app.dependency_overrides.clear()
+        reset_runtime_config()
+        if self._original_key is None:
+            os.environ.pop("CONFIG_ENCRYPTION_KEY", None)
+        else:
+            os.environ["CONFIG_ENCRYPTION_KEY"] = self._original_key
+        get_settings.cache_clear()
+
+    def test_update_config_with_empty_payload_returns_200(self):
+        """PATCH /api/config with empty payload should return 200."""
+        from unittest.mock import patch, AsyncMock
+        client, app, mock_db = _make_config_admin_client()
+
+        with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
+            response = client.patch("/api/config", json={})
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_update_config_with_runtime_update(self):
+        """PATCH /api/config with runtime changes should save overrides and return config."""
+        from unittest.mock import patch, AsyncMock
+        client, app, mock_db = _make_config_admin_client()
+
+        with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
+            with patch("app.runtime_config.save_runtime_config_override", new=AsyncMock()):
+                response = client.patch("/api/config", json={
+                    "runtime": {
+                        "max_concurrency": 3,
+                        "scheduler_interval": 10,
+                    }
+                })
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("runtime", data)
+
+    def test_update_config_with_auth_update(self):
+        """PATCH /api/config with auth changes should save overrides and return config."""
+        from unittest.mock import patch, AsyncMock
+        client, app, mock_db = _make_config_admin_client()
+
+        with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
+            with patch("app.runtime_config.save_runtime_config_override", new=AsyncMock()):
+                response = client.patch("/api/config", json={
+                    "auth": {
+                        "session_ttl_seconds": 3600,
+                    }
+                })
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+
+
+class UpdateConfigIntegrationTests(unittest.TestCase):
+    """Tests for PATCH /api/config with integration section."""
+
+    def setUp(self):
+        self._original_key = os.environ.get("CONFIG_ENCRYPTION_KEY")
+        os.environ["CONFIG_ENCRYPTION_KEY"] = "test-encryption-key"
+        get_settings.cache_clear()
+
+    def tearDown(self):
+        from app.main import app
+        app.dependency_overrides.clear()
+        reset_runtime_config()
+        if self._original_key is None:
+            os.environ.pop("CONFIG_ENCRYPTION_KEY", None)
+        else:
+            os.environ["CONFIG_ENCRYPTION_KEY"] = self._original_key
+        get_settings.cache_clear()
+
+    def test_update_config_with_integration_gitlab_url(self):
+        """PATCH /api/config with integration section updates GitLab URL."""
+        client, app, mock_db = _make_config_admin_client()
+
+        with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
+            with patch("app.runtime_config.save_runtime_config_override", new=AsyncMock()):
+                response = client.patch("/api/config", json={
+                    "integration": {
+                        "gitlab_url": "https://gitlab.example.com",
+                    }
+                })
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("integration", data)
+
+    def test_update_config_with_integration_clear_bot_token(self):
+        """PATCH /api/config with clear_gitlab_bot_token clears stored token."""
+        client, app, mock_db = _make_config_admin_client()
+
+        with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
+            with patch("app.runtime_config.save_runtime_config_override", new=AsyncMock()):
+                with patch("app.runtime_config.reset_runtime_config_override", new=AsyncMock()) as mock_reset:
+                    response = client.patch("/api/config", json={
+                        "integration": {
+                            "clear_gitlab_bot_token": True,
+                        }
+                    })
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        mock_reset.assert_awaited()
+
+    def test_update_config_with_auth_and_integration(self):
+        """PATCH /api/config with both auth and integration sections."""
+        client, app, mock_db = _make_config_admin_client()
+
+        with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
+            with patch("app.runtime_config.save_runtime_config_override", new=AsyncMock()):
+                response = client.patch("/api/config", json={
+                    "auth": {
+                        "session_ttl_seconds": 7200,
+                    },
+                    "integration": {
+                        "gitlab_url": "https://gitlab.example.com",
+                    }
+                })
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_update_config_with_runtime_clear_alert_webhook(self):
+        """PATCH /api/config clears alert webhook when clear_alert_webhook_url set."""
+        client, app, mock_db = _make_config_admin_client()
+
+        with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
+            with patch("app.runtime_config.save_runtime_config_override", new=AsyncMock()):
+                with patch("app.runtime_config.reset_runtime_config_override", new=AsyncMock()):
+                    response = client.patch("/api/config", json={
+                        "runtime": {
+                            "clear_alert_webhook_url": True,
+                        }
+                    })
+
+        app.dependency_overrides.clear()
+
+        # Should succeed (200)
+        self.assertEqual(response.status_code, 200)

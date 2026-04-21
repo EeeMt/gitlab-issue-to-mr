@@ -9,13 +9,15 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import case, select, func, false
+from sqlalchemy import case, select, func, false, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies.auth import require_page_access
+from app.dependencies.auth import get_optional_current_user, require_page_access
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
-from app.models import Task, TaskStatus
+from app.models import Task, TaskStatus, Issue, IssueStatus, User, AIProvider
+from app.core.projects import build_project_lookup
+from app.core.utcnow import utcnow
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -44,7 +46,9 @@ ERROR_CATEGORY_PATTERNS = (
 
 @router.get("/stats")
 async def get_stats(
+    my: bool = Query(False, description="When true, scope to the current user's data only"),
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Get task statistics.
@@ -60,6 +64,8 @@ async def get_stats(
             base_query = base_query.where(false())
         else:
             base_query = base_query.where(Task.project_id.in_(allowed_project_ids))
+    if my and current_user and current_user.username:
+        base_query = base_query.where(Task.initiator_username == current_user.username)
 
     total_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
     total = total_result.scalar() or 0
@@ -74,6 +80,68 @@ async def get_stats(
         )
         status_counts[status_value.value] = result.scalar() or 0
 
+    # Time-windowed counts for Monitor dashboard
+    now = utcnow()
+    cutoff_24h = now - timedelta(hours=24)
+
+    completed_24h_result = await db.execute(
+        select(func.count()).select_from(
+            base_query.where(
+                Task.status == TaskStatus.COMPLETED,
+                Task.created_at >= cutoff_24h,
+            ).subquery()
+        )
+    )
+    completed_24h = completed_24h_result.scalar() or 0
+
+    failed_cancelled_24h_result = await db.execute(
+        select(func.count()).select_from(
+            base_query.where(
+                Task.status.in_([TaskStatus.FAILED, TaskStatus.CANCELLED]),
+                Task.created_at >= cutoff_24h,
+            ).subquery()
+        )
+    )
+    failed_cancelled_24h = failed_cancelled_24h_result.scalar() or 0
+
+    # Long-running: running tasks started more than 30 minutes ago
+    cutoff_30min = now - timedelta(minutes=30)
+    running_long_result = await db.execute(
+        select(func.count()).select_from(
+            base_query.where(
+                Task.status == TaskStatus.RUNNING,
+                Task.started_at.isnot(None),
+                Task.started_at < cutoff_30min,
+            ).subquery()
+        )
+    )
+    running_long_30min = running_long_result.scalar() or 0
+
+    # Issue statistics
+    issue_base_query = select(Issue.id)
+    if not access_scope.is_unrestricted:
+        allowed_project_ids = access_scope.accessible_project_ids
+        if not allowed_project_ids:
+            issue_base_query = issue_base_query.where(false())
+        else:
+            issue_base_query = issue_base_query.where(Issue.project_id.in_(allowed_project_ids))
+    if my and current_user:
+        issue_base_query = issue_base_query.where(Issue.initiator_user_id == current_user.id)
+
+    issue_total_result = await db.execute(
+        select(func.count()).select_from(issue_base_query.subquery())
+    )
+    issue_total = issue_total_result.scalar() or 0
+
+    issue_by_status = {}
+    for status_val in IssueStatus:
+        result = await db.execute(
+            select(func.count()).select_from(
+                issue_base_query.where(Issue.status == status_val).subquery()
+            )
+        )
+        issue_by_status[status_val.value] = result.scalar() or 0
+
     return {
         "total": total,
         "pending": status_counts.get("pending", 0),
@@ -82,44 +150,30 @@ async def get_stats(
         "completed": status_counts.get("completed", 0),
         "failed": status_counts.get("failed", 0),
         "cancelled": status_counts.get("cancelled", 0),
+        "completed_24h": completed_24h,
+        "failed_cancelled_24h": failed_cancelled_24h,
+        "running_long_30min": running_long_30min,
+        "issues": {
+            "total": issue_total,
+            "by_status": issue_by_status,
+        },
     }
 
 
-async def _build_project_lookup(access_scope: ProjectAccessScope) -> dict[int, dict[str, str | None]]:
-    if not access_scope.is_unrestricted:
-        return {
-            int(project["id"]): {
-                "project_name": project.get("name"),
-                "project_path_with_namespace": project.get("path_with_namespace"),
-            }
-            for project in access_scope.accessible_projects
-        }
-
-    # Use cached projects from gitlab_client to avoid repeated GitLab API calls
-    from app.core.gitlab_client import get_cached_projects
-
-    try:
-        projects = await get_cached_projects()
-        return {
-            int(project["id"]): {
-                "project_name": project.get("name"),
-                "project_path_with_namespace": project.get("path_with_namespace"),
-            }
-            for project in projects
-        }
-    except Exception as exc:
-        logger.warning("Failed to load project metadata for analytics: %s", exc)
-        return {}
-
-
-def _apply_project_scope(query, access_scope: ProjectAccessScope):
+def _apply_project_column_scope(query, project_column, access_scope: ProjectAccessScope):
+    """Apply project-based access control to a query using the specified project column."""
     if access_scope.is_unrestricted:
         return query
 
     allowed_project_ids = access_scope.accessible_project_ids
     if not allowed_project_ids:
         return query.where(false())
-    return query.where(Task.project_id.in_(allowed_project_ids))
+    return query.where(project_column.in_(allowed_project_ids))
+
+
+def _apply_project_scope(query, access_scope: ProjectAccessScope):
+    """Apply project-based access control to a Task query."""
+    return _apply_project_column_scope(query, Task.project_id, access_scope)
 
 
 def _apply_analytics_filters(
@@ -134,6 +188,73 @@ def _apply_analytics_filters(
     if initiator_username:
         query = query.where(Task.initiator_username == initiator_username)
     return query
+
+
+def _apply_issue_analytics_filters(
+    query,
+    access_scope: ProjectAccessScope,
+    project_id: Optional[int] = None,
+    initiator_username: Optional[str] = None,
+):
+    query = _apply_project_column_scope(query, Issue.project_id, access_scope)
+    if project_id is not None:
+        query = query.where(Issue.project_id == project_id)
+    if initiator_username:
+        query = query.where(Issue.initiator_username == initiator_username)
+    return query
+
+
+def _build_status_breakdown_rows(statuses, raw_rows: list) -> list[dict]:
+    counts_by_status: dict[str, int] = {}
+    for row in raw_rows:
+        status_value = getattr(row.status, "value", row.status)
+        counts_by_status[str(status_value)] = int(row.count or 0)
+
+    total = sum(counts_by_status.get(getattr(status, "value", status), 0) for status in statuses)
+    rows: list[dict] = []
+    for status in statuses:
+        status_value = str(getattr(status, "value", status))
+        count = counts_by_status.get(status_value, 0)
+        rows.append(
+            {
+                "status": status_value,
+                "count": count,
+                "share": (count / total) if total else 0,
+            }
+        )
+    return rows
+
+
+def _safe_ratio(numerator: int | float | None, denominator: int | float | None) -> float | None:
+    if denominator in (None, 0) or numerator is None:
+        return None
+    return float(numerator) / float(denominator)
+
+
+def _provider_display_label(provider_name: str | None, provider_model: str | None) -> str:
+    if not provider_name:
+        return "Unknown / Legacy"
+    return f"{provider_name} / {provider_model}" if provider_model else provider_name
+
+
+def _build_provider_chart_series(rows: list[dict]) -> dict[str, list[dict]]:
+    def build(metric_key: str) -> list[dict]:
+        return [
+            {
+                "provider_id": row["provider_id"],
+                "label": _provider_display_label(row["provider_name"], row["provider_model"]),
+                "value": row[metric_key],
+            }
+            for row in rows
+            if row[metric_key] is not None
+        ]
+
+    return {
+        "success_rate": build("success_rate"),
+        "avg_tokens_per_second": build("avg_tokens_per_second"),
+        "avg_tokens_per_changed_line": build("avg_tokens_per_changed_line"),
+        "avg_execution_seconds_per_changed_line": build("avg_execution_seconds_per_changed_line"),
+    }
 
 
 def _build_error_breakdown(error_rows: list[tuple[str, int]], failed_tasks: int) -> list[dict]:
@@ -218,7 +339,7 @@ async def get_analytics(
                 detail=f"Project {project_id} is not available for analytics.",
             )
 
-    now = datetime.utcnow()
+    now = utcnow()
     since = now - timedelta(days=days - 1)
 
     finished_task_expr = case((Task.status.in_(FINISHED_TASK_STATUSES), 1), else_=0)
@@ -243,9 +364,19 @@ async def get_analytics(
         ),
         else_=None,
     )
+    output_tokens_expr = case(
+        (Task.output_tokens.is_not(None), Task.output_tokens),
+        else_=None,
+    )
     token_tracked_expr = case(
         (Task.input_tokens.is_not(None) | Task.output_tokens.is_not(None), 1),
         else_=0,
+    )
+
+    throughput_eligible_expr = (
+        output_tokens_expr.is_not(None)
+        & execution_seconds_expr.is_not(None)
+        & (execution_seconds_expr > 0)
     )
 
     summary_query = _apply_analytics_filters(
@@ -337,7 +468,10 @@ async def get_analytics(
         initiator_username=selected_initiator_username,
     )
     project_rows = (await db.execute(project_query)).all()
-    project_lookup = await _build_project_lookup(access_scope)
+    project_lookup = await build_project_lookup(
+        accessible_projects=access_scope.accessible_projects,
+        is_unrestricted=access_scope.is_unrestricted,
+    )
 
     available_initiators_query = (
         select(
@@ -449,6 +583,40 @@ async def get_analytics(
     )
     priority_wait_rows = (await db.execute(priority_wait_query)).all()
 
+    issue_status_query = (
+        select(Issue.status.label("status"), func.count(Issue.id).label("count"))
+        .where(Issue.created_at >= since)
+        .group_by(Issue.status)
+        .order_by(Issue.status.asc())
+    )
+    issue_status_query = _apply_issue_analytics_filters(
+        issue_status_query,
+        access_scope,
+        project_id=project_id,
+        initiator_username=selected_initiator_username,
+    )
+    issue_status_breakdown = _build_status_breakdown_rows(
+        IssueStatus,
+        (await db.execute(issue_status_query)).all(),
+    )
+
+    task_status_query = (
+        select(Task.status.label("status"), func.count(Task.id).label("count"))
+        .where(Task.created_at >= since)
+        .group_by(Task.status)
+        .order_by(Task.status.asc())
+    )
+    task_status_query = _apply_analytics_filters(
+        task_status_query,
+        access_scope,
+        project_id=project_id,
+        initiator_username=selected_initiator_username,
+    )
+    task_status_breakdown = _build_status_breakdown_rows(
+        TaskStatus,
+        (await db.execute(task_status_query)).all(),
+    )
+
     error_query = (
         select(Task.error_message, func.count(Task.id).label("count"))
         .where(
@@ -471,6 +639,134 @@ async def get_analytics(
         if row.error_message
     ]
     error_breakdown = _build_error_breakdown(error_rows, int(failed_tasks or 0))
+    provider_query = (
+        select(
+            Task.provider_id.label("provider_id"),
+            AIProvider.name.label("provider_name"),
+            Task.model_name.label("provider_model"),
+            func.count(Task.id).label("task_count"),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0)), 0).label(
+                "completed_tasks"
+            ),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.FAILED, 1), else_=0)), 0).label(
+                "failed_tasks"
+            ),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.CANCELLED, 1), else_=0)), 0).label(
+                "cancelled_tasks"
+            ),
+            func.coalesce(func.sum(finished_task_expr), 0).label("finished_tasks"),
+            func.coalesce(func.sum(Task.input_tokens), 0).label("total_input_tokens"),
+            func.coalesce(func.sum(Task.output_tokens), 0).label("total_output_tokens"),
+            func.coalesce(func.sum(token_total_expr), 0).label("total_tokens"),
+            func.avg(case((token_total_expr.is_not(None), token_total_expr), else_=None)).label(
+                "avg_tokens_per_task"
+            ),
+            (
+                func.sum(case((throughput_eligible_expr, output_tokens_expr), else_=None))
+                / func.nullif(
+                    func.sum(case((throughput_eligible_expr, execution_seconds_expr), else_=None)),
+                    0,
+                )
+            ).label("avg_tokens_per_second"),
+            func.avg(
+                case(
+                    (
+                        (token_total_expr.is_not(None))
+                        & (Task.total_changes.is_not(None))
+                        & (Task.total_changes > 0),
+                        token_total_expr / Task.total_changes,
+                    ),
+                    else_=None,
+                )
+            ).label("avg_tokens_per_changed_line"),
+            func.avg(execution_seconds_expr).label("avg_execution_seconds"),
+            func.avg(
+                case(
+                    (
+                        (execution_seconds_expr.is_not(None))
+                        & (Task.total_changes.is_not(None))
+                        & (Task.total_changes > 0),
+                        execution_seconds_expr / Task.total_changes,
+                    ),
+                    else_=None,
+                )
+            ).label("avg_execution_seconds_per_changed_line"),
+        )
+        .select_from(Task)
+        .outerjoin(AIProvider, AIProvider.id == Task.provider_id)
+        .where(
+            Task.created_at >= since,
+            (Task.provider_id.is_not(None)) | (Task.model_name.is_not(None)),
+        )
+        .group_by(Task.provider_id, AIProvider.name, Task.model_name)
+        .order_by(
+            func.count(Task.id).desc(),
+            func.coalesce(func.sum(token_total_expr), 0).desc(),
+            AIProvider.name.asc(),
+            Task.model_name.asc(),
+            Task.provider_id.asc(),
+        )
+    )
+    provider_query = _apply_analytics_filters(
+        provider_query,
+        access_scope,
+        project_id=project_id,
+        initiator_username=selected_initiator_username,
+    )
+    provider_rows = (await db.execute(provider_query)).all()
+
+    provider_items: list[dict] = []
+    for row in provider_rows:
+        provider_name = row.provider_name or "Unknown / Legacy"
+        provider_model = row.provider_model if row.provider_name else None
+        finished_count = int(row.finished_tasks or 0)
+        completed_count = int(row.completed_tasks or 0)
+
+        provider_items.append(
+            {
+                "provider_id": int(row.provider_id) if row.provider_id is not None else None,
+                "provider_name": provider_name,
+                "provider_model": provider_model,
+                "task_count": int(row.task_count or 0),
+                "finished_task_count": finished_count,
+                "completed_task_count": completed_count,
+                "failed_task_count": int(row.failed_tasks or 0),
+                "cancelled_task_count": int(row.cancelled_tasks or 0),
+                "success_rate": _safe_ratio(completed_count, finished_count),
+                "total_input_tokens": int(row.total_input_tokens or 0),
+                "total_output_tokens": int(row.total_output_tokens or 0),
+                "total_tokens": int(row.total_tokens or 0),
+                "avg_tokens_per_task": (
+                    float(row.avg_tokens_per_task) if row.avg_tokens_per_task is not None else None
+                ),
+                "avg_tokens_per_second": (
+                    float(row.avg_tokens_per_second) if row.avg_tokens_per_second is not None else None
+                ),
+                "avg_tokens_per_changed_line": (
+                    float(row.avg_tokens_per_changed_line)
+                    if row.avg_tokens_per_changed_line is not None
+                    else None
+                ),
+                "avg_execution_seconds": (
+                    float(row.avg_execution_seconds) if row.avg_execution_seconds is not None else None
+                ),
+                "avg_execution_seconds_per_changed_line": (
+                    float(row.avg_execution_seconds_per_changed_line)
+                    if row.avg_execution_seconds_per_changed_line is not None
+                    else None
+                ),
+            }
+        )
+
+    provider_summary = {
+        "active_provider_count": len(provider_items),
+        "provider_covered_task_count": sum(item["task_count"] for item in provider_items),
+        "provider_covered_total_tokens": sum(item["total_tokens"] for item in provider_items),
+        "provider_success_rate": _safe_ratio(
+            sum(item["completed_task_count"] for item in provider_items),
+            sum(item["finished_task_count"] for item in provider_items),
+        ),
+    }
 
     trends: list[dict] = []
     for offset in range(days):
@@ -609,6 +905,9 @@ async def get_analytics(
             }
             for row in initiator_rows
         ],
+        "provider_summary": provider_summary,
+        "providers": provider_items,
+        "provider_chart_series": _build_provider_chart_series(provider_items),
         "trends": trends,
         "priority_waits": [
             {
@@ -623,5 +922,144 @@ async def get_analytics(
             }
             for row in priority_wait_rows
         ],
+        "issue_status_breakdown": issue_status_breakdown,
+        "task_status_breakdown": task_status_breakdown,
         "error_breakdown": error_breakdown,
+    }
+
+
+@router.get("/stats/activity-heatmap")
+async def get_activity_heatmap(
+    days: int = Query(default=365, ge=1, le=730),
+    my: bool = Query(False, description="When true, scope to the current user's data only"),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Return daily completed-task counts for the heatmap."""
+    now = utcnow()
+    since = now - timedelta(days=days)
+
+    query = (
+        select(
+            func.date(Task.completed_at).label("date"),
+            func.count().label("count"),
+        )
+        .where(Task.status == TaskStatus.COMPLETED)
+        .where(Task.completed_at >= since)
+        .group_by(func.date(Task.completed_at))
+        .order_by(func.date(Task.completed_at))
+    )
+
+    if not access_scope.is_unrestricted:
+        allowed_project_ids = access_scope.accessible_project_ids
+        if not allowed_project_ids:
+            return []
+        query = query.where(Task.project_id.in_(allowed_project_ids))
+
+    if my and current_user and current_user.username:
+        query = query.where(Task.initiator_username == current_user.username)
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    return [{"date": str(row.date), "count": row.count} for row in rows]
+
+
+@router.get("/stats/scheduled")
+async def get_scheduled_stats(
+    project_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_page_access("schedule_overview")),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Get aggregated statistics for scheduled tasks.
+
+    Returns summary counts and 24-hour hourly distribution without
+    fetching individual task objects — designed for ScheduleOverview polling.
+    """
+    now = utcnow()
+    now_hour = now.replace(minute=0, second=0, microsecond=0)
+    next_24h = now + timedelta(hours=24)
+    end_24h_bucket = now_hour + timedelta(hours=24)
+
+    # Build shared WHERE conditions (avoiding subquery to preserve column refs)
+    base_conditions = [
+        Task.scheduled_at.isnot(None),
+        Task.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING]),
+    ]
+    if not access_scope.is_unrestricted:
+        allowed_project_ids = access_scope.accessible_project_ids
+        if not allowed_project_ids:
+            base_conditions.append(false())
+        else:
+            base_conditions.append(Task.project_id.in_(allowed_project_ids))
+    if project_id is not None:
+        base_conditions.append(Task.project_id == project_id)
+
+    # Summary counts in a single query using conditional aggregation
+    summary_q = select(
+        func.count().label("total"),
+        func.count(case((Task.scheduled_at <= now, 1))).label("ready_now"),
+        func.count(
+            case(((Task.scheduled_at > now) & (Task.scheduled_at <= next_24h), 1))
+        ).label("next_24h"),
+        func.count(case((Task.scheduled_at > next_24h, 1))).label("later"),
+        func.count(case((Task.status == TaskStatus.QUEUED, 1))).label("queued_count"),
+        func.count(case((Task.status == TaskStatus.RUNNING, 1))).label("running_count"),
+    ).where(*base_conditions)
+
+    summary_result = await db.execute(summary_q)
+    s = summary_result.one()
+
+    # Hourly distribution: count tasks bucketed by hour for next 24 hours
+    # Use literal_column to embed 'hour' directly in SQL, avoiding separate
+    # bind parameters that PostgreSQL can't match across SELECT/GROUP BY/ORDER BY
+    hour_trunc = func.date_trunc(literal_column("'hour'"), Task.scheduled_at)
+    hourly_q = (
+        select(
+            hour_trunc.label("hour_start"),
+            func.count().label("count"),
+        )
+        .where(
+            *base_conditions,
+            Task.scheduled_at >= now_hour,
+            Task.scheduled_at < end_24h_bucket,
+        )
+        .group_by(hour_trunc)
+        .order_by(hour_trunc)
+    )
+    hourly_result = await db.execute(hourly_q)
+    hourly_rows = hourly_result.all()
+
+    # Build 24 buckets, filling in zeros for empty hours
+    hourly_map = {row.hour_start: row.count for row in hourly_rows}
+    hourly_distribution = []
+    max_count = 0
+    for i in range(24):
+        bucket_start = now_hour + timedelta(hours=i)
+        count = hourly_map.get(bucket_start, 0)
+        if count > max_count:
+            max_count = count
+        hourly_distribution.append({
+            "hour_start": bucket_start.isoformat(),
+            "count": count,
+        })
+
+    # Find busiest hour
+    busiest = max(hourly_distribution, key=lambda b: b["count"])
+
+    return {
+        "summary": {
+            "total": s.total,
+            "ready_now": s.ready_now,
+            "next_24h": s.next_24h,
+            "later": s.later,
+            "queued_count": s.queued_count,
+            "running_count": s.running_count,
+            "busiest_hour_count": busiest["count"],
+            "busiest_hour_label": busiest["hour_start"],
+        },
+        "hourly_distribution": hourly_distribution,
+        "max_count": max_count,
     }

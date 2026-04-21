@@ -1,21 +1,25 @@
 <template>
-  <div class="create-task-page">
-    <n-space vertical :size="20">
-      <div class="create-task-page__hero">
-        <div>
-          <h2 class="create-task-page__title">{{ t('createTask.title') }}</h2>
-          <p class="create-task-page__subtitle">
-            {{ t('createTask.subtitle') }}
-          </p>
-        </div>
-        <n-space :size="8" wrap>
-          <n-tag size="small" round type="info">{{ t('createTask.manualTrigger') }}</n-tag>
-          <n-tag size="small" round>{{ t('createTask.schedulerAware') }}</n-tag>
-          <n-tag size="small" round>{{ t('createTask.gitlabBranchWorkflow') }}</n-tag>
-        </n-space>
-      </div>
+  <div class="create-task-page" data-testid="create-task-page">
+    <n-space vertical :size="16">
+      <PageHeader
+        data-testid="create-task-header"
+        root-class="create-task-page__hero"
+        title-class="create-task-page__title"
+        subtitle-class="create-task-page__subtitle"
+        actions-class="create-task-page__actions"
+        :title="t('createTask.title')"
+        :subtitle="t('createTask.subtitle')"
+      >
+        <template #actions>
+          <n-space :size="8" wrap class="create-task-page__tags">
+            <n-tag size="small" round type="info">{{ t('createTask.manualTrigger') }}</n-tag>
+            <n-tag size="small" round>{{ t('createTask.schedulerAware') }}</n-tag>
+            <n-tag size="small" round>{{ t('createTask.issueDriven') }}</n-tag>
+          </n-space>
+        </template>
+      </PageHeader>
 
-      <n-card class="create-task-card" :bordered="false">
+      <n-card class="create-task-card" :bordered="false" data-testid="create-task-card">
         <template #header>
           <div class="create-task-card__header">
             <div>
@@ -25,104 +29,80 @@
           </div>
         </template>
         <n-spin :show="loading">
-          <n-form :key="formResetKey" ref="formRef" :model="formValue" :rules="rules" label-placement="top" class="create-task-form">
+          <n-form
+            :key="formResetKey"
+            ref="formRef"
+            :model="formValue"
+            :rules="rules"
+            label-placement="top"
+            class="create-task-form"
+            data-testid="create-task-form"
+          >
             <div class="create-task-form__section">
-              <div class="create-task-form__section-title">{{ t('createTask.repositoryBranches') }}</div>
-              <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-                <n-gi>
-                  <n-form-item :label="t('createTask.project')" path="project_id">
-                    <n-select
-                      v-model:value="formValue.project_id"
-                      :options="projectOptions"
-                      :loading="projectsLoading"
-                      :placeholder="t('createTask.selectProject')"
-                      @update:value="handleProjectChange"
-                    />
-                  </n-form-item>
-                </n-gi>
-                <n-gi>
-                  <n-form-item :label="t('createTask.baseBranch')" path="base_branch">
-                    <n-select
-                      v-model:value="formValue.base_branch"
-                      :options="branchOptions"
-                      :loading="branchesLoading"
-                      :placeholder="t('createTask.selectBaseBranch')"
-                      :disabled="!formValue.project_id"
-                      @update:value="handleBaseBranchChange"
-                    />
-                    <template #feedback>
-                      {{ t('createTask.baseBranchHint') }}
-                    </template>
-                  </n-form-item>
-                </n-gi>
-                <n-gi>
-                  <n-form-item :label="t('createTask.newBranchName')" path="new_branch_name">
-                    <n-input
-                      v-model:value="formValue.new_branch_name"
-                      :placeholder="t('createTask.newBranchPlaceholder')"
-                      :disabled="!formValue.project_id || !formValue.base_branch"
-                    />
-                    <template #feedback>
-                      {{ t('createTask.newBranchHint') }}
-                    </template>
-                  </n-form-item>
-                </n-gi>
-                <n-gi>
-                  <n-form-item :label="t('createTask.targetBranch')" path="target_branch">
-                    <n-select
-                      v-model:value="formValue.target_branch"
-                      :options="targetBranchOptions"
-                      :disabled="!formValue.project_id"
-                      :placeholder="t('createTask.selectTargetBranch')"
-                    />
-                    <template #feedback>
-                      {{ t('createTask.targetBranchHint') }}
-                    </template>
-                  </n-form-item>
-                  <div v-if="sameBranchConflict" class="create-task-form__warning">
-                    {{ t('createTask.branchConflict') }}
-                  </div>
-                </n-gi>
-              </n-grid>
+              <div class="create-task-form__section-title">{{ t('createTask.issueSelection') }}</div>
+              <n-form-item :label="t('createTask.issue')" path="issue_id">
+                <n-select
+                  data-testid="create-task-issue-select"
+                  v-model:value="formValue.issue_id"
+                  :options="issueOptions"
+                  :loading="issuesLoading"
+                  filterable
+                  :placeholder="t('createTask.selectIssue')"
+                  @update:value="handleIssueChange"
+                />
+              </n-form-item>
+              <div v-if="selectedIssue" class="issue-context" data-testid="create-task-issue-context">
+                <div class="issue-context__title">{{ selectedIssue.title }}</div>
+                <div class="issue-context__meta">
+                  <span v-if="selectedIssue.project_id" class="issue-context__item">
+                    <span class="issue-context__label">{{ t('createTask.project') }}:</span>
+                    #{{ selectedIssue.project_id }}
+                  </span>
+                  <span v-if="selectedIssue.branch_name" class="issue-context__item">
+                    <span class="issue-context__label">{{ t('createTask.branch') }}:</span>
+                    {{ selectedIssue.branch_name }}
+                  </span>
+                  <span v-if="selectedIssue.base_branch" class="issue-context__item">
+                    <span class="issue-context__label">{{ t('createTask.baseBranch') }}:</span>
+                    {{ selectedIssue.base_branch }}
+                  </span>
+                  <span v-if="selectedIssue.target_branch" class="issue-context__item">
+                    <span class="issue-context__label">{{ t('createTask.targetBranch') }}:</span>
+                    {{ selectedIssue.target_branch }}
+                  </span>
+                  <span class="issue-context__item">
+                    <span class="issue-context__label">{{ t('common.status') }}:</span>
+                    <n-tag size="tiny" :type="selectedIssue.status === 'open' ? 'info' : selectedIssue.status === 'in_progress' ? 'warning' : 'success'">
+                      {{ selectedIssue.status }}
+                    </n-tag>
+                  </span>
+                </div>
+                <div v-if="selectedIssue.description" class="issue-context__description">
+                  {{ selectedIssue.description }}
+                </div>
+              </div>
             </div>
 
             <div class="create-task-form__section">
               <div class="create-task-form__section-title">{{ t('createTask.implementationPrompt') }}</div>
               <div class="prompt-label-row">
                 <span class="prompt-label">{{ t('createTask.prompt') }}<span class="prompt-label__required">*</span></span>
-                <n-popover trigger="click" placement="bottom-end" :width="300" :keep-alive-on-hover="false">
-                  <template #trigger>
-                    <n-button
+                <n-button
                       size="small"
                       :disabled="promptTemplatesLoading || promptTemplates.length === 0"
                       :loading="promptTemplatesLoading"
                       type="default"
+                      @click="showTemplateDrawer = true"
                     >
                       <template #icon>
                         <n-icon :component="DocumentTextOutline" />
                       </template>
                       {{ t('createTask.useTemplate') }}
                     </n-button>
-                  </template>
-                  <div class="prompt-template-dropdown">
-                    <div class="prompt-template-dropdown__header">{{ t('createTask.selectPromptTemplate') }}</div>
-                    <div v-if="promptTemplates.length === 0" class="prompt-template-dropdown__empty">
-                      {{ t('createTask.noPromptTemplates') }}
-                    </div>
-                    <div
-                      v-for="tmpl in promptTemplates"
-                      :key="tmpl.id"
-                      class="prompt-template-dropdown__item"
-                      @click="applyPromptTemplate(tmpl)"
-                    >
-                      <div class="prompt-template-dropdown__item-name">{{ tmpl.name }}</div>
-                      <div class="prompt-template-dropdown__item-preview">{{ tmpl.content.substring(0, 50) }}...</div>
-                    </div>
-                  </div>
-                </n-popover>
               </div>
               <n-form-item path="user_prompt" :show-label="false">
                 <VariableEditor
+                  data-testid="create-task-prompt-editor"
                   v-model="formValue.user_prompt"
                   :variable-tips="promptVariableTips"
                 />
@@ -140,19 +120,31 @@
               <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
                 <n-gi>
                   <n-form-item :label="t('common.priority')" path="priority">
-                    <n-radio-group v-model:value="formValue.priority">
-                      <n-space vertical :size="8">
-                        <n-radio :value="0">{{ t('createTask.p0') }}</n-radio>
-                        <n-radio :value="1">{{ t('createTask.p1') }}</n-radio>
-                        <n-radio :value="2">{{ t('createTask.p2') }}</n-radio>
-                      </n-space>
+                    <n-radio-group v-model:value="formValue.priority" class="priority-selector" data-testid="create-task-priority-group">
+                      <div
+                        v-for="opt in priorityOptions"
+                        :key="opt.value"
+                        class="priority-card"
+                        :class="[`priority-card--p${opt.value}`, { 'priority-card--active': formValue.priority === opt.value }]"
+                        @click="formValue.priority = opt.value"
+                      >
+                        <n-radio :value="opt.value" class="priority-card__radio" />
+                        <div class="priority-card__text">
+                          <div class="priority-card__label">{{ opt.label }}</div>
+                          <div class="priority-card__desc">{{ opt.desc }}</div>
+                        </div>
+                      </div>
                     </n-radio-group>
                   </n-form-item>
                 </n-gi>
                 <n-gi>
                   <n-form-item :label="t('createTask.schedule')" path="schedule_type">
                     <n-space vertical :size="10" style="width: 100%">
-                      <n-radio-group v-model:value="scheduleType" name="scheduleType">
+                        <n-radio-group
+                          v-model:value="scheduleType"
+                          name="scheduleType"
+                          data-testid="create-task-schedule-group"
+                        >
                         <n-space vertical :size="8">
                           <n-radio value="now">{{ t('createTask.executeNow') }}</n-radio>
                           <n-radio value="delay">{{ t('createTask.delay') }}</n-radio>
@@ -186,7 +178,46 @@
                           :placeholder="t('createTask.selectDateTime')"
                           :is-date-disabled="isScheduledDateDisabled"
                           :is-time-disabled="isScheduledTimeDisabled"
+                          :status="scheduledDatetimeError ? 'error' : undefined"
                        />
+                       <div v-if="scheduleType === 'scheduled' && scheduledDatetimeError" class="create-task-form__schedule-error">
+                         {{ scheduledDatetimeError }}
+                       </div>
+
+
+                       <!-- Heatmap trigger: shown for both delay and scheduled modes -->
+                       <n-button
+                         v-if="scheduleType === 'delay' || scheduleType === 'scheduled'"
+                         size="small"
+                         secondary
+                         :loading="scheduledTasksLoading"
+                         @click="openScheduleDrawer"
+                       >
+                         <template #icon><n-icon :component="CalendarOutline" /></template>
+                         {{ t('createTask.viewScheduleHeatmap') }}
+                       </n-button>
+
+                       <n-alert
+                         v-if="slotCapacity?.is_full"
+                         :type="slotCapacity.enforce ? 'error' : 'warning'"
+                         class="slot-warning"
+                         style="margin-top: 8px;"
+                       >
+                         {{ slotCapacity.enforce
+                           ? t('createTask.slotFullError', {
+                               start: formatDateTimeUtc8Compact(slotCapacity.hour_start),
+                               end: formatTimeUtc8(slotCapacity.hour_end),
+                               count: slotCapacity.count,
+                               max: slotCapacity.max
+                             })
+                           : t('createTask.slotFullWarning', {
+                               start: formatDateTimeUtc8Compact(slotCapacity.hour_start),
+                               end: formatTimeUtc8(slotCapacity.hour_end),
+                               count: slotCapacity.count,
+                               max: slotCapacity.max
+                             })
+                         }}
+                       </n-alert>
 
                       <div class="create-task-form__hint">
                         {{ scheduleSummary }}
@@ -194,18 +225,37 @@
                     </n-space>
                   </n-form-item>
                 </n-gi>
+
+                <n-gi :span="isMobile ? 1 : 2">
+                  <n-form-item :label="t('config.providers.providerLabel')">
+                    <n-select
+                      v-model:value="selectedProviderId"
+                      :options="providerOptions"
+                      clearable
+                      :placeholder="t('config.providers.systemDefault')"
+                    />
+                  </n-form-item>
+                </n-gi>
               </n-grid>
             </div>
 
             <div class="create-task-form__actions">
-              <n-space justify="end" wrap>
-                <n-button secondary strong round @click="handleReset">
+               <n-space justify="end" wrap data-testid="create-task-form-actions">
+                 <n-button secondary strong round data-testid="create-task-reset-button" @click="handleReset">
                   {{ t('common.reset') }}
-                </n-button>
-                <n-button type="primary" strong round @click="handleSubmit" :loading="submitting">
-                  {{ t('common.createTask') }}
-                </n-button>
-              </n-space>
+                 </n-button>
+                 <n-button
+                   type="primary"
+                   strong
+                   round
+                   data-testid="create-task-submit-button"
+                   @click="handleSubmit"
+                   :loading="submitting"
+                   :disabled="submitting || slotCapacityLoading || (slotCapacity?.is_full && slotCapacity?.enforce)"
+                 >
+                   {{ t('common.createTask') }}
+                 </n-button>
+               </n-space>
             </div>
           </n-form>
         </n-spin>
@@ -221,43 +271,84 @@
           </n-space>
         </n-space>
       </n-modal>
+
+      <!-- Schedule Heatmap Drawer -->
+      <n-drawer v-model:show="showScheduleDrawer" :width="isMobile ? '100%' : 580" placement="right">
+        <n-drawer-content :title="t('createTask.schedulePreviewTitle')" closable>
+          <n-spin v-if="scheduledTasksLoading" :description="t('createTask.schedulePreviewLoading')" />
+          <template v-else>
+            <p class="schedule-drawer__hint">{{ t('createTask.schedulePreviewHint') }}</p>
+            <HeatmapChart
+              :tasks="scheduledTasksForPreview"
+              :selected-ms="heatmapSelectedMs"
+              :max-per-slot="slotMaxTasks"
+              :enforce-capacity="slotEnforce"
+              @cell-click="handleScheduleHeatmapCellClick"
+            />
+          </template>
+        </n-drawer-content>
+      </n-drawer>
+
+      <!-- Template Picker Drawer -->
+      <n-drawer v-model:show="showTemplateDrawer" :width="isMobile ? '100%' : 480" placement="right">
+        <n-drawer-content :title="t('createTask.selectTemplate')" closable>
+          <div style="overflow-y: auto;">
+            <div v-if="promptTemplates.length === 0" class="prompt-template-dropdown__empty">
+              {{ t('createTask.noPromptTemplates') }}
+            </div>
+            <div
+              v-for="tmpl in promptTemplates"
+              :key="tmpl.id"
+              class="prompt-template-dropdown__item"
+              @click="applyPromptTemplate(tmpl); showTemplateDrawer = false"
+            >
+              <div class="prompt-template-dropdown__item-name">{{ tmpl.name }}</div>
+              <div class="prompt-template-dropdown__item-preview">{{ tmpl.content.substring(0, 80) }}...</div>
+            </div>
+          </div>
+        </n-drawer-content>
+      </n-drawer>
     </n-space>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  NCard, NForm, NFormItem, NSelect, NInput, NInputNumber,
+  NCard, NForm, NFormItem, NSelect, NInputNumber,
   NButton, NSpin, NSpace, NRadioGroup, NRadio, NModal,
-  NDatePicker, NTag, NGrid, NGi, NPopover, NIcon,
+  NDatePicker, NTag, NGrid, NGi, NIcon,
+  NDrawer, NDrawerContent, NAlert,
   useMessage, FormInst, FormRules
 } from 'naive-ui'
-import { useWindowSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { getProjects, getBranches, createTask, getPromptTemplates, type Project, type Branch, type CreateTaskRequest, type PromptTemplate } from '../api'
-import { formatDateTimeUtc8 } from '../utils/datetime'
-import { DocumentTextOutline, WarningOutline } from '@vicons/ionicons5'
+import { createTask, getIssues, getPromptTemplates, getScheduledTasks, getSlotCapacity, getConfig, getProviders, type Issue, type CreateTaskRequest, type PromptTemplate, type Task, type SlotCapacityInfo, type AIProvider } from '../api'
+import { formatDateTimeUtc8, formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
+import { isSameLocalDay } from '../utils/format'
+import { extractSlotErrorMessage } from '../utils/slotError'
+import { DocumentTextOutline, WarningOutline, CalendarOutline } from '@vicons/ionicons5'
+import PageHeader from '../components/PageHeader.vue'
 import VariableEditor from '../components/VariableEditor.vue'
+import HeatmapChart from '../components/HeatmapChart.vue'
+import { useBreakpoints } from '../composables/useBreakpoints'
 
 const router = useRouter()
 const message = useMessage()
 const { t } = useI18n()
-const { width } = useWindowSize()
-const isMobile = computed(() => width.value < 768)
+const { isMobile } = useBreakpoints()
 
 // Loading states
 const loading = ref(false)
-const projectsLoading = ref(false)
-const branchesLoading = ref(false)
+const issuesLoading = ref(false)
 const submitting = ref(false)
 const promptTemplatesLoading = ref(false)
 
 // Data
-const projects = ref<Project[]>([])
-const branches = ref<Branch[]>([])
+const issues = ref<Issue[]>([])
 const promptTemplates = ref<PromptTemplate[]>([])
+const providers = ref<AIProvider[]>([])
+const selectedProviderId = ref<number | null>(null)
 
 // Per-session variable tips from template (not persisted)
 const promptVariableTips = ref<Record<string, string> | undefined>(undefined)
@@ -270,79 +361,136 @@ const unreplacedVariables = computed(() => {
   return matches.map(m => m.replace(/\{\{|\}\}/g, ''))
 })
 
+const providerOptions = computed(() =>
+  providers.value.map(p => ({
+    label: `${p.name} (${p.model})${p.is_default ? ' ★' : ''}`,
+    value: p.id,
+  }))
+)
+
+const priorityOptions = computed(() => [
+  { value: 0, label: t('createTask.p0'), desc: t('createTask.p0Desc') },
+  { value: 1, label: t('createTask.p1'), desc: t('createTask.p1Desc') },
+  { value: 2, label: t('createTask.p2'), desc: t('createTask.p2Desc') },
+])
+
 // Form state
 const formRef = ref<FormInst | null>(null)
 const formResetKey = ref(0)
 
-function createInitialFormValue(): CreateTaskRequest & { base_branch?: string; new_branch_name?: string; branch_name?: string } {
+interface FormModel {
+  issue_id: number | null
+  user_prompt: string
+  priority: number
+  delay_seconds?: number
+  scheduled_datetime?: string
+}
+
+function createInitialFormValue(): FormModel {
   return {
-    project_id: undefined,
-    base_branch: undefined,
-    new_branch_name: '',
-    branch_name: '',
-    target_branch: 'main',
+    issue_id: null,
     user_prompt: '',
-    priority: 0,
+    priority: 1,
     delay_seconds: undefined,
     scheduled_datetime: undefined
   }
 }
 
-const formValue = ref<CreateTaskRequest & { base_branch?: string; new_branch_name?: string; branch_name?: string }>(createInitialFormValue())
+const formValue = ref<FormModel>(createInitialFormValue())
 
 // UI state
 const scheduleType = ref<'now' | 'delay' | 'scheduled'>('now')
 const delayValue = ref(5)
 const delayUnit = ref<'seconds' | 'minutes' | 'hours'>('minutes')
 const scheduledDatetime = ref<number | null>(null)
+const scheduledDatetimeError = ref<string | null>(null)
+
+watch(scheduledDatetime, (val) => {
+  if (val !== null && val <= Date.now()) {
+    scheduledDatetimeError.value = t('createTask.scheduledTimePast')
+  } else {
+    scheduledDatetimeError.value = null
+  }
+})
+
+const scheduledTasksForPreview = ref<Task[]>([])
+const scheduledTasksLoading = ref(false)
+const showScheduleDrawer = ref(false)
+
+// Slot capacity
+const slotCapacity = ref<SlotCapacityInfo | null>(null)
+const slotCapacityLoading = ref(false)
+const slotMaxTasks = ref(0)
+const slotEnforce = ref(false)
+let slotCheckTimeout: ReturnType<typeof setTimeout> | undefined
+let slotCheckGeneration = 0
+
+function checkSlotCapacity() {
+  slotCapacity.value = null
+  if (slotCheckTimeout) clearTimeout(slotCheckTimeout)
+  slotCheckGeneration++
+
+  const ms = heatmapSelectedMs.value
+  if (!ms) return
+
+  const currentGeneration = slotCheckGeneration
+  slotCheckTimeout = setTimeout(async () => {
+    slotCapacityLoading.value = true
+    try {
+      const scheduledAt = new Date(ms).toISOString()
+      const result = await getSlotCapacity(scheduledAt)
+      if (currentGeneration !== slotCheckGeneration) return
+      slotCapacity.value = result
+    } catch {
+      if (currentGeneration !== slotCheckGeneration) return
+      slotCapacity.value = null
+    } finally {
+      if (currentGeneration === slotCheckGeneration) {
+        slotCapacityLoading.value = false
+      }
+    }
+  }, 300)
+}
+
+onUnmounted(() => {
+  if (slotCheckTimeout) clearTimeout(slotCheckTimeout)
+  slotCheckGeneration++
+})
+
+const showTemplateDrawer = ref(false)
+
+// Computed selected time for heatmap: works for both delay and scheduled modes
+const heatmapSelectedMs = computed<number | null>(() => {
+  if (scheduleType.value === 'scheduled') return scheduledDatetime.value
+  if (scheduleType.value === 'delay') {
+    const multiplier = delayUnit.value === 'seconds' ? 1000
+      : delayUnit.value === 'minutes' ? 60 * 1000
+      : 60 * 60 * 1000
+    return Date.now() + delayValue.value * multiplier
+  }
+  return null
+})
+
+watch(heatmapSelectedMs, () => checkSlotCapacity())
 
 // Success modal
 const showSuccessModal = ref(false)
 const createdTaskId = ref(0)
 
-// Options
-const projectOptions = computed(() =>
-  projects.value.map(p => ({
-    label: p.path_with_namespace,
-    value: p.id
+// Issue options for the select dropdown
+const issueOptions = computed(() =>
+  issues.value.map(issue => ({
+    label: `#${issue.id} – ${issue.title}`,
+    value: issue.id
   }))
 )
 
-const branchOptions = computed(() =>
-  branches.value.map(b => ({
-    label: b.name,
-    value: b.name
-  }))
+// Currently selected issue (for displaying context info)
+const selectedIssue = computed(() =>
+  formValue.value.issue_id != null
+    ? issues.value.find(i => i.id === formValue.value.issue_id) ?? null
+    : null
 )
-
-const targetBranchOptions = computed(() => {
-  // Use branches for target, with 'main' as first option
-  let options = branches.value.map(b => ({
-    label: b.name,
-    value: b.name
-  }))
-
-  // Move main to top if exists
-  const mainIdx = options.findIndex(o => o.value === 'main')
-  if (mainIdx > 0) {
-    const main = options.splice(mainIdx, 1)[0]
-    options.unshift(main)
-  }
-
-  return options
-})
-
-const resolvedSourceBranch = computed(() => {
-  return (formValue.value.new_branch_name || '').trim()
-})
-
-const sameBranchConflict = computed(() => {
-  return (
-    !!resolvedSourceBranch.value &&
-    !!formValue.value.target_branch &&
-    resolvedSourceBranch.value === formValue.value.target_branch
-  )
-})
 
 const scheduleSummary = computed(() => {
   if (scheduleType.value === 'now') {
@@ -367,14 +515,6 @@ const scheduleSummary = computed(() => {
 
   return t('createTask.taskWillRunAt', { time: formatDateTimeUtc8(scheduledDatetime.value) })
 })
-
-function isSameLocalDay(left: Date, right: Date): boolean {
-  return (
-    left.getFullYear() === right.getFullYear()
-    && left.getMonth() === right.getMonth()
-    && left.getDate() === right.getDate()
-  )
-}
 
 function isScheduledDateDisabled(timestamp: number): boolean {
   const candidate = new Date(timestamp)
@@ -415,33 +555,39 @@ function isScheduledTimeDisabled(timestamp: number) {
   }
 }
 
+async function openScheduleDrawer() {
+  showScheduleDrawer.value = true
+  if (scheduledTasksForPreview.value.length === 0) {
+    scheduledTasksLoading.value = true
+    try {
+      scheduledTasksForPreview.value = await getScheduledTasks()
+    } catch {
+      scheduledTasksForPreview.value = []
+    } finally {
+      scheduledTasksLoading.value = false
+    }
+  }
+  // Fetch slot config for heatmap display
+  try {
+    const config = await getConfig()
+    slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
+    slotEnforce.value = config.runtime?.slot_max_tasks_enforce ?? false
+  } catch { /* ignore */ }
+}
+
+function handleScheduleHeatmapCellClick(startMs: number) {
+  scheduledDatetime.value = startMs
+  scheduleType.value = 'scheduled'
+  showScheduleDrawer.value = false
+}
+
 // Validation rules
 const rules: FormRules = {
-  project_id: {
+  issue_id: {
     required: true,
     type: 'number',
-    message: t('createTask.pleaseSelectProject'),
+    message: t('createTask.pleaseSelectIssue'),
     trigger: 'change'
-  },
-  base_branch: {
-    required: true,
-    message: t('createTask.pleaseSelectBaseBranch'),
-    trigger: 'change'
-  },
-  new_branch_name: {
-    validator: () =>
-      !sameBranchConflict.value || new Error(t('createTask.sourceTargetDifferent')),
-    trigger: ['blur', 'input', 'change']
-  },
-  target_branch: {
-    required: true,
-    validator: () => {
-      if (!formValue.value.target_branch) {
-        return new Error(t('createTask.pleaseSelectTargetBranch'))
-      }
-      return !sameBranchConflict.value || new Error(t('createTask.sourceTargetDifferent'))
-    },
-    trigger: ['blur', 'change', 'input']
   },
   user_prompt: {
     required: true,
@@ -450,15 +596,16 @@ const rules: FormRules = {
   }
 }
 
-// Fetch projects
-async function fetchProjects() {
-  projectsLoading.value = true
+// Fetch issues
+async function fetchIssues() {
+  issuesLoading.value = true
   try {
-    projects.value = await getProjects()
+    const response = await getIssues({ status: 'open', page_size: 100 })
+    issues.value = response.items
   } catch (error) {
-    message.error(t('createTask.failedToFetchProjects'))
+    message.error(t('createTask.failedToFetchIssues'))
   } finally {
-    projectsLoading.value = false
+    issuesLoading.value = false
   }
 }
 
@@ -485,44 +632,18 @@ function applyPromptTemplate(template: PromptTemplate) {
   promptVariableTips.value = template.variable_tips
 }
 
-// Fetch branches when project changes
-async function fetchBranches(projectId: number) {
-  branchesLoading.value = true
-  branches.value = []
-  try {
-    branches.value = await getBranches(projectId)
-    // Reset branch selection
-    formValue.value.branch_name = ''
-  } catch (error) {
-    message.error(t('createTask.failedToFetchBranches'))
-  } finally {
-    branchesLoading.value = false
-  }
-}
-
-function handleProjectChange(projectId: number) {
-  if (projectId) {
-    fetchBranches(projectId)
-    formValue.value.base_branch = undefined
-    formValue.value.new_branch_name = ''
-    // Set target_branch to the project's default branch
-    const project = projects.value.find(p => p.id === projectId)
-    formValue.value.target_branch = project?.default_branch || 'main'
-  }
-}
-
-function handleBaseBranchChange(_branch: string) {
-  // Reset new branch name when base branch changes
-  formValue.value.new_branch_name = ''
+// Handle issue selection change
+function handleIssueChange(_issueId: number | null) {
+  // Selection itself is bound via v-model; no extra logic needed
 }
 
 async function handleReset() {
-  branches.value = []
   Object.assign(formValue.value, createInitialFormValue())
   scheduleType.value = 'now'
   delayValue.value = 5
   delayUnit.value = 'minutes'
   scheduledDatetime.value = null
+  selectedProviderId.value = null
   createdTaskId.value = 0
   formResetKey.value += 1
 
@@ -576,27 +697,28 @@ async function handleSubmit() {
   submitting.value = true
 
   try {
-    // Determine branch_name: use new_branch_name if provided, otherwise auto-generate
-    const branchName = formValue.value.new_branch_name?.trim() || `ai-task-${Date.now()}`
+    if (formValue.value.issue_id == null) {
+      message.error(t('createTask.pleaseSelectIssue'))
+      return
+    }
 
-    // Prepare request; base_branch is the branch to fork from (sent separately)
     const request: CreateTaskRequest = {
-      project_id: formValue.value.project_id,
-      branch_name: branchName,
-      base_branch: formValue.value.base_branch || undefined,
-      target_branch: formValue.value.target_branch,
-      user_prompt: formValue.value.user_prompt,
+      issue_id: formValue.value.issue_id,
+      user_prompt: formValue.value.user_prompt || undefined,
       priority: formValue.value.priority
     }
 
     Object.assign(request, buildScheduleRequest())
 
+    if (selectedProviderId.value) {
+      request.provider_id = selectedProviderId.value
+    }
+
     const task = await createTask(request)
     createdTaskId.value = task.id
     showSuccessModal.value = true
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : t('createTask.failedToCreateTask')
-    message.error(errorMessage)
+  } catch (error: any) {
+    message.error(extractSlotErrorMessage(error, t, 'createTask.failedToCreateTask'))
   } finally {
     submitting.value = false
   }
@@ -609,41 +731,43 @@ function viewTask() {
 
 function createAnother() {
   showSuccessModal.value = false
+  scheduledTasksForPreview.value = []
   void handleReset()
 }
 
 onMounted(() => {
-  fetchProjects()
+  fetchIssues()
   fetchPromptTemplates()
+  getProviders().then(data => { providers.value = data }).catch(() => {})
+})
+
+watch(scheduleType, (newType) => {
+  if (newType !== 'scheduled') {
+    scheduledDatetime.value = null
+    showScheduleDrawer.value = false
+  }
 })
 </script>
 
 <style scoped>
 .create-task-page {
-  max-width: 1240px;
+  max-width: var(--app-page-max-width);
 }
 
-.create-task-page__hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
+.create-task-page__actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.create-task-page__title {
-  margin: 0;
-  font-size: 28px;
-  line-height: 1.2;
-}
-
-.create-task-page__subtitle {
-  margin: 8px 0 0;
-  color: rgba(15, 23, 42, 0.68);
-  max-width: 760px;
+.create-task-page__tags {
+  justify-content: flex-end;
 }
 
 .create-task-card {
-  border-radius: 18px;
+  border-radius: var(--app-card-radius);
 }
 
 .create-task-card__header {
@@ -676,6 +800,10 @@ onMounted(() => {
   border-top: 1px solid rgba(148, 163, 184, 0.18);
 }
 
+.create-task-form__actions :deep(.n-space) {
+  justify-content: flex-end;
+}
+
 .create-task-form__section-title {
   margin-bottom: 12px;
   font-size: 13px;
@@ -695,25 +823,30 @@ onMounted(() => {
   max-width: 100%;
 }
 
-.create-task-form__warning {
-  margin-top: 6px;
-  font-size: 12px;
-  color: #d03050;
-}
-
 @media (max-width: 768px) {
-  .create-task-page__hero,
+  .create-task-page__actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .create-task-card__header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .create-task-page__tags {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .create-task-form__actions {
     justify-content: stretch;
   }
 
-  .create-task-page__title {
-    font-size: 24px;
+  .create-task-form__actions :deep(.n-space),
+  .create-task-form__actions :deep(.n-space-item),
+  .create-task-form__actions :deep(.n-button) {
+    width: 100%;
   }
 }
 
@@ -791,5 +924,171 @@ onMounted(() => {
   color: #d97706;
   font-size: 12px;
   margin-top: 4px;
+}
+
+.issue-context {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: rgba(32, 128, 240, 0.04);
+  border: 1px solid rgba(32, 128, 240, 0.12);
+}
+
+.issue-context__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.88);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.issue-context__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.issue-context__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.68);
+}
+
+.issue-context__label {
+  font-weight: 500;
+  color: rgba(15, 23, 42, 0.52);
+}
+
+.issue-context__description {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(32, 128, 240, 0.08);
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgba(15, 23, 42, 0.58);
+  white-space: pre-wrap;
+  max-height: 80px;
+  overflow-y: auto;
+}
+
+.schedule-drawer__hint {
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.55);
+  margin-bottom: 16px;
+  margin-top: 0;
+}
+
+.create-task-form__schedule-error {
+  font-size: 12px;
+  color: #d03050;
+  margin-top: 2px;
+}
+
+.priority-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.priority-card {
+  --priority-card-accent: rgba(100, 116, 139, 0.9);
+  --priority-card-accent-soft: rgba(148, 163, 184, 0.18);
+  --priority-card-accent-border: rgba(97, 107, 120, 0.24);
+  --priority-card-gradient-strong: rgba(148, 163, 184, 0.18);
+  --priority-card-gradient-soft: rgba(148, 163, 184, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  max-width: 350px;
+  border-radius: 12px;
+  border: 1px solid rgba(97, 107, 121, 0.14);
+  background: rgba(204, 213, 225, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  transition: border-color 0.18s, background 0.18s, box-shadow 0.18s, transform 0.18s;
+}
+
+.priority-card:hover {
+  border-color: var(--priority-card-accent-border, rgba(148, 163, 184, 0.2));
+  background: rgba(148, 163, 184, 0.06);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.46),
+    0 0 12px 1px var(--priority-card-accent-soft, rgba(148, 163, 184, 0.18)),
+    0 0 24px 2px var(--priority-card-accent-soft, rgba(148, 163, 184, 0.10));
+  transform: translateY(-1px);
+}
+
+.priority-card--active {
+  border-color: var(--priority-card-accent-border);
+  background: rgba(221, 226, 234, 0.1);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.52),
+    0 0 0 1px var(--priority-card-accent-soft),
+    0 0 14px 1px var(--priority-card-accent-soft);
+}
+
+.priority-card--active:hover {
+  border-color: var(--priority-card-accent-border);
+  background: rgba(148, 163, 184, 0.06);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.52),
+    0 0 0 1px var(--priority-card-accent-soft),
+    0 0 18px 2px var(--priority-card-accent-soft),
+    0 0 32px 4px var(--priority-card-accent-soft);
+}
+
+.priority-card__radio {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.priority-card--p0 {
+  --priority-card-accent: #d03050;
+  --priority-card-accent-soft: rgba(208, 48, 80, 0.14);
+  --priority-card-accent-border: rgba(208, 48, 80, 0.28);
+  --priority-card-gradient-strong: rgba(208, 48, 80, 0.22);
+  --priority-card-gradient-soft: rgba(208, 48, 80, 0.08);
+}
+
+.priority-card--p1 {
+  --priority-card-accent: #f0a020;
+  --priority-card-accent-soft: rgba(240, 160, 32, 0.16);
+  --priority-card-accent-border: rgba(240, 160, 32, 0.28);
+  --priority-card-gradient-strong: rgba(245, 158, 11, 0.24);
+  --priority-card-gradient-soft: rgba(245, 158, 11, 0.1);
+}
+
+.priority-card--p2 {
+  --priority-card-accent: #18a058;
+  --priority-card-accent-soft: rgba(24, 160, 88, 0.14);
+  --priority-card-accent-border: rgba(24, 160, 88, 0.26);
+  --priority-card-gradient-strong: rgba(24, 160, 88, 0.22);
+  --priority-card-gradient-soft: rgba(24, 160, 88, 0.08);
+}
+
+.priority-card__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.priority-card__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(15, 23, 42, 0.88);
+  letter-spacing: 0.01em;
+  line-height: 1.3;
+}
+
+.priority-card__desc {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.54);
+  line-height: 1.4;
 }
 </style>

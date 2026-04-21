@@ -9,15 +9,17 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Set
 
-from sqlalchemy import select, func
+from sqlalchemy import case, select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_effective_settings
+from app.config import get_effective_settings as get_settings
 from app.core.docker_client import get_docker_client
 from app.core.session import cleanup_stale_sessions
+from app.core.utcnow import utcnow
 from app.core.worker import WorkerExecutor
 from app.database import AsyncSessionLocal
-from app.models import Task, TaskStatus
+from app.models import Task, TaskStatus, Issue, IssueStatus
+from app.core.task_helpers import maybe_update_issue_status
 from app.runtime_config import load_runtime_config_from_db
 
 logger = logging.getLogger(__name__)
@@ -27,11 +29,16 @@ _SESSION_CLEANUP_INTERVAL_SECONDS = 3600
 _worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-")
 
 
-def get_settings():
-    """Get effective settings (with runtime overrides)."""
-    return get_effective_settings()
+def _get_container_pattern() -> re.Pattern:
+    """Build container name regex using configured prefix."""
+    prefix = re.escape(get_settings().worker_container_prefix)
+    return re.compile(rf"^{prefix}-(\d+)-issue(\d+)$")
 
-WORKER_CONTAINER_PATTERN = re.compile(r"^gimr-\d+-p\d+-i\d+$")
+
+def _extract_task_id(container_name: str) -> int | None:
+    """Extract task_id from a worker container name like codify-123-issue456."""
+    m = _get_container_pattern().match(container_name)
+    return int(m.group(1)) if m else None
 
 
 class Scheduler:
@@ -40,7 +47,7 @@ class Scheduler:
     def __init__(self) -> None:
         self.running = False
         self._running_tasks: Set[int] = set()  # task_ids currently running
-        self._running_issues: Set[str] = set()  # "project_id:issue_iid" pairs
+        self._running_issues: Set[int] = set()  # issue_ids with running tasks
         self._last_session_cleanup_at = 0.0
 
     async def start(self) -> None:
@@ -74,6 +81,10 @@ class Scheduler:
         async with AsyncSessionLocal() as db:
             await load_runtime_config_from_db(db)
             await self._maybe_cleanup_sessions(db)
+
+            # Transition eligible PENDING tasks → QUEUED
+            await self._mark_eligible_as_queued(db)
+
             settings = get_settings()
             # Count running tasks for concurrency control
             running_count = await self._get_running_count(db)
@@ -88,14 +99,15 @@ class Scheduler:
                 logger.debug("No tasks available")
                 return
 
-            # Check issue mutex
-            issue_key = f"{task.project_id}:{task.issue_iid}"
-            if issue_key in self._running_issues:
-                logger.debug(f"Issue {issue_key} already running, skipping")
-                return
+            # Check issue mutex — prevents concurrent tasks on the same issue.
+            # Tasks without issue_id are independent and skip the shared mutex.
+            if task.issue_id is not None:
+                if task.issue_id in self._running_issues:
+                    logger.debug(f"Issue {task.issue_id} already running, skipping")
+                    return
 
             # Execute task
-            await self._execute_task(db, task, issue_key)
+            await self._execute_task(db, task)
 
     async def _maybe_cleanup_sessions(self, db: AsyncSession) -> None:
         """Periodically delete long-stale dashboard sessions."""
@@ -109,6 +121,34 @@ class Scheduler:
             logger.info("Cleaned up %s stale dashboard sessions", deleted_count)
         self._last_session_cleanup_at = now
 
+    async def _mark_eligible_as_queued(self, db: AsyncSession) -> None:
+        """Mark eligible PENDING tasks as QUEUED.
+
+        A PENDING task becomes QUEUED when:
+        - scheduled_at is NULL (immediate) or scheduled_at <= now
+        - Its issue is not already running (issue mutex)
+        """
+        now = utcnow()
+        # Build list of issue_ids that are currently running (mutex-blocked)
+        blocked_issue_ids = list(self._running_issues) if self._running_issues else []
+
+        stmt = (
+            update(Task)
+            .where(
+                Task.status == TaskStatus.PENDING,
+                (Task.scheduled_at == None) | (Task.scheduled_at <= now),
+            )
+            .values(status=TaskStatus.QUEUED)
+        )
+        if blocked_issue_ids:
+            stmt = stmt.where(
+                (Task.issue_id == None) | (~Task.issue_id.in_(blocked_issue_ids))
+            )
+        result = await db.execute(stmt)
+        if result.rowcount > 0:
+            await db.commit()
+            logger.debug(f"Marked {result.rowcount} eligible task(s) as QUEUED")
+
     async def _get_running_count(self, db: AsyncSession) -> int:
         """Get count of currently running tasks."""
         result = await db.execute(
@@ -117,40 +157,51 @@ class Scheduler:
         return result.scalar() or 0
 
     async def _get_next_task(self, db: AsyncSession) -> Task | None:
-        """Get the next task to execute based on priority and scheduled time."""
-        now = datetime.utcnow()
+        """Get the next QUEUED task to execute based on priority.
 
-        # Query for next task:
-        # - status in (PENDING, QUEUED)
-        # - scheduled_at <= now (or null)
-        # - order by priority DESC, scheduled_at ASC, created_at ASC
+        Only picks QUEUED tasks — eligible PENDING tasks are transitioned
+        to QUEUED by _mark_eligible_as_queued() earlier in the cycle.
+
+        Ordering:
+        1. priority ASC — P0(0) runs before P1(1) before P2(2)
+        2. scheduled tasks before immediate — users who booked a slot
+           have a reasonable expectation their task runs on time
+        3. scheduled_at ASC — earlier due times first
+        4. created_at ASC — FIFO tiebreaker
+        """
         result = await db.execute(
             select(Task)
-            .where(
-                Task.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED]),
-                (Task.scheduled_at == None) | (Task.scheduled_at <= now)
+            .where(Task.status == TaskStatus.QUEUED)
+            .order_by(
+                Task.priority.asc(),
+                case((Task.scheduled_at.is_not(None), 0), else_=1),
+                Task.scheduled_at.asc(),
+                Task.created_at.asc(),
             )
-            .order_by(Task.priority.desc(), Task.scheduled_at.asc(), Task.created_at.asc())
             .limit(1)
         )
         return result.scalar_one_or_none()
 
-    async def _execute_task(self, db: AsyncSession, task: Task, issue_key: str) -> None:
+    async def _execute_task(self, db: AsyncSession, task: Task) -> None:
         """Execute a task in a separate thread to avoid blocking the event loop."""
-        logger.info(f"Executing task {task.id} for issue {issue_key}")
+        logger.info(f"Executing task {task.id} for issue {task.issue_id}")
 
         # Mark as running
         self._running_tasks.add(task.id)
-        self._running_issues.add(issue_key)
+        if task.issue_id is not None:
+            self._running_issues.add(task.issue_id)
 
         try:
             # Update status to RUNNING
             task.status = TaskStatus.RUNNING
-            task.started_at = datetime.utcnow()
+            task.started_at = utcnow()
             await db.commit()
 
+            # Auto-transition issue to IN_PROGRESS
+            if task.issue_id is not None:
+                await self._transition_issue_to_in_progress(db, task.issue_id)
+
             # Execute via worker in a thread pool WITHOUT waiting
-            # This allows multiple tasks to run in parallel
             asyncio.create_task(self._run_task_background(task.id))
             logger.info(f"Task {task.id} submitted to thread pool")
 
@@ -158,12 +209,24 @@ class Scheduler:
             logger.exception(f"Task {task.id} failed with exception")
             task.status = TaskStatus.FAILED
             task.error_message = str(e)[:500]
-            task.completed_at = datetime.utcnow()
+            task.completed_at = utcnow()
             await db.commit()
 
             # Clean up tracking
             self._running_tasks.discard(task.id)
-            self._running_issues.discard(issue_key)
+            if task.issue_id is not None:
+                self._running_issues.discard(task.issue_id)
+
+    async def _transition_issue_to_in_progress(self, db: AsyncSession, issue_id: int) -> None:
+        """Auto-transition issue OPEN/COMPLETED → IN_PROGRESS when a task starts running."""
+        try:
+            issue = await db.get(Issue, issue_id)
+            if issue and issue.status in (IssueStatus.OPEN.value, IssueStatus.IN_REVIEW.value):
+                issue.status = IssueStatus.IN_PROGRESS.value
+                await db.commit()
+                logger.info(f"Issue {issue_id} auto-transitioned to IN_PROGRESS")
+        except Exception as e:
+            logger.warning(f"Failed to transition issue {issue_id}: {e}")
 
     async def _run_task_background(self, task_id: int) -> None:
         """Run task in background thread pool."""
@@ -187,69 +250,148 @@ class Scheduler:
         finally:
             # Clean up tracking
             self._running_tasks.discard(task_id)
-            # Find the issue_key from database if needed
             try:
                 async with AsyncSessionLocal() as db:
                     result = await db.execute(
                         select(Task).where(Task.id == task_id)
                     )
                     task = result.scalar_one_or_none()
-                    if task:
-                        issue_key = f"{task.project_id}:{task.issue_iid}"
-                        self._running_issues.discard(issue_key)
+                    if task and task.issue_id is not None:
+                        self._running_issues.discard(task.issue_id)
+                        # Auto-transition issue to COMPLETED if all tasks done
+                        await self._maybe_complete_issue(db, task.issue_id)
             except Exception:
                 pass
 
+    async def _maybe_complete_issue(self, db: AsyncSession, issue_id: int) -> None:
+        """Delegate to shared helper."""
+        await maybe_update_issue_status(db, issue_id)
+
     async def _crash_recovery(self) -> None:
-        """Recover from crashes: clean up stuck tasks and containers."""
+        """Recover from crashes: clean up orphan containers, resume legitimate ones.
+
+        Handles several scenarios:
+        - Container running + task RUNNING → resume monitoring
+        - Container exited + task RUNNING → resume (collects logs/results from exited container)
+        - Container running/exited + no matching task → remove (true orphan)
+        - Task RUNNING + no container → mark FAILED
+        """
         logger.info("Running crash recovery...")
 
         async with AsyncSessionLocal() as db:
-            # Find stuck running tasks (started but not completed)
+            # Find all tasks that are still marked RUNNING in the DB
             result = await db.execute(
                 select(Task).where(Task.status == TaskStatus.RUNNING)
             )
             stuck_tasks = result.scalars().all()
+            running_task_map = {t.id: t for t in stuck_tasks}
 
             if stuck_tasks:
-                logger.warning(f"Found {len(stuck_tasks)} stuck running tasks")
+                logger.warning(f"Found {len(stuck_tasks)} tasks in RUNNING status")
 
-            # Clean up containers
+            # Discover worker containers and cross-reference with DB
+            resumed_task_ids: set[int] = set()
             try:
                 docker = get_docker_client()
+                prefix = get_settings().worker_container_prefix
                 all_containers = docker.client.containers.list(
                     all=True,
-                    filters={"name": "gimr-"}
+                    filters={"name": f"{prefix}-"}
                 )
+                pattern = _get_container_pattern()
 
                 for container in all_containers:
-                    # Only manage worker containers: gimr-{task_id}-p{project_id}-i{issue_iid}
-                    # Avoid touching compose-managed service containers like gimr-backend/gimr-postgres.
-                    if not WORKER_CONTAINER_PATTERN.match(container.name):
+                    if not pattern.match(container.name):
                         continue
 
-                    # Skip containers that are supposed to be running
-                    if container.status == "running":
-                        logger.warning(f"Removing running container: {container.name}")
-                        container.remove(force=True)
-                    elif container.status == "exited":
-                        container.remove()
+                    task_id = _extract_task_id(container.name)
+                    c_status = container.status
 
-                logger.info(f"Cleaned up {len(all_containers)} containers")
+                    if task_id is not None and task_id in running_task_map:
+                        if c_status in ("running", "exited"):
+                            # Legitimate worker (running or just finished) — resume monitoring.
+                            task = running_task_map[task_id]
+                            logger.info(
+                                f"Resuming task {task_id} (container {container.name}, "
+                                f"status={c_status}, issue_id={task.issue_id})"
+                            )
+                            self._running_tasks.add(task_id)
+                            if task.issue_id is not None:
+                                self._running_issues.add(task.issue_id)
+                            resumed_task_ids.add(task_id)
+                            asyncio.create_task(
+                                self._resume_task_background(task_id, container.name)
+                            )
+                        else:
+                            # Container in weird state (created, dead, etc.) — remove and let task fail
+                            logger.warning(
+                                f"Removing {c_status} container for task {task_id}: {container.name}"
+                            )
+                            try:
+                                container.remove(force=True)
+                            except Exception as e:
+                                logger.warning(f"Failed to remove container {container.name}: {e}")
+                    else:
+                        # No matching RUNNING task — true orphan
+                        logger.warning(
+                            f"Removing {c_status} orphan container: {container.name} "
+                            f"(task_id={task_id}, in_db={task_id in running_task_map if task_id else 'N/A'})"
+                        )
+                        try:
+                            container.remove(force=(c_status == "running"))
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to remove container {container.name}: {e}"
+                            )
 
             except Exception as e:
-                logger.warning(f"Failed to clean up containers: {e}")
+                logger.warning(f"Failed to enumerate containers: {e}")
 
-            # Mark stuck tasks as failed
+            # Mark truly stuck tasks as failed (RUNNING in DB but no container)
             for task in stuck_tasks:
+                if task.id in resumed_task_ids:
+                    continue
                 task.status = TaskStatus.FAILED
-                task.error_message = "Task was running when service crashed"
-                task.completed_at = datetime.utcnow()
-                logger.warning(f"Marked task {task.id} as failed")
+                task.error_message = "Task was running when scheduler restarted (container not found)"
+                task.completed_at = utcnow()
+                logger.warning(f"Marked task {task.id} as failed (no running container)")
 
             await db.commit()
 
-        logger.info("Crash recovery complete")
+        logger.info(
+            f"Crash recovery complete: {len(resumed_task_ids)} resumed, "
+            f"{len(stuck_tasks) - len(resumed_task_ids)} marked failed"
+        )
+
+    async def _resume_task_background(self, task_id: int, container_name: str) -> None:
+        """Resume monitoring a task in the background thread pool."""
+        try:
+            loop = asyncio.get_event_loop()
+            success = await loop.run_in_executor(
+                _worker_executor,
+                _run_worker_resume_task,
+                task_id,
+                container_name,
+            )
+            if success:
+                logger.info(f"Resumed task {task_id} completed successfully")
+            else:
+                logger.error(f"Resumed task {task_id} failed")
+        except Exception as e:
+            logger.exception(f"Resumed task {task_id} failed with exception: {e}")
+        finally:
+            self._running_tasks.discard(task_id)
+            try:
+                async with AsyncSessionLocal() as db:
+                    result = await db.execute(
+                        select(Task).where(Task.id == task_id)
+                    )
+                    task = result.scalar_one_or_none()
+                    if task and task.issue_id is not None:
+                        self._running_issues.discard(task.issue_id)
+                        await self._maybe_complete_issue(db, task.issue_id)
+            except Exception:
+                pass
 
 
 # Singleton scheduler instance
@@ -319,6 +461,50 @@ def _run_worker_task(task_id: int) -> bool:
             return await worker.execute_task(db, task_id)
 
     # Create new event loop for this thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    try:
+        return loop.run_until_complete(run_task())
+    finally:
+        try:
+            loop.run_until_complete(engine.dispose())
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+
+def _run_worker_resume_task(task_id: int, container_name: str) -> bool:
+    """Resume monitoring a worker task in a separate thread with its own event loop.
+
+    Similar to _run_worker_task but calls WorkerExecutor.resume_task()
+    which attaches to an existing container instead of creating a new one.
+    """
+    import asyncio
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+    from app.database import _database_url
+
+    engine = create_async_engine(
+        _database_url,
+        pool_pre_ping=True,
+        pool_size=2,
+        max_overflow=2,
+    )
+
+    ThreadSessionLocal = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    from app.core.worker import WorkerExecutor
+
+    async def run_task():
+        async with ThreadSessionLocal() as db:
+            worker = WorkerExecutor()
+            return await worker.resume_task(db, task_id, container_name)
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 

@@ -1,6 +1,6 @@
 # E2E 集成测试调试指南
 
-本文档记录调试 GIMR (GitLab Issue to MR Bot) E2E 测试时发现的问题和解决方案。
+本文档记录调试 Codify (Codify) E2E 测试时发现的问题和解决方案。
 
 ## 环境配置
 
@@ -33,10 +33,10 @@ ANTHROPIC_MODEL=MiniMax-M2.5                  # 使用的模型
 
 ```bash
 # 1. 重新构建 worker 镜像（修改 entrypoint.sh 后需要）
-docker build -f deploy/Dockerfile.worker -t gimr-worker:latest .
+docker build -f deploy/Dockerfile.worker -t codify-worker:latest .
 
 # 2. 重新构建 backend 镜像（修改 worker.py 后需要）
-docker build -f deploy/Dockerfile.backend -t deploy-backend .
+docker build -f deploy/Dockerfile.backend -t codify-backend:latest .
 
 # 3. 重启服务
 cd deploy && docker-compose up -d backend
@@ -138,10 +138,10 @@ text = ''.join(char if ord(char) < 0xFFFD else '?' for char in text)
 **调试方法**：
 ```bash
 # 检查任务状态
-docker exec gimr-postgres psql -U gimr -d gimr -c "SELECT id, status FROM tasks ORDER BY id DESC LIMIT 5;"
+docker exec codify-e2e-postgres psql -U codify -d codify -c "SELECT id, status FROM tasks ORDER BY id DESC LIMIT 5;"
 
 # 检查容器状态
-docker ps -a | grep gimr
+docker ps -a | grep codify
 
 # 检查容器日志
 docker logs <container_id>
@@ -170,9 +170,9 @@ docker run your-image python3 script.py > output.md 2>&1
 ```
 
 **常见容器名称模式**：
-- Worker: `gimr-{task_id}-p{project_id}-i{issue_iid}`
-- Backend: `gimr-backend`
-- Database: `gimr-postgres`
+- Worker: `codify-{task_id}-p{project_id}-i{issue_iid}`
+- Backend: `codify-e2e-backend`
+- Database: `codify-e2e-postgres`
 
 ---
 
@@ -219,19 +219,19 @@ response = client.messages.create(
 
 ```bash
 # 1. 查看后端日志
-docker logs gimr-backend --tail 100
-docker logs gimr-backend --tail 100 2>&1 | grep -i "task\|error"
+docker logs codify-e2e-backend --tail 100
+docker logs codify-e2e-backend --tail 100 2>&1 | grep -i "task\|error"
 
 # 2. 查看数据库任务状态
-docker exec gimr-postgres psql -U gimr -d gimr -c "SELECT id, status, error_message FROM tasks ORDER BY id DESC LIMIT 3;"
+docker exec codify-e2e-postgres psql -U codify -d codify -c "SELECT id, status, error_message FROM tasks ORDER BY id DESC LIMIT 3;"
 
 # 3. 查看任务日志（完整输出）
-docker exec gimr-postgres psql -U gimr -d gimr -c "SELECT message FROM task_logs WHERE task_id = <id>;"
+docker exec codify-e2e-postgres psql -U codify -d codify -c "SELECT message FROM task_logs WHERE task_id = <id>;"
 
 # 4. 查看 GitLab Issue 评论（真实 GitLab 地址）
 GITLAB_TOKEN="glpat-xxx"  # 从 deploy/.env.test 获取
 GITLAB_URL="http://192.168.50.129:8080"
-curl -s -H "PRIVATE-TOKEN: $GITLAB_URL" \
+curl -s -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
   "$GITLAB_URL/api/v4/projects/1/issues/1/notes"
 
 # 5. 查看 MR 状态
@@ -239,13 +239,13 @@ curl -s -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
   "$GITLAB_URL/api/v4/projects/1/merge_requests/1"
 
 # 6. 查看当前运行的容器
-docker ps -a | grep gimr
+docker ps -a | grep codify
 
 # 7. 重新构建 worker 镜像（修改 entrypoint.sh 后需要）
-docker build -f deploy/Dockerfile.worker -t gimr-worker:latest .
+docker build -f deploy/Dockerfile.worker -t codify-worker:latest .
 
 # 8. 重新构建 backend 镜像（修改 worker.py 后需要）
-docker build -f deploy/Dockerfile.backend -t deploy-backend .
+docker build -f deploy/Dockerfile.backend -t codify-backend:latest .
 
 # 9. 重启服务
 cd deploy && docker-compose up -d backend
@@ -261,7 +261,7 @@ cat deploy/.env.test | grep -v "^#" | grep -v "^$"
 
 ```
 GitLab 地址: http://192.168.50.129:8080
-项目 ID: 1 (root/gimr_test)
+项目 ID: 1 (root/codify_test)
 
 # Issue 相关
 GET  /api/v4/projects/1/issues              # 列出 Issue

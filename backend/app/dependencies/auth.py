@@ -19,7 +19,7 @@ from app.core.session import (
 from app.database import get_db
 from app.models import User, UserSession
 from app.page_permissions import can_access_page
-from app.runtime_config import load_runtime_config_from_db
+from app.runtime_config import refresh_runtime_config_if_stale
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,8 @@ async def get_optional_auth_context(
 ) -> Optional[AuthContext]:
     """Resolve the current auth context from the session cookie if auth is enabled."""
     t0 = time.time()
-    await load_runtime_config_from_db(db)
+    if not getattr(request.state, "runtime_config_synced", False):
+        await refresh_runtime_config_if_stale(db, min_check_interval=0.0)
     t1 = time.time()
     settings = get_effective_settings()
 

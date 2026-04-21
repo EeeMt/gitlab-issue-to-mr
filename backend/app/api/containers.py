@@ -13,16 +13,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.dependencies.auth import require_admin_user, require_page_access
+from app.dependencies.auth import require_admin_user, require_authenticated_user, require_page_access
+from app.dependencies.auth import get_optional_current_user
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
-from app.models import Task
+from app.models import Issue, Task, TaskLog, User
 from app.core.docker_client import get_docker_client
+from app.api.task_operations import get_task_with_access_check
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 router = APIRouter()
 
-WORKER_CONTAINER_PATTERN = re.compile(r"^gimr-\d+-p\d+-i\d+$")
+
+def _get_container_pattern() -> re.Pattern:
+    """Build container name regex using configured prefix."""
+    prefix = re.escape(get_settings().worker_container_prefix)
+    return re.compile(rf"^{prefix}-(\d+)-issue(\d+)$")
 
 
 @router.get("/containers")
@@ -43,30 +48,40 @@ async def list_containers(
 
     try:
         docker = get_docker_client()
+        settings = get_settings()
+        prefix = settings.worker_container_prefix
+        pattern = _get_container_pattern()
         all_containers = await asyncio.to_thread(
             docker.client.containers.list,
             all=True,
-            filters={"name": "gimr-"},
+            filters={"name": f"{prefix}-"},
         )
 
         for container in all_containers:
-            # Only show worker containers
-            if not WORKER_CONTAINER_PATTERN.match(container.name):
+            if not pattern.match(container.name):
                 continue
 
-            # Try to extract task_id from container name (format: gimr-{task_id}-p{project_id}-i{issue_iid})
+            # Extract task_id and issue_id from: {prefix}-{task_id}-issue{issue_id}
             task_id = None
-            project_id = None
-            issue_iid = None
+            issue_id = None
 
-            try:
-                parts = container.name.split("-")
-                if len(parts) >= 5 and parts[0] == "gimr":
-                    task_id = int(parts[1])
-                    project_id = int(parts[2].replace("p", ""))
-                    issue_iid = int(parts[3].replace("i", ""))
-            except (ValueError, IndexError):
-                pass
+            m = pattern.match(container.name)
+            if m:
+                task_id = int(m.group(1))
+                issue_id = int(m.group(2))
+
+            # Look up project_id from task for access control
+            project_id = None
+            if task_id is not None:
+                result = await db.execute(
+                    select(Task.issue_id).where(Task.id == task_id)
+                )
+                tid = result.scalar_one_or_none()
+                if tid:
+                    result2 = await db.execute(
+                        select(Issue.project_id).where(Issue.id == tid)
+                    )
+                    project_id = result2.scalar_one_or_none()
 
             if (
                 project_id is not None
@@ -80,8 +95,8 @@ async def list_containers(
                 "name": container.name,
                 "status": container.status,
                 "task_id": task_id,
+                "issue_id": issue_id,
                 "project_id": project_id,
-                "issue_iid": issue_iid,
                 "created_at": container.attrs.get("Created", ""),
             })
 
@@ -98,7 +113,7 @@ async def list_containers(
 @router.get("/containers/{container_id}/logs")
 async def get_container_logs(
     container_id: str,
-    _current_user=Depends(require_admin_user),
+    _current_user=Depends(require_authenticated_user),
 ):
     """Stream container logs via SSE.
 
@@ -126,8 +141,7 @@ async def get_container_logs(
                         break
 
                 if not container:
-                    yield f"data: {('Container not found: ' + container_id)}\n\n"
-                    return
+                    return  # Container is gone; close stream silently
 
             t_got = time.time()
             if t_got - t_get > 2.0:
@@ -179,33 +193,46 @@ async def get_container_logs(
 @router.get("/tasks/{task_id}/container-logs")
 async def get_task_container_logs(
     task_id: int,
+    source: str = "auto",
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_admin_user),
+    current_user: Optional["User"] = Depends(get_optional_current_user),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Get container logs for a task (polling endpoint).
 
     Args:
         task_id: Task ID
+        source: 'auto' (try Docker, fall back to DB) or 'db' (always use DB chunks)
         db: Database session
 
     Returns:
         Container logs
     """
-    # Get task to find container_id
-    result = await db.execute(select(Task).where(Task.id == task_id))
-    task = result.scalar_one_or_none()
-
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Task {task_id} not found",
-        )
+    task = await get_task_with_access_check(task_id, db, access_scope, current_user)
 
     if not task.container_id:
         return {
             "container_id": None,
             "logs": "",
             "status": task.status,
+        }
+
+    async def _fetch_db_chunks() -> str:
+        log_result = await db.execute(
+            select(TaskLog)
+            .where(TaskLog.task_id == task_id, TaskLog.log_type.is_(None))
+            .order_by(TaskLog.id.asc())
+        )
+        chunks = log_result.scalars().all()
+        return "".join(c.message or "" for c in chunks)
+
+    if source == "db":
+        logs = await _fetch_db_chunks()
+        return {
+            "container_id": task.container_id,
+            "logs": logs,
+            "status": task.status,
+            "source": "db",
         }
 
     try:
@@ -220,10 +247,18 @@ async def get_task_container_logs(
             "status": task.status,
         }
     except Exception as e:
-        logger.error(f"Error getting container logs: {e}")
+        # Container is gone (completed/removed) — fall back to DB-stored raw log chunks
+        logs = await _fetch_db_chunks()
+        if logs:
+            return {
+                "container_id": task.container_id,
+                "logs": logs,
+                "status": task.status,
+                "source": "db",
+            }
+        logger.warning(f"Container gone and no DB chunks for task {task_id}: {e}")
         return {
             "container_id": task.container_id,
-            "logs": f"Error: {str(e)}",
+            "logs": "",
             "status": task.status,
-            "error": str(e),
         }

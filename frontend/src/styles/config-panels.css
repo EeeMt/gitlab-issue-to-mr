@@ -1,0 +1,275 @@
+.config-layout__main {
+  display: grid;
+  gap: 16px;
+  padding: 8px 0;
+}
+
+.config-form-card {
+  margin-bottom: 0;
+  border-radius: var(--app-card-radius);
+  box-shadow: var(--app-card-shadow-soft);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.96));
+}
+
+.config-form-card .n-card-header {
+  padding-bottom: 8px;
+}
+
+.config-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.config-card-header--stacked {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.config-card-header__title {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #0f172a;
+}
+
+.config-card-header__subtitle {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(15, 23, 42, 0.58);
+}
+
+.config-section-form {
+  display: grid;
+}
+
+.config-form__section {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.config-form__section:last-child {
+  margin-bottom: 0;
+}
+
+.config-form__section + .config-form__section {
+  padding-top: 20px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.config-form__section-title {
+  margin-bottom: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: rgba(15, 23, 42, 0.62);
+}
+
+.config-form__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 0;
+}
+
+.config-form__input {
+  width: 100%;
+}
+
+.config-card-actions {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.config-page-actions {
+  padding: 8px 0;
+}
+
+.config-actions__alert {
+  margin-top: 12px;
+}
+
+.config-summary-card {
+  min-height: 100%;
+  border-radius: var(--app-card-radius-small);
+  background: var(--app-summary-card-background);
+}
+
+.config-summary-card__label {
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.6);
+}
+
+.config-summary-card__value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--n-text-color-1);
+}
+
+.config-table-wrapper {
+  margin-top: 16px;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.config-editor-modal {
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: var(--app-card-radius);
+  box-shadow: var(--app-card-shadow-soft);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
+}
+
+.config-editor-modal__scroll {
+  max-height: min(70vh, 680px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.config-webhook-project {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.config-webhook-project__name {
+  font-weight: 600;
+}
+
+.config-webhook-project__meta,
+.config-webhook-checks,
+.config-webhook-mobile__item-detail {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.58);
+}
+
+.config-webhook-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.config-webhook-summary {
+  margin-bottom: 16px;
+}
+
+.config-webhook-mobile__empty,
+.config-empty,
+.config-notification-empty {
+  padding: 24px;
+  text-align: center;
+  color: rgba(15, 23, 42, 0.48);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.03);
+}
+
+.config-webhook-mobile__item,
+.config-mount-item,
+.config-notification-profile {
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(248, 250, 252, 0.8);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.config-webhook-mobile__item {
+  margin-bottom: 8px;
+  padding: 14px;
+}
+
+.config-webhook-mobile__item-top,
+.config-notification-profile__top,
+.config-notification-profile__footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.config-webhook-mobile__item-tags,
+.config-notification-profile__section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.config-notification-list,
+.config-mounts-list {
+  display: grid;
+  gap: 12px;
+}
+
+.config-notification-profile {
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.config-notification-profile__title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.config-notification-profile__meta {
+  margin-top: 4px;
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.58);
+}
+
+.config-notification-profile__section {
+  display: grid;
+}
+
+.config-notification-profile__label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: rgba(15, 23, 42, 0.58);
+}
+
+.config-mount-item {
+  position: relative;
+  padding: 14px;
+}
+
+.config-mount-remove {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+
+.config-maven-section {
+  margin-top: 20px;
+}
+
+.prompt-template-content-preview {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+@media (max-width: 767px) {
+  .config-card-header,
+  .config-form__section-header,
+  .config-webhook-mobile__item-top,
+  .config-notification-profile__top,
+  .config-notification-profile__footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .config-card-actions .n-space,
+  .config-form__section-header .n-space {
+    width: 100%;
+  }
+}

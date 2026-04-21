@@ -12,6 +12,7 @@ from sqlalchemy import or_, select
 
 from app.config import get_effective_settings
 from app.core.ssl_utils import get_ssl_verify
+from app.core.utcnow import utcnow
 from app.database import AsyncSessionLocal
 from app.models import (
     MattermostNotificationDelivery,
@@ -129,10 +130,8 @@ def serialize_profile(profile: MattermostNotificationProfile) -> dict[str, Any]:
         "name": profile.name,
         "enabled": profile.enabled,
         "target_type": profile.target_type,
-        "team_name": profile.team_name,
-        "channel_name": profile.channel_name,
+        "channel_id": profile.channel_id,
         "mention_in_channel": profile.mention_in_channel,
-        "send_for_manual_tasks": profile.send_for_manual_tasks,
         "event_types": deserialize_string_list(profile.event_types_json),
         "field_keys": deserialize_string_list(profile.field_keys_json),
         "created_at": profile.created_at,
@@ -218,6 +217,12 @@ class MattermostClient:
         team = await self._request("GET", f"/teams/name/{team_name}")
         return await self._request("GET", f"/teams/{team['id']}/channels/name/{channel_name}")
 
+    async def get_channel(self, channel_id: str) -> dict[str, Any]:
+        return await self._request("GET", f"/channels/{channel_id}")
+
+    async def get_team(self, team_id: str) -> dict[str, Any]:
+        return await self._request("GET", f"/teams/{team_id}")
+
     async def create_direct_channel(self, other_user_id: str) -> dict[str, Any]:
         me = await self.get_me()
         return await self._request("POST", "/channels/direct", json_body=[me["id"], other_user_id])
@@ -277,7 +282,7 @@ async def _resolve_mattermost_user_id(
         user_mapping_query = select(MattermostUserMapping).where(or_(*filters))
         existing_mapping = (await session.execute(user_mapping_query)).scalars().first()
     if existing_mapping is not None:
-        existing_mapping.last_verified_at = datetime.utcnow()
+        existing_mapping.last_verified_at = utcnow()
         return existing_mapping.mattermost_user_id
 
     username = (task.initiator_username or "").strip()
@@ -296,14 +301,14 @@ async def _resolve_mattermost_user_id(
         mattermost_user_id=mattermost_user_id,
         mattermost_username=str(mattermost_user.get("username", username)),
         source="username",
-        last_verified_at=datetime.utcnow(),
+        last_verified_at=utcnow(),
     )
     if existing_mapping is None:
         session.add(mapping)
     else:
         mapping.mattermost_username = str(mattermost_user.get("username", username))
         mapping.source = "username"
-        mapping.last_verified_at = datetime.utcnow()
+        mapping.last_verified_at = utcnow()
 
     return mattermost_user_id
 
@@ -323,18 +328,18 @@ def _build_attachment_fields(task: Task, event_type: str, field_keys: list[str],
         MATTERMOST_FIELD_PROJECT: ("项目", f"#{task.project_id}", True),
         MATTERMOST_FIELD_ISSUE: (
             "Issue",
-            f"#{task.issue_iid}" if task.issue_iid is not None else ("手工任务" if task.is_manual else "-"),
+            f"#{task.issue_id}" if task.issue_id is not None else "-",
             True,
         ),
         MATTERMOST_FIELD_MERGE_REQUEST: (
             "Merge Request",
-            f"!{task.merge_request_iid}" if task.merge_request_iid is not None else (task.merge_request_url or "-"),
+            (getattr(task.issue, 'merge_request_url', None) or "-") if task.issue_id else "-",
             True,
         ),
         MATTERMOST_FIELD_INITIATOR: ("发起人", task.initiator_username or "-", True),
         MATTERMOST_FIELD_STATUS: ("状态", task.status.value, True),
-        MATTERMOST_FIELD_BRANCH: ("分支", task.branch_name or "-", True),
-        MATTERMOST_FIELD_TARGET_BRANCH: ("目标分支", task.target_branch or "-", True),
+        MATTERMOST_FIELD_BRANCH: ("分支", (getattr(task.issue, 'branch_name', None) or "-") if task.issue_id else "-", True),
+        MATTERMOST_FIELD_TARGET_BRANCH: ("目标分支", (getattr(task.issue, 'target_branch', None) or "-") if task.issue_id else "-", True),
         MATTERMOST_FIELD_SCHEDULED_AT: ("预约时间", _format_datetime(task.scheduled_at), False),
         MATTERMOST_FIELD_SCHEDULE_CHANGE: ("时间变更", schedule_change or "-", False),
         MATTERMOST_FIELD_ERROR: ("错误摘要", (task.error_message or "-")[:500], False),
@@ -367,10 +372,11 @@ def _build_card_markdown(task: Task, event_type: str, context: dict[str, Any]) -
         f"- 状态: `{task.status.value}`",
     ]
 
-    if task.issue_iid is not None:
-        lines.append(f"- Issue: `#{task.issue_iid}`")
-    if task.merge_request_iid is not None:
-        lines.append(f"- Merge Request: `!{task.merge_request_iid}`")
+    if task.issue_id is not None:
+        lines.append(f"- Issue: `#{task.issue_id}`")
+    issue = getattr(task, 'issue', None)
+    if issue and getattr(issue, 'merge_request_iid', None) is not None:
+        lines.append(f"- Merge Request: `!{issue.merge_request_iid}`")
     if task.initiator_username:
         lines.append(f"- 发起人: `{task.initiator_username}`")
     if task.scheduled_at is not None:
@@ -418,11 +424,9 @@ async def notify_task_event(
                 event_types = deserialize_string_list(profile.event_types_json)
                 if event_type not in event_types:
                     continue
-                if task.is_manual and not profile.send_for_manual_tasks:
-                    continue
 
                 target_summary = (
-                    f"{profile.team_name}/{profile.channel_name}"
+                    f"channel:{profile.channel_id or '-'}"
                     if profile.target_type == MATTERMOST_TARGET_TYPE_CHANNEL
                     else f"dm:{task.initiator_username or '-'}"
                 )
@@ -453,10 +457,10 @@ async def notify_task_event(
                     }
 
                     if profile.target_type == MATTERMOST_TARGET_TYPE_CHANNEL:
-                        if not profile.team_name or not profile.channel_name:
-                            raise MattermostNotificationError("Channel profile is missing team_name or channel_name.")
-                        channel = await client.get_channel_by_name(profile.team_name, profile.channel_name)
-                        await client.create_post(str(channel["id"]), message, props)
+                        channel_id = str(profile.channel_id or "").strip()
+                        if not channel_id:
+                            raise MattermostNotificationError("Channel profile is missing channel_id.")
+                        await client.create_post(channel_id, message, props)
                     else:
                         mattermost_user_id = await _resolve_mattermost_user_id(session, client, task)
                         if not mattermost_user_id:

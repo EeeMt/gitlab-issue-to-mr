@@ -1,0 +1,52 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Python
+__pycache__
+*.py[cod]
+*.egg-info
+.eggs
+dist
+build
+.venv
+venv
+.env
+
+# Node
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Tests
+tests/
+coverage/
+*.test.*
+*.spec.*
+
+# Docs
+docs/
+*.md
+!README.md
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Include deploy directory (required for worker image build)
+!deploy/
+
+# Misc
+*.log
+logs/
+*.tmp
+*.temp
+.env.local
+.env.*.local

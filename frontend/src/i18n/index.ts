@@ -6,7 +6,7 @@ import zhCNMessages from './messages/zh-CN'
 
 export type AppLocale = 'en' | 'zh-CN'
 
-const LOCALE_STORAGE_KEY = 'gimr-locale'
+const LOCALE_STORAGE_KEY = 'codify-locale'
 const FALLBACK_LOCALE: AppLocale = 'en'
 
 function normalizeLocale(value: string | null | undefined): AppLocale | null {
