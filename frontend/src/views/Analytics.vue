@@ -43,340 +43,468 @@
           {{ t('analytics.projectInfo') }}
         </n-alert>
 
-        <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 2 : 3" :x-gap="16" :y-gap="16">
-          <n-gi v-for="item in summaryItems" :key="item.label" class="analytics-grid-cell">
-            <SummaryCard
-              :label="item.label"
-              :value="item.value"
-              :note="item.note"
-              card-class="analytics-summary-card"
-              label-class="analytics-summary-card__label"
-              value-class="analytics-summary-card__value"
-              note-class="analytics-summary-card__note"
-            />
-          </n-gi>
-        </n-grid>
+        <n-tabs v-if="hasLoadedOnce" v-model:value="analyticsTab" type="segment" size="large" class="analytics-top-tabs">
+          <n-tab-pane name="overview" :tab="t('analytics.overviewTab')">
+            <n-grid :cols="isMobile ? 2 : 3" :x-gap="16" :y-gap="16">
+              <n-gi v-for="item in summaryItems" :key="item.label" class="analytics-grid-cell">
+                <SummaryCard
+                  :label="item.label"
+                  :value="item.value"
+                  :note="item.note"
+                  card-class="analytics-summary-card"
+                  label-class="analytics-summary-card__label"
+                  value-class="analytics-summary-card__value"
+                  note-class="analytics-summary-card__note"
+                />
+              </n-gi>
+            </n-grid>
 
-        <n-grid v-if="hasLoadedOnce" :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
-          <n-gi class="analytics-grid-cell">
-            <n-card class="analytics-card analytics-card--stretch" :bordered="false" data-testid="analytics-issue-status-card">
+            <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
+              <n-gi class="analytics-grid-cell">
+                <n-card class="analytics-card analytics-card--stretch" :bordered="false" data-testid="analytics-issue-status-card">
+                  <template #header>
+                    <div class="analytics-card__header">
+                      <div>
+                        <div class="analytics-card__title">{{ t('analytics.issueStatusDistribution') }}</div>
+                        <div class="analytics-card__subtitle">{{ t('analytics.issueStatusDistributionSubtitle') }}</div>
+                      </div>
+                      <div class="analytics-card__header-actions analytics-card__header-actions--status">
+                        <div class="analytics-chart-toggle" role="tablist" :aria-label="t('analytics.issueStatusDistribution')">
+                          <button
+                            type="button"
+                            class="analytics-chart-toggle__button"
+                            :class="{ 'analytics-chart-toggle__button--active': issueStatusChartMode === 'bar' }"
+                            data-testid="issue-status-chart-mode-bar"
+                            :disabled="!hasIssueStatusData"
+                            @click="issueStatusChartMode = 'bar'"
+                          >
+                            {{ t('analytics.barChart') }}
+                          </button>
+                          <button
+                            type="button"
+                            class="analytics-chart-toggle__button"
+                            :class="{ 'analytics-chart-toggle__button--active': issueStatusChartMode === 'donut' }"
+                            data-testid="issue-status-chart-mode-donut"
+                            :disabled="!hasIssueStatusData"
+                            @click="issueStatusChartMode = 'donut'"
+                          >
+                            {{ t('analytics.donutChart') }}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+
+                  <div v-if="!hasIssueStatusData" class="analytics-empty-state">
+                    <div class="analytics-empty-state__title">{{ t('analytics.issueStatusDistributionEmpty') }}</div>
+                  </div>
+                  <div v-else-if="issueStatusChartMode === 'bar'" class="status-chart status-chart--bar">
+                    <div v-for="row in issueStatusRows" :key="`issue-${row.status}`" class="status-chart__bar-row">
+                      <div class="status-chart__row-meta">
+                        <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                        <span class="status-chart__row-label">{{ row.label }}</span>
+                      </div>
+                      <div class="status-chart__bar-track">
+                        <div class="status-chart__bar-fill" :style="{ width: `${row.barWidthPercent}%`, background: row.color }" />
+                      </div>
+                      <div class="status-chart__row-value">{{ row.count }}</div>
+                      <div class="status-chart__row-share">{{ row.shareLabel }}</div>
+                    </div>
+                  </div>
+
+                  <div v-else-if="issueStatusChartMode === 'donut'" class="status-chart status-chart--donut">
+                    <div class="status-chart__donut-shell">
+                      <div class="status-chart__donut" :style="issueStatusDonutStyle">
+                        <div class="status-chart__donut-hole">
+                          <div class="status-chart__donut-total">{{ issueStatusTotal }}</div>
+                          <div class="status-chart__donut-total-label">{{ t('analytics.issues') }}</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="status-chart__legend">
+                      <div v-for="row in issueStatusRows" :key="`issue-legend-${row.status}`" class="status-chart__legend-row">
+                        <div class="status-chart__row-meta">
+                          <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                          <span class="status-chart__row-label">{{ row.label }}</span>
+                        </div>
+                        <div class="status-chart__legend-values">
+                          <span class="status-chart__row-value">{{ row.count }}</span>
+                          <span class="status-chart__row-share">{{ row.shareLabel }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </n-card>
+              </n-gi>
+
+              <n-gi class="analytics-grid-cell">
+                <n-card class="analytics-card analytics-card--stretch" :bordered="false" data-testid="analytics-task-status-card">
+                  <template #header>
+                    <div class="analytics-card__header">
+                      <div>
+                        <div class="analytics-card__title">{{ t('analytics.taskStatusDistribution') }}</div>
+                        <div class="analytics-card__subtitle">{{ t('analytics.taskStatusDistributionSubtitle') }}</div>
+                      </div>
+                      <div class="analytics-card__header-actions analytics-card__header-actions--status">
+                        <div class="analytics-chart-toggle" role="tablist" :aria-label="t('analytics.taskStatusDistribution')">
+                          <button
+                            type="button"
+                            class="analytics-chart-toggle__button"
+                            :class="{ 'analytics-chart-toggle__button--active': taskStatusChartMode === 'bar' }"
+                            data-testid="task-status-chart-mode-bar"
+                            :disabled="!hasTaskStatusData"
+                            @click="taskStatusChartMode = 'bar'"
+                          >
+                            {{ t('analytics.barChart') }}
+                          </button>
+                          <button
+                            type="button"
+                            class="analytics-chart-toggle__button"
+                            :class="{ 'analytics-chart-toggle__button--active': taskStatusChartMode === 'donut' }"
+                            data-testid="task-status-chart-mode-donut"
+                            :disabled="!hasTaskStatusData"
+                            @click="taskStatusChartMode = 'donut'"
+                          >
+                            {{ t('analytics.donutChart') }}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+
+                  <div v-if="!hasTaskStatusData" class="analytics-empty-state">
+                    <div class="analytics-empty-state__title">{{ t('analytics.taskStatusDistributionEmpty') }}</div>
+                  </div>
+                  <div v-else-if="taskStatusChartMode === 'bar'" class="status-chart status-chart--bar">
+                    <div v-for="row in taskStatusRows" :key="`task-${row.status}`" class="status-chart__bar-row">
+                      <div class="status-chart__row-meta">
+                        <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                        <span class="status-chart__row-label">{{ row.label }}</span>
+                      </div>
+                      <div class="status-chart__bar-track">
+                        <div class="status-chart__bar-fill" :style="{ width: `${row.barWidthPercent}%`, background: row.color }" />
+                      </div>
+                      <div class="status-chart__row-value">{{ row.count }}</div>
+                      <div class="status-chart__row-share">{{ row.shareLabel }}</div>
+                    </div>
+                  </div>
+
+                  <div v-else-if="taskStatusChartMode === 'donut'" class="status-chart status-chart--donut">
+                    <div class="status-chart__donut-shell">
+                      <div class="status-chart__donut" :style="taskStatusDonutStyle">
+                        <div class="status-chart__donut-hole">
+                          <div class="status-chart__donut-total">{{ taskStatusTotal }}</div>
+                          <div class="status-chart__donut-total-label">{{ t('analytics.tasks') }}</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="status-chart__legend">
+                      <div v-for="row in taskStatusRows" :key="`task-legend-${row.status}`" class="status-chart__legend-row">
+                        <div class="status-chart__row-meta">
+                          <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                          <span class="status-chart__row-label">{{ row.label }}</span>
+                        </div>
+                        <div class="status-chart__legend-values">
+                          <span class="status-chart__row-value">{{ row.count }}</span>
+                          <span class="status-chart__row-share">{{ row.shareLabel }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </n-card>
+              </n-gi>
+            </n-grid>
+
+            <n-space vertical :size="16">
+              <n-card class="analytics-card" :bordered="false">
+                <template #header>
+                  <div class="analytics-card__header">
+                    <div>
+                        <div class="analytics-card__title">{{ t('analytics.taskVolumeTrend') }}</div>
+                        <div class="analytics-card__subtitle">{{ t('analytics.taskVolumeTrendSubtitle') }}</div>
+                    </div>
+                  </div>
+                </template>
+
+                <div v-if="taskTrendBars.length" ref="taskChartRef" class="trend-chart-scroll">
+                  <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
+                    <div v-for="bar in taskTrendBars" :key="bar.key" class="trend-chart__item">
+                      <div class="trend-chart__count">{{ bar.displayValue }}</div>
+                      <div class="trend-chart__bar-wrap">
+                        <div class="trend-chart__bar" :style="{ height: `${bar.heightPercent}%` }" />
+                      </div>
+                      <div class="trend-chart__label">{{ bar.label }}</div>
+                    </div>
+                  </div>
+                </div>
+              </n-card>
+
+              <n-card class="analytics-card" :bordered="false">
+                <template #header>
+                  <div class="analytics-card__header">
+                    <div>
+                        <div class="analytics-card__title">{{ t('analytics.changedLinesTrend') }}</div>
+                        <div class="analytics-card__subtitle">{{ t('analytics.changedLinesTrendSubtitle') }}</div>
+                    </div>
+                  </div>
+                </template>
+
+                <div v-if="changeTrendBars.length" ref="changeChartRef" class="trend-chart-scroll">
+                  <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
+                    <div v-for="bar in changeTrendBars" :key="bar.key" class="trend-chart__item">
+                      <div class="trend-chart__count">{{ bar.displayValue }}</div>
+                      <div class="trend-chart__bar-wrap">
+                        <div class="trend-chart__bar trend-chart__bar--secondary" :style="{ height: `${bar.heightPercent}%` }" />
+                      </div>
+                      <div class="trend-chart__label">{{ bar.label }}</div>
+                    </div>
+                  </div>
+                </div>
+              </n-card>
+
+              <n-card class="analytics-card" :bordered="false">
+                <template #header>
+                  <div class="analytics-card__header">
+                    <div>
+                        <div class="analytics-card__title">{{ t('analytics.executionDurationTrend') }}</div>
+                        <div class="analytics-card__subtitle">{{ t('analytics.executionDurationTrendSubtitle') }}</div>
+                    </div>
+                  </div>
+                </template>
+
+                <div v-if="durationTrendBars.length" ref="durationChartRef" class="trend-chart-scroll">
+                  <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
+                    <div v-for="bar in durationTrendBars" :key="bar.key" class="trend-chart__item">
+                      <div class="trend-chart__count">{{ bar.displayValue }}</div>
+                      <div class="trend-chart__bar-wrap">
+                        <div class="trend-chart__bar trend-chart__bar--accent" :style="{ height: `${bar.heightPercent}%` }" />
+                      </div>
+                      <div class="trend-chart__label">{{ bar.label }}</div>
+                    </div>
+                  </div>
+                </div>
+              </n-card>
+
+              <n-card class="analytics-card" :bordered="false">
+                <template #header>
+                  <div class="analytics-card__header">
+                    <div>
+                        <div class="analytics-card__title">{{ t('analytics.tokenTrend') }}</div>
+                        <div class="analytics-card__subtitle">{{ t('analytics.tokenTrendSubtitle') }}</div>
+                    </div>
+                  </div>
+                </template>
+
+                <div v-if="tokenTrendBars.length" ref="tokenChartRef" class="trend-chart-scroll">
+                  <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
+                    <div v-for="bar in tokenTrendBars" :key="bar.key" class="trend-chart__item">
+                      <div class="trend-chart__count">{{ bar.displayValue }}</div>
+                      <div class="trend-chart__bar-wrap">
+                        <div class="trend-chart__bar trend-chart__bar--token" :style="{ height: `${bar.heightPercent}%` }" />
+                      </div>
+                      <div class="trend-chart__label">{{ bar.label }}</div>
+                    </div>
+                  </div>
+                </div>
+              </n-card>
+            </n-space>
+
+            <n-card class="analytics-card analytics-card--stretch analytics-breakdown-card" :bordered="false" data-testid="analytics-breakdown-card">
               <template #header>
-                <div class="analytics-card__header">
+                <div class="analytics-card__header analytics-card__header--breakdown">
                   <div>
-                    <div class="analytics-card__title">{{ t('analytics.issueStatusDistribution') }}</div>
-                    <div class="analytics-card__subtitle">{{ t('analytics.issueStatusDistributionSubtitle') }}</div>
+                    <div class="analytics-card__title">{{ analyticsBreakdownTitle }}</div>
+                    <div class="analytics-card__subtitle">{{ analyticsBreakdownSubtitle }}</div>
                   </div>
-                  <div class="analytics-card__header-actions analytics-card__header-actions--status">
-                    <div class="analytics-chart-toggle" role="tablist" :aria-label="t('analytics.issueStatusDistribution')">
-                      <button
-                        type="button"
-                        class="analytics-chart-toggle__button"
-                        :class="{ 'analytics-chart-toggle__button--active': issueStatusChartMode === 'bar' }"
-                        data-testid="issue-status-chart-mode-bar"
-                        :disabled="!hasIssueStatusData"
-                        @click="issueStatusChartMode = 'bar'"
-                      >
-                        {{ t('analytics.barChart') }}
-                      </button>
-                      <button
-                        type="button"
-                        class="analytics-chart-toggle__button"
-                        :class="{ 'analytics-chart-toggle__button--active': issueStatusChartMode === 'donut' }"
-                        data-testid="issue-status-chart-mode-donut"
-                        :disabled="!hasIssueStatusData"
-                        @click="issueStatusChartMode = 'donut'"
-                      >
-                        {{ t('analytics.donutChart') }}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </template>
-
-              <div v-if="!hasIssueStatusData" class="analytics-empty-state">
-                <div class="analytics-empty-state__title">{{ t('analytics.issueStatusDistributionEmpty') }}</div>
-              </div>
-              <div v-else-if="issueStatusChartMode === 'bar'" class="status-chart status-chart--bar">
-                <div v-for="row in issueStatusRows" :key="`issue-${row.status}`" class="status-chart__bar-row">
-                  <div class="status-chart__row-meta">
-                    <span class="status-chart__legend-dot" :style="{ background: row.color }" />
-                    <span class="status-chart__row-label">{{ row.label }}</span>
-                  </div>
-                  <div class="status-chart__bar-track">
-                    <div class="status-chart__bar-fill" :style="{ width: `${row.barWidthPercent}%`, background: row.color }" />
-                  </div>
-                  <div class="status-chart__row-value">{{ row.count }}</div>
-                  <div class="status-chart__row-share">{{ row.shareLabel }}</div>
-                </div>
-              </div>
-
-              <div v-else-if="issueStatusChartMode === 'donut'" class="status-chart status-chart--donut">
-                <div class="status-chart__donut-shell">
-                  <div class="status-chart__donut" :style="issueStatusDonutStyle">
-                    <div class="status-chart__donut-hole">
-                      <div class="status-chart__donut-total">{{ issueStatusTotal }}</div>
-                      <div class="status-chart__donut-total-label">{{ t('analytics.issues') }}</div>
-                    </div>
-                  </div>
-                </div>
-                <div class="status-chart__legend">
-                  <div v-for="row in issueStatusRows" :key="`issue-legend-${row.status}`" class="status-chart__legend-row">
-                    <div class="status-chart__row-meta">
-                      <span class="status-chart__legend-dot" :style="{ background: row.color }" />
-                      <span class="status-chart__row-label">{{ row.label }}</span>
-                    </div>
-                    <div class="status-chart__legend-values">
-                      <span class="status-chart__row-value">{{ row.count }}</span>
-                      <span class="status-chart__row-share">{{ row.shareLabel }}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </n-card>
-          </n-gi>
-
-          <n-gi class="analytics-grid-cell">
-            <n-card class="analytics-card analytics-card--stretch" :bordered="false" data-testid="analytics-task-status-card">
-              <template #header>
-                <div class="analytics-card__header">
-                  <div>
-                    <div class="analytics-card__title">{{ t('analytics.taskStatusDistribution') }}</div>
-                    <div class="analytics-card__subtitle">{{ t('analytics.taskStatusDistributionSubtitle') }}</div>
-                  </div>
-                  <div class="analytics-card__header-actions analytics-card__header-actions--status">
-                    <div class="analytics-chart-toggle" role="tablist" :aria-label="t('analytics.taskStatusDistribution')">
-                      <button
-                        type="button"
-                        class="analytics-chart-toggle__button"
-                        :class="{ 'analytics-chart-toggle__button--active': taskStatusChartMode === 'bar' }"
-                        data-testid="task-status-chart-mode-bar"
-                        :disabled="!hasTaskStatusData"
-                        @click="taskStatusChartMode = 'bar'"
-                      >
-                        {{ t('analytics.barChart') }}
-                      </button>
-                      <button
-                        type="button"
-                        class="analytics-chart-toggle__button"
-                        :class="{ 'analytics-chart-toggle__button--active': taskStatusChartMode === 'donut' }"
-                        data-testid="task-status-chart-mode-donut"
-                        :disabled="!hasTaskStatusData"
-                        @click="taskStatusChartMode = 'donut'"
-                      >
-                        {{ t('analytics.donutChart') }}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </template>
-
-              <div v-if="!hasTaskStatusData" class="analytics-empty-state">
-                <div class="analytics-empty-state__title">{{ t('analytics.taskStatusDistributionEmpty') }}</div>
-              </div>
-              <div v-else-if="taskStatusChartMode === 'bar'" class="status-chart status-chart--bar">
-                <div v-for="row in taskStatusRows" :key="`task-${row.status}`" class="status-chart__bar-row">
-                  <div class="status-chart__row-meta">
-                    <span class="status-chart__legend-dot" :style="{ background: row.color }" />
-                    <span class="status-chart__row-label">{{ row.label }}</span>
-                  </div>
-                  <div class="status-chart__bar-track">
-                    <div class="status-chart__bar-fill" :style="{ width: `${row.barWidthPercent}%`, background: row.color }" />
-                  </div>
-                  <div class="status-chart__row-value">{{ row.count }}</div>
-                  <div class="status-chart__row-share">{{ row.shareLabel }}</div>
-                </div>
-              </div>
-
-              <div v-else-if="taskStatusChartMode === 'donut'" class="status-chart status-chart--donut">
-                <div class="status-chart__donut-shell">
-                  <div class="status-chart__donut" :style="taskStatusDonutStyle">
-                    <div class="status-chart__donut-hole">
-                      <div class="status-chart__donut-total">{{ taskStatusTotal }}</div>
-                      <div class="status-chart__donut-total-label">{{ t('analytics.tasks') }}</div>
-                    </div>
-                  </div>
-                </div>
-                <div class="status-chart__legend">
-                  <div v-for="row in taskStatusRows" :key="`task-legend-${row.status}`" class="status-chart__legend-row">
-                    <div class="status-chart__row-meta">
-                      <span class="status-chart__legend-dot" :style="{ background: row.color }" />
-                      <span class="status-chart__row-label">{{ row.label }}</span>
-                    </div>
-                    <div class="status-chart__legend-values">
-                      <span class="status-chart__row-value">{{ row.count }}</span>
-                      <span class="status-chart__row-share">{{ row.shareLabel }}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </n-card>
-          </n-gi>
-        </n-grid>
-
-        <n-space vertical :size="16">
-          <n-card class="analytics-card" :bordered="false">
-            <template #header>
-              <div class="analytics-card__header">
-                <div>
-                    <div class="analytics-card__title">{{ t('analytics.taskVolumeTrend') }}</div>
-                    <div class="analytics-card__subtitle">{{ t('analytics.taskVolumeTrendSubtitle') }}</div>
-                </div>
-              </div>
-            </template>
-
-            <div v-if="taskTrendBars.length" ref="taskChartRef" class="trend-chart-scroll">
-              <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
-                <div v-for="bar in taskTrendBars" :key="bar.key" class="trend-chart__item">
-                  <div class="trend-chart__count">{{ bar.displayValue }}</div>
-                  <div class="trend-chart__bar-wrap">
-                    <div class="trend-chart__bar" :style="{ height: `${bar.heightPercent}%` }" />
-                  </div>
-                  <div class="trend-chart__label">{{ bar.label }}</div>
-                </div>
-              </div>
-            </div>
-          </n-card>
-
-          <n-card class="analytics-card" :bordered="false">
-            <template #header>
-              <div class="analytics-card__header">
-                <div>
-                    <div class="analytics-card__title">{{ t('analytics.changedLinesTrend') }}</div>
-                    <div class="analytics-card__subtitle">{{ t('analytics.changedLinesTrendSubtitle') }}</div>
-                </div>
-              </div>
-            </template>
-
-            <div v-if="changeTrendBars.length" ref="changeChartRef" class="trend-chart-scroll">
-              <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
-                <div v-for="bar in changeTrendBars" :key="bar.key" class="trend-chart__item">
-                  <div class="trend-chart__count">{{ bar.displayValue }}</div>
-                  <div class="trend-chart__bar-wrap">
-                    <div class="trend-chart__bar trend-chart__bar--secondary" :style="{ height: `${bar.heightPercent}%` }" />
-                  </div>
-                  <div class="trend-chart__label">{{ bar.label }}</div>
-                </div>
-              </div>
-            </div>
-          </n-card>
-
-          <n-card class="analytics-card" :bordered="false">
-            <template #header>
-              <div class="analytics-card__header">
-                <div>
-                    <div class="analytics-card__title">{{ t('analytics.executionDurationTrend') }}</div>
-                    <div class="analytics-card__subtitle">{{ t('analytics.executionDurationTrendSubtitle') }}</div>
-                </div>
-              </div>
-            </template>
-
-            <div v-if="durationTrendBars.length" ref="durationChartRef" class="trend-chart-scroll">
-              <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
-                <div v-for="bar in durationTrendBars" :key="bar.key" class="trend-chart__item">
-                  <div class="trend-chart__count">{{ bar.displayValue }}</div>
-                  <div class="trend-chart__bar-wrap">
-                    <div class="trend-chart__bar trend-chart__bar--accent" :style="{ height: `${bar.heightPercent}%` }" />
-                  </div>
-                  <div class="trend-chart__label">{{ bar.label }}</div>
-                </div>
-              </div>
-            </div>
-          </n-card>
-
-          <n-card class="analytics-card" :bordered="false">
-            <template #header>
-              <div class="analytics-card__header">
-                <div>
-                    <div class="analytics-card__title">{{ t('analytics.tokenTrend') }}</div>
-                    <div class="analytics-card__subtitle">{{ t('analytics.tokenTrendSubtitle') }}</div>
-                </div>
-              </div>
-            </template>
-
-            <div v-if="tokenTrendBars.length" ref="tokenChartRef" class="trend-chart-scroll">
-              <div class="trend-chart" :style="{ minWidth: trendChartMinWidth }">
-                <div v-for="bar in tokenTrendBars" :key="bar.key" class="trend-chart__item">
-                  <div class="trend-chart__count">{{ bar.displayValue }}</div>
-                  <div class="trend-chart__bar-wrap">
-                    <div class="trend-chart__bar trend-chart__bar--token" :style="{ height: `${bar.heightPercent}%` }" />
-                  </div>
-                  <div class="trend-chart__label">{{ bar.label }}</div>
-                </div>
-              </div>
-            </div>
-          </n-card>
-        </n-space>
-
-        <n-card class="analytics-card analytics-card--stretch analytics-breakdown-card" :bordered="false" data-testid="analytics-breakdown-card">
-          <template #header>
-            <div class="analytics-card__header analytics-card__header--breakdown">
-              <div>
-                <div class="analytics-card__title">{{ analyticsBreakdownTitle }}</div>
-                <div class="analytics-card__subtitle">{{ analyticsBreakdownSubtitle }}</div>
-              </div>
-              <div class="analytics-card__header-actions analytics-card__header-actions--breakdown">
-                <n-tabs v-model:value="analyticsBreakdownTab" type="segment" size="small" class="analytics-breakdown-tabs">
-                  <n-tab-pane name="project" :tab="t('analytics.byProject')" />
-                  <n-tab-pane name="initiator" :tab="t('analytics.byInitiator')" />
-                </n-tabs>
-                <n-button text size="small" @click="showBreakdownModal = true" class="analytics-card__expand-btn" :title="t('analytics.expand')">
-                  <template #icon><n-icon :component="ExpandOutline" /></template>
-                </n-button>
-              </div>
-            </div>
-          </template>
-
-          <n-data-table
-            :columns="analyticsBreakdownColumns"
-            :data="analyticsBreakdownData"
-            :bordered="false"
-            :pagination="{ pageSize: 8 }"
-            :scroll-x="analyticsBreakdownScrollX"
-          />
-        </n-card>
-
-        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
-          <n-gi class="analytics-grid-cell">
-            <n-card class="analytics-card analytics-card--stretch" :bordered="false">
-              <template #header>
-                <div class="analytics-card__header">
-                  <div>
-                      <div class="analytics-card__title">{{ t('analytics.queueWaitByPriority') }}</div>
-                      <div class="analytics-card__subtitle">{{ t('analytics.queueWaitByPrioritySubtitle') }}</div>
+                  <div class="analytics-card__header-actions analytics-card__header-actions--breakdown">
+                    <n-tabs v-model:value="analyticsBreakdownTab" type="segment" size="small" class="analytics-breakdown-tabs">
+                      <n-tab-pane name="project" :tab="t('analytics.byProject')" />
+                      <n-tab-pane name="initiator" :tab="t('analytics.byInitiator')" />
+                    </n-tabs>
+                    <n-button text size="small" @click="showBreakdownModal = true" class="analytics-card__expand-btn" :title="t('analytics.expand')">
+                      <template #icon><n-icon :component="ExpandOutline" /></template>
+                    </n-button>
                   </div>
                 </div>
               </template>
 
               <n-data-table
-                :columns="priorityColumns"
-                :data="analytics?.priority_waits || []"
-                :bordered="false"
-                :pagination="false"
-              />
-            </n-card>
-          </n-gi>
-
-          <n-gi class="analytics-grid-cell">
-            <n-card class="analytics-card analytics-card--stretch" :bordered="false">
-              <template #header>
-                <div class="analytics-card__header">
-                  <div>
-                      <div class="analytics-card__title">{{ t('analytics.failureBreakdown') }}</div>
-                      <div class="analytics-card__subtitle">{{ t('analytics.failureBreakdownSubtitle') }}</div>
-                  </div>
-                </div>
-              </template>
-
-              <n-data-table
-                :columns="errorColumns"
-                :data="analytics?.error_breakdown || []"
+                :columns="analyticsBreakdownColumns"
+                :data="analyticsBreakdownData"
                 :bordered="false"
                 :pagination="{ pageSize: 8 }"
-                :scroll-x="isMobile ? undefined : 760"
+                :scroll-x="analyticsBreakdownScrollX"
               />
             </n-card>
-          </n-gi>
-        </n-grid>
+
+            <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
+              <n-gi class="analytics-grid-cell">
+                <n-card class="analytics-card analytics-card--stretch" :bordered="false">
+                  <template #header>
+                    <div class="analytics-card__header">
+                      <div>
+                          <div class="analytics-card__title">{{ t('analytics.queueWaitByPriority') }}</div>
+                          <div class="analytics-card__subtitle">{{ t('analytics.queueWaitByPrioritySubtitle') }}</div>
+                      </div>
+                    </div>
+                  </template>
+
+                  <n-data-table
+                    :columns="priorityColumns"
+                    :data="analytics?.priority_waits || []"
+                    :bordered="false"
+                    :pagination="false"
+                  />
+                </n-card>
+              </n-gi>
+
+              <n-gi class="analytics-grid-cell">
+                <n-card class="analytics-card analytics-card--stretch" :bordered="false">
+                  <template #header>
+                    <div class="analytics-card__header">
+                      <div>
+                          <div class="analytics-card__title">{{ t('analytics.failureBreakdown') }}</div>
+                          <div class="analytics-card__subtitle">{{ t('analytics.failureBreakdownSubtitle') }}</div>
+                      </div>
+                    </div>
+                  </template>
+
+                  <n-data-table
+                    :columns="errorColumns"
+                    :data="analytics?.error_breakdown || []"
+                    :bordered="false"
+                    :pagination="{ pageSize: 8 }"
+                    :scroll-x="isMobile ? undefined : 760"
+                  />
+                </n-card>
+              </n-gi>
+            </n-grid>
+          </n-tab-pane>
+
+          <n-tab-pane name="providers" :tab="t('analytics.providersTab')">
+            <n-space vertical :size="16" data-testid="analytics-providers-panel">
+              <div v-if="!hasProviderData" class="analytics-empty-state">
+                <div class="analytics-empty-state__title">{{ t('analytics.providersEmpty') }}</div>
+              </div>
+
+              <template v-else>
+                <n-grid :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16">
+                  <n-gi v-for="item in providerSummaryItems" :key="item.label" class="analytics-grid-cell">
+                    <SummaryCard
+                      :label="item.label"
+                      :value="item.value"
+                      card-class="analytics-summary-card"
+                      label-class="analytics-summary-card__label"
+                      value-class="analytics-summary-card__value"
+                    />
+                  </n-gi>
+                </n-grid>
+
+                <n-card class="analytics-card" :bordered="false">
+                  <template #header>
+                    <div class="analytics-card__header">
+                      <div>
+                        <div class="analytics-card__title">{{ t('analytics.providerComparison') }}</div>
+                        <div class="analytics-card__subtitle">{{ t('analytics.providerComparisonSubtitle') }}</div>
+                      </div>
+                    </div>
+                  </template>
+
+                  <n-data-table
+                    :columns="providerColumns"
+                    :data="providerRows"
+                    :bordered="false"
+                    :pagination="{ pageSize: 8 }"
+                    :scroll-x="1200"
+                  />
+                </n-card>
+
+                <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
+                  <n-gi class="analytics-grid-cell">
+                    <n-card class="analytics-card analytics-card--stretch" :bordered="false" data-testid="analytics-provider-success-rate-card">
+                      <template #header>
+                        <div class="analytics-card__header">
+                          <div>
+                            <div class="analytics-card__title">{{ t('analytics.providerSuccessRateByProvider') }}</div>
+                            <div class="analytics-card__subtitle">{{ t('analytics.providerSuccessRateByProviderSubtitle') }}</div>
+                          </div>
+                        </div>
+                      </template>
+
+                      <div v-if="!providerSuccessRateBars.length" class="analytics-empty-state analytics-empty-state--compact">
+                        <div class="analytics-empty-state__title">{{ t('analytics.providersEmpty') }}</div>
+                      </div>
+                      <div v-else class="provider-chart provider-chart--bars">
+                        <div v-for="bar in providerSuccessRateBars" :key="bar.key" class="provider-chart__row">
+                          <div class="provider-chart__label">{{ bar.label }}</div>
+                          <div class="provider-chart__track">
+                            <div class="provider-chart__fill provider-chart__fill--success" :style="{ width: `${bar.heightPercent}%` }" />
+                          </div>
+                          <div class="provider-chart__value">{{ formatPercentage(bar.value) }}</div>
+                        </div>
+                      </div>
+                    </n-card>
+                  </n-gi>
+
+                  <n-gi class="analytics-grid-cell">
+                    <n-card class="analytics-card analytics-card--stretch" :bordered="false">
+                      <template #header>
+                        <div class="analytics-card__header">
+                          <div>
+                            <div class="analytics-card__title">{{ t('analytics.providerEfficiencyByProvider') }}</div>
+                            <div class="analytics-card__subtitle">{{ providerEfficiencyMetricTitle }}</div>
+                          </div>
+                          <div class="analytics-chart-toggle" role="tablist" :aria-label="t('analytics.providerEfficiencyByProvider')">
+                            <button
+                              type="button"
+                              class="analytics-chart-toggle__button"
+                              :class="{ 'analytics-chart-toggle__button--active': providersEfficiencyMetric === 'avg_tokens_per_second' }"
+                              data-testid="provider-efficiency-metric-tokens-per-second"
+                              @click="providersEfficiencyMetric = 'avg_tokens_per_second'"
+                            >
+                              {{ t('analytics.avgTokensPerSecond') }}
+                            </button>
+                            <button
+                              type="button"
+                              class="analytics-chart-toggle__button"
+                              :class="{ 'analytics-chart-toggle__button--active': providersEfficiencyMetric === 'avg_tokens_per_changed_line' }"
+                              data-testid="provider-efficiency-metric-tokens-per-line"
+                              @click="providersEfficiencyMetric = 'avg_tokens_per_changed_line'"
+                            >
+                              {{ t('analytics.avgTokensPerChangedLine') }}
+                            </button>
+                            <button
+                              type="button"
+                              class="analytics-chart-toggle__button"
+                              :class="{ 'analytics-chart-toggle__button--active': providersEfficiencyMetric === 'avg_execution_seconds_per_changed_line' }"
+                              data-testid="provider-efficiency-metric-seconds-per-line"
+                              @click="providersEfficiencyMetric = 'avg_execution_seconds_per_changed_line'"
+                            >
+                              {{ t('analytics.avgSecondsPerChangedLine') }}
+                            </button>
+                          </div>
+                        </div>
+                      </template>
+
+                      <div v-if="!providerEfficiencyBars.length" class="analytics-empty-state analytics-empty-state--compact">
+                        <div class="analytics-empty-state__title">{{ t('analytics.providersEmpty') }}</div>
+                      </div>
+                      <div v-else class="provider-chart provider-chart--bars">
+                        <div v-for="bar in providerEfficiencyBars" :key="bar.key" class="provider-chart__row">
+                          <div class="provider-chart__label">{{ bar.label }}</div>
+                          <div class="provider-chart__track">
+                            <div class="provider-chart__fill provider-chart__fill--efficiency" :style="{ width: `${bar.heightPercent}%` }" />
+                          </div>
+                          <div class="provider-chart__value">{{ bar.displayValue }}</div>
+                        </div>
+                      </div>
+                    </n-card>
+                  </n-gi>
+                </n-grid>
+              </template>
+            </n-space>
+          </n-tab-pane>
+        </n-tabs>
       </n-space>
     </n-spin>
 
@@ -434,6 +562,9 @@ import {
   type AnalyticsInitiatorRow,
   type AnalyticsPriorityWaitRow,
   type AnalyticsProjectRow,
+  type AnalyticsProviderChartPoint,
+  type AnalyticsProviderChartSeries,
+  type AnalyticsProviderRow,
   type AnalyticsResponse,
   type AnalyticsStatusRow,
   type Project
@@ -454,12 +585,18 @@ type TrendBar = {
 }
 
 type StatusChartMode = 'bar' | 'donut'
+type AnalyticsTopLevelTab = 'overview' | 'providers'
+type ProviderEfficiencyMetric = 'avg_tokens_per_second' | 'avg_tokens_per_changed_line' | 'avg_execution_seconds_per_changed_line'
 
 type StatusChartRow = AnalyticsStatusRow & {
   label: string
   color: string
   barWidthPercent: number
   shareLabel: string
+}
+
+type ProviderMetricBar = TrendBar & {
+  providerId: number | null
 }
 
 const message = useMessage()
@@ -504,10 +641,12 @@ const taskChartRef = ref<HTMLElement | null>(null)
 const changeChartRef = ref<HTMLElement | null>(null)
 const durationChartRef = ref<HTMLElement | null>(null)
 const tokenChartRef = ref<HTMLElement | null>(null)
+const analyticsTab = ref<AnalyticsTopLevelTab>('overview')
 const analyticsBreakdownTab = ref<'project' | 'initiator'>('project')
 const showBreakdownModal = ref(false)
 const issueStatusChartMode = ref<StatusChartMode>('bar')
 const taskStatusChartMode = ref<StatusChartMode>('bar')
+const providersEfficiencyMetric = ref<ProviderEfficiencyMetric>('avg_tokens_per_second')
 
 const windowOptions = computed(() => [
   { label: t('analytics.last7Days'), value: 7 },
@@ -568,6 +707,49 @@ function formatPercentage(value: number | null | undefined) {
     return '—'
   }
     return `${(value * 100).toFixed(1)}%`
+}
+
+function formatNumericValue(value: number | null | undefined, digits = 1) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return 'N/A'
+  }
+  return new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: digits
+  }).format(value)
+}
+
+function formatProviderMetricValue(metric: ProviderEfficiencyMetric, value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return 'N/A'
+  }
+
+  if (metric === 'avg_execution_seconds_per_changed_line') {
+    return formatDurationSec(value)
+  }
+
+  return formatNumericValue(value)
+}
+
+function formatProviderName(row: AnalyticsProviderRow) {
+  if (!row.provider_name) {
+    return 'Unknown / Legacy'
+  }
+  return row.provider_model ? `${row.provider_name} / ${row.provider_model}` : row.provider_name
+}
+
+function buildProviderMetricBars(rows: AnalyticsProviderChartPoint[], metric: ProviderEfficiencyMetric): ProviderMetricBar[] {
+  return buildTrendBars(
+    rows.map((row) => ({
+      key: `${metric}-${row.label}`,
+      label: row.label,
+      value: row.value,
+      displayValue: formatProviderMetricValue(metric, row.value)
+    }))
+  ).map((row, index) => ({
+    ...row,
+    providerId: rows[index]?.provider_id ?? null
+  }))
 }
 
 function formatTokenBreakdown(inputTokens: number, outputTokens: number) {
@@ -767,6 +949,125 @@ const taskStatusDonutStyle = computed(() =>
   buildStatusDonutStyle(taskStatusRows.value)
 )
 
+const providerSummary = computed(() => analytics.value?.provider_summary ?? null)
+
+const providerRows = computed(() => analytics.value?.providers || [])
+
+const providerChartSeries = computed<AnalyticsProviderChartSeries>(() =>
+  analytics.value?.provider_chart_series || {
+    success_rate: [],
+    avg_tokens_per_second: [],
+    avg_tokens_per_changed_line: [],
+    avg_execution_seconds_per_changed_line: []
+  }
+)
+
+const hasProviderData = computed(() => providerRows.value.length > 0)
+
+const providerSummaryItems = computed(() => [
+  {
+    label: t('analytics.activeProviders'),
+    value: String(providerSummary.value?.active_provider_count ?? 0)
+  },
+  {
+    label: t('analytics.providerCoveredTasks'),
+    value: String(providerSummary.value?.provider_covered_task_count ?? 0)
+  },
+  {
+    label: t('analytics.providerCoveredTokens'),
+    value: formatNumber(providerSummary.value?.provider_covered_total_tokens ?? 0)
+  },
+  {
+    label: t('analytics.providerSuccessRate'),
+    value: formatPercentage(providerSummary.value?.provider_success_rate)
+  }
+])
+
+const providerSuccessRateBars = computed(() =>
+  buildProviderMetricBars(providerChartSeries.value.success_rate, 'avg_tokens_per_second')
+)
+
+const providerEfficiencyBars = computed(() =>
+  buildProviderMetricBars(
+    providerChartSeries.value[providersEfficiencyMetric.value],
+    providersEfficiencyMetric.value
+  )
+)
+
+const providerEfficiencyMetricTitle = computed(() => {
+  if (providersEfficiencyMetric.value === 'avg_execution_seconds_per_changed_line') {
+    return t('analytics.avgSecondsPerChangedLine')
+  }
+  if (providersEfficiencyMetric.value === 'avg_tokens_per_changed_line') {
+    return t('analytics.avgTokensPerChangedLine')
+  }
+  return t('analytics.avgTokensPerSecond')
+})
+
+const providerColumns = computed<DataTableColumns<AnalyticsProviderRow>>(() => [
+  {
+    title: t('analytics.provider'),
+    key: 'provider_name',
+    minWidth: 220,
+    sorter: (a, b) => formatProviderName(a).localeCompare(formatProviderName(b)),
+    render: (row) =>
+      h('div', { class: 'analytics-table__primary' }, [
+        h('div', { style: { fontWeight: 500 } }, row.provider_name || 'Unknown / Legacy'),
+        row.provider_model
+          ? h('div', { class: 'analytics-table__secondary' }, row.provider_model)
+          : null
+      ])
+  },
+  {
+    title: t('analytics.tasks'),
+    key: 'task_count',
+    width: 90,
+    sorter: (a, b) => b.task_count - a.task_count
+  },
+  {
+    title: t('analytics.successRate'),
+    key: 'success_rate',
+    width: 120,
+    sorter: (a, b) => (a.success_rate ?? -1) - (b.success_rate ?? -1),
+    render: (row) => formatPercentage(row.success_rate)
+  },
+  {
+    title: t('analytics.totalTokens'),
+    key: 'total_tokens',
+    width: 130,
+    sorter: (a, b) => (a.total_tokens ?? 0) - (b.total_tokens ?? 0),
+    render: (row) => formatNumber(row.total_tokens)
+  },
+  {
+    title: t('analytics.avgTokensPerTask'),
+    key: 'avg_tokens_per_task',
+    width: 130,
+    sorter: (a, b) => (a.avg_tokens_per_task ?? -1) - (b.avg_tokens_per_task ?? -1),
+    render: (row) => formatNumericValue(row.avg_tokens_per_task)
+  },
+  {
+    title: t('analytics.avgTokensPerSecond'),
+    key: 'avg_tokens_per_second',
+    width: 130,
+    sorter: (a, b) => (a.avg_tokens_per_second ?? -1) - (b.avg_tokens_per_second ?? -1),
+    render: (row) => formatProviderMetricValue('avg_tokens_per_second', row.avg_tokens_per_second)
+  },
+  {
+    title: t('analytics.avgTokensPerChangedLine'),
+    key: 'avg_tokens_per_changed_line',
+    width: 150,
+    sorter: (a, b) => (a.avg_tokens_per_changed_line ?? -1) - (b.avg_tokens_per_changed_line ?? -1),
+    render: (row) => formatProviderMetricValue('avg_tokens_per_changed_line', row.avg_tokens_per_changed_line)
+  },
+  {
+    title: t('analytics.avgSecondsPerChangedLine'),
+    key: 'avg_execution_seconds_per_changed_line',
+    width: 160,
+    sorter: (a, b) => (a.avg_execution_seconds_per_changed_line ?? -1) - (b.avg_execution_seconds_per_changed_line ?? -1),
+    render: (row) => formatProviderMetricValue('avg_execution_seconds_per_changed_line', row.avg_execution_seconds_per_changed_line)
+  }
+])
+
 const analyticsBreakdownTitle = computed(() =>
   analyticsBreakdownTab.value === 'project' ? t('analytics.byProject') : t('analytics.byInitiator')
 )
@@ -787,7 +1088,7 @@ const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
       h('div', [
         h('div', { style: { fontWeight: 500 } }, row.project_name),
         row.project_path_with_namespace
-          ? h('div', { style: { fontSize: '11px', color: 'rgba(15,23,42,0.45)', marginTop: '2px', lineHeight: '1.4' } }, row.project_path_with_namespace)
+          ? h('div', { style: secondaryTextStyle }, row.project_path_with_namespace)
           : null
       ])
   },
@@ -1388,6 +1689,57 @@ onMounted(() => {
   color: rgba(15, 23, 42, 0.6);
 }
 
+.analytics-top-tabs {
+  width: 100%;
+}
+
+.provider-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.provider-chart__row {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) minmax(0, 1fr) 96px;
+  gap: 12px;
+  align-items: center;
+}
+
+.provider-chart__label {
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.84);
+  word-break: break-word;
+}
+
+.provider-chart__track {
+  position: relative;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  overflow: hidden;
+}
+
+.provider-chart__fill {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.provider-chart__fill--success {
+  background: linear-gradient(180deg, rgba(34, 197, 94, 0.92), rgba(34, 197, 94, 0.55));
+}
+
+.provider-chart__fill--efficiency {
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.92), rgba(59, 130, 246, 0.55));
+}
+
+.provider-chart__value {
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(15, 23, 42, 0.68);
+}
+
 @media (max-width: 768px) {
   .analytics-page__controls {
     width: 100%;
@@ -1424,13 +1776,15 @@ onMounted(() => {
   }
 
   .status-chart__bar-row,
-  .status-chart__legend-row {
+  .status-chart__legend-row,
+  .provider-chart__row {
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
   }
 
   .status-chart__row-value,
-  .status-chart__row-share {
+  .status-chart__row-share,
+  .provider-chart__value {
     text-align: left;
   }
 

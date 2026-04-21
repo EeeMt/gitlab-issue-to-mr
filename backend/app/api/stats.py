@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies.auth import get_optional_current_user, require_page_access
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
-from app.models import Task, TaskStatus, Issue, IssueStatus, User
+from app.models import Task, TaskStatus, Issue, IssueStatus, User, AIProvider
 from app.core.projects import build_project_lookup
 from app.core.utcnow import utcnow
 
@@ -223,6 +223,38 @@ def _build_status_breakdown_rows(statuses, raw_rows: list) -> list[dict]:
             }
         )
     return rows
+
+
+def _safe_ratio(numerator: int | float | None, denominator: int | float | None) -> float | None:
+    if denominator in (None, 0) or numerator is None:
+        return None
+    return float(numerator) / float(denominator)
+
+
+def _provider_display_label(provider_name: str | None, provider_model: str | None) -> str:
+    if not provider_name:
+        return "Unknown / Legacy"
+    return f"{provider_name} / {provider_model}" if provider_model else provider_name
+
+
+def _build_provider_chart_series(rows: list[dict]) -> dict[str, list[dict]]:
+    def build(metric_key: str) -> list[dict]:
+        return [
+            {
+                "provider_id": row["provider_id"],
+                "label": _provider_display_label(row["provider_name"], row["provider_model"]),
+                "value": row[metric_key],
+            }
+            for row in rows
+            if row[metric_key] is not None
+        ]
+
+    return {
+        "success_rate": build("success_rate"),
+        "avg_tokens_per_second": build("avg_tokens_per_second"),
+        "avg_tokens_per_changed_line": build("avg_tokens_per_changed_line"),
+        "avg_execution_seconds_per_changed_line": build("avg_execution_seconds_per_changed_line"),
+    }
 
 
 def _build_error_breakdown(error_rows: list[tuple[str, int]], failed_tasks: int) -> list[dict]:
@@ -597,6 +629,138 @@ async def get_analytics(
         if row.error_message
     ]
     error_breakdown = _build_error_breakdown(error_rows, int(failed_tasks or 0))
+    provider_query = (
+        select(
+            Task.provider_id.label("provider_id"),
+            AIProvider.name.label("provider_name"),
+            Task.model_name.label("provider_model"),
+            func.count(Task.id).label("task_count"),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0)), 0).label(
+                "completed_tasks"
+            ),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.FAILED, 1), else_=0)), 0).label(
+                "failed_tasks"
+            ),
+            func.coalesce(func.sum(case((Task.status == TaskStatus.CANCELLED, 1), else_=0)), 0).label(
+                "cancelled_tasks"
+            ),
+            func.coalesce(func.sum(finished_task_expr), 0).label("finished_tasks"),
+            func.coalesce(func.sum(Task.input_tokens), 0).label("total_input_tokens"),
+            func.coalesce(func.sum(Task.output_tokens), 0).label("total_output_tokens"),
+            func.coalesce(func.sum(token_total_expr), 0).label("total_tokens"),
+            func.avg(case((token_total_expr.is_not(None), token_total_expr), else_=None)).label(
+                "avg_tokens_per_task"
+            ),
+            func.avg(
+                case(
+                    (
+                        (token_total_expr.is_not(None))
+                        & (execution_seconds_expr.is_not(None))
+                        & (execution_seconds_expr > 0),
+                        token_total_expr / execution_seconds_expr,
+                    ),
+                    else_=None,
+                )
+            ).label("avg_tokens_per_second"),
+            func.avg(
+                case(
+                    (
+                        (token_total_expr.is_not(None))
+                        & (Task.total_changes.is_not(None))
+                        & (Task.total_changes > 0),
+                        token_total_expr / Task.total_changes,
+                    ),
+                    else_=None,
+                )
+            ).label("avg_tokens_per_changed_line"),
+            func.avg(execution_seconds_expr).label("avg_execution_seconds"),
+            func.avg(
+                case(
+                    (
+                        (execution_seconds_expr.is_not(None))
+                        & (Task.total_changes.is_not(None))
+                        & (Task.total_changes > 0),
+                        execution_seconds_expr / Task.total_changes,
+                    ),
+                    else_=None,
+                )
+            ).label("avg_execution_seconds_per_changed_line"),
+        )
+        .select_from(Task)
+        .outerjoin(AIProvider, AIProvider.id == Task.provider_id)
+        .where(
+            Task.created_at >= since,
+            (Task.provider_id.is_not(None)) | (Task.model_name.is_not(None)),
+        )
+        .group_by(Task.provider_id, AIProvider.name, Task.model_name)
+        .order_by(
+            func.count(Task.id).desc(),
+            func.coalesce(func.sum(token_total_expr), 0).desc(),
+            AIProvider.name.asc(),
+            Task.model_name.asc(),
+            Task.provider_id.asc(),
+        )
+    )
+    provider_query = _apply_analytics_filters(
+        provider_query,
+        access_scope,
+        project_id=project_id,
+        initiator_username=selected_initiator_username,
+    )
+    provider_rows = (await db.execute(provider_query)).all()
+
+    provider_items: list[dict] = []
+    for row in provider_rows:
+        provider_name = row.provider_name or "Unknown / Legacy"
+        provider_model = row.provider_model if row.provider_name else None
+        finished_count = int(row.finished_tasks or 0)
+        completed_count = int(row.completed_tasks or 0)
+
+        provider_items.append(
+            {
+                "provider_id": int(row.provider_id) if row.provider_id is not None else None,
+                "provider_name": provider_name,
+                "provider_model": provider_model,
+                "task_count": int(row.task_count or 0),
+                "finished_task_count": finished_count,
+                "completed_task_count": completed_count,
+                "failed_task_count": int(row.failed_tasks or 0),
+                "cancelled_task_count": int(row.cancelled_tasks or 0),
+                "success_rate": _safe_ratio(completed_count, finished_count),
+                "total_input_tokens": int(row.total_input_tokens or 0),
+                "total_output_tokens": int(row.total_output_tokens or 0),
+                "total_tokens": int(row.total_tokens or 0),
+                "avg_tokens_per_task": (
+                    float(row.avg_tokens_per_task) if row.avg_tokens_per_task is not None else None
+                ),
+                "avg_tokens_per_second": (
+                    float(row.avg_tokens_per_second) if row.avg_tokens_per_second is not None else None
+                ),
+                "avg_tokens_per_changed_line": (
+                    float(row.avg_tokens_per_changed_line)
+                    if row.avg_tokens_per_changed_line is not None
+                    else None
+                ),
+                "avg_execution_seconds": (
+                    float(row.avg_execution_seconds) if row.avg_execution_seconds is not None else None
+                ),
+                "avg_execution_seconds_per_changed_line": (
+                    float(row.avg_execution_seconds_per_changed_line)
+                    if row.avg_execution_seconds_per_changed_line is not None
+                    else None
+                ),
+            }
+        )
+
+    provider_summary = {
+        "active_provider_count": len(provider_items),
+        "provider_covered_task_count": sum(item["task_count"] for item in provider_items),
+        "provider_covered_total_tokens": sum(item["total_tokens"] for item in provider_items),
+        "provider_success_rate": _safe_ratio(
+            sum(item["completed_task_count"] for item in provider_items),
+            sum(item["finished_task_count"] for item in provider_items),
+        ),
+    }
 
     trends: list[dict] = []
     for offset in range(days):
@@ -735,6 +899,9 @@ async def get_analytics(
             }
             for row in initiator_rows
         ],
+        "provider_summary": provider_summary,
+        "providers": provider_items,
+        "provider_chart_series": _build_provider_chart_series(provider_items),
         "trends": trends,
         "priority_waits": [
             {
