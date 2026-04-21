@@ -173,6 +173,10 @@ interface OnboardingContentItem {
   bodyKey: string
 }
 
+interface OnboardingWorkflowItem extends OnboardingContentItem {
+  stepKey: string
+}
+
 interface OnboardingMotif {
   key: string
   icon: unknown
@@ -237,7 +241,7 @@ const conceptItems: OnboardingContentItem[] = [
   },
 ]
 
-const workflowItems: OnboardingContentItem[] = [
+const workflowItems: OnboardingWorkflowItem[] = [
   {
     stepKey: 'onboarding.workflow.steps.first.step',
     titleKey: 'onboarding.workflow.steps.first.title',
@@ -840,4 +844,3 @@ function handleCreateIssue() {
   }
 }
 </style>
-
