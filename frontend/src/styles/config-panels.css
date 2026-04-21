@@ -130,6 +130,12 @@
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
 }
 
+.config-editor-modal__scroll {
+  max-height: min(70vh, 680px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .config-webhook-project {
   display: flex;
   flex-direction: column;
