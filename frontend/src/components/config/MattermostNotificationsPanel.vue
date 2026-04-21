@@ -292,7 +292,7 @@
 
     <template #footer>
       <n-space justify="end" :size="12">
-        <n-button secondary :disabled="profileSaving" @click="profileModalVisible = false">
+        <n-button secondary :disabled="profileSaving" @click="closeProfileModal">
           {{ t('common.cancel') }}
         </n-button>
         <n-button type="primary" :loading="profileSaving" @click="handleSaveProfile">
@@ -626,6 +626,20 @@ function openEditProfileModal(profile: MattermostNotificationProfile) {
   profileModalVisible.value = true
 }
 
+function closeProfileModal() {
+  profileModalVisible.value = false
+  editingProfileId.value = null
+  Object.assign(profileForm, createEmptyProfileForm())
+  // reset form validation if available
+  if (profileFormRef.value) {
+    try {
+      ;(profileFormRef.value as any).reset?.()
+    } catch (e) {
+      // ignore
+    }
+  }
+}
+
 async function handleSaveProfile() {
   const valid = await profileFormRef.value?.validate().then(() => true).catch(() => false)
   if (!valid) {
@@ -641,7 +655,7 @@ async function handleSaveProfile() {
       await updateMattermostNotificationProfile(editingProfileId.value, buildProfilePayload())
       message.success(t('config.notificationProfileUpdated'))
     }
-    profileModalVisible.value = false
+    closeProfileModal()
     await fetchNotifications(false)
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('config.failedToSaveNotifications'))
