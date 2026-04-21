@@ -44,9 +44,9 @@ vi.mock('naive-ui', () => ({
   NModal: {
     name: 'NModal',
     props: ['show', 'preset', 'style', 'width'],
-    setup(_props: any, { slots, attrs }: any) {
-      // Render modal container and pass attrs through so data-testid is available
-      return () => h('div', { class: 'n-modal', ...attrs }, slots.default?.())
+    setup(props: any, { slots, attrs }: any) {
+      // Render modal container only when show is truthy and pass attrs through so data-testid is available
+      return () => props.show ? h('div', { class: 'n-modal', ...attrs }, slots.default?.()) : null
     }
   },
   NDataTable: {
