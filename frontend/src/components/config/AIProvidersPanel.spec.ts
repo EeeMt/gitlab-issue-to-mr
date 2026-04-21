@@ -42,7 +42,7 @@ vi.mock('../../api', () => ({
   setDefaultProvider: mockApi.setDefaultProvider
 }))
 
-describe('AIProvidersPanel (modal conversion)', () => {
+describe('AIProvidersPanel', () => {
   beforeEach(() => {
     resetMockApi()
   })
@@ -51,7 +51,7 @@ describe('AIProvidersPanel (modal conversion)', () => {
     const wrapper = mount(AIProvidersPanel, {
       props: { isMobile: false },
       global: {
-        stubs: ['NCard', 'NButton', 'NDataTable', 'NDrawer', 'NDrawerContent', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NTag']
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NTag']
       }
     })
 
@@ -59,7 +59,7 @@ describe('AIProvidersPanel (modal conversion)', () => {
     // @ts-ignore
     await wrapper.vm.openCreate()
 
-    // Expect modal state to be true (we will convert drawer -> modal)
+    // Expect modal state to be true
     // @ts-ignore
     expect(wrapper.vm.modalVisible).toBe(true)
 
@@ -88,7 +88,7 @@ describe('AIProvidersPanel (modal conversion)', () => {
     const wrapper = mount(AIProvidersPanel, {
       props: { isMobile: false },
       global: {
-        stubs: ['NCard', 'NButton', 'NDataTable', 'NDrawer', 'NDrawerContent', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NTag']
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NTag']
       }
     })
 
@@ -113,7 +113,7 @@ describe('AIProvidersPanel (modal conversion)', () => {
     const wrapper = mount(AIProvidersPanel, {
       props: { isMobile: false },
       global: {
-        stubs: ['NCard', 'NButton', 'NDataTable', 'NDrawer', 'NDrawerContent', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NTag']
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NTag']
       }
     })
 
@@ -140,7 +140,7 @@ describe('AIProvidersPanel (modal conversion)', () => {
     // createProvider should have been called
     expect(mockApi.createProvider).toHaveBeenCalled()
 
-    // modal should be closed (we will convert drawerVisible -> modalVisible)
+    // modal should be closed
     // @ts-ignore
     expect(wrapper.vm.modalVisible).toBe(false)
   })
