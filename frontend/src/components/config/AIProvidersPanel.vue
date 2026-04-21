@@ -27,102 +27,101 @@
       </div>
     </n-card>
 
-    <n-drawer v-model:show="drawerVisible" :width="isMobile ? '100%' : 480" placement="right">
-      <n-drawer-content
-        :title="editingProvider ? t('config.providers.edit') : t('config.providers.create')"
-        closable
+    <n-modal v-model:show="modalVisible" preset="card" :style="{ width: isMobile ? '96vw' : '560px' }">
+      <template #header>
+        <div>{{ editingProvider ? t('config.providers.edit') : t('config.providers.create') }}</div>
+      </template>
+
+      <n-form
+        ref="formRef"
+        :model="formValue"
+        :rules="rules"
+        label-placement="top"
+        class="config-section-form"
       >
-        <n-form
-          ref="formRef"
-          :model="formValue"
-          :rules="rules"
-          label-placement="top"
-          class="config-section-form"
-        >
-          <n-form-item :label="t('config.providers.name')" path="name">
-            <n-input
-              v-model:value="formValue.name"
-              placeholder="my-provider"
-              class="config-form__input"
-            />
-            <template #feedback>
-              {{ t('config.providers.nameHint') }}
-            </template>
-          </n-form-item>
+        <n-form-item :label="t('config.providers.name')" path="name">
+          <n-input
+            v-model:value="formValue.name"
+            placeholder="my-provider"
+            class="config-form__input"
+          />
+          <template #feedback>
+            {{ t('config.providers.nameHint') }}
+          </template>
+        </n-form-item>
 
-          <n-form-item :label="t('config.providers.baseUrl')" path="base_url">
-            <n-input
-              v-model:value="formValue.base_url"
-              placeholder="http://host.docker.internal:11434/v1"
-              class="config-form__input"
-            />
-            <template #feedback>
-              {{ t('config.providers.baseUrlHint') }}
-            </template>
-          </n-form-item>
+        <n-form-item :label="t('config.providers.baseUrl')" path="base_url">
+          <n-input
+            v-model:value="formValue.base_url"
+            placeholder="http://host.docker.internal:11434/v1"
+            class="config-form__input"
+          />
+          <template #feedback>
+            {{ t('config.providers.baseUrlHint') }}
+          </template>
+        </n-form-item>
 
-          <n-form-item :label="t('config.providers.model')" path="model">
-            <n-input
-              v-model:value="formValue.model"
-              placeholder="claude-sonnet-4-20250514"
-              class="config-form__input"
-            />
-            <template #feedback>
-              {{ t('config.providers.modelHint') }}
-            </template>
-          </n-form-item>
+        <n-form-item :label="t('config.providers.model')" path="model">
+          <n-input
+            v-model:value="formValue.model"
+            placeholder="claude-sonnet-4-20250514"
+            class="config-form__input"
+          />
+          <template #feedback>
+            {{ t('config.providers.modelHint') }}
+          </template>
+        </n-form-item>
 
-          <n-form-item :label="t('config.providers.maxTurns')" path="max_turns">
-            <n-input-number
-              v-model:value="formValue.max_turns"
-              :min="1"
-              :max="1000"
-              class="config-form__input"
-            />
-            <template #feedback>
-              {{ t('config.providers.maxTurnsHint') }}
-            </template>
-          </n-form-item>
+        <n-form-item :label="t('config.providers.maxTurns')" path="max_turns">
+          <n-input-number
+            v-model:value="formValue.max_turns"
+            :min="1"
+            :max="1000"
+            class="config-form__input"
+          />
+          <template #feedback>
+            {{ t('config.providers.maxTurnsHint') }}
+          </template>
+        </n-form-item>
 
-          <n-form-item :label="t('config.providers.apiKey')" path="api_key">
-            <n-input
-              v-model:value="formValue.api_key"
-              type="password"
-              show-password-on="click"
-              :placeholder="editingProvider ? t('config.providers.apiKeyHint') : ''"
-              class="config-form__input"
-            />
-            <template #feedback>
-              <span v-if="editingProvider && editingProvider.api_key_configured">
-                <n-tag size="tiny" type="success" round>{{ t('config.providers.apiKeyConfigured') }}</n-tag>
-              </span>
-              <span v-else-if="editingProvider">
-                <n-tag size="tiny" type="warning" round>{{ t('config.providers.apiKeyNotConfigured') }}</n-tag>
-              </span>
-            </template>
-          </n-form-item>
+        <n-form-item :label="t('config.providers.apiKey')" path="api_key">
+          <n-input
+            v-model:value="formValue.api_key"
+            type="password"
+            show-password-on="click"
+            :placeholder="editingProvider ? t('config.providers.apiKeyHint') : ''"
+            class="config-form__input"
+          />
+          <template #feedback>
+            <span v-if="editingProvider && editingProvider.api_key_configured">
+              <n-tag size="tiny" type="success" round>{{ t('config.providers.apiKeyConfigured') }}</n-tag>
+            </span>
+            <span v-else-if="editingProvider">
+              <n-tag size="tiny" type="warning" round>{{ t('config.providers.apiKeyNotConfigured') }}</n-tag>
+            </span>
+          </template>
+        </n-form-item>
 
-          <n-form-item :label="t('config.providers.systemPrompt')" path="system_prompt">
-            <n-input
-              v-model:value="formValue.system_prompt"
-              type="textarea"
-              :rows="4"
-              :placeholder="t('config.providers.systemPromptHint')"
-              class="config-form__input"
-            />
-          </n-form-item>
-        </n-form>
+        <n-form-item :label="t('config.providers.systemPrompt')" path="system_prompt">
+          <n-input
+            v-model:value="formValue.system_prompt"
+            type="textarea"
+            :rows="4"
+            :placeholder="t('config.providers.systemPromptHint')"
+            class="config-form__input"
+          />
+        </n-form-item>
+      </n-form>
 
-        <template #footer>
-          <n-space justify="end">
-            <n-button @click="drawerVisible = false">{{ t('common.cancel') }}</n-button>
-            <n-button type="primary" :loading="saving" @click="handleSave">
-              {{ t('common.save') }}
-            </n-button>
-          </n-space>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="modalVisible = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :loading="saving" @click="handleSave">
+            {{ t('common.save') }}
+          </n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
@@ -132,8 +131,7 @@ import {
   NButton,
   NCard,
   NDataTable,
-  NDrawer,
-  NDrawerContent,
+  NModal,
   NForm,
   NFormItem,
   NInput,
@@ -169,7 +167,7 @@ const message = useMessage()
 const providers = ref<AIProvider[]>([])
 const loading = ref(false)
 const saving = ref(false)
-const drawerVisible = ref(false)
+const modalVisible = ref(false)
 const editingProvider = ref<AIProvider | null>(null)
 const formRef = ref<FormInst | null>(null)
 
@@ -345,7 +343,7 @@ function resetForm() {
 function openCreate() {
   editingProvider.value = null
   resetForm()
-  drawerVisible.value = true
+  modalVisible.value = true
 }
 
 function openEdit(provider: AIProvider) {
@@ -358,7 +356,7 @@ function openEdit(provider: AIProvider) {
     api_key: '',
     system_prompt: provider.system_prompt || ''
   }
-  drawerVisible.value = true
+  modalVisible.value = true
 }
 
 async function handleSave() {
@@ -407,7 +405,7 @@ async function handleSave() {
       message.success(t('config.providers.created'))
     }
 
-    drawerVisible.value = false
+    modalVisible.value = false
     await fetchProviders()
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('config.saveError'))
