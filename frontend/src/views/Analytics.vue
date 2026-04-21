@@ -151,55 +151,33 @@
           </n-card>
         </n-space>
 
-        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
-          <n-gi class="analytics-grid-cell">
-            <n-card class="analytics-card analytics-card--stretch" :bordered="false">
-              <template #header>
-                <div class="analytics-card__header">
-                  <div>
-                      <div class="analytics-card__title">{{ t('analytics.byProject') }}</div>
-                      <div class="analytics-card__subtitle">{{ t('analytics.byProjectSubtitle') }}</div>
-                  </div>
-                  <n-button text size="small" @click="showProjectModal = true" class="analytics-card__expand-btn" :title="t('analytics.expand')">
-                    <template #icon><n-icon :component="ExpandOutline" /></template>
-                  </n-button>
-                </div>
-              </template>
+        <n-card class="analytics-card analytics-card--stretch analytics-breakdown-card" :bordered="false" data-testid="analytics-breakdown-card">
+          <template #header>
+            <div class="analytics-card__header analytics-card__header--breakdown">
+              <div>
+                <div class="analytics-card__title">{{ analyticsBreakdownTitle }}</div>
+                <div class="analytics-card__subtitle">{{ analyticsBreakdownSubtitle }}</div>
+              </div>
+              <div class="analytics-card__header-actions analytics-card__header-actions--breakdown">
+                <n-tabs v-model:value="analyticsBreakdownTab" type="segment" size="small" class="analytics-breakdown-tabs">
+                  <n-tab-pane name="project" :tab="t('analytics.byProject')" />
+                  <n-tab-pane name="initiator" :tab="t('analytics.byInitiator')" />
+                </n-tabs>
+                <n-button text size="small" @click="showBreakdownModal = true" class="analytics-card__expand-btn" :title="t('analytics.expand')">
+                  <template #icon><n-icon :component="ExpandOutline" /></template>
+                </n-button>
+              </div>
+            </div>
+          </template>
 
-              <n-data-table
-                :columns="projectColumns"
-                :data="analytics?.projects || []"
-                :bordered="false"
-                :pagination="{ pageSize: 8 }"
-                :scroll-x="isMobile ? undefined : 1130"
-              />
-            </n-card>
-          </n-gi>
-
-          <n-gi class="analytics-grid-cell">
-            <n-card class="analytics-card analytics-card--stretch" :bordered="false">
-              <template #header>
-                <div class="analytics-card__header">
-                  <div>
-                      <div class="analytics-card__title">{{ t('analytics.byInitiator') }}</div>
-                      <div class="analytics-card__subtitle">{{ t('analytics.byInitiatorSubtitle') }}</div>
-                  </div>
-                  <n-button text size="small" @click="showInitiatorModal = true" class="analytics-card__expand-btn" :title="t('analytics.expand')">
-                    <template #icon><n-icon :component="ExpandOutline" /></template>
-                  </n-button>
-                </div>
-              </template>
-
-              <n-data-table
-                :columns="initiatorColumns"
-                :data="analytics?.initiators || []"
-                :bordered="false"
-                :pagination="{ pageSize: 8 }"
-                :scroll-x="isMobile ? undefined : 1050"
-              />
-            </n-card>
-          </n-gi>
-        </n-grid>
+          <n-data-table
+            :columns="analyticsBreakdownColumns"
+            :data="analyticsBreakdownData"
+            :bordered="false"
+            :pagination="{ pageSize: 8 }"
+            :scroll-x="analyticsBreakdownScrollX"
+          />
+        </n-card>
 
         <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
           <n-gi class="analytics-grid-cell">
@@ -246,50 +224,25 @@
       </n-space>
     </n-spin>
 
-    <!-- By Project expanded modal -->
-    <n-modal v-model:show="showProjectModal" :mask-closable="true" style="width: 90vw; max-width: 1400px;">
+    <n-modal v-model:show="showBreakdownModal" :mask-closable="true" style="width: 90vw; max-width: 1400px;">
       <n-card class="analytics-card" :bordered="false">
         <template #header>
           <div class="analytics-card__header">
             <div>
-              <div class="analytics-card__title">{{ t('analytics.byProject') }}</div>
-              <div class="analytics-card__subtitle">{{ t('analytics.byProjectSubtitle') }}</div>
+              <div class="analytics-card__title">{{ analyticsBreakdownTitle }}</div>
+              <div class="analytics-card__subtitle">{{ analyticsBreakdownSubtitle }}</div>
             </div>
-            <n-button text size="small" @click="showProjectModal = false">
+            <n-button text size="small" @click="showBreakdownModal = false">
               <template #icon><n-icon :component="CloseOutline" /></template>
             </n-button>
           </div>
         </template>
         <n-data-table
-          :columns="projectColumns"
-          :data="analytics?.projects || []"
+          :columns="analyticsBreakdownColumns"
+          :data="analyticsBreakdownData"
           :bordered="false"
           :pagination="{ pageSize: 20 }"
-          :scroll-x="1130"
-        />
-      </n-card>
-    </n-modal>
-
-    <!-- By Initiator expanded modal -->
-    <n-modal v-model:show="showInitiatorModal" :mask-closable="true" style="width: 90vw; max-width: 1400px;">
-      <n-card class="analytics-card" :bordered="false">
-        <template #header>
-          <div class="analytics-card__header">
-            <div>
-              <div class="analytics-card__title">{{ t('analytics.byInitiator') }}</div>
-              <div class="analytics-card__subtitle">{{ t('analytics.byInitiatorSubtitle') }}</div>
-            </div>
-            <n-button text size="small" @click="showInitiatorModal = false">
-              <template #icon><n-icon :component="CloseOutline" /></template>
-            </n-button>
-          </div>
-        </template>
-        <n-data-table
-          :columns="initiatorColumns"
-          :data="analytics?.initiators || []"
-          :bordered="false"
-          :pagination="{ pageSize: 20 }"
-          :scroll-x="1050"
+          :scroll-x="analyticsBreakdownModalScrollX"
         />
       </n-card>
     </n-modal>
@@ -306,6 +259,8 @@ import {
   NGi,
   NGrid,
   NModal,
+  NTabPane,
+  NTabs,
   NSelect,
   NSpace,
   NSpin,
@@ -358,8 +313,8 @@ const taskChartRef = ref<HTMLElement | null>(null)
 const changeChartRef = ref<HTMLElement | null>(null)
 const durationChartRef = ref<HTMLElement | null>(null)
 const tokenChartRef = ref<HTMLElement | null>(null)
-const showProjectModal = ref(false)
-const showInitiatorModal = ref(false)
+const analyticsBreakdownTab = ref<'project' | 'initiator'>('project')
+const showBreakdownModal = ref(false)
 
 const windowOptions = computed(() => [
   { label: t('analytics.last7Days'), value: 7 },
@@ -557,6 +512,16 @@ const tokenTrendBars = computed(() =>
   )
 )
 
+const analyticsBreakdownTitle = computed(() =>
+  analyticsBreakdownTab.value === 'project' ? t('analytics.byProject') : t('analytics.byInitiator')
+)
+
+const analyticsBreakdownSubtitle = computed(() =>
+  analyticsBreakdownTab.value === 'project'
+    ? t('analytics.byProjectSubtitle')
+    : t('analytics.byInitiatorSubtitle')
+)
+
 const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
   {
     title: t('common.project'),
@@ -692,6 +657,28 @@ const initiatorColumns = computed<DataTableColumns<AnalyticsInitiatorRow>>(() =>
     render: (row) => formatDateTime(row.last_task_at)
   }
 ])
+
+const analyticsBreakdownColumns = computed(() =>
+  analyticsBreakdownTab.value === 'project' ? projectColumns.value : initiatorColumns.value
+)
+
+const analyticsBreakdownData = computed(() =>
+  analyticsBreakdownTab.value === 'project'
+    ? (analytics.value?.projects || [])
+    : (analytics.value?.initiators || [])
+)
+
+const analyticsBreakdownScrollX = computed(() => {
+  if (isMobile.value) {
+    return undefined
+  }
+
+  return analyticsBreakdownTab.value === 'project' ? 1130 : 1050
+})
+
+const analyticsBreakdownModalScrollX = computed(() =>
+  analyticsBreakdownTab.value === 'project' ? 1130 : 1050
+)
 
 const priorityColumns = computed<DataTableColumns<AnalyticsPriorityWaitRow>>(() => [
   { title: t('common.priority'), key: 'priority', width: 90 },
@@ -851,6 +838,30 @@ onMounted(() => {
   gap: 12px;
 }
 
+.analytics-card__header--breakdown {
+  align-items: flex-start;
+}
+
+.analytics-card__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.analytics-card__header-actions--breakdown {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.analytics-breakdown-card {
+  width: 100%;
+}
+
+.analytics-breakdown-tabs {
+  flex: 1 1 auto;
+  min-width: 280px;
+}
+
 .analytics-card__expand-btn {
   flex-shrink: 0;
   color: rgba(15, 23, 42, 0.45);
@@ -963,6 +974,18 @@ onMounted(() => {
     transform: none;
     font-variant-numeric: tabular-nums;
     font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  }
+
+  .analytics-card__header,
+  .analytics-card__header-actions,
+  .analytics-card__header-actions--breakdown,
+  .analytics-breakdown-tabs {
+    width: 100%;
+  }
+
+  .analytics-card__header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 </style>

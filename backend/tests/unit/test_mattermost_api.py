@@ -19,11 +19,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from app.api.mattermost import (
     MattermostConnectionTestRequest,
     MattermostIntegrationUpdate,
+    MattermostResolveChannelRequest,
     MattermostNotificationProfileInput,
     _normalize_updates,
     create_mattermost_notification_profile,
     delete_mattermost_notification_profile,
     get_mattermost_notification_config,
+    get_mattermost_channel_target,
+    resolve_mattermost_channel_target,
     test_mattermost_notification_integration as _endpoint_test_connection,
     update_mattermost_notification_integration,
     update_mattermost_notification_profile,
@@ -40,8 +43,7 @@ def _mock_profile(
     name="Test",
     enabled=True,
     target_type="channel",
-    team_name="team",
-    channel_name="chan",
+    channel_id="channel-123",
 ):
     """Return a mock that quacks like a MattermostNotificationProfile row."""
     p = MagicMock()
@@ -49,10 +51,8 @@ def _mock_profile(
     p.name = name
     p.enabled = enabled
     p.target_type = target_type
-    p.team_name = team_name
-    p.channel_name = channel_name
+    p.channel_id = channel_id
     p.mention_in_channel = False
-    p.send_for_manual_tasks = False
     p.event_types_json = '["task_completed"]'
     p.field_keys_json = '["task_id"]'
     p.created_at = datetime(2024, 1, 1, tzinfo=UTC)
@@ -118,8 +118,7 @@ class TestProfileInputValidation:
             MattermostNotificationProfileInput(
                 name="   ",
                 target_type="channel",
-                team_name="t",
-                channel_name="c",
+                channel_id="channel-1",
                 event_types=["task_completed"],
                 field_keys=["task_id"],
             )
@@ -140,8 +139,7 @@ class TestProfileInputValidation:
             MattermostNotificationProfileInput(
                 name="p",
                 target_type="channel",
-                team_name="t",
-                channel_name="c",
+                channel_id="channel-1",
                 event_types=[],
                 field_keys=["task_id"],
             )
@@ -152,8 +150,7 @@ class TestProfileInputValidation:
             MattermostNotificationProfileInput(
                 name="p",
                 target_type="channel",
-                team_name="t",
-                channel_name="c",
+                channel_id="channel-1",
                 event_types=["bogus_event"],
                 field_keys=["task_id"],
             )
@@ -164,8 +161,7 @@ class TestProfileInputValidation:
             MattermostNotificationProfileInput(
                 name="p",
                 target_type="channel",
-                team_name="t",
-                channel_name="c",
+                channel_id="channel-1",
                 event_types=["task_completed"],
                 field_keys=[],
             )
@@ -176,49 +172,44 @@ class TestProfileInputValidation:
             MattermostNotificationProfileInput(
                 name="p",
                 target_type="channel",
-                team_name="t",
-                channel_name="c",
+                channel_id="channel-1",
                 event_types=["task_completed"],
                 field_keys=["bogus_key"],
             )
 
-    def test_channel_missing_team_name_rejected(self):
-        """Channel target_type without team_name must be rejected."""
-        with pytest.raises(ValidationError, match="Channel notifications require both"):
+    def test_channel_missing_channel_id_rejected(self):
+        """Channel target_type without channel_id must be rejected."""
+        with pytest.raises(ValidationError, match="Channel notifications require channel_id"):
             MattermostNotificationProfileInput(
                 name="p",
                 target_type="channel",
-                team_name=None,
-                channel_name="c",
+                channel_id=None,
                 event_types=["task_completed"],
                 field_keys=["task_id"],
             )
 
-    def test_channel_missing_channel_name_rejected(self):
-        """Channel target_type without channel_name must be rejected."""
-        with pytest.raises(ValidationError, match="Channel notifications require both"):
+    def test_channel_blank_channel_id_rejected(self):
+        """Channel target_type with blank channel_id must be rejected."""
+        with pytest.raises(ValidationError, match="Channel notifications require channel_id"):
             MattermostNotificationProfileInput(
                 name="p",
                 target_type="channel",
-                team_name="t",
-                channel_name=None,
+                channel_id="   ",
                 event_types=["task_completed"],
                 field_keys=["task_id"],
             )
 
-    def test_non_channel_clears_team_channel_mention(self):
-        """For initiator_dm, team_name/channel_name/mention must be cleared."""
+    def test_non_channel_clears_channel_id_and_mention(self):
+        """For initiator_dm, channel_id/mention must be cleared."""
         p = MattermostNotificationProfileInput(
             name="dm",
             target_type="initiator_dm",
-            team_name="should_clear",
-            channel_name="should_clear",
+            channel_id="should_clear",
             mention_in_channel=True,
             event_types=["task_failed"],
             field_keys=["status"],
         )
-        assert p.team_name is None
-        assert p.channel_name is None
+        assert p.channel_id is None
         assert p.mention_in_channel is False
 
     def test_valid_channel_profile_accepted(self):
@@ -226,29 +217,27 @@ class TestProfileInputValidation:
         p = MattermostNotificationProfileInput(
             name="ok",
             target_type="channel",
-            team_name="t",
-            channel_name="c",
+            channel_id="channel-1",
             event_types=["task_completed", "task_failed"],
             field_keys=["task_id", "status"],
         )
         assert p.name == "ok"
         assert p.target_type == "channel"
+        assert p.channel_id == "channel-1"
         assert p.event_types == ["task_completed", "task_failed"]
 
     def test_whitespace_is_stripped(self):
-        """Leading/trailing spaces in name, target, team, channel must be stripped."""
+        """Leading/trailing spaces in name, target, channel_id must be stripped."""
         p = MattermostNotificationProfileInput(
             name="  myprof  ",
             target_type="  channel  ",
-            team_name="  t  ",
-            channel_name="  c  ",
+            channel_id="  chan-1  ",
             event_types=["task_completed"],
             field_keys=["task_id"],
         )
         assert p.name == "myprof"
         assert p.target_type == "channel"
-        assert p.team_name == "t"
-        assert p.channel_name == "c"
+        assert p.channel_id == "chan-1"
 
 
 # ===================================================================
@@ -507,6 +496,8 @@ class TestCreateProfile:
         # db.add is synchronous in SQLAlchemy – use a plain MagicMock to avoid
         # the "coroutine never awaited" warning from AsyncMock.
         db.add = MagicMock()
+        mock_client = AsyncMock()
+        mock_client.get_channel_by_name.return_value = {"id": "channel-42"}
 
         async def _fake_refresh(obj):
             obj.id = 42
@@ -518,8 +509,7 @@ class TestCreateProfile:
         payload = MattermostNotificationProfileInput(
             name="new-channel",
             target_type="channel",
-            team_name="eng",
-            channel_name="alerts",
+            channel_id="channel-42",
             event_types=["task_completed"],
             field_keys=["task_id", "status"],
         )
@@ -534,8 +524,9 @@ class TestCreateProfile:
         assert result.id == 42
         assert result.name == "new-channel"
         assert result.target_type == "channel"
+        assert result.channel_id == "channel-42"
         assert result.event_types == ["task_completed"]
-
+        assert "send_for_manual_tasks" not in result.model_dump()
 
 # ===================================================================
 # PATCH /config/notifications/profiles/{profile_id}  (update)
@@ -550,6 +541,8 @@ class TestUpdateProfile:
         profile = _mock_profile(pid=5)
         db = AsyncMock()
         db.get = AsyncMock(return_value=profile)
+        mock_client = AsyncMock()
+        mock_client.get_channel_by_name.return_value = {"id": "channel-99"}
 
         async def _refresh(obj):
             obj.created_at = datetime(2024, 1, 1, tzinfo=UTC)
@@ -560,8 +553,7 @@ class TestUpdateProfile:
         payload = MattermostNotificationProfileInput(
             name="renamed",
             target_type="channel",
-            team_name="team2",
-            channel_name="chan2",
+            channel_id="channel-99",
             event_types=["task_failed"],
             field_keys=["status"],
         )
@@ -572,8 +564,136 @@ class TestUpdateProfile:
 
         db.commit.assert_awaited_once()
         assert profile.name == "renamed"
-        assert profile.team_name == "team2"
+        assert profile.channel_id == "channel-99"
         assert result.name == "renamed"
+
+    @pytest.mark.asyncio
+    async def test_preserves_existing_channel_id_when_names_unchanged(self):
+        """Editing other fields can keep the stored channel_id by resubmitting it."""
+        profile = _mock_profile(pid=5, channel_id="channel-123")
+        db = AsyncMock()
+        db.get = AsyncMock(return_value=profile)
+
+        async def _refresh(obj):
+            obj.created_at = datetime(2024, 1, 1, tzinfo=UTC)
+            obj.updated_at = datetime(2024, 7, 1, tzinfo=UTC)
+
+        db.refresh = AsyncMock(side_effect=_refresh)
+
+        payload = MattermostNotificationProfileInput(
+            name="renamed",
+            target_type="channel",
+            channel_id="channel-123",
+            event_types=["task_failed"],
+            field_keys=["status"],
+        )
+
+        result = await update_mattermost_notification_profile(
+            profile_id=5, payload=payload, db=db, _current_user=MagicMock(),
+        )
+
+        assert profile.channel_id == "channel-123"
+        assert result.channel_id == "channel-123"
+
+    @pytest.mark.asyncio
+    async def test_channel_target_requires_channel_id_on_update(self):
+        """Channel target updates without channel_id must be rejected."""
+        with pytest.raises(ValidationError, match="channel_id"):
+            MattermostNotificationProfileInput(
+                name="renamed",
+                target_type="channel",
+                channel_id=None,
+                event_types=["task_failed"],
+                field_keys=["status"],
+            )
+
+
+# ===================================================================
+# Channel target resolve endpoints
+# ===================================================================
+
+class TestResolveChannelTarget:
+    """Tests for channel target resolution endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_resolves_channel_target_by_names(self):
+        db = AsyncMock()
+        mock_client = AsyncMock()
+        mock_client.get_channel_by_name.return_value = {
+            "id": "channel-42",
+            "team_id": "team-1",
+            "name": "codify-alerts",
+            "display_name": "Codify Alerts",
+        }
+        mock_client.get_team.return_value = {
+            "id": "team-1",
+            "name": "engineering",
+            "display_name": "Engineering",
+        }
+
+        with patch(
+            "app.api.mattermost.get_effective_settings",
+            return_value=SimpleNamespace(
+                mattermost_server_url="https://mm.example.com",
+                mattermost_bot_token="mm-token",
+            ),
+        ), patch(
+            "app.api.mattermost.load_runtime_config_from_db",
+            new_callable=AsyncMock,
+        ), patch(
+            "app.api.mattermost.MattermostClient",
+            return_value=mock_client,
+        ):
+            result = await resolve_mattermost_channel_target(
+                payload=MattermostResolveChannelRequest(team_name="engineering", channel_name="codify-alerts"),
+                db=db,
+                _current_user=MagicMock(),
+            )
+
+        assert result.channel_id == "channel-42"
+        assert result.team_name == "engineering"
+        assert result.team_display_name == "Engineering"
+        assert result.channel_name == "codify-alerts"
+        assert result.channel_display_name == "Codify Alerts"
+
+    @pytest.mark.asyncio
+    async def test_gets_channel_target_by_channel_id(self):
+        db = AsyncMock()
+        mock_client = AsyncMock()
+        mock_client.get_channel.return_value = {
+            "id": "channel-42",
+            "team_id": "team-1",
+            "name": "codify-alerts",
+            "display_name": "Codify Alerts",
+        }
+        mock_client.get_team.return_value = {
+            "id": "team-1",
+            "name": "engineering",
+            "display_name": "Engineering",
+        }
+
+        with patch(
+            "app.api.mattermost.get_effective_settings",
+            return_value=SimpleNamespace(
+                mattermost_server_url="https://mm.example.com",
+                mattermost_bot_token="mm-token",
+            ),
+        ), patch(
+            "app.api.mattermost.load_runtime_config_from_db",
+            new_callable=AsyncMock,
+        ), patch(
+            "app.api.mattermost.MattermostClient",
+            return_value=mock_client,
+        ):
+            result = await get_mattermost_channel_target(
+                channel_id="channel-42",
+                db=db,
+                _current_user=MagicMock(),
+            )
+
+        assert result.channel_id == "channel-42"
+        assert result.team_name == "engineering"
+        assert result.channel_name == "codify-alerts"
 
     @pytest.mark.asyncio
     async def test_returns_404_when_not_found(self):
@@ -586,8 +706,7 @@ class TestUpdateProfile:
         payload = MattermostNotificationProfileInput(
             name="x",
             target_type="channel",
-            team_name="t",
-            channel_name="c",
+            channel_id="channel-123",
             event_types=["task_completed"],
             field_keys=["task_id"],
         )

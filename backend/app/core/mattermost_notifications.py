@@ -130,10 +130,8 @@ def serialize_profile(profile: MattermostNotificationProfile) -> dict[str, Any]:
         "name": profile.name,
         "enabled": profile.enabled,
         "target_type": profile.target_type,
-        "team_name": profile.team_name,
-        "channel_name": profile.channel_name,
+        "channel_id": profile.channel_id,
         "mention_in_channel": profile.mention_in_channel,
-        "send_for_manual_tasks": profile.send_for_manual_tasks,
         "event_types": deserialize_string_list(profile.event_types_json),
         "field_keys": deserialize_string_list(profile.field_keys_json),
         "created_at": profile.created_at,
@@ -218,6 +216,12 @@ class MattermostClient:
     async def get_channel_by_name(self, team_name: str, channel_name: str) -> dict[str, Any]:
         team = await self._request("GET", f"/teams/name/{team_name}")
         return await self._request("GET", f"/teams/{team['id']}/channels/name/{channel_name}")
+
+    async def get_channel(self, channel_id: str) -> dict[str, Any]:
+        return await self._request("GET", f"/channels/{channel_id}")
+
+    async def get_team(self, team_id: str) -> dict[str, Any]:
+        return await self._request("GET", f"/teams/{team_id}")
 
     async def create_direct_channel(self, other_user_id: str) -> dict[str, Any]:
         me = await self.get_me()
@@ -422,7 +426,7 @@ async def notify_task_event(
                     continue
 
                 target_summary = (
-                    f"{profile.team_name}/{profile.channel_name}"
+                    f"channel:{profile.channel_id or '-'}"
                     if profile.target_type == MATTERMOST_TARGET_TYPE_CHANNEL
                     else f"dm:{task.initiator_username or '-'}"
                 )
@@ -453,10 +457,10 @@ async def notify_task_event(
                     }
 
                     if profile.target_type == MATTERMOST_TARGET_TYPE_CHANNEL:
-                        if not profile.team_name or not profile.channel_name:
-                            raise MattermostNotificationError("Channel profile is missing team_name or channel_name.")
-                        channel = await client.get_channel_by_name(profile.team_name, profile.channel_name)
-                        await client.create_post(str(channel["id"]), message, props)
+                        channel_id = str(profile.channel_id or "").strip()
+                        if not channel_id:
+                            raise MattermostNotificationError("Channel profile is missing channel_id.")
+                        await client.create_post(channel_id, message, props)
                     else:
                         mattermost_user_id = await _resolve_mattermost_user_id(session, client, task)
                         if not mattermost_user_id:

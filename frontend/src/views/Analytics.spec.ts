@@ -123,6 +123,33 @@ vi.mock('naive-ui', () => ({
       return () => props.show ? h('div', { class: 'n-modal' }, slots.default?.()) : h('div')
     }
   },
+  NTabs: {
+    name: 'NTabs',
+    props: ['value', 'type', 'size'],
+    emits: ['update:value'],
+    setup(props: any, { slots, emit }: any) {
+      return () => h('div', { class: 'n-tabs', 'data-value': props.value }, [
+        h('button', {
+          class: 'n-tabs__trigger',
+          'data-tab': 'project',
+          onClick: () => emit('update:value', 'project')
+        }, 'project'),
+        h('button', {
+          class: 'n-tabs__trigger',
+          'data-tab': 'initiator',
+          onClick: () => emit('update:value', 'initiator')
+        }, 'initiator'),
+        slots.default?.()
+      ])
+    }
+  },
+  NTabPane: {
+    name: 'NTabPane',
+    props: ['name', 'tab'],
+    setup(_props: any) {
+      return () => null
+    }
+  },
   NIcon: {
     name: 'NIcon',
     props: ['component'],
@@ -346,5 +373,26 @@ describe('Analytics', () => {
     await flushPromises()
 
     expect(mockApi.getAnalytics).toHaveBeenCalledTimes(1)
+  })
+
+  it('defaults the merged breakdown card to the project tab', async () => {
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    expect(wrapper.vm.analyticsBreakdownTab).toBe('project')
+    expect(wrapper.vm.analyticsBreakdownTitle).toBe('analytics.byProject')
+    expect(wrapper.find('[data-testid="analytics-breakdown-card"]').exists()).toBe(true)
+  })
+
+  it('switches the merged breakdown card to the initiator tab', async () => {
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    await wrapper.find('[data-tab="initiator"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.vm.analyticsBreakdownTab).toBe('initiator')
+    expect(wrapper.vm.analyticsBreakdownTitle).toBe('analytics.byInitiator')
+    expect(wrapper.vm.analyticsBreakdownData).toEqual([])
   })
 })

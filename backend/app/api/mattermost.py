@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, model_validator
@@ -19,6 +19,7 @@ from app.core.mattermost_notifications import (
     MATTERMOST_TARGET_TYPE_CHANNEL,
     MATTERMOST_TARGET_TYPE_INITIATOR_DM,
     MATTERMOST_TARGET_TYPES,
+    MattermostClient,
     MattermostNotificationError,
     normalize_string_list,
     serialize_profile,
@@ -68,10 +69,8 @@ class MattermostNotificationProfileResponse(BaseModel):
     name: str
     enabled: bool
     target_type: str
-    team_name: Optional[str] = None
-    channel_name: Optional[str] = None
+    channel_id: Optional[str] = None
     mention_in_channel: bool
-    send_for_manual_tasks: bool
     event_types: list[str]
     field_keys: list[str]
     created_at: datetime
@@ -83,10 +82,8 @@ class MattermostNotificationProfileInput(BaseModel):
     name: str
     enabled: bool = True
     target_type: str
-    team_name: Optional[str] = None
-    channel_name: Optional[str] = None
+    channel_id: Optional[str] = None
     mention_in_channel: bool = False
-    send_for_manual_tasks: bool = False
     event_types: list[str] = Field(default_factory=list)
     field_keys: list[str] = Field(default_factory=list)
 
@@ -94,8 +91,7 @@ class MattermostNotificationProfileInput(BaseModel):
     def validate_profile(self) -> "MattermostNotificationProfileInput":
         self.name = self.name.strip()
         self.target_type = self.target_type.strip()
-        self.team_name = self.team_name.strip() if self.team_name else None
-        self.channel_name = self.channel_name.strip() if self.channel_name else None
+        self.channel_id = self.channel_id.strip() if self.channel_id else None
 
         if not self.name:
             raise ValueError("Profile name cannot be empty")
@@ -111,14 +107,128 @@ class MattermostNotificationProfileInput(BaseModel):
             raise ValueError("At least one field must be selected")
 
         if self.target_type == MATTERMOST_TARGET_TYPE_CHANNEL:
-            if not self.team_name or not self.channel_name:
-                raise ValueError("Channel notifications require both team_name and channel_name")
+            if not self.channel_id:
+                raise ValueError("Channel notifications require channel_id")
         else:
-            self.team_name = None
-            self.channel_name = None
+            self.channel_id = None
             self.mention_in_channel = False
 
         return self
+
+
+class MattermostResolveChannelRequest(BaseModel):
+    """Request model for resolving a channel target by current names."""
+
+    team_name: str
+    channel_name: str
+
+    @model_validator(mode="after")
+    def validate_payload(self) -> "MattermostResolveChannelRequest":
+        self.team_name = self.team_name.strip()
+        self.channel_name = self.channel_name.strip()
+        if not self.team_name:
+            raise ValueError("Mattermost team_name cannot be empty")
+        if not self.channel_name:
+            raise ValueError("Mattermost channel_name cannot be empty")
+        return self
+
+
+class MattermostChannelTargetResponse(BaseModel):
+    """Resolved Mattermost channel target details for UI display."""
+
+    channel_id: str
+    team_name: str
+    team_display_name: str
+    channel_name: str
+    channel_display_name: str
+
+
+def _create_mattermost_client(settings: Settings) -> MattermostClient:
+    server_url = settings.mattermost_server_url.strip()
+    bot_token = settings.mattermost_bot_token.strip()
+    if not server_url or not bot_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Mattermost integration must be configured before resolving channel targets.",
+        )
+    return MattermostClient(server_url, bot_token)
+
+
+def _serialize_channel_target(channel: dict[str, Any], team: dict[str, Any]) -> MattermostChannelTargetResponse:
+    channel_id = str(channel.get("id", "")).strip()
+    team_id = str(channel.get("team_id", "")).strip()
+    team_name = str(team.get("name", "")).strip()
+    channel_name = str(channel.get("name", "")).strip()
+    if not channel_id or not team_id or not team_name or not channel_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Mattermost returned incomplete channel target data.",
+        )
+
+    team_display_name = str(team.get("display_name", "")).strip() or team_name
+    channel_display_name = str(channel.get("display_name", "")).strip() or channel_name
+    return MattermostChannelTargetResponse(
+        channel_id=channel_id,
+        team_name=team_name,
+        team_display_name=team_display_name,
+        channel_name=channel_name,
+        channel_display_name=channel_display_name,
+    )
+
+
+async def _resolve_channel_target_by_name(payload: MattermostResolveChannelRequest) -> MattermostChannelTargetResponse:
+    settings = get_effective_settings()
+    client = _create_mattermost_client(settings)
+    try:
+        channel = await client.get_channel_by_name(payload.team_name, payload.channel_name)
+        team_id = str(channel.get("team_id", "")).strip()
+        if not team_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Mattermost returned a channel without team_id.",
+            )
+        team = await client.get_team(team_id)
+        return _serialize_channel_target(channel, team)
+    except HTTPException:
+        raise
+    except MattermostNotificationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to resolve Mattermost channel target: {exc}",
+        ) from exc
+    finally:
+        await client.close()
+
+
+async def _resolve_channel_target_by_id(channel_id: str) -> MattermostChannelTargetResponse:
+    normalized_channel_id = channel_id.strip()
+    if not normalized_channel_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="channel_id cannot be empty",
+        )
+
+    settings = get_effective_settings()
+    client = _create_mattermost_client(settings)
+    try:
+        channel = await client.get_channel(normalized_channel_id)
+        team_id = str(channel.get("team_id", "")).strip()
+        if not team_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Mattermost returned a channel without team_id.",
+            )
+        team = await client.get_team(team_id)
+        return _serialize_channel_target(channel, team)
+    except HTTPException:
+        raise
+    except MattermostNotificationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to fetch Mattermost channel target: {exc}",
+        ) from exc
+    finally:
+        await client.close()
 
 
 class MattermostNotificationConfigResponse(BaseModel):
@@ -236,6 +346,30 @@ async def test_mattermost_notification_integration(
     return MattermostConnectionTestResponse(**result)
 
 
+@router.post("/config/notifications/channel-targets/resolve", response_model=MattermostChannelTargetResponse)
+async def resolve_mattermost_channel_target(
+    payload: MattermostResolveChannelRequest,
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_admin_user),
+):
+    """Resolve a Mattermost channel target from team/channel names."""
+
+    await load_runtime_config_from_db(db)
+    return await _resolve_channel_target_by_name(payload)
+
+
+@router.get("/config/notifications/channel-targets/{channel_id}", response_model=MattermostChannelTargetResponse)
+async def get_mattermost_channel_target(
+    channel_id: str,
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_admin_user),
+):
+    """Fetch the current Mattermost team/channel names for a stored channel_id."""
+
+    await load_runtime_config_from_db(db)
+    return await _resolve_channel_target_by_id(channel_id)
+
+
 @router.post("/config/notifications/profiles", response_model=MattermostNotificationProfileResponse)
 async def create_mattermost_notification_profile(
     payload: MattermostNotificationProfileInput,
@@ -247,12 +381,10 @@ async def create_mattermost_notification_profile(
         name=payload.name,
         enabled=payload.enabled,
         target_type=payload.target_type,
-        team_name=payload.team_name,
-        channel_name=payload.channel_name,
+        channel_id=payload.channel_id,
         mention_in_channel=payload.mention_in_channel,
         event_types_json=serialize_string_list(payload.event_types),
         field_keys_json=serialize_string_list(payload.field_keys),
-        send_for_manual_tasks=payload.send_for_manual_tasks,
     )
     db.add(profile)
     await db.commit()
@@ -279,12 +411,10 @@ async def update_mattermost_notification_profile(
     profile.name = payload.name
     profile.enabled = payload.enabled
     profile.target_type = payload.target_type
-    profile.team_name = payload.team_name
-    profile.channel_name = payload.channel_name
+    profile.channel_id = payload.channel_id
     profile.mention_in_channel = payload.mention_in_channel
     profile.event_types_json = serialize_string_list(payload.event_types)
     profile.field_keys_json = serialize_string_list(payload.field_keys)
-    profile.send_for_manual_tasks = payload.send_for_manual_tasks
     await db.commit()
     await db.refresh(profile)
     logger.info("Updated Mattermost notification profile %s", profile.id)

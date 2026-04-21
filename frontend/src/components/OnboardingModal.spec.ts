@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { h } from 'vue'
+import { h, nextTick } from 'vue'
 
 const {
   sparklesIconStub,
@@ -150,6 +150,26 @@ vi.mock('naive-ui', () => ({
 
 import OnboardingModal from './OnboardingModal.vue'
 
+const stepHeights: Record<number, number> = {
+  1: 506,
+  2: 462,
+  3: 613,
+}
+
+const originalScrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
+const originalOffsetHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')
+
+function resolveRenderedStepNumber(element: HTMLElement): number {
+  const explicitStep = Number(element.dataset.measureStep)
+  if (explicitStep > 0) {
+    return explicitStep
+  }
+
+  const shellContent = element.closest('.onboarding-modal-shell__content') as HTMLElement | null
+  const current = Number(shellContent?.querySelector('.n-steps')?.getAttribute('data-current'))
+  return current > 0 ? current : 1
+}
+
 function mountComponent() {
   return mount(OnboardingModal, {
     props: {
@@ -158,7 +178,58 @@ function mountComponent() {
   })
 }
 
+function getVisibleShellContent(wrapper: ReturnType<typeof mountComponent>) {
+  return wrapper.get('.onboarding-modal-shell__content:not([data-measure-step])')
+}
+
+function getVisibleShell(wrapper: ReturnType<typeof mountComponent>) {
+  return wrapper.get('.onboarding-modal-shell:not(.onboarding-modal-shell--measure)')
+}
+
 describe('OnboardingModal', () => {
+  beforeEach(() => {
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get() {
+        const element = this as HTMLElement
+
+        if (element.classList.contains('onboarding-modal-shell__content')) {
+          return stepHeights[resolveRenderedStepNumber(element)] ?? 0
+        }
+
+        return 0
+      },
+    })
+
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get() {
+        const element = this as HTMLElement
+        const inlineHeight = Number.parseFloat(element.style.height || '')
+        if (!Number.isNaN(inlineHeight) && inlineHeight > 0) {
+          return inlineHeight
+        }
+
+        if (element.classList.contains('onboarding-modal-shell')) {
+          const visibleContent = element.querySelector('.onboarding-modal-shell__content:not([data-measure-step])') as HTMLElement | null
+          return visibleContent?.scrollHeight ?? 0
+        }
+
+        return 0
+      },
+    })
+  })
+
+  afterEach(() => {
+    if (originalScrollHeightDescriptor) {
+      Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalScrollHeightDescriptor)
+    }
+
+    if (originalOffsetHeightDescriptor) {
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeightDescriptor)
+    }
+  })
+
   it('renders the welcome step first', () => {
     const wrapper = mountComponent()
 
@@ -169,11 +240,12 @@ describe('OnboardingModal', () => {
 
   it('renders emphasized welcome copy without html messages', () => {
     const wrapper = mountComponent()
+    const visibleShellContent = getVisibleShellContent(wrapper)
 
-    const emphasis = wrapper.findAll('.onboarding-modal__section-text strong')
+    const emphasis = visibleShellContent.findAll('.onboarding-modal__section-text strong')
 
-    expect(wrapper.find('.onboarding-modal__section-text').text()).toContain('Codify uses')
-    expect(wrapper.find('.onboarding-modal__section-text u').exists()).toBe(false)
+    expect(visibleShellContent.find('.onboarding-modal__section-text').text()).toContain('Codify uses')
+    expect(visibleShellContent.find('.onboarding-modal__section-text u').exists()).toBe(false)
     expect(emphasis).toHaveLength(3)
     expect(emphasis[0].text()).toBe('task scheduling')
     expect(emphasis[1].text()).toBe('generating code')
@@ -182,8 +254,9 @@ describe('OnboardingModal', () => {
 
   it('applies emphasis styling to highlighted welcome segments', () => {
     const wrapper = mountComponent()
+    const visibleShellContent = getVisibleShellContent(wrapper)
 
-    const emphasis = wrapper.findAll('.onboarding-modal__section-emphasis')
+    const emphasis = visibleShellContent.findAll('.onboarding-modal__section-emphasis')
 
     expect(emphasis).toHaveLength(3)
     expect(emphasis[0].text()).toBe('task scheduling')
@@ -228,11 +301,11 @@ describe('OnboardingModal', () => {
     const wrapper = mountComponent()
 
     await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
-    expect(wrapper.findAll('.onboarding-modal__surface').length).toBeGreaterThan(0)
-    expect(wrapper.findAll('.onboarding-modal__concept-card.onboarding-modal__surface')).toHaveLength(3)
+    expect(getVisibleShellContent(wrapper).findAll('.onboarding-modal__surface').length).toBeGreaterThan(0)
+    expect(getVisibleShellContent(wrapper).findAll('.onboarding-modal__concept-card.onboarding-modal__surface')).toHaveLength(3)
 
     await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
-    expect(wrapper.findAll('.onboarding-modal__workflow-item.onboarding-modal__surface')).toHaveLength(3)
+    expect(getVisibleShellContent(wrapper).findAll('.onboarding-modal__workflow-item.onboarding-modal__surface')).toHaveLength(3)
   })
 
   it('resets to the first step when reopened', async () => {
@@ -247,6 +320,32 @@ describe('OnboardingModal', () => {
 
     expect(wrapper.find('[data-testid="onboarding-step-title"]').text()).toBe('onboarding.welcome.title')
     expect(wrapper.find('.n-steps').attributes('data-current')).toBe('1')
+  })
+
+  it('updates shell height immediately when navigating into the concepts step', async () => {
+    const wrapper = mountComponent()
+
+    await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
+    await vi.waitFor(() => {
+      expect(getVisibleShell(wrapper).attributes('style')).toContain('height: 462px')
+    })
+  })
+
+  it('updates shell height immediately when navigating back into the concepts step', async () => {
+    const wrapper = mountComponent()
+
+    await nextTick()
+    await nextTick()
+    await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
+    await nextTick()
+    await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
+    await nextTick()
+    expect(wrapper.find('[data-testid="onboarding-step-title"]').text()).toBe('onboarding.workflow.title')
+
+    await wrapper.find('[data-testid="onboarding-previous"]').trigger('click')
+    await vi.waitFor(() => {
+      expect(getVisibleShell(wrapper).attributes('style')).toContain('height: 462px')
+    })
   })
 
   it('uses a localized accessibility label for the close button', () => {

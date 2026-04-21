@@ -51,12 +51,10 @@ class MattermostNotificationTests(unittest.IsolatedAsyncioTestCase):
             name="Channel",
             enabled=True,
             target_type=MATTERMOST_TARGET_TYPE_CHANNEL,
-            team_name="engineering",
-            channel_name="codify",
+            channel_id="channel-1",
             mention_in_channel=True,
             event_types_json='["task_completed"]',
             field_keys_json='["task_id","status"]',
-            send_for_manual_tasks=True,
         )
         mock_session = MagicMock()
         mock_session.commit = AsyncMock()
@@ -65,7 +63,60 @@ class MattermostNotificationTests(unittest.IsolatedAsyncioTestCase):
             scalars=lambda: SimpleNamespace(all=lambda: [profile])
         )
         mock_client = AsyncMock()
-        mock_client.get_channel_by_name.return_value = {"id": "channel-1"}
+        with patch(
+            "app.core.mattermost_notifications.AsyncSessionLocal",
+            return_value=_SessionContext(mock_session),
+        ), patch(
+            "app.core.mattermost_notifications.MattermostClient",
+            return_value=mock_client,
+        ), patch(
+            "app.core.mattermost_notifications.get_effective_settings",
+            return_value=SimpleNamespace(
+                mattermost_server_url="https://mattermost.example.com",
+                mattermost_bot_token="mm-token",
+                dashboard_url="https://bot.example.com",
+            ),
+        ):
+            await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
+
+        mock_client.get_channel_by_name.assert_not_called()
+        create_post_args = mock_client.create_post.await_args.args
+        self.assertEqual(create_post_args[0], "channel-1")
+        self.assertIn("@alice", create_post_args[1])
+        self.assertEqual(mock_session.commit.await_count, 1)
+
+    async def test_notify_task_event_fails_when_channel_id_missing(self) -> None:
+        task = Task(
+            id=8,
+            project_id=12,
+            user_prompt="ship it",
+            status=TaskStatus.COMPLETED,
+            initiator_username="alice",
+        )
+        task.issue_id = 35
+        task.__dict__["issue"] = SimpleNamespace(
+            branch_name="feature/fallback",
+            target_branch="main",
+            merge_request_iid=None,
+            merge_request_url=None,
+        )
+        profile = MattermostNotificationProfile(
+            id=2,
+            name="Channel fallback",
+            enabled=True,
+            target_type=MATTERMOST_TARGET_TYPE_CHANNEL,
+            channel_id=None,
+            mention_in_channel=False,
+            event_types_json='["task_completed"]',
+            field_keys_json='["task_id"]',
+        )
+        mock_session = MagicMock()
+        mock_session.commit = AsyncMock()
+        mock_session.execute = AsyncMock()
+        mock_session.execute.return_value = SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: [profile])
+        )
+        mock_client = AsyncMock()
 
         with patch(
             "app.core.mattermost_notifications.AsyncSessionLocal",
@@ -83,11 +134,13 @@ class MattermostNotificationTests(unittest.IsolatedAsyncioTestCase):
         ):
             await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
 
-        mock_client.get_channel_by_name.assert_awaited_once_with("engineering", "codify")
-        create_post_args = mock_client.create_post.await_args.args
-        self.assertEqual(create_post_args[0], "channel-1")
-        self.assertIn("@alice", create_post_args[1])
-        self.assertEqual(mock_session.commit.await_count, 1)
+        mock_client.get_channel_by_name.assert_not_called()
+        mock_client.create_post.assert_not_called()
+        add_calls = mock_session.add.call_args_list
+        self.assertTrue(any(
+            getattr(c.args[0], "status", None) == "failed"
+            for c in add_calls
+        ))
 
     async def test_notify_task_event_skips_dm_when_initiator_missing(self) -> None:
         task = Task(
@@ -109,12 +162,9 @@ class MattermostNotificationTests(unittest.IsolatedAsyncioTestCase):
             name="DM",
             enabled=True,
             target_type=MATTERMOST_TARGET_TYPE_INITIATOR_DM,
-            team_name=None,
-            channel_name=None,
             mention_in_channel=False,
             event_types_json='["task_failed"]',
             field_keys_json='["task_id","status"]',
-            send_for_manual_tasks=True,
         )
         mock_session = MagicMock()
         mock_session.commit = AsyncMock()
@@ -242,11 +292,10 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
         profile = MattermostNotificationProfile(
             id=1, name="C", enabled=True,
             target_type=MATTERMOST_TARGET_TYPE_CHANNEL,
-            team_name="t", channel_name="c",
+            channel_id="channel-1",
             mention_in_channel=False,
             event_types_json='["task_failed"]',
             field_keys_json='["task_id"]',
-            send_for_manual_tasks=True,
         )
         mock_session = MagicMock()
         mock_session.execute = AsyncMock(
@@ -286,11 +335,9 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
         profile = MattermostNotificationProfile(
             id=2, name="DM", enabled=True,
             target_type=MATTERMOST_TARGET_TYPE_INITIATOR_DM,
-            team_name=None, channel_name=None,
             mention_in_channel=False,
             event_types_json='["task_failed"]',
             field_keys_json='["task_id","status"]',
-            send_for_manual_tasks=True,
         )
         mock_session = MagicMock()
         mock_session.execute = AsyncMock(
@@ -327,8 +374,8 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
         post_args = mock_client.create_post.await_args.args
         self.assertEqual(post_args[0], "dm-chan-1")
 
-    async def test_channel_missing_team_raises_and_logs_failed(self) -> None:
-        """Channel profile with missing team_name should log as failed."""
+    async def test_channel_missing_channel_id_raises_and_logs_failed(self) -> None:
+        """Channel profile with missing channel_id should log as failed."""
         task = Task(
             id=11, project_id=1, user_prompt="x",
             status=TaskStatus.COMPLETED, initiator_username="alice",
@@ -338,11 +385,10 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
         profile = MattermostNotificationProfile(
             id=3, name="BadChan", enabled=True,
             target_type=MATTERMOST_TARGET_TYPE_CHANNEL,
-            team_name=None, channel_name=None,
+            channel_id=None,
             mention_in_channel=False,
             event_types_json='["task_completed"]',
             field_keys_json='["task_id"]',
-            send_for_manual_tasks=True,
         )
         mock_session = MagicMock()
         mock_session.execute = AsyncMock(
@@ -387,11 +433,10 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
         profile = MattermostNotificationProfile(
             id=4, name="C", enabled=True,
             target_type=MATTERMOST_TARGET_TYPE_CHANNEL,
-            team_name="t", channel_name="c",
+            channel_id="channel-1",
             mention_in_channel=False,
             event_types_json='["task_completed"]',
             field_keys_json='["task_id"]',
-            send_for_manual_tasks=True,
         )
         mock_session = MagicMock()
         mock_session.execute = AsyncMock(
@@ -402,7 +447,7 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
         mock_session.commit = AsyncMock()
 
         mock_client = AsyncMock()
-        mock_client.get_channel_by_name.side_effect = RuntimeError("connection lost")
+        mock_client.create_post.side_effect = RuntimeError("connection lost")
 
         with patch(
             "app.core.mattermost_notifications.AsyncSessionLocal",
@@ -548,10 +593,8 @@ class TestSerializeProfile:
         p.name = "Test"
         p.enabled = True
         p.target_type = "channel"
-        p.team_name = "t"
-        p.channel_name = "c"
+        p.channel_id = "chan-1"
         p.mention_in_channel = False
-        p.send_for_manual_tasks = True
         p.event_types_json = '["task_completed"]'
         p.field_keys_json = '["task_id", "status"]'
         p.created_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
@@ -562,7 +605,8 @@ class TestSerializeProfile:
         assert result["id"] == 1
         assert result["event_types"] == ["task_completed"]
         assert result["field_keys"] == ["task_id", "status"]
-        assert result["send_for_manual_tasks"] is True
+        assert result["channel_id"] == "chan-1"
+        assert "send_for_manual_tasks" not in result
 
 
 # ---- _format_datetime ----

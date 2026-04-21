@@ -43,7 +43,7 @@
         :model="formValue"
         :rules="rules"
         label-placement="top"
-        class="config-section-form"
+        class="config-section-form ai-provider-modal__form"
       >
         <n-form-item :label="t('config.providers.name')" path="name">
           <n-input
@@ -470,5 +470,18 @@ onMounted(() => {
 .ai-providers-system-prompt-preview {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
+}
+
+.ai-provider-modal__form {
+  gap: 14px;
+}
+
+.ai-provider-modal__form :deep(.n-form-item) {
+  margin-bottom: 0;
+}
+
+.ai-provider-modal__form :deep(.n-form-item-feedback-wrapper) {
+  min-height: auto;
+  padding-top: 6px;
 }
 </style>

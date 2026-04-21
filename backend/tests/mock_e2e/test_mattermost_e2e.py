@@ -62,10 +62,8 @@ VALID_CHANNEL_PROFILE = {
     "name": "Eng Channel",
     "enabled": True,
     "target_type": "channel",
-    "team_name": "engineering",
-    "channel_name": "codify-alerts",
+    "channel_id": "ch-001",
     "mention_in_channel": True,
-    "send_for_manual_tasks": False,
     "event_types": ["task_completed", "task_failed"],
     "field_keys": ["task_id", "status"],
 }
@@ -74,10 +72,7 @@ VALID_DM_PROFILE = {
     "name": "DM Initiator",
     "enabled": True,
     "target_type": "initiator_dm",
-    "team_name": None,
-    "channel_name": None,
     "mention_in_channel": False,
-    "send_for_manual_tasks": True,
     "event_types": ["task_failed"],
     "field_keys": ["task_id", "error"],
 }
@@ -422,10 +417,9 @@ class TestCreateProfile:
         assert data["id"] >= 1
         assert data["name"] == "Eng Channel"
         assert data["target_type"] == "channel"
-        assert data["team_name"] == "engineering"
-        assert data["channel_name"] == "codify-alerts"
+        assert data["channel_id"] == "ch-001"
         assert data["mention_in_channel"] is True
-        assert data["send_for_manual_tasks"] is False
+        assert "send_for_manual_tasks" not in data
         assert set(data["event_types"]) == {"task_completed", "task_failed"}
         assert set(data["field_keys"]) == {"task_id", "status"}
         assert "created_at" in data
@@ -437,24 +431,21 @@ class TestCreateProfile:
         assert resp.status_code == 200
         data = resp.json()
         assert data["target_type"] == "initiator_dm"
-        assert data["team_name"] is None
-        assert data["channel_name"] is None
+        assert data["channel_id"] is None
         assert data["mention_in_channel"] is False
-        assert data["send_for_manual_tasks"] is True
+        assert "send_for_manual_tasks" not in data
 
-    async def test_create_dm_profile_strips_team_channel(self, client):
-        """Even if team/channel are provided for DM, they are cleared."""
+    async def test_create_dm_profile_strips_channel_id(self, client):
+        """Even if channel_id is provided for DM, it is cleared."""
         payload = {
             **VALID_DM_PROFILE,
-            "team_name": "should-be-cleared",
-            "channel_name": "should-be-cleared",
+            "channel_id": "should-be-cleared",
             "mention_in_channel": True,
         }
         resp = await client.post("/api/config/notifications/profiles", json=payload)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["team_name"] is None
-        assert data["channel_name"] is None
+        assert data["channel_id"] is None
         assert data["mention_in_channel"] is False
 
     async def test_create_profile_all_event_types(self, client):
@@ -540,21 +531,15 @@ class TestCreateProfile:
         resp = await client.post("/api/config/notifications/profiles", json=payload)
         assert resp.status_code == 422
 
-    async def test_channel_without_team_name_rejected(self, client):
-        """Channel profile without team_name is rejected."""
-        payload = {**VALID_CHANNEL_PROFILE, "team_name": None}
+    async def test_channel_without_channel_id_rejected(self, client):
+        """Channel profile without channel_id is rejected."""
+        payload = {**VALID_CHANNEL_PROFILE, "channel_id": None}
         resp = await client.post("/api/config/notifications/profiles", json=payload)
         assert resp.status_code == 422
 
-    async def test_channel_without_channel_name_rejected(self, client):
-        """Channel profile without channel_name is rejected."""
-        payload = {**VALID_CHANNEL_PROFILE, "channel_name": None}
-        resp = await client.post("/api/config/notifications/profiles", json=payload)
-        assert resp.status_code == 422
-
-    async def test_channel_with_empty_team_name_rejected(self, client):
-        """Channel profile with empty team_name is rejected."""
-        payload = {**VALID_CHANNEL_PROFILE, "team_name": "  "}
+    async def test_channel_with_empty_channel_id_rejected(self, client):
+        """Channel profile with empty channel_id is rejected."""
+        payload = {**VALID_CHANNEL_PROFILE, "channel_id": "  "}
         resp = await client.post("/api/config/notifications/profiles", json=payload)
         assert resp.status_code == 422
 
@@ -655,22 +640,19 @@ class TestUpdateProfile:
         assert resp.status_code == 200
         data = resp.json()
         assert data["target_type"] == "initiator_dm"
-        assert data["team_name"] is None
-        assert data["channel_name"] is None
+        assert data["channel_id"] is None
         assert data["mention_in_channel"] is False
 
     async def test_update_change_target_type_dm_to_channel(self, client):
-        """Switching from DM to channel requires team/channel."""
+        """Switching from DM to channel succeeds when channel_id is provided."""
         profile = await self._create_profile(client, VALID_DM_PROFILE)
         updated = {**VALID_CHANNEL_PROFILE}
         resp = await client.patch(
             f"/api/config/notifications/profiles/{profile['id']}", json=updated
         )
         assert resp.status_code == 200
-        data = resp.json()
-        assert data["target_type"] == "channel"
-        assert data["team_name"] == "engineering"
-        assert data["channel_name"] == "codify-alerts"
+        assert resp.json()["target_type"] == "channel"
+        assert resp.json()["channel_id"] == "ch-001"
 
     async def test_update_event_types(self, client):
         """Event types can be changed on update."""
@@ -692,16 +674,15 @@ class TestUpdateProfile:
         assert resp.status_code == 200
         assert set(resp.json()["field_keys"]) == {"project", "issue", "task_link"}
 
-    async def test_update_send_for_manual_tasks(self, client):
-        """send_for_manual_tasks flag can be toggled."""
+    async def test_update_response_omits_deprecated_manual_flag(self, client):
+        """The deprecated manual-task flag is no longer returned by the API."""
         profile = await self._create_profile(client)
-        assert profile["send_for_manual_tasks"] is False
-        updated = {**VALID_CHANNEL_PROFILE, "send_for_manual_tasks": True}
+        updated = {**VALID_CHANNEL_PROFILE, "mention_in_channel": False}
         resp = await client.patch(
             f"/api/config/notifications/profiles/{profile['id']}", json=updated
         )
         assert resp.status_code == 200
-        assert resp.json()["send_for_manual_tasks"] is True
+        assert "send_for_manual_tasks" not in resp.json()
 
     async def test_update_mention_in_channel(self, client):
         """mention_in_channel can be toggled."""
@@ -761,12 +742,12 @@ class TestUpdateProfile:
         )
         assert resp.status_code == 422
 
-    async def test_update_channel_missing_team_rejected(self, client):
-        """Switching to channel without team_name on update is rejected."""
+    async def test_update_channel_missing_channel_id_rejected(self, client):
+        """Switching to channel without channel_id on update is rejected."""
         profile = await self._create_profile(client, VALID_DM_PROFILE)
         updated = {
             **VALID_CHANNEL_PROFILE,
-            "team_name": None,
+            "channel_id": None,
         }
         resp = await client.patch(
             f"/api/config/notifications/profiles/{profile['id']}", json=updated
@@ -898,7 +879,7 @@ class TestFullCRUDLifecycle:
         )
         assert resp.status_code == 200
         assert resp.json()["target_type"] == "channel"
-        assert resp.json()["team_name"] == "engineering"
+        assert resp.json()["channel_id"] == "ch-001"
 
         # Delete
         resp = await client.delete(f"/api/config/notifications/profiles/{pid}")
@@ -913,15 +894,9 @@ class TestFullCRUDLifecycle:
 class TestTargetTypeSemantics:
     """Verify target_type-specific field behavior."""
 
-    async def test_channel_with_whitespace_team_name(self, client):
-        """Whitespace-only team_name for channel is rejected."""
-        payload = {**VALID_CHANNEL_PROFILE, "team_name": "   "}
-        resp = await client.post("/api/config/notifications/profiles", json=payload)
-        assert resp.status_code == 422
-
-    async def test_channel_with_whitespace_channel_name(self, client):
-        """Whitespace-only channel_name for channel is rejected."""
-        payload = {**VALID_CHANNEL_PROFILE, "channel_name": "   "}
+    async def test_channel_with_whitespace_channel_id(self, client):
+        """Whitespace-only channel_id for channel is rejected."""
+        payload = {**VALID_CHANNEL_PROFILE, "channel_id": "   "}
         resp = await client.post("/api/config/notifications/profiles", json=payload)
         assert resp.status_code == 422
 
@@ -1060,20 +1035,18 @@ async def notify_session(notify_sf):
 
 
 async def _seed_profile(session, *, name="default", enabled=True, target_type="channel",
-                        team_name="eng", channel_name="alerts", mention=False,
-                        events=None, fields=None, manual=False):
+                        team_name="eng", channel_name="alerts", channel_id="ch-seeded",
+                        mention=False, events=None, fields=None):
     """Insert a MattermostNotificationProfile into the test DB."""
     import json
     profile = MattermostNotificationProfile(
         name=name,
         enabled=enabled,
         target_type=target_type,
-        team_name=team_name if target_type == "channel" else None,
-        channel_name=channel_name if target_type == "channel" else None,
+        channel_id=channel_id if target_type == "channel" else None,
         mention_in_channel=mention,
         event_types_json=json.dumps(events or ["task_completed", "task_failed"]),
         field_keys_json=json.dumps(fields or ["task_id", "status"]),
-        send_for_manual_tasks=manual,
     )
     session.add(profile)
     await session.commit()
@@ -1190,15 +1163,14 @@ class TestNotifyChannelNotification:
         task = await _seed_task(notify_session)
 
         mock_client = AsyncMock()
-        mock_client.get_channel_by_name.return_value = {"id": "ch-001"}
 
         with _patches(notify_sf, mock_client):
             await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
 
-        mock_client.get_channel_by_name.assert_awaited_once_with("eng", "alerts")
+        mock_client.get_channel_by_name.assert_not_called()
         mock_client.create_post.assert_awaited_once()
         post_args = mock_client.create_post.await_args
-        assert post_args.args[0] == "ch-001"
+        assert post_args.args[0] == "ch-seeded"
 
         deliveries = await _get_deliveries(notify_session, task.id)
         assert len(deliveries) == 1
@@ -1273,7 +1245,7 @@ class TestNotifyChannelNotification:
         task = await _seed_task(notify_session)
 
         mock_client = AsyncMock()
-        mock_client.get_channel_by_name.side_effect = MattermostNotificationError("channel not found")
+        mock_client.create_post.side_effect = MattermostNotificationError("channel not found")
 
         with _patches(notify_sf, mock_client):
             await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
@@ -1432,34 +1404,6 @@ class TestNotifyFiltering:
         deliveries = await _get_deliveries(notify_session, task.id)
         assert len(deliveries) == 0
 
-    async def test_skips_task_when_send_for_manual_tasks_false(self, notify_sf, notify_session):
-        """Note: send_for_manual_tasks no longer has effect (all tasks are manual now).
-        This test is kept for backwards compatibility but both settings behave the same."""
-        await _seed_profile(notify_session, manual=False, events=["task_completed"])
-        task = await _seed_task(notify_session)
-
-        mock_client = AsyncMock()
-        mock_client.get_channel_by_name.return_value = {"id": "ch-001"}
-
-        with _patches(notify_sf, mock_client):
-            await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
-
-        # Since is_manual filtering was removed, this now sends the notification
-        mock_client.create_post.assert_awaited_once()
-
-    async def test_sends_task_when_send_for_manual_tasks_true(self, notify_sf, notify_session):
-        """Tasks are sent when send_for_manual_tasks=True."""
-        await _seed_profile(notify_session, manual=True, events=["task_completed"])
-        task = await _seed_task(notify_session)
-
-        mock_client = AsyncMock()
-        mock_client.get_channel_by_name.return_value = {"id": "ch-001"}
-
-        with _patches(notify_sf, mock_client):
-            await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
-
-        mock_client.create_post.assert_awaited_once()
-
     async def test_no_profiles_does_nothing(self, notify_sf, notify_session):
         """When no profiles exist, nothing happens."""
         task = await _seed_task(notify_session)
@@ -1551,22 +1495,21 @@ class TestNotifyMultipleProfiles:
     async def test_one_failure_does_not_stop_others(self, notify_sf, notify_session):
         """If one profile's notification fails, others still succeed."""
         p1 = await _seed_profile(notify_session, name="Fail",
-                                 team_name="bad", channel_name="gone",
+                                 team_name="bad", channel_name="gone", channel_id="bad-channel",
                                  events=["task_completed"])
         p2 = await _seed_profile(notify_session, name="OK",
-                                 team_name="good", channel_name="ok",
+                                 team_name="good", channel_name="ok", channel_id="good-channel",
                                  events=["task_completed"])
         task = await _seed_task(notify_session)
 
         mock_client = AsyncMock()
 
-        # First call fails, second succeeds
-        async def _get_channel(team, channel):
-            if team == "bad":
+        async def _create_post(channel_id, message, props):
+            if channel_id == "bad-channel":
                 raise MattermostNotificationError("channel gone")
-            return {"id": "ch-ok"}
+            return {"id": "post-ok"}
 
-        mock_client.get_channel_by_name.side_effect = _get_channel
+        mock_client.create_post.side_effect = _create_post
 
         with _patches(notify_sf, mock_client):
             await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
@@ -1710,8 +1653,7 @@ class TestNotifyContext:
 
     async def test_manual_task_shows_in_issue_field(self, notify_sf, notify_session):
         """All tasks have an issue now, so issue field shows issue_id."""
-        await _seed_profile(notify_session, manual=True, events=["task_completed"],
-                            fields=["task_id", "issue"])
+        await _seed_profile(notify_session, events=["task_completed"], fields=["task_id", "issue"])
         task = await _seed_task(notify_session)  # All tasks have an issue
 
         mock_client = AsyncMock()
@@ -1737,7 +1679,7 @@ class TestNotifyDeliverySummary:
     """Verify target_summary values in delivery records."""
 
     async def test_channel_delivery_summary(self, notify_sf, notify_session):
-        """Channel delivery summary is 'team/channel'."""
+        """Channel delivery summary is based on channel_id."""
         await _seed_profile(notify_session, team_name="myteam", channel_name="mychan",
                             events=["task_completed"])
         task = await _seed_task(notify_session)
@@ -1749,7 +1691,7 @@ class TestNotifyDeliverySummary:
             await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
 
         deliveries = await _get_deliveries(notify_session, task.id)
-        assert deliveries[0].target_summary == "myteam/mychan"
+        assert deliveries[0].target_summary == "channel:ch-seeded"
 
     async def test_dm_delivery_summary(self, notify_sf, notify_session):
         """DM delivery summary is 'dm:{username}'."""

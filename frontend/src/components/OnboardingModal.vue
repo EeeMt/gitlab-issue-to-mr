@@ -150,11 +150,138 @@
         </n-card>
       </div>
     </div>
+
   </n-modal>
+
+  <div class="onboarding-modal__measurement-root" aria-hidden="true">
+    <div class="onboarding-modal-shell onboarding-modal-shell--measure">
+      <div
+        v-for="step in steps"
+        :key="`measure-${step.number}`"
+        :ref="(el) => setMeasureContentRef(step.number, el)"
+        :data-measure-step="step.number"
+        class="onboarding-modal-shell__content onboarding-modal-shell__content--measure"
+      >
+        <n-card
+          class="onboarding-modal onboarding-modal--measure"
+          :bordered="false"
+        >
+          <template #header>
+            <div class="onboarding-modal__header">
+              <div class="onboarding-modal__header-main">
+                <span class="onboarding-modal__eyebrow">{{ t('onboarding.progressLabel', { current: step.number, total: steps.length }) }}</span>
+                <h2 class="onboarding-modal__title">
+                  {{ t(step.titleKey) }}
+                </h2>
+                <p class="onboarding-modal__description">
+                  {{ t(step.descriptionKey) }}
+                </p>
+              </div>
+
+              <n-button quaternary circle class="onboarding-modal__close" :aria-label="t('onboarding.actions.closeOnboarding')">
+                <span aria-hidden="true">×</span>
+              </n-button>
+            </div>
+
+            <n-steps :current="step.number" size="small" class="onboarding-modal__steps">
+              <n-step
+                v-for="item in steps"
+                :key="item.number"
+                :title="t(item.shortTitleKey)"
+                :description="t(item.captionKey)"
+              />
+            </n-steps>
+          </template>
+
+          <div class="onboarding-modal__body">
+            <div class="onboarding-modal__step-content">
+              <template v-if="step.number === 1">
+                <div class="onboarding-modal__hero">
+                  <div class="onboarding-modal__hero-copy">
+                    <h3 class="onboarding-modal__section-title">{{ t('onboarding.welcome.heading') }}</h3>
+                    <p class="onboarding-modal__section-text">
+                      <template v-for="segment in welcomeBodySegments" :key="segment.key">
+                        <strong v-if="segment.emphasized" class="onboarding-modal__section-emphasis">{{ segment.text }}</strong>
+                        <template v-else>{{ segment.text }}</template>
+                      </template>
+                    </p>
+                  </div>
+                  <div class="onboarding-modal__summary-card">
+                    <span class="onboarding-modal__summary-label">{{ t('onboarding.welcome.summaryLabel') }}</span>
+                    <strong class="onboarding-modal__summary-title">{{ t('onboarding.welcome.summaryTitle') }}</strong>
+                    <p class="onboarding-modal__summary-text">{{ t('onboarding.welcome.summaryBody') }}</p>
+                  </div>
+                </div>
+              </template>
+
+              <template v-else-if="step.number === 2">
+                <div class="onboarding-modal__concept-grid">
+                  <n-thing
+                    v-for="item in conceptItems"
+                    :key="item.titleKey"
+                    class="onboarding-modal__concept-card onboarding-modal__surface"
+                    :title="t(item.titleKey)"
+                  >
+                    <p class="onboarding-modal__section-text">{{ t(item.bodyKey) }}</p>
+                  </n-thing>
+                </div>
+              </template>
+
+              <template v-else>
+                <div class="onboarding-modal__workflow-list">
+                  <div
+                    v-for="item in workflowItems"
+                    :key="item.stepKey"
+                    class="onboarding-modal__workflow-item onboarding-modal__surface"
+                  >
+                    <div class="onboarding-modal__workflow-index">{{ t(item.stepKey) }}</div>
+                    <div>
+                      <h3 class="onboarding-modal__section-title">{{ t(item.titleKey) }}</h3>
+                      <p class="onboarding-modal__section-text">{{ t(item.bodyKey) }}</p>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <template #action>
+            <div class="onboarding-modal__footer">
+              <div class="onboarding-modal__footer-start">
+                <n-button text>
+                  {{ step.number === steps.length ? t('onboarding.actions.close') : t('onboarding.actions.skip') }}
+                </n-button>
+              </div>
+
+              <div class="onboarding-modal__footer-end">
+                <n-button v-if="step.number > 1">
+                  {{ t('onboarding.actions.previous') }}
+                </n-button>
+
+                <template v-if="step.number < steps.length">
+                  <n-button type="primary">
+                    {{ t('onboarding.actions.next') }}
+                  </n-button>
+                </template>
+                <template v-else>
+                  <n-button>
+                    {{ t('onboarding.actions.createIssue') }}
+                  </n-button>
+                  <n-button type="primary">
+                    {{ t('onboarding.actions.viewDashboard') }}
+                  </n-button>
+                </template>
+              </div>
+            </div>
+          </template>
+        </n-card>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch, type ComponentPublicInstance } from 'vue'
 import { NButton, NCard, NIcon, NModal, NStep, NSteps, NThing } from 'naive-ui'
 import { SparklesOutline, GitMergeOutline, CalendarClearOutline, DocumentTextOutline, LayersOutline, CheckmarkDoneCircleOutline, PlayCircleOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
@@ -201,6 +328,7 @@ const shellRef = ref<HTMLElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
 const shellHeight = ref<string | null>(null)
 const pendingShellHeight = ref<string | null>(null)
+const measuredStepContentRefs = ref<Record<number, HTMLElement | null>>({})
 
 const steps: OnboardingStep[] = [
   {
@@ -347,18 +475,32 @@ const shellStyle = computed(() => (
   shellHeight.value ? { height: shellHeight.value } : undefined
 ))
 
-async function measureContentHeight() {
+function setMeasureContentRef(stepNumber: number, el: Element | ComponentPublicInstance | null) {
+  measuredStepContentRefs.value[stepNumber] = (el as HTMLElement | null) ?? null
+}
+
+async function measureStepHeight(stepNumber: number) {
+  await nextTick()
+  return measuredStepContentRefs.value[stepNumber]?.scrollHeight ?? 0
+}
+
+async function getStepHeight(stepNumber: number) {
+  const measuredHeight = await measureStepHeight(stepNumber)
+  if (measuredHeight > 0) {
+    return measuredHeight
+  }
+
   await nextTick()
   return contentRef.value?.scrollHeight ?? 0
 }
 
 async function initializeShellHeight() {
-  const height = await measureContentHeight()
+  const height = await getStepHeight(activeStep.value.number)
   shellHeight.value = height > 0 ? `${height}px` : null
   pendingShellHeight.value = null
 }
 
-function animateShellHeight(stepUpdater: () => void) {
+function animateShellHeight(nextStepNumber: number, stepUpdater: () => void) {
   const fromHeight = shellRef.value?.offsetHeight ?? 0
 
   if (fromHeight > 0) {
@@ -366,8 +508,17 @@ function animateShellHeight(stepUpdater: () => void) {
     void shellRef.value?.offsetHeight
   }
 
-  pendingShellHeight.value = null
+  pendingShellHeight.value = shellHeight.value
   stepUpdater()
+  void nextTick(async () => {
+    const nextHeight = await getStepHeight(nextStepNumber)
+    const nextShellHeight = nextHeight > 0 ? `${nextHeight}px` : null
+    pendingShellHeight.value = nextShellHeight
+
+    if (pendingShellHeight.value === nextShellHeight) {
+      shellHeight.value = nextShellHeight
+    }
+  })
 }
 
 watch(
@@ -389,7 +540,7 @@ function handleBeforeStepLeave() {
 
 function handleStepEnter() {
   requestAnimationFrame(async () => {
-    const height = await measureContentHeight()
+    const height = await getStepHeight(activeStep.value.number)
     const nextHeight = height > 0 ? `${height}px` : null
     pendingShellHeight.value = nextHeight
 
@@ -410,7 +561,8 @@ function handleShellTransitionEnd(event: TransitionEvent) {
 
 function goToNext() {
   if (currentStep.value < steps.length - 1) {
-    animateShellHeight(() => {
+    const nextStepNumber = steps[currentStep.value + 1].number
+    animateShellHeight(nextStepNumber, () => {
       currentStep.value += 1
     })
   }
@@ -418,7 +570,8 @@ function goToNext() {
 
 function goToPrevious() {
   if (currentStep.value > 0) {
-    animateShellHeight(() => {
+    const previousStepNumber = steps[currentStep.value - 1].number
+    animateShellHeight(previousStepNumber, () => {
       currentStep.value -= 1
     })
   }
@@ -439,27 +592,69 @@ function handleCreateIssue() {
 .onboarding-modal-shell {
   width: min(880px, calc(100vw - 32px));
   overflow: hidden;
+  border-radius: 24px;
   transition: height 220ms ease;
 }
 
 .onboarding-modal-shell__content {
   width: 100%;
+  height: 100%;
 }
 
-.onboarding-modal {
+.onboarding-modal-shell__content--measure {
+  height: auto;
+}
+
+.onboarding-modal.n-card {
   position: relative;
   isolation: isolate;
   width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   border-radius: 24px;
   overflow: hidden;
   background: var(--n-card-color, #fff);
 }
 
+.onboarding-modal--measure.n-card {
+  height: auto;
+  display: block;
+  pointer-events: none;
+}
+
+.onboarding-modal__measurement-root {
+  position: fixed;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.onboarding-modal-shell--measure {
+  position: absolute;
+  top: 0;
+  left: -99999px;
+  height: auto !important;
+  transition: none;
+}
+
 .onboarding-modal > :deep(.n-card-header),
-.onboarding-modal > :deep(.n-card__content),
+.onboarding-modal > :deep(.n-card-content),
 .onboarding-modal > :deep(.n-card__action) {
   position: relative;
   z-index: 1;
+}
+
+.onboarding-modal > :deep(.n-card-content) {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.onboarding-modal > :deep(.n-card__action) {
+  flex-shrink: 0;
 }
 
 .onboarding-modal__background {
@@ -615,10 +810,15 @@ function handleCreateIssue() {
 }
 
 .onboarding-modal__body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 8px 0 4px;
+  overflow: hidden;
 }
 
 .onboarding-modal__step-content {
+  width: 100%;
   min-height: 100%;
 }
 
@@ -719,6 +919,7 @@ function handleCreateIssue() {
 .onboarding-modal__workflow-item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
   gap: 16px;
   padding: 18px 20px;
 }

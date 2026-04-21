@@ -463,14 +463,20 @@ export interface MattermostNotificationProfile {
   name: string
   enabled: boolean
   target_type: MattermostNotificationTargetType
-  team_name: string | null
-  channel_name: string | null
+  channel_id: string | null
   mention_in_channel: boolean
-  send_for_manual_tasks: boolean
   event_types: MattermostNotificationEventType[]
   field_keys: MattermostNotificationFieldKey[]
   created_at: string
   updated_at: string
+}
+
+export interface MattermostChannelTarget {
+  channel_id: string
+  team_name: string
+  team_display_name: string
+  channel_name: string
+  channel_display_name: string
 }
 
 export interface MattermostNotificationConfig {
@@ -493,12 +499,15 @@ export interface MattermostNotificationProfilePayload {
   name: string
   enabled: boolean
   target_type: MattermostNotificationTargetType
-  team_name?: string | null
-  channel_name?: string | null
+  channel_id?: string | null
   mention_in_channel: boolean
-  send_for_manual_tasks: boolean
   event_types: MattermostNotificationEventType[]
   field_keys: MattermostNotificationFieldKey[]
+}
+
+export interface MattermostResolveChannelTargetPayload {
+  team_name: string
+  channel_name: string
 }
 
 export interface RuntimeConfigUpdate
@@ -1032,6 +1041,18 @@ export async function updateMattermostNotificationProfile(
 
 export async function deleteMattermostNotificationProfile(profileId: number): Promise<void> {
   await api.delete(`/config/notifications/profiles/${profileId}`)
+}
+
+export async function resolveMattermostChannelTarget(
+  payload: MattermostResolveChannelTargetPayload
+): Promise<MattermostChannelTarget> {
+  const response = await api.post('/config/notifications/channel-targets/resolve', payload)
+  return response.data
+}
+
+export async function getMattermostChannelTarget(channelId: string): Promise<MattermostChannelTarget> {
+  const response = await api.get(`/config/notifications/channel-targets/${encodeURIComponent(channelId)}`)
+  return response.data
 }
 
 export async function getAuthStatus(): Promise<AuthStatus> {

@@ -285,12 +285,10 @@ class MattermostNotificationProfile(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     target_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    team_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    channel_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    channel_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     mention_in_channel: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     event_types_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     field_keys_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    send_for_manual_tasks: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow
     )
