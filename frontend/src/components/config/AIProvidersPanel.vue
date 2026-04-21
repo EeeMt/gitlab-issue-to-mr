@@ -28,6 +28,7 @@
     </n-card>
 
     <n-modal
+      class="config-editor-modal"
       :show="modalVisible"
       preset="card"
       :style="{ width: isMobile ? '96vw' : '560px' }"
@@ -116,7 +117,7 @@
             class="config-form__input"
           />
         </n-form-item>
-        </n-form>
+      </n-form>
 
       <template #footer>
         <n-space justify="end">

@@ -19,6 +19,7 @@
       </template>
 
       <n-modal
+        class="config-editor-modal"
         :show="promptTemplateModalVisible"
         preset="card"
         :style="{ width: isMobile ? '96vw' : '860px' }"

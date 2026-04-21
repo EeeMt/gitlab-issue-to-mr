@@ -189,6 +189,7 @@
   </n-spin>
 
   <n-modal
+    class="config-editor-modal"
     v-model:show="profileModalVisible"
     preset="card"
     :title="editingProfileId === null ? t('config.createNotificationProfile') : t('config.editNotificationProfile')"

@@ -122,6 +122,14 @@
   background: rgba(255, 255, 255, 0.72);
 }
 
+.config-editor-modal .n-card {
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: var(--app-card-radius);
+  box-shadow: var(--app-card-shadow-soft);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
+}
+
 .config-webhook-project {
   display: flex;
   flex-direction: column;
