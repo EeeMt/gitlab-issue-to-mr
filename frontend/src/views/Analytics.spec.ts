@@ -219,6 +219,24 @@ const mockProjects = [
   { id: 2, name: 'Project B', path_with_namespace: 'group/project-b' }
 ]
 
+const mockAnalyticsEmptyStatus = {
+  ...mockAnalytics,
+  issue_status_breakdown: [
+    { status: 'open', count: 0, share: 0 },
+    { status: 'in_progress', count: 0, share: 0 },
+    { status: 'in_review', count: 0, share: 0 },
+    { status: 'closed', count: 0, share: 0 }
+  ],
+  task_status_breakdown: [
+    { status: 'pending', count: 0, share: 0 },
+    { status: 'queued', count: 0, share: 0 },
+    { status: 'running', count: 0, share: 0 },
+    { status: 'completed', count: 0, share: 0 },
+    { status: 'failed', count: 0, share: 0 },
+    { status: 'cancelled', count: 0, share: 0 }
+  ]
+}
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
@@ -429,5 +447,31 @@ describe('Analytics', () => {
 
     expect(wrapper.vm.taskStatusChartMode).toBe('donut')
     expect(wrapper.vm.issueStatusChartMode).toBe('bar')
+  })
+
+  it('renders the status distribution cards before the trend charts', async () => {
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    const cardTexts = wrapper.findAll('.n-card').map((card) => card.text())
+    const issueCardIndex = cardTexts.findIndex((text) => text.includes('analytics.issueStatusDistribution'))
+    const taskCardIndex = cardTexts.findIndex((text) => text.includes('analytics.taskStatusDistribution'))
+    const trendCardIndex = cardTexts.findIndex((text) => text.includes('analytics.taskVolumeTrend'))
+
+    expect(issueCardIndex).toBeGreaterThan(-1)
+    expect(taskCardIndex).toBeGreaterThan(-1)
+    expect(trendCardIndex).toBeGreaterThan(-1)
+    expect(issueCardIndex).toBeLessThan(trendCardIndex)
+    expect(taskCardIndex).toBeLessThan(trendCardIndex)
+  })
+
+  it('shows whole-card empty states when both status distributions have no data', async () => {
+    ;(mockApi.getAnalytics as Mock).mockResolvedValue(mockAnalyticsEmptyStatus)
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('analytics.issueStatusDistributionEmpty')
+    expect(wrapper.text()).toContain('analytics.taskStatusDistributionEmpty')
+    expect(wrapper.findAll('.status-chart__bar-row')).toHaveLength(0)
   })
 })
