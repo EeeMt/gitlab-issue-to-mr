@@ -867,11 +867,12 @@ const summaryItems = computed(() => {
           : t('analytics.noTokenData')
     },
     {
-      label: t('analytics.trackedInitiators'),
-      value: String(summary.tracked_initiator_tasks),
-      note: summary.initiator_tracking_started_at
-        ? t('analytics.since', { time: formatDateTime(summary.initiator_tracking_started_at) })
-        : t('analytics.noTrackedInitiators')
+      label: t('analytics.finishedTasks'),
+      value: String(summary.finished_tasks),
+      note:
+        summary.finished_tasks > 0
+          ? t('analytics.finishedBreakdown', { completed: summary.completed_tasks, failed: summary.failed_tasks, cancelled: summary.cancelled_tasks })
+          : t('analytics.noFinishedTasksYet')
     }
   )
 

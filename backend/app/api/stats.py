@@ -352,6 +352,12 @@ async def get_analytics(
     )
     queue_wait_seconds_expr = case(
         (
+            Task.started_at.is_not(None)
+            & Task.scheduled_at.is_not(None)
+            & (Task.scheduled_at > Task.created_at),
+            func.extract("epoch", Task.started_at - Task.scheduled_at),
+        ),
+        (
             Task.started_at.is_not(None),
             func.extract("epoch", Task.started_at - Task.created_at),
         ),

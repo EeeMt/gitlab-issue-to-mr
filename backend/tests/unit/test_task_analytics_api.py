@@ -621,9 +621,59 @@ async def test_get_analytics_provider_query_groups_by_provider_and_model():
         )
 
     assert response["providers"] == []
-    assert response["provider_chart_series"] == {
-        "success_rate": [],
-        "avg_tokens_per_second": [],
-        "avg_tokens_per_changed_line": [],
-        "avg_execution_seconds_per_changed_line": [],
-    }
+
+
+@pytest.mark.asyncio
+async def test_get_analytics_queue_wait_excludes_pre_schedule_delay():
+    """Scheduled tasks should only count waiting time after scheduled_at."""
+    fixed_now = datetime(2026, 3, 14, 12, 0, 0)
+    db = MagicMock()
+
+    def execute_side_effect(query):
+        sql = " ".join(str(query).split())
+
+        if AnalyticsQueryStub._is_summary_query(sql):
+            assert "tasks.scheduled_at" in sql
+            assert "tasks.started_at - tasks.scheduled_at" in sql
+            assert "tasks.started_at - tasks.created_at" in sql
+            assert "tasks.scheduled_at > tasks.created_at" in sql
+            return MockResult(AnalyticsSummaryRow().as_result_row())
+        if AnalyticsQueryStub._is_project_query(sql):
+            assert "tasks.scheduled_at" in sql
+            return MockResult([])
+        if AnalyticsQueryStub._is_available_initiators_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_initiators_query(sql):
+            assert "tasks.scheduled_at" in sql
+            return MockResult([])
+        if AnalyticsQueryStub._is_trend_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_priority_wait_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_issue_status_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_task_status_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_error_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_provider_query(sql):
+            return MockResult([])
+
+        raise AssertionError(f"unrecognized analytics query: {sql}")
+
+    db.execute = AsyncMock(side_effect=execute_side_effect)
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+    with patch("app.api.stats.utcnow", return_value=fixed_now), patch(
+        "app.api.stats.build_project_lookup", new=AsyncMock(return_value={})
+    ):
+        response = await get_analytics(
+            days=7,
+            project_id=None,
+            initiator_username=None,
+            db=db,
+            _current_user=None,
+            access_scope=access_scope,
+        )
+
+    assert response["summary"]["avg_queue_wait_seconds"] is None

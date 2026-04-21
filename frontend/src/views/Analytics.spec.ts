@@ -445,6 +445,16 @@ describe('Analytics', () => {
     expect(items[5].value).toBe('1500')
   })
 
+  it('replaces tracked initiators with finished tasks in the summary cards', async () => {
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    const items = wrapper.vm.summaryItems as any[]
+    expect(items[8].label).toBe('analytics.finishedTasks')
+    expect(items[8].value).toBe('35')
+    expect(items[8].note).toBe('analytics.finishedBreakdown')
+  })
+
   it('does not show summary when hasLoadedOnce is false', async () => {
     let resolveAnalytics!: (value: any) => void
     ;(mockApi.getAnalytics as Mock).mockReturnValue(new Promise(r => { resolveAnalytics = r }))

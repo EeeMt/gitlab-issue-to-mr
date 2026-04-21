@@ -845,6 +845,7 @@ const en = {
     issues: 'Issues',
     dayWindow: '{days}-day window',
     successRate: 'Success Rate',
+    finishedTasks: 'Finished Tasks',
     finishedBreakdown: '{completed} completed / {failed} failed / {cancelled} cancelled',
     noFinishedTasksYet: 'No finished tasks yet',
     avgDuration: 'Avg Duration',
