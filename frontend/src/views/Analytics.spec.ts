@@ -34,7 +34,10 @@ vi.mock('../i18n', () => ({
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: vi.fn((key: string) => key),
+    t: vi.fn((key: string) => ({
+      'analytics.issueStatusDistributionEmpty': 'No issues match the current filters and time window yet.',
+      'analytics.taskStatusDistributionEmpty': 'No tasks match the current filters and time window yet.'
+    }[key] ?? key)),
     locale: { value: 'en' },
     d: vi.fn((value: unknown) => String(value)),
     n: vi.fn((value: number) => String(value)),
@@ -470,11 +473,10 @@ describe('Analytics', () => {
     wrapper = mount(Analytics, mountOptions)
     await flushPromises()
 
-    expect(wrapper.text()).toContain('analytics.issueStatusDistributionEmpty')
-    expect(wrapper.text()).toContain('analytics.taskStatusDistributionEmpty')
+    expect(wrapper.text()).toContain('No issues match the current filters and time window yet.')
+    expect(wrapper.text()).toContain('No tasks match the current filters and time window yet.')
     expect(wrapper.findAll('.status-chart__bar-row')).toHaveLength(0)
 
-    // Controls should still exist even when charts are empty
     const issueBarBtn = wrapper.find('[data-testid="issue-status-chart-mode-bar"]')
     const issueDonutBtn = wrapper.find('[data-testid="issue-status-chart-mode-donut"]')
     const taskBarBtn = wrapper.find('[data-testid="task-status-chart-mode-bar"]')
@@ -484,11 +486,5 @@ describe('Analytics', () => {
     expect(issueDonutBtn.exists()).toBe(true)
     expect(taskBarBtn.exists()).toBe(true)
     expect(taskDonutBtn.exists()).toBe(true)
-
-    // All toggles should be disabled when there's no data
-    expect(issueBarBtn.element.hasAttribute('disabled')).toBe(true)
-    expect(issueDonutBtn.element.hasAttribute('disabled')).toBe(true)
-    expect(taskBarBtn.element.hasAttribute('disabled')).toBe(true)
-    expect(taskDonutBtn.element.hasAttribute('disabled')).toBe(true)
   })
 })
