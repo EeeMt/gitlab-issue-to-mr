@@ -473,5 +473,11 @@ describe('Analytics', () => {
     expect(wrapper.text()).toContain('analytics.issueStatusDistributionEmpty')
     expect(wrapper.text()).toContain('analytics.taskStatusDistributionEmpty')
     expect(wrapper.findAll('.status-chart__bar-row')).toHaveLength(0)
+
+    // Controls should still exist even when charts are empty
+    expect(wrapper.find('[data-testid="issue-status-chart-mode-bar"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="issue-status-chart-mode-donut"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="task-status-chart-mode-bar"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="task-status-chart-mode-donut"]').exists()).toBe(true)
   })
 })
