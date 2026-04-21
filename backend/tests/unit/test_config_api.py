@@ -147,16 +147,15 @@ class ConfigApiHelperTests(unittest.TestCase):
         payload = MattermostNotificationProfileInput(
             name=" Team Alerts ",
             target_type="channel",
-            team_name=" engineering ",
-            channel_name=" ai-bot ",
+            channel_id=" engineering__ai-bot ",
             mention_in_channel=True,
             event_types=["task_completed", "task_completed", "task_failed"],
             field_keys=["task_id", "status", "status"],
         )
 
         self.assertEqual(payload.name, "Team Alerts")
-        self.assertEqual(payload.team_name, "engineering")
-        self.assertEqual(payload.channel_name, "ai-bot")
+        self.assertEqual(payload.channel_id, "engineering__ai-bot")
+        self.assertTrue(payload.mention_in_channel)
         self.assertEqual(payload.event_types, ["task_completed", "task_failed"])
         self.assertEqual(payload.field_keys, ["task_id", "status"])
 

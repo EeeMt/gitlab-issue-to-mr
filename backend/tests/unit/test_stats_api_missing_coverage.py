@@ -78,72 +78,64 @@ class TestGetStatsMyFilterWithUsername(unittest.IsolatedAsyncioTestCase):
 class TestGetAnalyticsEmptyInitiatorUsername(unittest.IsolatedAsyncioTestCase):
     """Test get_analytics with empty initiator_username after strip."""
 
+    def _empty_rows(self):
+        result = MagicMock()
+        result.all = MagicMock(return_value=[])
+        return result
+
     async def test_analytics_empty_initiator_username_after_strip_covers_line_259(self):
         """get_analytics with whitespace-only initiator_username (covers line 259)."""
         mock_db = MagicMock()
-        
-        # Mock the query results - need to return a tuple with 19 values
+
         mock_one_result = (
-            0,  # total_tasks
-            0,  # total_additions
-            0,  # total_deletions
-            0,  # total_changes
-            0,  # total_input_tokens
-            0,  # total_output_tokens
-            0,  # completed_tasks
-            0,  # failed_tasks
-            0,  # cancelled_tasks
-            0,  # finished_tasks
-            0,  # tracked_initiator_tasks
-            0,  # token_tracked_tasks
-            None,  # initiator_tracking_started_at
-            None,  # avg_execution_seconds
-            None,  # max_execution_seconds
-            None,  # avg_queue_wait_seconds
-            None,  # max_queue_wait_seconds
-            None,  # avg_total_tokens_per_tracked_task
-            None,  # max_total_tokens_per_tracked_task
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         )
         mock_summary = MagicMock()
         mock_summary.one = MagicMock(return_value=mock_one_result)
-        
-        # Mock result for queries that return .all()
-        mock_empty_rows = MagicMock()
-        mock_empty_rows.all = MagicMock(return_value=[])
-        
-        # get_analytics makes 7 DB calls:
-        # 1. summary_query (returns .one())
-        # 2. project_query (returns .all())
-        # 3. available_initiators_query (returns .all())
-        # 4. initiator_query (returns .all())
-        # 5. trend_query (returns .all())
-        # 6. priority_wait_query (returns .all())
-        # 7. error_query (returns .all())
-        
+
         mock_db.execute = AsyncMock(side_effect=[
-            mock_summary,       # summary
-            mock_empty_rows,    # projects
-            mock_empty_rows,    # available initiators
-            mock_empty_rows,    # initiators
-            mock_empty_rows,    # trend
-            mock_empty_rows,    # priority wait
-            mock_empty_rows,    # errors
+            mock_summary,        # summary
+            self._empty_rows(),  # projects
+            self._empty_rows(),  # available initiators
+            self._empty_rows(),  # initiators
+            self._empty_rows(),  # trends
+            self._empty_rows(),  # priority waits
+            self._empty_rows(),  # issue status
+            self._empty_rows(),  # task status
+            self._empty_rows(),  # errors
+            self._empty_rows(),  # providers
         ])
-        
+
         mock_user = User(id=1, username="admin", platform_role="platform_admin")
         scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
-        
-        # Pass whitespace-only string, which should be stripped to empty and then set to None
+
         result = await get_analytics(
             days=7,
             project_id=None,
-            initiator_username="  ",  # whitespace only
+            initiator_username="  ",
             db=mock_db,
             _current_user=mock_user,
             access_scope=scope,
         )
-        
-        # Should return valid response dict, not error
+
         self.assertIsInstance(result, dict)
         self.assertIn("summary", result)
         self.assertIn("trends", result)

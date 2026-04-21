@@ -367,13 +367,56 @@ export interface AnalyticsStatusRow {
   share: number
 }
 
+export interface AnalyticsProviderRow {
+  provider_id: number | null
+  provider_name: string | null
+  provider_model: string | null
+  task_count: number
+  completed_task_count: number
+  failed_task_count: number
+  cancelled_task_count: number
+  finished_task_count: number
+  success_rate: number | null
+  total_input_tokens: number
+  total_output_tokens: number
+  total_tokens: number
+  avg_tokens_per_task: number | null
+  avg_tokens_per_second: number | null
+  avg_tokens_per_changed_line: number | null
+  avg_execution_seconds: number | null
+  avg_execution_seconds_per_changed_line: number | null
+}
+
+export interface AnalyticsProviderSummary {
+  active_provider_count: number
+  provider_covered_task_count: number
+  provider_covered_total_tokens: number
+  provider_success_rate: number | null
+}
+
+export interface AnalyticsProviderChartPoint {
+  provider_id: number | null
+  label: string
+  value: number
+}
+
+export interface AnalyticsProviderChartSeries {
+  success_rate: AnalyticsProviderChartPoint[]
+  avg_tokens_per_second: AnalyticsProviderChartPoint[]
+  avg_tokens_per_changed_line: AnalyticsProviderChartPoint[]
+  avg_execution_seconds_per_changed_line: AnalyticsProviderChartPoint[]
+}
+
 export interface AnalyticsResponse {
   window_days: number
   generated_at: string
   summary: AnalyticsSummary
+  provider_summary: AnalyticsProviderSummary
   available_initiators: AnalyticsInitiatorOption[]
   projects: AnalyticsProjectRow[]
   initiators: AnalyticsInitiatorRow[]
+  providers: AnalyticsProviderRow[]
+  provider_chart_series: AnalyticsProviderChartSeries
   trends: AnalyticsTrendPoint[]
   priority_waits: AnalyticsPriorityWaitRow[]
   issue_status_breakdown: AnalyticsStatusRow[]
