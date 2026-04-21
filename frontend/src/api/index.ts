@@ -361,6 +361,12 @@ export interface AnalyticsErrorRow {
   sample_message: string | null
 }
 
+export interface AnalyticsStatusRow {
+  status: IssueStatus | TaskStatus
+  count: number
+  share: number
+}
+
 export interface AnalyticsResponse {
   window_days: number
   generated_at: string
@@ -370,6 +376,8 @@ export interface AnalyticsResponse {
   initiators: AnalyticsInitiatorRow[]
   trends: AnalyticsTrendPoint[]
   priority_waits: AnalyticsPriorityWaitRow[]
+  issue_status_breakdown: AnalyticsStatusRow[]
+  task_status_breakdown: AnalyticsStatusRow[]
   error_breakdown: AnalyticsErrorRow[]
 }
 

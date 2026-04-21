@@ -184,6 +184,49 @@ def _apply_analytics_filters(
     return query
 
 
+def _apply_issue_analytics_filters(
+    query,
+    access_scope: ProjectAccessScope,
+    project_id: Optional[int] = None,
+    initiator_username: Optional[str] = None,
+):
+    if access_scope.is_unrestricted:
+        scoped_query = query
+    else:
+        allowed_project_ids = access_scope.accessible_project_ids
+        if not allowed_project_ids:
+            scoped_query = query.where(false())
+        else:
+            scoped_query = query.where(Issue.project_id.in_(allowed_project_ids))
+
+    if project_id is not None:
+        scoped_query = scoped_query.where(Issue.project_id == project_id)
+    if initiator_username:
+        scoped_query = scoped_query.where(Issue.initiator_username == initiator_username)
+    return scoped_query
+
+
+def _build_status_breakdown_rows(statuses, raw_rows: list) -> list[dict]:
+    counts_by_status: dict[str, int] = {}
+    for row in raw_rows:
+        status_value = getattr(row.status, "value", row.status)
+        counts_by_status[str(status_value)] = int(row.count or 0)
+
+    total = sum(counts_by_status.get(getattr(status, "value", status), 0) for status in statuses)
+    rows: list[dict] = []
+    for status in statuses:
+        status_value = str(getattr(status, "value", status))
+        count = counts_by_status.get(status_value, 0)
+        rows.append(
+            {
+                "status": status_value,
+                "count": count,
+                "share": (count / total) if total else 0,
+            }
+        )
+    return rows
+
+
 def _build_error_breakdown(error_rows: list[tuple[str, int]], failed_tasks: int) -> list[dict]:
     grouped: dict[str, dict[str, object]] = defaultdict(
         lambda: {
@@ -500,6 +543,40 @@ async def get_analytics(
     )
     priority_wait_rows = (await db.execute(priority_wait_query)).all()
 
+    issue_status_query = (
+        select(Issue.status.label("status"), func.count(Issue.id).label("count"))
+        .where(Issue.created_at >= since)
+        .group_by(Issue.status)
+        .order_by(Issue.status.asc())
+    )
+    issue_status_query = _apply_issue_analytics_filters(
+        issue_status_query,
+        access_scope,
+        project_id=project_id,
+        initiator_username=selected_initiator_username,
+    )
+    issue_status_breakdown = _build_status_breakdown_rows(
+        IssueStatus,
+        (await db.execute(issue_status_query)).all(),
+    )
+
+    task_status_query = (
+        select(Task.status.label("status"), func.count(Task.id).label("count"))
+        .where(Task.created_at >= since)
+        .group_by(Task.status)
+        .order_by(Task.status.asc())
+    )
+    task_status_query = _apply_analytics_filters(
+        task_status_query,
+        access_scope,
+        project_id=project_id,
+        initiator_username=selected_initiator_username,
+    )
+    task_status_breakdown = _build_status_breakdown_rows(
+        TaskStatus,
+        (await db.execute(task_status_query)).all(),
+    )
+
     error_query = (
         select(Task.error_message, func.count(Task.id).label("count"))
         .where(
@@ -674,6 +751,8 @@ async def get_analytics(
             }
             for row in priority_wait_rows
         ],
+        "issue_status_breakdown": issue_status_breakdown,
+        "task_status_breakdown": task_status_breakdown,
         "error_breakdown": error_breakdown,
     }
 

@@ -181,6 +181,152 @@
 
         <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
           <n-gi class="analytics-grid-cell">
+            <n-card class="analytics-card analytics-card--stretch" :bordered="false" data-testid="analytics-issue-status-card">
+              <template #header>
+                <div class="analytics-card__header">
+                  <div>
+                    <div class="analytics-card__title">{{ t('analytics.issueStatusDistribution') }}</div>
+                    <div class="analytics-card__subtitle">{{ t('analytics.issueStatusDistributionSubtitle') }}</div>
+                  </div>
+                  <div class="analytics-card__header-actions analytics-card__header-actions--status">
+                    <div class="analytics-chart-toggle" role="tablist" :aria-label="t('analytics.issueStatusDistribution')">
+                      <button
+                        type="button"
+                        class="analytics-chart-toggle__button"
+                        :class="{ 'analytics-chart-toggle__button--active': issueStatusChartMode === 'bar' }"
+                        data-testid="issue-status-chart-mode-bar"
+                        @click="issueStatusChartMode = 'bar'"
+                      >
+                        {{ t('analytics.barChart') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="analytics-chart-toggle__button"
+                        :class="{ 'analytics-chart-toggle__button--active': issueStatusChartMode === 'donut' }"
+                        data-testid="issue-status-chart-mode-donut"
+                        @click="issueStatusChartMode = 'donut'"
+                      >
+                        {{ t('analytics.donutChart') }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <div v-if="issueStatusChartMode === 'bar'" class="status-chart status-chart--bar">
+                <div v-for="row in issueStatusRows" :key="`issue-${row.status}`" class="status-chart__bar-row">
+                  <div class="status-chart__row-meta">
+                    <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                    <span class="status-chart__row-label">{{ row.label }}</span>
+                  </div>
+                  <div class="status-chart__bar-track">
+                    <div class="status-chart__bar-fill" :style="{ width: `${row.barWidthPercent}%`, background: row.color }" />
+                  </div>
+                  <div class="status-chart__row-value">{{ row.count }}</div>
+                  <div class="status-chart__row-share">{{ row.shareLabel }}</div>
+                </div>
+              </div>
+
+              <div v-else class="status-chart status-chart--donut">
+                <div class="status-chart__donut-shell">
+                  <div class="status-chart__donut" :style="issueStatusDonutStyle">
+                    <div class="status-chart__donut-hole">
+                      <div class="status-chart__donut-total">{{ issueStatusTotal }}</div>
+                      <div class="status-chart__donut-total-label">{{ t('analytics.issues') }}</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="status-chart__legend">
+                  <div v-for="row in issueStatusRows" :key="`issue-legend-${row.status}`" class="status-chart__legend-row">
+                    <div class="status-chart__row-meta">
+                      <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                      <span class="status-chart__row-label">{{ row.label }}</span>
+                    </div>
+                    <div class="status-chart__legend-values">
+                      <span class="status-chart__row-value">{{ row.count }}</span>
+                      <span class="status-chart__row-share">{{ row.shareLabel }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </n-card>
+          </n-gi>
+
+          <n-gi class="analytics-grid-cell">
+            <n-card class="analytics-card analytics-card--stretch" :bordered="false" data-testid="analytics-task-status-card">
+              <template #header>
+                <div class="analytics-card__header">
+                  <div>
+                    <div class="analytics-card__title">{{ t('analytics.taskStatusDistribution') }}</div>
+                    <div class="analytics-card__subtitle">{{ t('analytics.taskStatusDistributionSubtitle') }}</div>
+                  </div>
+                  <div class="analytics-card__header-actions analytics-card__header-actions--status">
+                    <div class="analytics-chart-toggle" role="tablist" :aria-label="t('analytics.taskStatusDistribution')">
+                      <button
+                        type="button"
+                        class="analytics-chart-toggle__button"
+                        :class="{ 'analytics-chart-toggle__button--active': taskStatusChartMode === 'bar' }"
+                        data-testid="task-status-chart-mode-bar"
+                        @click="taskStatusChartMode = 'bar'"
+                      >
+                        {{ t('analytics.barChart') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="analytics-chart-toggle__button"
+                        :class="{ 'analytics-chart-toggle__button--active': taskStatusChartMode === 'donut' }"
+                        data-testid="task-status-chart-mode-donut"
+                        @click="taskStatusChartMode = 'donut'"
+                      >
+                        {{ t('analytics.donutChart') }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <div v-if="taskStatusChartMode === 'bar'" class="status-chart status-chart--bar">
+                <div v-for="row in taskStatusRows" :key="`task-${row.status}`" class="status-chart__bar-row">
+                  <div class="status-chart__row-meta">
+                    <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                    <span class="status-chart__row-label">{{ row.label }}</span>
+                  </div>
+                  <div class="status-chart__bar-track">
+                    <div class="status-chart__bar-fill" :style="{ width: `${row.barWidthPercent}%`, background: row.color }" />
+                  </div>
+                  <div class="status-chart__row-value">{{ row.count }}</div>
+                  <div class="status-chart__row-share">{{ row.shareLabel }}</div>
+                </div>
+              </div>
+
+              <div v-else class="status-chart status-chart--donut">
+                <div class="status-chart__donut-shell">
+                  <div class="status-chart__donut" :style="taskStatusDonutStyle">
+                    <div class="status-chart__donut-hole">
+                      <div class="status-chart__donut-total">{{ taskStatusTotal }}</div>
+                      <div class="status-chart__donut-total-label">{{ t('analytics.tasks') }}</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="status-chart__legend">
+                  <div v-for="row in taskStatusRows" :key="`task-legend-${row.status}`" class="status-chart__legend-row">
+                    <div class="status-chart__row-meta">
+                      <span class="status-chart__legend-dot" :style="{ background: row.color }" />
+                      <span class="status-chart__row-label">{{ row.label }}</span>
+                    </div>
+                    <div class="status-chart__legend-values">
+                      <span class="status-chart__row-value">{{ row.count }}</span>
+                      <span class="status-chart__row-share">{{ row.shareLabel }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </n-card>
+          </n-gi>
+        </n-grid>
+
+        <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
+          <n-gi class="analytics-grid-cell">
             <n-card class="analytics-card analytics-card--stretch" :bordered="false">
               <template #header>
                 <div class="analytics-card__header">
@@ -279,6 +425,7 @@ import {
   type AnalyticsPriorityWaitRow,
   type AnalyticsProjectRow,
   type AnalyticsResponse,
+  type AnalyticsStatusRow,
   type Project
 } from '../api'
 import PageHeader from '../components/PageHeader.vue'
@@ -296,9 +443,43 @@ type TrendBar = {
   heightPercent: number
 }
 
+type StatusChartMode = 'bar' | 'donut'
+
+type StatusChartRow = AnalyticsStatusRow & {
+  label: string
+  color: string
+  barWidthPercent: number
+  shareLabel: string
+}
+
 const message = useMessage()
 const { t } = useI18n()
 const { isMobile } = useBreakpoints()
+
+const ISSUE_STATUS_COLORS: Record<string, string> = {
+  open: 'rgba(59, 130, 246, 0.9)',
+  in_progress: 'rgba(245, 158, 11, 0.9)',
+  in_review: 'rgba(168, 85, 247, 0.9)',
+  closed: 'rgba(34, 197, 94, 0.9)'
+}
+
+const TASK_STATUS_COLORS: Record<string, string> = {
+  pending: 'rgba(148, 163, 184, 0.95)',
+  queued: 'rgba(56, 189, 248, 0.9)',
+  running: 'rgba(245, 158, 11, 0.9)',
+  completed: 'rgba(34, 197, 94, 0.9)',
+  failed: 'rgba(239, 68, 68, 0.9)',
+  cancelled: 'rgba(100, 116, 139, 0.9)'
+}
+
+const FALLBACK_STATUS_COLORS = [
+  'rgba(59, 130, 246, 0.9)',
+  'rgba(245, 158, 11, 0.9)',
+  'rgba(168, 85, 247, 0.9)',
+  'rgba(34, 197, 94, 0.9)',
+  'rgba(239, 68, 68, 0.9)',
+  'rgba(100, 116, 139, 0.9)'
+]
 
 const analytics = ref<AnalyticsResponse | null>(null)
 const availableProjects = ref<Project[]>([])
@@ -315,6 +496,8 @@ const durationChartRef = ref<HTMLElement | null>(null)
 const tokenChartRef = ref<HTMLElement | null>(null)
 const analyticsBreakdownTab = ref<'project' | 'initiator'>('project')
 const showBreakdownModal = ref(false)
+const issueStatusChartMode = ref<StatusChartMode>('bar')
+const taskStatusChartMode = ref<StatusChartMode>('bar')
 
 const windowOptions = computed(() => [
   { label: t('analytics.last7Days'), value: 7 },
@@ -393,6 +576,40 @@ function buildTrendBars(values: { key: string; label: string; value: number; dis
     displayValue: item.displayValue ?? String(item.value),
     heightPercent: item.value === 0 ? 10 : Math.max((item.value / max) * 100, 14)
   }))
+}
+
+function resolveStatusLabel(kind: 'issue' | 'task', status: string) {
+  return kind === 'issue' ? t(`issue.status.${status}`) : t(`status.${status}`)
+}
+
+function buildStatusChartRows(kind: 'issue' | 'task', rows: AnalyticsStatusRow[]) {
+  const palette = kind === 'issue' ? ISSUE_STATUS_COLORS : TASK_STATUS_COLORS
+  const max = Math.max(...rows.map((row) => row.count), 1)
+
+  return rows.map<StatusChartRow>((row, index) => ({
+    ...row,
+    label: resolveStatusLabel(kind, row.status),
+    color: palette[row.status] ?? FALLBACK_STATUS_COLORS[index % FALLBACK_STATUS_COLORS.length],
+    barWidthPercent: row.count === 0 ? 0 : Math.max((row.count / max) * 100, 8),
+    shareLabel: formatPercentage(row.share)
+  }))
+}
+
+function buildStatusDonutStyle(rows: StatusChartRow[]) {
+  let cursor = 0
+  const segments = rows
+    .filter((row) => row.count > 0)
+    .map((row) => {
+      const start = cursor
+      cursor += row.share * 100
+      return `${row.color} ${start}% ${cursor}%`
+    })
+
+  return {
+    background: segments.length
+      ? `conic-gradient(${segments.join(', ')})`
+      : 'conic-gradient(rgba(148, 163, 184, 0.18) 0% 100%)'
+  }
 }
 
 const summaryItems = computed(() => {
@@ -510,6 +727,30 @@ const tokenTrendBars = computed(() =>
       displayValue: formatCompactNumber(point.total_tokens)
     }))
   )
+)
+
+const issueStatusRows = computed(() =>
+  buildStatusChartRows('issue', analytics.value?.issue_status_breakdown || [])
+)
+
+const taskStatusRows = computed(() =>
+  buildStatusChartRows('task', analytics.value?.task_status_breakdown || [])
+)
+
+const issueStatusTotal = computed(() =>
+  issueStatusRows.value.reduce((sum, row) => sum + row.count, 0)
+)
+
+const taskStatusTotal = computed(() =>
+  taskStatusRows.value.reduce((sum, row) => sum + row.count, 0)
+)
+
+const issueStatusDonutStyle = computed(() =>
+  buildStatusDonutStyle(issueStatusRows.value)
+)
+
+const taskStatusDonutStyle = computed(() =>
+  buildStatusDonutStyle(taskStatusRows.value)
 )
 
 const analyticsBreakdownTitle = computed(() =>
@@ -853,6 +1094,10 @@ onMounted(() => {
   justify-content: flex-end;
 }
 
+.analytics-card__header-actions--status {
+  align-items: flex-start;
+}
+
 .analytics-breakdown-card {
   width: 100%;
 }
@@ -881,6 +1126,156 @@ onMounted(() => {
   margin-top: 4px;
   font-size: 13px;
   color: rgba(15, 23, 42, 0.58);
+}
+
+.analytics-chart-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.analytics-chart-toggle__button {
+  border: none;
+  background: transparent;
+  color: rgba(15, 23, 42, 0.62);
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.analytics-chart-toggle__button--active {
+  background: rgba(255, 255, 255, 0.92);
+  color: rgba(15, 23, 42, 0.92);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+
+.status-chart {
+  display: flex;
+  gap: 20px;
+}
+
+.status-chart--bar {
+  flex-direction: column;
+}
+
+.status-chart__bar-row,
+.status-chart__legend-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 150px) minmax(0, 1fr) 44px 60px;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-chart__bar-row + .status-chart__bar-row,
+.status-chart__legend-row + .status-chart__legend-row {
+  margin-top: 12px;
+}
+
+.status-chart__row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.status-chart__row-label {
+  min-width: 0;
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.84);
+}
+
+.status-chart__legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.status-chart__bar-track {
+  position: relative;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  overflow: hidden;
+}
+
+.status-chart__bar-fill {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.status-chart__row-value,
+.status-chart__row-share {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.status-chart__row-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.88);
+}
+
+.status-chart__row-share {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.55);
+}
+
+.status-chart--donut {
+  align-items: center;
+}
+
+.status-chart__donut-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 180px;
+}
+
+.status-chart__donut {
+  position: relative;
+  width: 168px;
+  height: 168px;
+  border-radius: 50%;
+}
+
+.status-chart__donut-hole {
+  position: absolute;
+  inset: 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12);
+}
+
+.status-chart__donut-total {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  color: rgba(15, 23, 42, 0.92);
+}
+
+.status-chart__donut-total-label {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.52);
+}
+
+.status-chart__legend {
+  flex: 1;
+}
+
+.status-chart__legend-values {
+  display: contents;
 }
 
 .trend-chart {
@@ -979,13 +1374,40 @@ onMounted(() => {
   .analytics-card__header,
   .analytics-card__header-actions,
   .analytics-card__header-actions--breakdown,
-  .analytics-breakdown-tabs {
+  .analytics-card__header-actions--status,
+  .analytics-breakdown-tabs,
+  .analytics-chart-toggle {
     width: 100%;
   }
 
   .analytics-card__header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .status-chart,
+  .status-chart--donut {
+    flex-direction: column;
+  }
+
+  .status-chart__bar-row,
+  .status-chart__legend-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .status-chart__row-value,
+  .status-chart__row-share {
+    text-align: left;
+  }
+
+  .status-chart__legend-values {
+    display: flex;
+    gap: 12px;
+  }
+
+  .status-chart__donut-shell {
+    min-width: 0;
   }
 }
 </style>
