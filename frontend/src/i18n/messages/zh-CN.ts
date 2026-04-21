@@ -847,7 +847,7 @@ const zhCN = {
     providerSuccessRate: '服务成功率',
     provider: '模型服务',
     providerComparison: '模型服务对比',
-    providerComparisonSubtitle: '按模型服务与模型查看任务量、成功率和效率指标',
+    providerComparisonSubtitle: '按模型服务与模型查看任务量、成功率和效率指标。平均 Token / 秒仅基于 output tokens 统计，因此和其他 Token 指标的统计口径不同。',
     providerSuccessRateByProvider: '模型服务成功率',
     providerSuccessRateByProviderSubtitle: '按模型服务与模型查看已结束任务成功率',
     providerEfficiencyByProvider: '模型服务效率',

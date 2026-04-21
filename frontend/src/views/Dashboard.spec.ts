@@ -346,17 +346,17 @@ describe('Dashboard', () => {
       expect(wrapper.find('[data-testid="my-work-board-tab-issues"]').attributes('data-active')).toBe('true')
     })
 
-    it('uses a shared fixed panel container for both tabs', async () => {
+    it('renders My Work Board tabs in the card header', async () => {
       await mountDashboard()
 
-      const issuesPanel = wrapper.find('[data-testid="my-work-board-panel"]')
-      expect(issuesPanel.exists()).toBe(true)
+      const board = wrapper.find('[data-testid="dashboard-my-work-board"]')
+      const header = board.find('.my-work-board__header')
+      const tabs = header.find('.my-work-board__tabs')
 
-      await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
-      await nextTick()
-
-      const tasksPanel = wrapper.find('[data-testid="my-work-board-panel"]')
-      expect(tasksPanel.exists()).toBe(true)
+      expect(header.exists()).toBe(true)
+      expect(tabs.exists()).toBe(true)
+      expect(header.find('[data-testid="my-work-board-tab-issues"]').exists()).toBe(true)
+      expect(header.find('[data-testid="my-work-board-tab-tasks"]').exists()).toBe(true)
     })
 
     it('shows issue status columns on the issues tab', async () => {

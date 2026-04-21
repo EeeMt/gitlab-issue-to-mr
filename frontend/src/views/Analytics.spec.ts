@@ -38,7 +38,8 @@ vi.mock('vue-i18n', () => ({
     t: vi.fn((key: string) => ({
       'analytics.issueStatusDistributionEmpty': 'No issues match the current filters and time window yet.',
       'analytics.taskStatusDistributionEmpty': 'No tasks match the current filters and time window yet.',
-      'analytics.providersEmpty': 'No provider analytics match the current filters and time window yet.'
+      'analytics.providersEmpty': 'No provider analytics match the current filters and time window yet.',
+      'analytics.providerComparisonSubtitle': 'Task volume, success rate, and efficiency by provider and model. Avg Tokens / Sec uses output tokens only, so its definition differs from the other token metrics.'
     }[key] ?? key)),
     locale: { value: 'en' },
     d: vi.fn((value: unknown) => String(value)),
@@ -62,7 +63,12 @@ vi.mock('naive-ui', () => ({
   NSpace: {
     name: 'NSpace',
     props: ['vertical', 'size'],
-    setup(_p: any, { slots }: any) { return () => h('div', slots.default?.()) }
+    setup(props: any, { slots, attrs }: any) {
+      return () => h('div', {
+        ...attrs,
+        class: ['n-space', attrs.class, props.vertical ? 'n-space--vertical' : null].filter(Boolean)
+      }, slots.default?.())
+    }
   },
   NButton: {
     name: 'NButton',
@@ -156,7 +162,7 @@ vi.mock('naive-ui', () => ({
         })
         const activePane = tabPanes.find((pane: any) => pane.props?.name === props.value)
 
-        return h('div', { class: 'n-tabs', 'data-value': props.value }, [
+        return h('div', { class: 'n-tabs', 'data-value': props.value, 'data-type': props.type }, [
           ...tabButtons,
           activePane ? h('div', { class: 'n-tabs__pane', 'data-active-tab': String(props.value) }, [activePane]) : null
         ])
@@ -534,7 +540,7 @@ describe('Analytics', () => {
     wrapper = mount(Analytics, mountOptions)
     await flushPromises()
 
-    await wrapper.find('[data-tab="initiator"]').trigger('click')
+    await wrapper.find('[data-testid="analytics-breakdown-tab-initiator"]').trigger('click')
     await nextTick()
 
     expect(wrapper.vm.analyticsBreakdownTab).toBe('initiator')
@@ -542,15 +548,15 @@ describe('Analytics', () => {
     expect(wrapper.vm.analyticsBreakdownData).toEqual([])
   })
 
-  it('renders status distribution cards with independent default chart modes', async () => {
+  it('renders the merged breakdown switcher with pill buttons', async () => {
     wrapper = mount(Analytics, mountOptions)
     await flushPromises()
 
-    expect(wrapper.find('[data-testid="analytics-issue-status-card"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="analytics-task-status-card"]').exists()).toBe(true)
-    expect(wrapper.vm.issueStatusChartMode).toBe('bar')
-    expect(wrapper.vm.taskStatusChartMode).toBe('bar')
+    expect(wrapper.find('[data-testid="analytics-breakdown-tab-project"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="analytics-breakdown-tab-initiator"]').exists()).toBe(true)
   })
+
+
 
   it('switches task status chart mode without changing issue status chart mode', async () => {
     wrapper = mount(Analytics, mountOptions)
@@ -563,7 +569,7 @@ describe('Analytics', () => {
     expect(wrapper.vm.issueStatusChartMode).toBe('bar')
   })
 
-  it('renders the status distribution cards before the trend charts', async () => {
+  it('renders the status distribution cards before the trend chart card', async () => {
     wrapper = mount(Analytics, mountOptions)
     await flushPromises()
 
@@ -589,6 +595,34 @@ describe('Analytics', () => {
     expect(wrapper.find('[data-testid="analytics-providers-panel"]').exists()).toBe(false)
   })
 
+  it('shows a single trend card and switches trend metrics with pill toggles', async () => {
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="analytics-trend-card"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('analytics.taskVolumeTrend')
+    expect(wrapper.text()).not.toContain('analytics.changedLinesTrendanalytics.changedLinesTrendSubtitle')
+    expect(wrapper.find('[data-testid="trend-metric-changes"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-testid="analytics-trend-card"]').length).toBe(1)
+
+    await wrapper.find('[data-testid="trend-metric-duration"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.vm.selectedTrendMetric).toBe('duration')
+    expect(wrapper.text()).toContain('analytics.executionDurationTrend')
+  })
+
+
+  it('wraps the overview summary and lower sections in the same outer stack', async () => {
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    const overviewPanel = wrapper.find('[data-testid="analytics-overview-panel"]')
+    expect(overviewPanel.exists()).toBe(true)
+    expect(overviewPanel.findAll('.summary-card').length).toBeGreaterThan(0)
+    expect(overviewPanel.find('[data-testid="analytics-overview-sections"]').exists()).toBe(true)
+  })
+
   it('switches to the providers tab and renders provider analytics content', async () => {
     wrapper = mount(Analytics, mountOptions)
     await flushPromises()
@@ -601,7 +635,6 @@ describe('Analytics', () => {
     expect(wrapper.text()).toContain('claude-sonnet-4-6')
     expect(wrapper.text()).toContain('Unknown / Legacy')
   })
-
   it('renders the provider empty state when the providers tab has no provider rows', async () => {
     ;(mockApi.getAnalytics as Mock).mockResolvedValue(mockAnalyticsEmptyProviders)
     wrapper = mount(Analytics, mountOptions)
@@ -624,20 +657,27 @@ describe('Analytics', () => {
     expect(wrapper.find('[data-testid="analytics-providers-panel"]').text()).toContain('N/A')
   })
 
-  it('switches provider efficiency metric mode without changing other provider tab state', async () => {
+  it('shows the avg tokens per second scope note in the provider subtitle instead of the card body', async () => {
     wrapper = mount(Analytics, mountOptions)
     await flushPromises()
 
     await wrapper.find('[data-tab="providers"]').trigger('click')
     await nextTick()
 
+    expect(wrapper.find('[data-testid="provider-efficiency-output-token-note"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="provider-comparison-subtitle"]').text()).toBe(
+      'Task volume, success rate, and efficiency by provider and model. Avg Tokens / Sec uses output tokens only, so its definition differs from the other token metrics.'
+    )
+
     await wrapper.find('[data-testid="provider-efficiency-metric-seconds-per-line"]').trigger('click')
     await nextTick()
 
-    expect(wrapper.vm.providersEfficiencyMetric).toBe('avg_execution_seconds_per_changed_line')
-    expect(wrapper.find('[data-testid="analytics-providers-panel"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="analytics-provider-success-rate-card"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="provider-comparison-subtitle"]').text()).toBe(
+      'Task volume, success rate, and efficiency by provider and model. Avg Tokens / Sec uses output tokens only, so its definition differs from the other token metrics.'
+    )
   })
+
+
 
   it('shows a chart empty state when providers exist but success-rate series is empty', async () => {
     ;(mockApi.getAnalytics as Mock).mockResolvedValue(mockAnalyticsEmptyProviderSuccessSeries)

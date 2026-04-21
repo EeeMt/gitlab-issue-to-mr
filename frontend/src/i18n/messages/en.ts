@@ -866,7 +866,7 @@ const en = {
     providerSuccessRate: 'Provider Success Rate',
     provider: 'Provider',
     providerComparison: 'Provider Comparison',
-    providerComparisonSubtitle: 'Task volume, success rate, and efficiency by provider and model',
+    providerComparisonSubtitle: 'Task volume, success rate, and efficiency by provider and model. Avg Tokens / Sec uses output tokens only, so its definition differs from the other token metrics.',
     providerSuccessRateByProvider: 'Provider Success Rate',
     providerSuccessRateByProviderSubtitle: 'Finished-task success rate by provider and model',
     providerEfficiencyByProvider: 'Provider Efficiency',

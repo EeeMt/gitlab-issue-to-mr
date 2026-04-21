@@ -3,31 +3,30 @@
     <template #header>
       <div class="my-work-board__header">
         <span>{{ t('dashboard.myWorkBoard.title') }}</span>
+        <div class="my-work-board__tabs">
+          <button
+            type="button"
+            data-testid="my-work-board-tab-issues"
+            data-tab-value="issues"
+            :data-active="String(activeTab === 'issues')"
+            class="my-work-board__tab-button"
+            @click="activeTab = 'issues'"
+          >
+            {{ t('common.issues') }}
+          </button>
+          <button
+            type="button"
+            data-testid="my-work-board-tab-tasks"
+            data-tab-value="tasks"
+            :data-active="String(activeTab === 'tasks')"
+            class="my-work-board__tab-button"
+            @click="activeTab = 'tasks'"
+          >
+            {{ t('common.tasks') }}
+          </button>
+        </div>
       </div>
     </template>
-
-    <div class="my-work-board__tabs">
-      <button
-        type="button"
-        data-testid="my-work-board-tab-issues"
-        data-tab-value="issues"
-        :data-active="String(activeTab === 'issues')"
-        class="my-work-board__tab-button"
-        @click="activeTab = 'issues'"
-      >
-        {{ t('common.issues') }}
-      </button>
-      <button
-        type="button"
-        data-testid="my-work-board-tab-tasks"
-        data-tab-value="tasks"
-        :data-active="String(activeTab === 'tasks')"
-        class="my-work-board__tab-button"
-        @click="activeTab = 'tasks'"
-      >
-        {{ t('common.tasks') }}
-      </button>
-    </div>
 
     <div class="my-work-board__panel" data-testid="my-work-board-panel">
       <div
@@ -171,24 +170,53 @@ function getColumnIcon(status: string) {
   border-radius: var(--app-card-radius);
 }
 
-.my-work-board__tabs {
+.my-work-board__header {
   display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.my-work-board__tabs {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.18);
 }
 
 .my-work-board__tab-button {
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  background: #fff;
+  position: relative;
+  z-index: 1;
+  border: none;
+  background: transparent;
+  color: rgba(15, 23, 42, 0.62);
   border-radius: 999px;
-  padding: 6px 12px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
+  transform: translateY(0);
+  transition: background-color 0.22s ease, color 0.22s ease, box-shadow 0.22s ease, transform 0.22s ease;
+}
+
+.my-work-board__tab-button:hover {
+  color: rgba(15, 23, 42, 0.88);
 }
 
 .my-work-board__tab-button[data-active='true'] {
-  background: rgba(24, 160, 88, 0.08);
-  border-color: rgba(24, 160, 88, 0.32);
-  color: #18a058;
+  background: rgba(255, 255, 255, 0.92);
+  color: rgba(15, 23, 42, 0.92);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+  transform: translateY(-1px);
+}
+
+.my-work-board__tab-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.18), 0 1px 3px rgba(15, 23, 42, 0.12);
 }
 
 .my-work-board__panel {
@@ -317,4 +345,17 @@ function getColumnIcon(status: string) {
   color: rgba(15, 23, 42, 0.6);
   font-size: 12px;
 }
+
+@media (max-width: 768px) {
+  .my-work-board__header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .my-work-board__tabs {
+    width: fit-content;
+    max-width: 100%;
+  }
+}
 </style>
+
