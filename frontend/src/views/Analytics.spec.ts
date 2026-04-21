@@ -34,7 +34,10 @@ vi.mock('../i18n', () => ({
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: vi.fn((key: string) => key),
+    t: vi.fn((key: string) => ({
+      'analytics.issueStatusDistributionEmpty': 'No issues match the current filters and time window yet.',
+      'analytics.taskStatusDistributionEmpty': 'No tasks match the current filters and time window yet.'
+    }[key] ?? key)),
     locale: { value: 'en' },
     d: vi.fn((value: unknown) => String(value)),
     n: vi.fn((value: number) => String(value)),
@@ -218,6 +221,24 @@ const mockProjects = [
   { id: 1, name: 'Project A', path_with_namespace: 'group/project-a' },
   { id: 2, name: 'Project B', path_with_namespace: 'group/project-b' }
 ]
+
+const mockAnalyticsEmptyStatus = {
+  ...mockAnalytics,
+  issue_status_breakdown: [
+    { status: 'open', count: 0, share: 0 },
+    { status: 'in_progress', count: 0, share: 0 },
+    { status: 'in_review', count: 0, share: 0 },
+    { status: 'closed', count: 0, share: 0 }
+  ],
+  task_status_breakdown: [
+    { status: 'pending', count: 0, share: 0 },
+    { status: 'queued', count: 0, share: 0 },
+    { status: 'running', count: 0, share: 0 },
+    { status: 'completed', count: 0, share: 0 },
+    { status: 'failed', count: 0, share: 0 },
+    { status: 'cancelled', count: 0, share: 0 }
+  ]
+}
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -429,5 +450,41 @@ describe('Analytics', () => {
 
     expect(wrapper.vm.taskStatusChartMode).toBe('donut')
     expect(wrapper.vm.issueStatusChartMode).toBe('bar')
+  })
+
+  it('renders the status distribution cards before the trend charts', async () => {
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    const cardTexts = wrapper.findAll('.n-card').map((card) => card.text())
+    const issueCardIndex = cardTexts.findIndex((text) => text.includes('analytics.issueStatusDistribution'))
+    const taskCardIndex = cardTexts.findIndex((text) => text.includes('analytics.taskStatusDistribution'))
+    const trendCardIndex = cardTexts.findIndex((text) => text.includes('analytics.taskVolumeTrend'))
+
+    expect(issueCardIndex).toBeGreaterThan(-1)
+    expect(taskCardIndex).toBeGreaterThan(-1)
+    expect(trendCardIndex).toBeGreaterThan(-1)
+    expect(issueCardIndex).toBeLessThan(trendCardIndex)
+    expect(taskCardIndex).toBeLessThan(trendCardIndex)
+  })
+
+  it('shows whole-card empty states when both status distributions have no data', async () => {
+    ;(mockApi.getAnalytics as Mock).mockResolvedValue(mockAnalyticsEmptyStatus)
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('No issues match the current filters and time window yet.')
+    expect(wrapper.text()).toContain('No tasks match the current filters and time window yet.')
+    expect(wrapper.findAll('.status-chart__bar-row')).toHaveLength(0)
+
+    const issueBarBtn = wrapper.find('[data-testid="issue-status-chart-mode-bar"]')
+    const issueDonutBtn = wrapper.find('[data-testid="issue-status-chart-mode-donut"]')
+    const taskBarBtn = wrapper.find('[data-testid="task-status-chart-mode-bar"]')
+    const taskDonutBtn = wrapper.find('[data-testid="task-status-chart-mode-donut"]')
+
+    expect(issueBarBtn.exists()).toBe(true)
+    expect(issueDonutBtn.exists()).toBe(true)
+    expect(taskBarBtn.exists()).toBe(true)
+    expect(taskDonutBtn.exists()).toBe(true)
   })
 })

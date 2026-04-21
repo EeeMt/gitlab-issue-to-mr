@@ -864,7 +864,9 @@ const zhCN = {
     example: '示例',
     gitlabId: 'GitLab ID：{id}',
     failedToLoad: '加载统计失败',
-    failedToLoadProjects: '加载项目筛选项失败'
+    failedToLoadProjects: '加载项目筛选项失败',
+    issueStatusDistributionEmpty: '当前筛选条件和时间窗口下还没有匹配的需求。',
+    taskStatusDistributionEmpty: '当前筛选条件和时间窗口下还没有匹配的任务。'
   },
   config: {
     title: '系统配置',
