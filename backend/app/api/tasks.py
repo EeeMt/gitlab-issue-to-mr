@@ -716,6 +716,8 @@ async def retry_task(
         initiator_user_id=current_user.id if current_user is not None else None,
         initiator_gitlab_user_id=current_user.gitlab_user_id if current_user is not None else None,
         initiator_username=current_user.username if current_user is not None else None,
+        initiator_display_name=current_user.display_name if current_user is not None else None,
+        initiator_email=current_user.email if current_user is not None else None,
     )
     db.add(new_task)
     await db.commit()
@@ -859,6 +861,8 @@ async def create_task(
         initiator_user_id=current_user.id if current_user is not None else None,
         initiator_gitlab_user_id=current_user.gitlab_user_id if current_user is not None else None,
         initiator_username=current_user.username if current_user is not None else None,
+        initiator_display_name=current_user.display_name if current_user is not None else None,
+        initiator_email=current_user.email if current_user is not None else None,
         priority=request.priority,
         scheduled_at=scheduled_at,
         provider_id=request.provider_id,

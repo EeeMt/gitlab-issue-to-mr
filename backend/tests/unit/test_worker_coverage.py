@@ -28,6 +28,7 @@ import asyncio
 import json
 import unittest
 from datetime import datetime
+from pathlib import Path
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
@@ -514,21 +515,70 @@ class TestBuildContainerEnv(unittest.TestCase):
         self.assertEqual(env["CUSTOM_CA_BUNDLE"], "/etc/ssl/custom-ca.crt")
 
     @patch('app.core.worker.get_settings')
-    def test_env_target_branch_none_becomes_empty(self, mock_get_settings):
-        """TARGET_BRANCH should be '' when target_branch is None (no-MR mode) — line 500."""
+    def test_env_includes_commit_author_metadata(self, mock_get_settings):
+        """Should pass initiator author identity and fixed Codify co-author into the worker env."""
         mock_get_settings.return_value = _make_settings()
         worker = _make_worker()
-        task = _make_task()
+        task = _make_task(
+            initiator_display_name="Alice Zhang",
+            initiator_email="alice@example.com",
+            initiator_username="alice",
+        )
         issue = task.issue
 
-        env = worker._build_container_env(task, issue, mr_iid=None, target_branch=None)
+        env = worker._build_container_env(task, issue, mr_iid=None, target_branch="main")
 
-        self.assertEqual(env["TARGET_BRANCH"], "")
+        self.assertEqual(env["GIT_AUTHOR_NAME"], "Alice Zhang")
+        self.assertEqual(env["GIT_AUTHOR_EMAIL"], "alice@example.com")
+        self.assertEqual(env["CODIFY_COAUTHOR_NAME"], "Codify")
+
+    @patch('app.core.worker.get_settings')
+    def test_env_falls_back_to_username_and_service_email(self, mock_get_settings):
+        """Should fall back when task has no display name or email snapshot."""
+        mock_get_settings.return_value = _make_settings()
+        worker = _make_worker()
+        task = _make_task(initiator_username="alice")
+        issue = task.issue
+
+        env = worker._build_container_env(task, issue, mr_iid=None, target_branch="main")
+
+        self.assertEqual(env["GIT_AUTHOR_NAME"], "alice")
+        self.assertEqual(env["GIT_AUTHOR_EMAIL"], "codify-task@codify.local")
 
 
-# ===================================================================
-# _build_container_volumes
-# ===================================================================
+
+class TestResolveCommitAuthor(unittest.IsolatedAsyncioTestCase):
+    """Tests for _resolve_commit_author."""
+
+    async def test_uses_user_record_when_task_snapshot_missing(self):
+        worker = _make_worker()
+        task = _make_task(initiator_user_id=7, initiator_username="alice")
+        task.initiator_display_name = None
+        task.initiator_email = None
+
+        db = MagicMock()
+        db.get = AsyncMock(return_value=MagicMock(display_name="Alice Zhang", username="alice", email="alice@example.com"))
+
+        name, email = await worker._resolve_commit_author(db, task)
+
+        self.assertEqual(name, "Alice Zhang")
+        self.assertEqual(email, "alice@example.com")
+
+
+class TestEntrypointCommitAttribution(unittest.TestCase):
+    """Regression tests for commit attribution shell logic."""
+
+    def test_entrypoint_uses_codify_coauthor_and_git_author_env(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.sh"
+        content = script.read_text()
+
+        self.assertIn('GIT_AUTHOR_NAME_VALUE', content)
+        self.assertIn('GIT_AUTHOR_EMAIL_VALUE', content)
+        self.assertIn('Co-authored-by: %s <%s>', content)
+        self.assertIn('CODIFY_COAUTHOR_NAME_VALUE', content)
+        self.assertIn('CODIFY_COAUTHOR_EMAIL_VALUE', content)
+        self.assertNotIn('Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>', content)
+
 
 class TestBuildContainerVolumes(unittest.TestCase):
     """Tests for _build_container_volumes — lines 527-557."""

@@ -44,7 +44,13 @@ async def test_create_task_persists_manual_initiator_metadata():
         task.updated_at = datetime(2026, 3, 14, 12, 0, 0)
 
     db.refresh = AsyncMock(side_effect=refresh)
-    current_user = SimpleNamespace(id=7, gitlab_user_id=77, username="alice")
+    current_user = SimpleNamespace(
+        id=7,
+        gitlab_user_id=77,
+        username="alice",
+        display_name="Alice Zhang",
+        email="alice@example.com",
+    )
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
     with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
@@ -54,7 +60,59 @@ async def test_create_task_persists_manual_initiator_metadata():
     assert task.initiator_user_id == 7
     assert task.initiator_gitlab_user_id == 77
     assert task.initiator_username == "alice"
-    assert result["id"] == 23
+    assert task.initiator_display_name == "Alice Zhang"
+    assert task.initiator_email == "alice@example.com"
+
+
+@pytest.mark.asyncio
+async def test_retry_task_persists_manual_initiator_metadata():
+    from app.api.tasks import retry_task
+    from app.models import Task
+
+    original_task = Task(
+        id=12,
+        issue_id=1,
+        project_id=101,
+        user_prompt="Retry analytics task",
+        priority=2,
+        provider_id=5,
+        status=TaskStatus.FAILED,
+    )
+
+    db = MagicMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+
+    original_result = MagicMock()
+    original_result.scalar_one_or_none.return_value = None
+    issue_result = MagicMock()
+    issue_result.scalar_one_or_none.return_value = MagicMock(id=1)
+    db.execute = AsyncMock(side_effect=[original_result, issue_result])
+    async def refresh(task):
+        task.id = 24
+        task.status = TaskStatus.PENDING
+        task.created_at = datetime(2026, 3, 14, 12, 0, 0)
+        task.updated_at = datetime(2026, 3, 14, 12, 0, 0)
+
+    db.refresh = AsyncMock(side_effect=refresh)
+
+    current_user = SimpleNamespace(
+        id=7,
+        gitlab_user_id=77,
+        username="alice",
+        display_name="Alice Zhang",
+        email="alice@example.com",
+    )
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+    with patch("app.api.tasks.get_task_with_access_check", new=AsyncMock(return_value=original_task)), \
+         patch("app.api.tasks.notify_task_retried", new=AsyncMock()), \
+         patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+        await retry_task(task_id=12, request=None, db=db, current_user=current_user, access_scope=access_scope)
+
+    task = db.add.call_args.args[0]
+    assert task.initiator_display_name == "Alice Zhang"
+    assert task.initiator_email == "alice@example.com"
 
 
 class MockResult:

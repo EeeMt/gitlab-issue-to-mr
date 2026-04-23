@@ -25,7 +25,7 @@ from app.core.mattermost_notifications import (
     MATTERMOST_EVENT_TASK_RETRY_SCHEDULED,
     notify_task_event,
 )
-from app.models import Task, TaskLog, TaskStatus, Issue, IssueStatus, AIProvider
+from app.models import Task, TaskLog, TaskStatus, Issue, IssueStatus, AIProvider, User
 from app.api.providers import _decrypt_provider_api_key
 
 logger = logging.getLogger(__name__)
@@ -526,6 +526,26 @@ class WorkerExecutor:
             system_prompt=None,
         )
 
+    async def _resolve_commit_author(self, db: AsyncSession, task: "Task") -> tuple[str, str]:
+        """Resolve commit author identity for worker-generated commits."""
+        fallback_name = (task.initiator_username or "Codify User").strip() or "Codify User"
+        fallback_email = "codify-task@codify.local"
+
+        display_name = (getattr(task, "initiator_display_name", None) or "").strip()
+        email = (getattr(task, "initiator_email", None) or "").strip()
+        if display_name or email:
+            return display_name or fallback_name, email or fallback_email
+
+        if task.initiator_user_id:
+            user = await db.get(User, task.initiator_user_id)
+            if user:
+                user_name = (getattr(user, "display_name", None) or getattr(user, "username", None) or "").strip()
+                user_email = (getattr(user, "email", None) or "").strip()
+                if user_name or user_email:
+                    return user_name or fallback_name, user_email or fallback_email
+
+        return fallback_name, fallback_email
+
     def _build_container_env(
         self,
         task: "Task",
@@ -533,6 +553,9 @@ class WorkerExecutor:
         mr_iid: Optional[int],
         target_branch: Optional[str],
         provider: "AIProvider" = None,
+        *,
+        author_name: Optional[str] = None,
+        author_email: Optional[str] = None,
     ) -> dict[str, str]:
         """Build environment variables for the worker container."""
         settings = get_settings()
@@ -564,6 +587,10 @@ class WorkerExecutor:
             "TASK_TIMEOUT": str(settings.task_timeout),
             "ISSUE_ID": str(issue.id),
             "ISSUE_TITLE": issue.title or "",
+            "GIT_AUTHOR_NAME": author_name or (getattr(task, "initiator_display_name", None) or task.initiator_username or "Codify User"),
+            "GIT_AUTHOR_EMAIL": author_email or (getattr(task, "initiator_email", None) or "codify-task@codify.local"),
+            "CODIFY_COAUTHOR_NAME": "Codify",
+            "CODIFY_COAUTHOR_EMAIL": "codify@codify.local",
         }
 
         # System prompt for Claude CLI
@@ -1003,7 +1030,16 @@ class WorkerExecutor:
             provider = await self._resolve_provider(db, task)
             
             # Build environment and volumes
-            environment = self._build_container_env(task, issue, mr_iid, target_branch, provider=provider)
+            author_name, author_email = await self._resolve_commit_author(db, task)
+            environment = self._build_container_env(
+                task,
+                issue,
+                mr_iid,
+                target_branch,
+                provider=provider,
+                author_name=author_name,
+                author_email=author_email,
+            )
             volumes = self._build_container_volumes(settings, issue)
 
             container_name = self._get_container_name(task)

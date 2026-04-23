@@ -131,6 +131,11 @@ git config --global user.email "bot@codify.local"
 git config --global user.name "Codify Bot"
 git config --global --add safe.directory /workspace
 
+GIT_AUTHOR_NAME_VALUE="${GIT_AUTHOR_NAME:-${CODIFY_AUTHOR_NAME:-Codify User}}"
+GIT_AUTHOR_EMAIL_VALUE="${GIT_AUTHOR_EMAIL:-${CODIFY_AUTHOR_EMAIL:-codify-task@codify.local}}"
+CODIFY_COAUTHOR_NAME_VALUE="${CODIFY_COAUTHOR_NAME:-Codify}"
+CODIFY_COAUTHOR_EMAIL_VALUE="${CODIFY_COAUTHOR_EMAIL:-codify@codify.local}"
+
 # Checkout/create branch
 echo "Checking out branch: ${BRANCH_NAME}"
 git fetch origin
@@ -626,10 +631,12 @@ AI-Generated: true"
 
     {
         printf '%s\n' "${FINAL_COMMIT_MESSAGE}"
-        printf '\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>\n'
+        printf '\nCo-authored-by: %s <%s>\n' "${CODIFY_COAUTHOR_NAME_VALUE}" "${CODIFY_COAUTHOR_EMAIL_VALUE}"
     } > /tmp/commit_message.txt
 
     # Create commit
+    GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME_VALUE}" \
+    GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL_VALUE}" \
     git commit -F /tmp/commit_message.txt
 
     # Push to remote using git push

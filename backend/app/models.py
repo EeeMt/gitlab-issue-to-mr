@@ -136,6 +136,8 @@ class Task(Base):
     )
     initiator_gitlab_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     initiator_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    initiator_display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    initiator_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # Retry tracking
     is_retry: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
