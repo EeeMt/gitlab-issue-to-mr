@@ -1,5 +1,9 @@
 <template>
-  <n-card class="task-process-panel" :bordered="false" style="position: relative">
+  <n-card
+    class="task-process-panel"
+    :class="{ 'task-process-panel--running': taskStatus === 'running' }"
+    :bordered="false"
+  >
     <template #header>
       <span class="panel-title">{{ t('taskView.taskProcess') }}</span>
       <n-tag v-if="isActive" type="success" size="small" round :class="{ 'live-badge--pulse': isActive }" style="margin-left: 8px">{{ t('taskView.realTime') }}</n-tag>
@@ -519,9 +523,24 @@ watch(() => props.terminalHtml, async () => {
 
 <style scoped>
 .task-process-panel {
+  position: relative;
   border-radius: var(--app-card-radius);
   overflow: hidden;
   min-width: 0;
+}
+
+.task-process-panel--running {
+  border: 1px solid rgba(34, 197, 94, 0.28);
+  animation: pulse-panel-glow 2.2s ease-in-out infinite;
+}
+
+.task-process-panel--running::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: radial-gradient(circle at top right, rgba(74, 222, 128, 0.07), transparent 58%);
 }
 
 .panel-title {
@@ -725,6 +744,22 @@ watch(() => props.terminalHtml, async () => {
 
 .live-badge--pulse {
   animation: pulse-badge 2s ease-in-out infinite;
+}
+
+@keyframes pulse-panel-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(34, 197, 94, 0.14),
+      0 0 18px rgba(34, 197, 94, 0.12),
+      0 0 34px rgba(16, 185, 129, 0.1);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(74, 222, 128, 0.3),
+      0 0 26px rgba(74, 222, 128, 0.22),
+      0 0 52px rgba(16, 185, 129, 0.18);
+  }
 }
 
 @keyframes pulse-badge {
