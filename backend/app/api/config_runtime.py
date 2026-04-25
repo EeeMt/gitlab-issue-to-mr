@@ -363,13 +363,6 @@ async def apply_runtime_config_update(
             await save_runtime_config_override(db, key, value)
             logger.info("Updated runtime config %s", key)
 
-        if worker_environment_variables_provided:
-            await replace_worker_environment_variables(
-                db,
-                worker_environment_variables or [],
-            )
-            logger.info("Replaced runtime worker environment variables")
-
         if clear_alert_webhook and "alert_webhook_url" not in runtime_updates:
             await reset_runtime_config_override(db, "alert_webhook_url")
             logger.info("Cleared stored alert webhook URL")
@@ -377,13 +370,35 @@ async def apply_runtime_config_update(
         if clear_anthropic_api_key and "anthropic_api_key" not in runtime_updates:
             await reset_runtime_config_override(db, "anthropic_api_key")
             logger.info("Cleared stored Anthropic API key")
-
-        await load_runtime_config_from_db(db)
-    except ValueError as exc:
+    except ConfigEncryptionError as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
         ) from exc
+
+    if worker_environment_variables_provided:
+        if worker_environment_variables is None:
+            logger.info("Ignored null runtime worker environment variables update")
+        else:
+            try:
+                await replace_worker_environment_variables(
+                    db,
+                    worker_environment_variables,
+                )
+                logger.info("Replaced runtime worker environment variables")
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
+            except ConfigEncryptionError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=str(exc),
+                ) from exc
+
+    try:
+        await load_runtime_config_from_db(db)
     except ConfigEncryptionError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

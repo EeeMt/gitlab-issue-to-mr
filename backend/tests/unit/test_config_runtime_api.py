@@ -154,6 +154,53 @@ class ConfigRuntimeAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("anthropic_model", response.json()["detail"].lower())
 
+    def test_patch_runtime_config_null_worker_environment_variables_is_noop(self):
+        """PATCH /config/runtime with null worker env vars should not replace rows."""
+        with patch(
+            "app.api.config_runtime.replace_worker_environment_variables",
+            new=AsyncMock(),
+        ) as mock_replace:
+            response = self.client.patch(
+                "/api/config/runtime",
+                json={"worker_environment_variables": None},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_replace.assert_not_awaited()
+
+    def test_patch_runtime_config_returns_500_for_unrelated_value_error(self):
+        """PATCH /config/runtime should not report unrelated ValueErrors as 400."""
+        with patch(
+            "app.api.config_runtime.save_runtime_config_override",
+            new=AsyncMock(side_effect=ValueError("unexpected failure")),
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.patch(
+                "/api/config/runtime",
+                json={"max_concurrency": 5},
+            )
+            client.close()
+
+        self.assertEqual(response.status_code, 500)
+
+    def test_patch_runtime_config_returns_reload_encryption_error_detail(self):
+        """PATCH /config/runtime should surface reload encryption failures as 500s."""
+        from app.core.config_crypto import ConfigEncryptionError
+
+        with patch(
+            "app.api.config_runtime.load_runtime_config_from_db",
+            new=AsyncMock(side_effect=[None, ConfigEncryptionError("reload failed")]),
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.patch(
+                "/api/config/runtime",
+                json={"max_concurrency": 5},
+            )
+            client.close()
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["detail"], "reload failed")
+
     def test_api_middleware_refreshes_runtime_config_for_non_auth_route(self):
         """API middleware syncs runtime config before non-authenticated routes run."""
         set_runtime_config({"oidc_enabled": False})

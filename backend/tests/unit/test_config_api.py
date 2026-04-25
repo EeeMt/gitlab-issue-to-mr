@@ -484,6 +484,45 @@ class UpdateConfigEndpointTests(unittest.TestCase):
         data = response.json()
         self.assertIn("runtime", data)
 
+    def test_update_config_with_runtime_null_worker_environment_variables_is_noop(self):
+        """PATCH /api/config should treat null runtime worker env vars as a no-op."""
+        client, app, mock_db = _make_config_admin_client()
+
+        with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
+            with patch(
+                "app.api.config_runtime.replace_worker_environment_variables",
+                new=AsyncMock(),
+            ) as mock_replace:
+                response = client.patch("/api/config", json={
+                    "runtime": {
+                        "worker_environment_variables": None,
+                    }
+                })
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        mock_replace.assert_not_awaited()
+
+    def test_update_config_with_runtime_internal_value_error_returns_500(self):
+        """PATCH /api/config should not report unrelated runtime ValueErrors as 400."""
+        client, app, mock_db = _make_config_admin_client()
+
+        with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
+            with patch(
+                "app.api.config_runtime.save_runtime_config_override",
+                new=AsyncMock(side_effect=ValueError("unexpected failure")),
+            ):
+                response = client.patch("/api/config", json={
+                    "runtime": {
+                        "max_concurrency": 3,
+                    }
+                })
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 500)
+
     def test_update_config_with_auth_update(self):
         """PATCH /api/config with auth changes should save overrides and return config."""
         from unittest.mock import patch, AsyncMock
