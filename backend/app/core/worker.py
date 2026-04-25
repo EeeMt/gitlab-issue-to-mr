@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings as get_settings
 from app.core.docker_client import DockerClientWrapper, get_docker_client
+from app.core.worker_environment_variables import RESERVED_WORKER_ENVIRONMENT_KEYS
 from gitlab import Gitlab
 from app.core.gitlab_client import GitLabClient, get_gitlab_client
 from app.core.ssl_utils import get_ssl_verify
@@ -608,6 +609,13 @@ class WorkerExecutor:
 
         if settings.custom_ca_bundle:
             environment["CUSTOM_CA_BUNDLE"] = settings.custom_ca_bundle
+
+        unexpected_keys = set(environment) - RESERVED_WORKER_ENVIRONMENT_KEYS
+        if unexpected_keys:
+            raise RuntimeError(
+                "Worker container environment emitted keys not covered by reserved worker "
+                f"environment keys: {sorted(unexpected_keys)}"
+            )
 
         return environment
 

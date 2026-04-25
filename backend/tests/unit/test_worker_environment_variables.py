@@ -36,6 +36,10 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
             "CUSTOM_FLAG_1",
         )
 
+    def test_validate_worker_environment_variable_key_rejects_lowercase_key(self) -> None:
+        with self.assertRaisesRegex(ValueError, r"\^\[A-Z_\]\[A-Z0-9_\]\*\$"):
+            validate_worker_environment_variable_key("lowercase_key")
+
     def test_validate_worker_environment_variable_key_rejects_reserved_key(self) -> None:
         with self.assertRaisesRegex(ValueError, "reserved"):
             validate_worker_environment_variable_key("TASK_ID")
