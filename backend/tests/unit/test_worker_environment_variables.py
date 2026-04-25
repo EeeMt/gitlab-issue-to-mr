@@ -7,12 +7,18 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app.core.worker import WorkerExecutor  # noqa: E402
 from app.core.worker_environment_variables import (  # noqa: E402
     RESERVED_WORKER_ENVIRONMENT_KEYS,
     build_worker_environment_map,
+    deserialize_worker_environment_variable_value,
+    list_worker_environment_variables,
+    serialize_worker_environment_variable_value,
     serialize_worker_environment_variable_for_api,
     validate_worker_environment_variable_key,
 )
@@ -79,6 +85,15 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
         self.assertEqual(runtime_map["SECRET_TOKEN"], "super-secret")
         self.assertEqual(runtime_map["EMPTY_VALUE"], "")
 
+    def test_secret_value_serialization_encrypts_before_storage_and_round_trips(self) -> None:
+        serialized = serialize_worker_environment_variable_value("sk-secret", is_secret=True)
+
+        self.assertNotEqual(serialized, "sk-secret")
+        self.assertEqual(
+            deserialize_worker_environment_variable_value(serialized, is_secret=True),
+            "sk-secret",
+        )
+
     @patch("app.core.worker.get_settings")
     def test_reserved_worker_keys_cover_emitted_optional_worker_env_keys(self, mock_get_settings) -> None:
         mock_get_settings.return_value = SimpleNamespace(
@@ -130,6 +145,38 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
         self.assertEqual(env["MR_IID"], "5")
         self.assertEqual(env["CUSTOM_CA_BUNDLE"], "/etc/ssl/custom-ca.crt")
         self.assertTrue(set(env).issubset(RESERVED_WORKER_ENVIRONMENT_KEYS))
+
+
+class WorkerEnvironmentVariableQueryTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.engine = create_async_engine(
+            "sqlite+aiosqlite:///:memory:",
+            poolclass=StaticPool,
+        )
+        async with self.engine.begin() as conn:
+            await conn.run_sync(WorkerEnvironmentVariable.__table__.create)
+        self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
+
+    async def asyncTearDown(self) -> None:
+        await self.engine.dispose()
+
+    async def test_list_worker_environment_variables_returns_rows_sorted_by_key(self) -> None:
+        async with self.session_factory() as db:
+            db.add_all(
+                [
+                    WorkerEnvironmentVariable(key="ZETA_TOKEN", value="zeta", is_secret=False),
+                    WorkerEnvironmentVariable(key="ALPHA_TOKEN", value="alpha", is_secret=False),
+                    WorkerEnvironmentVariable(key="MIDDLE_TOKEN", value="middle", is_secret=True),
+                ]
+            )
+            await db.commit()
+
+            rows = await list_worker_environment_variables(db)
+
+        self.assertEqual(
+            [row.key for row in rows],
+            ["ALPHA_TOKEN", "MIDDLE_TOKEN", "ZETA_TOKEN"],
+        )
 
 
 if __name__ == "__main__":
