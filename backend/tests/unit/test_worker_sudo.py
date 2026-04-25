@@ -146,7 +146,7 @@ class TestWorkerSudoDraftRemoval(unittest.TestCase):
         return worker
 
     def test_draft_removal_uses_sudo_gl(self):
-        """Should use sudo GL to get and save MR."""
+        """Should use sudo GL to get MR, mark it ready, and save."""
         worker = self._make_worker()
         task = MagicMock()
         task.id = 1
@@ -162,6 +162,7 @@ class TestWorkerSudoDraftRemoval(unittest.TestCase):
         worker._remove_mr_draft_status_for_issue(task, issue, sudo_gl=sudo_gl)
 
         sudo_gl.projects.get.assert_called_once_with(10)
+        mock_mr.ready.assert_called_once_with()
         self.assertEqual(mock_mr.title, "My Feature")
         mock_mr.save.assert_called_once()
 
@@ -183,8 +184,8 @@ class TestWorkerSudoDraftRemoval(unittest.TestCase):
         worker.gitlab.gl.projects.get.assert_called_once_with(10)
         mock_mr.save.assert_called_once()
 
-    def test_draft_removal_skips_non_draft(self):
-        """Should skip saving if title doesn't have draft prefix."""
+    def test_draft_removal_marks_ready_without_title_prefix(self):
+        """Should still mark ready when MR title has no draft prefix."""
         worker = self._make_worker()
         task = MagicMock()
         task.id = 1
@@ -193,9 +194,10 @@ class TestWorkerSudoDraftRemoval(unittest.TestCase):
         issue.merge_request_iid = 5
 
         mock_mr = MagicMock()
-        mock_mr.title = "My Feature"  # No draft prefix
+        mock_mr.title = "My Feature"
         worker.gitlab.gl.projects.get.return_value.mergerequests.get.return_value = mock_mr
 
         worker._remove_mr_draft_status_for_issue(task, issue)
 
-        mock_mr.save.assert_not_called()
+        mock_mr.ready.assert_called_once_with()
+        mock_mr.save.assert_called_once()

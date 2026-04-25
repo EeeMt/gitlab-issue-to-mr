@@ -160,7 +160,7 @@ class WorkerExecutor:
     def _remove_mr_draft_status_for_issue(
         self, task: Task, issue: Issue, *, sudo_gl: Optional["Gitlab"] = None
     ) -> None:
-        """Remove draft status from an MR by normalizing its title."""
+        """Mark an MR ready and normalize legacy draft prefixes in the title."""
         gl = sudo_gl or self.gitlab.gl
         project = gl.projects.get(task.project_id)
         mr = project.mergerequests.get(issue.merge_request_iid)
@@ -171,13 +171,11 @@ class WorkerExecutor:
             return
 
         updated_title = re.sub(r"^(?:\[Draft\]\s*|Draft:\s*|WIP:\s*)", "", title, count=1, flags=re.IGNORECASE).strip()
-        if not updated_title or updated_title == title:
-            logger.info(f"[Task {task.id}] MR !{issue.merge_request_iid} is already non-draft")
-            return
-
-        mr.title = updated_title
+        mr.ready()
+        if updated_title:
+            mr.title = updated_title
         mr.save()
-        logger.info(f"[Task {task.id}] Removed draft status from MR !{issue.merge_request_iid}")
+        logger.info(f"[Task {task.id}] Marked MR !{issue.merge_request_iid} ready")
 
     async def _flush_log_chunk(
         self,

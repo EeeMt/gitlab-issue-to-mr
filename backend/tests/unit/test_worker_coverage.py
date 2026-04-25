@@ -292,8 +292,8 @@ class TestBuildInitialMrDescription(unittest.TestCase):
 class TestRemoveMrDraftStatus(unittest.TestCase):
     """Tests for _remove_mr_draft_status_for_issue and legacy _remove_mr_draft_status."""
 
-    def test_removes_draft_prefix(self):
-        """Should remove 'Draft: ' prefix and save."""
+    def test_marks_ready_and_removes_draft_prefix(self):
+        """Should explicitly mark ready, remove 'Draft: ' prefix, and save."""
         mock_mr = MagicMock()
         mock_mr.title = "Draft: Add new feature"
         mock_project = MagicMock()
@@ -306,6 +306,7 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
 
         worker._remove_mr_draft_status_for_issue(task, task.issue)
 
+        mock_mr.ready.assert_called_once_with()
         self.assertEqual(mock_mr.title, "Add new feature")
         mock_mr.save.assert_called_once()
 
@@ -341,8 +342,24 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
 
         self.assertEqual(mock_mr.title, "New API endpoint")
 
-    def test_skips_when_title_not_string(self):
-        """Should skip when title is not a string (e.g., None)."""
+    def test_marks_ready_without_title_prefix(self):
+        """Should still call ready even when title has no draft prefix."""
+        mock_mr = MagicMock()
+        mock_mr.title = "Add new feature"
+        mock_project = MagicMock()
+        mock_project.mergerequests.get.return_value = mock_mr
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.gl.projects.get.return_value = mock_project
+        worker = _make_worker(mock_gitlab=mock_gitlab)
+        task = _make_task(merge_request_iid=5)
+
+        worker._remove_mr_draft_status_for_issue(task, task.issue)
+
+        mock_mr.ready.assert_called_once_with()
+        self.assertEqual(mock_mr.title, "Add new feature")
+        mock_mr.save.assert_called_once()
+
         mock_mr = MagicMock()
         mock_project = MagicMock()
         mock_project.mergerequests.get.return_value = mock_mr
@@ -358,8 +375,8 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
 
         mock_mr.save.assert_not_called()
 
-    def test_skips_already_non_draft(self):
-        """Should skip when title doesn't have draft prefix."""
+    def test_marks_ready_for_already_non_draft(self):
+        """Should still mark ready and save when title has no draft prefix."""
         mock_mr = MagicMock()
         mock_mr.title = "Add new feature"
         mock_project = MagicMock()
@@ -372,7 +389,8 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
 
         worker._remove_mr_draft_status_for_issue(task, task.issue)
 
-        mock_mr.save.assert_not_called()
+        mock_mr.ready.assert_called_once_with()
+        mock_mr.save.assert_called_once()
 
     def test_legacy_method_is_noop(self):
         """The legacy _remove_mr_draft_status(task) does nothing."""

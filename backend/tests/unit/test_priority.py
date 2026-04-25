@@ -329,7 +329,7 @@ def test_draft_removed_on_completion():
     mock_project.mergerequests.list.return_value = []
     mock_project.mergerequests.create.return_value = mock_mr
 
-    # Mock the MR reload/save flow used to remove draft status
+    # Mock the MR reload/save flow used to mark ready and remove draft status
     mock_existing_mr = MagicMock()
     mock_existing_mr.title = "Draft: AI: Complete feature"
     mock_project.mergerequests.get.return_value = mock_existing_mr
@@ -362,6 +362,7 @@ def test_draft_removed_on_completion():
     asyncio.run(run_test())
 
     mock_project.mergerequests.get.assert_called_with(42)
+    mock_existing_mr.ready.assert_called_once_with()
     assert mock_existing_mr.title == "AI: Complete feature"
     mock_existing_mr.save.assert_called_once()
 
