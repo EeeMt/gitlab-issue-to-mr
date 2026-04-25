@@ -145,6 +145,9 @@ def _make_db(task=None):
             provider = getattr(task, 'provider', None) if task else None
             mock_result.scalar_one_or_none.return_value = provider
             mock_result.scalars.return_value.all.return_value = [provider] if provider else []
+        elif 'FROM worker_environment_variables' in statement_str:
+            mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.all.return_value = []
         else:
             mock_result.scalar_one_or_none.return_value = task
             mock_result.scalars.return_value.all.return_value = [task] if task else []
@@ -531,6 +534,46 @@ class TestBuildContainerEnv(unittest.TestCase):
         env = worker._build_container_env(task, issue, mr_iid=None, target_branch="main")
 
         self.assertEqual(env["CUSTOM_CA_BUNDLE"], "/etc/ssl/custom-ca.crt")
+
+    @patch('app.core.worker.get_settings')
+    def test_env_merges_custom_environment_values(self, mock_get_settings):
+        """Custom environment values are validated and merged, including empty strings."""
+        mock_get_settings.return_value = _make_settings()
+        worker = _make_worker()
+        task = _make_task()
+        issue = task.issue
+
+        env = worker._build_container_env(
+            task,
+            issue,
+            mr_iid=None,
+            target_branch="main",
+            custom_environment={
+                "FEATURE_FLAG": "enabled",
+                "EMPTY_ALLOWED": "",
+            },
+        )
+
+        self.assertEqual(env["FEATURE_FLAG"], "enabled")
+        self.assertEqual(env["EMPTY_ALLOWED"], "")
+        self.assertEqual(env["TASK_ID"], "1")
+
+    @patch('app.core.worker.get_settings')
+    def test_env_rejects_reserved_custom_environment_key(self, mock_get_settings):
+        """Reserved custom environment keys raise ValueError."""
+        mock_get_settings.return_value = _make_settings()
+        worker = _make_worker()
+        task = _make_task()
+        issue = task.issue
+
+        with self.assertRaisesRegex(ValueError, "reserved"):
+            worker._build_container_env(
+                task,
+                issue,
+                mr_iid=None,
+                target_branch="main",
+                custom_environment={"TASK_ID": "999"},
+            )
 
     @patch('app.core.worker.get_settings')
     def test_env_includes_commit_author_metadata(self, mock_get_settings):
@@ -1289,6 +1332,51 @@ class TestExecuteTask(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertEqual(task.status, TaskStatus.COMPLETED)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    @patch('app.core.worker.build_worker_environment_map', create=True)
+    @patch('app.core.worker.list_worker_environment_variables', new_callable=AsyncMock, create=True)
+    def test_execute_task_loads_persisted_custom_environment(
+        self,
+        mock_list_worker_environment_variables,
+        mock_build_worker_environment_map,
+        mock_notify,
+        mock_get_settings,
+    ):
+        """execute_task loads persisted worker env vars and passes them into container env building."""
+        mock_get_settings.return_value = _make_settings()
+
+        persisted_rows = [MagicMock(key="FEATURE_FLAG", value="stored", is_secret=False)]
+        custom_environment = {"FEATURE_FLAG": "enabled", "EMPTY_ALLOWED": ""}
+        mock_list_worker_environment_variables.return_value = persisted_rows
+        mock_build_worker_environment_map.return_value = custom_environment
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.normalize_web_url.side_effect = lambda x: x
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+
+        mock_docker = MagicMock()
+        mock_docker.create_container.return_value = MagicMock(id="ctr-custom-env")
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(target_branch="main", merge_request_iid=None)
+        db = _make_db(task)
+
+        with (
+            patch.object(worker, '_build_container_env', return_value={"TASK_ID": "1"}) as mock_build_container_env,
+            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1))),
+        ):
+            result = asyncio.run(worker.execute_task(db, task.id))
+
+        self.assertTrue(result)
+        mock_list_worker_environment_variables.assert_awaited_once_with(db)
+        mock_build_worker_environment_map.assert_called_once_with(persisted_rows)
+        self.assertEqual(
+            mock_build_container_env.call_args.kwargs["custom_environment"],
+            custom_environment,
+        )
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)

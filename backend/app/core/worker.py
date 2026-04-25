@@ -25,6 +25,11 @@ from app.core.mattermost_notifications import (
     MATTERMOST_EVENT_TASK_RETRY_SCHEDULED,
     notify_task_event,
 )
+from app.core.worker_environment_variables import (
+    build_worker_environment_map,
+    list_worker_environment_variables,
+    validate_worker_environment_variable_key as validate_worker_environment_key,
+)
 from app.models import Task, TaskLog, TaskStatus, Issue, IssueStatus, AIProvider, User
 from app.api.providers import _decrypt_provider_api_key
 
@@ -554,6 +559,7 @@ class WorkerExecutor:
         *,
         author_name: Optional[str] = None,
         author_email: Optional[str] = None,
+        custom_environment: Optional[dict[str, str]] = None,
     ) -> dict[str, str]:
         """Build environment variables for the worker container."""
         settings = get_settings()
@@ -608,6 +614,11 @@ class WorkerExecutor:
 
         if settings.custom_ca_bundle:
             environment["CUSTOM_CA_BUNDLE"] = settings.custom_ca_bundle
+
+        if custom_environment:
+            for key, value in custom_environment.items():
+                validate_worker_environment_key(key)
+                environment[key] = value
 
         return environment
 
@@ -1026,8 +1037,10 @@ class WorkerExecutor:
 
             # Resolve AI provider
             provider = await self._resolve_provider(db, task)
-            
+
             # Build environment and volumes
+            custom_environment_rows = await list_worker_environment_variables(db)
+            custom_environment = build_worker_environment_map(custom_environment_rows)
             author_name, author_email = await self._resolve_commit_author(db, task)
             environment = self._build_container_env(
                 task,
@@ -1037,6 +1050,7 @@ class WorkerExecutor:
                 provider=provider,
                 author_name=author_name,
                 author_email=author_email,
+                custom_environment=custom_environment,
             )
             volumes = self._build_container_volumes(settings, issue)
 
