@@ -1403,7 +1403,10 @@ class TestExecuteTask(unittest.TestCase):
         task = _make_task(target_branch=None, merge_request_iid=None)
         db = _make_db(task)
 
-        with patch.object(worker, '_notify_task_completed', new=AsyncMock()) as mock_notify_task_completed:
+        with (
+            patch('app.core.worker.logger') as mock_logger,
+            patch.object(worker, '_notify_task_completed', new=AsyncMock()) as mock_notify_task_completed,
+        ):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         self.assertFalse(result)
@@ -1411,6 +1414,12 @@ class TestExecuteTask(unittest.TestCase):
         self.assertIsNotNone(task.completed_at)
         self.assertIn("TASK_ID", task.error_message)
         self.assertIn("reserved", task.error_message)
+        mock_logger.error.assert_called_once()
+        self.assertIn(
+            "Failed while building worker environment",
+            mock_logger.error.call_args.args[0],
+        )
+        mock_logger.exception.assert_not_called()
         mock_notify_task_completed.assert_awaited_once()
         mock_notify.assert_awaited_once()
         mock_docker.create_container.assert_not_called()

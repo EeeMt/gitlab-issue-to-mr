@@ -1092,7 +1092,7 @@ class WorkerExecutor:
                     custom_environment=custom_environment,
                 )
             except ValueError as e:
-                logger.exception(
+                logger.error(
                     f"[Task {task_id}] Failed while building worker environment: {e}"
                 )
                 return await self._handle_execute_task_failure(
