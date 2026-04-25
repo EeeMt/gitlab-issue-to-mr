@@ -245,6 +245,27 @@ class SystemConfig(Base):
     )
 
 
+class WorkerEnvironmentVariable(Base):
+    """Persisted custom environment variable injected into worker containers."""
+
+    __tablename__ = "worker_environment_variables"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(255), nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    is_secret: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = (
+        Index("ix_worker_environment_variables_key", "key", unique=True),
+    )
+
+
 class PromptTemplate(Base):
     """Reusable prompt templates for task creation."""
 
