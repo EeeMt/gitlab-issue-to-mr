@@ -343,6 +343,13 @@ def _make_config_admin_client():
     from app.dependencies.auth import require_admin_user, require_authenticated_user
 
     mock_db = MagicMock()
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = []
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_db.commit = AsyncMock()
+    mock_db.rollback = AsyncMock()
+    mock_db.flush = AsyncMock()
+    mock_db.delete = AsyncMock()
 
     async def override_db():
         yield mock_db
@@ -463,7 +470,7 @@ class UpdateConfigEndpointTests(unittest.TestCase):
         client, app, mock_db = _make_config_admin_client()
 
         with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
-            with patch("app.runtime_config.save_runtime_config_override", new=AsyncMock()):
+            with patch("app.api.config_runtime.save_runtime_config_override", new=AsyncMock()):
                 response = client.patch("/api/config", json={
                     "runtime": {
                         "max_concurrency": 3,
@@ -573,8 +580,8 @@ class UpdateConfigIntegrationTests(unittest.TestCase):
         client, app, mock_db = _make_config_admin_client()
 
         with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
-            with patch("app.runtime_config.save_runtime_config_override", new=AsyncMock()):
-                with patch("app.runtime_config.reset_runtime_config_override", new=AsyncMock()):
+            with patch("app.api.config_runtime.save_runtime_config_override", new=AsyncMock()):
+                with patch("app.api.config_runtime.reset_runtime_config_override", new=AsyncMock()):
                     response = client.patch("/api/config", json={
                         "runtime": {
                             "clear_alert_webhook_url": True,

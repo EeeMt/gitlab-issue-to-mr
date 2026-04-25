@@ -80,6 +80,18 @@ def serialize_worker_environment_variable_for_api(
     }
 
 
+def serialize_worker_environment_variable_for_runtime(
+    row: WorkerEnvironmentVariable,
+) -> dict[str, Any]:
+    """Serialize one worker environment variable for runtime config responses."""
+    return {
+        "key": row.key,
+        "value": "" if row.is_secret else row.value,
+        "is_secret": row.is_secret,
+        "value_configured": row.value is not None,
+    }
+
+
 async def list_worker_environment_variables(
     db: AsyncSession,
 ) -> list[WorkerEnvironmentVariable]:
@@ -88,6 +100,65 @@ async def list_worker_environment_variables(
         select(WorkerEnvironmentVariable).order_by(WorkerEnvironmentVariable.key.asc())
     )
     return list(result.scalars().all())
+
+
+def _item_field(item: Any, field: str) -> Any:
+    """Read one field from a replacement item."""
+    if isinstance(item, dict):
+        return item[field]
+    return getattr(item, field)
+
+
+async def replace_worker_environment_variables(
+    db: AsyncSession,
+    items: Iterable[Any],
+) -> list[WorkerEnvironmentVariable]:
+    """Replace all persisted worker environment variables with the submitted list."""
+    existing_rows = await list_worker_environment_variables(db)
+    existing_by_key = {row.key: row for row in existing_rows}
+    seen_keys: set[str] = set()
+
+    for item in items:
+        key = validate_worker_environment_variable_key(_item_field(item, "key"))
+        if key in seen_keys:
+            raise ValueError(f"Duplicate worker environment variable key: {key}")
+        seen_keys.add(key)
+
+        value = _item_field(item, "value")
+        is_secret = bool(_item_field(item, "is_secret"))
+
+        if is_secret and value == "":
+            existing_row = existing_by_key.get(key)
+            if existing_row is None or not existing_row.is_secret:
+                raise ValueError(
+                    f"New secret worker environment variable {key} cannot use a blank value"
+                )
+            stored_value = existing_row.value
+        else:
+            stored_value = serialize_worker_environment_variable_value(
+                value,
+                is_secret=is_secret,
+            )
+
+        row = existing_by_key.get(key)
+        if row is None:
+            row = WorkerEnvironmentVariable(
+                key=key,
+                value=stored_value,
+                is_secret=is_secret,
+            )
+            db.add(row)
+            existing_by_key[key] = row
+        else:
+            row.value = stored_value
+            row.is_secret = is_secret
+
+    for row in existing_rows:
+        if row.key not in seen_keys:
+            await db.delete(row)
+
+    await db.flush()
+    return await list_worker_environment_variables(db)
 
 
 def build_worker_environment_map(

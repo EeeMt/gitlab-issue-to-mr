@@ -18,6 +18,8 @@ from app.core.worker_environment_variables import (  # noqa: E402
     build_worker_environment_map,
     deserialize_worker_environment_variable_value,
     list_worker_environment_variables,
+    replace_worker_environment_variables,
+    serialize_worker_environment_variable_for_runtime,
     serialize_worker_environment_variable_value,
     serialize_worker_environment_variable_for_api,
     validate_worker_environment_variable_key,
@@ -66,6 +68,18 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
         self.assertEqual(serialized["key"], "CUSTOM_SECRET")
         self.assertIsNone(serialized["value"])
         self.assertTrue(serialized["is_secret"])
+        self.assertTrue(serialized["value_configured"])
+
+    def test_runtime_serialization_marks_empty_plain_value_as_configured(self) -> None:
+        row = WorkerEnvironmentVariable(
+            key="EMPTY_PLAIN",
+            value="",
+            is_secret=False,
+        )
+
+        serialized = serialize_worker_environment_variable_for_runtime(row)
+
+        self.assertEqual(serialized["value"], "")
         self.assertTrue(serialized["value_configured"])
 
     def test_runtime_map_decrypts_secret_values_and_preserves_empty_plain_values(self) -> None:
@@ -149,6 +163,9 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
 
 class WorkerEnvironmentVariableQueryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
+        self._original_config_encryption_key = os.environ.get("CONFIG_ENCRYPTION_KEY")
+        os.environ["CONFIG_ENCRYPTION_KEY"] = "unit-test-config-key"
+        get_settings.cache_clear()
         self.engine = create_async_engine(
             "sqlite+aiosqlite:///:memory:",
             poolclass=StaticPool,
@@ -159,6 +176,11 @@ class WorkerEnvironmentVariableQueryTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self) -> None:
         await self.engine.dispose()
+        if self._original_config_encryption_key is None:
+            os.environ.pop("CONFIG_ENCRYPTION_KEY", None)
+        else:
+            os.environ["CONFIG_ENCRYPTION_KEY"] = self._original_config_encryption_key
+        get_settings.cache_clear()
 
     async def test_list_worker_environment_variables_returns_rows_sorted_by_key(self) -> None:
         async with self.session_factory() as db:
@@ -177,6 +199,66 @@ class WorkerEnvironmentVariableQueryTests(unittest.IsolatedAsyncioTestCase):
             [row.key for row in rows],
             ["ALPHA_TOKEN", "MIDDLE_TOKEN", "ZETA_TOKEN"],
         )
+
+    async def test_replace_worker_environment_variables_replaces_rows_and_preserves_existing_secret(self) -> None:
+        async with self.session_factory() as db:
+            db.add_all(
+                [
+                    WorkerEnvironmentVariable(
+                        key="OLD_PLAIN",
+                        value="old-plain",
+                        is_secret=False,
+                    ),
+                    WorkerEnvironmentVariable(
+                        key="SECRET_TOKEN",
+                        value=serialize_worker_environment_variable_value("secret-1", is_secret=True),
+                        is_secret=True,
+                    ),
+                ]
+            )
+            await db.commit()
+
+            rows = await replace_worker_environment_variables(
+                db,
+                [
+                    SimpleNamespace(key="PLAIN_TOKEN", value="plain-2", is_secret=False),
+                    SimpleNamespace(key="SECRET_TOKEN", value="", is_secret=True),
+                ],
+            )
+            await db.commit()
+
+            refreshed_rows = await list_worker_environment_variables(db)
+
+        self.assertEqual([row.key for row in rows], ["PLAIN_TOKEN", "SECRET_TOKEN"])
+        self.assertEqual([row.key for row in refreshed_rows], ["PLAIN_TOKEN", "SECRET_TOKEN"])
+        self.assertEqual(refreshed_rows[0].value, "plain-2")
+        self.assertFalse(refreshed_rows[0].is_secret)
+        self.assertEqual(
+            deserialize_worker_environment_variable_value(
+                refreshed_rows[1].value,
+                is_secret=refreshed_rows[1].is_secret,
+            ),
+            "secret-1",
+        )
+
+    async def test_replace_worker_environment_variables_rejects_duplicate_keys(self) -> None:
+        async with self.session_factory() as db:
+            with self.assertRaisesRegex(ValueError, "Duplicate worker environment variable key"):
+                await replace_worker_environment_variables(
+                    db,
+                    [
+                        SimpleNamespace(key="DUPLICATE_KEY", value="one", is_secret=False),
+                        SimpleNamespace(key="DUPLICATE_KEY", value="two", is_secret=False),
+                    ],
+                )
+
+    async def test_replace_worker_environment_variables_rejects_new_blank_secret(self) -> None:
+        async with self.session_factory() as db:
+            with self.assertRaisesRegex(ValueError, "blank value"):
+                await replace_worker_environment_variables(
+                    db,
+                    [SimpleNamespace(key="NEW_SECRET", value="", is_secret=True)],
+                )
 
 
 if __name__ == "__main__":

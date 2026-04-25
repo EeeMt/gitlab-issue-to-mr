@@ -6,13 +6,18 @@ import logging
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._validators import _is_valid_http_url, _sanitize_string_list
 from app.config import Settings, get_effective_settings, get_runtime_config_types, get_settings
 from app.core.config_crypto import ConfigEncryptionError
+from app.core.worker_environment_variables import (
+    list_worker_environment_variables,
+    replace_worker_environment_variables,
+    serialize_worker_environment_variable_for_runtime,
+)
 from app.database import get_db
 from app.dependencies.auth import require_admin_user
 from app.runtime_config import (
@@ -24,6 +29,23 @@ from app.runtime_config import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+class RuntimeWorkerEnvironmentVariableRequest(BaseModel):
+    """One worker environment variable submitted via runtime config APIs."""
+
+    key: str
+    value: str
+    is_secret: bool = False
+
+
+class RuntimeWorkerEnvironmentVariableResponse(BaseModel):
+    """One worker environment variable returned by runtime config APIs."""
+
+    key: str
+    value: str
+    is_secret: bool
+    value_configured: bool
 
 
 class RuntimeConfigSection(BaseModel):
@@ -49,6 +71,9 @@ class RuntimeConfigSection(BaseModel):
     maven_settings_host_path: str
     slot_max_tasks: int
     slot_max_tasks_enforce: bool
+    worker_environment_variables: list[RuntimeWorkerEnvironmentVariableResponse] = Field(
+        default_factory=list
+    )
 
 
 class RuntimeConfigUpdate(BaseModel):
@@ -76,9 +101,13 @@ class RuntimeConfigUpdate(BaseModel):
     maven_settings_host_path: Optional[str] = None
     slot_max_tasks: Optional[int] = None
     slot_max_tasks_enforce: Optional[bool] = None
+    worker_environment_variables: Optional[list[RuntimeWorkerEnvironmentVariableRequest]] = None
 
 
-def _serialize_runtime_config(settings: Settings) -> RuntimeConfigSection:
+def _serialize_runtime_config(
+    settings: Settings,
+    worker_environment_variables: list[RuntimeWorkerEnvironmentVariableResponse] | None = None,
+) -> RuntimeConfigSection:
     return RuntimeConfigSection(
         max_concurrency=settings.max_concurrency,
         task_timeout=settings.task_timeout,
@@ -101,6 +130,25 @@ def _serialize_runtime_config(settings: Settings) -> RuntimeConfigSection:
         maven_settings_host_path=settings.maven_settings_host_path,
         slot_max_tasks=settings.slot_max_tasks,
         slot_max_tasks_enforce=settings.slot_max_tasks_enforce,
+        worker_environment_variables=worker_environment_variables or [],
+    )
+
+
+async def _serialize_runtime_config_response(
+    db: AsyncSession,
+    settings: Settings | None = None,
+) -> RuntimeConfigSection:
+    """Serialize runtime config including persisted worker env vars."""
+    rows = await list_worker_environment_variables(db)
+    serialized_rows = [
+        RuntimeWorkerEnvironmentVariableResponse.model_validate(
+            serialize_worker_environment_variable_for_runtime(row)
+        )
+        for row in rows
+    ]
+    return _serialize_runtime_config(
+        settings or get_effective_settings(),
+        worker_environment_variables=serialized_rows,
     )
 
 
@@ -276,21 +324,27 @@ async def get_runtime_config(
 ):
     """Get current runtime configuration."""
     await load_runtime_config_from_db(db)
-    return _serialize_runtime_config(get_effective_settings())
+    return await _serialize_runtime_config_response(db)
 
 
-@router.patch("/config/runtime")
-async def update_runtime_config(
+async def apply_runtime_config_update(
+    db: AsyncSession,
     runtime_update: RuntimeConfigUpdate,
-    db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_admin_user),
-):
-    """Update persisted runtime configuration overrides."""
+    *,
+    commit: bool,
+) -> RuntimeConfigSection:
+    """Apply runtime config updates and return the serialized runtime section."""
     await load_runtime_config_from_db(db)
 
-    runtime_updates = _normalize_runtime_updates(
-        runtime_update.model_dump(exclude_unset=True)
+    raw_runtime_updates = runtime_update.model_dump(
+        exclude_unset=True,
+        exclude={"worker_environment_variables"},
     )
+    runtime_updates = _normalize_runtime_updates(raw_runtime_updates)
+    worker_environment_variables_provided = (
+        "worker_environment_variables" in runtime_update.model_fields_set
+    )
+    worker_environment_variables = runtime_update.worker_environment_variables
 
     clear_alert_webhook = bool(runtime_updates.pop("clear_alert_webhook_url", False))
     clear_anthropic_api_key = bool(runtime_updates.pop("clear_anthropic_api_key", False))
@@ -298,8 +352,6 @@ async def update_runtime_config(
     provider_sync_updates = dict(runtime_updates)
     if clear_anthropic_api_key:
         provider_sync_updates["clear_anthropic_api_key"] = True
-
-    preview_settings = _build_preview_settings(runtime_updates, get_settings())
 
     if clear_alert_webhook and "alert_webhook_url" not in runtime_updates:
         runtime_updates["alert_webhook_url"] = get_settings().alert_webhook_url
@@ -311,6 +363,13 @@ async def update_runtime_config(
             await save_runtime_config_override(db, key, value)
             logger.info("Updated runtime config %s", key)
 
+        if worker_environment_variables_provided:
+            await replace_worker_environment_variables(
+                db,
+                worker_environment_variables or [],
+            )
+            logger.info("Replaced runtime worker environment variables")
+
         if clear_alert_webhook and "alert_webhook_url" not in runtime_updates:
             await reset_runtime_config_override(db, "alert_webhook_url")
             logger.info("Cleared stored alert webhook URL")
@@ -320,14 +379,33 @@ async def update_runtime_config(
             logger.info("Cleared stored Anthropic API key")
 
         await load_runtime_config_from_db(db)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     except ConfigEncryptionError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
 
     # Sync anthropic_* changes to default AI provider
     await _sync_anthropic_to_default_provider(db, provider_sync_updates)
-    await db.commit()
+    if commit:
+        await db.commit()
 
-    return _serialize_runtime_config(get_effective_settings())
+    return await _serialize_runtime_config_response(db)
+
+
+@router.patch("/config/runtime")
+async def update_runtime_config(
+    runtime_update: RuntimeConfigUpdate,
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_admin_user),
+):
+    """Update persisted runtime configuration overrides."""
+    return await apply_runtime_config_update(db, runtime_update, commit=True)
 
 
 @router.delete("/config/runtime/{key}")
@@ -346,4 +424,4 @@ async def reset_runtime_config_key(
     await reset_runtime_config_override(db, key)
     await load_runtime_config_from_db(db)
     logger.info("Reset persisted runtime configuration override for %s", key)
-    return _serialize_runtime_config(get_effective_settings())
+    return await _serialize_runtime_config_response(db)
