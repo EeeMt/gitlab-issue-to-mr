@@ -945,6 +945,44 @@ class WorkerExecutor:
         prefix = get_settings().worker_container_prefix
         return f"{prefix}-{task.id}-issue{task.issue_id}"
 
+    async def _handle_execute_task_failure(
+        self,
+        db: AsyncSession,
+        task: Task,
+        error: Exception,
+        *,
+        had_existing_mr: bool,
+        issue: Optional[Issue] = None,
+        container: Any = None,
+    ) -> bool:
+        """Persist execute_task failure state and send normal failure notifications."""
+        task.status = TaskStatus.FAILED
+        task.completed_at = utcnow()
+        task.error_message = sanitize_sensitive_data(str(error))[:1000]
+        await db.commit()
+
+        if container:
+            try:
+                self.docker.remove_container(container, force=True)
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to cleanup container: {cleanup_error}")
+
+        try:
+            await self._notify_task_completed(
+                task,
+                success=False,
+                notify_target="mr" if had_existing_mr else "issue",
+                issue=issue,
+            )
+        except Exception as notify_error:
+            logger.warning(f"Failed to send failure notification: {notify_error}")
+        try:
+            await notify_task_event(task, MATTERMOST_EVENT_TASK_FAILED)
+        except Exception as notify_error:
+            logger.warning(f"Failed to send Mattermost failure notification: {notify_error}")
+
+        return False
+
     async def execute_task(self, db: AsyncSession, task_id: int) -> bool:
         """Execute a task."""
         settings = get_settings()
@@ -1039,19 +1077,31 @@ class WorkerExecutor:
             provider = await self._resolve_provider(db, task)
 
             # Build environment and volumes
-            custom_environment_rows = await list_worker_environment_variables(db)
-            custom_environment = build_worker_environment_map(custom_environment_rows)
-            author_name, author_email = await self._resolve_commit_author(db, task)
-            environment = self._build_container_env(
-                task,
-                issue,
-                mr_iid,
-                target_branch,
-                provider=provider,
-                author_name=author_name,
-                author_email=author_email,
-                custom_environment=custom_environment,
-            )
+            try:
+                custom_environment_rows = await list_worker_environment_variables(db)
+                custom_environment = build_worker_environment_map(custom_environment_rows)
+                author_name, author_email = await self._resolve_commit_author(db, task)
+                environment = self._build_container_env(
+                    task,
+                    issue,
+                    mr_iid,
+                    target_branch,
+                    provider=provider,
+                    author_name=author_name,
+                    author_email=author_email,
+                    custom_environment=custom_environment,
+                )
+            except ValueError as e:
+                logger.exception(
+                    f"[Task {task_id}] Failed while building worker environment: {e}"
+                )
+                return await self._handle_execute_task_failure(
+                    db,
+                    task,
+                    e,
+                    had_existing_mr=had_existing_mr,
+                    issue=issue,
+                )
             volumes = self._build_container_volumes(settings, issue)
 
             container_name = self._get_container_name(task)
@@ -1148,31 +1198,16 @@ class WorkerExecutor:
 
             return exit_code == 0
 
-        except ValueError:
-            raise
         except Exception as e:
             logger.exception(f"Task {task_id} failed with exception: {e}")
-            task.status = TaskStatus.FAILED
-            task.completed_at = utcnow()
-            task.error_message = sanitize_sensitive_data(str(e))[:1000]
-            await db.commit()
-
-            if container:
-                try:
-                    self.docker.remove_container(container, force=True)
-                except Exception as cleanup_error:
-                    logger.warning(f"Failed to cleanup container: {cleanup_error}")
-
-            try:
-                await self._notify_task_completed(task, success=False, notify_target="mr" if had_existing_mr else "issue", issue=issue)
-            except Exception as notify_error:
-                logger.warning(f"Failed to send failure notification: {notify_error}")
-            try:
-                await notify_task_event(task, MATTERMOST_EVENT_TASK_FAILED)
-            except Exception as notify_error:
-                logger.warning(f"Failed to send Mattermost failure notification: {notify_error}")
-
-            return False
+            return await self._handle_execute_task_failure(
+                db,
+                task,
+                e,
+                had_existing_mr=had_existing_mr,
+                issue=issue,
+                container=container,
+            )
 
     async def resume_task(self, db: AsyncSession, task_id: int, container_name: str) -> bool:
         """Resume monitoring a task whose container survived a scheduler restart.
