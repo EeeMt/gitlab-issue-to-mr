@@ -1335,8 +1335,8 @@ class TestExecuteTask(unittest.TestCase):
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
-    @patch('app.core.worker.build_worker_environment_map', create=True)
-    @patch('app.core.worker.list_worker_environment_variables', new_callable=AsyncMock, create=True)
+    @patch('app.core.worker.build_worker_environment_map')
+    @patch('app.core.worker.list_worker_environment_variables', new_callable=AsyncMock)
     def test_execute_task_loads_persisted_custom_environment(
         self,
         mock_list_worker_environment_variables,
@@ -1380,7 +1380,7 @@ class TestExecuteTask(unittest.TestCase):
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
-    @patch('app.core.worker.list_worker_environment_variables', new_callable=AsyncMock, create=True)
+    @patch('app.core.worker.list_worker_environment_variables', new_callable=AsyncMock)
     def test_execute_task_persists_failure_for_invalid_persisted_custom_environment_key(
         self,
         mock_list_worker_environment_variables,
