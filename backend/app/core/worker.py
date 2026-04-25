@@ -1148,6 +1148,8 @@ class WorkerExecutor:
 
             return exit_code == 0
 
+        except ValueError:
+            raise
         except Exception as e:
             logger.exception(f"Task {task_id} failed with exception: {e}")
             task.status = TaskStatus.FAILED

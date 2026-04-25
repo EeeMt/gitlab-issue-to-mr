@@ -1380,6 +1380,36 @@ class TestExecuteTask(unittest.TestCase):
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    @patch('app.core.worker.list_worker_environment_variables', new_callable=AsyncMock, create=True)
+    def test_execute_task_propagates_invalid_persisted_custom_environment_key(
+        self,
+        mock_list_worker_environment_variables,
+        mock_notify,
+        mock_get_settings,
+    ):
+        """execute_task propagates invalid persisted custom env keys as ValueError."""
+        mock_get_settings.return_value = _make_settings()
+        mock_list_worker_environment_variables.return_value = [
+            MagicMock(key="TASK_ID", value="reserved", is_secret=False)
+        ]
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.normalize_web_url.side_effect = lambda x: x
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+
+        mock_docker = MagicMock()
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(target_branch=None, merge_request_iid=None)
+        db = _make_db(task)
+
+        with self.assertRaisesRegex(ValueError, "reserved"):
+            asyncio.run(worker.execute_task(db, task.id))
+
+        mock_docker.create_container.assert_not_called()
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
     def test_task_failure_sets_failed_status(self, mock_notify, mock_get_settings):
         """Failed task sets status to FAILED."""
         mock_get_settings.return_value = _make_settings()
