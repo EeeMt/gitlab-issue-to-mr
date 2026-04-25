@@ -238,4 +238,75 @@ describe('WorkerSettingsPanel', () => {
       }
     })
   })
+
+  it('clears newly entered secret values from local state after save while keeping configured status', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    vm.workerFormValue.environment_variables[0].value = 'new-secret-value'
+
+    await vm.handleSaveWorker()
+
+    expect(vm.workerFormValue.environment_variables).toEqual([
+      {
+        id: 7,
+        key: 'SECRET_TOKEN',
+        value: '',
+        is_secret: true,
+        value_configured: true
+      },
+      {
+        id: 8,
+        key: 'JAVA_OPTS',
+        value: '-Xmx512m',
+        is_secret: false,
+        value_configured: true
+      }
+    ])
+    expect(vm.lastLoadedWorker.environment_variables).toEqual([
+      {
+        id: 7,
+        key: 'SECRET_TOKEN',
+        value: '',
+        is_secret: true,
+        value_configured: true
+      },
+      {
+        id: 8,
+        key: 'JAVA_OPTS',
+        value: '-Xmx512m',
+        is_secret: false,
+        value_configured: true
+      }
+    ])
+    expect(wrapper.text()).toContain('config.configured')
+    expect(mockUpdateConfig).toHaveBeenCalledWith({
+      runtime: {
+        worker_volume_mounts: '[{"host_path":"/host/cache","container_path":"/container/cache","mode":"rw"}]',
+        maven_cache_host_path: '/data/.m2/repository',
+        maven_settings_host_path: '/data/.m2/settings.xml',
+        worker_environment_variables: [
+          {
+            id: 7,
+            key: 'SECRET_TOKEN',
+            value: 'new-secret-value',
+            is_secret: true
+          },
+          {
+            id: 8,
+            key: 'JAVA_OPTS',
+            value: '-Xmx512m',
+            is_secret: false
+          }
+        ]
+      }
+    })
+  })
 })

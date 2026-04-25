@@ -351,6 +351,34 @@ function serializeEnvironmentVariables(
     .filter((environmentVariable) => environmentVariable.key)
 }
 
+function cloneWorkerFormValue(value: WorkerFormValue): WorkerFormValue {
+  return {
+    mounts: value.mounts.map((mount) => ({ ...mount })),
+    environment_variables: value.environment_variables.map((environmentVariable) => ({
+      ...environmentVariable
+    })),
+    maven_cache_host_path: value.maven_cache_host_path,
+    maven_settings_host_path: value.maven_settings_host_path
+  }
+}
+
+function normalizeWorkerFormValue(value: WorkerFormValue): WorkerFormValue {
+  return {
+    ...cloneWorkerFormValue(value),
+    environment_variables: value.environment_variables.map((environmentVariable) => {
+      const valueConfigured = Boolean(
+        environmentVariable.value_configured || environmentVariable.value
+      )
+
+      return {
+        ...environmentVariable,
+        value: environmentVariable.is_secret ? '' : environmentVariable.value,
+        value_configured: valueConfigured
+      }
+    })
+  }
+}
+
 async function fetchConfig() {
   loading.value = true
   try {
@@ -361,7 +389,7 @@ async function fetchConfig() {
       maven_cache_host_path: config.runtime.maven_cache_host_path || '',
       maven_settings_host_path: config.runtime.maven_settings_host_path || ''
     }
-    lastLoadedWorker.value = JSON.parse(JSON.stringify(workerFormValue.value))
+    lastLoadedWorker.value = normalizeWorkerFormValue(workerFormValue.value)
   } catch {
     message.error(t('config.loadError'))
   } finally {
@@ -416,13 +444,8 @@ async function handleSaveWorker() {
         maven_settings_host_path: workerFormValue.value.maven_settings_host_path.trim()
       }
     })
-    // Safely clone the form value to preserve current state
-    try {
-      lastLoadedWorker.value = JSON.parse(JSON.stringify(workerFormValue.value))
-    } catch {
-      // Cloning failed, but save succeeded - use empty object as fallback
-      lastLoadedWorker.value = createEmptyWorkerFormValue()
-    }
+    workerFormValue.value = normalizeWorkerFormValue(workerFormValue.value)
+    lastLoadedWorker.value = cloneWorkerFormValue(workerFormValue.value)
     message.success(t('config.saved'))
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('config.saveError'))
@@ -432,17 +455,7 @@ async function handleSaveWorker() {
 }
 
 function resetWorker() {
-  // Safely clone last loaded worker config with error boundary
-  if (!lastLoadedWorker.value) {
-    workerFormValue.value = createEmptyWorkerFormValue()
-    return
-  }
-  try {
-    workerFormValue.value = JSON.parse(JSON.stringify(lastLoadedWorker.value))
-  } catch {
-    // If cloning fails, reset to empty mounts
-    workerFormValue.value = createEmptyWorkerFormValue()
-  }
+  workerFormValue.value = cloneWorkerFormValue(lastLoadedWorker.value)
 }
 
 onMounted(() => {
