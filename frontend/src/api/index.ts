@@ -449,10 +449,19 @@ export interface RuntimeConfig {
   allow_analytics_for_users: boolean
   allow_oidc_diagnostics_for_users: boolean
   worker_volume_mounts: string
+  worker_environment_variables: WorkerEnvironmentVariable[]
   maven_cache_host_path: string
   maven_settings_host_path: string
   slot_max_tasks: number
   slot_max_tasks_enforce: boolean
+}
+
+export interface WorkerEnvironmentVariable {
+  id?: number
+  key: string
+  value: string
+  is_secret: boolean
+  value_configured: boolean
 }
 
 export interface AuthConfig {
@@ -562,14 +571,27 @@ export interface MattermostResolveChannelTargetPayload {
 }
 
 export interface RuntimeConfigUpdate
-  extends Partial<Omit<RuntimeConfig, 'alert_webhook_url_configured' | 'anthropic_api_key_configured'>> {
+  extends Partial<
+    Omit<
+      RuntimeConfig,
+      'alert_webhook_url_configured' | 'anthropic_api_key_configured' | 'worker_environment_variables'
+    >
+  > {
   alert_webhook_url?: string
   clear_alert_webhook_url?: boolean
   anthropic_api_key?: string
   clear_anthropic_api_key?: boolean
   worker_volume_mounts?: string
+  worker_environment_variables?: WorkerEnvironmentVariableUpdate[]
   maven_cache_host_path?: string
   maven_settings_host_path?: string
+}
+
+export interface WorkerEnvironmentVariableUpdate {
+  id?: number
+  key: string
+  value: string
+  is_secret: boolean
 }
 
 export interface AuthConfigUpdate extends Partial<Omit<AuthConfig, 'oidc_client_secret_configured'>> {

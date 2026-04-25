@@ -84,6 +84,89 @@
             </div>
           </div>
 
+          <div class="config-form__section config-environment-section">
+            <div class="config-form__section-header">
+              <div class="config-form__section-title">{{ t('config.environmentVariables') }}</div>
+              <n-button size="small" @click="addEnvironmentVariable">
+                {{ t('config.addEnvironmentVariable') }}
+              </n-button>
+            </div>
+            <div v-if="workerFormValue.environment_variables.length === 0" class="config-empty">
+              {{ t('config.noEnvironmentVariables') }}
+            </div>
+            <div v-else class="config-mounts-list">
+              <div
+                v-for="(environmentVariable, index) in workerFormValue.environment_variables"
+                :key="environmentVariable.id ?? `env-${index}`"
+                class="config-mount-item"
+              >
+                <n-grid :cols="isMobile ? 1 : 3" :x-gap="12" :y-gap="8">
+                  <n-gi>
+                    <n-form-item :label="t('config.environmentVariableKey')" size="small">
+                      <n-input
+                        v-model:value="environmentVariable.key"
+                        :placeholder="t('config.environmentVariableKeyPlaceholder')"
+                        class="config-form__input"
+                      />
+                    </n-form-item>
+                  </n-gi>
+                  <n-gi>
+                    <n-form-item :label="t('config.environmentVariableType')" size="small">
+                      <n-select
+                        :value="environmentVariable.is_secret ? 'secret' : 'plain_text'"
+                        :options="environmentVariableTypeOptions"
+                        @update:value="
+                          (value) => {
+                            environmentVariable.is_secret = value === 'secret'
+                          }
+                        "
+                        class="config-form__input"
+                      />
+                    </n-form-item>
+                  </n-gi>
+                  <n-gi>
+                    <n-form-item :label="t('config.environmentVariableValue')" size="small">
+                      <n-input
+                        v-model:value="environmentVariable.value"
+                        :type="environmentVariable.is_secret ? 'password' : 'text'"
+                        :placeholder="
+                          environmentVariable.is_secret && environmentVariable.value_configured
+                            ? t('config.configuredEnterNew')
+                            : t('config.environmentVariableValuePlaceholder')
+                        "
+                        class="config-form__input"
+                      />
+                      <template v-if="environmentVariable.is_secret" #feedback>
+                        <div class="config-secret-feedback">
+                          <n-tag
+                            :type="environmentVariable.value_configured ? 'success' : 'warning'"
+                            round
+                          >
+                            {{
+                              environmentVariable.value_configured
+                                ? t('config.configured')
+                                : t('config.missing')
+                            }}
+                          </n-tag>
+                          <span>{{ t('config.environmentVariableSecretHint') }}</span>
+                        </div>
+                      </template>
+                    </n-form-item>
+                  </n-gi>
+                </n-grid>
+                <n-button
+                  size="tiny"
+                  type="error"
+                  quaternary
+                  @click="removeEnvironmentVariable(index)"
+                  class="config-mount-remove"
+                >
+                  {{ t('config.remove') }}
+                </n-button>
+              </div>
+            </div>
+          </div>
+
           <div class="config-form__section config-maven-section">
             <div class="config-form__section-title">{{ t('config.mavenSettings') }}</div>
             <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
@@ -149,10 +232,16 @@ import {
   NSelect,
   NSpace,
   NSpin,
+  NTag,
   useMessage
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getConfig, updateConfig } from '../../api'
+import {
+  getConfig,
+  updateConfig,
+  type WorkerEnvironmentVariable,
+  type WorkerEnvironmentVariableUpdate
+} from '../../api'
 
 type MountItem = {
   host_path: string
@@ -162,8 +251,17 @@ type MountItem = {
 
 type WorkerFormValue = {
   mounts: MountItem[]
+  environment_variables: EnvironmentVariableFormItem[]
   maven_cache_host_path: string
   maven_settings_host_path: string
+}
+
+type EnvironmentVariableFormItem = {
+  id?: number
+  key: string
+  value: string
+  is_secret: boolean
+  value_configured: boolean
 }
 
 const props = defineProps<{
@@ -182,8 +280,14 @@ const mountModeOptions = [
   { label: 'Read-write (rw)', value: 'rw' }
 ]
 
+const environmentVariableTypeOptions = [
+  { label: t('config.environmentVariablePlainText'), value: 'plain_text' },
+  { label: t('config.environmentVariableSecret'), value: 'secret' }
+]
+
 const workerFormValue = ref<WorkerFormValue>({
   mounts: [],
+  environment_variables: [],
   maven_cache_host_path: '',
   maven_settings_host_path: ''
 })
@@ -217,12 +321,43 @@ function serializeMounts(mounts: MountItem[]): string {
   return JSON.stringify(mounts.filter(m => m.host_path && m.container_path))
 }
 
+function parseEnvironmentVariables(
+  environmentVariables: WorkerEnvironmentVariable[] | undefined
+): EnvironmentVariableFormItem[] {
+  if (!Array.isArray(environmentVariables)) return []
+
+  return environmentVariables.map((environmentVariable) => ({
+    id: environmentVariable.id,
+    key: environmentVariable.key || '',
+    value:
+      environmentVariable.is_secret && environmentVariable.value_configured
+        ? ''
+        : (environmentVariable.value ?? ''),
+    is_secret: Boolean(environmentVariable.is_secret),
+    value_configured: Boolean(environmentVariable.value_configured || environmentVariable.value)
+  }))
+}
+
+function serializeEnvironmentVariables(
+  environmentVariables: EnvironmentVariableFormItem[]
+): WorkerEnvironmentVariableUpdate[] {
+  return environmentVariables
+    .map((environmentVariable) => ({
+      id: environmentVariable.id,
+      key: environmentVariable.key.trim(),
+      value: environmentVariable.value,
+      is_secret: environmentVariable.is_secret
+    }))
+    .filter((environmentVariable) => environmentVariable.key)
+}
+
 async function fetchConfig() {
   loading.value = true
   try {
     const config = await getConfig()
     workerFormValue.value = {
       mounts: parseMounts(config.runtime.worker_volume_mounts),
+      environment_variables: parseEnvironmentVariables(config.runtime.worker_environment_variables),
       maven_cache_host_path: config.runtime.maven_cache_host_path || '',
       maven_settings_host_path: config.runtime.maven_settings_host_path || ''
     }
@@ -242,9 +377,19 @@ function addMount() {
   })
 }
 
+function addEnvironmentVariable() {
+  workerFormValue.value.environment_variables.push({
+    key: '',
+    value: '',
+    is_secret: false,
+    value_configured: false
+  })
+}
+
 function createEmptyWorkerFormValue(): WorkerFormValue {
   return {
     mounts: [],
+    environment_variables: [],
     maven_cache_host_path: '',
     maven_settings_host_path: ''
   }
@@ -254,12 +399,19 @@ function removeMount(index: number) {
   workerFormValue.value.mounts.splice(index, 1)
 }
 
+function removeEnvironmentVariable(index: number) {
+  workerFormValue.value.environment_variables.splice(index, 1)
+}
+
 async function handleSaveWorker() {
   workerSaving.value = true
   try {
     await updateConfig({
       runtime: {
         worker_volume_mounts: serializeMounts(workerFormValue.value.mounts),
+        worker_environment_variables: serializeEnvironmentVariables(
+          workerFormValue.value.environment_variables
+        ),
         maven_cache_host_path: workerFormValue.value.maven_cache_host_path.trim(),
         maven_settings_host_path: workerFormValue.value.maven_settings_host_path.trim()
       }
@@ -305,5 +457,16 @@ watch(() => props.reloadKey, () => {
 <style scoped>
 .config-maven-section {
   margin-top: 20px;
+}
+
+.config-environment-section {
+  margin-top: 20px;
+}
+
+.config-secret-feedback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 </style>
