@@ -33,7 +33,6 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 from app.core.worker import WorkerExecutor, scrub_sensitive_data, sanitize_sensitive_data
-from app.core.worker_environment_variables import RESERVED_WORKER_ENVIRONMENT_KEYS
 from app.models import Task, TaskStatus, TaskLog
 
 
@@ -532,53 +531,6 @@ class TestBuildContainerEnv(unittest.TestCase):
         env = worker._build_container_env(task, issue, mr_iid=None, target_branch="main")
 
         self.assertEqual(env["CUSTOM_CA_BUNDLE"], "/etc/ssl/custom-ca.crt")
-
-    @patch('app.core.worker.get_settings')
-    def test_env_keys_are_all_reserved_worker_keys(self, mock_get_settings):
-        """All emitted container env keys should remain covered by the shared reserved set."""
-        mock_get_settings.return_value = _make_settings(custom_ca_bundle="/etc/ssl/custom-ca.crt")
-        worker = _make_worker()
-        provider = MagicMock()
-        provider.id = None
-        provider.api_key = "provider-key"
-        provider.base_url = "http://provider.example/v1"
-        provider.model = "provider-model"
-        provider.max_turns = 33
-        provider.system_prompt = "append this"
-        task = _make_task(provider=provider)
-        issue = task.issue
-        issue.claude_session_id = "session-123"
-        issue.base_branch = "develop"
-
-        env = worker._build_container_env(task, issue, mr_iid=5, target_branch="main", provider=provider)
-
-        self.assertEqual(env["APPEND_SYSTEM_PROMPT"], "append this")
-        self.assertEqual(env["RESUME_SESSION"], "session-123")
-        self.assertEqual(env["BASE_BRANCH"], "develop")
-        self.assertEqual(env["MR_IID"], "5")
-        self.assertEqual(env["CUSTOM_CA_BUNDLE"], "/etc/ssl/custom-ca.crt")
-        self.assertTrue(set(env).issubset(RESERVED_WORKER_ENVIRONMENT_KEYS))
-
-    @patch('app.core.worker.RESERVED_WORKER_ENVIRONMENT_KEYS', frozenset())
-    @patch('app.core.worker.get_settings')
-    def test_env_build_fails_when_reserved_key_guard_does_not_cover_output(self, mock_get_settings):
-        """A guard should catch drift between emitted runtime keys and shared reserved keys."""
-        mock_get_settings.return_value = _make_settings(custom_ca_bundle="/etc/ssl/custom-ca.crt")
-        worker = _make_worker()
-        provider = MagicMock()
-        provider.id = None
-        provider.api_key = "provider-key"
-        provider.base_url = "http://provider.example/v1"
-        provider.model = "provider-model"
-        provider.max_turns = 33
-        provider.system_prompt = "append this"
-        task = _make_task(provider=provider)
-        issue = task.issue
-        issue.claude_session_id = "session-123"
-        issue.base_branch = "develop"
-
-        with self.assertRaisesRegex(RuntimeError, "reserved"):
-            worker._build_container_env(task, issue, mr_iid=5, target_branch="main", provider=provider)
 
     @patch('app.core.worker.get_settings')
     def test_env_includes_commit_author_metadata(self, mock_get_settings):

@@ -4,10 +4,14 @@
 import os
 import sys
 import unittest
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from app.core.worker import WorkerExecutor  # noqa: E402
 from app.core.worker_environment_variables import (  # noqa: E402
+    RESERVED_WORKER_ENVIRONMENT_KEYS,
     build_worker_environment_map,
     serialize_worker_environment_variable_for_api,
     validate_worker_environment_variable_key,
@@ -74,6 +78,58 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
 
         self.assertEqual(runtime_map["SECRET_TOKEN"], "super-secret")
         self.assertEqual(runtime_map["EMPTY_VALUE"], "")
+
+    @patch("app.core.worker.get_settings")
+    def test_reserved_worker_keys_cover_emitted_optional_worker_env_keys(self, mock_get_settings) -> None:
+        mock_get_settings.return_value = SimpleNamespace(
+            gitlab_url="http://gitlab.example.com",
+            gitlab_bot_token="test-token",
+            anthropic_base_url="http://localhost:11434/v1",
+            anthropic_api_key="test-key",
+            anthropic_model="claude-sonnet-4-20250514",
+            claude_max_turns=20,
+            task_timeout=1800,
+            custom_ca_bundle="/etc/ssl/custom-ca.crt",
+        )
+        worker = WorkerExecutor(docker_client=MagicMock(), gitlab_client=MagicMock())
+        task = SimpleNamespace(
+            project_id=123,
+            user_prompt="Implement the task",
+            id=456,
+            initiator_display_name="Alice Zhang",
+            initiator_email="alice@example.com",
+            initiator_username="alice",
+        )
+        issue = SimpleNamespace(
+            branch_name="task-123",
+            id=789,
+            title="Task title",
+            claude_session_id="session-123",
+            base_branch="develop",
+        )
+        provider = SimpleNamespace(
+            id=None,
+            api_key="provider-key",
+            base_url="http://provider.example/v1",
+            model="provider-model",
+            max_turns=33,
+            system_prompt="append this",
+        )
+
+        env = worker._build_container_env(
+            task,
+            issue,
+            mr_iid=5,
+            target_branch="main",
+            provider=provider,
+        )
+
+        self.assertEqual(env["APPEND_SYSTEM_PROMPT"], "append this")
+        self.assertEqual(env["RESUME_SESSION"], "session-123")
+        self.assertEqual(env["BASE_BRANCH"], "develop")
+        self.assertEqual(env["MR_IID"], "5")
+        self.assertEqual(env["CUSTOM_CA_BUNDLE"], "/etc/ssl/custom-ca.crt")
+        self.assertTrue(set(env).issubset(RESERVED_WORKER_ENVIRONMENT_KEYS))
 
 
 if __name__ == "__main__":
