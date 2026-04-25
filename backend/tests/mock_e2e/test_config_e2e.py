@@ -701,8 +701,8 @@ class TestResetConfig:
         resp2 = await client.get("/api/config/runtime")
         assert resp2.json()["anthropic_api_key_configured"] is False
 
-    async def test_reset_clears_worker_environment_variables(self, client: AsyncClient):
-        """Reset should also remove persisted worker env vars."""
+    async def test_reset_does_not_clear_worker_environment_variables(self, client: AsyncClient):
+        """Reset must NOT remove persisted worker env vars (out of scope for config reset)."""
         patch_resp = await client.patch(
             "/api/config/runtime",
             json={
@@ -717,11 +717,12 @@ class TestResetConfig:
 
         reset_resp = await client.post("/api/config/reset")
         assert reset_resp.status_code == 200
-        assert reset_resp.json()["runtime"]["worker_environment_variables"] == []
+        # worker_environment_variables must survive a config reset
+        assert len(reset_resp.json()["runtime"]["worker_environment_variables"]) == 2
 
         runtime_resp = await client.get("/api/config/runtime")
         assert runtime_resp.status_code == 200
-        assert runtime_resp.json()["worker_environment_variables"] == []
+        assert len(runtime_resp.json()["worker_environment_variables"]) == 2
 
 
 # ═══════════════════════════════════════════════════════════════════════════

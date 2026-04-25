@@ -24,7 +24,7 @@ from app.core.config_crypto import (
     encrypt_config_secret,
 )
 from app.database import AsyncSessionLocal
-from app.models import SystemConfig, WorkerEnvironmentVariable
+from app.models import SystemConfig
 
 logger = logging.getLogger(__name__)
 _runtime_config_last_check_monotonic = 0.0
@@ -169,10 +169,6 @@ async def reset_all_runtime_config_overrides(db: AsyncSession) -> None:
     """Remove all runtime configuration overrides."""
     result = await db.execute(select(SystemConfig))
     for row in result.scalars().all():
-        await db.delete(row)
-
-    worker_env_result = await db.execute(select(WorkerEnvironmentVariable))
-    for row in worker_env_result.scalars().all():
         await db.delete(row)
 
     await db.flush()
