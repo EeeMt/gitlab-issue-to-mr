@@ -34,6 +34,8 @@ router = APIRouter()
 class RuntimeWorkerEnvironmentVariableRequest(BaseModel):
     """One worker environment variable submitted via runtime config APIs."""
 
+    # Round-tripped for UI identity; persisted rows are still matched by key during replace.
+    id: Optional[int] = None
     key: str
     value: str
     is_secret: bool = False
@@ -42,6 +44,7 @@ class RuntimeWorkerEnvironmentVariableRequest(BaseModel):
 class RuntimeWorkerEnvironmentVariableResponse(BaseModel):
     """One worker environment variable returned by runtime config APIs."""
 
+    id: int
     key: str
     value: str
     is_secret: bool

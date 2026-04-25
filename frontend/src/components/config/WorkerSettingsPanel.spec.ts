@@ -153,7 +153,7 @@ describe('WorkerSettingsPanel', () => {
           {
             id: 7,
             key: 'SECRET_TOKEN',
-            value: 'server-secret-value',
+            value: '',
             is_secret: true,
             value_configured: true
           },
@@ -198,7 +198,7 @@ describe('WorkerSettingsPanel', () => {
         value_configured: true
       }
     ])
-    expect(wrapper.html()).not.toContain('server-secret-value')
+    expect((wrapper.find('input[type="password"]').element as HTMLInputElement).value).toBe('')
     expect(wrapper.find('input[type="password"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('config.configured')
   })

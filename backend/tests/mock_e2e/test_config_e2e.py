@@ -231,7 +231,13 @@ class TestGetRuntimeConfig:
         )
 
         assert patch_resp.status_code == 200
-        assert patch_resp.json()["worker_environment_variables"] == [
+        worker_environment_variables = patch_resp.json()["worker_environment_variables"]
+        assert all(isinstance(item["id"], int) for item in worker_environment_variables)
+        assert len({item["id"] for item in worker_environment_variables}) == 2
+        assert [
+            {key: value for key, value in item.items() if key != "id"}
+            for item in worker_environment_variables
+        ] == [
             {
                 "key": "PLAIN_TOKEN",
                 "value": "plain-123",
@@ -493,7 +499,10 @@ class TestUpdateRuntimeConfig:
         )
 
         assert second_resp.status_code == 200
-        assert second_resp.json()["worker_environment_variables"] == [
+        worker_environment_variables = second_resp.json()["worker_environment_variables"]
+        assert len(worker_environment_variables) == 1
+        assert isinstance(worker_environment_variables[0]["id"], int)
+        assert [{key: value for key, value in worker_environment_variables[0].items() if key != "id"}] == [
             {
                 "key": "SECRET_TOKEN",
                 "value": "",

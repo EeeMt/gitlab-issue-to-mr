@@ -72,6 +72,7 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
 
     def test_runtime_serialization_marks_empty_plain_value_as_configured(self) -> None:
         row = WorkerEnvironmentVariable(
+            id=12,
             key="EMPTY_PLAIN",
             value="",
             is_secret=False,
@@ -79,6 +80,7 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
 
         serialized = serialize_worker_environment_variable_for_runtime(row)
 
+        self.assertEqual(serialized["id"], 12)
         self.assertEqual(serialized["value"], "")
         self.assertTrue(serialized["value_configured"])
 

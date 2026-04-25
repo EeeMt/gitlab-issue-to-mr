@@ -6,6 +6,7 @@ import sys
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+
 from starlette.requests import Request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -167,6 +168,35 @@ class ConfigRuntimeAPITests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         mock_replace.assert_not_awaited()
+
+    def test_get_runtime_config_returns_worker_environment_variable_ids(self):
+        """GET /config/runtime should expose persisted worker env var ids."""
+        row = SimpleNamespace(
+            id=7,
+            key="SECRET_TOKEN",
+            value="encrypted-value",
+            is_secret=True,
+        )
+
+        with patch(
+            "app.api.config_runtime.list_worker_environment_variables",
+            new=AsyncMock(return_value=[row]),
+        ):
+            response = self.client.get("/api/config/runtime")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["worker_environment_variables"],
+            [
+                {
+                    "id": 7,
+                    "key": "SECRET_TOKEN",
+                    "value": "",
+                    "is_secret": True,
+                    "value_configured": True,
+                }
+            ],
+        )
 
     def test_patch_runtime_config_returns_500_for_unrelated_value_error(self):
         """PATCH /config/runtime should not report unrelated ValueErrors as 400."""

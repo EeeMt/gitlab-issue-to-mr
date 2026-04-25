@@ -85,6 +85,7 @@ def serialize_worker_environment_variable_for_runtime(
 ) -> dict[str, Any]:
     """Serialize one worker environment variable for runtime config responses."""
     return {
+        "id": row.id,
         "key": row.key,
         "value": "" if row.is_secret else row.value,
         "is_secret": row.is_secret,
