@@ -3,6 +3,31 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { h } from 'vue'
 import WorkerSettingsPanel from './WorkerSettingsPanel.vue'
 
+function createRuntimeConfig() {
+  return {
+    worker_volume_mounts:
+      '[{"host_path":"/host/cache","container_path":"/container/cache","mode":"rw"}]',
+    maven_cache_host_path: '/data/.m2/repository',
+    maven_settings_host_path: '/data/.m2/settings.xml',
+    worker_environment_variables: [
+      {
+        id: 7,
+        key: 'SECRET_TOKEN',
+        value: '',
+        is_secret: true,
+        value_configured: true
+      },
+      {
+        id: 8,
+        key: 'JAVA_OPTS',
+        value: '-Xmx512m',
+        is_secret: false,
+        value_configured: true
+      }
+    ]
+  }
+}
+
 const { mockGetConfig, mockUpdateConfig, mockMessage } = vi.hoisted(() => ({
   mockGetConfig: vi.fn(),
   mockUpdateConfig: vi.fn(),
@@ -144,30 +169,11 @@ describe('WorkerSettingsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockGetConfig.mockResolvedValue({
-      runtime: {
-        worker_volume_mounts:
-          '[{"host_path":"/host/cache","container_path":"/container/cache","mode":"rw"}]',
-        maven_cache_host_path: '/data/.m2/repository',
-        maven_settings_host_path: '/data/.m2/settings.xml',
-        worker_environment_variables: [
-          {
-            id: 7,
-            key: 'SECRET_TOKEN',
-            value: '',
-            is_secret: true,
-            value_configured: true
-          },
-          {
-            id: 8,
-            key: 'JAVA_OPTS',
-            value: '-Xmx512m',
-            is_secret: false,
-            value_configured: true
-          }
-        ]
-      }
+      runtime: createRuntimeConfig()
     })
-    mockUpdateConfig.mockResolvedValue({})
+    mockUpdateConfig.mockResolvedValue({
+      runtime: createRuntimeConfig()
+    })
   })
 
   it('loads configured secret environment variables without exposing stored values', async () => {
@@ -237,23 +243,6 @@ describe('WorkerSettingsPanel', () => {
         ]
       }
     })
-  })
-
-  it('clears newly entered secret values from local state after save while keeping configured status', async () => {
-    const wrapper = mount(WorkerSettingsPanel, {
-      props: {
-        isMobile: false,
-        reloadKey: 0
-      }
-    })
-
-    await flushPromises()
-
-    const vm = wrapper.vm as any
-    vm.workerFormValue.environment_variables[0].value = 'new-secret-value'
-
-    await vm.handleSaveWorker()
-
     expect(vm.workerFormValue.environment_variables).toEqual([
       {
         id: 7,
@@ -286,6 +275,107 @@ describe('WorkerSettingsPanel', () => {
         value_configured: true
       }
     ])
+  })
+
+  it('clears newly entered secret values from local state after save while keeping configured status', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    vm.workerFormValue.environment_variables[0].value = 'new-secret-value'
+    vm.workerFormValue.environment_variables.push({
+      key: 'NEW_SECRET',
+      value: 'brand-new-secret',
+      is_secret: true,
+      value_configured: false
+    })
+
+    mockUpdateConfig.mockResolvedValueOnce({
+      runtime: {
+        worker_volume_mounts:
+          '[{"host_path":"/host/cache","container_path":"/container/cache","mode":"rw"}]',
+        maven_cache_host_path: '/data/.m2/repository',
+        maven_settings_host_path: '/data/.m2/settings.xml',
+        worker_environment_variables: [
+          {
+            id: 7,
+            key: 'SECRET_TOKEN',
+            value: '',
+            is_secret: true,
+            value_configured: true
+          },
+          {
+            id: 19,
+            key: 'NEW_SECRET',
+            value: '',
+            is_secret: true,
+            value_configured: true
+          },
+          {
+            id: 8,
+            key: 'JAVA_OPTS',
+            value: '-Xmx512m',
+            is_secret: false,
+            value_configured: true
+          }
+        ]
+      }
+    })
+
+    await vm.handleSaveWorker()
+
+    expect(vm.workerFormValue.environment_variables).toEqual([
+      {
+        id: 7,
+        key: 'SECRET_TOKEN',
+        value: '',
+        is_secret: true,
+        value_configured: true
+      },
+      {
+        id: 19,
+        key: 'NEW_SECRET',
+        value: '',
+        is_secret: true,
+        value_configured: true
+      },
+      {
+        id: 8,
+        key: 'JAVA_OPTS',
+        value: '-Xmx512m',
+        is_secret: false,
+        value_configured: true
+      }
+    ])
+    expect(vm.lastLoadedWorker.environment_variables).toEqual([
+      {
+        id: 7,
+        key: 'SECRET_TOKEN',
+        value: '',
+        is_secret: true,
+        value_configured: true
+      },
+      {
+        id: 19,
+        key: 'NEW_SECRET',
+        value: '',
+        is_secret: true,
+        value_configured: true
+      },
+      {
+        id: 8,
+        key: 'JAVA_OPTS',
+        value: '-Xmx512m',
+        is_secret: false,
+        value_configured: true
+      }
+    ])
     expect(wrapper.text()).toContain('config.configured')
     expect(mockUpdateConfig).toHaveBeenCalledWith({
       runtime: {
@@ -304,6 +394,12 @@ describe('WorkerSettingsPanel', () => {
             key: 'JAVA_OPTS',
             value: '-Xmx512m',
             is_secret: false
+          },
+          {
+            id: undefined,
+            key: 'NEW_SECRET',
+            value: 'brand-new-secret',
+            is_secret: true
           }
         ]
       }

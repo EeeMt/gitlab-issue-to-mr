@@ -239,6 +239,7 @@ import { useI18n } from 'vue-i18n'
 import {
   getConfig,
   updateConfig,
+  type RuntimeConfig,
   type WorkerEnvironmentVariable,
   type WorkerEnvironmentVariableUpdate
 } from '../../api'
@@ -351,6 +352,15 @@ function serializeEnvironmentVariables(
     .filter((environmentVariable) => environmentVariable.key)
 }
 
+function mapRuntimeConfigToWorkerFormValue(runtime?: Partial<RuntimeConfig>): WorkerFormValue {
+  return {
+    mounts: parseMounts(runtime?.worker_volume_mounts ?? ''),
+    environment_variables: parseEnvironmentVariables(runtime?.worker_environment_variables),
+    maven_cache_host_path: runtime?.maven_cache_host_path || '',
+    maven_settings_host_path: runtime?.maven_settings_host_path || ''
+  }
+}
+
 function cloneWorkerFormValue(value: WorkerFormValue): WorkerFormValue {
   return {
     mounts: value.mounts.map((mount) => ({ ...mount })),
@@ -362,34 +372,12 @@ function cloneWorkerFormValue(value: WorkerFormValue): WorkerFormValue {
   }
 }
 
-function normalizeWorkerFormValue(value: WorkerFormValue): WorkerFormValue {
-  return {
-    ...cloneWorkerFormValue(value),
-    environment_variables: value.environment_variables.map((environmentVariable) => {
-      const valueConfigured = Boolean(
-        environmentVariable.value_configured || environmentVariable.value
-      )
-
-      return {
-        ...environmentVariable,
-        value: environmentVariable.is_secret ? '' : environmentVariable.value,
-        value_configured: valueConfigured
-      }
-    })
-  }
-}
-
 async function fetchConfig() {
   loading.value = true
   try {
     const config = await getConfig()
-    workerFormValue.value = {
-      mounts: parseMounts(config.runtime.worker_volume_mounts),
-      environment_variables: parseEnvironmentVariables(config.runtime.worker_environment_variables),
-      maven_cache_host_path: config.runtime.maven_cache_host_path || '',
-      maven_settings_host_path: config.runtime.maven_settings_host_path || ''
-    }
-    lastLoadedWorker.value = normalizeWorkerFormValue(workerFormValue.value)
+    workerFormValue.value = mapRuntimeConfigToWorkerFormValue(config.runtime)
+    lastLoadedWorker.value = cloneWorkerFormValue(workerFormValue.value)
   } catch {
     message.error(t('config.loadError'))
   } finally {
@@ -434,7 +422,7 @@ function removeEnvironmentVariable(index: number) {
 async function handleSaveWorker() {
   workerSaving.value = true
   try {
-    await updateConfig({
+    const savedConfig = await updateConfig({
       runtime: {
         worker_volume_mounts: serializeMounts(workerFormValue.value.mounts),
         worker_environment_variables: serializeEnvironmentVariables(
@@ -444,7 +432,7 @@ async function handleSaveWorker() {
         maven_settings_host_path: workerFormValue.value.maven_settings_host_path.trim()
       }
     })
-    workerFormValue.value = normalizeWorkerFormValue(workerFormValue.value)
+    workerFormValue.value = mapRuntimeConfigToWorkerFormValue(savedConfig.runtime)
     lastLoadedWorker.value = cloneWorkerFormValue(workerFormValue.value)
     message.success(t('config.saved'))
   } catch (error: any) {
