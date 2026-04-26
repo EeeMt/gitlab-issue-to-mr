@@ -92,18 +92,44 @@
                 </div>
               </template>
 
-              <template v-else>
-                <div class="onboarding-modal__workflow-list">
-                  <div
-                    v-for="item in workflowItems"
-                    :key="item.stepKey"
-                    class="onboarding-modal__workflow-item onboarding-modal__surface"
-                  >
-                    <div class="onboarding-modal__workflow-index">{{ t(item.stepKey) }}</div>
-                    <div>
-                      <h3 class="onboarding-modal__section-title">{{ t(item.titleKey) }}</h3>
-                      <p class="onboarding-modal__section-text">{{ t(item.bodyKey) }}</p>
+              <template v-else-if="activeStep.number === 3">
+                <div class="onboarding-modal__pipeline">
+                  <template v-for="(item, idx) in architectureItems" :key="item.stepKey">
+                    <div class="onboarding-modal__pipeline-card onboarding-modal__surface">
+                      <div class="onboarding-modal__pipeline-icon">
+                        <n-icon size="28"><component :is="architectureIcons[idx]" /></n-icon>
+                      </div>
+                      <h3 class="onboarding-modal__pipeline-title">{{ t(item.titleKey) }}</h3>
+                      <p class="onboarding-modal__pipeline-text">{{ t(item.bodyKey) }}</p>
                     </div>
+                    <div v-if="idx < architectureItems.length - 1" class="onboarding-modal__pipeline-connector">
+                      <n-icon size="20"><ChevronForwardOutline /></n-icon>
+                    </div>
+                  </template>
+                </div>
+              </template>
+
+              <template v-else>
+                <div class="onboarding-modal__carousel">
+                  <Transition :name="carouselTransition" mode="out-in">
+                    <div :key="carouselStep" class="onboarding-modal__carousel-slide">
+                      <div class="onboarding-modal__carousel-icon">
+                        <n-icon size="28"><component :is="workflowIcons[carouselStep]" /></n-icon>
+                      </div>
+                      <h3 class="onboarding-modal__section-title">{{ t(workflowItems[carouselStep].titleKey) }}</h3>
+                      <p class="onboarding-modal__section-text">{{ t(workflowItems[carouselStep].bodyKey) }}</p>
+                    </div>
+                  </Transition>
+                  <div class="onboarding-modal__carousel-thumbs">
+                    <button
+                      v-for="(item, idx) in workflowItems"
+                      :key="item.stepKey"
+                      :class="['onboarding-modal__carousel-thumb', { 'onboarding-modal__carousel-thumb--active': idx === carouselStep }]"
+                      @click="goToCarouselStep(idx)"
+                    >
+                      <span class="onboarding-modal__carousel-thumb-num">{{ idx + 1 }}</span>
+                      <span class="onboarding-modal__carousel-thumb-title">{{ t(item.titleKey) }}</span>
+                    </button>
                   </div>
                 </div>
               </template>
@@ -227,17 +253,40 @@
                 </div>
               </template>
 
+              <template v-else-if="step.number === 3">
+                <div class="onboarding-modal__pipeline">
+                  <template v-for="(item, idx) in architectureItems" :key="item.stepKey">
+                    <div class="onboarding-modal__pipeline-card onboarding-modal__surface">
+                      <div class="onboarding-modal__pipeline-icon">
+                        <n-icon size="28"><component :is="architectureIcons[idx]" /></n-icon>
+                      </div>
+                      <h3 class="onboarding-modal__pipeline-title">{{ t(item.titleKey) }}</h3>
+                      <p class="onboarding-modal__pipeline-text">{{ t(item.bodyKey) }}</p>
+                    </div>
+                    <div v-if="idx < architectureItems.length - 1" class="onboarding-modal__pipeline-connector">
+                      <n-icon size="20"><ChevronForwardOutline /></n-icon>
+                    </div>
+                  </template>
+                </div>
+              </template>
+
               <template v-else>
-                <div class="onboarding-modal__workflow-list">
-                  <div
-                    v-for="item in workflowItems"
-                    :key="item.stepKey"
-                    class="onboarding-modal__workflow-item onboarding-modal__surface"
-                  >
-                    <div class="onboarding-modal__workflow-index">{{ t(item.stepKey) }}</div>
-                    <div>
-                      <h3 class="onboarding-modal__section-title">{{ t(item.titleKey) }}</h3>
-                      <p class="onboarding-modal__section-text">{{ t(item.bodyKey) }}</p>
+                <div class="onboarding-modal__carousel">
+                  <div :key="carouselStep" class="onboarding-modal__carousel-slide">
+                    <div class="onboarding-modal__carousel-icon">
+                      <n-icon size="28"><component :is="workflowIcons[carouselStep]" /></n-icon>
+                    </div>
+                    <h3 class="onboarding-modal__section-title">{{ t(workflowItems[carouselStep].titleKey) }}</h3>
+                    <p class="onboarding-modal__section-text">{{ t(workflowItems[carouselStep].bodyKey) }}</p>
+                  </div>
+                  <div class="onboarding-modal__carousel-thumbs">
+                    <div
+                      v-for="(item, idx) in workflowItems"
+                      :key="item.stepKey"
+                      :class="['onboarding-modal__carousel-thumb', { 'onboarding-modal__carousel-thumb--active': idx === carouselStep }]"
+                    >
+                      <span class="onboarding-modal__carousel-thumb-num">{{ idx + 1 }}</span>
+                      <span class="onboarding-modal__carousel-thumb-title">{{ t(item.titleKey) }}</span>
                     </div>
                   </div>
                 </div>
@@ -281,9 +330,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch, type ComponentPublicInstance } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from 'vue'
 import { NButton, NCard, NIcon, NModal, NStep, NSteps, NThing } from 'naive-ui'
-import { SparklesOutline, GitMergeOutline, CalendarClearOutline, DocumentTextOutline, LayersOutline, CheckmarkDoneCircleOutline, PlayCircleOutline } from '@vicons/ionicons5'
+import { SparklesOutline, GitMergeOutline, CalendarClearOutline, DocumentTextOutline, LayersOutline, CheckmarkDoneCircleOutline, PlayCircleOutline, CubeOutline, CogOutline, ChevronForwardOutline, OptionsOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 
 interface OnboardingStep {
@@ -324,6 +373,9 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const currentStep = ref(0)
+const carouselStep = ref(0)
+const carouselTransition = ref('carousel-slide')
+let carouselTimer: ReturnType<typeof setInterval> | null = null
 const shellRef = ref<HTMLElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
 const shellHeight = ref<string | null>(null)
@@ -347,6 +399,13 @@ const steps: OnboardingStep[] = [
   },
   {
     number: 3,
+    titleKey: 'onboarding.architecture.title',
+    shortTitleKey: 'onboarding.architecture.shortTitle',
+    captionKey: 'onboarding.architecture.caption',
+    descriptionKey: 'onboarding.architecture.description',
+  },
+  {
+    number: 4,
     titleKey: 'onboarding.workflow.title',
     shortTitleKey: 'onboarding.workflow.shortTitle',
     captionKey: 'onboarding.workflow.caption',
@@ -366,6 +425,33 @@ const conceptItems: OnboardingContentItem[] = [
   {
     titleKey: 'onboarding.concepts.results.title',
     bodyKey: 'onboarding.concepts.results.body',
+  },
+]
+
+const architectureIcons = [OptionsOutline, CubeOutline, SparklesOutline, GitMergeOutline]
+
+const workflowIcons = [DocumentTextOutline, PlayCircleOutline, CheckmarkDoneCircleOutline]
+
+const architectureItems: OnboardingWorkflowItem[] = [
+  {
+    stepKey: 'onboarding.architecture.steps.first.step',
+    titleKey: 'onboarding.architecture.steps.first.title',
+    bodyKey: 'onboarding.architecture.steps.first.body',
+  },
+  {
+    stepKey: 'onboarding.architecture.steps.second.step',
+    titleKey: 'onboarding.architecture.steps.second.title',
+    bodyKey: 'onboarding.architecture.steps.second.body',
+  },
+  {
+    stepKey: 'onboarding.architecture.steps.third.step',
+    titleKey: 'onboarding.architecture.steps.third.title',
+    bodyKey: 'onboarding.architecture.steps.third.body',
+  },
+  {
+    stepKey: 'onboarding.architecture.steps.fourth.step',
+    titleKey: 'onboarding.architecture.steps.fourth.title',
+    bodyKey: 'onboarding.architecture.steps.fourth.body',
   },
 ]
 
@@ -423,6 +509,23 @@ const stepMotifs: Record<number, OnboardingMotif[]> = {
     },
   ],
   3: [
+    {
+      key: 'cog',
+      icon: CogOutline,
+      className: 'onboarding-modal__motif--cog',
+    },
+    {
+      key: 'cube',
+      icon: CubeOutline,
+      className: 'onboarding-modal__motif--cube',
+    },
+    {
+      key: 'sparkle',
+      icon: SparklesOutline,
+      className: 'onboarding-modal__motif--sparkle',
+    },
+  ],
+  4: [
     {
       key: 'schedule',
       icon: CalendarClearOutline,
@@ -530,6 +633,46 @@ watch(
     }
   },
 )
+
+function startCarousel() {
+  carouselStep.value = 0
+  stopCarousel()
+  carouselTimer = setInterval(() => {
+    carouselTransition.value = 'carousel-slide'
+    carouselStep.value = (carouselStep.value + 1) % 3
+  }, 3500)
+}
+
+function stopCarousel() {
+  if (carouselTimer !== null) {
+    clearInterval(carouselTimer)
+    carouselTimer = null
+  }
+}
+
+function goToCarouselStep(idx: number) {
+  if (idx === carouselStep.value) return
+  carouselTransition.value = idx > carouselStep.value ? 'carousel-slide' : 'carousel-slide-reverse'
+  carouselStep.value = idx
+  // Restart auto-rotate timer
+  stopCarousel()
+  carouselTimer = setInterval(() => {
+    carouselTransition.value = 'carousel-slide'
+    carouselStep.value = (carouselStep.value + 1) % 3
+  }, 3500)
+}
+
+watch(activeStep, (step) => {
+  if (step.number === 4) {
+    startCarousel()
+  } else {
+    stopCarousel()
+  }
+})
+
+onBeforeUnmount(() => {
+  stopCarousel()
+})
 
 function handleBeforeStepLeave() {
   const height = shellRef.value?.offsetHeight ?? 0
@@ -764,6 +907,36 @@ function handleCreateIssue() {
   transform: rotate(-8deg);
 }
 
+.onboarding-modal__motif--cog {
+  top: -40px;
+  right: -28px;
+  width: clamp(200px, 27vw, 290px);
+  height: clamp(200px, 27vw, 290px);
+  opacity: 0.09;
+  color: color-mix(in srgb, var(--n-text-color-3, #64748b) 40%, transparent);
+  transform: rotate(-6deg);
+}
+
+.onboarding-modal__motif--cube {
+  top: 40%;
+  left: -78px;
+  width: clamp(210px, 28vw, 300px);
+  height: clamp(210px, 28vw, 300px);
+  opacity: 0.08;
+  color: color-mix(in srgb, var(--n-primary-color, #18a058) 26%, transparent);
+  transform: translateY(-50%) rotate(12deg);
+}
+
+.onboarding-modal__motif--sparkle {
+  right: 8%;
+  bottom: -96px;
+  width: clamp(200px, 27vw, 290px);
+  height: clamp(200px, 27vw, 290px);
+  opacity: 0.08;
+  color: color-mix(in srgb, var(--n-primary-color, #18a058) 32%, transparent);
+  transform: rotate(10deg);
+}
+
 .onboarding-modal__header {
   display: flex;
   align-items: flex-start;
@@ -911,17 +1084,199 @@ function handleCreateIssue() {
   padding: 20px;
 }
 
-.onboarding-modal__workflow-list {
-  display: grid;
-  gap: 16px;
+/* ── Carousel (workflow step) ── */
+
+.onboarding-modal__carousel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  padding: 0;
 }
 
-.onboarding-modal__workflow-item {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+.onboarding-modal__carousel-slide {
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 16px;
-  padding: 18px 20px;
+  text-align: center;
+  max-width: 420px;
+}
+
+.onboarding-modal__carousel-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: rgba(24, 160, 88, 0.1);
+  color: var(--n-primary-color, #18a058);
+  margin-bottom: 16px;
+  position: relative;
+  z-index: 1;
+}
+
+.onboarding-modal__carousel-slide .onboarding-modal__section-title {
+  margin-bottom: 8px;
+}
+
+.onboarding-modal__carousel-slide .onboarding-modal__section-text {
+  margin-top: 0;
+}
+
+/* ── Thumbnails ── */
+
+.onboarding-modal__carousel-thumbs {
+  display: flex;
+  gap: 10px;
+}
+
+.onboarding-modal__carousel-thumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--n-border-color, rgba(148, 163, 184, 0.2));
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 0.3s, background 0.3s, box-shadow 0.3s;
+}
+
+.onboarding-modal__carousel-thumb:hover {
+  border-color: rgba(24, 160, 88, 0.3);
+}
+
+.onboarding-modal__carousel-thumb--active {
+  border-color: var(--n-primary-color, #18a058);
+  background: rgba(24, 160, 88, 0.06);
+  box-shadow: 0 0 0 1px rgba(24, 160, 88, 0.12);
+}
+
+.onboarding-modal__carousel-thumb-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(148, 163, 184, 0.6);
+  background: rgba(148, 163, 184, 0.08);
+  flex-shrink: 0;
+  transition: color 0.3s, background 0.3s;
+}
+
+.onboarding-modal__carousel-thumb--active .onboarding-modal__carousel-thumb-num {
+  color: #fff;
+  background: var(--n-primary-color, #18a058);
+}
+
+.onboarding-modal__carousel-thumb-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(148, 163, 184, 0.6);
+  white-space: nowrap;
+  transition: color 0.3s;
+}
+
+.onboarding-modal__carousel-thumb--active .onboarding-modal__carousel-thumb-title {
+  color: var(--n-primary-color, #18a058);
+}
+
+/* ── Transitions ── */
+
+.carousel-slide-enter-active,
+.carousel-slide-leave-active {
+  transition: all 0.3s ease;
+}
+
+.carousel-slide-enter-from {
+  opacity: 0;
+  transform: translateX(30px);
+}
+
+.carousel-slide-leave-to {
+  opacity: 0;
+  transform: translateX(-30px);
+}
+
+.carousel-slide-reverse-enter-active,
+.carousel-slide-reverse-leave-active {
+  transition: all 0.3s ease;
+}
+
+.carousel-slide-reverse-enter-from {
+  opacity: 0;
+  transform: translateX(-30px);
+}
+
+.carousel-slide-reverse-leave-to {
+  opacity: 0;
+  transform: translateX(30px);
+}
+
+/* ── Pipeline (architecture step) ── */
+
+.onboarding-modal__pipeline {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+}
+
+.onboarding-modal__pipeline-card {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 24px 16px 20px;
+  border-radius: 20px;
+  border: 1px solid var(--n-border-color, rgba(148, 163, 184, 0.25));
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
+}
+
+.onboarding-modal__pipeline-card.onboarding-modal__surface {
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.78), rgba(255, 255, 255, 0.62));
+  backdrop-filter: blur(14px);
+}
+
+.onboarding-modal__pipeline-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: rgba(24, 160, 88, 0.1);
+  color: var(--n-primary-color, #18a058);
+  margin-bottom: 14px;
+}
+
+.onboarding-modal__pipeline-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--n-text-color-1, #0f172a);
+}
+
+.onboarding-modal__pipeline-text {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--n-text-color-2, rgba(15, 23, 42, 0.68));
+}
+
+.onboarding-modal__pipeline-connector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  color: rgba(148, 163, 184, 0.45);
 }
 
 .onboarding-modal__section-title {
@@ -976,6 +1331,49 @@ function handleCreateIssue() {
   .onboarding-modal__hero,
   .onboarding-modal__concept-grid {
     grid-template-columns: 1fr;
+  }
+
+  .onboarding-modal__pipeline {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .onboarding-modal__pipeline-card {
+    flex-direction: row;
+    text-align: left;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .onboarding-modal__pipeline-icon {
+    flex-shrink: 0;
+    width: 48px;
+    height: 48px;
+    margin-bottom: 0;
+    border-radius: 14px;
+  }
+
+  .onboarding-modal__pipeline-connector {
+    width: 100%;
+    height: 32px;
+  }
+
+  .onboarding-modal__pipeline-connector :deep(svg) {
+    transform: rotate(90deg);
+  }
+
+  .onboarding-modal__carousel-thumbs {
+    gap: 6px;
+  }
+
+  .onboarding-modal__carousel-thumb {
+    padding: 6px 10px 6px 8px;
+    gap: 4px;
+  }
+
+  .onboarding-modal__carousel-thumb-title {
+    font-size: 11px;
   }
 
   .onboarding-modal__motif--ai {

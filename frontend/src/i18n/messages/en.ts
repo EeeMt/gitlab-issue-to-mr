@@ -191,6 +191,7 @@ const en = {
   },
   onboarding: {
     progressLabel: 'Step {current} of {total}',
+    stepIndicator: 'Step {n}',
     welcome: {
       title: 'Welcome to Codify',
       shortTitle: 'Welcome',
@@ -223,12 +224,39 @@ const en = {
         body: 'Each task produces logs, status changes, and code delivery details so you can review what happened and decide what to do next.',
       },
     },
+    architecture: {
+      title: 'How it works',
+      shortTitle: 'Architecture',
+      caption: 'System architecture',
+      description: 'Understand how Codify schedules tasks, runs AI code generation in containers, and delivers results.',
+      steps: {
+        first: {
+          step: '1',
+          title: 'Priority scheduling',
+          body: 'Tasks enter a P0/P1/P2 priority queue. The scheduler respects concurrency limits and serializes per-issue execution to avoid conflicts.',
+        },
+        second: {
+          step: '2',
+          title: 'Isolated execution',
+          body: 'Each task gets its own Docker container. The container clones the repo and invokes the AI engine in a clean environment.',
+        },
+        third: {
+          step: '3',
+          title: 'AI code generation',
+          body: 'Uses system tools, language ecosystems (Java, Python, Node), sub-agents, Skills, and MCP extensions.',
+        },
+        fourth: {
+          step: '4',
+          title: 'Automated delivery',
+          body: 'Generated code is committed, pushed to a branch, and a Merge Request is opened for team review.',
+        },
+      },
+    },
     workflow: {
       title: 'Follow the workflow',
       shortTitle: 'Workflow',
       caption: 'Create, run, review',
-      description: 'A simple loop helps teams move from a request to visible delivery without losing context.',
-      steps: {
+      description: 'A simple loop helps teams move from a request to visible delivery without losing context.',      steps: {
         first: {
           step: '1',
           title: 'Create an issue',

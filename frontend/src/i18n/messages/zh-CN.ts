@@ -189,6 +189,7 @@ const zhCN = {
   },
   onboarding: {
     progressLabel: '第 {current} 步，共 {total} 步',
+    stepIndicator: '第 {n} 步',
     welcome: {
       title: '欢迎使用 Codify',
       shortTitle: '欢迎',
@@ -219,6 +220,34 @@ const zhCN = {
       results: {
         title: '结果',
         body: '每个任务都会产生日志、状态变化和交付信息，方便你回顾执行情况并决定下一步。',
+      },
+    },
+    architecture: {
+      title: '系统如何工作',
+      shortTitle: '原理',
+      caption: '系统架构',
+      description: '了解 Codify 如何调度任务、在容器中运行 AI 代码生成并交付结果。',
+      steps: {
+        first: {
+          step: '1',
+          title: '优先级调度',
+          body: '任务按 P0/P1/P2 进入队列，调度器遵守并发上限，同一需求串行执行，避免资源冲突。',
+        },
+        second: {
+          step: '2',
+          title: '隔离执行',
+          body: '每个任务独占一个 Docker 容器。容器克隆代码仓库后，在干净环境中调用 AI 引擎。',
+        },
+        third: {
+          step: '3',
+          title: 'AI 代码生成',
+          body: '集成 Bash/Read/Write 等工具和 Java/Python/Node 生态，支持子代理、Skill、MCP 等扩展能力。',
+        },
+        fourth: {
+          step: '4',
+          title: '自动化交付',
+          body: '生成的代码自动提交推送至 Git 分支，并创建 Merge Request 等待团队审查。',
+        },
       },
     },
     workflow: {
