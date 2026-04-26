@@ -38,7 +38,6 @@
             :key="session.id"
             class="sessions-card"
             :bordered="false"
-            size="small"
           >
             <div class="sessions-card__header">
               <div>
