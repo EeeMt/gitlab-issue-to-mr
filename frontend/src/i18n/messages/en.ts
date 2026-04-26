@@ -221,8 +221,11 @@ const en = {
       },
       results: {
         title: 'Results',
-        body: 'Each task produces logs, status changes, and code delivery details so you can review what happened and decide what to do next.',
+        body: 'All tasks deliver commits to one branch and a single Merge Request, plus logs and status history for full traceability.',
       },
+      logHint: 'log',
+      commitA: 'commit a',
+      commitB: 'commit b',
     },
     architecture: {
       title: 'How it works',

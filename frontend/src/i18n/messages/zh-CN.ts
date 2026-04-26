@@ -219,8 +219,11 @@ const zhCN = {
       },
       results: {
         title: '结果',
-        body: '每个任务都会产生日志、状态变化和交付信息，方便你回顾执行情况并决定下一步。',
+        body: '所有任务的代码以多个 commit 推送到同一分支，合并为一个 Merge Request，同时提供完整的日志和状态记录。',
       },
+      logHint: '日志',
+      commitA: 'commit a',
+      commitB: 'commit b',
     },
     architecture: {
       title: '系统如何工作',

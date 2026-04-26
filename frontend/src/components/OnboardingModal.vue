@@ -80,15 +80,37 @@
               </template>
 
               <template v-else-if="activeStep.number === 2">
-                <div class="onboarding-modal__concept-grid">
-                  <n-thing
-                    v-for="item in conceptItems"
-                    :key="item.titleKey"
-                    class="onboarding-modal__concept-card onboarding-modal__surface"
-                    :title="t(item.titleKey)"
-                  >
-                    <p class="onboarding-modal__section-text">{{ t(item.bodyKey) }}</p>
-                  </n-thing>
+                <div class="onboarding-modal__concept-flow">
+                  <div class="concept-flow-card concept-flow-card--main onboarding-modal__surface">
+                    <div class="concept-flow-icon">
+                      <n-icon size="20"><component :is="conceptIcons[0]" /></n-icon>
+                    </div>
+                    <div>
+                      <h3 class="onboarding-modal__section-title">{{ t(conceptItems[0].titleKey) }}</h3>
+                      <p class="onboarding-modal__section-text">{{ t(conceptItems[0].bodyKey) }}</p>
+                    </div>
+                  </div>
+                  <div class="concept-flow-arrow"></div>
+                  <div class="concept-flow-card concept-flow-card--main onboarding-modal__surface">
+                    <div class="concept-flow-icon">
+                      <n-icon size="20"><component :is="conceptIcons[1]" /></n-icon>
+                    </div>
+                    <div>
+                      <h3 class="onboarding-modal__section-title">{{ t(conceptItems[1].titleKey) }} <span class="concept-flow-badge">1 … N</span></h3>
+                      <p class="onboarding-modal__section-text">{{ t(conceptItems[1].bodyKey) }}</p>
+                      <p class="concept-flow-meta">{{ t('onboarding.concepts.logHint') }} · commit</p>
+                    </div>
+                  </div>
+                  <div class="concept-flow-arrow"></div>
+                  <div class="concept-flow-card concept-flow-card--main onboarding-modal__surface">
+                    <div class="concept-flow-icon">
+                      <n-icon size="20"><component :is="conceptIcons[2]" /></n-icon>
+                    </div>
+                    <div>
+                      <h3 class="onboarding-modal__section-title">{{ t(conceptItems[2].titleKey) }} <span class="concept-flow-badge">MR</span></h3>
+                      <p class="onboarding-modal__section-text">{{ t(conceptItems[2].bodyKey) }}</p>
+                    </div>
+                  </div>
                 </div>
               </template>
 
@@ -241,15 +263,37 @@
               </template>
 
               <template v-else-if="step.number === 2">
-                <div class="onboarding-modal__concept-grid">
-                  <n-thing
-                    v-for="item in conceptItems"
-                    :key="item.titleKey"
-                    class="onboarding-modal__concept-card onboarding-modal__surface"
-                    :title="t(item.titleKey)"
-                  >
-                    <p class="onboarding-modal__section-text">{{ t(item.bodyKey) }}</p>
-                  </n-thing>
+                <div class="onboarding-modal__concept-flow">
+                  <div class="concept-flow-card concept-flow-card--main onboarding-modal__surface">
+                    <div class="concept-flow-icon">
+                      <n-icon size="20"><component :is="conceptIcons[0]" /></n-icon>
+                    </div>
+                    <div>
+                      <h3 class="onboarding-modal__section-title">{{ t(conceptItems[0].titleKey) }}</h3>
+                      <p class="onboarding-modal__section-text">{{ t(conceptItems[0].bodyKey) }}</p>
+                    </div>
+                  </div>
+                  <div class="concept-flow-arrow"></div>
+                  <div class="concept-flow-card concept-flow-card--main onboarding-modal__surface">
+                    <div class="concept-flow-icon">
+                      <n-icon size="20"><component :is="conceptIcons[1]" /></n-icon>
+                    </div>
+                    <div>
+                      <h3 class="onboarding-modal__section-title">{{ t(conceptItems[1].titleKey) }} <span class="concept-flow-badge">1 … N</span></h3>
+                      <p class="onboarding-modal__section-text">{{ t(conceptItems[1].bodyKey) }}</p>
+                      <p class="concept-flow-meta">{{ t('onboarding.concepts.logHint') }} · commit</p>
+                    </div>
+                  </div>
+                  <div class="concept-flow-arrow"></div>
+                  <div class="concept-flow-card concept-flow-card--main onboarding-modal__surface">
+                    <div class="concept-flow-icon">
+                      <n-icon size="20"><component :is="conceptIcons[2]" /></n-icon>
+                    </div>
+                    <div>
+                      <h3 class="onboarding-modal__section-title">{{ t(conceptItems[2].titleKey) }} <span class="concept-flow-badge">MR</span></h3>
+                      <p class="onboarding-modal__section-text">{{ t(conceptItems[2].bodyKey) }}</p>
+                    </div>
+                  </div>
                 </div>
               </template>
 
@@ -331,7 +375,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from 'vue'
-import { NButton, NCard, NIcon, NModal, NStep, NSteps, NThing } from 'naive-ui'
+import { NButton, NCard, NIcon, NModal, NStep, NSteps } from 'naive-ui'
 import { SparklesOutline, GitMergeOutline, CalendarClearOutline, DocumentTextOutline, LayersOutline, CheckmarkDoneCircleOutline, PlayCircleOutline, CubeOutline, CogOutline, ChevronForwardOutline, OptionsOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 
@@ -412,6 +456,8 @@ const steps: OnboardingStep[] = [
     descriptionKey: 'onboarding.workflow.description',
   },
 ]
+
+const conceptIcons = [DocumentTextOutline, PlayCircleOutline, CheckmarkDoneCircleOutline]
 
 const conceptItems: OnboardingContentItem[] = [
   {
@@ -1028,13 +1074,6 @@ function handleCreateIssue() {
 }
 
 .onboarding-modal__summary-card,
-.onboarding-modal__concept-card,
-.onboarding-modal__workflow-item {
-  border: 1px solid var(--n-border-color, rgba(148, 163, 184, 0.25));
-  border-radius: 20px;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
-}
-
 .onboarding-modal__surface {
   background: linear-gradient(180deg, rgba(248, 250, 252, 0.78), rgba(255, 255, 255, 0.62));
   backdrop-filter: blur(14px);
@@ -1044,8 +1083,7 @@ function handleCreateIssue() {
   padding: 20px;
 }
 
-.onboarding-modal__summary-label,
-.onboarding-modal__workflow-index {
+.onboarding-modal__summary-label {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1074,14 +1112,98 @@ function handleCreateIssue() {
   line-height: 1.55;
 }
 
-.onboarding-modal__concept-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+/* ── Concept flow (step 2) ── */
+
+.onboarding-modal__concept-flow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  max-width: 460px;
+  margin: 0 auto;
 }
 
-.onboarding-modal__concept-card {
-  padding: 20px;
+.concept-flow-card--main {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 20px;
+  border-radius: 16px;
+  border: 1px solid var(--n-border-color, rgba(148, 163, 184, 0.25));
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.concept-flow-card--main:nth-child(1) {
+  animation: concept-step-in 0.4s ease both;
+}
+
+.concept-flow-card--main:nth-child(3) {
+  animation: concept-step-in 0.4s 0.1s ease both;
+}
+
+.concept-flow-card--main:nth-child(5) {
+  animation: concept-step-in 0.4s 0.2s ease both;
+}
+
+.concept-flow-card--main .concept-flow-icon {
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.concept-flow-card--main .onboarding-modal__section-title {
+  margin-bottom: 4px;
+  font-size: 15px;
+}
+
+.concept-flow-card--main .onboarding-modal__section-text {
+  margin-top: 0;
+  font-size: 13px;
+}
+
+.concept-flow-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(24, 160, 88, 0.1);
+  color: var(--n-primary-color, #18a058);
+}
+
+.concept-flow-badge {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(24, 160, 88, 0.08);
+  color: var(--n-primary-color, #18a058);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.concept-flow-meta {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--n-text-color-3, rgba(15, 23, 42, 0.55));
+}
+
+/* Arrows */
+.concept-flow-arrow {
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 9px solid var(--n-primary-color, #18a058);
+  opacity: 0.25;
+  margin: 1px 0;
+}
+
+@keyframes concept-step-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* ── Carousel (workflow step) ── */
@@ -1329,8 +1451,12 @@ function handleCreateIssue() {
   }
 
   .onboarding-modal__hero,
-  .onboarding-modal__concept-grid {
+  .onboarding-modal__concept-flow {
     grid-template-columns: 1fr;
+  }
+
+  .concept-flow-card--main {
+    padding: 14px 16px;
   }
 
   .onboarding-modal__pipeline {
