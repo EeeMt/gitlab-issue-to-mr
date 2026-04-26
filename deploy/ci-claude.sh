@@ -234,27 +234,24 @@ process_stream() {
         esac
         ;;
 
-      # ── Tool execution results (delivered in user messages after each assistant turn)
-      # NOTE: This handler fires only when the API emits user-turn events in stream-json.
-      # Tested with MiniMax-M2.5 (minimaxi.com Anthropic API): user-turn events are NOT
-      # emitted, so CODIFY_TOOL_RESULT is never sent and tool outputs remain null.
-      # If a future API/model supports it, this handler will work as intended.
+      # ── Tool execution results (delivered in top-level user messages)
+      # stream-json emits these as {"type":"user","message":{"content":[...]}}.
       user)
         local count
-        count=$(printf '%s' "$line" | jq '[.content[]? | select(.type == "tool_result")] | length' 2>/dev/null || echo 0)
+        count=$(printf '%s' "$line" | jq '[.message.content[]? | select(.type == "tool_result")] | length' 2>/dev/null || echo 0)
         local i
         for (( i=0; i<count; i++ )); do
           local tool_use_id output is_error stored_out
           # Use filtered-array indexing to avoid off-by-one if content has mixed types
           tool_use_id=$(printf '%s' "$line" | jq -r --argjson i "$i" \
-            '[.content[]? | select(.type == "tool_result")][$i].tool_use_id // ""' 2>/dev/null)
+            '[.message.content[]? | select(.type == "tool_result")][$i].tool_use_id // ""' 2>/dev/null)
           output=$(printf '%s' "$line" | jq -r --argjson i "$i" \
-            '[.content[]? | select(.type == "tool_result")][$i] |
+            '[.message.content[]? | select(.type == "tool_result")][$i] |
             if (.content | type) == "array" then (.content | map(.text // "") | join(""))
             elif (.content | type) == "string" then .content
             else (.output // "") end' 2>/dev/null)
           is_error=$(printf '%s' "$line" | jq -r --argjson i "$i" \
-            '[.content[]? | select(.type == "tool_result")][$i].is_error // false' 2>/dev/null)
+            '[.message.content[]? | select(.type == "tool_result")][$i].is_error // false' 2>/dev/null)
 
           if [[ "$is_error" == "true" ]]; then
             _e "${RED}  ╰─ ❌ Error:  ${DIM}%.400s${RESET}\n" "$output"

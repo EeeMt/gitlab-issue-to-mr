@@ -646,8 +646,13 @@ watch(() => props.terminalHtml, async () => {
 }
 
 .event-collapse {
-  margin-top: 4px;
-  margin-left: 28px;
+  margin: 8px 0 8px 28px;
+  --n-item-margin: 8px 0 0 0;
+  --n-title-padding: 8px 0;
+}
+
+.event-collapse :deep(.n-collapse-item__content-inner) {
+  padding-top: 8px;
 }
 
 /* Expandable content bodies */
