@@ -1554,8 +1554,12 @@ onBeforeUnmount(() => {
   height: 100%;
 }
 
+.monitor-card,
 .monitor-summary-card {
   border-radius: var(--app-card-radius);
+}
+
+.monitor-summary-card {
   background: var(--app-summary-card-background);
 }
 
