@@ -8,7 +8,7 @@
   margin-bottom: 0;
   border-radius: var(--app-card-radius);
   box-shadow: var(--app-card-shadow-soft);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.96));
+  background: #fff;
 }
 
 .config-form-card .n-card-header {
