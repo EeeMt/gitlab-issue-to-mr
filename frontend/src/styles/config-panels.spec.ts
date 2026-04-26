@@ -14,4 +14,8 @@ describe('config-panels modal styling', () => {
     expect(cssSource).toMatch(/\.config-form-card\s*\{[\s\S]*background:\s*#fff;/)
     expect(cssSource).not.toContain('rgba(255, 255, 255, 0.92)')
   })
+
+  it('does not cast a drop shadow between stacked config cards', () => {
+    expect(cssSource).toMatch(/\.config-form-card\s*\{[\s\S]*box-shadow:\s*none;/)
+  })
 })

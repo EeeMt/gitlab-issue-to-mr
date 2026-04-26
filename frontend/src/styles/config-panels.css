@@ -7,7 +7,7 @@
 .config-form-card {
   margin-bottom: 0;
   border-radius: var(--app-card-radius);
-  box-shadow: var(--app-card-shadow-soft);
+  box-shadow: none;
   background: #fff;
 }
 
