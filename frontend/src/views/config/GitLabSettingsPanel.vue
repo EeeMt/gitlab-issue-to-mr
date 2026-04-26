@@ -1,17 +1,17 @@
 <template>
   <div class="config-layout__main">
-    <n-form ref="gitlabFormRef" :model="formValue" :rules="gitlabRules" label-placement="top">
-      <!-- Card 1: GitLab Connection -->
-      <n-card id="gitlab-settings" class="config-form-card" :bordered="false">
-        <template #header>
-          <div class="config-card-header">
-            <div>
-              <div class="config-card-header__title">{{ t('config.gitlabIntegration') }}</div>
-              <div class="config-card-header__subtitle">{{ t('config.gitlabIntegrationSubtitle') }}</div>
-            </div>
+    <!-- Card 1: GitLab Connection -->
+    <n-card id="gitlab-settings" class="config-form-card" :bordered="false">
+      <template #header>
+        <div class="config-card-header">
+          <div>
+            <div class="config-card-header__title">{{ t('config.gitlabIntegration') }}</div>
+            <div class="config-card-header__subtitle">{{ t('config.gitlabIntegrationSubtitle') }}</div>
           </div>
-        </template>
+        </div>
+      </template>
 
+      <n-form ref="gitlabFormRef" :model="formValue" :rules="gitlabRules" label-placement="top">
         <div class="config-form__section">
           <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
             <n-gi>
@@ -54,71 +54,6 @@
                 </template>
               </n-form-item>
             </n-gi>
-          </n-grid>
-        </div>
-
-        <div class="config-card-actions">
-          <n-space :size="12" wrap>
-            <n-button
-              type="primary"
-              @click="handleSaveSection('gitlab')"
-              :loading="sectionSaving.gitlab"
-              :disabled="isGitLabBusy || !isSectionDirty('gitlab')"
-            >
-              {{ t('config.saveChanges') }}
-            </n-button>
-            <n-button
-              secondary
-              @click="resetSection('gitlab')"
-              :disabled="isGitLabBusy || !isSectionDirty('gitlab')"
-            >
-              {{ t('config.revertChanges') }}
-            </n-button>
-            <n-button
-              @click="handleTestGitLab"
-              :loading="gitlabTesting"
-              :disabled="isGitLabBusy"
-            >
-              {{ t('config.testGitlabConnection') }}
-            </n-button>
-            <n-button
-              @click="handleInvalidateProjectCache"
-              :loading="projectCacheInvalidating"
-              :disabled="isGitLabBusy"
-            >
-              {{ t('config.invalidateProjectCache') }}
-            </n-button>
-            <n-button
-              @click="handleClearSecret('gitlab_bot_token')"
-              :disabled="isGitLabBusy || !formValue.gitlab_bot_token_configured"
-            >
-              {{ t('config.clearGitlabBotToken') }}
-            </n-button>
-          </n-space>
-          <n-alert
-            v-if="gitlabTestState"
-            :type="gitlabTestState.type"
-            :show-icon="false"
-            class="config-actions__alert"
-          >
-            {{ gitlabTestState.message }}
-          </n-alert>
-        </div>
-      </n-card>
-
-      <!-- Card 2: Webhook Configuration -->
-      <n-card id="webhook-configuration" class="config-form-card" :bordered="false">
-        <template #header>
-          <div class="config-card-header">
-            <div>
-              <div class="config-card-header__title">{{ t('config.webhookConfiguration') }}</div>
-              <div class="config-card-header__subtitle">{{ t('config.webhookConfigurationSubtitle') }}</div>
-            </div>
-          </div>
-        </template>
-
-        <div class="config-form__section">
-          <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
             <n-gi>
               <n-form-item :label="t('config.gitlabAdminTokenStatus')">
                 <n-tag :type="formValue.gitlab_admin_token_configured ? 'success' : 'warning'" round>
@@ -126,16 +61,6 @@
                 </n-tag>
                 <template #feedback>
                   {{ t('config.gitlabAdminTokenStatusHint') }}
-                </template>
-              </n-form-item>
-            </n-gi>
-            <n-gi>
-              <n-form-item :label="t('config.gitlabWebhookSecretStatus')">
-                <n-tag :type="formValue.gitlab_webhook_secret_configured ? 'success' : 'warning'" round>
-                  {{ formValue.gitlab_webhook_secret_configured ? t('config.configured') : t('config.missing') }}
-                </n-tag>
-                <template #feedback>
-                  {{ t('config.gitlabWebhookSecretStatusHint') }}
                 </template>
               </n-form-item>
             </n-gi>
@@ -154,6 +79,89 @@
                 />
                 <template #feedback>
                   {{ t('config.gitlabAdminTokenHint') }}
+                </template>
+              </n-form-item>
+            </n-gi>
+          </n-grid>
+        </div>
+      </n-form>
+
+      <div class="config-card-actions">
+        <n-space :size="12" wrap>
+          <n-button
+            type="primary"
+            @click="handleSaveSection('gitlab')"
+            :loading="sectionSaving.gitlab"
+            :disabled="isGitLabBusy || !isSectionDirty('gitlab')"
+          >
+            {{ t('config.saveChanges') }}
+          </n-button>
+          <n-button
+            secondary
+            @click="resetSection('gitlab')"
+            :disabled="isGitLabBusy || !isSectionDirty('gitlab')"
+          >
+            {{ t('config.revertChanges') }}
+          </n-button>
+          <n-button
+            @click="handleTestGitLab"
+            :loading="gitlabTesting"
+            :disabled="isGitLabBusy"
+          >
+            {{ t('config.testGitlabConnection') }}
+          </n-button>
+          <n-button
+            @click="handleInvalidateProjectCache"
+            :loading="projectCacheInvalidating"
+            :disabled="isGitLabBusy"
+          >
+            {{ t('config.invalidateProjectCache') }}
+          </n-button>
+          <n-button
+            @click="handleClearSecret('gitlab_bot_token')"
+            :disabled="isGitLabBusy || !formValue.gitlab_bot_token_configured"
+          >
+            {{ t('config.clearGitlabBotToken') }}
+          </n-button>
+          <n-button
+            @click="handleClearSecret('gitlab_admin_token')"
+            :disabled="isGitLabBusy || !formValue.gitlab_admin_token_configured"
+          >
+            {{ t('config.clearGitlabAdminToken') }}
+          </n-button>
+        </n-space>
+        <n-alert
+          v-if="gitlabTestState"
+          :type="gitlabTestState.type"
+          :show-icon="false"
+          class="config-actions__alert"
+        >
+          {{ gitlabTestState.message }}
+        </n-alert>
+      </div>
+    </n-card>
+
+    <!-- Card 2: Webhook Configuration -->
+    <n-card id="webhook-configuration" class="config-form-card" :bordered="false">
+      <template #header>
+        <div class="config-card-header">
+          <div>
+            <div class="config-card-header__title">{{ t('config.webhookConfiguration') }}</div>
+            <div class="config-card-header__subtitle">{{ t('config.webhookConfigurationSubtitle') }}</div>
+          </div>
+        </div>
+      </template>
+
+      <n-form :model="formValue" label-placement="top">
+        <div class="config-form__section">
+          <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+            <n-gi>
+              <n-form-item :label="t('config.gitlabWebhookSecretStatus')">
+                <n-tag :type="formValue.gitlab_webhook_secret_configured ? 'success' : 'warning'" round>
+                  {{ formValue.gitlab_webhook_secret_configured ? t('config.configured') : t('config.missing') }}
+                </n-tag>
+                <template #feedback>
+                  {{ t('config.gitlabWebhookSecretStatusHint') }}
                 </template>
               </n-form-item>
             </n-gi>
@@ -189,7 +197,6 @@
                 v-model:value="webhookSearch"
                 clearable
                 :placeholder="t('config.webhookOverviewSearchPlaceholder')"
-                class="config-form__input"
                 style="width: 200px"
               />
               <n-button
@@ -257,56 +264,50 @@
             </div>
           </n-spin>
         </div>
+      </n-form>
 
-        <div class="config-card-actions">
-          <n-space :size="12" wrap>
-            <n-button
-              type="primary"
-              @click="handleSaveSection('gitlab')"
-              :loading="sectionSaving.gitlab"
-              :disabled="isGitLabBusy || !isSectionDirty('gitlab')"
-            >
-              {{ t('config.saveChanges') }}
-            </n-button>
-            <n-button
-              secondary
-              @click="resetSection('gitlab')"
-              :disabled="isGitLabBusy || !isSectionDirty('gitlab')"
-            >
-              {{ t('config.revertChanges') }}
-            </n-button>
-            <n-button
-              @click="handleClearSecret('gitlab_admin_token')"
-              :disabled="isGitLabBusy || !formValue.gitlab_admin_token_configured"
-            >
-              {{ t('config.clearGitlabAdminToken') }}
-            </n-button>
-            <n-button
-              @click="handleClearSecret('gitlab_webhook_secret')"
-              :disabled="isGitLabBusy || !formValue.gitlab_webhook_secret_configured"
-            >
-              {{ t('config.clearGitlabWebhookSecret') }}
-            </n-button>
-          </n-space>
-          <n-alert
-            v-if="webhookSetupState"
-            :type="webhookSetupState.type"
-            :show-icon="false"
-            class="config-actions__alert"
+      <div class="config-card-actions">
+        <n-space :size="12" wrap>
+          <n-button
+            type="primary"
+            @click="handleSaveSection('gitlab')"
+            :loading="sectionSaving.gitlab"
+            :disabled="isGitLabBusy || !isSectionDirty('gitlab')"
           >
-            {{ webhookSetupState.message }}
-          </n-alert>
-          <n-alert
-            v-if="webhookStatusState"
-            :type="webhookStatusState.type"
-            :show-icon="false"
-            class="config-actions__alert"
+            {{ t('config.saveChanges') }}
+          </n-button>
+          <n-button
+            secondary
+            @click="resetSection('gitlab')"
+            :disabled="isGitLabBusy || !isSectionDirty('gitlab')"
           >
-            {{ webhookStatusState.message }}
-          </n-alert>
-        </div>
-      </n-card>
-    </n-form>
+            {{ t('config.revertChanges') }}
+          </n-button>
+          <n-button
+            @click="handleClearSecret('gitlab_webhook_secret')"
+            :disabled="isGitLabBusy || !formValue.gitlab_webhook_secret_configured"
+          >
+            {{ t('config.clearGitlabWebhookSecret') }}
+          </n-button>
+        </n-space>
+        <n-alert
+          v-if="webhookSetupState"
+          :type="webhookSetupState.type"
+          :show-icon="false"
+          class="config-actions__alert"
+        >
+          {{ webhookSetupState.message }}
+        </n-alert>
+        <n-alert
+          v-if="webhookStatusState"
+          :type="webhookStatusState.type"
+          :show-icon="false"
+          class="config-actions__alert"
+        >
+          {{ webhookStatusState.message }}
+        </n-alert>
+      </div>
+    </n-card>
   </div>
 </template>
 
