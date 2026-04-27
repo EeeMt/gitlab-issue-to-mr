@@ -98,6 +98,8 @@ def _mock_admin_user():
     user.id = 1
     user.username = "testadmin"
     user.gitlab_user_id = 100
+    user.display_name = "Test Admin"
+    user.email = "testadmin@example.com"
     user.platform_role = "platform_admin"
     return user
 
