@@ -46,6 +46,7 @@ const en = {
     analytics: 'Analytics',
     config: 'Configuration',
     accessManagement: 'Access Management',
+    usageManagement: 'Usage Management',
     oidcDiagnostics: 'OIDC Diagnostics',
     workspace: 'Workspace',
     insights: 'Insights & Operations',
@@ -57,7 +58,17 @@ const en = {
     signedInWithGitlab: 'Signed in with GitLab',
     productTour: 'Product tour',
     reopenOnboarding: 'Open product tour again',
-    logout: 'Logout'
+    logout: 'Logout',
+    usageNormal: 'Usage within limits',
+    usageNearLimit: 'Usage nearing limits',
+    usageOverLimit: 'Usage over limits',
+    dailyTokens: 'Daily tokens',
+    weeklyTokens: 'Weekly tokens',
+    dailyTasks: 'Daily tasks',
+    weeklyTasks: 'Weekly tasks',
+    dailyReset: 'Daily reset',
+    weeklyReset: 'Weekly reset',
+    usageUnlimited: 'Unlimited'
   },
   status: {
     pending: 'Pending',
@@ -604,6 +615,17 @@ const en = {
     manualTaskBranchConflict:
       'Source branch and target branch must be different for manual tasks',
     failedToCreateTask: 'Failed to create task',
+    usageLimitExceededTitle: 'Usage limit exceeded',
+    usageLimitUsed: 'Used',
+    usageLimitReset: 'Resets',
+    usageWindow: {
+      daily: 'Daily',
+      weekly: 'Weekly'
+    },
+    usageMetric: {
+      tokens: 'Tokens',
+      tasks: 'Tasks'
+    },
     createMR: 'Create Merge Request',
     createMRTooltip: 'When disabled, only pushes the branch without creating an MR',
     priorityP0Desc: 'Urgent',
@@ -1395,6 +1417,31 @@ const en = {
     revokedSessions: 'Revoked {count} active session(s) for \\@{username}',
     noActiveSessions: 'No active sessions found for \\@{username}',
     failedToRevokeSessions: 'Failed to revoke user sessions'
+  },
+  usageManagement: {
+    title: 'Usage Management',
+    subtitle: 'Review system defaults, inspect per-user usage, and manage quota overrides.',
+    intro: 'Usage is tracked at task granularity. Limits can inherit, override, or be set to unlimited.',
+    reload: 'Reload',
+    loading: 'Loading usage limits...',
+    systemDefaults: 'System defaults',
+    userOverrides: 'User overrides',
+    searchPlaceholder: 'Search users by name or username',
+    saveDefaults: 'Save defaults',
+    saveUser: 'Save override',
+    totalUsers: 'Tracked Users',
+    customOverrideUsers: 'Users with Overrides',
+    overLimitUsers: 'Users Over Limit',
+    dailyReset: 'Daily reset',
+    weeklyReset: 'Weekly reset',
+    modeInherit: 'Inherit',
+    modeCustom: 'Custom',
+    modeUnlimited: 'Unlimited',
+    failedToLoad: 'Failed to load usage limits',
+    savedDefaults: 'Saved usage defaults',
+    failedToSaveDefaults: 'Failed to save usage defaults',
+    savedUser: 'Saved usage override for \\@{username}',
+    failedToSaveUser: 'Failed to save usage override'
   },
   oidcDiagnostics: {
     title: 'OIDC Diagnostics',

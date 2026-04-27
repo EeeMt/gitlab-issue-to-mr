@@ -61,6 +61,88 @@ export interface ApiError {
   detail?: string
 }
 
+export type UsageSeverity = 'normal' | 'near_limit' | 'over_limit'
+
+export interface UsageLimitValue {
+  mode: 'inherit' | 'custom' | 'unlimited'
+  value: number | null
+}
+
+export interface CurrentUserUsageSummary {
+  user_id: number
+  usage: {
+    daily_tokens: number
+    weekly_tokens: number
+    daily_tasks: number
+    weekly_tasks: number
+  }
+  limits: {
+    daily_tokens: UsageLimitValue
+    weekly_tokens: UsageLimitValue
+    daily_tasks: UsageLimitValue
+    weekly_tasks: UsageLimitValue
+  }
+  reset_at: {
+    daily: string
+    weekly: string
+  }
+  is_over_limit: boolean
+  severity: UsageSeverity
+}
+
+export interface AdminUsageSummary {
+  daily_tokens: number
+  weekly_tokens: number
+  daily_tasks: number
+  weekly_tasks: number
+}
+
+export interface UsageResetAt {
+  daily: string
+  weekly: string
+}
+
+export interface AdminUsageLimitPolicy {
+  daily_tokens: UsageLimitValue
+  weekly_tokens: UsageLimitValue
+  daily_tasks: UsageLimitValue
+  weekly_tasks: UsageLimitValue
+}
+
+export interface AdminUsageLimitDefaultValue {
+  mode: 'custom' | 'unlimited'
+  value: number | null
+}
+
+export interface AdminUsageLimitUserValue {
+  mode: 'inherit' | 'custom' | 'unlimited'
+  value: number | null
+}
+
+export interface AdminUsageLimitDefaultUpdateRequest {
+  daily_tokens: AdminUsageLimitDefaultValue
+  weekly_tokens: AdminUsageLimitDefaultValue
+  daily_tasks: AdminUsageLimitDefaultValue
+  weekly_tasks: AdminUsageLimitDefaultValue
+}
+
+export interface AdminUsageLimitUserUpdateRequest {
+  daily_tokens: AdminUsageLimitUserValue
+  weekly_tokens: AdminUsageLimitUserValue
+  daily_tasks: AdminUsageLimitUserValue
+  weekly_tasks: AdminUsageLimitUserValue
+}
+
+export interface AdminUsageLimitUserRow {
+  user_id: number
+  username: string
+  display_name: string | null
+  usage: AdminUsageSummary
+  limits: AdminUsageLimitPolicy
+  overrides: AdminUsageLimitPolicy
+  reset_at: UsageResetAt
+}
+
 // Issue types
 export interface Issue {
   id: number
@@ -1166,6 +1248,31 @@ export async function revokeAdminUserSessions(userId: number): Promise<RevokeUse
   return response.data
 }
 
+export async function getAdminUsageLimitDefault(): Promise<AdminUsageLimitPolicy> {
+  const response = await api.get('/admin/usage-limits/default')
+  return response.data
+}
+
+export async function updateAdminUsageLimitDefault(
+  payload: AdminUsageLimitDefaultUpdateRequest
+): Promise<AdminUsageLimitPolicy> {
+  const response = await api.patch('/admin/usage-limits/default', payload)
+  return response.data
+}
+
+export async function listAdminUsageLimitUsers(): Promise<AdminUsageLimitUserRow[]> {
+  const response = await api.get('/admin/usage-limits/users')
+  return response.data
+}
+
+export async function updateAdminUsageLimitUser(
+  userId: number,
+  payload: AdminUsageLimitUserUpdateRequest
+): Promise<AdminUsageLimitUserRow> {
+  const response = await api.patch(`/admin/usage-limits/users/${userId}`, payload)
+  return response.data
+}
+
 export async function logout(): Promise<void> {
   await api.post('/auth/logout')
 }
@@ -1293,6 +1400,11 @@ export async function deleteProvider(id: number): Promise<void> {
 
 export async function setDefaultProvider(id: number): Promise<AIProvider> {
   const { data } = await api.post(`/providers/${id}/set-default`)
+  return data
+}
+
+export async function getMyUsageSummary(): Promise<CurrentUserUsageSummary> {
+  const { data } = await api.get('/usage/me')
   return data
 }
 

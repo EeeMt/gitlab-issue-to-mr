@@ -1,10 +1,24 @@
 """Database models for the application."""
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Optional, List
 
-from sqlalchemy import Boolean, DateTime, Enum as SQLEnum, ForeignKey, Index, Integer, JSON, String, Text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Enum as SQLEnum,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -229,6 +243,79 @@ class TaskLog(Base):
     # Timestamp
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow
+    )
+
+
+class UsageLimitPolicy(Base):
+    """Quota policy row for system defaults or per-user overrides."""
+
+    __tablename__ = "usage_limit_policies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
+    daily_tokens_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="custom")
+    daily_tokens_value: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    weekly_tokens_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="custom")
+    weekly_tokens_value: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    daily_tasks_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="custom")
+    daily_tasks_value: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    weekly_tasks_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="custom")
+    weekly_tasks_value: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_usage_limit_policies_user_id"),
+        Index(
+            "uq_usage_limit_policies_system_default",
+            "scope_type",
+            unique=True,
+            postgresql_where=text("scope_type = 'system_default' AND user_id IS NULL"),
+            sqlite_where=text("scope_type = 'system_default' AND user_id IS NULL"),
+        ),
+    )
+
+
+class TaskUsageLedger(Base):
+    """Task-level usage row used for daily and weekly quota aggregation."""
+
+    __tablename__ = "task_usage_ledger"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    task_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    timezone_day: Mapped[date] = mapped_column(Date, nullable=False)
+    timezone_week_start: Mapped[date] = mapped_column(Date, nullable=False)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    task_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint("task_id", name="uq_task_usage_ledger_task_id"),
+        CheckConstraint("task_count = 1", name="ck_task_usage_ledger_task_count_is_one"),
+        Index("ix_task_usage_ledger_completed_at", "completed_at"),
+        Index("ix_task_usage_ledger_user_day", "user_id", "timezone_day"),
+        Index("ix_task_usage_ledger_user_week", "user_id", "timezone_week_start"),
     )
 
 

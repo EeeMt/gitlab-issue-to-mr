@@ -55,6 +55,7 @@ import {
   getBranches,
   getAuthStatus
 } from './index'
+import * as apiModule from './index'
 
 describe('API functions', () => {
   beforeEach(() => {
@@ -381,6 +382,50 @@ describe('API functions', () => {
 
       // With X-Skip-Auth-Redirect header, location.assign should NOT be called
       expect(assignMock).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('admin usage limits', () => {
+    it('should call /api/admin/usage-limits/default', async () => {
+      const getAdminUsageLimitDefault = (
+        apiModule as unknown as Record<string, () => Promise<unknown>>
+      ).getAdminUsageLimitDefault
+      mockAxiosGet.mockResolvedValue({ data: { daily_tokens: { mode: 'custom', value: 1000 } } })
+
+      expect(typeof getAdminUsageLimitDefault).toBe('function')
+      await getAdminUsageLimitDefault?.()
+
+      expect(mockAxiosGet).toHaveBeenCalledWith('/admin/usage-limits/default')
+    })
+
+    it('should call /api/admin/usage-limits/users', async () => {
+      const listAdminUsageLimitUsers = (
+        apiModule as unknown as Record<string, () => Promise<unknown>>
+      ).listAdminUsageLimitUsers
+      mockAxiosGet.mockResolvedValue({ data: [] })
+
+      expect(typeof listAdminUsageLimitUsers).toBe('function')
+      await listAdminUsageLimitUsers?.()
+
+      expect(mockAxiosGet).toHaveBeenCalledWith('/admin/usage-limits/users')
+    })
+
+    it('should patch /api/admin/usage-limits/users/:id', async () => {
+      const updateAdminUsageLimitUser = (
+        apiModule as unknown as Record<string, (userId: number, payload: unknown) => Promise<unknown>>
+      ).updateAdminUsageLimitUser
+      const payload = {
+        daily_tokens: { mode: 'inherit', value: null },
+        weekly_tokens: { mode: 'custom', value: 4000 },
+        daily_tasks: { mode: 'unlimited', value: null },
+        weekly_tasks: { mode: 'inherit', value: null },
+      }
+      mockAxiosPatch.mockResolvedValue({ data: { user_id: 7 } })
+
+      expect(typeof updateAdminUsageLimitUser).toBe('function')
+      await updateAdminUsageLimitUser?.(7, payload)
+
+      expect(mockAxiosPatch).toHaveBeenCalledWith('/admin/usage-limits/users/7', payload)
     })
   })
 })

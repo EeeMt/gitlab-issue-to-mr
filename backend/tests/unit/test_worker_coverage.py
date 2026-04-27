@@ -1335,6 +1335,76 @@ class TestExecuteTask(unittest.TestCase):
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_execute_task_upserts_usage_ledger_for_finished_task(self, mock_notify, mock_get_settings):
+        """Finished tasks with parsed usage should be written to the quota ledger."""
+        mock_get_settings.return_value = _make_settings()
+        mock_gitlab = MagicMock()
+        mock_gitlab.normalize_web_url.side_effect = lambda x: x
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+
+        mock_docker = MagicMock()
+        mock_docker.create_container.return_value = MagicMock(id="ctr-usage")
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(target_branch="main", merge_request_iid=None, initiator_user_id=7)
+        db = _make_db(task)
+
+        fake_logs = (
+            "http://gitlab.example.com/project/-/merge_requests/42\n"
+            "CODIFY_DIFF:+10-5\n"
+            'CODIFY_STATS:{"input_tokens":100,"output_tokens":50}\n'
+        )
+
+        with (
+            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))),
+            patch("app.core.worker.upsert_task_usage_ledger", new=AsyncMock()) as mock_upsert,
+        ):
+            result = asyncio.run(worker.execute_task(db, task.id))
+
+        self.assertTrue(result)
+        mock_upsert.assert_awaited_once_with(db, task)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_execute_task_upserts_usage_ledger_when_post_parse_commit_fails(
+        self,
+        mock_notify,
+        mock_get_settings,
+    ):
+        """Post-parse failures should still attempt quota ledger persistence."""
+        mock_get_settings.return_value = _make_settings()
+        mock_gitlab = MagicMock()
+        mock_gitlab.normalize_web_url.side_effect = lambda x: x
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+
+        mock_docker = MagicMock()
+        mock_docker.create_container.return_value = MagicMock(id="ctr-usage-fail")
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(target_branch=None, merge_request_iid=None, initiator_user_id=7)
+        db = _make_db(task)
+        db.commit = AsyncMock(side_effect=[None, None, RuntimeError("post-parse commit failed"), None])
+
+        fake_logs = (
+            "http://gitlab.example.com/project/-/merge_requests/42\n"
+            "CODIFY_DIFF:+10-5\n"
+            'CODIFY_STATS:{"input_tokens":100,"output_tokens":50}\n'
+        )
+
+        with (
+            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))),
+            patch("app.core.worker.upsert_task_usage_ledger", new=AsyncMock()) as mock_upsert,
+        ):
+            result = asyncio.run(worker.execute_task(db, task.id))
+
+        self.assertFalse(result)
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        mock_upsert.assert_awaited_once_with(db, task)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
     @patch('app.core.worker.build_worker_environment_map')
     @patch('app.core.worker.list_worker_environment_variables', new_callable=AsyncMock)
     def test_execute_task_loads_persisted_custom_environment(

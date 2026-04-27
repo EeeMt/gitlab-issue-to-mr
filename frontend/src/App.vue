@@ -82,6 +82,37 @@
               </div>
             </div>
             <div class="app-shell__topbar-actions">
+              <n-tooltip v-if="usageSummary" trigger="hover">
+                <template #trigger>
+                  <n-button
+                    tertiary
+                    circle
+                    data-testid="usage-indicator-desktop"
+                    class="usage-indicator"
+                    :class="`usage-indicator--${usageSummary.severity}`"
+                    :title="t(usageSeverityLabelKey)"
+                  >
+                    <template #icon>
+                      <n-icon :component="SpeedometerOutline" />
+                    </template>
+                  </n-button>
+                </template>
+                <div class="usage-indicator__tooltip">
+                  <div class="usage-indicator__tooltip-title">{{ t(usageSeverityLabelKey) }}</div>
+                  <div v-for="item in usageTooltipItems" :key="item.labelKey" class="usage-indicator__tooltip-row">
+                    <span>{{ t(item.labelKey) }}</span>
+                    <span>{{ item.used }} / {{ item.limit }}</span>
+                  </div>
+                  <div class="usage-indicator__tooltip-row">
+                    <span>{{ t('shell.dailyReset') }}</span>
+                    <span>{{ formatUsageResetAt(usageSummary.reset_at.daily) }}</span>
+                  </div>
+                  <div class="usage-indicator__tooltip-row">
+                    <span>{{ t('shell.weeklyReset') }}</span>
+                    <span>{{ formatUsageResetAt(usageSummary.reset_at.weekly) }}</span>
+                  </div>
+                </div>
+              </n-tooltip>
               <LanguageToggle size="small" class="app-shell__language-toggle" />
               <n-tooltip trigger="hover" :style="onboardingTooltipStyle">
                 <template #trigger>
@@ -178,7 +209,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   NAvatar,
   NButton,
@@ -214,10 +245,12 @@ import {
   SpeedometerOutline
 } from '@vicons/ionicons5'
 import { authState, canAccessSharedPage, initializeAuth, isAdmin, logoutAndClearAuth } from './auth'
+import { getMyUsageSummary, type CurrentUserUsageSummary } from './api'
 import LanguageToggle from './components/LanguageToggle.vue'
 import OnboardingModal from './components/OnboardingModal.vue'
 import { useBreakpoints } from './composables/useBreakpoints'
 import { getOnboardingDismissed, setOnboardingDismissed } from './composables/useOnboarding'
+import { formatUsageResetAt } from './utils/usageLimits'
 import {
   naiveUiDateLocale,
   naiveUiLocale,
@@ -246,7 +279,8 @@ const menuLabels: Record<string, string> = {
   ScheduleOverview: 'nav.scheduleOverview',
   Analytics: 'nav.analytics',
   Config: 'nav.config',
-  AccessManagement: 'nav.accessManagement'
+  AccessManagement: 'nav.accessManagement',
+  UsageManagement: 'nav.usageManagement'
 }
 
 const onboardingTooltipStyle = {
@@ -259,6 +293,9 @@ const currentPageLabel = computed(() => t(menuLabels[activeKey.value] || 'app.na
 const showUserToolbar = computed(() => authState.authenticated)
 const onboardingDismissed = ref(getOnboardingDismissed())
 const manualOnboardingOpen = ref(false)
+const usageSummary = ref<CurrentUserUsageSummary | null>(null)
+const usageRefreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
+const usageSummaryRequestToken = ref(0)
 const showOnboarding = computed(
   () => authState.initialized && authState.authenticated && showShell.value && (!onboardingDismissed.value || manualOnboardingOpen.value)
 )
@@ -268,6 +305,48 @@ const userDisplayName = computed(
 const userInitial = computed(() => userDisplayName.value.slice(0, 1).toUpperCase())
 const renderIcon = (icon: any) => () => h(NIcon, null, { default: () => h(icon) })
 const shouldGroupMenu = computed(() => !collapsed.value || isMobile.value)
+const usageSeverityLabelKey = computed(() => {
+  switch (usageSummary.value?.severity) {
+    case 'over_limit':
+      return 'shell.usageOverLimit'
+    case 'near_limit':
+      return 'shell.usageNearLimit'
+    default:
+      return 'shell.usageNormal'
+  }
+})
+const usageTooltipItems = computed(() => {
+  if (!usageSummary.value) {
+    return []
+  }
+
+  return [
+    {
+      labelKey: 'shell.dailyTokens',
+      used: usageSummary.value.usage.daily_tokens,
+      limit: formatUsageLimit(usageSummary.value.limits.daily_tokens),
+    },
+    {
+      labelKey: 'shell.weeklyTokens',
+      used: usageSummary.value.usage.weekly_tokens,
+      limit: formatUsageLimit(usageSummary.value.limits.weekly_tokens),
+    },
+    {
+      labelKey: 'shell.dailyTasks',
+      used: usageSummary.value.usage.daily_tasks,
+      limit: formatUsageLimit(usageSummary.value.limits.daily_tasks),
+    },
+    {
+      labelKey: 'shell.weeklyTasks',
+      used: usageSummary.value.usage.weekly_tasks,
+      limit: formatUsageLimit(usageSummary.value.limits.weekly_tasks),
+    },
+  ]
+})
+
+function formatUsageLimit(limit: CurrentUserUsageSummary['limits']['daily_tokens']) {
+  return limit.mode === 'unlimited' || limit.value === null ? t('shell.usageUnlimited') : String(limit.value)
+}
 
 function buildMenuItem(labelKey: string, key: string, icon: any): MenuOption {
   return {
@@ -325,6 +404,7 @@ const menuOptions = computed<MenuOption[]>(() => {
 
   if (!authState.oidcEnabled || isAdmin.value) {
     adminItems.push(buildMenuItem('nav.accessManagement', 'AccessManagement', PeopleOutline))
+    adminItems.push(buildMenuItem('nav.usageManagement', 'UsageManagement', RocketOutline))
     adminItems.push(buildMenuItem('nav.config', 'Config', SettingsOutline))
   }
 
@@ -374,8 +454,73 @@ async function handleLogout() {
   await logoutAndClearAuth()
 }
 
+async function loadUsageSummary() {
+  if (!showShell.value || !authState.authenticated || !authState.user?.id) {
+    usageSummaryRequestToken.value += 1
+    usageSummary.value = null
+    return
+  }
+
+  const requestToken = ++usageSummaryRequestToken.value
+  const requestedUserId = authState.user.id
+
+  try {
+    const summary = await getMyUsageSummary()
+    if (
+      requestToken !== usageSummaryRequestToken.value ||
+      !showShell.value ||
+      !authState.authenticated ||
+      authState.user?.id !== requestedUserId
+    ) {
+      return
+    }
+    usageSummary.value = summary
+  } catch {
+    if (
+      requestToken !== usageSummaryRequestToken.value ||
+      !showShell.value ||
+      !authState.authenticated ||
+      authState.user?.id !== requestedUserId
+    ) {
+      return
+    }
+    usageSummary.value = null
+  }
+}
+
+function stopUsageRefresh() {
+  if (usageRefreshTimer.value !== null) {
+    clearInterval(usageRefreshTimer.value)
+    usageRefreshTimer.value = null
+  }
+}
+
+function startUsageRefresh() {
+  stopUsageRefresh()
+  if (!showShell.value || !authState.authenticated || !authState.user?.id) {
+    return
+  }
+  usageRefreshTimer.value = setInterval(() => {
+    void loadUsageSummary()
+  }, 60_000)
+}
+
+watch(
+  () => [showShell.value, authState.authenticated, authState.user?.id],
+  () => {
+    void loadUsageSummary()
+    startUsageRefresh()
+  },
+  { immediate: true }
+)
+
 onMounted(() => {
   initializeAuth()
+})
+
+onBeforeUnmount(() => {
+  stopUsageRefresh()
+  usageSummaryRequestToken.value += 1
 })
 </script>
 
@@ -509,6 +654,38 @@ body {
 
 .app-shell__language-toggle {
   flex-shrink: 0;
+}
+
+.usage-indicator {
+  flex-shrink: 0;
+}
+
+.usage-indicator--normal {
+  color: #18a058;
+}
+
+.usage-indicator--near_limit {
+  color: #f0a020;
+}
+
+.usage-indicator--over_limit {
+  color: #d03050;
+}
+
+.usage-indicator__tooltip {
+  min-width: 240px;
+}
+
+.usage-indicator__tooltip-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.usage-indicator__tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
 }
 
 .logo {

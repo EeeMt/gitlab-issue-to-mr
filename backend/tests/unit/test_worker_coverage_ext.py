@@ -160,6 +160,9 @@ def _make_db(task=None):
             provider = getattr(task, 'provider', None) if task else None
             mock_result.scalar_one_or_none.return_value = provider
             mock_result.scalars.return_value.all.return_value = [provider] if provider else []
+        elif 'FROM worker_environment_variables' in statement_str:
+            mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.all.return_value = []
         else:
             mock_result.scalar_one_or_none.return_value = task
             mock_result.scalars.return_value.all.return_value = [task] if task else []
@@ -849,6 +852,44 @@ class TestResumeTaskSuccess(unittest.TestCase):
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_resume_success_upserts_usage_ledger(self, mock_notify, mock_get_settings):
+        """resume_task should write completed usage into the quota ledger."""
+        mock_get_settings.return_value = _make_settings()
+        mock_container = MagicMock(id="ctr-resume-usage")
+        mock_docker = MagicMock()
+        mock_docker.client.containers.get.return_value = mock_container
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+        mock_gitlab.normalize_web_url.side_effect = lambda x: x
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(
+            status=TaskStatus.RUNNING,
+            initiator_user_id=7,
+            merge_request_iid=42,
+            merge_request_url="http://gitlab.example.com/-/merge_requests/42",
+        )
+        db = _make_db(task)
+
+        fake_logs = (
+            "CODIFY_DIFF:+5-3\n"
+            "http://gitlab.example.com/-/merge_requests/42\n"
+            'CODIFY_STATS:{"input_tokens":100,"output_tokens":50}\n'
+        )
+
+        with (
+            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 2))),
+            patch("app.core.worker.upsert_task_usage_ledger", new=AsyncMock()) as mock_upsert,
+        ):
+            result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
+
+        self.assertTrue(result)
+        mock_upsert.assert_awaited_once_with(db, task)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
     def test_resume_success_removes_mr_draft(self, mock_notify, mock_get_settings):
         """resume_task on success removes MR draft status via _remove_mr_draft_status_for_issue."""
         mock_get_settings.return_value = _make_settings()
@@ -997,6 +1038,41 @@ class TestResumeTaskException(unittest.TestCase):
         self.assertEqual(task.status, TaskStatus.FAILED)
         self.assertIn("Docker exploded", task.error_message)
         mock_docker.remove_container.assert_called_with(mock_container, force=True)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_exception_after_parse_still_upserts_usage_ledger(self, mock_notify, mock_get_settings):
+        """Post-parse resume failures should still attempt quota ledger persistence."""
+        mock_get_settings.return_value = _make_settings()
+        mock_container = MagicMock(id="ctr-resume-post-parse")
+        mock_docker = MagicMock()
+        mock_docker.client.containers.get.return_value = mock_container
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+        mock_gitlab.normalize_web_url.side_effect = lambda x: x
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(status=TaskStatus.RUNNING, initiator_user_id=7, merge_request_iid=None)
+        db = _make_db(task)
+        db.commit = AsyncMock(side_effect=[RuntimeError("post-parse commit failed"), None])
+
+        fake_logs = (
+            "http://gitlab.example.com/project/-/merge_requests/42\n"
+            "CODIFY_DIFF:+10-5\n"
+            'CODIFY_STATS:{"input_tokens":100,"output_tokens":50}\n'
+        )
+
+        with (
+            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 2))),
+            patch("app.core.worker.upsert_task_usage_ledger", new=AsyncMock()) as mock_upsert,
+        ):
+            result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
+
+        self.assertFalse(result)
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        mock_upsert.assert_awaited_once_with(db, task)
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)

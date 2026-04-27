@@ -53,7 +53,11 @@ async def test_create_task_persists_manual_initiator_metadata():
     )
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
-    with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+    with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})), \
+         patch(
+             "app.api.tasks.get_usage_quota_service",
+             return_value=MagicMock(raise_if_over_limit=AsyncMock()),
+         ):
         result = await create_task(request=request, db=db, current_user=current_user, access_scope=access_scope)
 
     task = db.add.call_args.args[0]
@@ -107,7 +111,11 @@ async def test_retry_task_persists_manual_initiator_metadata():
 
     with patch("app.api.tasks.get_task_with_access_check", new=AsyncMock(return_value=original_task)), \
          patch("app.api.tasks.notify_task_retried", new=AsyncMock()), \
-         patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+         patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})), \
+         patch(
+             "app.api.tasks.get_usage_quota_service",
+             return_value=MagicMock(raise_if_over_limit=AsyncMock()),
+         ):
         await retry_task(task_id=12, request=None, db=db, current_user=current_user, access_scope=access_scope)
 
     task = db.add.call_args.args[0]

@@ -18,6 +18,11 @@ from app.core.projects import build_project_lookup, get_project_metadata
 from app.core.scheduling import resolve_scheduled_at
 from app.core.task_helpers import _serialize_task, maybe_update_issue_status
 from app.core.utcnow import utcnow
+from app.core.usage_limits import (
+    UsageLimitExceeded,
+    get_usage_quota_service,
+    usage_limit_exceeded_detail,
+)
 from app.database import get_db
 from app.dependencies.auth import get_optional_current_user, require_page_access
 from app.dependencies.project_access import (
@@ -694,6 +699,19 @@ async def retry_task(
     if request and request.scheduled_datetime is not None:
         scheduled_at = validate_scheduled_datetime_in_future(request.scheduled_datetime)
 
+    if current_user is not None and current_user.id is not None:
+        try:
+            await get_usage_quota_service().raise_if_over_limit(
+                db,
+                current_user.id,
+                scope="create",
+            )
+        except UsageLimitExceeded as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=usage_limit_exceeded_detail(exc),
+            ) from exc
+
     # Check slot capacity for scheduled retries
     if scheduled_at is not None:
         from app.core.slot_capacity import check_slot_capacity, slot_full_detail_dict
@@ -840,6 +858,19 @@ async def create_task(
         request.scheduled_datetime,
         request.delay_seconds,
     )
+
+    if current_user is not None and current_user.id is not None:
+        try:
+            await get_usage_quota_service().raise_if_over_limit(
+                db,
+                current_user.id,
+                scope="create",
+            )
+        except UsageLimitExceeded as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=usage_limit_exceeded_detail(exc),
+            ) from exc
 
     # Slot capacity only applies to scheduled tasks
     slot_warning = None

@@ -10,6 +10,10 @@ const {
   layersIconStub,
   checkmarkDoneIconStub,
   playIconStub,
+  cubeIconStub,
+  cogIconStub,
+  chevronForwardIconStub,
+  optionsIconStub,
 } = vi.hoisted(() => ({
   sparklesIconStub: {
     name: 'SparklesOutline',
@@ -53,6 +57,30 @@ const {
       return () => h('svg', { class: 'icon-stub icon-stub--PlayCircleOutline' })
     },
   },
+  cubeIconStub: {
+    name: 'CubeOutline',
+    setup() {
+      return () => h('svg', { class: 'icon-stub icon-stub--CubeOutline' })
+    },
+  },
+  cogIconStub: {
+    name: 'CogOutline',
+    setup() {
+      return () => h('svg', { class: 'icon-stub icon-stub--CogOutline' })
+    },
+  },
+  chevronForwardIconStub: {
+    name: 'ChevronForwardOutline',
+    setup() {
+      return () => h('svg', { class: 'icon-stub icon-stub--ChevronForwardOutline' })
+    },
+  },
+  optionsIconStub: {
+    name: 'OptionsOutline',
+    setup() {
+      return () => h('svg', { class: 'icon-stub icon-stub--OptionsOutline' })
+    },
+  },
 }))
 
 const messages: Record<string, string> = {
@@ -78,6 +106,10 @@ vi.mock('@vicons/ionicons5', () => ({
   LayersOutline: layersIconStub,
   CheckmarkDoneCircleOutline: checkmarkDoneIconStub,
   PlayCircleOutline: playIconStub,
+  CubeOutline: cubeIconStub,
+  CogOutline: cogIconStub,
+  ChevronForwardOutline: chevronForwardIconStub,
+  OptionsOutline: optionsIconStub,
 }))
 
 vi.mock('naive-ui', () => ({
@@ -154,6 +186,7 @@ const stepHeights: Record<number, number> = {
   1: 506,
   2: 462,
   3: 613,
+  4: 428,
 }
 
 const originalScrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
@@ -184,6 +217,10 @@ function getVisibleShellContent(wrapper: ReturnType<typeof mountComponent>) {
 
 function getVisibleShell(wrapper: ReturnType<typeof mountComponent>) {
   return wrapper.get('.onboarding-modal-shell:not(.onboarding-modal-shell--measure)')
+}
+
+function getVisibleBackgroundSet(wrapper: ReturnType<typeof mountComponent>) {
+  return getVisibleShellContent(wrapper).get('.onboarding-modal__background-set')
 }
 
 describe('OnboardingModal', () => {
@@ -266,26 +303,37 @@ describe('OnboardingModal', () => {
 
   it('shows step-specific motifs tied to the active theme', async () => {
     const wrapper = mountComponent()
+    let visibleBackgroundSet = getVisibleBackgroundSet(wrapper)
 
-    expect(wrapper.find('.icon-stub--SparklesOutline').exists()).toBe(true)
-    expect(wrapper.find('.icon-stub--GitMergeOutline').exists()).toBe(true)
-    expect(wrapper.find('.icon-stub--DocumentTextOutline').exists()).toBe(true)
-    expect(wrapper.find('.icon-stub--LayersOutline').exists()).toBe(false)
-    expect(wrapper.find('.icon-stub--PlayCircleOutline').exists()).toBe(false)
-
-    await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
-
-    expect(wrapper.find('.icon-stub--DocumentTextOutline').exists()).toBe(true)
-    expect(wrapper.find('.icon-stub--LayersOutline').exists()).toBe(true)
-    expect(wrapper.find('.icon-stub--CheckmarkDoneCircleOutline').exists()).toBe(true)
-    expect(wrapper.find('.icon-stub--GitMergeOutline').exists()).toBe(false)
+    expect(visibleBackgroundSet.find('.icon-stub--SparklesOutline').exists()).toBe(true)
+    expect(visibleBackgroundSet.find('.icon-stub--GitMergeOutline').exists()).toBe(true)
+    expect(visibleBackgroundSet.find('.icon-stub--DocumentTextOutline').exists()).toBe(true)
+    expect(visibleBackgroundSet.find('.icon-stub--LayersOutline').exists()).toBe(false)
+    expect(visibleBackgroundSet.find('.icon-stub--PlayCircleOutline').exists()).toBe(false)
 
     await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
+    visibleBackgroundSet = getVisibleBackgroundSet(wrapper)
 
-    expect(wrapper.find('.icon-stub--CalendarClearOutline').exists()).toBe(true)
-    expect(wrapper.find('.icon-stub--PlayCircleOutline').exists()).toBe(true)
-    expect(wrapper.find('.icon-stub--GitMergeOutline').exists()).toBe(true)
-    expect(wrapper.find('.icon-stub--LayersOutline').exists()).toBe(false)
+    expect(visibleBackgroundSet.find('.icon-stub--DocumentTextOutline').exists()).toBe(true)
+    expect(visibleBackgroundSet.find('.icon-stub--LayersOutline').exists()).toBe(true)
+    expect(visibleBackgroundSet.find('.icon-stub--CheckmarkDoneCircleOutline').exists()).toBe(true)
+    expect(visibleBackgroundSet.find('.icon-stub--GitMergeOutline').exists()).toBe(false)
+
+    await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
+    visibleBackgroundSet = getVisibleBackgroundSet(wrapper)
+
+    expect(visibleBackgroundSet.find('.icon-stub--CogOutline').exists()).toBe(true)
+    expect(visibleBackgroundSet.find('.icon-stub--CubeOutline').exists()).toBe(true)
+    expect(visibleBackgroundSet.find('.icon-stub--SparklesOutline').exists()).toBe(true)
+    expect(visibleBackgroundSet.find('.icon-stub--GitMergeOutline').exists()).toBe(false)
+
+    await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
+    visibleBackgroundSet = getVisibleBackgroundSet(wrapper)
+
+    expect(visibleBackgroundSet.find('.icon-stub--CalendarClearOutline').exists()).toBe(true)
+    expect(visibleBackgroundSet.find('.icon-stub--PlayCircleOutline').exists()).toBe(true)
+    expect(visibleBackgroundSet.find('.icon-stub--GitMergeOutline').exists()).toBe(true)
+    expect(visibleBackgroundSet.find('.icon-stub--LayersOutline').exists()).toBe(false)
   })
 
   it('renders motifs through a single crossfade transition', () => {
@@ -297,15 +345,15 @@ describe('OnboardingModal', () => {
   })
 
 
-  it('uses translucent surfaces for concept and workflow cards', async () => {
+  it('uses translucent surfaces for concept and architecture cards', async () => {
     const wrapper = mountComponent()
 
     await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
     expect(getVisibleShellContent(wrapper).findAll('.onboarding-modal__surface').length).toBeGreaterThan(0)
-    expect(getVisibleShellContent(wrapper).findAll('.onboarding-modal__concept-card.onboarding-modal__surface')).toHaveLength(3)
+    expect(getVisibleShellContent(wrapper).findAll('.concept-flow-card.onboarding-modal__surface')).toHaveLength(3)
 
     await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
-    expect(getVisibleShellContent(wrapper).findAll('.onboarding-modal__workflow-item.onboarding-modal__surface')).toHaveLength(3)
+    expect(getVisibleShellContent(wrapper).findAll('.onboarding-modal__pipeline-card.onboarding-modal__surface')).toHaveLength(4)
   })
 
   it('resets to the first step when reopened', async () => {
@@ -313,7 +361,7 @@ describe('OnboardingModal', () => {
 
     await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
     await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
-    expect(wrapper.find('[data-testid="onboarding-step-title"]').text()).toBe('onboarding.workflow.title')
+    expect(wrapper.find('[data-testid="onboarding-step-title"]').text()).toBe('onboarding.architecture.title')
 
     await wrapper.setProps({ show: false })
     await wrapper.setProps({ show: true })
@@ -340,7 +388,7 @@ describe('OnboardingModal', () => {
     await nextTick()
     await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
     await nextTick()
-    expect(wrapper.find('[data-testid="onboarding-step-title"]').text()).toBe('onboarding.workflow.title')
+    expect(wrapper.find('[data-testid="onboarding-step-title"]').text()).toBe('onboarding.architecture.title')
 
     await wrapper.find('[data-testid="onboarding-previous"]').trigger('click')
     await vi.waitFor(() => {
@@ -367,6 +415,7 @@ describe('OnboardingModal', () => {
 
     await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
     await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
+    await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
     await wrapper.find('[data-testid="onboarding-view-dashboard"]').trigger('click')
 
     expect(wrapper.emitted('view-dashboard')).toHaveLength(1)
@@ -376,6 +425,7 @@ describe('OnboardingModal', () => {
   it('emits create-issue on final secondary action', async () => {
     const wrapper = mountComponent()
 
+    await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
     await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
     await wrapper.find('[data-testid="onboarding-next"]').trigger('click')
     await wrapper.find('[data-testid="onboarding-create-issue"]').trigger('click')

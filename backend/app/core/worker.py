@@ -19,6 +19,7 @@ from gitlab import Gitlab
 from app.core.gitlab_client import GitLabClient, get_gitlab_client
 from app.core.ssl_utils import get_ssl_verify
 from app.core.utcnow import utcnow
+from app.core.usage_limits import upsert_task_usage_ledger
 from app.core.mattermost_notifications import (
     MATTERMOST_EVENT_TASK_COMPLETED,
     MATTERMOST_EVENT_TASK_FAILED,
@@ -945,6 +946,13 @@ class WorkerExecutor:
         prefix = get_settings().worker_container_prefix
         return f"{prefix}-{task.id}-issue{task.issue_id}"
 
+    async def _try_upsert_usage_ledger(self, db: AsyncSession, task: Task) -> None:
+        """Best-effort quota ledger persistence for already-finished tasks."""
+        try:
+            await upsert_task_usage_ledger(db, task)
+        except Exception as ledger_error:
+            logger.warning(f"[Task {task.id}] Failed to upsert usage ledger: {ledger_error}")
+
     async def _handle_execute_task_failure(
         self,
         db: AsyncSession,
@@ -956,9 +964,13 @@ class WorkerExecutor:
         container: Any = None,
     ) -> bool:
         """Persist execute_task failure state and send normal failure notifications."""
+        had_completed_at = task.completed_at is not None
         task.status = TaskStatus.FAILED
-        task.completed_at = utcnow()
+        if task.completed_at is None:
+            task.completed_at = utcnow()
         task.error_message = sanitize_sensitive_data(str(error))[:1000]
+        if had_completed_at:
+            await self._try_upsert_usage_ledger(db, task)
         await db.commit()
 
         if container:
@@ -1186,6 +1198,7 @@ class WorkerExecutor:
                 )
                 db.add(log_entry)
 
+            await upsert_task_usage_ledger(db, task)
             await db.commit()
 
             # Update MR description with comprehensive issue context + all tasks
@@ -1313,6 +1326,7 @@ class WorkerExecutor:
                 db.add(TaskLog(task_id=task.id, log_level="INFO",
                                message=scrubbed_logs[-4000:] or "[No output]"))
 
+            await upsert_task_usage_ledger(db, task)
             await db.commit()
 
             # Update MR description with comprehensive issue context + all tasks
@@ -1328,9 +1342,13 @@ class WorkerExecutor:
 
         except Exception as e:
             logger.exception(f"[Task {task_id}] Resume failed with exception: {e}")
+            had_completed_at = task.completed_at is not None
             task.status = TaskStatus.FAILED
-            task.completed_at = utcnow()
+            if task.completed_at is None:
+                task.completed_at = utcnow()
             task.error_message = sanitize_sensitive_data(str(e))[:1000]
+            if had_completed_at:
+                await self._try_upsert_usage_ledger(db, task)
             await db.commit()
 
             try:

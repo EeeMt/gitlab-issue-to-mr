@@ -46,6 +46,7 @@ const zhCN = {
     analytics: '统计分析',
     config: '系统配置',
     accessManagement: '访问管理',
+    usageManagement: '用量管理',
     oidcDiagnostics: 'OIDC 诊断',
     workspace: '工作区',
     insights: '分析与运维',
@@ -57,7 +58,17 @@ const zhCN = {
     signedInWithGitlab: '通过 GitLab 登录',
     productTour: '产品介绍',
     reopenOnboarding: '再次查看产品介绍',
-    logout: '退出登录'
+    logout: '退出登录',
+    usageNormal: '使用量正常',
+    usageNearLimit: '使用量接近上限',
+    usageOverLimit: '使用量已超限',
+    dailyTokens: '日 Token',
+    weeklyTokens: '周 Token',
+    dailyTasks: '日任务数',
+    weeklyTasks: '周任务数',
+    dailyReset: '日重置时间',
+    weeklyReset: '周重置时间',
+    usageUnlimited: '无限制'
   },
   status: {
     pending: '待处理',
@@ -591,6 +602,17 @@ const zhCN = {
     scheduledTimeFuture: '定时执行时间必须晚于当前时间',
     manualTaskBranchConflict: '手动任务的源分支和目标分支必须不同',
     failedToCreateTask: '创建任务失败',
+    usageLimitExceededTitle: '用量已超限',
+    usageLimitUsed: '已使用',
+    usageLimitReset: '重置时间',
+    usageWindow: {
+      daily: '每日',
+      weekly: '每周'
+    },
+    usageMetric: {
+      tokens: 'Token',
+      tasks: '任务数'
+    },
     createMR: '创建合并请求',
     createMRTooltip: '禁用时仅推送分支，不创建 MR',
     priorityP0Desc: '紧急',
@@ -1365,6 +1387,31 @@ const zhCN = {
     revokedSessions: '已为 \\@{username} 撤销 {count} 个活跃会话',
     noActiveSessions: '\\@{username} 当前没有活跃会话',
     failedToRevokeSessions: '撤销用户会话失败'
+  },
+  usageManagement: {
+    title: '用量管理',
+    subtitle: '查看系统默认限制、用户用量，并管理配额覆盖。',
+    intro: '用量按任务粒度统计。限制可以继承、单独覆盖，或设置为无限制。',
+    reload: '重新加载',
+    loading: '正在加载用量限制...',
+    systemDefaults: '系统默认值',
+    userOverrides: '用户覆盖',
+    searchPlaceholder: '按姓名或用户名搜索',
+    saveDefaults: '保存默认值',
+    saveUser: '保存覆盖',
+    totalUsers: '跟踪用户数',
+    customOverrideUsers: '有覆盖的用户数',
+    overLimitUsers: '超限用户数',
+    dailyReset: '日重置时间',
+    weeklyReset: '周重置时间',
+    modeInherit: '继承',
+    modeCustom: '自定义',
+    modeUnlimited: '无限制',
+    failedToLoad: '加载用量限制失败',
+    savedDefaults: '已保存默认限制',
+    failedToSaveDefaults: '保存默认限制失败',
+    savedUser: '已保存 \\@{username} 的用量覆盖',
+    failedToSaveUser: '保存用户用量覆盖失败'
   },
   oidcDiagnostics: {
     title: 'OIDC 诊断',

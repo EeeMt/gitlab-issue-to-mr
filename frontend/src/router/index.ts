@@ -9,6 +9,7 @@ import ScheduleOverview from '../views/ScheduleOverview.vue'
 import Analytics from '../views/Analytics.vue'
 import Config from '../views/Config.vue'
 import AccessManagement from '../views/AccessManagement.vue'
+import UsageManagement from '../views/UsageManagement.vue'
 import Sessions from '../views/Sessions.vue'
 import Login from '../views/Login.vue'
 import Bootstrap from '../views/Bootstrap.vue'
@@ -110,6 +111,12 @@ const router = createRouter({
       path: '/access-management',
       name: 'AccessManagement',
       component: AccessManagement,
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/usage-management',
+      name: 'UsageManagement',
+      component: UsageManagement,
       meta: { requiresAuth: true, requiresAdmin: true }
     },
     {
