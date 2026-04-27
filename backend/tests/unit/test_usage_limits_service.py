@@ -174,9 +174,11 @@ class UsageQuotaServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(existing_row.total_tokens, 75)
         self.assertEqual(existing_row.task_status, "failed")
 
-    async def test_upsert_task_usage_ledger_skips_task_without_recorded_usage(self) -> None:
+    async def test_upsert_task_usage_ledger_records_task_count_without_token_stats(self) -> None:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
         db = MagicMock()
-        db.execute = AsyncMock()
+        db.execute = AsyncMock(return_value=mock_result)
         db.add = MagicMock()
         task = MagicMock(
             id=11,
@@ -189,8 +191,10 @@ class UsageQuotaServiceTests(unittest.IsolatedAsyncioTestCase):
 
         await upsert_task_usage_ledger(db, task, timezone=ZoneInfo("Asia/Shanghai"))
 
-        db.execute.assert_not_awaited()
-        db.add.assert_not_called()
+        db.execute.assert_awaited_once()
+        added_row = db.add.call_args.args[0]
+        self.assertEqual(added_row.total_tokens, 0)
+        self.assertEqual(added_row.task_count, 1)
 
     async def test_get_current_usage_totals_aggregates_daily_and_weekly_rows(self) -> None:
         daily_result = MagicMock()

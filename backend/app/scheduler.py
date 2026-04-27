@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -16,6 +17,11 @@ from app.config import get_effective_settings as get_settings
 from app.core.docker_client import get_docker_client
 from app.core.session import cleanup_stale_sessions
 from app.core.utcnow import utcnow
+from app.core.usage_limits import (
+    UsageLimitExceeded,
+    get_usage_quota_service,
+    usage_limit_exceeded_detail,
+)
 from app.core.worker import WorkerExecutor
 from app.database import AsyncSessionLocal
 from app.models import Task, TaskStatus, Issue, IssueStatus
@@ -192,6 +198,30 @@ class Scheduler:
             self._running_issues.add(task.issue_id)
 
         try:
+            initiator_user_id = getattr(task, "initiator_user_id", None)
+            if isinstance(initiator_user_id, int):
+                try:
+                    await get_usage_quota_service().raise_if_over_limit(
+                        db,
+                        initiator_user_id,
+                        scope="execute",
+                    )
+                except UsageLimitExceeded as exc:
+                    logger.info(
+                        "Task %s blocked by usage limits before execution",
+                        task.id,
+                    )
+                    task.status = TaskStatus.FAILED
+                    task.error_message = json.dumps(usage_limit_exceeded_detail(exc))
+                    task.completed_at = utcnow()
+                    await db.commit()
+                    if task.issue_id is not None:
+                        await maybe_update_issue_status(db, task.issue_id)
+                    self._running_tasks.discard(task.id)
+                    if task.issue_id is not None:
+                        self._running_issues.discard(task.issue_id)
+                    return
+
             # Update status to RUNNING
             task.status = TaskStatus.RUNNING
             task.started_at = utcnow()

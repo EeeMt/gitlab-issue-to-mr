@@ -194,6 +194,23 @@ class UsageQuotaService:
         return exceeded_items
 
 
+_usage_quota_service = UsageQuotaService()
+
+
+def get_usage_quota_service() -> UsageQuotaService:
+    """Return the shared quota service instance."""
+    return _usage_quota_service
+
+
+def usage_limit_exceeded_detail(exc: UsageLimitExceeded) -> dict[str, Any]:
+    """Serialize a quota exception for API and task error payloads."""
+    return {
+        "reason": "usage_limit_exceeded",
+        "scope": exc.scope,
+        "exceeded_items": exc.exceeded_items,
+    }
+
+
 def _calendar_keys_for_datetime(
     value: datetime,
     *,
@@ -231,8 +248,6 @@ async def upsert_task_usage_ledger(
     timezone: tzinfo = UTC,
 ) -> None:
     if getattr(task, "initiator_user_id", None) is None or getattr(task, "completed_at", None) is None:
-        return
-    if getattr(task, "input_tokens", None) is None and getattr(task, "output_tokens", None) is None:
         return
 
     completed_at = task.completed_at

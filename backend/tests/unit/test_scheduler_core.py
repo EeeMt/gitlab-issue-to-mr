@@ -8,6 +8,7 @@ Tests:
 """
 
 import asyncio
+import json
 import os
 import sys
 import unittest
@@ -296,6 +297,64 @@ class SchedulerTaskExecutionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(task.status, TaskStatus.RUNNING)
         self.assertIsNotNone(task.started_at)
+
+    async def test_execute_task_marks_failed_when_usage_limit_exceeded(self) -> None:
+        """_execute_task should fail queued work before submitting it to the worker."""
+        from app.core.usage_limits import UsageLimitExceeded
+        from app.models import TaskStatus
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+
+        task = MagicMock()
+        task.id = 12
+        task.project_id = 1
+        task.issue_id = 34
+        task.initiator_user_id = 56
+        task.status = TaskStatus.QUEUED
+        task.started_at = None
+        task.completed_at = None
+        task.error_message = None
+
+        mock_db = MagicMock()
+        mock_db.commit = AsyncMock()
+
+        exceeded = UsageLimitExceeded(
+            scope="execute",
+            exceeded_items=[{
+                "field": "daily_tasks",
+                "window": "daily",
+                "metric": "tasks",
+                "used": 6,
+                "limit": 5,
+                "reset_at": "2026-04-28T00:00:00+00:00",
+            }],
+        )
+
+        with (
+            patch(
+                "app.scheduler.get_usage_quota_service",
+                return_value=MagicMock(raise_if_over_limit=AsyncMock(side_effect=exceeded)),
+            ),
+            patch("app.scheduler.utcnow", return_value=datetime(2026, 4, 27, 12, 0, 0)),
+            patch("app.scheduler.asyncio.create_task") as mock_create_task,
+            patch.object(scheduler, "_transition_issue_to_in_progress", new=AsyncMock()) as mock_transition,
+            patch("app.scheduler.maybe_update_issue_status", new=AsyncMock()) as mock_update_issue_status,
+        ):
+            await scheduler._execute_task(mock_db, task)
+
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        self.assertEqual(task.completed_at, datetime(2026, 4, 27, 12, 0, 0))
+        self.assertIsNone(task.started_at)
+        self.assertNotIn(task.id, scheduler._running_tasks)
+        self.assertNotIn(task.issue_id, scheduler._running_issues)
+        mock_create_task.assert_not_called()
+        mock_transition.assert_not_awaited()
+        mock_update_issue_status.assert_awaited_once_with(mock_db, task.issue_id)
+
+        detail = json.loads(task.error_message)
+        self.assertEqual(detail["reason"], "usage_limit_exceeded")
+        self.assertEqual(detail["scope"], "execute")
 
 
 class SchedulerGetNextTaskTests(unittest.IsolatedAsyncioTestCase):

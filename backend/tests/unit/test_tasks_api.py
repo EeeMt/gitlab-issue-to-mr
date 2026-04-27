@@ -706,6 +706,71 @@ class RetryTaskAPITests(unittest.TestCase):
         created_task = mock_db.add.call_args.args[0]
         self.assertEqual(created_task.provider_id, 23)
 
+    def test_retry_task_returns_409_when_usage_limit_exceeded(self):
+        """POST /api/tasks/{id}/retry should enforce create quota limits."""
+        from app.core.usage_limits import UsageLimitExceeded
+        from app.dependencies.auth import get_optional_current_user, require_authenticated_user
+
+        task = _make_serializable_task(task_status=TaskStatus.FAILED)
+        task.id = 70
+        task.project_id = 1
+
+        mock_result_task = MagicMock()
+        mock_result_task.scalar_one_or_none.return_value = task
+        mock_result_no_retry = MagicMock()
+        mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_issue = MagicMock()
+        mock_result_issue.scalar_one_or_none.return_value = None
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
+        mock_db.add = MagicMock()
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        current_user = MagicMock()
+        current_user.id = 7
+        current_user.gitlab_user_id = 17
+        current_user.username = "alice"
+        current_user.display_name = "Alice"
+        current_user.email = "alice@example.com"
+
+        client, app = _make_app_client_with_db(
+            mock_db,
+            extra_overrides={
+                get_optional_current_user: lambda: current_user,
+                require_authenticated_user: lambda: current_user,
+            },
+        )
+
+        with (
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch(
+                "app.api.tasks.get_usage_quota_service",
+                return_value=MagicMock(
+                    raise_if_over_limit=AsyncMock(
+                        side_effect=UsageLimitExceeded(
+                            scope="create",
+                            exceeded_items=[{
+                                "field": "daily_tasks",
+                                "window": "daily",
+                                "metric": "tasks",
+                                "used": 6,
+                                "limit": 5,
+                                "reset_at": "2026-04-28T00:00:00+00:00",
+                            }],
+                        )
+                    )
+                ),
+            ),
+        ):
+            response = client.post("/api/tasks/70/retry")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"]["reason"], "usage_limit_exceeded")
+
     def test_retry_task_returns_404_when_not_found(self):
         """POST /api/tasks/{id}/retry should return 404 when task does not exist."""
         mock_result = MagicMock()
@@ -951,6 +1016,75 @@ class CreateTaskAPITests(unittest.TestCase):
         self.assertIn("id", data)
         self.assertEqual(data["project_id"], 1)
         self.assertEqual(data["user_prompt"], "Fix the login bug")
+
+    def test_create_task_returns_409_when_usage_limit_exceeded(self):
+        """POST /api/tasks returns structured 409 when quota is already exceeded."""
+        from app.main import app
+        from app.database import get_db
+        from app.dependencies.auth import get_optional_current_user, require_authenticated_user
+        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.core.usage_limits import UsageLimitExceeded
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        async def override_db():
+            yield mock_db
+
+        mock_db = MagicMock()
+        mock_db.add = MagicMock()
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        current_user = MagicMock()
+        current_user.id = 7
+        current_user.gitlab_user_id = 17
+        current_user.username = "alice"
+        current_user.display_name = "Alice"
+        current_user.email = "alice@example.com"
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[get_optional_current_user] = lambda: current_user
+        app.dependency_overrides[require_authenticated_user] = lambda: current_user
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        mock_issue = MagicMock()
+        mock_issue.id = 1
+        mock_issue.project_id = 1
+        mock_issue.description = "Ship it"
+        mock_issue.status = "open"
+        mock_db.get = AsyncMock(return_value=mock_issue)
+
+        client = TestClient(app, raise_server_exceptions=False)
+        with (
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+            patch("app.core.task_helpers._require_issue_operator", return_value=None),
+            patch(
+                "app.api.tasks.get_usage_quota_service",
+                return_value=MagicMock(
+                    raise_if_over_limit=AsyncMock(
+                        side_effect=UsageLimitExceeded(
+                            scope="create",
+                            exceeded_items=[{
+                                "metric": "tokens",
+                                "window": "daily",
+                                "used": 120000,
+                                "limit": 100000,
+                                "reset_at": "2026-04-28T00:00:00+08:00",
+                            }],
+                        )
+                    )
+                ),
+            ),
+        ):
+            response = client.post("/api/tasks", json={
+                "issue_id": 1,
+                "user_prompt": "Ship it",
+                "priority": 0,
+            })
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"]["reason"], "usage_limit_exceeded")
 
 
 # ---------------------------------------------------------------------------
