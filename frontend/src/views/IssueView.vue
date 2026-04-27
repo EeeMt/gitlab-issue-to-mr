@@ -414,6 +414,26 @@
           }}
         </n-alert>
 
+        <n-alert
+          v-if="createTaskUsageLimitDetail"
+          type="warning"
+          style="margin-bottom: 16px;"
+        >
+          <div data-testid="issue-create-task-usage-alert" class="issue-view__usage-limit-alert">
+            <div class="issue-view__usage-limit-title">{{ t('createTask.usageLimitExceededTitle') }}</div>
+            <div
+              v-for="item in createTaskUsageLimitDetail.exceeded_items"
+              :key="`${item.field}-${item.reset_at}`"
+              class="issue-view__usage-limit-row"
+            >
+              <span>{{ t(`createTask.usageWindow.${item.window}`) }}</span>
+              <span>{{ t(`createTask.usageMetric.${item.metric}`) }}</span>
+              <span>{{ t('createTask.usageLimitUsed') }} {{ item.used }}/{{ item.limit }}</span>
+              <span>{{ t('createTask.usageLimitReset') }} {{ formatUsageResetAt(item.reset_at) }}</span>
+            </div>
+          </div>
+        </n-alert>
+
         <template #footer>
           <div style="display: flex; justify-content: flex-end;">
             <n-button
@@ -487,6 +507,7 @@ import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
 import { extractSlotErrorMessage } from '../utils/slotError'
+import { formatUsageResetAt, isUsageLimitExceededDetail, type UsageLimitExceededDetail } from '../utils/usageLimits'
 import { authState, isAdmin } from '../auth'
 
 const route = useRoute()
@@ -523,6 +544,7 @@ const newTaskPrompt = ref('')
 const newTaskPriority = ref(1)
 const newTaskSchedule = ref<number | null>(null)
 const createTaskLoading = ref(false)
+const createTaskUsageLimitDetail = ref<UsageLimitExceededDetail | null>(null)
 const providers = ref<AIProvider[]>([])
 const selectedProviderId = ref<number | null>(null)
 const promptTemplates = ref<PromptTemplate[]>([])
@@ -760,6 +782,9 @@ watch(showCreateDrawer, (val) => {
   if (val && !newTaskPrompt.value && issue.value?.description) {
     newTaskPrompt.value = issue.value.description
   }
+  if (!val) {
+    createTaskUsageLimitDetail.value = null
+  }
 })
 
 onUnmounted(() => {
@@ -842,6 +867,7 @@ async function handleCreateTask() {
   }
 
   createTaskLoading.value = true
+  createTaskUsageLimitDetail.value = null
   try {
     const request: Parameters<typeof createTask>[0] = {
       issue_id: issueId.value,
@@ -877,7 +903,12 @@ async function handleCreateTask() {
     showCreateDrawer.value = false
     await fetchIssue()
   } catch (error: any) {
-    message.error(extractSlotErrorMessage(error, t, 'createTask.failedToCreateTask'))
+    const detail = error?.response?.data?.detail
+    if (isUsageLimitExceededDetail(detail)) {
+      createTaskUsageLimitDetail.value = detail
+    } else {
+      message.error(extractSlotErrorMessage(error, t, 'createTask.failedToCreateTask'))
+    }
   } finally {
     createTaskLoading.value = false
   }

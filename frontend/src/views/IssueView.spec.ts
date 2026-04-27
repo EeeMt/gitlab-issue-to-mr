@@ -863,6 +863,45 @@ describe('IssueView', () => {
       expect(mockMessage.error).toHaveBeenCalled()
     })
 
+    it('shows a quota alert when createTask is rejected for usage limits', async () => {
+      setupDefaultMocks()
+      mockApi.createTask.mockRejectedValue({
+        response: {
+          data: {
+            detail: {
+              reason: 'usage_limit_exceeded',
+              scope: 'user',
+              exceeded_items: [
+                {
+                  field: 'daily_tasks',
+                  window: 'daily',
+                  metric: 'tasks',
+                  used: 6,
+                  limit: 5,
+                  reset_at: '2026-04-29T00:00:00+08:00',
+                },
+              ],
+            },
+          },
+        },
+      })
+      wrapper = await mountComponent()
+
+      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
+      await nextTick()
+
+      const createBtn = wrapper.find('[data-testid="issue-create-task-button"]')
+      await createBtn.trigger('click')
+      await flushPromises()
+
+      const quotaAlert = wrapper.find('[data-testid="issue-create-task-usage-alert"]')
+      expect(quotaAlert.exists()).toBe(true)
+      expect(quotaAlert.text()).toContain('6')
+      expect(quotaAlert.text()).toContain('5')
+      expect(quotaAlert.text()).toContain('2026-04-29 00:00 UTC+08:00')
+      expect(mockMessage.error).not.toHaveBeenCalled()
+    })
+
     it('refreshes issue data after successful task creation', async () => {
       setupDefaultMocks()
       mockApi.createTask.mockResolvedValue({ id: 3 })
