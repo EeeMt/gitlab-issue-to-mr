@@ -103,7 +103,7 @@
                     <div class="usage-indicator__tooltip-row-top">
                       <span class="usage-indicator__tooltip-label">{{ t(item.labelKey) }}</span>
                       <span class="usage-indicator__tooltip-value">
-                        {{ toScientificNotation(item.used) }} / {{ item.limit }}
+                        {{ toScientificNotation(item.used) }} / {{ formatUsageLimitDisplay(item.limitNumeric, item.limit) }}
                         &nbsp;({{ formatUsagePercent(item.used, item.limitNumeric) }})
                       </span>
                     </div>
@@ -368,6 +368,11 @@ const usageTooltipItems = computed(() => {
 
 function formatUsageLimit(limit: CurrentUserUsageSummary['limits']['daily_tokens']) {
   return limit.mode === 'unlimited' || limit.value === null ? t('shell.usageUnlimited') : String(limit.value)
+}
+
+function formatUsageLimitDisplay(limitNumeric: number | null, fallback: string): string {
+  if (limitNumeric === null) return fallback
+  return toScientificNotation(limitNumeric)
 }
 
 function formatUsagePercent(used: number, limitNumeric: number | null): string {
