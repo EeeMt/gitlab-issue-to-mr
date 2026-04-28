@@ -1390,7 +1390,7 @@ const zhCN = {
   },
   usageManagement: {
     title: '用量管理',
-    subtitle: '查看系统默认限制、用户用量，并管理配额覆盖。',
+    subtitle: '查看用户用量，并管理配额覆盖。',
     intro: '用量按任务粒度统计。限制可以继承、单独覆盖，或设置为无限制。',
     reload: '重新加载',
     loading: '正在加载用量限制...',
@@ -1411,7 +1411,11 @@ const zhCN = {
     savedDefaults: '已保存默认限制',
     failedToSaveDefaults: '保存默认限制失败',
     savedUser: '已保存 \\@{username} 的用量覆盖',
-    failedToSaveUser: '保存用户用量覆盖失败'
+    failedToSaveUser: '保存用户用量覆盖失败',
+    filterAll: '全部用户',
+    filterOverridden: '有覆盖',
+    filterNotOverridden: '无覆盖',
+    overridden: '已覆盖',
   },
   oidcDiagnostics: {
     title: 'OIDC 诊断',

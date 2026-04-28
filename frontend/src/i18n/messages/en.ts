@@ -1441,7 +1441,11 @@ const en = {
     savedDefaults: 'Saved usage defaults',
     failedToSaveDefaults: 'Failed to save usage defaults',
     savedUser: 'Saved usage override for \\@{username}',
-    failedToSaveUser: 'Failed to save usage override'
+    failedToSaveUser: 'Failed to save usage override',
+    filterAll: 'All users',
+    filterOverridden: 'With overrides',
+    filterNotOverridden: 'Without overrides',
+    overridden: 'Overridden',
   },
   oidcDiagnostics: {
     title: 'OIDC Diagnostics',
