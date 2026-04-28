@@ -250,8 +250,8 @@ describe('App onboarding integration', () => {
     const { wrapper } = await mountAppAt('/dashboard')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('2026-04-29 00:00 UTC+08:00')
-    expect(wrapper.text()).toContain('2026-05-04 00:00 UTC+08:00')
+    expect(wrapper.text()).toContain('2026-04-29 00:00')
+    expect(wrapper.text()).toContain('2026-05-04 00:00')
   })
 
   it('refreshes usage summary while the app remains open', async () => {

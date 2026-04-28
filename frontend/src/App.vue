@@ -82,7 +82,7 @@
               </div>
             </div>
             <div class="app-shell__topbar-actions">
-              <n-tooltip v-if="usageSummary" trigger="hover">
+              <n-tooltip v-if="usageSummary" trigger="hover" :style="usageTooltipStyle">
                 <template #trigger>
                   <n-button
                     tertiary
@@ -100,14 +100,26 @@
                 <div class="usage-indicator__tooltip">
                   <div class="usage-indicator__tooltip-title">{{ t(usageSeverityLabelKey) }}</div>
                   <div v-for="item in usageTooltipItems" :key="item.labelKey" class="usage-indicator__tooltip-row">
-                    <span>{{ t(item.labelKey) }}</span>
-                    <span>{{ item.used }} / {{ item.limit }}</span>
+                    <div class="usage-indicator__tooltip-row-top">
+                      <span class="usage-indicator__tooltip-label">{{ t(item.labelKey) }}</span>
+                      <span class="usage-indicator__tooltip-value">
+                        {{ toScientificNotation(item.used) }} / {{ item.limit }}
+                        &nbsp;({{ formatUsagePercent(item.used, item.limitNumeric) }})
+                      </span>
+                    </div>
+                    <div class="usage-indicator__progress">
+                      <div
+                        class="usage-indicator__progress-fill"
+                        :class="`usage-indicator__progress-fill--${usageSummary.severity}`"
+                        :style="{ width: formatUsagePercent(item.used, item.limitNumeric) }"
+                      />
+                    </div>
                   </div>
-                  <div class="usage-indicator__tooltip-row">
+                  <div class="usage-indicator__tooltip-row usage-indicator__tooltip-row--reset">
                     <span>{{ t('shell.dailyReset') }}</span>
                     <span>{{ formatUsageResetAt(usageSummary.reset_at.daily) }}</span>
                   </div>
-                  <div class="usage-indicator__tooltip-row">
+                  <div class="usage-indicator__tooltip-row usage-indicator__tooltip-row--reset">
                     <span>{{ t('shell.weeklyReset') }}</span>
                     <span>{{ formatUsageResetAt(usageSummary.reset_at.weekly) }}</span>
                   </div>
@@ -250,7 +262,7 @@ import LanguageToggle from './components/LanguageToggle.vue'
 import OnboardingModal from './components/OnboardingModal.vue'
 import { useBreakpoints } from './composables/useBreakpoints'
 import { getOnboardingDismissed, setOnboardingDismissed } from './composables/useOnboarding'
-import { formatUsageResetAt } from './utils/usageLimits'
+import { formatUsageResetAt, toScientificNotation } from './utils/usageLimits'
 import {
   naiveUiDateLocale,
   naiveUiLocale,
@@ -289,6 +301,12 @@ const onboardingTooltipStyle = {
   borderRadius: '6px',
 }
 
+const usageTooltipStyle = {
+  borderRadius: '12px',
+  padding: '12px 16px',
+  fontSize: '12px',
+}
+
 const currentPageLabel = computed(() => t(menuLabels[activeKey.value] || 'app.navigation'))
 const showUserToolbar = computed(() => authState.authenticated)
 const onboardingDismissed = ref(getOnboardingDismissed())
@@ -325,27 +343,37 @@ const usageTooltipItems = computed(() => {
       labelKey: 'shell.dailyTokens',
       used: usageSummary.value.usage.daily_tokens,
       limit: formatUsageLimit(usageSummary.value.limits.daily_tokens),
+      limitNumeric: usageSummary.value.limits.daily_tokens.value,
     },
     {
       labelKey: 'shell.weeklyTokens',
       used: usageSummary.value.usage.weekly_tokens,
       limit: formatUsageLimit(usageSummary.value.limits.weekly_tokens),
+      limitNumeric: usageSummary.value.limits.weekly_tokens.value,
     },
     {
       labelKey: 'shell.dailyTasks',
       used: usageSummary.value.usage.daily_tasks,
       limit: formatUsageLimit(usageSummary.value.limits.daily_tasks),
+      limitNumeric: usageSummary.value.limits.daily_tasks.value,
     },
     {
       labelKey: 'shell.weeklyTasks',
       used: usageSummary.value.usage.weekly_tasks,
       limit: formatUsageLimit(usageSummary.value.limits.weekly_tasks),
+      limitNumeric: usageSummary.value.limits.weekly_tasks.value,
     },
   ]
 })
 
 function formatUsageLimit(limit: CurrentUserUsageSummary['limits']['daily_tokens']) {
   return limit.mode === 'unlimited' || limit.value === null ? t('shell.usageUnlimited') : String(limit.value)
+}
+
+function formatUsagePercent(used: number, limitNumeric: number | null): string {
+  if (limitNumeric === null || limitNumeric <= 0) return '0%'
+  const pct = Math.min((used / limitNumeric) * 100, 100)
+  return `${Math.round(pct)}%`
 }
 
 function buildMenuItem(labelKey: string, key: string, icon: any): MenuOption {
@@ -673,7 +701,8 @@ body {
 }
 
 .usage-indicator__tooltip {
-  min-width: 240px;
+  min-width: 260px;
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .usage-indicator__tooltip-title {
@@ -682,10 +711,54 @@ body {
 }
 
 .usage-indicator__tooltip-row {
+  margin-top: 6px;
+}
+
+.usage-indicator__tooltip-row-top {
   display: flex;
   justify-content: space-between;
   gap: 12px;
+}
+
+.usage-indicator__tooltip-row--reset {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.usage-indicator__tooltip-label {
+  flex-shrink: 0;
+}
+
+.usage-indicator__tooltip-value {
+  text-align: right;
+}
+
+.usage-indicator__progress {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.15);
   margin-top: 4px;
+  overflow: hidden;
+}
+
+.usage-indicator__progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.usage-indicator__progress-fill--normal {
+  background: #18a058;
+}
+
+.usage-indicator__progress-fill--near_limit {
+  background: #f0a020;
+}
+
+.usage-indicator__progress-fill--over_limit {
+  background: #d03050;
 }
 
 .logo {
