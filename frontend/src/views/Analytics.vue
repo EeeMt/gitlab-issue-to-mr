@@ -1,7 +1,7 @@
 <template>
   <div class="analytics-page">
     <n-spin :show="initialLoading" :description="t('analytics.loading')">
-      <n-space vertical :size="20">
+      <div class="page-hero">
         <PageHeader
           :title="t('analytics.title')"
           :subtitle="t('analytics.subtitle')"
@@ -38,8 +38,10 @@
             </n-button>
           </template>
         </PageHeader>
+      </div>
+      <n-space vertical :size="20">
 
-        <n-alert type="info" :show-icon="false">
+        <n-alert type="info" :show-icon="false" :style="{ borderRadius: '12px' }">
           {{ t('analytics.projectInfo') }}
         </n-alert>
 

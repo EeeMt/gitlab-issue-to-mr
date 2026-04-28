@@ -1,6 +1,6 @@
 <template>
   <div class="sessions-page">
-    <n-space vertical :size="16">
+    <div class="page-hero">
       <PageHeader
         :title="t('sessions.title')"
         :subtitle="t('sessions.subtitle')"
@@ -20,14 +20,17 @@
           <SummaryCard
             :label="item.label"
             :value="item.value"
+            :icon="item.icon"
+            :accent="item.accent"
             card-class="sessions-summary-card"
             label-class="sessions-summary-card__label"
             value-class="sessions-summary-card__value"
           />
         </n-gi>
       </n-grid>
-
-      <n-alert type="info" :show-icon="false">
+    </div>
+    <n-space vertical :size="16">
+      <n-alert type="info" :show-icon="false" :style="{ borderRadius: '12px' }">
         {{ t('sessions.refreshTokenInfo') }}
       </n-alert>
 
@@ -123,6 +126,7 @@ import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeLocal } from '../utils/datetime'
+import { PeopleOutline, FlashOutline, KeyOutline, PersonOutline } from '@vicons/ionicons5'
 
 const message = useMessage()
 const { t } = useI18n()
@@ -139,10 +143,10 @@ const summaryItems = computed(() => {
   const refreshCapable = sessions.value.filter((session) => session.has_gitlab_refresh_token).length
   const current = sessions.value.find((session) => session.current)
   return [
-    { label: t('sessions.knownSessions'), value: String(sessions.value.length) },
-    { label: t('sessions.activeSessions'), value: String(active) },
-    { label: t('sessions.refreshCapable'), value: String(refreshCapable) },
-    { label: t('sessions.currentSession'), value: current ? shortId(current.id) : '—' }
+    { label: t('sessions.knownSessions'), value: String(sessions.value.length), icon: PeopleOutline, accent: 'blue' as const },
+    { label: t('sessions.activeSessions'), value: String(active), icon: FlashOutline, accent: 'green' as const },
+    { label: t('sessions.refreshCapable'), value: String(refreshCapable), icon: KeyOutline, accent: 'purple' as const },
+    { label: t('sessions.currentSession'), value: current ? shortId(current.id) : '—', icon: PersonOutline, accent: 'amber' as const }
   ]
 })
 
@@ -212,12 +216,7 @@ onMounted(() => {
   max-width: var(--app-page-max-width);
 }
 
-.sessions-summary-card {
-  border-radius: var(--app-card-radius);
-}
-
 .sessions-summary-card__value {
-  font-size: 20px;
   word-break: break-word;
 }
 

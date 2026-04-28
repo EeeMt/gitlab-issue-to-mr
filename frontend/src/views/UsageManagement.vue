@@ -26,13 +26,12 @@
       </PageHeader>
 
       <!-- Summary stat blocks -->
-      <div v-if="hasLoadedOnce" class="usage-stats">
+      <div class="usage-stats" :class="{ 'usage-stats--visible': hasLoadedOnce }">
         <div
-          v-for="(item, index) in summaryItems"
+          v-for="item in summaryItems"
           :key="item.label"
           class="usage-stat"
-          :class="[`usage-stat--${item.key}`, { 'usage-stat--visible': hasLoadedOnce }]"
-          :style="{ transitionDelay: `${120 + index * 80}ms` }"
+          :class="`usage-stat--${item.key}`"
         >
           <div class="usage-stat__icon-ring">
             <n-icon :component="item.icon" :size="20" />
@@ -575,7 +574,7 @@ onMounted(() => {
 .usage-hero {
   position: relative;
   padding: 32px 36px 28px;
-  margin: -16px -16px 0;
+  margin: -16px -16px 16px;
 
   border-bottom: 1px solid rgba(15, 23, 42, 0.05);
   overflow: hidden;
@@ -611,6 +610,12 @@ onMounted(() => {
   margin-top: 24px;
   position: relative;
   z-index: 1;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.usage-stats--visible {
+  opacity: 1;
 }
 
 .usage-stat {
@@ -625,18 +630,9 @@ onMounted(() => {
   backdrop-filter: blur(12px);
   border: 1px solid rgba(15, 23, 42, 0.06);
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
-  opacity: 0;
-  transform: translateY(12px);
   transition:
-    opacity 0.45s cubic-bezier(0.22, 0.61, 0.36, 1),
-    transform 0.45s cubic-bezier(0.22, 0.61, 0.36, 1),
     box-shadow 0.25s ease,
     border-color 0.25s ease;
-}
-
-.usage-stat--visible {
-  opacity: 1;
-  transform: translateY(0);
 }
 
 .usage-stat:hover {
@@ -1144,7 +1140,7 @@ onMounted(() => {
 @media (max-width: 767px) {
   .usage-hero {
     padding: 20px 16px 20px;
-    margin: -12px -12px 0;
+    margin: -12px -12px 12px;
   }
 
   .usage-stats {

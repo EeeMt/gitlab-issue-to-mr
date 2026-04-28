@@ -1,7 +1,7 @@
 <template>
   <div class="dashboard" data-testid="tasks-page">
     <n-spin :show="initialLoading" :description="t('common.loadingTasks')">
-      <n-space vertical :size="16">
+      <div class="page-hero">
         <PageHeader
           data-testid="tasks-header"
           root-class="dashboard__hero"
@@ -29,6 +29,8 @@
             <SummaryCard
               :label="item.label"
               :value="item.value"
+              :icon="item.icon"
+              :accent="item.accent"
               data-testid="tasks-summary-card"
               card-class="dashboard-summary-card"
               label-class="dashboard-summary-card__label"
@@ -36,7 +38,8 @@
             />
           </n-gi>
         </n-grid>
-
+      </div>
+      <n-space vertical :size="16">
         <FilterToolbar
           :config="filterConfig"
           :filters="filterState.filters.value"
@@ -88,7 +91,7 @@ import { useBreakpoints } from '../composables/useBreakpoints'
 import { usePolling } from '../composables/usePolling'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
 import { formatPriority, getProjectLabel as _getProjectLabel } from '../utils/format'
-import { EllipseOutline, FolderOpenOutline, FlagOutline, PersonOutline, CalendarOutline, GitMergeOutline, TimeOutline } from '@vicons/ionicons5'
+import { EllipseOutline, FolderOpenOutline, FlagOutline, PersonOutline, CalendarOutline, GitMergeOutline, TimeOutline, GridOutline, CheckmarkCircleOutline, PlayCircleOutline } from '@vicons/ionicons5'
 
 const router = useRouter()
 const message = useMessage()
@@ -498,10 +501,10 @@ const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 
 const summaryItems = computed(() => [
-  { label: t('dashboard.visibleTasks'), value: String(statsTotal.value) },
-  { label: t('dashboard.running'), value: String(statsRunning.value) },
-  { label: t('dashboard.pendingQueued'), value: String(statsPending.value) },
-  { label: t('dashboard.completed'), value: String(statsCompleted.value) },
+  { label: t('dashboard.visibleTasks'), value: String(statsTotal.value), icon: GridOutline, accent: 'blue' as const },
+  { label: t('dashboard.running'), value: String(statsRunning.value), icon: PlayCircleOutline, accent: 'green' as const },
+  { label: t('dashboard.pendingQueued'), value: String(statsPending.value), icon: TimeOutline, accent: 'amber' as const },
+  { label: t('dashboard.completed'), value: String(statsCompleted.value), icon: CheckmarkCircleOutline, accent: 'purple' as const },
 ])
 
 async function fetchTasks() {

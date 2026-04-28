@@ -3,7 +3,7 @@
     <n-spin :show="initialLoading">
       <template #description>{{ t('monitor.loading') }}</template>
 
-      <n-space vertical :size="16">
+      <div class="page-hero">
         <PageHeader
           :title="t('monitor.title')"
           :subtitle="t('monitor.subtitle')"
@@ -15,10 +15,6 @@
             </n-button>
           </template>
         </PageHeader>
-
-        <n-alert type="info" :show-icon="false">
-          {{ t('monitor.dataSourceInfo') }}
-        </n-alert>
 
         <n-grid :x-gap="16" :y-gap="16" cols="2 s:2 l:4" responsive="screen">
           <n-gi v-for="item in overviewCards" :key="item.key" class="monitor-grid-cell">
@@ -32,6 +28,11 @@
             </n-card>
           </n-gi>
         </n-grid>
+      </div>
+      <n-space vertical :size="16">
+        <n-alert type="info" :show-icon="false" :style="{ borderRadius: '12px' }">
+          {{ t('monitor.dataSourceInfo') }}
+        </n-alert>
 
         <n-tabs v-model:value="activeTab" type="line" animated class="monitor-tabs">
           <n-tab-pane name="runtime" :tab="t('monitor.runtimeTab')">
@@ -1554,13 +1555,23 @@ onBeforeUnmount(() => {
   height: 100%;
 }
 
-.monitor-card,
-.monitor-summary-card {
+.monitor-card {
   border-radius: var(--app-card-radius);
 }
 
 .monitor-summary-card {
-  background: var(--app-summary-card-background);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  transition: transform 0.25s cubic-bezier(0.22, 0.61, 0.36, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.monitor-summary-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+  border-color: rgba(15, 23, 42, 0.1);
 }
 
 .monitor-summary-card :deep(.n-card__content) {
@@ -2157,6 +2168,14 @@ onBeforeUnmount(() => {
   .health-check {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+@media (hover: none) {
+  .monitor-summary-card:hover {
+    transform: none;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    border-color: rgba(15, 23, 42, 0.06);
   }
 }
 </style>

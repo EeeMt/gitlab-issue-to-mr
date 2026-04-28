@@ -1,7 +1,7 @@
 <template>
   <div class="issue-list" data-testid="issue-list-page">
     <n-spin :show="initialLoading" :description="t('common.loadingTasks')">
-      <n-space vertical :size="16">
+      <div class="page-hero">
         <PageHeader
           data-testid="issue-list-header"
           root-class="issue-list__hero"
@@ -31,6 +31,8 @@
             <SummaryCard
               :label="item.label"
               :value="item.value"
+              :icon="item.icon"
+              :accent="item.accent"
               data-testid="issue-summary-card"
               card-class="issue-summary-card"
               label-class="issue-summary-card__label"
@@ -38,7 +40,8 @@
             />
           </n-gi>
         </n-grid>
-
+      </div>
+      <n-space vertical :size="16">
         <FilterToolbar
           :config="filterConfig"
           :filters="filterState.filters.value"
@@ -88,7 +91,7 @@ import FilterToolbar from '../components/filter/FilterToolbar.vue'
 import { useFilterSort, type FilterSortConfig } from '../composables/useFilterSort'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
-import { EllipseOutline, FolderOpenOutline, CalendarOutline, PersonOutline, GitMergeOutline } from '@vicons/ionicons5'
+import { EllipseOutline, FolderOpenOutline, CalendarOutline, PersonOutline, GitMergeOutline, DocumentTextOutline, AlertCircleOutline, SyncOutline, CheckmarkCircleOutline } from '@vicons/ionicons5'
 
 const router = useRouter()
 const message = useMessage()
@@ -107,10 +110,10 @@ const statsInProgress = ref(0)
 const statsCompleted = ref(0)
 
 const summaryItems = computed(() => [
-  { label: t('issue.totalIssues'), value: String(statsTotal.value) },
-  { label: t('issue.openCount'), value: String(statsOpen.value) },
-  { label: t('issue.inProgressCount'), value: String(statsInProgress.value) },
-  { label: t('issue.completedCount'), value: String(statsCompleted.value) },
+  { label: t('issue.totalIssues'), value: String(statsTotal.value), icon: DocumentTextOutline, accent: 'blue' as const },
+  { label: t('issue.openCount'), value: String(statsOpen.value), icon: AlertCircleOutline, accent: 'red' as const },
+  { label: t('issue.inProgressCount'), value: String(statsInProgress.value), icon: SyncOutline, accent: 'amber' as const },
+  { label: t('issue.completedCount'), value: String(statsCompleted.value), icon: CheckmarkCircleOutline, accent: 'green' as const },
 ])
 
 const currentPage = ref(1)

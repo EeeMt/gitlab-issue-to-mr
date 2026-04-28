@@ -200,6 +200,10 @@ vi.mock('@vicons/ionicons5', () => ({
   PersonOutline: {},
   CalendarOutline: {},
   GitMergeOutline: {},
+  DocumentTextOutline: {},
+  AlertCircleOutline: {},
+  SyncOutline: {},
+  CheckmarkCircleOutline: {},
 }))
 
 // ---------------------------------------------------------------------------

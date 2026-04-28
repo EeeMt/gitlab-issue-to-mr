@@ -222,6 +222,9 @@ vi.mock('@vicons/ionicons5', () => ({
   CalendarOutline: {},
   GitMergeOutline: {},
   TimeOutline: {},
+  GridOutline: {},
+  CheckmarkCircleOutline: {},
+  PlayCircleOutline: {},
 }))
 
 // ---------------------------------------------------------------------------

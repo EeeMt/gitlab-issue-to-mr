@@ -1049,4 +1049,49 @@ a.app-link:visited:hover {
     padding-right: 4px;
   }
 }
+
+/* ===================================================================
+   Shared page hero section (gradient header + summary cards)
+   =================================================================== */
+
+.page-hero {
+  position: relative;
+  padding: 32px 36px 28px;
+  margin: -16px -16px 16px;
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 0%, rgba(99, 102, 241, 0.06), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 80% 100%, rgba(59, 130, 246, 0.05), transparent 55%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgba(248, 250, 252, 0.4) 100%);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+}
+
+.page-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(15, 23, 42, 0.03) 1px, transparent 1px);
+  background-size: 20px 20px;
+  pointer-events: none;
+  mask-image: linear-gradient(180deg, black 0%, transparent 100%);
+}
+
+.page-hero > .n-grid {
+  margin-top: 24px;
+}
+
+.page-hero .n-gi {
+  display: flex;
+}
+
+.page-hero .n-gi > * {
+  width: 100%;
+}
+
+@media (max-width: 767px) {
+  .page-hero {
+    padding: 20px 16px 20px;
+    margin: -12px -12px 12px;
+  }
+}
 </style>
