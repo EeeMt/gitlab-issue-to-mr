@@ -252,7 +252,26 @@ describe('UsageManagement', () => {
     expect(wrapper.find('[data-testid="usage-management-page"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('alice')
     expect(wrapper.text()).toContain('120')
-    expect(wrapper.text()).toContain('formatted:2026-04-29T00:00:00+08:00')
+    // New grouped layout expectations (TDD - will fail until template updated)
+    expect(wrapper.find('.usage-management-user-card__top').exists()).toBe(true)
+    expect(wrapper.find('.usage-management-user-card__stats').exists()).toBe(true)
+    expect(wrapper.find('.usage-management-user-card__stat').exists()).toBe(true)
+    expect(wrapper.find('.usage-management-user-card__reset').text()).toContain('formatted:2026-04-29T00:00:00+08:00')
+  })
+
+  it('renders compact stat blocks for each quota metric', async () => {
+    wrapper = mountComponent()
+    await flushPromises()
+    const stats = wrapper.findAll('.usage-management-user-card__stat')
+    expect(stats).toHaveLength(4)
+    const expectedValues = ['120', '800', '2', '4']
+    expectedValues.forEach((value, index) => {
+      // Each stat block should contain the corresponding usage value
+      expect(stats[index].text()).toContain(value)
+      // New DOM structure: expect each stat to expose a dedicated value element
+      // (This is intentionally a red expectation until the template is updated.)
+      expect(stats[index].find('.usage-management-user-card__stat__value').exists()).toBe(true)
+    })
   })
 
   it('saves the system default limits', async () => {

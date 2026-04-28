@@ -97,30 +97,36 @@
               class="usage-management-user-card"
               data-testid="usage-management-user-card"
             >
-              <div class="usage-management-user-card__header">
+              <div class="usage-management-user-card__top">
                 <div>
-                  <div class="usage-management-user-card__name">{{ user.display_name || user.username }}</div>
-                  <div class="usage-management-user-card__meta">@{{ user.username }}</div>
+                  <div class="usage-management-user-card__name-row">
+                    <div class="usage-management-user-card__name">{{ user.display_name || user.username }}</div>
+                    <div class="usage-management-user-card__meta">@{{ user.username }}</div>
+                  </div>
+                </div>
+                <div class="usage-management-user-card__reset">
+                  <div class="usage-management-user-card__reset-item">
+                    <span class="usage-management-user-card__label">{{ t('usageManagement.dailyReset') }}</span>
+                    <span>{{ formatUsageResetAt(user.reset_at.daily) }}</span>
+                  </div>
+                  <div class="usage-management-user-card__reset-item">
+                    <span class="usage-management-user-card__label">{{ t('usageManagement.weeklyReset') }}</span>
+                    <span>{{ formatUsageResetAt(user.reset_at.weekly) }}</span>
+                  </div>
                 </div>
               </div>
 
-              <div class="usage-management-user-card__usage">
+              <div class="usage-management-user-card__stats">
                 <div
                   v-for="field in limitFields"
                   :key="`${user.user_id}-${field.key}`"
-                  class="usage-management-user-card__usage-row"
+                  class="usage-management-user-card__stat"
                 >
-                  <span>{{ field.label }}</span>
-                  <span>{{ user.usage[field.key] }}</span>
-                  <span>{{ formatLimitValue(user.limits[field.key]) }}</span>
-                </div>
-                <div class="usage-management-user-card__usage-row">
-                  <span>{{ t('usageManagement.dailyReset') }}</span>
-                  <span>{{ formatUsageResetAt(user.reset_at.daily) }}</span>
-                </div>
-                <div class="usage-management-user-card__usage-row">
-                  <span>{{ t('usageManagement.weeklyReset') }}</span>
-                  <span>{{ formatUsageResetAt(user.reset_at.weekly) }}</span>
+                  <div class="usage-management-user-card__label">{{ field.label }}</div>
+                  <div class="usage-management-user-card__stat__value">{{ user.usage[field.key] }}</div>
+                  <div class="usage-management-user-card__stat-limit">
+                    {{ formatLimitValue(user.limits[field.key]) }}
+                  </div>
                 </div>
               </div>
 
@@ -476,10 +482,19 @@ onMounted(() => {
 
 .usage-management-user-card {
   border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.9));
 }
 
-.usage-management-user-card__header {
-  margin-bottom: 12px;
+.usage-management-user-card__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.usage-management-user-card__name-row {
+  display: grid;
+  gap: 4px;
 }
 
 .usage-management-user-card__name {
@@ -492,17 +507,49 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.usage-management-user-card__usage {
+.usage-management-user-card__reset {
   display: grid;
-  gap: 8px;
+  gap: 10px;
+  text-align: right;
+}
+
+.usage-management-user-card__reset-item {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.usage-management-user-card__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
   margin-bottom: 16px;
 }
 
-.usage-management-user-card__usage-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
+.usage-management-user-card__stat {
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.usage-management-user-card__label {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.56);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 6px;
+}
+
+.usage-management-user-card__stat__value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--n-text-color-1);
+  margin-bottom: 2px;
+}
+
+.usage-management-user-card__stat-limit {
   font-size: 13px;
+  color: rgba(15, 23, 42, 0.68);
 }
 
 .usage-management-user-card__actions {
@@ -523,5 +570,19 @@ onMounted(() => {
 
 .usage-management-limit-row__value {
   width: 140px;
+}
+
+@media (max-width: 767px) {
+  .usage-management-user-card__top {
+    flex-direction: column;
+  }
+
+  .usage-management-user-card__reset {
+    text-align: left;
+  }
+
+  .usage-management-user-card__stats {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
