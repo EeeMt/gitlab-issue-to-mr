@@ -630,7 +630,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
     """Regression tests for commit attribution shell logic."""
 
     def test_entrypoint_uses_codify_coauthor_and_git_author_env(self):
-        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.sh"
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = script.read_text()
 
         self.assertIn('GIT_AUTHOR_NAME_VALUE', content)

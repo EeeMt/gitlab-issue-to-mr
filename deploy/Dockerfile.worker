@@ -40,7 +40,7 @@ COPY --from=claude-installer /usr/local/bin/claude /usr/local/bin/claude
 RUN claude --version
 
 # Copy entrypoint scripts
-COPY deploy/entrypoint.sh /entrypoint.sh
+COPY deploy/entrypoint.worker.sh /entrypoint.sh
 COPY deploy/ci-claude.sh /usr/local/bin/ci-claude.sh
 RUN chmod +x /entrypoint.sh /usr/local/bin/ci-claude.sh
 

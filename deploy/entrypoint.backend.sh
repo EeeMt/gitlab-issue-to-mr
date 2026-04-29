@@ -5,7 +5,7 @@ set -e
 # Handles custom CA certificate installation before starting the application
 
 echo "========================================"
-echo "GitLab Issue to MR Backend Service"
+echo "Codify Backend Service"
 echo "========================================"
 
 # Custom CA certificate installation
