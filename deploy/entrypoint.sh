@@ -26,7 +26,7 @@ ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}"
 APPEND_SYSTEM_PROMPT="${APPEND_SYSTEM_PROMPT:-}"
 
 echo "========================================"
-echo "GitLab Issue to MR Worker"
+echo "Codify Worker"
 echo "========================================"
 echo "GitLab URL:   ${GITLAB_URL}"
 echo "Project:      ${PROJECT_ID}"
@@ -45,44 +45,12 @@ echo "System Prompt:  $([ -n "$APPEND_SYSTEM_PROMPT" ] && echo "set (${#APPEND_S
 echo "GitLab Token:   $([ -n "$GITLAB_TOKEN" ] && echo 'set' || echo 'missing')"
 echo "========================================"
 
-# Extract hostname from GITLAB_URL for git operations
+# Extract scheme and hostname from GITLAB_URL for git operations
+GITLAB_SCHEME="${GITLAB_URL%%://*}"
+case "${GITLAB_SCHEME}" in http | https) ;; *) GITLAB_SCHEME="http" ;; esac
 GITLAB_HOST=$(echo "${GITLAB_URL}" | sed 's|https://||' | sed 's|http://||')
 
-# Get correct git repo URL from GitLab API (handles external_url misconfiguration)
-echo "Fetching repository URL from GitLab API..."
-GITLAB_API_RESPONSE=$(curl -s -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
-    "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}")
-GIT_REPO_URL=$(echo "${GITLAB_API_RESPONSE}" | grep -o '"http_url_to_repo":"[^"]*"' | cut -d'"' -f4)
-PROJECT_PATH=$(echo "${GITLAB_API_RESPONSE}" | grep -o '"path_with_namespace":"[^"]*"' | cut -d'"' -f4)
-DEFAULT_BRANCH=$(echo "${GITLAB_API_RESPONSE}" | grep -o '"default_branch":"[^"]*"' | cut -d'"' -f4)
-
-# Set BASE_BRANCH: explicit > TARGET_BRANCH > project default branch (now that DEFAULT_BRANCH is known)
-if [ -z "${BASE_BRANCH}" ]; then
-    if [ -n "${TARGET_BRANCH}" ]; then
-        BASE_BRANCH="${TARGET_BRANCH}"
-    else
-        BASE_BRANCH="${DEFAULT_BRANCH:-main}"
-        echo "No TARGET_BRANCH set (no-MR mode); using default branch '${BASE_BRANCH}' as base"
-    fi
-fi
-
-# Fallback to constructed URL if API fails
-if [ -z "${PROJECT_PATH}" ] && [ -n "${GIT_REPO_URL}" ]; then
-    PROJECT_PATH=$(echo "${GIT_REPO_URL}" | sed -E 's|https?://[^/]+/||; s|\.git$||')
-fi
-
-if [ -z "${PROJECT_PATH}" ]; then
-    echo "Warning: Could not get URL from API, using constructed URL"
-    PROJECT_PATH="projects/${PROJECT_ID}"
-fi
-
-# Build repo URL with the actual configured host and let credential helper provide auth.
-GIT_REPO_URL="http://${GITLAB_HOST}/${PROJECT_PATH}.git"
-
-# Log repository URL without exposing token
-echo "Repository URL: http://[TOKEN]@${GITLAB_HOST}/${PROJECT_PATH}.git"
-
-# Configure git SSL verification
+# Configure git SSL verification early, before any GitLab API requests.
 # When a custom CA bundle is provided, install it into the system trust store,
 # configure git to use it, and enable SSL verification.
 # Without a custom CA, fall back to disabling SSL verification (legacy behaviour).
@@ -112,12 +80,46 @@ else
     git config --global http.sslVerify false
 fi
 
+# Get correct git repo URL from GitLab API (handles external_url misconfiguration)
+echo "Fetching repository URL from GitLab API..."
+GITLAB_API_RESPONSE=$(curl -sS -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+    "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}")
+GIT_REPO_URL=$(echo "${GITLAB_API_RESPONSE}" | grep -o '"http_url_to_repo":"[^"]*"' | cut -d'"' -f4)
+PROJECT_PATH=$(echo "${GITLAB_API_RESPONSE}" | grep -o '"path_with_namespace":"[^"]*"' | cut -d'"' -f4)
+DEFAULT_BRANCH=$(echo "${GITLAB_API_RESPONSE}" | grep -o '"default_branch":"[^"]*"' | cut -d'"' -f4)
+
+# Set BASE_BRANCH: explicit > TARGET_BRANCH > project default branch (now that DEFAULT_BRANCH is known)
+if [ -z "${BASE_BRANCH}" ]; then
+    if [ -n "${TARGET_BRANCH}" ]; then
+        BASE_BRANCH="${TARGET_BRANCH}"
+    else
+        BASE_BRANCH="${DEFAULT_BRANCH:-main}"
+        echo "No TARGET_BRANCH set (no-MR mode); using default branch '${BASE_BRANCH}' as base"
+    fi
+fi
+
+# Fallback to constructed URL if API fails
+if [ -z "${PROJECT_PATH}" ] && [ -n "${GIT_REPO_URL}" ]; then
+    PROJECT_PATH=$(echo "${GIT_REPO_URL}" | sed -E 's|https?://[^/]+/||; s|\.git$||')
+fi
+
+if [ -z "${PROJECT_PATH}" ]; then
+    echo "Warning: Could not get URL from API, using constructed URL"
+    PROJECT_PATH="projects/${PROJECT_ID}"
+fi
+
+# Build repo URL with the actual configured host and let credential helper provide auth.
+GIT_REPO_URL="${GITLAB_SCHEME}://${GITLAB_HOST}/${PROJECT_PATH}.git"
+
+# Log repository URL without exposing token
+echo "Repository URL: ${GITLAB_SCHEME}://[TOKEN]@${GITLAB_HOST}/${PROJECT_PATH}.git"
+
 # Set up credential helper - write credentials file
 rm -rf ~/.git-credentials
 touch ~/.git-credentials
 chmod 600 ~/.git-credentials
 # Write credentials in format: protocol://username:password@host
-echo "http://oauth2:${GITLAB_TOKEN}@${GITLAB_HOST}" > ~/.git-credentials
+echo "${GITLAB_SCHEME}://oauth2:${GITLAB_TOKEN}@${GITLAB_HOST}" > ~/.git-credentials
 
 git config --global credential.helper store
 
@@ -641,7 +643,7 @@ AI-Generated: true"
 
     # Push to remote using git push
     echo "Pushing to remote..."
-    git remote set-url origin "http://${GITLAB_HOST}/${PROJECT_PATH}.git"
+    git remote set-url origin "${GITLAB_SCHEME}://${GITLAB_HOST}/${PROJECT_PATH}.git"
     git config --local http.extraHeader "PRIVATE-TOKEN: ${GITLAB_TOKEN}"
     GIT_TERMINAL_PROMPT=0 git push -u origin "${BRANCH_NAME}"
 
@@ -657,18 +659,18 @@ AI-Generated: true"
         echo "No-MR mode: skipping MR lookup and update"
     elif [ -n "${MR_IID}" ]; then
         echo "Using existing MR: !${MR_IID}"
-        MR_WEB_URL=$(curl -s -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+        MR_WEB_URL=$(curl -sS -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
             "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests/${MR_IID}" | \
             grep -o '"web_url":"[^"]*"' | cut -d'"' -f4)
     else
         # Fallback: check if MR already exists for this branch
         echo "Checking for existing MR..."
-        EXISTING_MR=$(curl -s -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+        EXISTING_MR=$(curl -sS -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
             "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests?state=opened&source_branch=${BRANCH_NAME}" | \
             grep -o '"iid":[0-9]*' | head -1 | cut -d':' -f2)
         if [ -n "$EXISTING_MR" ]; then
             MR_IID="${EXISTING_MR}"
-            MR_WEB_URL=$(curl -s -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            MR_WEB_URL=$(curl -sS -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
                 "${GITLAB_URL}/api/v4/projects/${PROJECT_ID}/merge_requests/${EXISTING_MR}" | \
                 grep -o '"web_url":"[^"]*"' | cut -d'"' -f4)
         fi
