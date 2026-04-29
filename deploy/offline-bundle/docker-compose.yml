@@ -31,6 +31,15 @@ services:
         condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Mount CA cert (place ca.crt at the source path on the Docker host).
+      # If you don't use an internal CA, comment out this bind mount and
+      # remove CUSTOM_CA_BUNDLE from the environment block above.
+      - type: bind
+        source: /opt/ca.crt
+        target: /etc/ssl/certs/custom-ca.crt
+        read_only: true
+        bind:
+          create_host_path: false
     restart: unless-stopped
     networks:
       - codify-network
@@ -63,6 +72,17 @@ services:
         condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Session storage — shared with worker containers via host path
+      - /var/codify/sessions:/var/codify/sessions
+      # Mount CA cert (place ca.crt at the source path on the Docker host).
+      # If you don't use an internal CA, comment out this bind mount and
+      # remove CUSTOM_CA_BUNDLE from the environment block above.
+      - type: bind
+        source: /opt/ca.crt
+        target: /etc/ssl/certs/custom-ca.crt
+        read_only: true
+        bind:
+          create_host_path: false
     restart: unless-stopped
     networks:
       - codify-network

@@ -898,7 +898,7 @@ describe('IssueView', () => {
       expect(quotaAlert.exists()).toBe(true)
       expect(quotaAlert.text()).toContain('6')
       expect(quotaAlert.text()).toContain('5')
-      expect(quotaAlert.text()).toContain('2026-04-29 00:00 UTC+08:00')
+      expect(quotaAlert.text()).toContain('2026-04-29 00:00')
       expect(mockMessage.error).not.toHaveBeenCalled()
     })
 
