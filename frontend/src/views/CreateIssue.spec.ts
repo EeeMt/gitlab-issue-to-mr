@@ -366,12 +366,12 @@ describe('CreateIssue', () => {
       expect(wrapper.find('button.n-switch').exists()).toBe(true)
     })
 
-    it('should render base branch select', async () => {
+    it('should render base branch and target branch selects by default', async () => {
       await mountComponent()
 
       const selects = wrapper.findAll('select.n-select')
-      // project select + base branch select (target branch hidden when create_mr is false)
-      expect(selects.length).toBeGreaterThanOrEqual(2)
+      // project select + base branch select + target branch select
+      expect(selects.length).toBeGreaterThanOrEqual(3)
     })
   })
 
@@ -476,13 +476,12 @@ describe('CreateIssue', () => {
   // ── MR Toggle ─────────────────────────────────────────────────
 
   describe('MR toggle (create_mr)', () => {
-    it('should not show target branch select when create_mr is false', async () => {
+    it('should show target branch select by default when create_mr is true', async () => {
       await mountComponent()
 
-      expect(wrapper.vm.formValue.create_mr).toBe(false)
-      // Target branch select should not be in DOM (v-if="formValue.create_mr")
-      const text = wrapper.text()
-      expect(text).not.toContain('issue.field.targetBranch')
+      expect(wrapper.vm.formValue.create_mr).toBe(true)
+      const selects = wrapper.findAll('select.n-select')
+      expect(selects.length).toBeGreaterThanOrEqual(3)
     })
 
     it('should show target branch select when create_mr is true', async () => {
@@ -838,7 +837,7 @@ describe('CreateIssue', () => {
       expect(wrapper.vm.formValue.project_id).toBeUndefined()
       expect(wrapper.vm.formValue.base_branch).toBeUndefined()
       expect(wrapper.vm.formValue.target_branch).toBeUndefined()
-      expect(wrapper.vm.formValue.create_mr).toBe(false)
+      expect(wrapper.vm.formValue.create_mr).toBe(true)
     })
 
     it('should clear branches on reset', async () => {

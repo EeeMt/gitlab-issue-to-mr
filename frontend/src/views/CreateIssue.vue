@@ -242,7 +242,7 @@ function createInitialFormValue(): {
     project_id: undefined,
     base_branch: undefined,
     target_branch: undefined,
-    create_mr: false,
+    create_mr: true,
   }
 }
 
