@@ -60,9 +60,9 @@
           </div>
           <div class="summary-item">
             <span class="summary-label">{{ t('taskView.totalTokens') }}</span>
-            <span class="summary-value">{{ totalTokens != null ? totalTokens.toLocaleString() : '-' }}</span>
+            <span class="summary-value">{{ totalTokens != null ? formatLargeNumber(totalTokens) : '-' }}</span>
             <span v-if="task.input_tokens != null && task.output_tokens != null" class="summary-item__sub">
-              {{ t('taskView.tokenBreakdown', { input: task.input_tokens.toLocaleString(), output: task.output_tokens.toLocaleString() }) }}
+              {{ t('taskView.tokenBreakdown', { input: formatLargeNumber(task.input_tokens), output: formatLargeNumber(task.output_tokens) }) }}
             </span>
           </div>
           <div class="summary-item">
@@ -80,6 +80,7 @@ import { computed } from 'vue'
 import { NCard, NIcon } from 'naive-ui'
 import { GitMergeOutline, AlertCircleOutline, CodeOutline, TimeOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
+import { formatLargeNumber } from '../utils/usageLimits'
 import type { Task } from '../api'
 
 const props = defineProps<{

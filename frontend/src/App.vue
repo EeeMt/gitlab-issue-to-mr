@@ -103,7 +103,7 @@
                     <div class="usage-indicator__tooltip-row-top">
                       <span class="usage-indicator__tooltip-label">{{ t(item.labelKey) }}</span>
                       <span class="usage-indicator__tooltip-value">
-                        {{ toScientificNotation(item.used) }} / {{ formatUsageLimitDisplay(item.limitNumeric, item.limit) }}
+                        {{ formatLargeNumber(item.used) }} / {{ formatUsageLimitDisplay(item.limitNumeric, item.limit) }}
                         &nbsp;({{ formatUsagePercent(item.used, item.limitNumeric) }})
                       </span>
                     </div>
@@ -262,7 +262,7 @@ import LanguageToggle from './components/LanguageToggle.vue'
 import OnboardingModal from './components/OnboardingModal.vue'
 import { useBreakpoints } from './composables/useBreakpoints'
 import { getOnboardingDismissed, setOnboardingDismissed } from './composables/useOnboarding'
-import { formatUsageResetAt, toScientificNotation } from './utils/usageLimits'
+import { formatLargeNumber, formatUsageResetAt } from './utils/usageLimits'
 import {
   naiveUiDateLocale,
   naiveUiLocale,
@@ -372,7 +372,7 @@ function formatUsageLimit(limit: CurrentUserUsageSummary['limits']['daily_tokens
 
 function formatUsageLimitDisplay(limitNumeric: number | null, fallback: string): string {
   if (limitNumeric === null) return fallback
-  return toScientificNotation(limitNumeric)
+  return formatLargeNumber(limitNumeric)
 }
 
 function formatUsagePercent(used: number, limitNumeric: number | null): string {

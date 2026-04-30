@@ -184,7 +184,7 @@
                 <!-- Usage vs limit with progress bar -->
                 <div class="usage-management-user-card__field-usage">
                   <span class="usage-management-user-card__field-used">
-                    {{ user.usage[field.key].toLocaleString() }}
+                    {{ formatLargeNumber(user.usage[field.key]) }}
                   </span>
                   <span class="usage-management-user-card__field-limit">
                     / {{ formatLimitValue(user.limits[field.key]) }}
@@ -279,7 +279,7 @@ import {
 } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
-import { formatUsageResetAt } from '../utils/usageLimits'
+import { formatLargeNumber, formatUsageResetAt } from '../utils/usageLimits'
 
 type LimitFieldKey = keyof AdminUsageLimitPolicy
 
@@ -482,7 +482,7 @@ function formatLimitValue(limit: UsageLimitValue) {
   if (limit.mode === 'unlimited' || limit.value === null) {
     return t('shell.usageUnlimited')
   }
-  return limit.value.toLocaleString()
+  return formatLargeNumber(limit.value)
 }
 
 function setUserSaving(userId: number, active: boolean) {

@@ -28,6 +28,7 @@ vi.mock('../api', () => ({
 }))
 
 vi.mock('../utils/usageLimits', () => ({
+  formatLargeNumber: vi.fn((value: number) => String(value)),
   formatUsageResetAt: vi.fn((value: string) => `formatted:${value}`),
 }))
 

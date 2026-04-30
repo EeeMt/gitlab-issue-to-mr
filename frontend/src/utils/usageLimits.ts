@@ -57,10 +57,17 @@ export function formatUsageResetAt(value: string) {
   return `${utc8Date} ${utc8Time}`
 }
 
-export function toScientificNotation(value: number): string {
+export function formatLargeNumber(value: number): string {
   if (value === 0) return '0'
-  const exp = Math.floor(Math.log10(Math.abs(value)))
-  if (exp < 6) return value.toLocaleString()
-  const mantissa = value / Math.pow(10, exp)
-  return `${mantissa.toFixed(2)}e${exp}`
+  if (value < 1000) return value.toLocaleString()
+
+  const units = ['', 'K', 'M', 'B', 'T']
+  const tier = Math.floor(Math.log10(Math.abs(value)) / 3)
+  const clampedTier = Math.min(tier, units.length - 1)
+  const scaled = value / Math.pow(10, clampedTier * 3)
+
+  if (scaled % 1 < 0.05 || scaled % 1 > 0.95) {
+    return `${Math.round(scaled)}${units[clampedTier]}`
+  }
+  return `${scaled.toFixed(1)}${units[clampedTier]}`
 }
