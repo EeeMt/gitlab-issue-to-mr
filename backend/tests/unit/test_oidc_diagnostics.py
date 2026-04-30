@@ -35,7 +35,6 @@ class OIDCDiagnosticsTests(unittest.TestCase):
         self.assertTrue(any("/api/auth/callback" in warning for warning in warnings))
         self.assertTrue(any("COOKIE_SECURE=true" in warning for warning in warnings))
         self.assertTrue(any("24 hours" in warning for warning in warnings))
-        self.assertTrue(any("Break-glass recovery" in warning for warning in warnings))
         self.assertTrue(any("Group-based admin bootstrap" in warning for warning in warnings))
 
     def test_diagnostics_warn_when_samesite_none_is_not_secure(self) -> None:

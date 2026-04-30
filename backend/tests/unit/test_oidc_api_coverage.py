@@ -590,7 +590,7 @@ class TestOIDCDiagnosticsEndpoint(unittest.TestCase):
 
     def test_cookie_policy_warning_when_warnings_exist(self):
         """Lines 305-316: warnings present → cookie_policy is warning."""
-        settings = _make_settings(break_glass_enabled=False)
+        settings = _make_settings(session_ttl_seconds=90000)
         resp = self._get(settings=settings)
         data = resp.json()
         cookie = next(c for c in data["checks"] if c["key"] == "cookie_policy")
@@ -640,16 +640,11 @@ class TestOIDCDiagnosticsEndpoint(unittest.TestCase):
     def test_warnings_surface_in_response(self):
         """Warnings from _build_oidc_diagnostics_warnings appear in response."""
         settings = _make_settings(
-            break_glass_enabled=False,
             session_ttl_seconds=90000,
         )
         resp = self._get(settings=settings)
         data = resp.json()
         self.assertTrue(len(data["warnings"]) > 0)
-        self.assertTrue(
-            any("Break-glass" in w for w in data["warnings"]),
-            "Expected a break-glass warning",
-        )
         self.assertTrue(
             any("24 hours" in w for w in data["warnings"]),
             "Expected a long-TTL warning",

@@ -85,9 +85,6 @@ def _build_oidc_diagnostics_warnings(settings: Settings) -> list[str]:
     if settings.cookie_samesite == "none" and not settings.cookie_secure:
         warnings.append("SameSite=None without secure cookies is rejected by many browsers.")
 
-    if not settings.break_glass_enabled:
-        warnings.append("Break-glass recovery is currently disabled.")
-
     if settings.admin_gitlab_groups:
         warnings.append(
             "Group-based admin bootstrap is enabled. Verify GitLab OIDC returns groups in claims or userinfo; otherwise those admin grants will not apply."
