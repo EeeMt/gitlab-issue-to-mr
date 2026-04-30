@@ -108,14 +108,12 @@ def _build_gitlab_project_webhook_status_response(
     elif not hook_found:
         status_value = "missing"
         status_detail = "No webhook matches the configured callback URL"
-    elif note_events and enable_ssl_verification and merge_requests_events:
+    elif enable_ssl_verification and merge_requests_events:
         status_value = "configured"
         status_detail = None
     else:
         status_value = "needs_attention"
         issues: list[str] = []
-        if not note_events:
-            issues.append("note events disabled")
         if not enable_ssl_verification:
             issues.append("SSL verification disabled")
         if not merge_requests_events:

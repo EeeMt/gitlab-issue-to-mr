@@ -222,14 +222,13 @@ class ConfigApiHelperTests(unittest.TestCase):
             matched_hook={
                 "id": 12,
                 "url": "https://bot.example.com/api/webhook/gitlab",
-                "note_events": False,
-                "enable_ssl_verification": True,
+                "enable_ssl_verification": False,
                 "merge_requests_events": True,
             },
         )
 
         self.assertEqual(response.status, "needs_attention")
-        self.assertEqual(response.status_detail, "note events disabled")
+        self.assertEqual(response.status_detail, "SSL verification disabled")
         self.assertEqual(response.secret_mode, "global_fallback")
 
     def test_build_gitlab_project_webhook_status_response_marks_missing_and_error(self) -> None:

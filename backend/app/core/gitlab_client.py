@@ -459,7 +459,7 @@ class GitLabClient:
             "url": webhook_url,
             "token": secret_token,
             "enable_ssl_verification": True,
-            "note_events": True,
+            "note_events": False,
             "issues_events": False,
             "merge_requests_events": True,
             "push_events": False,
