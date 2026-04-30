@@ -222,6 +222,7 @@ function createEditor() {
 
   const editorExtensions = [
     minimalSetup,
+    EditorView.lineWrapping,
     variableHighlightPlugin,
     variableTooltip,
     EditorView.updateListener.of((update) => {
