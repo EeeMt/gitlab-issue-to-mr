@@ -12,6 +12,7 @@ This folder contains the artifacts needed to deploy the current Codify build int
 - `scripts/stop.sh`: stop the stack
 - `scripts/health-check.sh`: verify backend/frontend health
 - `scripts/export-images.sh`: regenerate image archives from an online build machine
+- `scripts/package-bundle.sh`: package the whole `offline-bundle/` directory for distribution
 - `images/`: Docker image archives and checksum files
 
 ## Required images
@@ -32,6 +33,20 @@ The deployment uses these image tags:
 5. Run `./scripts/start.sh`.
 6. Run `./scripts/health-check.sh`.
 7. Open the dashboard at `FRONTEND_URL`.
+
+## Quick start on the export machine
+
+If you want one command that builds images and produces a distributable offline bundle:
+
+```bash
+make offline-bundle-export
+```
+
+This command:
+
+1. Builds the latest Codify images.
+2. Regenerates `images/codify-offline-images.tar.gz`.
+3. Packages the entire `deploy/offline-bundle/` directory as `deploy/codify-offline-bundle.tar.gz`.
 
 ## Notes
 

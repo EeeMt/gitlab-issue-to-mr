@@ -21,6 +21,12 @@ build: ## Build all images (backend, nginx, worker)
 	@printf "  - codify-nginx:latest\n"
 	@printf "  - codify-worker:latest\n"
 
+.PHONY: offline-bundle-export
+offline-bundle-export: ## Build images, export offline bundle images, and package deploy/offline-bundle
+	$(MAKE) build
+	cd $(PROJECT_ROOT)/deploy/offline-bundle && ./scripts/export-images.sh
+	cd $(PROJECT_ROOT)/deploy/offline-bundle && ./scripts/package-bundle.sh
+
 .PHONY: up
 up: ## Start development environment
 	cd $(PROJECT_ROOT)/deploy && docker-compose up -d --build
@@ -506,6 +512,7 @@ help:
 	@echo ""
 	@echo "Development Environment:"
 	@echo "  make build              Build all images (backend, nginx, worker)"
+	@echo "  make offline-bundle-export  Build images, export offline bundle, and package it"
 	@echo "  make up                Start development environment"
 	@echo "  make down              Stop development environment"
 	@echo "  make restart           Restart development environment"
