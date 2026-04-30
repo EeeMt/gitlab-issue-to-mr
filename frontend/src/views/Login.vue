@@ -1,6 +1,7 @@
 <template>
   <div class="login-page" data-testid="login-page">
-    <n-card class="login-card" :bordered="false" data-testid="login-card">
+    <div class="login-page__center">
+      <n-card class="login-card" :bordered="false" data-testid="login-card">
       <div class="login-card__header" data-testid="login-header">
         <LanguageToggle size="small" class="login-card__lang" />
         <div class="login-card__brand">
@@ -169,6 +170,20 @@
         </n-text>
       </n-space>
     </n-card>
+    </div>
+
+    <footer class="login-footer">
+      <span class="login-footer__text">Powered by</span>
+      <a
+        href="https://github.com/EeeMt/codify"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="login-footer__link"
+      >
+        <n-icon size="13" :component="LogoGithub" />
+        Codify
+      </a>
+    </footer>
   </div>
 </template>
 
@@ -177,7 +192,7 @@ import axios from 'axios'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NCard, NCollapseTransition, NDivider, NIcon, NInput, NSpace, NTabPane, NTabs, NText, useMessage } from 'naive-ui'
-import { LogoGitlab, KeyOutline, RocketOutline } from '@vicons/ionicons5'
+import { KeyOutline, LogoGithub, LogoGitlab, RocketOutline } from '@vicons/ionicons5'
 import { useRoute } from 'vue-router'
 import { authState, startLogin } from '../auth'
 import { breakGlassLogin } from '../api'
@@ -291,8 +306,8 @@ async function handleBreakGlassLogin() {
 .login-page {
   min-height: 100dvh;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
   width: 100%;
   box-sizing: border-box;
   padding: 24px;
@@ -301,6 +316,14 @@ async function handleBreakGlassLogin() {
   background:
     radial-gradient(circle at top left, rgba(32, 128, 240, 0.12), transparent 28%),
     linear-gradient(180deg, rgba(248, 250, 252, 0.94), rgba(241, 245, 249, 0.98));
+}
+
+.login-page__center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
 }
 
 .login-card {
@@ -414,6 +437,33 @@ async function handleBreakGlassLogin() {
 
 .login-card__break-glass {
   width: 100%;
+}
+
+.login-footer {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.login-footer__text {
+  font-size: 11px;
+  color: rgba(15, 23, 42, 0.22);
+}
+
+.login-footer__link {
+  font-size: 11px;
+  color: rgba(15, 23, 42, 0.28);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.2s ease;
+}
+
+.login-footer__link:hover {
+  color: rgba(15, 23, 42, 0.45);
 }
 
 /* ─── Responsive ─── */
