@@ -478,6 +478,7 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
             "issue_id": 1,
             "user_prompt": "Fix the login bug",
             "priority": 0,
+            "provider_id": 1,
         }
         if scheduled_datetime is not None:
             payload["scheduled_datetime"] = scheduled_datetime

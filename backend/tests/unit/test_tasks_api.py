@@ -285,6 +285,16 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     return task
 
 
+def _make_mock_provider(id=1):
+    """Create a mock AIProvider with minimal attributes."""
+    provider = MagicMock()
+    provider.id = id
+    provider.name = "Test Provider"
+    provider.model = "test-model"
+    provider.is_default = True
+    return provider
+
+
 def _make_app_client_with_db(mock_db, extra_overrides=None):
     """Build a TestClient with DB, access scope, and auth overridden."""
     from app.main import app
@@ -581,11 +591,13 @@ class RetryTaskAPITests(unittest.TestCase):
         task.project_id = 1
 
         # First execute returns the task; second returns None (no existing retry);
-        # third fetches the Issue for serialization
+        # third resolves default provider; fourth fetches the Issue for serialization
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_default_provider = MagicMock()
+        mock_result_default_provider.scalar_one_or_none.return_value = _make_mock_provider(id=1)
         mock_result_issue = MagicMock()
         mock_result_issue.scalar_one_or_none.return_value = None
 
@@ -599,7 +611,7 @@ class RetryTaskAPITests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_default_provider, mock_result_issue])
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
@@ -626,11 +638,13 @@ class RetryTaskAPITests(unittest.TestCase):
         task.project_id = 1
 
         # First execute returns the task; second returns None (no existing retry);
-        # third fetches the Issue for serialization
+        # third resolves default provider; fourth fetches the Issue for serialization
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_default_provider = MagicMock()
+        mock_result_default_provider.scalar_one_or_none.return_value = _make_mock_provider(id=1)
         mock_result_issue = MagicMock()
         mock_result_issue.scalar_one_or_none.return_value = None
 
@@ -644,7 +658,7 @@ class RetryTaskAPITests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_default_provider, mock_result_issue])
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
@@ -1008,6 +1022,7 @@ class CreateTaskAPITests(unittest.TestCase):
                 "issue_id": 1,
                 "user_prompt": "Fix the login bug",
                 "priority": 0,
+                "provider_id": 1,
             })
         app.dependency_overrides.clear()
 
@@ -1080,6 +1095,7 @@ class CreateTaskAPITests(unittest.TestCase):
                 "issue_id": 1,
                 "user_prompt": "Ship it",
                 "priority": 0,
+                "provider_id": 1,
             })
         app.dependency_overrides.clear()
 
@@ -1283,11 +1299,14 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
         task.project_id = 1
 
         # First execute returns the task; second returns None (no existing retry);
-        # third is for slot capacity count query; fourth fetches Issue for serialization
+        # third resolves default provider; fourth is for slot capacity count query;
+        # fifth fetches Issue for serialization
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_default_provider = MagicMock()
+        mock_result_default_provider.scalar_one_or_none.return_value = _make_mock_provider(id=1)
         mock_result_default = MagicMock()
         mock_result_default.scalar_one_or_none.return_value = None
         mock_result_default.scalar.return_value = 0
@@ -1304,7 +1323,7 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_default, mock_result_issue])
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_default, mock_result_default_provider, mock_result_issue])
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)

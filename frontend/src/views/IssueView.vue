@@ -879,9 +879,7 @@ async function handleCreateTask() {
     if (scheduleType.value === 'scheduled' && newTaskSchedule.value) {
       request.scheduled_datetime = new Date(newTaskSchedule.value).toISOString()
     }
-    if (selectedProviderId.value) {
-      request.provider_id = selectedProviderId.value
-    }
+    request.provider_id = selectedProviderId.value ?? defaultProviderId.value ?? undefined
     await createTask(request)
     message.success(t('issue.taskCreated'))
     if (showScheduleDrawer.value) {
@@ -974,6 +972,10 @@ const providerOptions = computed(() =>
     label: `${p.name} (${p.model})${p.is_default ? ' ★' : ''}`,
     value: p.id,
   }))
+)
+
+const defaultProviderId = computed(() =>
+  providers.value.find(p => p.is_default)?.id ?? null
 )
 
 onMounted(() => {

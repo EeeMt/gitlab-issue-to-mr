@@ -30,6 +30,7 @@ class TestCreateTaskRequest:
     def test_valid_immediate_task(self):
         """Test creating a task with immediate execution."""
         request = CreateTaskRequest(
+            provider_id=1,
             issue_id=1,
             user_prompt="Test prompt",
             priority=0,
@@ -43,6 +44,7 @@ class TestCreateTaskRequest:
     def test_task_with_delay(self):
         """Test creating a task with delay."""
         request = CreateTaskRequest(
+            provider_id=1,
             issue_id=1,
             user_prompt="Test prompt",
             delay_seconds=300,
@@ -54,6 +56,7 @@ class TestCreateTaskRequest:
         """Test creating a task with scheduled datetime."""
         scheduled = datetime.now(UTC) + timedelta(days=30)
         request = CreateTaskRequest(
+            provider_id=1,
             issue_id=1,
             user_prompt="Test prompt",
             scheduled_datetime=scheduled,
@@ -64,6 +67,7 @@ class TestCreateTaskRequest:
     def test_task_default_values(self):
         """Test default values for CreateTaskRequest."""
         request = CreateTaskRequest(
+            provider_id=1,
             issue_id=1,
             user_prompt="Test prompt",
         )
@@ -74,6 +78,7 @@ class TestCreateTaskRequest:
         """Test that delay_seconds=0 is rejected."""
         with pytest.raises(ValidationError, match="Delay seconds must be greater than 0"):
             CreateTaskRequest(
+                provider_id=1,
                 issue_id=1,
                 user_prompt="Test prompt",
                 delay_seconds=0,
@@ -82,6 +87,7 @@ class TestCreateTaskRequest:
     def test_task_priority_p0(self):
         """Test P0 priority."""
         request = CreateTaskRequest(
+            provider_id=1,
             issue_id=1,
             user_prompt="Test prompt",
             priority=0,
@@ -91,6 +97,7 @@ class TestCreateTaskRequest:
     def test_task_priority_p1(self):
         """Test P1 priority."""
         request = CreateTaskRequest(
+            provider_id=1,
             issue_id=1,
             user_prompt="Test prompt",
             priority=1,
@@ -100,6 +107,7 @@ class TestCreateTaskRequest:
     def test_task_priority_p2(self):
         """Test P2 priority."""
         request = CreateTaskRequest(
+            provider_id=1,
             issue_id=1,
             user_prompt="Test prompt",
             priority=2,
@@ -208,6 +216,7 @@ class TestScheduledAtCalculation:
     def test_no_scheduling(self):
         """Test no scheduling means immediate execution."""
         request = CreateTaskRequest(
+            provider_id=1,
             issue_id=1,
             user_prompt="Test prompt",
         )
@@ -222,6 +231,7 @@ class TestScheduledAtCalculation:
     def test_delay_scheduling(self):
         """Test delay scheduling calculation."""
         request = CreateTaskRequest(
+            provider_id=1,
             issue_id=1,
             user_prompt="Test prompt",
             delay_seconds=300,
@@ -243,6 +253,7 @@ class TestScheduledAtCalculation:
         """Test absolute datetime scheduling."""
         scheduled_time = datetime.now(UTC) + timedelta(days=30)
         request = CreateTaskRequest(
+            provider_id=1,
             issue_id=1,
             user_prompt="Test prompt",
             scheduled_datetime=scheduled_time,
@@ -260,6 +271,7 @@ class TestScheduledAtCalculation:
         """Test absolute datetime takes precedence over delay."""
         scheduled_time = datetime.now(UTC) + timedelta(days=30)
         request = CreateTaskRequest(
+            provider_id=1,
             issue_id=1,
             user_prompt="Test prompt",
             delay_seconds=300,

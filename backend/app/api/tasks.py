@@ -722,6 +722,20 @@ async def retry_task(
                 detail=slot_full_detail_dict(slot_info),
             )
 
+    provider_id = original_task.provider_id
+    if provider_id is None:
+        from app.models import AIProvider
+        default_result = await db.execute(
+            select(AIProvider).where(AIProvider.is_default == True)
+        )
+        default_provider = default_result.scalar_one_or_none()
+        if not default_provider:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No default provider configured. Please set a default AI provider.",
+            )
+        provider_id = default_provider.id
+
     new_task = Task(
         issue_id=original_task.issue_id,
         project_id=original_task.project_id,
@@ -730,7 +744,7 @@ async def retry_task(
         scheduled_at=scheduled_at,
         is_retry=True,
         retry_source_task_id=original_task.id,
-        provider_id=original_task.provider_id,
+        provider_id=provider_id,
         initiator_user_id=current_user.id if current_user is not None else None,
         initiator_gitlab_user_id=current_user.gitlab_user_id if current_user is not None else None,
         initiator_username=current_user.username if current_user is not None else None,
@@ -847,12 +861,11 @@ async def create_task(
             detail="No prompt provided and issue has no description",
         )
 
-    # Validate provider_id if provided
-    if request.provider_id is not None:
-        from app.models import AIProvider
-        provider = await db.get(AIProvider, request.provider_id)
-        if not provider:
-            raise HTTPException(status_code=404, detail="Provider not found")
+    # Validate provider_id is required
+    from app.models import AIProvider
+    provider = await db.get(AIProvider, request.provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
 
     scheduled_at = resolve_scheduled_at(
         request.scheduled_datetime,

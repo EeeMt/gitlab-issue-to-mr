@@ -22,6 +22,7 @@ from app.models import TaskStatus
 async def test_create_task_persists_manual_initiator_metadata():
     from app.models import Issue
     request = CreateTaskRequest(
+        provider_id=1,
         issue_id=1,
         user_prompt="Build analytics page",
         priority=1,

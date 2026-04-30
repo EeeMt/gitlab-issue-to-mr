@@ -159,6 +159,7 @@ class TestManualTaskCreation:
         from app.api.task_schemas import CreateTaskRequest
 
         request = CreateTaskRequest(
+            provider_id=1,
             issue_id=1,  # Now requires issue_id
             user_prompt=TEST_PROMPT,
             priority=0,
@@ -176,6 +177,7 @@ class TestManualTaskCreation:
         from app.api.task_schemas import CreateTaskRequest
 
         request = CreateTaskRequest(
+            provider_id=1,
             issue_id=1,
             user_prompt=TEST_PROMPT,
             delay_seconds=300,  # 5 minutes
@@ -190,6 +192,7 @@ class TestManualTaskCreation:
 
         scheduled = datetime.now(UTC) + timedelta(days=30)
         request = CreateTaskRequest(
+            provider_id=1,
             issue_id=1,
             user_prompt=TEST_PROMPT,
             scheduled_datetime=scheduled,
@@ -267,6 +270,7 @@ class TestManualTaskScheduling:
         from app.api.task_schemas import CreateTaskRequest
 
         request = CreateTaskRequest(
+            provider_id=1,
             issue_id=1,
             user_prompt=TEST_PROMPT,
             delay_seconds=600,  # 10 minutes
@@ -290,6 +294,7 @@ class TestManualTaskScheduling:
         from app.api.task_schemas import CreateTaskRequest
 
         request = CreateTaskRequest(
+            provider_id=1,
             issue_id=1,
             user_prompt=TEST_PROMPT,
             scheduled_datetime=scheduled,

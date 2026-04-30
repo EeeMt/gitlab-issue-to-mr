@@ -724,7 +724,7 @@ async def get_analytics(
     provider_items: list[dict] = []
     for row in provider_rows:
         provider_name = row.provider_name or "Unknown / Legacy"
-        provider_model = row.provider_model if row.provider_name else None
+        provider_model = row.provider_model
         finished_count = int(row.finished_tasks or 0)
         completed_count = int(row.completed_tasks or 0)
 

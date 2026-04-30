@@ -49,7 +49,7 @@ from app.dependencies.project_access import (
     require_project_access_scope,
 )
 from app.main import app
-from app.models import Base, Issue, Task, TaskLog, TaskStatus
+from app.models import AIProvider, Base, Issue, Task, TaskLog, TaskStatus
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -105,7 +105,7 @@ def _mock_admin_user():
 
 
 @pytest.fixture()
-async def client(session_factory, _mock_admin_user):
+async def client(session_factory, _mock_admin_user, _default_provider):
     """httpx.AsyncClient wired to the FastAPI app with auth overrides.
 
     * ``get_db`` → yields sessions from the in-memory test database
@@ -139,6 +139,22 @@ async def client(session_factory, _mock_admin_user):
         yield ac
 
     app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+async def _default_provider(session_factory):
+    """Seed a default AIProvider so task creation has a valid provider_id."""
+    async with session_factory() as session:
+        provider = AIProvider(
+            name="Test Provider",
+            base_url="https://api.example.com",
+            api_key="test-key",
+            model="test-model",
+            is_default=True,
+        )
+        session.add(provider)
+        await session.commit()
+        return provider.id
 
 
 @pytest.fixture(autouse=True)
@@ -281,6 +297,7 @@ class TestCreateTask:
         # Create task under the issue
         resp = await client.post("/api/tasks", json={
             "issue_id": issue_id,
+            "provider_id": 1,
             "user_prompt": "Fix the bug",
         })
         assert resp.status_code == 200
@@ -309,6 +326,7 @@ class TestCreateTask:
         # Create task with all fields
         resp = await client.post("/api/tasks", json={
             "issue_id": issue_id,
+            "provider_id": 1,
             "user_prompt": "Refactor the module",
             "priority": 2,
         })
@@ -332,6 +350,7 @@ class TestCreateTask:
         # Create task with delay
         resp = await client.post("/api/tasks", json={
             "issue_id": issue_id,
+            "provider_id": 1,
             "user_prompt": "Delayed task",
             "delay_seconds": 3600,
         })
@@ -357,6 +376,7 @@ class TestCreateTask:
         future = _future_dt(hours=72)
         resp = await client.post("/api/tasks", json={
             "issue_id": issue_id,
+            "provider_id": 1,
             "user_prompt": "Scheduled task",
             "scheduled_datetime": future.isoformat(),
         })
@@ -378,6 +398,7 @@ class TestCreateTask:
         past = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)
         resp = await client.post("/api/tasks", json={
             "issue_id": issue_id,
+            "provider_id": 1,
             "user_prompt": "Past task",
             "scheduled_datetime": past.isoformat(),
         })
@@ -402,6 +423,7 @@ class TestCreateTask:
         # Create task without user_prompt and issue has no description → should fail
         resp = await client.post("/api/tasks", json={
             "issue_id": issue_id,
+            "provider_id": 1,
         })
         assert resp.status_code == 400  # "No prompt provided and issue has no description"
 
@@ -418,6 +440,7 @@ class TestCreateTask:
         
         resp = await client.post("/api/tasks", json={
             "issue_id": issue_id,
+            "provider_id": 1,
             "user_prompt": "Priority 0 task",
             "priority": 0,
         })
@@ -438,6 +461,7 @@ class TestCreateTask:
         
         resp = await client.post("/api/tasks", json={
             "issue_id": issue_id,
+            "provider_id": 1,
             "user_prompt": "Bad delay",
             "delay_seconds": -10,
         })
@@ -464,10 +488,12 @@ class TestCreateTask:
         
         r1 = await client.post("/api/tasks", json={
             "issue_id": issue1_id,
+            "provider_id": 1,
             "user_prompt": "Task A",
         })
         r2 = await client.post("/api/tasks", json={
             "issue_id": issue2_id,
+            "provider_id": 1,
             "user_prompt": "Task B",
         })
         assert r1.status_code == 200

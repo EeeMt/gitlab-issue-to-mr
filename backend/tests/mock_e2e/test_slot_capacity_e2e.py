@@ -35,7 +35,7 @@ from app.dependencies.project_access import (
     require_project_access_scope,
 )
 from app.main import app
-from app.models import Base, Issue, Task, TaskStatus
+from app.models import AIProvider, Base, Issue, Task, TaskStatus
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -84,6 +84,22 @@ async def db_session(session_factory):
 
 
 @pytest.fixture()
+async def _default_provider(session_factory):
+    """Seed a default AIProvider so task creation has a valid provider_id."""
+    async with session_factory() as session:
+        provider = AIProvider(
+            name="Test Provider",
+            base_url="https://api.example.com",
+            api_key="test-key",
+            model="test-model",
+            is_default=True,
+        )
+        session.add(provider)
+        await session.commit()
+        return provider.id
+
+
+@pytest.fixture()
 def _mock_admin_user():
     """A mock admin user returned by admin-gated auth overrides."""
     user = MagicMock()
@@ -95,7 +111,7 @@ def _mock_admin_user():
 
 
 @pytest.fixture()
-async def client(session_factory, _mock_admin_user):
+async def client(session_factory, _mock_admin_user, _default_provider):
     """``httpx.AsyncClient`` wired to the FastAPI app.
 
     * ``get_db`` → yields sessions from the in-memory test database
@@ -364,6 +380,7 @@ class TestTaskCreationSlotEnforcement:
             "issue_id": issue_id,
             "user_prompt": "Implement feature X",
             "priority": 0,
+            "provider_id": 1,
             **extra,
         }
         if scheduled_datetime is not None:

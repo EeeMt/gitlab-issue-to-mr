@@ -368,6 +368,10 @@ const providerOptions = computed(() =>
   }))
 )
 
+const defaultProviderId = computed(() =>
+  providers.value.find(p => p.is_default)?.id ?? null
+)
+
 const priorityOptions = computed(() => [
   { value: 0, label: t('createTask.p0'), desc: t('createTask.p0Desc') },
   { value: 1, label: t('createTask.p1'), desc: t('createTask.p1Desc') },
@@ -710,9 +714,7 @@ async function handleSubmit() {
 
     Object.assign(request, buildScheduleRequest())
 
-    if (selectedProviderId.value) {
-      request.provider_id = selectedProviderId.value
-    }
+    request.provider_id = selectedProviderId.value ?? defaultProviderId.value ?? undefined
 
     const task = await createTask(request)
     createdTaskId.value = task.id
