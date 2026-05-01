@@ -12,7 +12,6 @@ async def create_payload(
     task_id: int,
     payload_kind: str,
     text: str,
-    content_type: str = "text/plain",
 ) -> TaskPayload:
     """Insert a TaskPayload row and return it (flushed, id assigned)."""
     content = text.encode("utf-8")

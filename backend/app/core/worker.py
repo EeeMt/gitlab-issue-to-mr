@@ -35,9 +35,10 @@ from app.core.task_event_archive import (
     iter_complete_jsonl_records,
     decode_event_line,
     get_or_create_cursor,
+    archive_bundle_name,
 )
 from app.core.task_log_payloads import create_payload, append_raw_log_chunk
-from app.models import Task, TaskLog, TaskStatus, Issue, IssueStatus, AIProvider, User
+from app.models import Task, TaskLog, TaskRunArchive, TaskStatus, Issue, IssueStatus, AIProvider, User
 from app.api.providers import _decrypt_provider_api_key
 
 logger = logging.getLogger(__name__)
@@ -144,7 +145,9 @@ class WorkerExecutor:
         # Event-archive ingestion state (per task execution)
         self._active_tool_use: dict | None = None
         self._active_text_block: dict | None = None
+        # TODO: populated during tool_call flush; will be used for tool_result correlation (future)
         self._pending_tool_log_by_id: dict = {}
+        # TODO: captured for future use (e.g. final result status projection)
         self._latest_result_record: dict | None = None
 
     async def _ingest_event_record(
@@ -178,7 +181,6 @@ class WorkerExecutor:
             task_id=task_id,
             payload_kind="tool_input",
             text="".join(tool_use["input_parts"]),
-            content_type="application/json",
         )
         log = TaskLog(
             task_id=task_id,
@@ -244,33 +246,110 @@ class WorkerExecutor:
         self,
         *,
         task_id: int,
-        event_jsonl_path: str,
+        container: Any,
         db: AsyncSession,
     ) -> None:
-        """Read newly appended event records from event.jsonl and project them.
-
-        Non-blocking: reads once and returns. Caller must retry on next poll interval.
-        Handles FileNotFoundError gracefully (file not yet created by the container).
-        """
+        """Read newly appended event records from container's event.jsonl and project them."""
         cursor = await get_or_create_cursor(db, task_id=task_id, stream_name="event_jsonl")
+        offset = cursor.last_offset + 1
         try:
-            with open(event_jsonl_path, "r", encoding="utf-8") as handle:
-                handle.seek(cursor.last_offset)
-                chunk = handle.read()
-                if not chunk:
-                    return
-                records, remainder = iter_complete_jsonl_records(chunk)
-                for raw in records:
-                    try:
-                        record = decode_event_line(raw)
-                        await self._ingest_event_record(task_id=task_id, record=record, db=db)
-                        cursor.last_sequence_no += 1
-                    except Exception as exc:  # noqa: BLE001
-                        logger.debug(f"[Task {task_id}] Failed to ingest event record: {exc}")
-                cursor.last_offset = handle.tell() - len(remainder.encode("utf-8"))
-        except FileNotFoundError:
-            return  # file not yet created by the container; retry on next poll
+            result = await asyncio.to_thread(
+                container.exec_run,
+                f"tail -c +{offset} /workspace/event.jsonl",
+                demux=False,
+            )
+            if result.exit_code != 0 or not result.output:
+                return
+            chunk = result.output.decode("utf-8", errors="replace")
+            if not chunk:
+                return
+            records, remainder = iter_complete_jsonl_records(chunk)
+            for raw in records:
+                try:
+                    record = decode_event_line(raw)
+                    await self._ingest_event_record(task_id=task_id, record=record, db=db)
+                    cursor.last_sequence_no += 1
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(f"[Task {task_id}] Failed to ingest event record: {exc}")
+            cursor.last_offset += len(chunk.encode("utf-8")) - len(remainder.encode("utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[Task {task_id}] _tail_event_jsonl error: {exc}")
         await db.commit()
+
+    async def _tail_console_log(
+        self,
+        *,
+        task_id: int,
+        container: Any,
+        db: AsyncSession,
+    ) -> None:
+        """Read newly appended bytes from console.log and persist as raw log chunks."""
+        cursor = await get_or_create_cursor(db, task_id=task_id, stream_name="console_log")
+        offset = cursor.last_offset + 1
+        try:
+            result = await asyncio.to_thread(
+                container.exec_run,
+                f"tail -c +{offset} /workspace/console.log",
+                demux=False,
+            )
+            if result.exit_code != 0 or not result.output:
+                return
+            text = result.output.decode("utf-8", errors="replace")
+            if not text:
+                return
+            await append_raw_log_chunk(
+                db, task_id=task_id, sequence_no=cursor.last_sequence_no + 1, text=text
+            )
+            cursor.last_sequence_no += 1
+            cursor.last_offset += len(text.encode("utf-8"))
+            await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[Task {task_id}] _tail_console_log error: {exc}")
+
+    async def _finalize_archive(
+        self,
+        *,
+        task_id: int,
+        container: Any,
+        db: AsyncSession,
+    ) -> None:
+        """Package the three runtime artifacts into an archive and record its metadata."""
+        import io
+        import os as _os
+        import shutil
+        import tarfile as _tarfile
+
+        archive_name = archive_bundle_name(task_id=task_id)
+        try:
+            stream, _stat_info = await asyncio.to_thread(
+                container.get_archive,
+                f"/workspace/.codify-archive/{archive_name}",
+            )
+            # Collect all stream chunks into a buffer (outer Docker tar wrapping)
+            raw_bytes = b"".join(stream)
+            outer_tar_buf = io.BytesIO(raw_bytes)
+
+            archive_store = "/opt/codify-archives"
+            _os.makedirs(archive_store, exist_ok=True)
+            final_path = _os.path.join(archive_store, archive_name)
+
+            with _tarfile.open(fileobj=outer_tar_buf, mode="r|") as tf:
+                member = tf.next()
+                if member:
+                    with tf.extractfile(member) as src, open(final_path, "wb") as dst:
+                        dst.write(src.read())
+
+            size = _os.path.getsize(final_path) if _os.path.exists(final_path) else 0
+            db.add(TaskRunArchive(
+                task_id=task_id,
+                archive_name=archive_name,
+                archive_path=final_path,
+                archive_size_bytes=size,
+            ))
+            await db.commit()
+            logger.info(f"[Task {task_id}] Runtime archive saved: {final_path} ({size} bytes)")
+        except Exception as exc:
+            logger.warning(f"[Task {task_id}] _finalize_archive failed (non-fatal): {exc}")
 
     def _build_initial_mr_title(self, task: Task) -> str:
         """Build a reasonable initial MR title — uses issue title when available."""
@@ -1267,10 +1346,33 @@ class WorkerExecutor:
             task.container_id = container.id
             await db.commit()
 
-            # Stream logs
-            exit_code, logs, log_chunks_saved, timed_out = await self._stream_logs_to_db(
-                container, task.id, db, settings.task_timeout
-            )
+            # Stream logs while concurrently polling event.jsonl and console.log
+            async def _poll_artifacts(stop: asyncio.Event) -> None:
+                while not stop.is_set():
+                    try:
+                        await self._tail_event_jsonl(task_id=task.id, container=container, db=db)
+                        await self._tail_console_log(task_id=task.id, container=container, db=db)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"[Task {task.id}] artifact poll error: {exc}")
+                    await asyncio.sleep(2)
+
+            stop_event = asyncio.Event()
+            poll_task = asyncio.create_task(_poll_artifacts(stop_event))
+            try:
+                exit_code, logs, log_chunks_saved, timed_out = await self._stream_logs_to_db(
+                    container, task.id, db, settings.task_timeout
+                )
+            finally:
+                stop_event.set()
+                await poll_task
+
+            # Final pass after container exits + finalize archive
+            try:
+                await self._tail_event_jsonl(task_id=task.id, container=container, db=db)
+                await self._tail_console_log(task_id=task.id, container=container, db=db)
+                await self._finalize_archive(task_id=task.id, container=container, db=db)
+            except Exception as exc:
+                logger.warning(f"[Task {task.id}] Post-exit artifact finalization error: {exc}")
 
             # Check if task was cancelled externally while container was running
             await db.refresh(task)
