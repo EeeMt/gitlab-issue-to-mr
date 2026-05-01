@@ -28,7 +28,8 @@ offline-bundle-export: ## Build images, export offline bundle images, and packag
 	cd $(PROJECT_ROOT)/deploy/offline-bundle && ./scripts/package-bundle.sh
 
 .PHONY: up
-up: ## Start development environment
+up: ## Start development environment (rebuilds backend, nginx, and worker images)
+	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t codify-worker:latest $(PROJECT_ROOT)
 	cd $(PROJECT_ROOT)/deploy && docker-compose up -d --build
 
 .PHONY: down
