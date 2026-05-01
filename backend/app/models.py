@@ -14,6 +14,7 @@ from sqlalchemy import (
     Index,
     Integer,
     JSON,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -572,3 +573,76 @@ class WebhookEvent(Base):
     __table_args__ = (
         Index("ix_webhook_events_project_created", "project_id", "created_at"),
     )
+
+
+class TaskRunArchive(Base):
+    """One-row-per-task compressed runtime archive (event.jsonl + runtime.json + console.log)."""
+
+    __tablename__ = "task_run_archives"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tasks.id", ondelete="CASCADE"), index=True, unique=True
+    )
+    archive_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    archive_path: Mapped[str] = mapped_column(Text, nullable=False)
+    archive_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class TaskIngestCursor(Base):
+    """Tracks byte offset and sequence number for each tailer stream per task."""
+
+    __tablename__ = "task_ingest_cursors"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tasks.id", ondelete="CASCADE"), index=True
+    )
+    stream_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    last_offset: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_sequence_no: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint("task_id", "stream_name", name="uq_task_ingest_cursor"),
+    )
+
+
+class TaskRawLogChunk(Base):
+    """Raw console log chunks stored for post-completion browsing."""
+
+    __tablename__ = "task_raw_log_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tasks.id", ondelete="CASCADE"), index=True
+    )
+    sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    encoding: Mapped[str] = mapped_column(String(20), nullable=False, default="identity")
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    char_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    byte_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("task_id", "sequence_no", name="uq_task_raw_log_chunk_seq"),
+    )
+
+
+class TaskPayload(Base):
+    """Full tool input/output and assistant text bodies (replaces inline storage in TaskLog)."""
+
+    __tablename__ = "task_payloads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tasks.id", ondelete="CASCADE"), index=True
+    )
+    payload_kind: Mapped[str] = mapped_column(String(50), nullable=False)
+    encoding: Mapped[str] = mapped_column(String(20), nullable=False, default="identity")
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    char_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    byte_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
