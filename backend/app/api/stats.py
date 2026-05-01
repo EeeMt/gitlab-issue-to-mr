@@ -400,6 +400,7 @@ async def get_analytics(
             func.coalesce(func.sum(case((Task.initiator_username.is_not(None), 1), else_=0)), 0),
             func.coalesce(func.sum(token_tracked_expr), 0),
             func.min(case((Task.initiator_username.is_not(None), Task.created_at), else_=None)),
+            func.coalesce(func.sum(execution_seconds_expr), 0).label("total_execution_seconds"),
             func.avg(execution_seconds_expr),
             func.max(execution_seconds_expr),
             func.avg(queue_wait_seconds_expr),
@@ -426,6 +427,7 @@ async def get_analytics(
         tracked_initiator_tasks,
         token_tracked_tasks,
         initiator_tracking_started_at,
+        total_execution_seconds,
         avg_execution_seconds,
         max_execution_seconds,
         avg_queue_wait_seconds,
@@ -820,6 +822,7 @@ async def get_analytics(
             "initiator_tracking_started_at": (
                 initiator_tracking_started_at.isoformat() if initiator_tracking_started_at else None
             ),
+            "total_execution_seconds": float(total_execution_seconds) if total_execution_seconds is not None else 0.0,
             "avg_execution_seconds": float(avg_execution_seconds) if avg_execution_seconds is not None else None,
             "max_execution_seconds": float(max_execution_seconds) if max_execution_seconds is not None else None,
             "avg_queue_wait_seconds": float(avg_queue_wait_seconds) if avg_queue_wait_seconds is not None else None,

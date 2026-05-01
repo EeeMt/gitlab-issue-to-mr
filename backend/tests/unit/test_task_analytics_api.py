@@ -160,6 +160,7 @@ class AnalyticsSummaryRow:
     tracked_initiator_tasks: int = 0
     token_tracked_tasks: int = 0
     initiator_tracking_started_at: datetime | None = None
+    total_execution_seconds: float | None = None
     avg_execution_seconds: float | None = None
     max_execution_seconds: float | None = None
     avg_queue_wait_seconds: float | None = None
@@ -182,6 +183,7 @@ class AnalyticsSummaryRow:
             self.tracked_initiator_tasks,
             self.token_tracked_tasks,
             self.initiator_tracking_started_at,
+            self.total_execution_seconds,
             self.avg_execution_seconds,
             self.max_execution_seconds,
             self.avg_queue_wait_seconds,
@@ -272,6 +274,47 @@ class AnalyticsQueryStub:
 
 
 @pytest.mark.asyncio
+async def test_get_analytics_summary_query_requests_total_execution_seconds():
+    fixed_now = datetime(2026, 3, 14, 12, 0, 0)
+    captured_summary_sql: list[str] = []
+    db = MagicMock()
+
+    def execute_side_effect(query):
+        sql = " ".join(str(query).split())
+        if AnalyticsQueryStub._is_summary_query(sql):
+            captured_summary_sql.append(sql)
+        return AnalyticsQueryStub(
+            summary=AnalyticsSummaryRow(
+                total_tasks=1,
+                finished_tasks=1,
+                completed_tasks=1,
+                total_execution_seconds=120.0,
+                avg_execution_seconds=120.0,
+                max_execution_seconds=120.0,
+            )
+        )(query)
+
+    db.execute = AsyncMock(side_effect=execute_side_effect)
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+    with patch("app.api.stats.utcnow", return_value=fixed_now), patch(
+        "app.api.stats.build_project_lookup",
+        new=AsyncMock(return_value={}),
+    ):
+        await get_analytics(
+            days=7,
+            project_id=None,
+            initiator_username=None,
+            db=db,
+            _current_user=None,
+            access_scope=access_scope,
+        )
+
+    assert captured_summary_sql
+    assert "total_execution_seconds" in captured_summary_sql[0]
+
+
+@pytest.mark.asyncio
 async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
     fixed_now = datetime(2026, 3, 14, 12, 0, 0)
 
@@ -300,6 +343,7 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
                 2,      # tracked_initiator_tasks
                 2,      # token_tracked_tasks
                 datetime(2026, 3, 12, 8, 0, 0),  # initiator_tracking_started_at
+                2160.0, # total_execution_seconds
                 540.0,  # avg_execution_seconds
                 900.0,  # max_execution_seconds
                 180.0,  # avg_queue_wait_seconds
@@ -449,6 +493,7 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
     assert response["window_days"] == 7
     assert response["summary"]["total_tasks"] == 4
     assert response["summary"]["success_rate"] == pytest.approx(0.75)
+    assert response["summary"]["total_execution_seconds"] == pytest.approx(2160.0)
     assert response["summary"]["avg_execution_seconds"] == pytest.approx(540.0)
     assert response["summary"]["avg_queue_wait_seconds"] == pytest.approx(180.0)
     assert response["summary"]["tracked_initiator_tasks"] == 2

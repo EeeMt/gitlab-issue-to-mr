@@ -361,6 +361,7 @@ export interface AnalyticsSummary {
   tracked_initiator_tasks: number
   token_tracked_tasks: number
   initiator_tracking_started_at: string | null
+  total_execution_seconds: number
   avg_execution_seconds: number | null
   max_execution_seconds: number | null
   avg_queue_wait_seconds: number | null

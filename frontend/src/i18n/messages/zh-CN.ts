@@ -880,6 +880,7 @@ const zhCN = {
     issues: '需求',
     dayWindow: '{days} 天窗口',
     successRate: '成功率',
+    totalDuration: '总时长',
     finishedTasks: '已结束任务',
     finishedBreakdown: '{completed} 完成 / {failed} 失败 / {cancelled} 取消',
     noFinishedTasksYet: '暂无已结束任务',

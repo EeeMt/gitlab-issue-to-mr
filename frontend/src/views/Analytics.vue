@@ -832,6 +832,14 @@ const summaryItems = computed(() => {
           : t('analytics.noFinishedTasksYet')
     },
     {
+      label: t('analytics.totalDuration'),
+      value: formatDurationSec(summary.total_execution_seconds),
+      note:
+        summary.finished_tasks > 0
+          ? t('analytics.finishedBreakdown', { completed: summary.completed_tasks, failed: summary.failed_tasks, cancelled: summary.cancelled_tasks })
+          : t('analytics.noFinishedTasksYet')
+    },
+    {
       label: t('analytics.avgDuration'),
       value: formatDurationSec(summary.avg_execution_seconds),
       note:
@@ -867,14 +875,6 @@ const summaryItems = computed(() => {
         summary.max_total_tokens_per_tracked_task !== null
           ? t('analytics.maxTokens', { value: formatNumber(summary.max_total_tokens_per_tracked_task) })
           : t('analytics.noTokenData')
-    },
-    {
-      label: t('analytics.finishedTasks'),
-      value: String(summary.finished_tasks),
-      note:
-        summary.finished_tasks > 0
-          ? t('analytics.finishedBreakdown', { completed: summary.completed_tasks, failed: summary.failed_tasks, cancelled: summary.cancelled_tasks })
-          : t('analytics.noFinishedTasksYet')
     }
   )
 
