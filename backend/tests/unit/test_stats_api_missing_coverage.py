@@ -107,6 +107,7 @@ class TestGetAnalyticsEmptyInitiatorUsername(unittest.IsolatedAsyncioTestCase):
             None,
             None,
             None,
+            None,
         )
         mock_summary = MagicMock()
         mock_summary.one = MagicMock(return_value=mock_one_result)

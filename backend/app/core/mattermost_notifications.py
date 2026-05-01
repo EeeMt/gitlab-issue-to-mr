@@ -417,7 +417,16 @@ async def notify_task_event(
             issue_result = await session.execute(
                 select(Issue).where(Issue.id == task.issue_id)
             )
-            task.issue = issue_result.scalar_one_or_none()
+            issue = issue_result.scalar_one_or_none()
+            if issue is not None:
+                session.expunge(issue)
+            # Detach the task from any active session so that setting
+            # task.issue does not conflict with an already-cached Issue
+            # instance (e.g. when the caller still holds a session open).
+            task_state = inspect(task)
+            if task_state.session is not None:
+                task_state.session.expunge(task)
+            task.issue = issue
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(

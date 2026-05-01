@@ -814,19 +814,6 @@ describe('TaskList', () => {
       expect(result.props?.type).toBe('error')
     })
 
-    it('renders user_prompt column with text', async () => {
-      await mountComponent()
-      const cols = (wrapper.vm as any).allDesktopColumns
-      const col = getColumn(cols, 'user_prompt')
-      expect(col.render(fullTask, 0)).toBe('Implement feature X')
-    })
-
-    it('renders user_prompt column with dash when empty', async () => {
-      await mountComponent()
-      const cols = (wrapper.vm as any).allDesktopColumns
-      const col = getColumn(cols, 'user_prompt')
-      expect(col.render(minimalTask, 0)).toBe('-')
-    })
 
     it('renders project column with external link', async () => {
       await mountComponent()

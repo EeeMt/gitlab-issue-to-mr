@@ -144,6 +144,7 @@ vi.mock('@vicons/ionicons5', () => ({
   GridOutline: {},
   ListOutline: {},
   LogOutOutline: {},
+  LogoGithub: {},
   MenuOutline: {},
   CalendarOutline: {},
   PeopleOutline: {},
