@@ -309,6 +309,20 @@ export interface ToolCall {
   error: boolean
   /** ISO timestamp present on real-time individual log entries (log_type='tool_call'). */
   timestamp?: string
+  // Archive payload fields (from event archive system)
+  output_payload_id?: number
+  output_preview?: string
+  output_truncated?: boolean
+  output_char_count?: number
+}
+
+export interface TaskPayloadResponse {
+  id: number
+  payload_kind: string
+  content: string
+  encoding: string
+  char_count: number
+  byte_count: number
 }
 
 export interface TaskStats {
@@ -1015,6 +1029,16 @@ export async function getTaskContainerLogs(id: number, source?: 'db' | 'auto'): 
 }> {
   const params = source ? { source } : {}
   const response = await api.get(`/tasks/${id}/container-logs`, { params })
+  return response.data
+}
+
+export async function getTaskArchive(id: number): Promise<{ archive_name: string; archive_size_bytes: number; created_at: string }> {
+  const response = await api.get(`/tasks/${id}/archive`)
+  return response.data
+}
+
+export async function getTaskPayload(taskId: number, payloadId: number): Promise<TaskPayloadResponse> {
+  const response = await api.get(`/tasks/${taskId}/payloads/${payloadId}`)
   return response.data
 }
 

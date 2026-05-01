@@ -137,11 +137,24 @@
                     </template>
                     <pre class="tool-pre tool-pre--input">{{ formatInput(parsedToolCall(event)) }}</pre>
                   </n-collapse-item>
-                  <n-collapse-item v-if="parsedToolCall(event).output" name="output">
+                  <n-collapse-item v-if="parsedToolCall(event).output || parsedToolCall(event).output_payload_id" name="output">
                     <template #header>
                       <span class="tool-detail-label">{{ t('taskView.toolOutput') }}</span>
+                      <n-tag v-if="parsedToolCall(event).output_truncated" type="warning" size="small" round style="margin-left: 8px">{{ t('taskView.truncatedPreview') }}</n-tag>
                     </template>
-                    <pre class="tool-pre" :class="{ 'tool-pre--error': parsedToolCall(event).error }">{{ parsedToolCall(event).output }}</pre>
+                    <template v-if="parsedToolCall(event).output_payload_id">
+                      <pre class="tool-pre" :class="{ 'tool-pre--error': parsedToolCall(event).error }">{{ expandedPayloads[parsedToolCall(event).output_payload_id!] ?? parsedToolCall(event).output_preview ?? parsedToolCall(event).output }}</pre>
+                      <n-button
+                        v-if="expandedPayloads[parsedToolCall(event).output_payload_id!] === undefined"
+                        size="small"
+                        :loading="loadingPayloads.has(parsedToolCall(event).output_payload_id!)"
+                        :data-testid="`tool-output-expand-${parsedToolCall(event).output_payload_id}`"
+                        @click.stop="loadPayload(props.task?.id ?? 0, parsedToolCall(event).output_payload_id!)"
+                      >{{ t('taskView.loadFullOutput') }}</n-button>
+                    </template>
+                    <template v-else>
+                      <pre class="tool-pre" :class="{ 'tool-pre--error': parsedToolCall(event).error }">{{ parsedToolCall(event).output }}</pre>
+                    </template>
                   </n-collapse-item>
                 </n-collapse>
               </div>
@@ -185,6 +198,7 @@ import {
 } from '@vicons/ionicons5'
 import type { Component } from 'vue'
 import type { TaskLog, ToolCall, Task } from '../api'
+import { getTaskPayload } from '../api'
 
 const props = withDefaults(defineProps<{
   task: Task | null
@@ -334,6 +348,25 @@ const eventStreamRef = ref<HTMLElement | null>(null)
 const logContentRef = ref<HTMLElement | null>(null)
 const activeTab = ref<'events' | 'raw'>('events')
 const collapseRefs = ref<(HTMLElement | null)[]>([])
+
+// ── Payload expansion ─────────────────────────────────────────────────────────
+
+const expandedPayloads = ref<Record<number, string>>({})
+const loadingPayloads = ref<Set<number>>(new Set())
+
+async function loadPayload(taskId: number, payloadId: number) {
+  if (expandedPayloads.value[payloadId] !== undefined) return
+  loadingPayloads.value = new Set([...loadingPayloads.value, payloadId])
+  try {
+    const payload = await getTaskPayload(taskId, payloadId)
+    expandedPayloads.value = { ...expandedPayloads.value, [payloadId]: payload.content }
+  } catch {
+    expandedPayloads.value = { ...expandedPayloads.value, [payloadId]: t('taskView.failedToLoadPayload') }
+  } finally {
+    loadingPayloads.value.delete(payloadId)
+    loadingPayloads.value = new Set(loadingPayloads.value)
+  }
+}
 
 function onCollapseChange(expandedNames: (string | number)[], index: number) {
   if (expandedNames.length > 0) {

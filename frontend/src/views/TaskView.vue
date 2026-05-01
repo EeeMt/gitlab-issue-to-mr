@@ -320,7 +320,6 @@ const logsLoading = ref(false)
 const containerLogsLoading = ref(false)
 const actionLoading = ref(false)
 const taskRequestInFlight = ref(false)
-const containerRequestInFlight = ref(false)
 const rescheduleDatetime = ref<number | null>(null)
 const retryScheduleDatetime = ref<number | null>(null)
 const showScheduleDrawer = ref(false)
@@ -564,29 +563,6 @@ async function fetchLogs() {
   }
 }
 
-async function fetchContainerLogs() {
-  if (containerRequestInFlight.value) return
-  if (!task.value?.container_id) {
-    containerLogs.value = ''
-    return
-  }
-  if (typeof EventSource !== 'undefined' && isActiveTaskStatus(task.value.status)) {
-    connectLogStream()
-    return
-  }
-  containerRequestInFlight.value = true
-  containerLogsLoading.value = true
-  try {
-    const result = await getTaskContainerLogs(taskId.value)
-    containerLogs.value = result.logs
-  } catch (error) {
-    containerLogs.value = t('taskView.failedToFetchContainerLogs')
-  } finally {
-    containerLogsLoading.value = false
-    containerRequestInFlight.value = false
-  }
-}
-
 async function refreshTask() {
   await fetchTask()
   if (!isActiveTaskStatus(task.value?.status)) {
@@ -607,8 +583,16 @@ async function onRawTabOpen() {
     }
     connectLogStream()
   } else {
-    // Fetch once for completed tasks (DB fallback handles gone containers)
-    await fetchContainerLogs()
+    // For completed/failed/cancelled tasks, always read from DB (TaskRawLogChunk → TaskLog fallback)
+    containerLogsLoading.value = true
+    try {
+      const result = await getTaskContainerLogs(taskId.value, 'db')
+      containerLogs.value = result.logs
+    } catch (error) {
+      containerLogs.value = t('taskView.failedToFetchContainerLogs')
+    } finally {
+      containerLogsLoading.value = false
+    }
   }
 }
 

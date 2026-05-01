@@ -1,9 +1,18 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { h } from 'vue'
-import type { Task } from '../api'
+import type { Task, TaskLog } from '../api'
 import TaskProcessPanel from './TaskProcessPanel.vue'
 import taskProcessPanelSource from './TaskProcessPanel.vue?raw'
+
+// Use vi.hoisted so the mock factory runs before vi.mock hoisting
+const { mockGetTaskPayload } = vi.hoisted(() => {
+  return { mockGetTaskPayload: vi.fn() }
+})
+
+vi.mock('../api', () => ({
+  getTaskPayload: mockGetTaskPayload,
+}))
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
@@ -11,22 +20,38 @@ vi.mock('vue-i18n', () => ({
   }),
 }))
 
-const NCardStub = {
-  name: 'NCard',
-  inheritAttrs: false,
-  setup(_props: unknown, { attrs, slots }: { attrs: Record<string, unknown>; slots: Record<string, () => unknown> }) {
-    return () => h('section', { class: attrs.class, style: attrs.style }, [
-      h('header', { class: 'n-card__header' }, slots.header?.()),
-      h('div', { class: 'n-card__content' }, slots.default?.()),
-    ])
-  },
-}
-
-const passthroughStub = (name: string, tag = 'div') => ({
-  name,
-  setup(_props: unknown, { slots }: { slots: Record<string, () => unknown> }) {
-    return () => h(tag, { class: name }, slots.default?.())
-  },
+// Mock naive-ui so all components render their slots without styling overhead
+vi.mock('naive-ui', () => {
+  const makePassthrough = (name: string, tag = 'div') => ({
+    name,
+    inheritAttrs: false,
+    setup(_props: unknown, { slots, attrs }: { slots: Record<string, () => unknown>; attrs: Record<string, unknown> }) {
+      return () => h(tag, { class: name, ...attrs }, slots.default?.())
+    },
+  })
+  const NCardMock = {
+    name: 'NCard',
+    inheritAttrs: false,
+    setup(_props: unknown, { attrs, slots }: { attrs: Record<string, unknown>; slots: Record<string, () => unknown> }) {
+      return () => h('section', { class: attrs.class, style: attrs.style }, [
+        h('header', { class: 'n-card__header' }, slots.header?.()),
+        h('div', { class: 'n-card__content' }, slots.default?.()),
+      ])
+    },
+  }
+  return {
+    NCard: NCardMock,
+    NTag: makePassthrough('NTag', 'span'),
+    NIcon: makePassthrough('NIcon', 'i'),
+    NTabs: makePassthrough('NTabs'),
+    NTabPane: makePassthrough('NTabPane'),
+    NEmpty: makePassthrough('NEmpty'),
+    NCollapse: makePassthrough('NCollapse'),
+    NCollapseItem: makePassthrough('NCollapseItem'),
+    NButton: makePassthrough('NButton', 'button'),
+    useMessage: () => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }),
+    useDialog: () => ({}),
+  }
 })
 
 function createTask(status: Task['status']): Task {
@@ -66,19 +91,6 @@ function mountComponent(status: Task['status']) {
       terminalHtml: '',
       taskStatus: status,
     },
-    global: {
-      stubs: {
-        NCard: NCardStub,
-        NTag: passthroughStub('NTag', 'span'),
-        NIcon: passthroughStub('NIcon', 'i'),
-        NTabs: passthroughStub('NTabs'),
-        NTabPane: passthroughStub('NTabPane'),
-        NEmpty: passthroughStub('NEmpty'),
-        NCollapse: passthroughStub('NCollapse'),
-        NCollapseItem: passthroughStub('NCollapseItem'),
-        NButton: passthroughStub('NButton', 'button'),
-      },
-    },
   })
 }
 
@@ -91,5 +103,38 @@ describe('TaskProcessPanel', () => {
 
   it('keeps the running background glow subtle', () => {
     expect(taskProcessPanelSource).toContain('rgba(74, 222, 128, 0.07)')
+  })
+
+  it('renders expand button for tool_call entries with output_payload_id', () => {
+    const task = createTask('completed')
+    const toolCallLog: TaskLog = {
+      id: 42,
+      task_id: 1,
+      log_level: 'info',
+      log_type: 'tool_call',
+      metadata: JSON.stringify({
+        name: 'Bash',
+        input: { command: 'cat large_file.txt' },
+        output: null,
+        error: false,
+        output_payload_id: 15,
+        output_preview: 'first few lines...',
+        output_truncated: true,
+      }),
+      message: '',
+      created_at: '2026-04-23T10:00:00Z',
+    }
+
+    const wrapper = mount(TaskProcessPanel, {
+      props: {
+        task,
+        taskLogs: [toolCallLog],
+        isActive: false,
+        terminalHtml: '',
+        taskStatus: 'completed',
+      },
+    })
+
+    expect(wrapper.find('[data-testid="tool-output-expand-15"]').exists()).toBe(true)
   })
 })

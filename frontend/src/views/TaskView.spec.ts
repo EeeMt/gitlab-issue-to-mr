@@ -1190,56 +1190,23 @@ describe('TaskView', () => {
     })
   })
 
-  describe('fetchContainerLogs', () => {
-    it('should clear containerLogs when no container_id', async () => {
-      await mountComponent({ status: 'completed', container_id: null })
-
-      wrapper.vm.containerLogs = 'old logs'
-
-      await wrapper.vm.fetchContainerLogs()
-
-      expect(wrapper.vm.containerLogs).toBe('')
-    })
-
-    it('should fetch container logs for completed tasks', async () => {
-      await mountComponent({ status: 'completed', container_id: 'container-123' })
-
-      await wrapper.vm.fetchContainerLogs()
-
-      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1)
-      expect(wrapper.vm.containerLogs).toBe('Container log content')
-    })
-
-    it('should handle fetchContainerLogs API error', async () => {
-      await mountComponent({ status: 'completed', container_id: 'container-123' })
-      ;(mockApi.getTaskContainerLogs as Mock).mockRejectedValue(new Error('Fetch failed'))
-
-      await wrapper.vm.fetchContainerLogs()
-
-      expect(wrapper.vm.containerLogs).toContain('taskView.failedToFetchContainerLogs')
-    })
-
-    it('should prevent duplicate requests via containerRequestInFlight guard', async () => {
-      await mountComponent({ status: 'completed', container_id: 'container-123' })
-
-      // Simulate in-flight request
-      wrapper.vm.containerRequestInFlight = true
-
-      await wrapper.vm.fetchContainerLogs()
-
-      // Should not have called the API since request is in-flight
-      expect(mockApi.getTaskContainerLogs).not.toHaveBeenCalled()
-    })
-  })
-
   describe('onRawTabOpen and onRawTabClose', () => {
-    it('should fetch container logs for completed tasks via onRawTabOpen', async () => {
+    it('should fetch container logs for completed tasks via onRawTabOpen using source=db', async () => {
       await mountComponent({ status: 'completed', container_id: 'container-123' })
 
       await wrapper.vm.onRawTabOpen()
 
-      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1)
+      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1, 'db')
       expect(wrapper.vm.containerLogs).toBe('Container log content')
+    })
+
+    it('should pass source=db when fetching logs for completed tasks', async () => {
+      await mountComponent({ status: 'completed', container_id: 'container-123' })
+
+      await wrapper.vm.onRawTabOpen()
+
+      // Verify it always uses 'db' source for completed tasks
+      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1, 'db')
     })
 
     it('should close log stream on onRawTabClose', async () => {
