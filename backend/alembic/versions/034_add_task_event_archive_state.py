@@ -30,7 +30,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("task_id", name="uq_task_run_archives_task_id"),
     )
-    op.create_index("ix_task_run_archives_task_id", "task_run_archives", ["task_id"], unique=True)
+    op.create_index("ix_task_run_archives_task_id", "task_run_archives", ["task_id"], unique=False)
 
     op.create_table(
         "task_ingest_cursors",

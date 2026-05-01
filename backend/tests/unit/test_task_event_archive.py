@@ -2,6 +2,7 @@ from app.core.task_event_archive import (
     artifact_paths,
     decode_event_line,
     archive_bundle_name,
+    iter_complete_jsonl_records,
 )
 
 
@@ -22,3 +23,21 @@ def test_decode_event_line_reads_jsonl_record():
 
 def test_archive_bundle_name_is_stable():
     assert archive_bundle_name(task_id=12) == "task-12-runtime-archive.tar.gz"
+
+
+def test_iter_complete_jsonl_records_splits_partial_line():
+    lines, remainder = iter_complete_jsonl_records('{"a":1}\n{"b":2}')
+    assert lines == ['{"a":1}']
+    assert remainder == '{"b":2}'
+
+
+def test_iter_complete_jsonl_records_empty_buffer():
+    lines, remainder = iter_complete_jsonl_records("")
+    assert lines == []
+    assert remainder == ""
+
+
+def test_iter_complete_jsonl_records_all_complete():
+    lines, remainder = iter_complete_jsonl_records('{"a":1}\n{"b":2}\n')
+    assert lines == ['{"a":1}', '{"b":2}']
+    assert remainder == ""
