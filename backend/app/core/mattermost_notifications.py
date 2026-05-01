@@ -8,13 +8,14 @@ from datetime import datetime
 from typing import Any, Optional
 
 import httpx
-from sqlalchemy import or_, select
+from sqlalchemy import inspect, or_, select
 
 from app.config import get_effective_settings
 from app.core.ssl_utils import get_ssl_verify
 from app.core.utcnow import utcnow
 from app.database import AsyncSessionLocal
 from app.models import (
+    Issue,
     MattermostNotificationDelivery,
     MattermostNotificationProfile,
     MattermostUserMapping,
@@ -407,6 +408,16 @@ async def notify_task_event(
         return
 
     context_data = context or {}
+
+    # Ensure task.issue is loaded so that _build_card_markdown and
+    # _build_attachment_fields can safely access it without triggering
+    # async lazy-load failures (the Task model does not use AsyncAttrs).
+    if task.issue_id is not None and "issue" in inspect(task).unloaded:
+        async with AsyncSessionLocal() as session:
+            issue_result = await session.execute(
+                select(Issue).where(Issue.id == task.issue_id)
+            )
+            task.issue = issue_result.scalar_one_or_none()
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
