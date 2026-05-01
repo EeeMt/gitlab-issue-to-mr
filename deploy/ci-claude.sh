@@ -356,29 +356,22 @@ if [[ ! -s "$RESULT_FILE" ]]; then
 fi
 
 RESULT_SUBTYPE=$(jq -r '.subtype // "unknown"' "$RESULT_FILE")
-RESULT_TEXT=$(jq -r '.result // ""' "$RESULT_FILE")
-SESSION_ID=$(jq -r '.session_id // ""' "$RESULT_FILE")
-USAGE_JSON=$(jq -c '.usage // {}' "$RESULT_FILE")
 
-TOOL_CALLS_JSON="[]"
-if [[ -s "$TOOL_CALLS_FILE" ]]; then
-  TOOL_CALLS_JSON=$(jq -sc '.' "$TOOL_CALLS_FILE")
-fi
-
+# Use --slurpfile to read large fields (result text, tool_calls) directly from
+# files instead of passing them via --arg/--argjson, which hits OS ARG_MAX limit.
+# --slurpfile reads a stream of JSON texts from the file; an empty
+# TOOL_CALLS_FILE yields [] naturally. RESULT_FILE always contains one object.
 jq -n \
   --argjson success "$([[ "$RESULT_SUBTYPE" == "success" ]] && echo 'true' || echo 'false')" \
-  --arg subtype "$RESULT_SUBTYPE" \
-  --arg result "$RESULT_TEXT" \
-  --arg session_id "$SESSION_ID" \
-  --argjson usage "$USAGE_JSON" \
-  --argjson tool_calls "$TOOL_CALLS_JSON" \
+  --slurpfile result_data "$RESULT_FILE" \
+  --slurpfile tool_calls_data "$TOOL_CALLS_FILE" \
   '{
     success:    $success,
-    subtype:    $subtype,
-    result:     $result,
-    session_id: $session_id,
-    usage:      $usage,
-    tool_calls: $tool_calls
+    subtype:    ($result_data[0].subtype // "unknown"),
+    result:     ($result_data[0].result // ""),
+    session_id: ($result_data[0].session_id // ""),
+    usage:      ($result_data[0].usage // {}),
+    tool_calls: $tool_calls_data
   }'
 
 [[ "$RESULT_SUBTYPE" == "success" ]] && exit 0 || exit 1
