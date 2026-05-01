@@ -32,3 +32,26 @@ def iter_complete_jsonl_records(buffer: str) -> tuple[list[str], str]:
     complete = [line for line in lines if line.endswith("\n")]
     remainder = "" if not lines or lines[-1].endswith("\n") else lines[-1]
     return [line.rstrip("\n") for line in complete], remainder
+
+
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
+from sqlalchemy import select as _sa_select  # noqa: E402
+from app.models import TaskIngestCursor  # noqa: E402
+
+
+async def get_or_create_cursor(
+    db: AsyncSession, *, task_id: int, stream_name: str
+) -> TaskIngestCursor:
+    """Get or create an ingest cursor for the given task and stream."""
+    result = await db.execute(
+        _sa_select(TaskIngestCursor).where(
+            TaskIngestCursor.task_id == task_id,
+            TaskIngestCursor.stream_name == stream_name,
+        )
+    )
+    cursor = result.scalar_one_or_none()
+    if cursor is None:
+        cursor = TaskIngestCursor(task_id=task_id, stream_name=stream_name)
+        db.add(cursor)
+        await db.flush()
+    return cursor

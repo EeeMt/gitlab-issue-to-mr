@@ -31,6 +31,12 @@ from app.core.worker_environment_variables import (
     list_worker_environment_variables,
     validate_worker_environment_variable_key as validate_worker_environment_key,
 )
+from app.core.task_event_archive import (
+    iter_complete_jsonl_records,
+    decode_event_line,
+    get_or_create_cursor,
+)
+from app.core.task_log_payloads import create_payload, append_raw_log_chunk
 from app.models import Task, TaskLog, TaskStatus, Issue, IssueStatus, AIProvider, User
 from app.api.providers import _decrypt_provider_api_key
 
@@ -134,6 +140,137 @@ class WorkerExecutor:
         """
         self.docker = docker_client or get_docker_client()
         self.gitlab = gitlab_client or get_gitlab_client()
+
+        # Event-archive ingestion state (per task execution)
+        self._active_tool_use: dict | None = None
+        self._active_text_block: dict | None = None
+        self._pending_tool_log_by_id: dict = {}
+        self._latest_result_record: dict | None = None
+
+    async def _ingest_event_record(
+        self, *, task_id: int, record: dict, db: AsyncSession
+    ) -> None:
+        """Project one raw event.jsonl record into TaskLog/TaskPayload rows."""
+        record_type = record.get("type")
+        if record_type == "system" and record.get("subtype") == "init":
+            db.add(TaskLog(
+                task_id=task_id,
+                log_level="INFO",
+                message="",
+                log_type="system_init",
+                log_metadata=_json.dumps({"model": record.get("model"), "cwd": record.get("cwd")}),
+            ))
+        elif record_type == "stream_event":
+            event = record.get("event", {})
+            await self._project_stream_event(task_id=task_id, event=event, db=db)
+        elif record_type == "result":
+            self._latest_result_record = record
+
+    async def _flush_tool_use_projection(
+        self, *, task_id: int, db: AsyncSession
+    ) -> None:
+        """Flush accumulated tool_use block into TaskLog + TaskPayload."""
+        tool_use = self._active_tool_use
+        if tool_use is None:
+            return
+        payload = await create_payload(
+            db,
+            task_id=task_id,
+            payload_kind="tool_input",
+            text="".join(tool_use["input_parts"]),
+            content_type="application/json",
+        )
+        log = TaskLog(
+            task_id=task_id,
+            log_level="INFO",
+            message=f"Tool call: {tool_use['name']}",
+            log_type="tool_call",
+            log_metadata=_json.dumps({
+                "tool_use_id": tool_use["id"],
+                "name": tool_use["name"],
+                "input_payload_id": payload.id,
+            }),
+        )
+        db.add(log)
+        self._pending_tool_log_by_id[tool_use["id"]] = log
+        self._active_tool_use = None
+
+    async def _project_stream_event(
+        self, *, task_id: int, event: dict, db: AsyncSession
+    ) -> None:
+        """Map one stream_event payload to TaskLog/TaskPayload mutations."""
+        event_type = event.get("type")
+        content_block = event.get("content_block", {})
+        block_type = content_block.get("type")
+
+        if event_type == "content_block_start":
+            if block_type == "tool_use":
+                self._active_tool_use = {
+                    "id": content_block["id"],
+                    "name": content_block["name"],
+                    "input_parts": [],
+                }
+                self._active_text_block = None
+            elif block_type == "text":
+                self._active_text_block = {"parts": []}
+                self._active_tool_use = None
+
+        elif event_type == "content_block_delta":
+            delta = event.get("delta", {})
+            delta_type = delta.get("type")
+            if delta_type == "input_json_delta" and self._active_tool_use is not None:
+                self._active_tool_use["input_parts"].append(delta.get("partial_json", ""))
+            elif delta_type == "text_delta" and self._active_text_block is not None:
+                self._active_text_block["parts"].append(delta.get("text", ""))
+
+        elif event_type == "content_block_stop":
+            if self._active_tool_use is not None:
+                await self._flush_tool_use_projection(task_id=task_id, db=db)
+            elif self._active_text_block is not None:
+                text = "".join(self._active_text_block["parts"])
+                payload = await create_payload(
+                    db, task_id=task_id, payload_kind="assistant_text", text=text
+                )
+                db.add(TaskLog(
+                    task_id=task_id,
+                    log_level="INFO",
+                    message="",
+                    log_type="assistant_text",
+                    log_metadata=_json.dumps({"payload_id": payload.id, "char_count": len(text)}),
+                ))
+                self._active_text_block = None
+
+    async def _tail_event_jsonl(
+        self,
+        *,
+        task_id: int,
+        event_jsonl_path: str,
+        db: AsyncSession,
+    ) -> None:
+        """Read newly appended event records from event.jsonl and project them.
+
+        Non-blocking: reads once and returns. Caller must retry on next poll interval.
+        Handles FileNotFoundError gracefully (file not yet created by the container).
+        """
+        cursor = await get_or_create_cursor(db, task_id=task_id, stream_name="event_jsonl")
+        try:
+            with open(event_jsonl_path, "r", encoding="utf-8") as handle:
+                handle.seek(cursor.last_offset)
+                chunk = handle.read()
+                if not chunk:
+                    return
+                records, remainder = iter_complete_jsonl_records(chunk)
+                for raw in records:
+                    try:
+                        record = decode_event_line(raw)
+                        await self._ingest_event_record(task_id=task_id, record=record, db=db)
+                        cursor.last_sequence_no += 1
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"[Task {task_id}] Failed to ingest event record: {exc}")
+                cursor.last_offset = handle.tell() - len(remainder.encode("utf-8"))
+        except FileNotFoundError:
+            return  # file not yet created by the container; retry on next poll
+        await db.commit()
 
     def _build_initial_mr_title(self, task: Task) -> str:
         """Build a reasonable initial MR title — uses issue title when available."""
