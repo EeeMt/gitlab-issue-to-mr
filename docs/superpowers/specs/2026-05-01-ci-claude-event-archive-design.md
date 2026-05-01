@@ -72,13 +72,24 @@ Properties:
 - available during task execution
 - archived after task completion
 
+Each line is the raw event object emitted by Claude's `stream-json` mode, written verbatim. `ci-claude.sh` does **not** wrap events in an additional envelope. Example line:
+
+```json
+{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","id":"toolu_01","name":"Write"}}}
+```
+
+The outer `type: stream_event` field is part of Claude's own `stream-json` format; it is not added by Codify.
+
 ### `runtime.json`
 
-Contains a one-time snapshot of execution context written when the task starts.
+Contains a one-time snapshot of execution context. It is written in two passes:
+
+1. **Before Claude is invoked**: write what is known from environment variables (cwd, configured model, resume session ID, task/issue identifiers).
+2. **On first `system` init event from Claude**: update the `model` field with the actual model reported by Claude, which takes precedence over the env-var value.
 
 Recommended contents:
 
-- Claude model and invocation mode
+- Claude model and invocation mode (from `system` init event if available, else from env)
 - current working directory
 - session/resume identifiers
 - selected runtime configuration values that matter for debugging
@@ -140,6 +151,10 @@ Responsibilities:
 - write extracted full bodies to `task_payloads`
 
 The event tailer is the only component that derives structured timeline entries.
+
+#### Tool result correlation
+
+Claude emits tool call input and tool result as separate events linked by `tool_use_id`. The event tailer must buffer an in-progress tool use (tracking `id`, `name`, and accumulated `input_json_delta` parts) and flush it to a `tool_input` payload when `content_block_stop` arrives. Tool result events (`{"type":"tool_result","tool_use_id":"...","content":[...]}`) are correlated back to the originating tool call using `tool_use_id` and stored as a `tool_output` payload, then the corresponding `TaskLog` row is updated with the `output_payload_id`.
 
 ### 2. Console tailer
 
@@ -230,9 +245,9 @@ The event tailer must be resumable and idempotent.
 
 Required approach:
 
-- persist a per-task event cursor
-- persist the mirrored event sequence position for each projected event
-- enforce a unique key per `(task_id, event_seq, projection_type)` so replay cannot duplicate timeline projections
+- persist a per-task event cursor (`TaskIngestCursor`) tracking byte offset and sequence number
+- enforce a DB-level unique constraint on `(task_id, event_seq)` in `TaskLog` so that replaying the same event line cannot insert a duplicate timeline projection
+- when the constraint fires on replay, skip rather than error
 
 If Claude output already includes stable identifiers such as `tool_use_id`, use them in the projection model. For raw event mirroring, preserve the original order exactly.
 
@@ -312,6 +327,7 @@ Use a forward-only migration.
 3. remove `CODIFY_*` marker generation and parsing
 4. keep raw console logging independent
 5. add post-completion archive packaging and download support
+6. implement failure-mode tracking: degraded event capture flag, archive status surfacing in API response
 
 Historical tasks stay on the old read path. New tasks use the new archive pipeline.
 
