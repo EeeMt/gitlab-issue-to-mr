@@ -1327,7 +1327,7 @@ class TestExecuteTask(unittest.TestCase):
             'CODIFY_STATS:{"input_tokens":100,"output_tokens":50}\n'
         )
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         self.assertTrue(result)
@@ -1357,7 +1357,7 @@ class TestExecuteTask(unittest.TestCase):
         )
 
         with (
-            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))),
+            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))),
             patch("app.core.worker.upsert_task_usage_ledger", new=AsyncMock()) as mock_upsert,
         ):
             result = asyncio.run(worker.execute_task(db, task.id))
@@ -1394,7 +1394,7 @@ class TestExecuteTask(unittest.TestCase):
         )
 
         with (
-            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))),
+            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))),
             patch("app.core.worker.upsert_task_usage_ledger", new=AsyncMock()) as mock_upsert,
         ):
             result = asyncio.run(worker.execute_task(db, task.id))
@@ -1436,7 +1436,7 @@ class TestExecuteTask(unittest.TestCase):
 
         with (
             patch.object(worker, '_build_container_env', return_value={"TASK_ID": "1"}) as mock_build_container_env,
-            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1))),
+            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1, False))),
         ):
             result = asyncio.run(worker.execute_task(db, task.id))
 
@@ -1510,7 +1510,7 @@ class TestExecuteTask(unittest.TestCase):
         task = _make_task(target_branch="main", merge_request_iid=None)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error output", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error output", 1, False))):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         self.assertFalse(result)
@@ -1532,7 +1532,7 @@ class TestExecuteTask(unittest.TestCase):
         task = _make_task(target_branch="main", merge_request_iid=None)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error output", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error output", 1, False))):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         self.assertFalse(result)
@@ -1606,7 +1606,7 @@ class TestExecuteTask(unittest.TestCase):
 
         fake_logs = "CODIFY_DIFF:+1-0\n"
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         # Should succeed despite pull failure
@@ -1631,7 +1631,7 @@ class TestExecuteTask(unittest.TestCase):
         fake_logs = "CODIFY_DIFF:+1-0\n"
 
         with patch.object(worker, '_create_mr_if_needed') as mock_create_mr:
-            with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
+            with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))):
                 asyncio.run(worker.execute_task(db, task.id))
 
         # _create_mr_if_needed should NOT have been called
@@ -1654,7 +1654,7 @@ class TestExecuteTask(unittest.TestCase):
         task = _make_task(target_branch="main", merge_request_iid=None)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 0))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 0, False))):
             asyncio.run(worker.execute_task(db, task.id))
 
         # Should have added a fallback log entry
@@ -1690,7 +1690,7 @@ class TestExecuteTask(unittest.TestCase):
         db.execute = AsyncMock(side_effect=tracking_execute)
 
         fake_logs = "CODIFY_DIFF:+1-0\n"
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))):
             asyncio.run(worker.execute_task(db, task.id))
 
         # The first execute call should be the DELETE for TaskLog
@@ -1698,6 +1698,55 @@ class TestExecuteTask(unittest.TestCase):
         # First call: SELECT task; second call: DELETE logs
         delete_found = any('task_logs' in call.lower() or 'DELETE' in call for call in execute_calls[:3])
         self.assertTrue(delete_found, f"Expected DELETE on task_logs in early calls: {execute_calls[:3]}")
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_task_timeout_sets_error_message_prefix(self, mock_notify, mock_get_settings):
+        """When timed_out=True, error_message starts with timeout prefix."""
+        mock_get_settings.return_value = _make_settings(task_timeout=1800)
+        mock_docker = MagicMock()
+        mock_docker.create_container.return_value = MagicMock(id="ctr-timeout")
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(target_branch="main", merge_request_iid=None)
+        db = _make_db(task)
+
+        with patch.object(worker, '_stream_logs_to_db',
+                          new=AsyncMock(return_value=(-1, "running...", 1, True))):
+            result = asyncio.run(worker.execute_task(db, task.id))
+
+        self.assertFalse(result)
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        self.assertIn("Task timed out after 1800s", task.error_message)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_task_non_timeout_failure_regular_error_message(self, mock_notify, mock_get_settings):
+        """When timed_out=False and exit_code!=0, error_message is log tail without timeout prefix."""
+        mock_get_settings.return_value = _make_settings(task_timeout=1800)
+        mock_docker = MagicMock()
+        mock_docker.create_container.return_value = MagicMock(id="ctr-regular-fail")
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(target_branch="main", merge_request_iid=None)
+        db = _make_db(task)
+
+        with patch.object(worker, '_stream_logs_to_db',
+                          new=AsyncMock(return_value=(1, "claude error occurred", 1, False))):
+            result = asyncio.run(worker.execute_task(db, task.id))
+
+        self.assertFalse(result)
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        self.assertNotIn("Task timed out", task.error_message)
+        self.assertIn("claude error occurred", task.error_message)
 
 
 # ===================================================================

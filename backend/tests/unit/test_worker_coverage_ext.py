@@ -211,11 +211,12 @@ class TestStreamLogsTimeout(unittest.TestCase):
         db = _make_db()
         container = _make_stream_container([b"some log line\n"])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=0)
         )
 
         self.assertEqual(exit_code, -1)
+        self.assertTrue(timed_out)
 
     def test_empty_buffer_on_deadline_exceeded(self):
         """When deadline exceeded with empty buffer, no flush occurs — lines 243-248."""
@@ -230,11 +231,12 @@ class TestStreamLogsTimeout(unittest.TestCase):
         # Let's verify no flush occurs (buffer is empty at that point).
         container = _make_stream_container([])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=0)
         )
 
         self.assertEqual(exit_code, -1)
+        self.assertTrue(timed_out)
         self.assertEqual(chunks, 0)  # no buffer to flush
 
 
@@ -268,7 +270,7 @@ class TestStreamLogsTimeoutFlush(unittest.TestCase):
         container.wait.return_value = {"StatusCode": 0}
 
         # Use a short timeout but enough for the stream to complete
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=10)
         )
 
@@ -285,7 +287,7 @@ class TestStreamLogsEmptyLine(unittest.TestCase):
         db = _make_db()
         container = _make_stream_container([b"\n", b"real content\n", b"  \n"])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
@@ -300,7 +302,7 @@ class TestStreamLogsEmptyLine(unittest.TestCase):
         db = _make_db()
         container = _make_stream_container([b"\n", b"\n", b"\n"])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
@@ -336,7 +338,7 @@ class TestStreamLogsToolUseStart(unittest.TestCase):
         line = f"CODIFY_TOOL_USE_START:{tool_use_data}\n".encode()
         container = _make_stream_container([line])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
@@ -357,7 +359,7 @@ class TestStreamLogsToolUseStart(unittest.TestCase):
         container = _make_stream_container([b"CODIFY_TOOL_USE_START:{bad json}\n"])
 
         # Should not raise
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
@@ -371,7 +373,7 @@ class TestStreamLogsToolUseStart(unittest.TestCase):
         # The (.+) in the regex requires at least one char, so empty payload produces no match.
         container = _make_stream_container([b"CODIFY_TOOL_USE_START:\n"])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
@@ -427,7 +429,7 @@ class TestStreamLogsToolResult(unittest.TestCase):
             f"CODIFY_TOOL_RESULT:{tool_result_line}\n".encode(),
         ])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
@@ -470,7 +472,7 @@ class TestStreamLogsToolResult(unittest.TestCase):
             f"CODIFY_TOOL_RESULT:{tool_result_line}\n".encode(),
         ])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
@@ -494,7 +496,7 @@ class TestStreamLogsToolResult(unittest.TestCase):
         ])
 
         # Should not raise
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
@@ -506,7 +508,7 @@ class TestStreamLogsToolResult(unittest.TestCase):
         db = _make_db()
         container = _make_stream_container([b"CODIFY_TOOL_RESULT:{bad}\n"])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
@@ -526,7 +528,7 @@ class TestStreamLogsSystemInit(unittest.TestCase):
             f"CODIFY_SYSTEM_INIT:{json_str}\n".encode(),
         ])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
@@ -543,7 +545,7 @@ class TestStreamLogsSystemInit(unittest.TestCase):
         db = _make_db()
         container = _make_stream_container([b"CODIFY_SYSTEM_INIT:not-json\n"])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
@@ -565,7 +567,7 @@ class TestStreamLogsBufferFlush(unittest.TestCase):
         lines = [f"log line {i}\n".encode() for i in range(250)]
         container = _make_stream_container(lines)
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=10)
         )
 
@@ -582,7 +584,7 @@ class TestStreamLogsBufferFlush(unittest.TestCase):
         multi_line = b"line 1\nline 2\nline 3\n"
         container = _make_stream_container([multi_line])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
@@ -768,7 +770,7 @@ class TestExecuteTaskNotifyStartedException(unittest.TestCase):
 
         fake_logs = "CODIFY_DIFF:+1-0\n"
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         # Should still succeed despite notification failure
@@ -843,7 +845,7 @@ class TestResumeTaskSuccess(unittest.TestCase):
 
         fake_logs = "CODIFY_DIFF:+5-3\nhttp://gitlab.example.com/-/merge_requests/42\n"
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 2))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 2, False))):
             result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
         self.assertTrue(result)
@@ -880,7 +882,7 @@ class TestResumeTaskSuccess(unittest.TestCase):
         )
 
         with (
-            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 2))),
+            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 2, False))),
             patch("app.core.worker.upsert_task_usage_ledger", new=AsyncMock()) as mock_upsert,
         ):
             result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
@@ -905,7 +907,7 @@ class TestResumeTaskSuccess(unittest.TestCase):
         task = _make_task(status=TaskStatus.RUNNING, merge_request_iid=42)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1, False))):
             with patch.object(worker, '_remove_mr_draft_status_for_issue') as mock_remove_draft:
                 asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
@@ -928,7 +930,7 @@ class TestResumeTaskSuccess(unittest.TestCase):
         task = _make_task(status=TaskStatus.RUNNING, merge_request_iid=42)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1, False))):
             with patch.object(worker, '_remove_mr_draft_status_for_issue', side_effect=Exception("draft boom")):
                 result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
@@ -956,7 +958,7 @@ class TestResumeTaskFailure(unittest.TestCase):
         task = _make_task(status=TaskStatus.RUNNING)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error occurred", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error occurred", 1, False))):
             result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
         self.assertFalse(result)
@@ -980,11 +982,36 @@ class TestResumeTaskFailure(unittest.TestCase):
         task = _make_task(status=TaskStatus.RUNNING)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error", 1, False))):
             result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
         self.assertFalse(result)
         self.assertEqual(task.status, TaskStatus.FAILED)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_resume_timeout_sets_error_message_prefix(self, mock_notify, mock_get_settings):
+        """resume_task with timed_out=True sets timeout error_message prefix."""
+        mock_get_settings.return_value = _make_settings(task_timeout=600)
+        mock_container = MagicMock(id="ctr-resume-timeout")
+        mock_docker = MagicMock()
+        mock_docker.client.containers.get.return_value = mock_container
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(status=TaskStatus.RUNNING)
+        db = _make_db(task)
+
+        with patch.object(worker, '_stream_logs_to_db',
+                          new=AsyncMock(return_value=(-1, "still running", 1, True))):
+            result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
+
+        self.assertFalse(result)
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        self.assertIn("Task timed out after 600s", task.error_message)
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
@@ -1004,7 +1031,7 @@ class TestResumeTaskFailure(unittest.TestCase):
         task = _make_task(status=TaskStatus.RUNNING)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1, False))):
             result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
         # Should still return True (success) despite cleanup failure
@@ -1065,7 +1092,7 @@ class TestResumeTaskException(unittest.TestCase):
         )
 
         with (
-            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 2))),
+            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 2, False))),
             patch("app.core.worker.upsert_task_usage_ledger", new=AsyncMock()) as mock_upsert,
         ):
             result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
@@ -1143,7 +1170,7 @@ class TestResumeTaskException(unittest.TestCase):
         )
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1, False))):
             with patch.object(worker, '_send_notifications', new=AsyncMock()) as mock_send:
                 result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
@@ -1178,7 +1205,7 @@ class TestExecuteTaskDraftRemovalException(unittest.TestCase):
 
         fake_logs = "CODIFY_DIFF:+1-0\nhttp://gitlab.example.com/-/merge_requests/42\n"
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))):
             with patch.object(worker, '_remove_mr_draft_status', side_effect=Exception("draft error")):
                 result = asyncio.run(worker.execute_task(db, task.id))
 
@@ -1208,7 +1235,7 @@ class TestExecuteTaskContainerRemovalException(unittest.TestCase):
         task = _make_task(target_branch="main", merge_request_iid=None)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1, False))):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         # Should still return True (success) despite cleanup failure
@@ -1375,7 +1402,7 @@ class TestStreamLogsContainerWaitException(unittest.TestCase):
         container.wait.side_effect = Exception("container wait timeout")
         container.id = "mock-id"
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
@@ -1414,7 +1441,7 @@ class TestStreamLogsMultipleMarkersSameStream(unittest.TestCase):
             b"Another normal line\n",
         ])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
@@ -1444,7 +1471,7 @@ class TestStreamLogsThreadError(unittest.TestCase):
         container.wait.return_value = {"StatusCode": 1}
         container.id = "mock-id"
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 

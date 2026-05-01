@@ -120,7 +120,7 @@ def test_worker_saves_mr_stats_after_completion():
         )
 
         async def run_test():
-            with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
+            with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))):
                 await worker.execute_task(mock_db, task.id)
 
         asyncio.run(run_test())
@@ -194,7 +194,7 @@ def test_worker_handles_missing_mr_stats():
         )
 
         async def run_test():
-            with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
+            with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))):
                 await worker.execute_task(mock_db, task.id)
 
         asyncio.run(run_test())

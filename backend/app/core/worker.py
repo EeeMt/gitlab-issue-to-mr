@@ -206,12 +206,12 @@ class WorkerExecutor:
         task_id: int,
         db: AsyncSession,
         timeout: int,
-    ) -> tuple[int, str, int]:
+    ) -> tuple[int, str, int, bool]:
         """Stream container logs to TaskLog entries while waiting for completion.
 
         Saves log chunks to the DB every FLUSH_INTERVAL seconds so users can
         monitor execution progress in real-time without waiting for the container
-        to finish. Returns (exit_code, full_log_string, chunks_saved).
+        to finish. Returns (exit_code, full_log_string, chunks_saved, timed_out).
         """
         FLUSH_INTERVAL = 10.0   # seconds between DB flushes
         MAX_BUFFER_LINES = 200  # also flush when buffer hits this many lines
@@ -250,7 +250,7 @@ class WorkerExecutor:
                     await self._flush_log_chunk(task_id, buffer, chunk_index, db)
                     chunk_index += 1
                 stream_thread.join(timeout=2)
-                return -1, "".join(all_lines), chunk_index
+                return -1, "".join(all_lines), chunk_index, True
 
             try:
                 item = await asyncio.wait_for(log_queue.get(), timeout=min(remaining, 2.0))
@@ -413,7 +413,7 @@ class WorkerExecutor:
         logger.info(
             f"[Task {task_id}] Log streaming complete: {chunk_index} chunks, exit_code={exit_code}"
         )
-        return exit_code, "".join(all_lines), chunk_index
+        return exit_code, "".join(all_lines), chunk_index, False
 
     def _create_mr_if_needed(
         self,
@@ -1131,7 +1131,7 @@ class WorkerExecutor:
             await db.commit()
 
             # Stream logs
-            exit_code, logs, log_chunks_saved = await self._stream_logs_to_db(
+            exit_code, logs, log_chunks_saved, timed_out = await self._stream_logs_to_db(
                 container, task.id, db, settings.task_timeout
             )
 
@@ -1179,7 +1179,19 @@ class WorkerExecutor:
             # Save a final log entry for failures, or for very fast tasks with no
             # streaming chunks (e.g., container exited immediately).
             scrubbed_logs = scrub_sensitive_data(logs)
-            if exit_code != 0:
+            if timed_out:
+                task.error_message = (
+                    f"Task timed out after {settings.task_timeout}s\n"
+                    + sanitize_sensitive_data(logs)[-800:]
+                )
+                if log_chunks_saved == 0:
+                    log_entry = TaskLog(
+                        task_id=task.id,
+                        log_level="ERROR",
+                        message=f"[Timed out after {settings.task_timeout}s]\n{scrubbed_logs[-2000:]}",
+                    )
+                    db.add(log_entry)
+            elif exit_code != 0:
                 task.error_message = sanitize_sensitive_data(logs)[-1000:]
                 if log_chunks_saved == 0:
                     # No streaming chunks saved — store full log as error entry
@@ -1271,7 +1283,7 @@ class WorkerExecutor:
 
         try:
             # Stream remaining logs (follow=True will wait for container to finish)
-            exit_code, logs, log_chunks_saved = await self._stream_logs_to_db(
+            exit_code, logs, log_chunks_saved, timed_out = await self._stream_logs_to_db(
                 container, task.id, db, settings.task_timeout
             )
 
@@ -1317,7 +1329,15 @@ class WorkerExecutor:
                 await self._send_failure_notifications(task, success=False, had_existing_mr=had_existing_mr, issue=issue)
 
             scrubbed_logs = scrub_sensitive_data(logs)
-            if exit_code != 0:
+            if timed_out:
+                task.error_message = (
+                    f"Task timed out after {settings.task_timeout}s\n"
+                    + sanitize_sensitive_data(logs)[-800:]
+                )
+                if log_chunks_saved == 0:
+                    db.add(TaskLog(task_id=task.id, log_level="ERROR",
+                                   message=f"[Timed out after {settings.task_timeout}s]\n{scrubbed_logs[-2000:]}"))
+            elif exit_code != 0:
                 task.error_message = sanitize_sensitive_data(logs)[-1000:]
                 if log_chunks_saved == 0:
                     db.add(TaskLog(task_id=task.id, log_level="ERROR",

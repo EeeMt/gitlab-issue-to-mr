@@ -7,6 +7,7 @@
     <template #header>
       <span class="panel-title">{{ t('taskView.taskProcess') }}</span>
       <n-tag v-if="isActive" type="success" size="small" round :class="{ 'live-badge--pulse': isActive }" style="margin-left: 8px">{{ t('taskView.realTime') }}</n-tag>
+      <span v-if="isActive && elapsedDisplay" class="elapsed-time">{{ elapsedDisplay }}</span>
     </template>
 
     <!-- system_init banner -->
@@ -168,6 +169,7 @@
 import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import { NCard, NCollapse, NCollapseItem, NIcon, NTag, NEmpty, NTabs, NTabPane, NButton } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
+import { formatDurationMs } from '../utils/format'
 import {
   TerminalOutline,
   CreateOutline,
@@ -441,6 +443,38 @@ const hasStructuredContent = computed(() =>
   sortedEvents.value.length > 0 || systemInitEntry.value !== null || !!props.task?.container_id
 )
 
+const elapsedMs = ref(0)
+let elapsedTimer: ReturnType<typeof setInterval> | null = null
+
+function updateElapsed() {
+  if (!props.task?.started_at) return
+  try {
+    const ms = Date.now() - new Date(props.task.started_at).getTime()
+    elapsedMs.value = ms > 0 ? ms : 0
+  } catch {
+    elapsedMs.value = 0
+  }
+}
+
+watch(() => props.isActive, (active) => {
+  if (active) {
+    updateElapsed()
+    elapsedTimer = setInterval(updateElapsed, 1000)
+  } else {
+    if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null }
+    elapsedMs.value = 0
+  }
+}, { immediate: true })
+
+onBeforeUnmount(() => {
+  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null }
+})
+
+const elapsedDisplay = computed(() => {
+  if (!props.isActive || elapsedMs.value <= 0) return ''
+  return formatDurationMs(elapsedMs.value)
+})
+
 // ── Raw-tab open/close events ─────────────────────────────────────────────────
 
 watch(activeTab, (val) => {
@@ -546,6 +580,16 @@ watch(() => props.terminalHtml, async () => {
 .panel-title {
   font-size: 18px;
   font-weight: 600;
+}
+
+.elapsed-time {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--n-text-color-3, #999);
+  font-family: var(--n-font-family-mono, monospace);
+  background: rgba(128, 128, 128, 0.08);
+  padding: 2px 10px;
+  border-radius: 10px;
 }
 
 .system-init-banner {

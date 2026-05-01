@@ -138,7 +138,7 @@ def test_create_initial_mr():
 
     # Run execute_task (it's async)
     async def run_test():
-        with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1))):
+        with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1, False))):
             with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
                 result = await worker.execute_task(mock_db, task.id)
                 return result
@@ -235,7 +235,7 @@ def test_mr_iid_passed_to_container():
     mock_db = create_mock_db(task, issue)
 
     async def run_test():
-        with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1))):
+        with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1, False))):
             with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
                 await worker.execute_task(mock_db, task.id)
 
@@ -289,7 +289,7 @@ def test_mr_creation_failure_handled():
     mock_db = create_mock_db(task, issue)
 
     async def run_test():
-        with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1))):
+        with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1, False))):
             with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
                 result = await worker.execute_task(mock_db, task.id)
                 return result
@@ -354,7 +354,7 @@ def test_draft_removed_on_completion():
         with patch.object(
             worker,
             "_stream_logs_to_db",
-            AsyncMock(return_value=(0, "Success", 1)),
+            AsyncMock(return_value=(0, "Success", 1, False)),
         ):
             with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
                 await worker.execute_task(mock_db, task.id)
