@@ -6,10 +6,26 @@ import tempfile
 from pathlib import Path
 
 
-def test_ci_claude_captures_tool_result_from_user_message():
+def _prepare_script_copy(tmpdir_path: Path, fake_claude_content: str) -> Path:
     repo_root = Path(__file__).resolve().parents[3]
     script_path = repo_root / "deploy" / "ci-claude.sh"
 
+    fake_claude = tmpdir_path / "fake-claude.sh"
+    fake_claude.write_text(fake_claude_content, encoding="utf-8")
+    fake_claude.chmod(fake_claude.stat().st_mode | stat.S_IEXEC)
+
+    script_copy = tmpdir_path / "ci-claude.sh"
+    script_copy.write_text(
+        script_path.read_text(encoding="utf-8").replace(
+            "/usr/local/bin/claude", str(fake_claude)
+        ),
+        encoding="utf-8",
+    )
+    script_copy.chmod(script_copy.stat().st_mode | stat.S_IEXEC)
+    return script_copy
+
+
+def test_ci_claude_captures_tool_result_from_user_message():
     fake_stream_lines = [
         json.dumps(
             {
@@ -92,24 +108,13 @@ def test_ci_claude_captures_tool_result_from_user_message():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
-        fake_claude = tmpdir_path / "fake-claude.sh"
-        fake_claude.write_text(
+        script_copy = _prepare_script_copy(
+            tmpdir_path,
             "#!/usr/bin/env bash\n"
             "cat <<'EOF'\n"
             + "\n".join(fake_stream_lines)
             + "\nEOF\n",
-            encoding="utf-8",
         )
-        fake_claude.chmod(fake_claude.stat().st_mode | stat.S_IEXEC)
-
-        script_copy = tmpdir_path / "ci-claude.sh"
-        script_copy.write_text(
-            script_path.read_text(encoding="utf-8").replace(
-                "/usr/local/bin/claude", str(fake_claude)
-            ),
-            encoding="utf-8",
-        )
-        script_copy.chmod(script_copy.stat().st_mode | stat.S_IEXEC)
 
         env = os.environ.copy()
         env["SANDBOX_MODE"] = "1"
@@ -137,3 +142,195 @@ def test_ci_claude_captures_tool_result_from_user_message():
             }
         ]
         assert "CODIFY_TOOL_RESULT:" in result.stderr
+
+
+def test_ci_claude_matches_tool_results_by_tool_use_id():
+    fake_stream_lines = [
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {
+                        "type": "tool_use",
+                        "id": "call_read",
+                        "name": "Read",
+                        "input": {},
+                    },
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "input_json_delta", "partial_json": "{}"},
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {"type": "content_block_stop", "index": 0},
+            }
+        ),
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_start",
+                    "index": 1,
+                    "content_block": {
+                        "type": "tool_use",
+                        "id": "call_write",
+                        "name": "Write",
+                        "input": {},
+                    },
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_delta",
+                    "index": 1,
+                    "delta": {"type": "input_json_delta", "partial_json": "{}"},
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "stream_event",
+                "event": {"type": "content_block_stop", "index": 1},
+            }
+        ),
+        json.dumps(
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "tool_use_id": "call_write",
+                            "type": "tool_result",
+                            "content": "WRITE_OK",
+                            "is_error": False,
+                        }
+                    ],
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "tool_use_id": "call_read",
+                            "type": "tool_result",
+                            "content": "README.md",
+                            "is_error": False,
+                        }
+                    ],
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "result": "done",
+                "session_id": "session-123",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+        ),
+    ]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        script_copy = _prepare_script_copy(
+            tmpdir_path,
+            "#!/usr/bin/env bash\n"
+            "cat <<'EOF'\n"
+            + "\n".join(fake_stream_lines)
+            + "\nEOF\n",
+        )
+
+        result = subprocess.run(
+            [str(script_copy), "test prompt"],
+            cwd=tmpdir,
+            env={**os.environ, "SANDBOX_MODE": "1"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["tool_calls"] == [
+            {"name": "Read", "input": {}, "output": "README.md", "error": False},
+            {"name": "Write", "input": {}, "output": "WRITE_OK", "error": False},
+        ]
+
+
+def test_ci_claude_emits_failure_json_when_claude_exits_nonzero():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        script_copy = _prepare_script_copy(
+            tmpdir_path,
+            "#!/usr/bin/env bash\n"
+            "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"error\",\"result\":\"boom\",\"session_id\":\"session-123\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n"
+            "exit 1\n",
+        )
+
+        result = subprocess.run(
+            [str(script_copy), "test prompt"],
+            cwd=tmpdir,
+            env={**os.environ, "SANDBOX_MODE": "1"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 1
+        payload = json.loads(result.stdout)
+        assert payload == {
+            "success": False,
+            "subtype": "error",
+            "result": "boom",
+            "session_id": "session-123",
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+            "tool_calls": [],
+        }
+
+
+def test_ci_claude_accepts_prompt_file_and_pipes_prompt_to_claude():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        prompt_file = tmpdir_path / "prompt.txt"
+        prompt_file.write_text("prompt from file", encoding="utf-8")
+
+        script_copy = _prepare_script_copy(
+            tmpdir_path,
+            "#!/usr/bin/env bash\n"
+            "stdin_content=$(cat)\n"
+            "printf '{\"type\":\"result\",\"subtype\":\"success\",\"result\":%s,\"session_id\":\"session-123\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}\\n' \"$(printf '%s' \"$stdin_content\" | python -c 'import json,sys; print(json.dumps(sys.stdin.read()))')\"\n",
+        )
+
+        result = subprocess.run(
+            [str(script_copy)],
+            cwd=tmpdir,
+            env={**os.environ, "SANDBOX_MODE": "1", "PROMPT_FILE": str(prompt_file)},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["result"] == "prompt from file"

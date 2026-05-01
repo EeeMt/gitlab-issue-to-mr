@@ -475,7 +475,7 @@ update_mr_description "$(build_running_mr_description)" || true
 echo "Starting Claude CLI (streaming mode)..."
 set +e
 env HOME=/home/codify timeout "${TASK_TIMEOUT:-1800}" su -m -s /bin/bash codify -c \
-    'cd /workspace && export PATH="/usr/local/bin:/usr/bin:/bin:${JAVA_HOME}/bin" && /usr/local/bin/ci-claude.sh "$(cat /tmp/claude_prompt.txt)"' \
+    'cd /workspace && export PATH="/usr/local/bin:/usr/bin:/bin:${JAVA_HOME}/bin" && PROMPT_FILE=/tmp/claude_prompt.txt /usr/local/bin/ci-claude.sh' \
     > /tmp/claude_result.json
 SCRIPT_RESULT=$?
 set -e

@@ -9,11 +9,13 @@
 # Usage:
 #   result=$(SANDBOX_MODE=1 ./ci-claude.sh "Fix auth.py")
 #   echo "$result" | jq .result    # extract the text answer
+#   result=$(PROMPT_FILE=/tmp/prompt.txt SANDBOX_MODE=1 ./ci-claude.sh)
 #
 # Environment variables:
 #   SANDBOX_MODE           "1" → --dangerously-skip-permissions (sandbox containers only!)
 #   ALLOWED_TOOLS          Comma-separated tool list, e.g. "Bash,Read,Edit,Write"
 #                          Ignored when SANDBOX_MODE=1. Default: "Bash,Read,Edit,Write"
+#   PROMPT_FILE            Read prompt from a file instead of argv (safer for large prompts)
 #   APPEND_SYSTEM_PROMPT   Extra system instructions appended to default prompt
 #   RESUME_SESSION         Session ID to resume a specific conversation
 #   CONTINUE_SESSION       "1" → --continue the most recent conversation
@@ -40,11 +42,25 @@ ok()   { _e "${GREEN}✅ %s${RESET}\n" "$*"; }
 fail() { _e "${RED}❌ %s${RESET}\n" "$*"; }
 
 # ── Args ──────────────────────────────────────────────────────────────────────
-PROMPT="${1:-}"
+PROMPT_FILE="${PROMPT_FILE:-}"
+PROMPT=""
+if [[ -n "$PROMPT_FILE" ]]; then
+  if [[ ! -f "$PROMPT_FILE" ]]; then
+    printf "PROMPT_FILE not found: %s\n" "$PROMPT_FILE" >&2
+    exit 1
+  fi
+  PROMPT=$(cat "$PROMPT_FILE")
+elif [[ $# -gt 0 ]]; then
+  PROMPT="$1"
+elif [[ ! -t 0 ]]; then
+  PROMPT=$(cat)
+fi
 if [[ -z "$PROMPT" ]]; then
   printf "Usage: %s <prompt>\n\n" "$0" >&2
   printf "  SANDBOX_MODE=1 %s 'Run tests and fix failures'\n" "$0" >&2
   printf "  ALLOWED_TOOLS=Bash,Read %s 'Explain the auth module'\n" "$0" >&2
+  printf "  PROMPT_FILE=/tmp/prompt.txt SANDBOX_MODE=1 %s\n" "$0" >&2
+  printf "  cat /tmp/prompt.txt | SANDBOX_MODE=1 %s\n" "$0" >&2
   exit 1
 fi
 
@@ -63,7 +79,7 @@ fi
 
 # ── Build claude args ─────────────────────────────────────────────────────────
 CLAUDE_ARGS=(
-  -p "$PROMPT"
+  -p
   --output-format stream-json
   --verbose
   --include-partial-messages
@@ -85,7 +101,11 @@ fi
 _e "${BLUE}${BOLD}╔═══════════════════════════════════════╗${RESET}\n"
 _e "${BLUE}${BOLD}║       🤖  Claude Code CI Runner       ║${RESET}\n"
 _e "${BLUE}${BOLD}╚═══════════════════════════════════════╝${RESET}\n"
-info "Prompt : $PROMPT"
+PROMPT_PREVIEW="$PROMPT"
+if [[ ${#PROMPT_PREVIEW} -gt 400 ]]; then
+  PROMPT_PREVIEW="${PROMPT_PREVIEW:0:400}…(truncated, ${#PROMPT} chars)"
+fi
+info "Prompt : $PROMPT_PREVIEW"
 if [[ "$SANDBOX_MODE" == "1" ]]; then
   info "Tools  : ALL (sandbox — dangerously-skip-permissions)"
 else
@@ -96,10 +116,9 @@ fi
 [[ -n "$RESUME" ]]               && info "Session: resuming $RESUME"
 [[ "$CONTINUE_SESSION" == "1" ]] && info "Session: continuing last conversation"
 
-# Print full CLI args (excluding the prompt at index 1)
+# Print full CLI args (prompt is piped via stdin/file, not argv)
 _e "${DIM}[ci-claude] CLI args:"
 for arg in "${CLAUDE_ARGS[@]}"; do
-  [[ "$arg" == "$PROMPT" ]] && continue
   _e " %s" "$arg"
 done
 _e "${RESET}\n\n"
@@ -209,9 +228,10 @@ process_stream() {
                 local safe_input
                 safe_input=$(printf '%s' "${cur_tool_input:-{\}}" | jq -c '.' 2>/dev/null || echo '{}')
                 jq -nc \
+                  --arg id "$cur_tool_id" \
                   --arg name "$cur_tool_name" \
                   --argjson input "$safe_input" \
-                  '{name: $name, input: $input, output: null, error: false}' \
+                  '{id: $id, name: $name, input: $input, output: null, error: false}' \
                   >> "$TOOL_CALLS_FILE"
                 # Emit structured tool-use event to stderr for worker.py Python parsing
                 printf 'CODIFY_TOOL_USE_START:%s\n' \
@@ -267,21 +287,14 @@ process_stream() {
                '{id: $id, output: $out, error: $err}')" >&2
 
           # Also update TOOL_CALLS_FILE stub (for backward-compat batch in entrypoint.sh)
-          if [[ -s "$TOOL_CALLS_FILE" ]]; then
-            local stub_line updated
-            stub_line=$(grep -nm 1 '"output":null' "$TOOL_CALLS_FILE" | cut -d: -f1)
-            if [[ -n "$stub_line" ]]; then
-              updated=$(sed -n "${stub_line}p" "$TOOL_CALLS_FILE" | jq -c \
-                --arg out "$stored_out" \
-                --argjson err "$is_error" \
-                '.output = $out | .error = $err')
-              {
-                head -n $(( stub_line - 1 )) "$TOOL_CALLS_FILE" 2>/dev/null || true
-                printf '%s\n' "$updated"
-                tail -n +$(( stub_line + 1 )) "$TOOL_CALLS_FILE" 2>/dev/null || true
-              } > "$TOOL_CALLS_FILE.tmp"
-              mv "$TOOL_CALLS_FILE.tmp" "$TOOL_CALLS_FILE"
-            fi
+          if [[ -n "$tool_use_id" && -s "$TOOL_CALLS_FILE" ]]; then
+            jq -c \
+              --arg id "$tool_use_id" \
+              --arg out "$stored_out" \
+              --argjson err "$is_error" \
+              'if .id == $id then .output = $out | .error = $err else . end' \
+              "$TOOL_CALLS_FILE" > "$TOOL_CALLS_FILE.tmp"
+            mv "$TOOL_CALLS_FILE.tmp" "$TOOL_CALLS_FILE"
           fi
         done
         ;;
@@ -329,8 +342,18 @@ process_stream() {
   done
 }
 
+run_claude_stream() {
+  set +e
+  printf '%s' "$PROMPT" | /usr/local/bin/claude "$@" 2>&1 | process_stream
+  local pipe_status=("${PIPESTATUS[@]}")
+  set -e
+  return "${pipe_status[1]}"
+}
+
 # ── Run claude and stream-process its output ──────────────────────────────────
-/usr/local/bin/claude "${CLAUDE_ARGS[@]}" 2>&1 | process_stream
+if ! run_claude_stream "${CLAUDE_ARGS[@]}"; then
+  :
+fi
 
 # ── Fallback: if --resume was used and produced no result, retry without it ───
 if [[ -n "$RESUME" && ! -s "$RESULT_FILE" ]]; then
@@ -346,7 +369,9 @@ if [[ -n "$RESUME" && ! -s "$RESULT_FILE" ]]; then
   # Reset temp files
   : > "$TOOL_CALLS_FILE"
   : > "$RESULT_FILE"
-  /usr/local/bin/claude "${NEW_ARGS[@]}" 2>&1 | process_stream
+  if ! run_claude_stream "${NEW_ARGS[@]}"; then
+    :
+  fi
 fi
 
 # ── Build and emit structured JSON to stdout ──────────────────────────────────
@@ -371,7 +396,7 @@ jq -n \
     result:     ($result_data[0].result // ""),
     session_id: ($result_data[0].session_id // ""),
     usage:      ($result_data[0].usage // {}),
-    tool_calls: $tool_calls_data
+    tool_calls: ($tool_calls_data | map(del(.id)))
   }'
 
 [[ "$RESULT_SUBTYPE" == "success" ]] && exit 0 || exit 1
