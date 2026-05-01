@@ -378,6 +378,8 @@ if [[ -n "$RESUME" && ! -s "$RESULT_FILE" ]]; then
   # Reset temp files
   : > "$TOOL_CALLS_FILE"
   : > "$RESULT_FILE"
+  : > "$EVENT_JSONL"
+  jq '.resume_session = ""' "$RUNTIME_JSON" > "${RUNTIME_JSON}.tmp" && mv "${RUNTIME_JSON}.tmp" "$RUNTIME_JSON"
   if ! run_claude_stream "${NEW_ARGS[@]}"; then
     :
   fi
@@ -408,4 +410,7 @@ jq -n \
     tool_calls: ($tool_calls_data | map(del(.id)))
   }'
 
+# Drain console.log tee process before exit
+exec 2>&-
+wait
 [[ "$RESULT_SUBTYPE" == "success" ]] && exit 0 || exit 1
