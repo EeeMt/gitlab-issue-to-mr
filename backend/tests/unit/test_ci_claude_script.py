@@ -141,7 +141,7 @@ def test_ci_claude_captures_tool_result_from_user_message():
                 "error": False,
             }
         ]
-        assert "CODIFY_TOOL_RESULT:" in result.stderr
+        # CODIFY markers removed; verify tool_calls content instead (already asserted above)
 
 
 def test_ci_claude_matches_tool_results_by_tool_use_id():
@@ -334,3 +334,41 @@ def test_ci_claude_accepts_prompt_file_and_pipes_prompt_to_claude():
         assert result.returncode == 0, result.stderr
         payload = json.loads(result.stdout)
         assert payload["result"] == "prompt from file"
+
+
+def run_fake_ci_claude(tmp_path, fake_stream_lines):
+    script_copy = _prepare_script_copy(
+        tmp_path,
+        "#!/usr/bin/env bash\ncat <<'EOF'\n" + "\n".join(fake_stream_lines) + "\nEOF\n",
+    )
+    env = os.environ.copy()
+    env["SANDBOX_MODE"] = "1"
+    return subprocess.run(
+        [str(script_copy), "test prompt"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_ci_claude_writes_event_jsonl_runtime_json_and_console_log(tmp_path):
+    result = run_fake_ci_claude(tmp_path, fake_stream_lines=[
+        '{"type":"system","subtype":"init","model":"claude-sonnet","cwd":"/workspace"}',
+        '{"type":"result","subtype":"success","result":"done","session_id":"s1","usage":{"input_tokens":1,"output_tokens":1}}',
+    ])
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "event.jsonl").read_text(encoding="utf-8").count('"type"') == 2
+    assert '"claude-sonnet"' in (tmp_path / "runtime.json").read_text(encoding="utf-8")
+    assert "Claude Code CI Runner" in (tmp_path / "console.log").read_text(encoding="utf-8")
+
+
+def test_ci_claude_no_longer_emits_codify_markers(tmp_path):
+    result = run_fake_ci_claude(tmp_path, fake_stream_lines=[
+        '{"type":"result","subtype":"success","result":"done","session_id":"s1","usage":{"input_tokens":1,"output_tokens":1}}',
+    ])
+
+    assert "CODIFY_" not in result.stderr
+    assert "CODIFY_" not in (tmp_path / "event.jsonl").read_text(encoding="utf-8")

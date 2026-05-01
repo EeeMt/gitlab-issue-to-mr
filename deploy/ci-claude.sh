@@ -25,6 +25,17 @@
 
 set -euo pipefail
 
+# ── Artifact files (written to cwd so callers can locate them) ────────────────
+ARTIFACT_DIR="${PWD}"
+EVENT_JSONL="${ARTIFACT_DIR}/event.jsonl"
+RUNTIME_JSON="${ARTIFACT_DIR}/runtime.json"
+CONSOLE_LOG="${ARTIFACT_DIR}/console.log"
+touch "$EVENT_JSONL" "$CONSOLE_LOG"
+# Tee all stderr to console.log; >&2 inside the substitution refers to the
+# original stderr (before exec redirects fd 2), so output still appears on
+# the caller's terminal/log stream.
+exec 2> >(tee -a "$CONSOLE_LOG" >&2)
+
 # ── Colors on stderr ──────────────────────────────────────────────────────────
 if [[ -t 2 && "${NO_COLOR:-}" != "1" ]]; then
   RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m'
@@ -125,6 +136,14 @@ _e "${RESET}\n\n"
 
 # ── Temp files for accumulating structured data ───────────────────────────────
 # Needed because process_stream runs in a pipe subshell and can't set outer vars.
+
+# Write initial runtime.json; model field is updated when system init event arrives.
+jq -n \
+  --arg model "${CLAUDE_MODEL:-}" \
+  --arg cwd "${PWD}" \
+  --arg resume "${RESUME:-}" \
+  '{model: $model, cwd: $cwd, resume_session: $resume}' > "$RUNTIME_JSON"
+
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT
 
@@ -143,6 +162,9 @@ process_stream() {
 
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
+
+    # Mirror every raw stream-json line verbatim to event.jsonl
+    printf '%s\n' "$line" >> "$EVENT_JSONL"
 
     local type
     type=$(printf '%s' "$line" | jq -r '.type // empty' 2>/dev/null) || {
@@ -217,9 +239,6 @@ process_stream() {
             case "$prev_block" in
               thinking)
                 _e "\n${DIM}${CYAN}╚══════════════════════════════════════════════${RESET}\n"
-                local stripped_thinking
-                stripped_thinking=$(printf '%s' "$cur_thinking_buf" | sed '/./,$!d')
-                printf 'CODIFY_THINKING:%s\n' "$(jq -c -n --arg text "$stripped_thinking" '{text: $text}')" >&2
                 cur_thinking_buf=""
                 ;;
               tool_use)
@@ -233,19 +252,11 @@ process_stream() {
                   --argjson input "$safe_input" \
                   '{id: $id, name: $name, input: $input, output: null, error: false}' \
                   >> "$TOOL_CALLS_FILE"
-                # Emit structured tool-use event to stderr for worker.py Python parsing
-                printf 'CODIFY_TOOL_USE_START:%s\n' \
-                  "$(jq -c -n --arg id "$cur_tool_id" --arg name "$cur_tool_name" --argjson input "$safe_input" \
-                     '{id: $id, name: $name, input: $input}')" >&2
                 cur_tool_input=""
                 cur_tool_id=""
                 ;;
               text)
                 _e "\n"
-                # Strip leading newlines from text before emitting
-                local stripped_text
-                stripped_text=$(printf '%s' "$cur_text_buf" | sed '/./,$!d')
-                printf 'CODIFY_ASSISTANT_TEXT:%s\n' "$(jq -c -n --arg text "$stripped_text" '{text: $text}')" >&2
                 cur_text_buf=""
                 ;;
             esac
@@ -279,14 +290,9 @@ process_stream() {
             _e "${CYAN}  ╰─ ✅ Output: ${DIM}%.400s${RESET}\n" "$output"
           fi
 
-          # Emit tool result to stderr for worker.py to correlate with CODIFY_TOOL_USE_START
+          # Update TOOL_CALLS_FILE stub (for backward-compat batch in entrypoint.sh)
           stored_out="${output:0:2000}"
           [[ ${#output} -gt 2000 ]] && stored_out+="…(truncated)"
-          printf 'CODIFY_TOOL_RESULT:%s\n' \
-            "$(jq -c -n --arg id "$tool_use_id" --arg out "$stored_out" --argjson err "$is_error" \
-               '{id: $id, output: $out, error: $err}')" >&2
-
-          # Also update TOOL_CALLS_FILE stub (for backward-compat batch in entrypoint.sh)
           if [[ -n "$tool_use_id" && -s "$TOOL_CALLS_FILE" ]]; then
             jq -c \
               --arg id "$tool_use_id" \
@@ -309,7 +315,10 @@ process_stream() {
           cwd=$(printf '%s' "$line" | jq -r '.cwd // empty' 2>/dev/null)
           [[ -n "$model" ]] && log "Model : $model"
           [[ -n "$cwd" ]]   && log "CWD   : $cwd"
-          printf 'CODIFY_SYSTEM_INIT:%s\n' "$(jq -c -n --arg model "$model" --arg cwd "$cwd" '{model: $model, cwd: $cwd}')" >&2
+          # Update runtime.json with the actual model reported by the API
+          [[ -n "$model" ]] && \
+            jq --arg model "$model" '.model = $model' "$RUNTIME_JSON" > "${RUNTIME_JSON}.tmp" && \
+            mv "${RUNTIME_JSON}.tmp" "$RUNTIME_JSON"
         fi
         ;;
 
