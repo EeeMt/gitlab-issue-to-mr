@@ -16,7 +16,7 @@ from app.database import get_db
 from app.dependencies.auth import require_admin_user, require_authenticated_user, require_page_access
 from app.dependencies.auth import get_optional_current_user
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
-from app.models import Issue, Task, TaskLog, User
+from app.models import Issue, Task, TaskLog, TaskRawLogChunk, User
 from app.core.docker_client import get_docker_client
 from app.api.task_operations import get_task_with_access_check
 
@@ -218,6 +218,17 @@ async def get_task_container_logs(
         }
 
     async def _fetch_db_chunks() -> str:
+        # New format: TaskRawLogChunk (written by the event archive system)
+        chunk_result = await db.execute(
+            select(TaskRawLogChunk)
+            .where(TaskRawLogChunk.task_id == task_id)
+            .order_by(TaskRawLogChunk.sequence_no.asc())
+        )
+        new_chunks = chunk_result.scalars().all()
+        if new_chunks:
+            return "".join(c.content.decode("utf-8", errors="replace") for c in new_chunks)
+
+        # Legacy fallback: TaskLog with log_type IS NULL (old tasks without event archive)
         log_result = await db.execute(
             select(TaskLog)
             .where(TaskLog.task_id == task_id, TaskLog.log_type.is_(None))

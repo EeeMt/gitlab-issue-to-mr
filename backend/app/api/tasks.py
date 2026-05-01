@@ -925,3 +925,54 @@ async def create_task(
     if slot_warning:
         response["slot_warning"] = slot_warning
     return response
+
+
+@router.get("/tasks/{task_id}/archive")
+async def get_task_archive(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Get runtime archive metadata for a completed task."""
+    from app.models import TaskRunArchive
+    archive = (
+        await db.execute(
+            select(TaskRunArchive).where(TaskRunArchive.task_id == task_id)
+        )
+    ).scalar_one_or_none()
+    if not archive:
+        raise HTTPException(status_code=404, detail="Archive not available")
+    return {
+        "archive_name": archive.archive_name,
+        "archive_size_bytes": archive.archive_size_bytes,
+        "created_at": archive.created_at.isoformat(),
+    }
+
+
+@router.get("/tasks/{task_id}/payloads/{payload_id}")
+async def get_task_payload(
+    task_id: int,
+    payload_id: int,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Get payload content for a task log entry."""
+    from app.models import TaskPayload
+    payload = (
+        await db.execute(
+            select(TaskPayload).where(
+                TaskPayload.task_id == task_id, TaskPayload.id == payload_id
+            )
+        )
+    ).scalar_one_or_none()
+    if not payload:
+        raise HTTPException(status_code=404, detail="Payload not found")
+    content = payload.content.decode("utf-8", errors="replace")
+    return {
+        "id": payload.id,
+        "payload_kind": payload.payload_kind,
+        "content": content,
+        "encoding": payload.encoding,
+        "char_count": payload.char_count,
+        "byte_count": payload.byte_count,
+    }

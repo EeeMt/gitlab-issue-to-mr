@@ -752,8 +752,12 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
         mock_log_result = MagicMock()
         mock_log_result.scalars.return_value.all.return_value = [mock_chunk]
 
+        # _fetch_db_chunks now checks TaskRawLogChunk first (empty), then falls back to TaskLog
+        mock_empty_raw_chunks = MagicMock()
+        mock_empty_raw_chunks.scalars.return_value.all.return_value = []
+
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_log_result])
+        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_empty_raw_chunks, mock_log_result])
 
         async def override_db():
             yield mock_db
@@ -789,8 +793,12 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
         mock_log_result = MagicMock()
         mock_log_result.scalars.return_value.all.return_value = []
 
+        # _fetch_db_chunks checks TaskRawLogChunk first (empty), then falls back to TaskLog (also empty)
+        mock_empty_raw_chunks = MagicMock()
+        mock_empty_raw_chunks.scalars.return_value.all.return_value = []
+
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_log_result])
+        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_empty_raw_chunks, mock_log_result])
 
         async def override_db():
             yield mock_db
@@ -831,8 +839,12 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
         mock_log_result = MagicMock()
         mock_log_result.scalars.return_value.all.return_value = [chunk1, chunk2, chunk3]
 
+        # _fetch_db_chunks checks TaskRawLogChunk first (empty), then falls back to TaskLog
+        mock_empty_raw_chunks = MagicMock()
+        mock_empty_raw_chunks.scalars.return_value.all.return_value = []
+
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_log_result])
+        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_empty_raw_chunks, mock_log_result])
 
         async def override_db():
             yield mock_db
@@ -882,8 +894,12 @@ class TaskContainerLogsDockerFailDbFallbackTests(unittest.TestCase):
         mock_log_result = MagicMock()
         mock_log_result.scalars.return_value.all.return_value = [mock_chunk_1, mock_chunk_2]
 
+        # _fetch_db_chunks checks TaskRawLogChunk first (empty), then falls back to TaskLog
+        mock_empty_raw_chunks = MagicMock()
+        mock_empty_raw_chunks.scalars.return_value.all.return_value = []
+
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_log_result])
+        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_empty_raw_chunks, mock_log_result])
 
         async def override_db():
             yield mock_db

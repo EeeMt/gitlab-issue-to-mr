@@ -1521,10 +1521,33 @@ class WorkerExecutor:
             return False
 
         try:
-            # Stream remaining logs (follow=True will wait for container to finish)
-            exit_code, logs, log_chunks_saved, timed_out = await self._stream_logs_to_db(
-                container, task.id, db, settings.task_timeout
-            )
+            # Stream remaining logs while concurrently polling artifacts
+            async def _poll_artifacts_resume(stop: asyncio.Event) -> None:
+                while not stop.is_set():
+                    try:
+                        await self._tail_event_jsonl(task_id=task.id, container=container, db=db)
+                        await self._tail_console_log(task_id=task.id, container=container, db=db)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"[Task {task.id}] artifact poll error (resume): {exc}")
+                    await asyncio.sleep(2)
+
+            stop_event_resume = asyncio.Event()
+            poll_task_resume = asyncio.create_task(_poll_artifacts_resume(stop_event_resume))
+            try:
+                exit_code, logs, log_chunks_saved, timed_out = await self._stream_logs_to_db(
+                    container, task.id, db, settings.task_timeout
+                )
+            finally:
+                stop_event_resume.set()
+                await poll_task_resume
+
+            # Final pass after container exits + finalize archive
+            try:
+                await self._tail_event_jsonl(task_id=task.id, container=container, db=db)
+                await self._tail_console_log(task_id=task.id, container=container, db=db)
+                await self._finalize_archive(task_id=task.id, container=container, db=db)
+            except Exception as exc:
+                logger.warning(f"[Task {task.id}] Resume: post-exit artifact finalization error: {exc}")
 
             # Check if task was cancelled externally while container was running
             await db.refresh(task)

@@ -483,6 +483,16 @@ echo "Claude CLI exited with code: ${SCRIPT_RESULT}"
 
 RESULT=${SCRIPT_RESULT}
 
+# Package runtime artifacts for post-execution inspection
+ARCHIVE_DIR="/workspace/.codify-archive"
+mkdir -p "$ARCHIVE_DIR"
+ARCHIVE_NAME="task-${TASK_ID:-0}-runtime-archive.tar.gz"
+ARCHIVE_PATH="${ARCHIVE_DIR}/${ARCHIVE_NAME}"
+if [ -f "/workspace/event.jsonl" ] && [ -f "/workspace/runtime.json" ]; then
+    tar -czf "$ARCHIVE_PATH" -C /workspace event.jsonl runtime.json console.log 2>/dev/null || true
+    echo "Archive created: ${ARCHIVE_PATH}"
+fi
+
 # Always emit structured tool calls if the JSON file exists, even on failure.
 # This lets the frontend show a timeline of what was attempted before the failure.
 if [ -f /tmp/claude_result.json ] && [ -s /tmp/claude_result.json ]; then
