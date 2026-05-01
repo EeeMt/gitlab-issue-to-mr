@@ -89,8 +89,8 @@ import FilterToolbar from '../components/filter/FilterToolbar.vue'
 import { useFilterSort, type FilterSortConfig } from '../composables/useFilterSort'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { usePolling } from '../composables/usePolling'
-import { formatDateTimeUtc8Compact } from '../utils/datetime'
-import { formatPriority, getProjectLabel as _getProjectLabel } from '../utils/format'
+import { formatDateTimeUtc8Compact, parseUtcDate } from '../utils/datetime'
+import { formatDurationMs, formatPriority, getProjectLabel as _getProjectLabel } from '../utils/format'
 import { EllipseOutline, FolderOpenOutline, FlagOutline, PersonOutline, CalendarOutline, GitMergeOutline, TimeOutline, GridOutline, CheckmarkCircleOutline, PlayCircleOutline } from '@vicons/ionicons5'
 
 const router = useRouter()
@@ -197,7 +197,6 @@ const filterConfig: FilterSortConfig = {
   ],
   columns: [
     { key: 'id', label: 'dashboard.id', defaultVisible: true, alwaysVisible: true },
-    { key: 'user_prompt', label: 'dashboard.task', defaultVisible: true, alwaysVisible: true },
     { key: 'project', label: 'dashboard.project', defaultVisible: true },
     { key: 'initiator_username', label: 'dashboard.initiator', defaultVisible: true },
     { key: 'issue', label: 'dashboard.issue', defaultVisible: false },
@@ -206,6 +205,7 @@ const filterConfig: FilterSortConfig = {
     { key: 'branch_name', label: 'dashboard.branch', defaultVisible: false },
     { key: 'merge_request_url', label: 'dashboard.mergeRequest', defaultVisible: false },
     { key: 'changes', label: 'common.changes', defaultVisible: true },
+    { key: 'duration', label: 'dashboard.duration', defaultVisible: true },
     { key: 'tokens', label: 'analytics.tokens', defaultVisible: false },
     { key: 'created_at', label: 'common.created', defaultVisible: true },
     { key: 'scheduled_at', label: 'dashboard.scheduled', defaultVisible: false },
@@ -325,12 +325,6 @@ const allDesktopColumns = computed<DataTableColumns<Task>>(() => {
       width: 52
     },
     {
-      title: t('createTask.prompt'),
-      key: 'user_prompt',
-      ellipsis: { tooltip: true },
-      render: (row) => row.user_prompt || '-',
-    },
-    {
       title: t('dashboard.project'),
       key: 'project',
       width: 156,
@@ -418,6 +412,18 @@ const allDesktopColumns = computed<DataTableColumns<Task>>(() => {
           h('div', String(total)),
           h('div', { style: secondaryTextStyle }, t('analytics.changeBreakdown', { additions: row.additions || 0, deletions: row.deletions || 0 })),
         ])
+      }
+    },
+    {
+      title: t('dashboard.duration'),
+      key: 'duration',
+      width: 80,
+      render: (row) => {
+        if (!row.started_at) return '—'
+        const started = parseUtcDate(row.started_at).getTime()
+        const ended = row.completed_at ? parseUtcDate(row.completed_at).getTime() : Date.now()
+        if (!started || !ended || ended < started) return '—'
+        return formatDurationMs(ended - started)
       }
     },
     {
