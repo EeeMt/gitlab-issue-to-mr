@@ -3,7 +3,6 @@
 
 import json
 import os
-import re
 import sys
 import unittest
 from unittest.mock import MagicMock
@@ -19,11 +18,6 @@ os.environ.setdefault("CONFIG_ENCRYPTION_KEY", "unit-test-key")
 from app.config import get_settings  # noqa: E402
 from app.models import Base, TaskLog, TaskPayload, TaskIngestCursor  # noqa: E402
 from app.core.worker import WorkerExecutor  # noqa: E402
-
-# Thinking tags used by some providers (e.g. MiniMax) inside type=text blocks.
-_THINK_OPEN = "\u200b\u200b\u200b"  # placeholder — real tags set in tests
-_THINK_TAG_OPEN = "<think>"
-_THINK_TAG_CLOSE = "</think>"
 
 
 class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
