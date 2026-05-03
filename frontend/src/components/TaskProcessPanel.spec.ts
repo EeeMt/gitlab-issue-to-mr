@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { h } from 'vue'
 import type { Task, TaskLog } from '../api'
@@ -49,10 +49,15 @@ vi.mock('naive-ui', () => {
     NCollapse: makePassthrough('NCollapse'),
     NCollapseItem: makePassthrough('NCollapseItem'),
     NButton: makePassthrough('NButton', 'button'),
+    NSpin: makePassthrough('NSpin'),
     useMessage: () => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }),
     useDialog: () => ({}),
   }
 })
+
+function flushPromises() {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
 
 function createTask(status: Task['status']): Task {
   return {
@@ -95,6 +100,10 @@ function mountComponent(status: Task['status']) {
 }
 
 describe('TaskProcessPanel', () => {
+  beforeEach(() => {
+    mockGetTaskPayload.mockReset()
+  })
+
   it('adds the running glow class to the card when the task is running', () => {
     const wrapper = mountComponent('running')
 
@@ -105,7 +114,7 @@ describe('TaskProcessPanel', () => {
     expect(taskProcessPanelSource).toContain('rgba(74, 222, 128, 0.07)')
   })
 
-  it('renders expand button for tool_call entries with output_payload_id', () => {
+  it('renders output preview for tool_call entries with output_payload_id', () => {
     const task = createTask('completed')
     const toolCallLog: TaskLog = {
       id: 42,
@@ -135,6 +144,73 @@ describe('TaskProcessPanel', () => {
       },
     })
 
-    expect(wrapper.find('[data-testid="tool-output-expand-15"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('first few lines...')
+  })
+
+  it('loads payload-backed assistant text on expand and clears loading state', async () => {
+    mockGetTaskPayload.mockResolvedValue({
+      id: 21,
+      payload_kind: 'assistant_text',
+      content: 'full assistant body',
+      encoding: 'identity',
+      char_count: 19,
+      byte_count: 19,
+    })
+    const task = createTask('completed')
+    const assistantLog: TaskLog = {
+      id: 43,
+      task_id: 1,
+      log_level: 'info',
+      log_type: 'assistant_text',
+      metadata: JSON.stringify({ payload_id: 21, char_count: 19 }),
+      message: '',
+      created_at: '2026-04-23T10:00:00Z',
+    }
+
+    const wrapper = mount(TaskProcessPanel, {
+      props: {
+        task,
+        taskLogs: [assistantLog],
+        isActive: false,
+        terminalHtml: '',
+        taskStatus: 'completed',
+      },
+    })
+
+    await (wrapper.vm as unknown as { onCollapseChange: (names: string[], index: number) => void }).onCollapseChange(['detail'], 0)
+    await flushPromises()
+
+    expect(mockGetTaskPayload).toHaveBeenCalledWith(1, 21)
+    expect(wrapper.text()).toContain('full assistant body')
+    expect(wrapper.text()).not.toContain('failedToLoadPayload')
+  })
+
+  it('shows failure text when assistant payload loading fails', async () => {
+    mockGetTaskPayload.mockRejectedValue(new Error('boom'))
+    const task = createTask('completed')
+    const assistantLog: TaskLog = {
+      id: 44,
+      task_id: 1,
+      log_level: 'info',
+      log_type: 'assistant_text',
+      metadata: JSON.stringify({ payload_id: 22, char_count: 10 }),
+      message: '',
+      created_at: '2026-04-23T10:00:00Z',
+    }
+
+    const wrapper = mount(TaskProcessPanel, {
+      props: {
+        task,
+        taskLogs: [assistantLog],
+        isActive: false,
+        terminalHtml: '',
+        taskStatus: 'completed',
+      },
+    })
+
+    await (wrapper.vm as unknown as { onCollapseChange: (names: string[], index: number) => void }).onCollapseChange(['detail'], 0)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('taskView.failedToLoadPayload')
   })
 })

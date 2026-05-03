@@ -71,8 +71,8 @@
                   </div>
                   <div class="event-info">
                     <span class="event-name">{{ t('taskView.thinkingLabel') }}</span>
-                    <span v-if="parseTextMeta(event.metadata)" class="event-preview">
-                      {{ parseTextMeta(event.metadata).slice(0, 120) }}
+                    <span v-if="getTextPreview(event.metadata)" class="event-preview">
+                      {{ getTextPreview(event.metadata) }}
                     </span>
                   </div>
                   <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
@@ -82,7 +82,8 @@
                     <template #header>
                       <span class="tool-detail-label">{{ t('taskView.fullText') }}</span>
                     </template>
-                    <div class="event-content event-content--thinking markdown-content" v-html="renderMarkdown(parseTextMeta(event.metadata))"></div>
+                    <n-spin v-if="hasTextPayloadLoading(event.metadata)" size="small" />
+                    <div v-else class="event-content event-content--thinking markdown-content" v-html="renderMarkdown(getExpandedText(event.metadata))"></div>
                   </n-collapse-item>
                 </n-collapse>
               </div>
@@ -96,8 +97,8 @@
                   </div>
                   <div class="event-info">
                     <span class="event-name">{{ t('taskView.assistantLabel') }}</span>
-                    <span v-if="parseTextMeta(event.metadata)" class="event-preview">
-                      {{ parseTextMeta(event.metadata).slice(0, 120) }}
+                    <span v-if="getTextPreview(event.metadata)" class="event-preview">
+                      {{ getTextPreview(event.metadata) }}
                     </span>
                   </div>
                   <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
@@ -107,7 +108,8 @@
                     <template #header>
                       <span class="tool-detail-label">{{ t('taskView.fullText') }}</span>
                     </template>
-                    <div class="event-content markdown-content" v-html="renderMarkdown(parseTextMeta(event.metadata))"></div>
+                    <n-spin v-if="hasTextPayloadLoading(event.metadata)" size="small" />
+                    <div v-else class="event-content markdown-content" v-html="renderMarkdown(getExpandedText(event.metadata))"></div>
                   </n-collapse-item>
                 </n-collapse>
               </div>
@@ -135,26 +137,17 @@
                     <template #header>
                       <span class="tool-detail-label">{{ t('taskView.toolInput') }}</span>
                     </template>
-                    <pre class="tool-pre tool-pre--input">{{ formatInput(parsedToolCall(event)) }}</pre>
+                    <pre v-if="expandedPayloads[parsedToolCall(event).input_payload_id!] !== undefined" class="tool-pre">{{ expandedPayloads[parsedToolCall(event).input_payload_id!] }}</pre>
+                    <n-spin v-else-if="parsedToolCall(event).input_payload_id && loadingPayloads.has(parsedToolCall(event).input_payload_id!)" size="small" />
+                    <pre v-else class="tool-pre tool-pre--input">{{ formatInput(parsedToolCall(event)) }}</pre>
                   </n-collapse-item>
                   <n-collapse-item v-if="parsedToolCall(event).output || parsedToolCall(event).output_payload_id" name="output">
                     <template #header>
                       <span class="tool-detail-label">{{ t('taskView.toolOutput') }}</span>
-                      <n-tag v-if="parsedToolCall(event).output_truncated" type="warning" size="small" round style="margin-left: 8px">{{ t('taskView.truncatedPreview') }}</n-tag>
                     </template>
-                    <template v-if="parsedToolCall(event).output_payload_id">
-                      <pre class="tool-pre" :class="{ 'tool-pre--error': parsedToolCall(event).error }">{{ expandedPayloads[parsedToolCall(event).output_payload_id!] ?? parsedToolCall(event).output_preview ?? parsedToolCall(event).output }}</pre>
-                      <n-button
-                        v-if="expandedPayloads[parsedToolCall(event).output_payload_id!] === undefined"
-                        size="small"
-                        :loading="loadingPayloads.has(parsedToolCall(event).output_payload_id!)"
-                        :data-testid="`tool-output-expand-${parsedToolCall(event).output_payload_id}`"
-                        @click.stop="loadPayload(props.task?.id ?? 0, parsedToolCall(event).output_payload_id!)"
-                      >{{ t('taskView.loadFullOutput') }}</n-button>
-                    </template>
-                    <template v-else>
-                      <pre class="tool-pre" :class="{ 'tool-pre--error': parsedToolCall(event).error }">{{ parsedToolCall(event).output }}</pre>
-                    </template>
+                    <pre v-if="parsedToolCall(event).output_payload_id && expandedPayloads[parsedToolCall(event).output_payload_id!] !== undefined" class="tool-pre" :class="{ 'tool-pre--error': parsedToolCall(event).error }">{{ expandedPayloads[parsedToolCall(event).output_payload_id!] }}</pre>
+                    <n-spin v-else-if="parsedToolCall(event).output_payload_id && loadingPayloads.has(parsedToolCall(event).output_payload_id!)" size="small" />
+                    <pre v-else class="tool-pre" :class="{ 'tool-pre--error': parsedToolCall(event).error }">{{ parsedToolCall(event).output_preview ?? parsedToolCall(event).output }}</pre>
                   </n-collapse-item>
                 </n-collapse>
               </div>
@@ -180,7 +173,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
-import { NCard, NCollapse, NCollapseItem, NIcon, NTag, NEmpty, NTabs, NTabPane, NButton } from 'naive-ui'
+import { NCard, NCollapse, NCollapseItem, NIcon, NTag, NEmpty, NTabs, NTabPane, NButton, NSpin } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { formatDurationMs } from '../utils/format'
 import {
@@ -247,6 +240,7 @@ function getToolColor(name: string): string {
 
 function getInputSummary(call: ToolCall): string {
   const input = call.input
+  if (!input) return ''
   switch (call.name) {
     case 'Bash': {
       const cmd = typeof input.command === 'string' ? input.command : ''
@@ -277,14 +271,16 @@ function getInputSummary(call: ToolCall): string {
 }
 
 function hasDetailedInput(call: ToolCall): boolean {
+  if (call.input_payload_id) return true
   const input = call.input
-  if (Object.keys(input).length === 0) return false
+  if (!input || Object.keys(input).length === 0) return false
   if (['Read', 'Glob', 'Grep'].includes(call.name) && Object.keys(input).length <= 2) return false
   return true
 }
 
 function formatInput(call: ToolCall): string {
   const input = call.input
+  if (!input) return ''
   switch (call.name) {
     case 'Bash':
       return typeof input.command === 'string' ? input.command : JSON.stringify(input, null, 2)
@@ -323,16 +319,6 @@ function formatTimestamp(iso: string): string {
 
 // ── Metadata parsers ──────────────────────────────────────────────────────────
 
-function parseTextMeta(metadata: string | null | undefined): string {
-  if (!metadata) return ''
-  try {
-    const obj = JSON.parse(metadata) as Record<string, unknown>
-    return typeof obj.text === 'string' ? obj.text : metadata
-  } catch {
-    return metadata
-  }
-}
-
 function parsedToolCall(log: TaskLog): ToolCall {
   try {
     const call = JSON.parse(log.metadata ?? '{}') as ToolCall
@@ -363,16 +349,74 @@ async function loadPayload(taskId: number, payloadId: number) {
   } catch {
     expandedPayloads.value = { ...expandedPayloads.value, [payloadId]: t('taskView.failedToLoadPayload') }
   } finally {
-    loadingPayloads.value.delete(payloadId)
-    loadingPayloads.value = new Set(loadingPayloads.value)
+    const next = new Set(loadingPayloads.value)
+    next.delete(payloadId)
+    loadingPayloads.value = next
   }
+}
+
+// ── Text entry helper (for assistant_text / thinking) ─────────────────────────
+
+interface ParsedTextEntry {
+  text: string
+  payloadId: number | null
+  charCount: number | null
+}
+
+function parseTextEntry(metadata: string | null | undefined): ParsedTextEntry {
+  if (!metadata) return { text: '', payloadId: null, charCount: null }
+  try {
+    const obj = JSON.parse(metadata) as Record<string, unknown>
+    const text = typeof obj.text === 'string' ? obj.text : ''
+    const payloadId = typeof obj.payload_id === 'number' ? obj.payload_id : null
+    const charCount = typeof obj.char_count === 'number' ? obj.char_count : null
+    return { text, payloadId, charCount }
+  } catch {
+    return { text: metadata, payloadId: null, charCount: null }
+  }
+}
+
+function getTextPreview(metadata: string | null | undefined): string {
+  const entry = parseTextEntry(metadata)
+  if (entry.text) return entry.text.slice(0, 120)
+  if (entry.payloadId && entry.charCount) return `${t('taskView.fullText')} (${entry.charCount})`
+  if (entry.payloadId) return t('taskView.fullText')
+  return ''
+}
+
+function getExpandedText(metadata: string | null | undefined): string {
+  const entry = parseTextEntry(metadata)
+  if (entry.payloadId) {
+    return expandedPayloads.value[entry.payloadId] ?? t('taskView.failedToLoadPayload')
+  }
+  return entry.text
+}
+
+function hasTextPayloadLoading(metadata: string | null | undefined): boolean {
+  const entry = parseTextEntry(metadata)
+  return entry.payloadId !== null && loadingPayloads.value.has(entry.payloadId)
 }
 
 function onCollapseChange(expandedNames: (string | number)[], index: number) {
   if (expandedNames.length > 0) {
     nextTick(() => {
-      collapseRefs.value[index]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      const collapseEl = collapseRefs.value[index]
+      if (collapseEl && typeof collapseEl.scrollIntoView === 'function') {
+        collapseEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      }
     })
+    const event = sortedEvents.value[index]
+    if (!event) return
+    const taskId = props.task?.id ?? 0
+    if (expandedNames.includes('input') || expandedNames.includes('output')) {
+      const call = parsedToolCall(event)
+      if (expandedNames.includes('input') && call.input_payload_id) loadPayload(taskId, call.input_payload_id)
+      if (expandedNames.includes('output') && call.output_payload_id) loadPayload(taskId, call.output_payload_id)
+    }
+    if (expandedNames.includes('detail')) {
+      const entry = parseTextEntry(event.metadata)
+      if (entry.payloadId) loadPayload(taskId, entry.payloadId)
+    }
   }
 }
 

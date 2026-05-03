@@ -310,6 +310,7 @@ export interface ToolCall {
   /** ISO timestamp present on real-time individual log entries (log_type='tool_call'). */
   timestamp?: string
   // Archive payload fields (from event archive system)
+  input_payload_id?: number
   output_payload_id?: number
   output_preview?: string
   output_truncated?: boolean

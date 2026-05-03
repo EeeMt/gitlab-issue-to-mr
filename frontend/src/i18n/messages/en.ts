@@ -504,7 +504,6 @@ const en = {
     toolInput: 'Input',
     toolOutput: 'Output',
     truncatedPreview: 'Preview truncated',
-    loadFullOutput: 'Load full output',
     failedToLoadPayload: 'Failed to load payload',
     timelineRunning: 'Running…',
     taskMetadata: 'Task Metadata',
