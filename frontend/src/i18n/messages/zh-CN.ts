@@ -493,7 +493,6 @@ const zhCN = {
     totalTokens: 'Token 消耗',
     toolInput: '输入',
     toolOutput: '输出',
-    truncatedPreview: '预览已截断',
     failedToLoadPayload: '加载内容失败',
     timelineRunning: '运行中…',
     taskMetadata: '任务元数据',

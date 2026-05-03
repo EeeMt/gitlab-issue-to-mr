@@ -71,8 +71,8 @@
                   </div>
                   <div class="event-info">
                     <span class="event-name">{{ t('taskView.thinkingLabel') }}</span>
-                    <span v-if="getTextPreview(event.metadata)" class="event-preview">
-                      {{ getTextPreview(event.metadata) }}
+                    <span v-if="getTextPreview(getEventTextEntry(index))" class="event-preview">
+                      {{ getTextPreview(getEventTextEntry(index)) }}
                     </span>
                   </div>
                   <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
@@ -82,8 +82,8 @@
                     <template #header>
                       <span class="tool-detail-label">{{ t('taskView.fullText') }}</span>
                     </template>
-                    <n-spin v-if="hasTextPayloadLoading(event.metadata)" size="small" />
-                    <div v-else class="event-content event-content--thinking markdown-content" v-html="renderMarkdown(getExpandedText(event.metadata))"></div>
+                    <n-spin v-if="hasTextPayloadLoading(getEventTextEntry(index))" size="small" />
+                    <div v-else-if="shouldShowTextContent(getEventTextEntry(index))" class="event-content event-content--thinking markdown-content" v-html="renderMarkdown(getExpandedText(getEventTextEntry(index)))"></div>
                   </n-collapse-item>
                 </n-collapse>
               </div>
@@ -97,8 +97,8 @@
                   </div>
                   <div class="event-info">
                     <span class="event-name">{{ t('taskView.assistantLabel') }}</span>
-                    <span v-if="getTextPreview(event.metadata)" class="event-preview">
-                      {{ getTextPreview(event.metadata) }}
+                    <span v-if="getTextPreview(getEventTextEntry(index))" class="event-preview">
+                      {{ getTextPreview(getEventTextEntry(index)) }}
                     </span>
                   </div>
                   <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
@@ -108,8 +108,8 @@
                     <template #header>
                       <span class="tool-detail-label">{{ t('taskView.fullText') }}</span>
                     </template>
-                    <n-spin v-if="hasTextPayloadLoading(event.metadata)" size="small" />
-                    <div v-else class="event-content markdown-content" v-html="renderMarkdown(getExpandedText(event.metadata))"></div>
+                    <n-spin v-if="hasTextPayloadLoading(getEventTextEntry(index))" size="small" />
+                    <div v-else-if="shouldShowTextContent(getEventTextEntry(index))" class="event-content markdown-content" v-html="renderMarkdown(getExpandedText(getEventTextEntry(index)))"></div>
                   </n-collapse-item>
                 </n-collapse>
               </div>
@@ -118,36 +118,36 @@
               <div v-else-if="event.log_type === 'tool_call'" class="event-item event-item--tool"
                 :ref="(el) => { collapseRefs[index] = el as HTMLElement }">
                 <div class="event-header">
-                  <div class="event-icon" :style="{ color: getToolColor(parsedToolCall(event).name) }">
+                  <div class="event-icon" :style="{ color: getToolEventColor(index) }">
                     <n-icon size="15">
-                      <component :is="getToolIcon(parsedToolCall(event).name)" />
+                      <component :is="getToolEventIcon(index)" />
                     </n-icon>
                   </div>
                   <div class="event-info">
-                    <span class="event-name">{{ parsedToolCall(event).name }}</span>
-                    <span v-if="getInputSummary(parsedToolCall(event))" class="event-preview">
-                      {{ getInputSummary(parsedToolCall(event)) }}
+                    <span class="event-name">{{ getToolEventName(index) }}</span>
+                    <span v-if="getToolEventInputSummary(index)" class="event-preview">
+                      {{ getToolEventInputSummary(index) }}
                     </span>
                   </div>
-                  <n-tag v-if="parsedToolCall(event).error" type="error" size="small" round>Error</n-tag>
+                  <n-tag v-if="hasToolEventError(index)" type="error" size="small" round>Error</n-tag>
                   <span class="event-ts">{{ formatTimestamp(event.created_at) }}</span>
                 </div>
                 <n-collapse class="event-collapse" @update:expanded-names="(names) => onCollapseChange(names, index)">
-                  <n-collapse-item v-if="hasDetailedInput(parsedToolCall(event))" name="input">
+                  <n-collapse-item v-if="hasDetailedToolInput(index)" name="input">
                     <template #header>
                       <span class="tool-detail-label">{{ t('taskView.toolInput') }}</span>
                     </template>
-                    <pre v-if="expandedPayloads[parsedToolCall(event).input_payload_id!] !== undefined" class="tool-pre">{{ expandedPayloads[parsedToolCall(event).input_payload_id!] }}</pre>
-                    <n-spin v-else-if="parsedToolCall(event).input_payload_id && loadingPayloads.has(parsedToolCall(event).input_payload_id!)" size="small" />
-                    <pre v-else class="tool-pre tool-pre--input">{{ formatInput(parsedToolCall(event)) }}</pre>
+                    <pre v-if="isPayloadLoaded(getToolEventInputPayload(index))" class="tool-pre">{{ getExpandedPayloadText(getToolEventInputPayload(index)) }}</pre>
+                    <n-spin v-else-if="isPayloadLoading(getToolEventInputPayload(index))" size="small" />
+                    <pre v-else class="tool-pre tool-pre--input">{{ formatToolEventInput(index) }}</pre>
                   </n-collapse-item>
-                  <n-collapse-item v-if="parsedToolCall(event).output || parsedToolCall(event).output_payload_id" name="output">
+                  <n-collapse-item v-if="hasToolEventOutput(index)" name="output">
                     <template #header>
                       <span class="tool-detail-label">{{ t('taskView.toolOutput') }}</span>
                     </template>
-                    <pre v-if="parsedToolCall(event).output_payload_id && expandedPayloads[parsedToolCall(event).output_payload_id!] !== undefined" class="tool-pre" :class="{ 'tool-pre--error': parsedToolCall(event).error }">{{ expandedPayloads[parsedToolCall(event).output_payload_id!] }}</pre>
-                    <n-spin v-else-if="parsedToolCall(event).output_payload_id && loadingPayloads.has(parsedToolCall(event).output_payload_id!)" size="small" />
-                    <pre v-else class="tool-pre" :class="{ 'tool-pre--error': parsedToolCall(event).error }">{{ parsedToolCall(event).output_preview ?? parsedToolCall(event).output }}</pre>
+                    <pre v-if="isPayloadLoaded(getToolEventOutputPayload(index))" class="tool-pre" :class="{ 'tool-pre--error': hasToolEventError(index) }">{{ getExpandedPayloadText(getToolEventOutputPayload(index)) }}</pre>
+                    <n-spin v-else-if="isPayloadLoading(getToolEventOutputPayload(index))" size="small" />
+                    <pre v-else class="tool-pre" :class="{ 'tool-pre--error': hasToolEventError(index) }">{{ getToolEventOutputText(index) }}</pre>
                   </n-collapse-item>
                 </n-collapse>
               </div>
@@ -172,7 +172,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
+import { computed, reactive, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import { NCard, NCollapse, NCollapseItem, NIcon, NTag, NEmpty, NTabs, NTabPane, NButton, NSpin } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { formatDurationMs } from '../utils/format'
@@ -209,8 +209,6 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-
-// ── Tool helpers ──────────────────────────────────────────────────────────────
 
 function getToolIcon(name: string): Component {
   switch (name) {
@@ -301,10 +299,8 @@ function formatInput(call: ToolCall): string {
 
 function formatTimestamp(iso: string): string {
   try {
-    // Timestamps from API are UTC but lack 'Z' suffix — append it
     const isoUtc = iso.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(iso) ? iso : iso + 'Z'
     const d = new Date(isoUtc)
-    // Display in UTC+8 (Asia/Shanghai)
     return d.toLocaleTimeString('zh-CN', {
       timeZone: 'Asia/Shanghai',
       hour: '2-digit',
@@ -317,8 +313,6 @@ function formatTimestamp(iso: string): string {
   }
 }
 
-// ── Metadata parsers ──────────────────────────────────────────────────────────
-
 function parsedToolCall(log: TaskLog): ToolCall {
   try {
     const call = JSON.parse(log.metadata ?? '{}') as ToolCall
@@ -328,34 +322,51 @@ function parsedToolCall(log: TaskLog): ToolCall {
   }
 }
 
-// ── Auto-scroll ref ───────────────────────────────────────────────────────────
-
 const eventStreamRef = ref<HTMLElement | null>(null)
 const logContentRef = ref<HTMLElement | null>(null)
 const activeTab = ref<'events' | 'raw'>('events')
 const collapseRefs = ref<(HTMLElement | null)[]>([])
-
-// ── Payload expansion ─────────────────────────────────────────────────────────
-
 const expandedPayloads = ref<Record<number, string>>({})
 const loadingPayloads = ref<Set<number>>(new Set())
+const payloadLoadErrors = reactive<Record<number, boolean>>({})
+const autoScroll = ref(true)
+const elapsedMs = ref(0)
 
-async function loadPayload(taskId: number, payloadId: number) {
-  if (expandedPayloads.value[payloadId] !== undefined) return
-  loadingPayloads.value = new Set([...loadingPayloads.value, payloadId])
-  try {
-    const payload = await getTaskPayload(taskId, payloadId)
-    expandedPayloads.value = { ...expandedPayloads.value, [payloadId]: payload.content }
-  } catch {
-    expandedPayloads.value = { ...expandedPayloads.value, [payloadId]: t('taskView.failedToLoadPayload') }
-  } finally {
-    const next = new Set(loadingPayloads.value)
-    next.delete(payloadId)
-    loadingPayloads.value = next
+let elapsedTimer: ReturnType<typeof setInterval> | null = null
+let programmaticScrollTimer: ReturnType<typeof setTimeout> | null = null
+let isProgrammaticScroll = false
+
+const STRUCTURED_TYPES = new Set(['thinking', 'assistant_text', 'tool_call'])
+
+const sortedEvents = computed<TaskLog[]>(() => {
+  const hasIndividual = props.taskLogs.some((l) => l.log_type === 'tool_call')
+  const directEvents = props.taskLogs.filter((l) => STRUCTURED_TYPES.has(l.log_type ?? ''))
+  const batchEvents: TaskLog[] = []
+
+  if (!hasIndividual) {
+    const batch = props.taskLogs.find((l) => l.log_type === 'tool_calls_json')
+    if (batch?.metadata) {
+      try {
+        const calls = JSON.parse(batch.metadata) as ToolCall[]
+        calls.forEach((call, i) => {
+          batchEvents.push({
+            id: -(i + 1),
+            task_id: batch.task_id,
+            log_level: 'info',
+            log_type: 'tool_call',
+            metadata: JSON.stringify(call),
+            message: '',
+            created_at: batch.created_at,
+          })
+        })
+      } catch {
+        // ignore parse errors
+      }
+    }
   }
-}
 
-// ── Text entry helper (for assistant_text / thinking) ─────────────────────────
+  return [...directEvents, ...batchEvents].sort((a, b) => a.created_at.localeCompare(b.created_at))
+})
 
 interface ParsedTextEntry {
   text: string
@@ -376,152 +387,204 @@ function parseTextEntry(metadata: string | null | undefined): ParsedTextEntry {
   }
 }
 
-function getTextPreview(metadata: string | null | undefined): string {
-  const entry = parseTextEntry(metadata)
-  if (entry.text) return entry.text.slice(0, 120)
-  if (entry.payloadId && entry.charCount) return `${t('taskView.fullText')} (${entry.charCount})`
-  if (entry.payloadId) return t('taskView.fullText')
-  return ''
-}
+const parsedTextEntries = computed(() =>
+  sortedEvents.value.map((event) => parseTextEntry(event.metadata))
+)
 
-function getExpandedText(metadata: string | null | undefined): string {
-  const entry = parseTextEntry(metadata)
-  if (entry.payloadId) {
-    return expandedPayloads.value[entry.payloadId] ?? t('taskView.failedToLoadPayload')
-  }
-  return entry.text
-}
-
-function hasTextPayloadLoading(metadata: string | null | undefined): boolean {
-  const entry = parseTextEntry(metadata)
-  return entry.payloadId !== null && loadingPayloads.value.has(entry.payloadId)
-}
-
-function onCollapseChange(expandedNames: (string | number)[], index: number) {
-  if (expandedNames.length > 0) {
-    nextTick(() => {
-      const collapseEl = collapseRefs.value[index]
-      if (collapseEl && typeof collapseEl.scrollIntoView === 'function') {
-        collapseEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-      }
-    })
-    const event = sortedEvents.value[index]
-    if (!event) return
-    const taskId = props.task?.id ?? 0
-    if (expandedNames.includes('input') || expandedNames.includes('output')) {
-      const call = parsedToolCall(event)
-      if (expandedNames.includes('input') && call.input_payload_id) loadPayload(taskId, call.input_payload_id)
-      if (expandedNames.includes('output') && call.output_payload_id) loadPayload(taskId, call.output_payload_id)
-    }
-    if (expandedNames.includes('detail')) {
-      const entry = parseTextEntry(event.metadata)
-      if (entry.payloadId) loadPayload(taskId, entry.payloadId)
-    }
-  }
-}
-
-// ── Markdown renderer ─────────────────────────────────────────────────────────
-
-function renderMarkdown(text: string): string {
-  if (!text) return ''
-  // Escape HTML entities first
-  let html = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-
-  // Code blocks (``` ... ```)
-  html = html.replace(/```[\w]*\n?([\s\S]*?)```/g, (_, code) =>
-    `<pre class="md-code-block"><code>${code}</code></pre>`
-  )
-
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
-
-  // Headers
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>')
-  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>')
-  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>')
-
-  // Bold
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  html = html.replace(/__(.+?)__/g, '<strong>$1</strong>')
-
-  // Italic
-  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
-  html = html.replace(/_(.+?)_/g, '<em>$1</em>')
-
-  // Unordered lists (lines starting with - or *)
-  html = html.replace(/^[*-] (.+)$/gm, '<li>$1</li>')
-  html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
-
-  // Line breaks (preserve newlines)
-  html = html.replace(/\n/g, '<br>')
-
-  return html
-}
-
-// ── system_init ───────────────────────────────────────────────────────────────
+const parsedToolCalls = computed(() =>
+  sortedEvents.value.map((event) => (event.log_type === 'tool_call' ? parsedToolCall(event) : null))
+)
 
 const systemInitEntry = computed(() => {
-  const entry = props.taskLogs.find(l => l.log_type === 'system_init')
+  const entry = props.taskLogs.find((l) => l.log_type === 'system_init')
   if (!entry?.metadata) return null
   try {
     const obj = JSON.parse(entry.metadata) as Record<string, unknown>
     return {
       model: typeof obj.model === 'string' ? obj.model : null,
-      cwd: typeof obj.cwd === 'string' ? obj.cwd : null
+      cwd: typeof obj.cwd === 'string' ? obj.cwd : null,
     }
   } catch {
     return null
   }
 })
 
-// ── Single sortedEvents computed (handles both individual + batch) ─────────────
-
-const STRUCTURED_TYPES = new Set(['thinking', 'assistant_text', 'tool_call'])
-
-const sortedEvents = computed<TaskLog[]>(() => {
-  const hasIndividual = props.taskLogs.some(l => l.log_type === 'tool_call')
-
-  // Start with structured events (excluding system_init shown as banner, and tool_calls_json)
-  const directEvents = props.taskLogs.filter(l => STRUCTURED_TYPES.has(l.log_type ?? ''))
-
-  // If no individual tool_call entries, synthesize from batch tool_calls_json
-  const batchEvents: TaskLog[] = []
-  if (!hasIndividual) {
-    const batch = props.taskLogs.find(l => l.log_type === 'tool_calls_json')
-    if (batch?.metadata) {
-      try {
-        const calls = JSON.parse(batch.metadata) as ToolCall[]
-        calls.forEach((call, i) => {
-          batchEvents.push({
-            id: -(i + 1),
-            task_id: batch.task_id,
-            log_level: 'info',
-            log_type: 'tool_call',
-            metadata: JSON.stringify(call),
-            message: '',
-            created_at: batch.created_at
-          })
-        })
-      } catch {
-        // ignore parse errors
-      }
-    }
-  }
-
-  return [...directEvents, ...batchEvents].sort((a, b) =>
-    a.created_at.localeCompare(b.created_at)
-  )
-})
-
 const hasStructuredContent = computed(() =>
   sortedEvents.value.length > 0 || systemInitEntry.value !== null || !!props.task?.container_id
 )
 
-const elapsedMs = ref(0)
-let elapsedTimer: ReturnType<typeof setInterval> | null = null
+const elapsedDisplay = computed(() => {
+  if (!props.isActive || elapsedMs.value <= 0) return ''
+  return formatDurationMs(elapsedMs.value)
+})
+
+async function loadPayload(taskId: number, payloadId: number) {
+  if (expandedPayloads.value[payloadId] !== undefined || loadingPayloads.value.has(payloadId)) return
+  loadingPayloads.value = new Set([...loadingPayloads.value, payloadId])
+  delete payloadLoadErrors[payloadId]
+  try {
+    const payload = await getTaskPayload(taskId, payloadId)
+    expandedPayloads.value = { ...expandedPayloads.value, [payloadId]: payload.content }
+  } catch {
+    payloadLoadErrors[payloadId] = true
+  } finally {
+    const next = new Set(loadingPayloads.value)
+    next.delete(payloadId)
+    loadingPayloads.value = next
+  }
+}
+
+function getEventTextEntry(index: number): ParsedTextEntry {
+  const event = sortedEvents.value[index]
+  if (!event || (event.log_type !== 'thinking' && event.log_type !== 'assistant_text')) {
+    return { text: '', payloadId: null, charCount: null }
+  }
+  return parsedTextEntries.value[index] ?? { text: '', payloadId: null, charCount: null }
+}
+
+function getTextPreview(entry: ParsedTextEntry): string {
+  if (entry.text) return entry.text.slice(0, 120)
+  if (entry.payloadId && entry.charCount) return `${t('taskView.fullText')} (${entry.charCount})`
+  if (entry.payloadId) return t('taskView.fullText')
+  return ''
+}
+
+function getExpandedText(entry: ParsedTextEntry): string {
+  if (entry.payloadId) {
+    if (payloadLoadErrors[entry.payloadId]) return t('taskView.failedToLoadPayload')
+    return expandedPayloads.value[entry.payloadId] ?? ''
+  }
+  return entry.text
+}
+
+function hasTextPayloadLoading(entry: ParsedTextEntry): boolean {
+  return entry.payloadId !== null && loadingPayloads.value.has(entry.payloadId)
+}
+
+function shouldShowTextContent(entry: ParsedTextEntry): boolean {
+  return (
+    entry.payloadId === null ||
+    expandedPayloads.value[entry.payloadId] !== undefined ||
+    !!payloadLoadErrors[entry.payloadId]
+  )
+}
+
+function getEventToolCall(index: number): ToolCall | null {
+  return parsedToolCalls.value[index] ?? null
+}
+
+function hasDetailedToolInput(index: number): boolean {
+  const call = getEventToolCall(index)
+  return call ? hasDetailedInput(call) : false
+}
+
+function getToolEventColor(index: number): string {
+  return getToolColor(getEventToolCall(index)?.name ?? 'Unknown')
+}
+
+function getToolEventIcon(index: number): Component {
+  return getToolIcon(getEventToolCall(index)?.name ?? 'Unknown')
+}
+
+function getToolEventName(index: number): string {
+  return getEventToolCall(index)?.name ?? 'Unknown'
+}
+
+function getToolEventInputSummary(index: number): string {
+  const call = getEventToolCall(index)
+  return call ? getInputSummary(call) : ''
+}
+
+function hasToolEventError(index: number): boolean {
+  return !!getEventToolCall(index)?.error
+}
+
+function getToolEventInputPayload(index: number): number | null {
+  return getEventToolCall(index)?.input_payload_id ?? null
+}
+
+function getToolEventOutputPayload(index: number): number | null {
+  return getEventToolCall(index)?.output_payload_id ?? null
+}
+
+function getToolEventOutputText(index: number): string {
+  const call = getEventToolCall(index)
+  return call?.output_preview ?? call?.output ?? ''
+}
+
+function formatToolEventInput(index: number): string {
+  const call = getEventToolCall(index)
+  return call ? formatInput(call) : ''
+}
+
+function hasToolEventOutput(index: number): boolean {
+  const call = getEventToolCall(index)
+  return !!(call && (call.output || call.output_payload_id))
+}
+
+function isPayloadLoading(payloadId: number | null): boolean {
+  return payloadId !== null && loadingPayloads.value.has(payloadId)
+}
+
+function getExpandedPayloadText(payloadId: number | null): string | undefined {
+  return payloadId !== null ? expandedPayloads.value[payloadId] : undefined
+}
+
+function isPayloadLoaded(payloadId: number | null): boolean {
+  return payloadId !== null && expandedPayloads.value[payloadId] !== undefined
+}
+
+function onCollapseChange(expandedNames: (string | number)[], index: number) {
+  if (expandedNames.length === 0) return
+
+  nextTick(() => {
+    const collapseEl = collapseRefs.value[index]
+    if (collapseEl && typeof collapseEl.scrollIntoView === 'function') {
+      collapseEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  })
+
+  const event = sortedEvents.value[index]
+  if (!event) return
+
+  const taskId = props.task?.id ?? 0
+  if (event.log_type === 'tool_call') {
+    const inputPayloadId = getToolEventInputPayload(index)
+    const outputPayloadId = getToolEventOutputPayload(index)
+    if (expandedNames.includes('input') && inputPayloadId) loadPayload(taskId, inputPayloadId)
+    if (expandedNames.includes('output') && outputPayloadId) loadPayload(taskId, outputPayloadId)
+  }
+
+  if (expandedNames.includes('detail')) {
+    const entry = getEventTextEntry(index)
+    if (entry.payloadId) loadPayload(taskId, entry.payloadId)
+  }
+}
+
+function renderMarkdown(text: string): string {
+  if (!text) return ''
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+  html = html.replace(/```[\w]*\n?([\s\S]*?)```/g, (_, code) =>
+    `<pre class="md-code-block"><code>${code}</code></pre>`
+  )
+  html = html.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>')
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>')
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>')
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  html = html.replace(/__(.+?)__/g, '<strong>$1</strong>')
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
+  html = html.replace(/_(.+?)_/g, '<em>$1</em>')
+  html = html.replace(/^[*-] (.+)$/gm, '<li>$1</li>')
+  html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
+  html = html.replace(/\n/g, '<br>')
+
+  return html
+}
 
 function updateElapsed() {
   if (!props.task?.started_at) return
@@ -538,33 +601,19 @@ watch(() => props.isActive, (active) => {
     updateElapsed()
     elapsedTimer = setInterval(updateElapsed, 1000)
   } else {
-    if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null }
+    if (elapsedTimer) {
+      clearInterval(elapsedTimer)
+      elapsedTimer = null
+    }
     elapsedMs.value = 0
   }
 }, { immediate: true })
-
-onBeforeUnmount(() => {
-  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null }
-})
-
-const elapsedDisplay = computed(() => {
-  if (!props.isActive || elapsedMs.value <= 0) return ''
-  return formatDurationMs(elapsedMs.value)
-})
-
-// ── Raw-tab open/close events ─────────────────────────────────────────────────
 
 watch(activeTab, (val) => {
   autoScroll.value = true
   if (val === 'raw') emit('raw-tab-open')
   else emit('raw-tab-close')
 })
-
-// ── Scroll-lock state ─────────────────────────────────────────────────────────
-
-const autoScroll = ref(true)
-let programmaticScrollTimer: ReturnType<typeof setTimeout> | null = null
-let isProgrammaticScroll = false
 
 function setProgrammaticScroll() {
   isProgrammaticScroll = true
@@ -575,31 +624,23 @@ function setProgrammaticScroll() {
 function onEventStreamScroll() {
   if (isProgrammaticScroll || !eventStreamRef.value) return
   const el = eventStreamRef.value
-  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 50
-  autoScroll.value = atBottom
+  autoScroll.value = el.scrollHeight - el.scrollTop - el.clientHeight <= 50
 }
 
 function onLogContentScroll() {
   if (isProgrammaticScroll || !logContentRef.value) return
   const el = logContentRef.value
-  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 50
-  autoScroll.value = atBottom
+  autoScroll.value = el.scrollHeight - el.scrollTop - el.clientHeight <= 50
 }
 
-// Attach/detach listeners when refs become available (elements use v-if)
 watch(eventStreamRef, (el, oldEl) => {
   oldEl?.removeEventListener('scroll', onEventStreamScroll)
   el?.addEventListener('scroll', onEventStreamScroll)
 })
+
 watch(logContentRef, (el, oldEl) => {
   oldEl?.removeEventListener('scroll', onLogContentScroll)
   el?.addEventListener('scroll', onLogContentScroll)
-})
-
-onBeforeUnmount(() => {
-  eventStreamRef.value?.removeEventListener('scroll', onEventStreamScroll)
-  logContentRef.value?.removeEventListener('scroll', onLogContentScroll)
-  if (programmaticScrollTimer) clearTimeout(programmaticScrollTimer)
 })
 
 function scrollToLatest() {
@@ -610,8 +651,6 @@ function scrollToLatest() {
     logContentRef.value?.scrollTo?.({ top: logContentRef.value.scrollHeight, behavior: 'smooth' })
   })
 }
-
-// ── Auto-scroll watch (after sortedEvents is defined) ─────────────────────────
 
 watch(sortedEvents, async () => {
   if (!props.isActive || !autoScroll.value) return
@@ -629,6 +668,13 @@ watch(() => props.terminalHtml, async () => {
     setProgrammaticScroll()
     logContentRef.value.scrollTo?.({ top: logContentRef.value.scrollHeight, behavior: 'smooth' })
   }
+})
+
+onBeforeUnmount(() => {
+  if (elapsedTimer) clearInterval(elapsedTimer)
+  eventStreamRef.value?.removeEventListener('scroll', onEventStreamScroll)
+  logContentRef.value?.removeEventListener('scroll', onLogContentScroll)
+  if (programmaticScrollTimer) clearTimeout(programmaticScrollTimer)
 })
 </script>
 

@@ -77,6 +77,9 @@ _CODIFY_TOOL_RESULT_RE = re.compile(r'^CODIFY_TOOL_RESULT:(.+)$')
 # Emitted by entrypoint.sh after Claude finishes; contains the session ID for resumption.
 _CODIFY_SESSION_ID_RE = re.compile(r'^CODIFY_SESSION_ID:(\S+)$', re.MULTILINE)
 
+_THINKING_OPEN = '<think>'
+_THINKING_CLOSE = '</think>'
+
 # Volume mount constants
 _MAVEN_CACHE_CONTAINER_PATH = "/home/codify/.m2/repository"
 _MAVEN_SETTINGS_CONTAINER_PATH = "/home/codify/.m2/settings.xml"
@@ -267,6 +270,48 @@ class WorkerExecutor:
         elif record_type == "result":
             self._latest_result_record = record
 
+    async def _create_sanitized_text_payload(
+        self,
+        *,
+        db: AsyncSession,
+        task_id: int,
+        payload_kind: str,
+        text: str,
+    ) -> Any:
+        sanitized_text = sanitize_sensitive_data(text)
+        return await create_payload(
+            db,
+            task_id=task_id,
+            payload_kind=payload_kind,
+            text=sanitized_text,
+        )
+
+    async def _add_text_log_with_payload(
+        self,
+        *,
+        db: AsyncSession,
+        task_id: int,
+        payload_kind: str,
+        log_type: str,
+        text: str,
+    ) -> None:
+        sanitized_text = sanitize_sensitive_data(text)
+        if not sanitized_text:
+            return
+        payload = await self._create_sanitized_text_payload(
+            db=db,
+            task_id=task_id,
+            payload_kind=payload_kind,
+            text=sanitized_text,
+        )
+        db.add(TaskLog(
+            task_id=task_id,
+            log_level="INFO",
+            message="",
+            log_type=log_type,
+            log_metadata=_json.dumps({"payload_id": payload.id, "char_count": len(sanitized_text)}),
+        ))
+
     async def _handle_user_event(
         self, *, task_id: int, record: dict, db: AsyncSession
     ) -> None:
@@ -292,14 +337,18 @@ class WorkerExecutor:
 
             pending_log = self._pending_tool_log_by_id.pop(tool_use_id, None)
             if pending_log is not None:
-                payload = await create_payload(
-                    db, task_id=task_id, payload_kind="tool_output", text=output_text,
+                payload = await self._create_sanitized_text_payload(
+                    db=db,
+                    task_id=task_id,
+                    payload_kind="tool_output",
+                    text=output_text,
                 )
+                sanitized_output_text = sanitize_sensitive_data(output_text)
                 meta = _json.loads(pending_log.log_metadata or "{}")
                 meta["output_payload_id"] = payload.id
-                meta["output_preview"] = output_text[:500]
-                meta["output_truncated"] = len(output_text) > 500
-                meta["output_char_count"] = len(output_text)
+                meta["output_preview"] = sanitized_output_text[:500]
+                meta["output_truncated"] = len(sanitized_output_text) > 500
+                meta["output_char_count"] = len(sanitized_output_text)
                 meta["error"] = is_error
                 pending_log.log_metadata = _json.dumps(meta)
 
@@ -327,8 +376,11 @@ class WorkerExecutor:
                 tool_input = block.get("input", {})
                 input_text = _json.dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input)
 
-                payload = await create_payload(
-                    db, task_id=task_id, payload_kind="tool_input", text=input_text,
+                payload = await self._create_sanitized_text_payload(
+                    db=db,
+                    task_id=task_id,
+                    payload_kind="tool_input",
+                    text=input_text,
                 )
                 log = TaskLog(
                     task_id=task_id,
@@ -349,97 +401,56 @@ class WorkerExecutor:
                 text = block.get("text", "")
                 if not text:
                     continue
-                # Some providers (e.g. MiniMax via OpenAI-compatible API) embed
-                # thinking content inside type=text blocks using think tags.
-                # The content inside the tags is thinking; everything between
-                # the closing tag and the next opening tag (or end of text) is
-                # the actual assistant response.  A single text block may
-                # contain multiple think-tag pairs.
-                _THINKING_OPEN = '<think>'
-                _THINKING_CLOSE = '</think>'
-                if _THINKING_OPEN in text and _THINKING_CLOSE in text:
-                    # Split text into alternating segments of thinking/response
-                    remaining = text
-                    while remaining:
-                        open_idx = remaining.find(_THINKING_OPEN)
-                        if open_idx < 0:
-                            # No more thinking tags - rest is response
-                            if remaining:
-                                payload = await create_payload(
-                                    db, task_id=task_id, payload_kind="assistant_text", text=remaining,
-                                )
-                                db.add(TaskLog(
-                                    task_id=task_id, log_level="INFO", message="",
-                                    log_type="assistant_text",
-                                    log_metadata=_json.dumps({"payload_id": payload.id, "char_count": len(remaining)}),
-                                ))
-                            break
-
-                        # Text before the first thinking tag is response (if any)
-                        if open_idx > 0:
-                            before = remaining[:open_idx]
-                            payload = await create_payload(
-                                db, task_id=task_id, payload_kind="assistant_text", text=before,
-                            )
-                            db.add(TaskLog(
-                                task_id=task_id, log_level="INFO", message="",
-                                log_type="assistant_text",
-                                log_metadata=_json.dumps({"payload_id": payload.id, "char_count": len(before)}),
-                            ))
-
-                        close_idx = remaining.find(_THINKING_CLOSE, open_idx + len(_THINKING_OPEN))
-                        if close_idx < 0:
-                            # Unclosed thinking tag - treat rest as thinking
-                            thinking_text = remaining[open_idx:]
-                            payload = await create_payload(
-                                db, task_id=task_id, payload_kind="thinking", text=thinking_text,
-                            )
-                            db.add(TaskLog(
-                                task_id=task_id, log_level="INFO", message="",
-                                log_type="thinking",
-                                log_metadata=_json.dumps({"payload_id": payload.id, "char_count": len(thinking_text)}),
-                            ))
-                            break
-
-                        # Extract thinking content (including tags)
-                        thinking_text = remaining[open_idx:close_idx + len(_THINKING_CLOSE)]
-                        payload = await create_payload(
-                            db, task_id=task_id, payload_kind="thinking", text=thinking_text,
+                remaining = text
+                while remaining:
+                    open_idx = remaining.find(_THINKING_OPEN)
+                    if open_idx < 0:
+                        await self._add_text_log_with_payload(
+                            db=db,
+                            task_id=task_id,
+                            payload_kind="assistant_text",
+                            log_type="assistant_text",
+                            text=remaining,
                         )
-                        db.add(TaskLog(
-                            task_id=task_id, log_level="INFO", message="",
-                            log_type="thinking",
-                            log_metadata=_json.dumps({"payload_id": payload.id, "char_count": len(thinking_text)}),
-                        ))
+                        break
 
-                        remaining = remaining[close_idx + len(_THINKING_CLOSE):].lstrip("\n")
-                else:
-                    # Normal assistant text - no thinking tags
-                    payload = await create_payload(
-                        db, task_id=task_id, payload_kind="assistant_text", text=text,
-                    )
-                    db.add(TaskLog(
+                    if open_idx > 0:
+                        await self._add_text_log_with_payload(
+                            db=db,
+                            task_id=task_id,
+                            payload_kind="assistant_text",
+                            log_type="assistant_text",
+                            text=remaining[:open_idx],
+                        )
+
+                    close_idx = remaining.find(_THINKING_CLOSE, open_idx + len(_THINKING_OPEN))
+                    if close_idx < 0:
+                        await self._add_text_log_with_payload(
+                            db=db,
+                            task_id=task_id,
+                            payload_kind="thinking",
+                            log_type="thinking",
+                            text=remaining[open_idx + len(_THINKING_OPEN):],
+                        )
+                        break
+
+                    await self._add_text_log_with_payload(
+                        db=db,
                         task_id=task_id,
-                        log_level="INFO",
-                        message="",
-                        log_type="assistant_text",
-                        log_metadata=_json.dumps({"payload_id": payload.id, "char_count": len(text)}),
-                    ))
+                        payload_kind="thinking",
+                        log_type="thinking",
+                        text=remaining[open_idx + len(_THINKING_OPEN):close_idx],
+                    )
+                    remaining = remaining[close_idx + len(_THINKING_CLOSE):].lstrip("\n")
 
             elif block_type == "thinking":
-                text = block.get("thinking", "")
-                if not text:
-                    continue
-                payload = await create_payload(
-                    db, task_id=task_id, payload_kind="thinking", text=text,
-                )
-                db.add(TaskLog(
+                await self._add_text_log_with_payload(
+                    db=db,
                     task_id=task_id,
-                    log_level="INFO",
-                    message="",
+                    payload_kind="thinking",
                     log_type="thinking",
-                    log_metadata=_json.dumps({"payload_id": payload.id, "char_count": len(text)}),
-                ))
+                    text=block.get("thinking", ""),
+                )
 
     async def _flush_tool_use_projection(
         self, *, task_id: int, db: AsyncSession
@@ -448,8 +459,8 @@ class WorkerExecutor:
         tool_use = self._active_tool_use
         if tool_use is None:
             return
-        payload = await create_payload(
-            db,
+        payload = await self._create_sanitized_text_payload(
+            db=db,
             task_id=task_id,
             payload_kind="tool_input",
             text="".join(tool_use["input_parts"]),
@@ -510,30 +521,23 @@ class WorkerExecutor:
                 await self._flush_tool_use_projection(task_id=task_id, db=db)
             elif self._active_thinking_block is not None:
                 text = "".join(self._active_thinking_block["parts"])
-                if text:
-                    payload = await create_payload(
-                        db, task_id=task_id, payload_kind="thinking", text=text,
-                    )
-                    db.add(TaskLog(
-                        task_id=task_id,
-                        log_level="INFO",
-                        message="",
-                        log_type="thinking",
-                        log_metadata=_json.dumps({"payload_id": payload.id, "char_count": len(text)}),
-                    ))
+                await self._add_text_log_with_payload(
+                    db=db,
+                    task_id=task_id,
+                    payload_kind="thinking",
+                    log_type="thinking",
+                    text=text,
+                )
                 self._active_thinking_block = None
             elif self._active_text_block is not None:
                 text = "".join(self._active_text_block["parts"])
-                payload = await create_payload(
-                    db, task_id=task_id, payload_kind="assistant_text", text=text
-                )
-                db.add(TaskLog(
+                await self._add_text_log_with_payload(
+                    db=db,
                     task_id=task_id,
-                    log_level="INFO",
-                    message="",
+                    payload_kind="assistant_text",
                     log_type="assistant_text",
-                    log_metadata=_json.dumps({"payload_id": payload.id, "char_count": len(text)}),
-                ))
+                    text=text,
+                )
                 self._active_text_block = None
 
     async def _tail_event_jsonl(

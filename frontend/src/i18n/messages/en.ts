@@ -503,7 +503,6 @@ const en = {
     totalTokens: 'Token Usage',
     toolInput: 'Input',
     toolOutput: 'Output',
-    truncatedPreview: 'Preview truncated',
     failedToLoadPayload: 'Failed to load payload',
     timelineRunning: 'Running…',
     taskMetadata: 'Task Metadata',
