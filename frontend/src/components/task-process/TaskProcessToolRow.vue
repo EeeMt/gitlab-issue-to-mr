@@ -16,17 +16,15 @@
         <template #header>
           <span class="tool-detail-label">{{ t('taskView.toolInput') }}</span>
         </template>
-        <pre v-if="inputLoaded" class="tool-pre">{{ inputExpandedText }}</pre>
-        <n-spin v-else-if="inputLoading" size="small" />
-        <pre v-else class="tool-pre tool-pre--input">{{ formatInput(row.toolCall) }}</pre>
+        <n-spin v-if="inputLoading" size="small" />
+        <pre v-else class="tool-pre tool-pre--input">{{ inputDisplayText }}</pre>
       </n-collapse-item>
       <n-collapse-item v-if="hasToolEventOutput" name="output">
         <template #header>
           <span class="tool-detail-label">{{ t('taskView.toolOutput') }}</span>
         </template>
-        <pre v-if="outputLoaded" class="tool-pre" :class="{ 'tool-pre--error': row.toolCall.error }">{{ outputExpandedText }}</pre>
-        <n-spin v-else-if="outputLoading" size="small" />
-        <pre v-else class="tool-pre" :class="{ 'tool-pre--error': row.toolCall.error }">{{ row.toolCall.output_preview ?? row.toolCall.output ?? '' }}</pre>
+        <n-spin v-if="outputLoading" size="small" />
+        <pre v-else class="tool-pre" :class="{ 'tool-pre--error': row.toolCall.error }">{{ outputDisplayText }}</pre>
       </n-collapse-item>
     </n-collapse>
   </div>
@@ -44,6 +42,8 @@ const props = defineProps<{
   outputLoaded: boolean
   inputLoading: boolean
   outputLoading: boolean
+  inputFailed?: boolean
+  outputFailed?: boolean
   inputExpandedText?: string
   outputExpandedText?: string
 }>()
@@ -56,7 +56,24 @@ const { t } = useI18n()
 
 const summary = computed(() => getInputSummary(props.row.toolCall))
 const hasDetailedToolInput = computed(() => hasDetailedInput(props.row.toolCall))
-const hasToolEventOutput = computed(() => props.row.toolCall.output !== null || !!props.row.toolCall.output_payload_id)
+const hasToolEventOutput = computed(() => props.row.toolCall.output !== null || !!props.row.toolCall.output_payload_id || !!props.row.toolCall.output_preview)
+const inputDisplayText = computed(() => {
+  if (props.inputLoaded) return props.inputExpandedText ?? ''
+  if (props.inputFailed) return t('taskView.failedToLoadPayload')
+  const hasInlineInput = !!props.row.toolCall.input && Object.keys(props.row.toolCall.input).length > 0
+  const inlineInput = hasInlineInput ? formatInput(props.row.toolCall) : ''
+  if (inlineInput) return inlineInput
+  if (props.row.toolCall.input_payload_id) return t('taskView.archivedInputPending')
+  return t('taskView.noToolInputCaptured')
+})
+const outputDisplayText = computed(() => {
+  if (props.outputLoaded) return props.outputExpandedText ?? ''
+  if (props.outputFailed) return t('taskView.failedToLoadPayload')
+  if (props.row.toolCall.output_preview !== undefined) return props.row.toolCall.output_preview
+  if (props.row.toolCall.output !== null && props.row.toolCall.output !== undefined) return props.row.toolCall.output
+  if (props.row.toolCall.output_payload_id) return t('taskView.archivedOutputPending')
+  return t('taskView.noToolOutputCaptured')
+})
 </script>
 
 <style scoped>
@@ -66,7 +83,7 @@ const hasToolEventOutput = computed(() => props.row.toolCall.output !== null || 
 }
 .event-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   min-height: 30px;
 }
@@ -75,14 +92,16 @@ const hasToolEventOutput = computed(() => props.row.toolCall.output !== null || 
   align-items: center;
   flex-shrink: 0;
   width: 20px;
+  padding-top: 2px;
 }
 .event-info {
   flex: 1;
   display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   overflow: hidden;
+  min-width: 0;
 }
 .event-name {
   font-weight: 500;
@@ -90,13 +109,15 @@ const hasToolEventOutput = computed(() => props.row.toolCall.output !== null || 
   flex-shrink: 0;
 }
 .event-preview {
+  display: block;
+  max-width: 100%;
   font-size: 12px;
+  line-height: 1.35;
   color: var(--n-text-color-3, #999);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   word-break: break-all;
-  max-width: 100%;
 }
 .event-ts {
   font-size: 11px;

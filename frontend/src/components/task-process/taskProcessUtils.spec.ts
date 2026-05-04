@@ -4,7 +4,7 @@ import { mount } from '@vue/test-utils'
 import type { TaskLog } from '../../api'
 import TaskProcessPanel from '../TaskProcessPanel.vue'
 import TaskProcessToolRow from './TaskProcessToolRow.vue'
-import { formatInput, normalizeTaskProcessRows } from './taskProcessUtils'
+import { formatInput, getInputSummary, normalizeTaskProcessRows } from './taskProcessUtils'
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
@@ -137,6 +137,33 @@ describe('taskProcessUtils', () => {
     expect(formatted).toContain('--- (old)\nbefore')
     expect(formatted).toContain('+++ (new)\nafter')
   })
+
+  it('prefers input_preview for payload-backed tool calls', () => {
+    expect(getInputSummary({
+      name: 'Read',
+      input: {},
+      output: null,
+      error: false,
+      input_payload_id: 9,
+      input_preview: '/tmp/example.txt',
+    })).toBe('/tmp/example.txt')
+  })
+
+  it('parses text preview metadata for payload-backed text rows', () => {
+    const rows = normalizeTaskProcessRows([
+      createTaskLog({
+        log_type: 'assistant_text',
+        metadata: JSON.stringify({ payload_id: 22, char_count: 40, preview: 'real summary', truncated: false }),
+      }),
+    ])
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0].kind).toBe('assistant_text')
+    if (rows[0].kind === 'assistant_text') {
+      expect(rows[0].textEntry.preview).toBe('real summary')
+      expect(rows[0].textEntry.payloadId).toBe(22)
+    }
+  })
 })
 
 describe('TaskProcessToolRow', () => {
@@ -156,6 +183,45 @@ describe('TaskProcessToolRow', () => {
     })
 
     expect(wrapper.text()).toContain('taskView.toolOutput')
+    expect(wrapper.text()).not.toContain('taskView.noToolOutputCaptured')
+  })
+
+  it('shows input preview in the header and pending text in the body for payload-backed tool calls', () => {
+    const wrapper = mount(TaskProcessToolRow, {
+      props: {
+        row: {
+          kind: 'tool_call',
+          event: createTaskLog({ metadata: JSON.stringify({ name: 'Read', input: {}, output: null, error: false, input_payload_id: 12, input_preview: '/tmp/example.txt' }) }),
+          toolCall: { name: 'Read', input: {}, output: null, error: false, input_payload_id: 12, input_preview: '/tmp/example.txt' },
+        },
+        inputLoaded: false,
+        outputLoaded: false,
+        inputLoading: false,
+        outputLoading: false,
+      },
+    })
+
+    expect(wrapper.text()).toContain('/tmp/example.txt')
+    expect(wrapper.text()).toContain('taskView.archivedInputPending')
+  })
+
+  it('shows failure text for tool payload load errors', () => {
+    const wrapper = mount(TaskProcessToolRow, {
+      props: {
+        row: {
+          kind: 'tool_call',
+          event: createTaskLog({ metadata: JSON.stringify({ name: 'Bash', input: {}, output: null, error: false, output_payload_id: 18 }) }),
+          toolCall: { name: 'Bash', input: {}, output: null, error: false, output_payload_id: 18 },
+        },
+        inputLoaded: false,
+        outputLoaded: false,
+        inputLoading: false,
+        outputLoading: false,
+        outputFailed: true,
+      },
+    })
+
+    expect(wrapper.text()).toContain('taskView.failedToLoadPayload')
   })
 })
 
@@ -199,5 +265,46 @@ describe('TaskProcessPanel raw pane wiring', () => {
 
     expect(wrapper.html()).toContain('hello')
     expect(wrapper.find('pre.log-content').exists()).toBe(true)
+  })
+
+  it('renders container summary in runtime info instead of the event stream', () => {
+    const wrapper = mount(TaskProcessPanel, {
+      props: {
+        task: {
+          id: 1,
+          issue_id: null,
+          project_id: 1,
+          user_prompt: 'Prompt',
+          status: 'completed',
+          priority: 0,
+          is_retry: false,
+          retry_source_task_id: null,
+          scheduled_at: null,
+          container_id: 'container-abcdef123456',
+          container_name: 'worker-292',
+          commit_sha: null,
+          error_message: null,
+          additions: 0,
+          deletions: 0,
+          total_changes: 0,
+          input_tokens: null,
+          output_tokens: null,
+          provider_id: null,
+          created_at: '2026-05-04T10:00:00Z',
+          updated_at: '2026-05-04T10:00:00Z',
+          started_at: null,
+          completed_at: null,
+        },
+        taskLogs: [],
+        isActive: false,
+        terminalHtml: '',
+        taskStatus: 'completed',
+      },
+    })
+
+    expect(wrapper.text()).toContain('worker-292')
+    expect(wrapper.find('.system-init-banner').text()).toContain('worker-292')
+    expect(wrapper.find('.empty-state').attributes('description')).toBe('taskView.noLogsAvailable')
+    expect(wrapper.find('.event-stream .event-item--container').exists()).toBe(false)
   })
 })

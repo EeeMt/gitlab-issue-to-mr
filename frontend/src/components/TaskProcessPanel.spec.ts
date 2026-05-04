@@ -114,7 +114,7 @@ describe('TaskProcessPanel', () => {
     expect(taskProcessPanelSource).toContain('rgba(74, 222, 128, 0.07)')
   })
 
-  it('renders output preview for tool_call entries with output_payload_id', () => {
+  it('renders input preview in tool_call header and output preview in body', () => {
     const task = createTask('completed')
     const toolCallLog: TaskLog = {
       id: 42,
@@ -123,7 +123,9 @@ describe('TaskProcessPanel', () => {
       log_type: 'tool_call',
       metadata: JSON.stringify({
         name: 'Bash',
-        input: { command: 'cat large_file.txt' },
+        input: {},
+        input_payload_id: 14,
+        input_preview: 'git status --short',
         output: null,
         error: false,
         output_payload_id: 15,
@@ -144,7 +146,33 @@ describe('TaskProcessPanel', () => {
       },
     })
 
+    expect(wrapper.text()).toContain('git status --short')
     expect(wrapper.text()).toContain('first few lines...')
+  })
+
+  it('renders preview for payload-backed assistant text entries', () => {
+    const task = createTask('completed')
+    const assistantLog: TaskLog = {
+      id: 52,
+      task_id: 1,
+      log_level: 'info',
+      log_type: 'assistant_text',
+      metadata: JSON.stringify({ payload_id: 21, char_count: 19, preview: 'summary from backend', truncated: false }),
+      message: '',
+      created_at: '2026-04-23T10:00:00Z',
+    }
+
+    const wrapper = mount(TaskProcessPanel, {
+      props: {
+        task,
+        taskLogs: [assistantLog],
+        isActive: false,
+        terminalHtml: '',
+        taskStatus: 'completed',
+      },
+    })
+
+    expect(wrapper.text()).toContain('summary from backend')
   })
 
   it('loads payload-backed assistant text on expand and clears loading state', async () => {
@@ -162,7 +190,7 @@ describe('TaskProcessPanel', () => {
       task_id: 1,
       log_level: 'info',
       log_type: 'assistant_text',
-      metadata: JSON.stringify({ payload_id: 21, char_count: 19 }),
+      metadata: JSON.stringify({ payload_id: 21, char_count: 19, preview: 'summary from backend', truncated: false }),
       message: '',
       created_at: '2026-04-23T10:00:00Z',
     }
@@ -193,7 +221,7 @@ describe('TaskProcessPanel', () => {
       task_id: 1,
       log_level: 'info',
       log_type: 'assistant_text',
-      metadata: JSON.stringify({ payload_id: 22, char_count: 10 }),
+      metadata: JSON.stringify({ payload_id: 22, char_count: 10, preview: 'summary from backend', truncated: false }),
       message: '',
       created_at: '2026-04-23T10:00:00Z',
     }

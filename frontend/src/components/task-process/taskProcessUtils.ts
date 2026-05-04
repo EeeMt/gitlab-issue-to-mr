@@ -11,8 +11,10 @@ import {
 
 export interface ParsedTextEntry {
   text: string
+  preview: string
   payloadId: number | null
   charCount: number | null
+  truncated: boolean
 }
 
 export interface NormalizedTextEventRow {
@@ -66,8 +68,9 @@ export function getToolColor(name: string): string {
 }
 
 export function getInputSummary(call: ToolCall): string {
+  if (call.input_preview) return call.input_preview
   const input = call.input
-  if (!input) return ''
+  if (!input || Object.keys(input).length === 0) return ''
   switch (call.name) {
     case 'Bash': {
       const cmd = typeof input.command === 'string' ? input.command : ''
@@ -155,15 +158,17 @@ export function parseToolCall(log: TaskLog): ToolCall {
 }
 
 export function parseTextEntry(metadata: string | null | undefined): ParsedTextEntry {
-  if (!metadata) return { text: '', payloadId: null, charCount: null }
+  if (!metadata) return { text: '', preview: '', payloadId: null, charCount: null, truncated: false }
   try {
     const obj = JSON.parse(metadata) as Record<string, unknown>
     const text = typeof obj.text === 'string' ? obj.text : ''
+    const preview = typeof obj.preview === 'string' ? obj.preview : ''
     const payloadId = typeof obj.payload_id === 'number' ? obj.payload_id : null
     const charCount = typeof obj.char_count === 'number' ? obj.char_count : null
-    return { text, payloadId, charCount }
+    const truncated = obj.truncated === true
+    return { text, preview, payloadId, charCount, truncated }
   } catch {
-    return { text: metadata, payloadId: null, charCount: null }
+    return { text: metadata, preview: metadata, payloadId: null, charCount: null, truncated: false }
   }
 }
 

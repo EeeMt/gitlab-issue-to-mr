@@ -10,7 +10,12 @@
       <span v-if="isActive && elapsedDisplay" class="elapsed-time">{{ elapsedDisplay }}</span>
     </template>
 
-    <TaskProcessSystemInitBanner v-if="systemInitEntry" :entry="systemInitEntry" />
+    <TaskProcessSystemInitBanner
+      v-if="runtimeInfoEntry"
+      :entry="runtimeInfoEntry"
+      :container-id="props.task?.container_id ?? null"
+      :container-name="props.task?.container_name ?? null"
+    />
 
     <template v-if="!hasStructuredContent">
       <n-tabs v-model:value="activeTab" type="line" size="small" class="process-tabs">
@@ -29,28 +34,6 @@
       <n-tabs v-model:value="activeTab" type="line" size="small" class="process-tabs">
         <n-tab-pane name="events" :tab="t('taskView.eventsTab')">
           <div class="event-stream" ref="eventStreamRef">
-            <div v-if="props.task?.container_id" class="event-item event-item--container">
-              <div class="event-header">
-                <div class="event-icon" style="color: #059669">
-                  <n-icon size="15"><CubeOutline /></n-icon>
-                </div>
-                <div class="event-info">
-                  <span class="event-name">{{ t('taskView.container') }}</span>
-                </div>
-              </div>
-              <n-collapse class="event-collapse">
-                <n-collapse-item name="detail">
-                  <template #header>
-                    <span class="tool-detail-label">{{ t('taskView.container') }}</span>
-                  </template>
-                  <div class="container-detail">
-                    <span class="container-name">{{ props.task.container_name ?? '—' }}</span>
-                    <span class="container-id-short">{{ props.task.container_id.slice(0, 12) }}</span>
-                  </div>
-                </n-collapse-item>
-              </n-collapse>
-            </div>
-
             <template v-for="(row, index) in processRows" :key="row.event.id">
               <div :ref="(el) => { collapseRefs[index] = el as HTMLElement }">
                 <TaskProcessTextRow
@@ -68,6 +51,8 @@
                   :output-loaded="isPayloadLoaded(row.toolCall.output_payload_id ?? null)"
                   :input-loading="isPayloadLoading(row.toolCall.input_payload_id ?? null)"
                   :output-loading="isPayloadLoading(row.toolCall.output_payload_id ?? null)"
+                  :input-failed="hasPayloadLoadError(row.toolCall.input_payload_id ?? null)"
+                  :output-failed="hasPayloadLoadError(row.toolCall.output_payload_id ?? null)"
                   :input-expanded-text="getExpandedPayloadText(row.toolCall.input_payload_id ?? null)"
                   :output-expanded-text="getExpandedPayloadText(row.toolCall.output_payload_id ?? null)"
                   @collapse-change="(names) => onCollapseChange(names, index)"
@@ -93,10 +78,10 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
-import { NCard, NCollapse, NCollapseItem, NIcon, NTag, NEmpty, NTabs, NTabPane, NButton } from 'naive-ui'
+import { NCard, NIcon, NTag, NEmpty, NTabs, NTabPane, NButton } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { formatDurationMs } from '../utils/format'
-import { CubeOutline, ArrowDownCircleOutline } from '@vicons/ionicons5'
+import { ArrowDownCircleOutline } from '@vicons/ionicons5'
 import type { TaskLog, Task } from '../api'
 import TaskProcessSystemInitBanner from './task-process/TaskProcessSystemInitBanner.vue'
 import TaskProcessRawPane from './task-process/TaskProcessRawPane.vue'
@@ -145,7 +130,12 @@ let isProgrammaticScroll = false
 
 const processRows = computed(() => normalizeTaskProcessRows(props.taskLogs))
 const systemInitEntry = computed(() => parseSystemInitEntry(props.taskLogs))
-const hasStructuredContent = computed(() => processRows.value.length > 0 || systemInitEntry.value !== null || !!props.task?.container_id)
+const runtimeInfoEntry = computed(() => {
+  if (systemInitEntry.value) return systemInitEntry.value
+  if (props.task?.container_id) return { model: null, cwd: null }
+  return null
+})
+const hasStructuredContent = computed(() => processRows.value.length > 0)
 const elapsedDisplay = computed(() => (!props.isActive || elapsedMs.value <= 0 ? '' : formatDurationMs(elapsedMs.value)))
 
 function getExpandedText(entry: ParsedTextEntry): string {
@@ -162,6 +152,10 @@ function hasTextPayloadLoading(entry: ParsedTextEntry): boolean {
 
 function shouldShowTextContent(entry: ParsedTextEntry): boolean {
   return entry.payloadId === null || expandedPayloads.value[entry.payloadId] !== undefined || !!payloadLoadErrors[entry.payloadId]
+}
+
+function hasPayloadLoadError(payloadId: number | null): boolean {
+  return payloadId !== null && !!payloadLoadErrors[payloadId]
 }
 
 function onCollapseChange(expandedNames: (string | number)[], index: number) {
@@ -335,7 +329,7 @@ defineExpose({ onCollapseChange })
 }
 .event-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   min-height: 30px;
 }
@@ -344,19 +338,31 @@ defineExpose({ onCollapseChange })
   align-items: center;
   flex-shrink: 0;
   width: 20px;
+  padding-top: 2px;
 }
 .event-info {
   flex: 1;
   display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   overflow: hidden;
+  min-width: 0;
 }
 .event-name {
   font-weight: 500;
   font-size: 13px;
   flex-shrink: 0;
+}
+.event-preview {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--n-text-color-3, #999);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .event-collapse {
   margin: 8px 0 8px 28px;
@@ -394,25 +400,6 @@ defineExpose({ onCollapseChange })
 }
 .empty-state {
   padding: 24px 0;
-}
-.container-detail {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.container-name {
-  font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
-  font-size: 13px;
-  color: var(--n-text-color-1);
-}
-.container-id-short {
-  font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
-  font-size: 11px;
-  color: var(--n-text-color-3, #999);
-  background: rgba(128, 128, 128, 0.08);
-  padding: 1px 6px;
-  border-radius: 4px;
 }
 .scroll-to-latest {
   position: absolute;

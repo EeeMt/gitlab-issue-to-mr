@@ -58,7 +58,10 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
 
         assert len(logs) == 1
         assert len(payloads) == 1
-        assert json.loads(logs[0].log_metadata)["input_payload_id"] == payloads[0].id
+        meta = json.loads(logs[0].log_metadata)
+        assert meta["input_payload_id"] == payloads[0].id
+        assert meta["input_preview"] == '{"file_path": "a.py", "content": "print(1)"}'
+        assert meta["input_truncated"] is False
         assert payloads[0].payload_kind == "tool_input"
 
     async def test_event_tailer_projects_assistant_text_to_tasklog_and_payload(self):
@@ -75,7 +78,10 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
 
         assert len(logs) == 1
         assert len(payloads) == 1
-        assert json.loads(logs[0].log_metadata)["payload_id"] == payloads[0].id
+        meta = json.loads(logs[0].log_metadata)
+        assert meta["payload_id"] == payloads[0].id
+        assert meta["preview"] == "hello from assistant"
+        assert meta["truncated"] is False
         assert payloads[0].char_count == len("hello from assistant")
 
     async def test_event_tailer_correlates_tool_result_to_tool_call(self):
@@ -95,8 +101,10 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
         assert len(payloads) == 2
         meta = json.loads(logs[0].log_metadata)
         assert meta["input_payload_id"] is not None
+        assert meta["input_preview"] == '{"command": "ls"}'
         assert meta["output_payload_id"] is not None
         assert meta["output_payload_id"] != meta["input_payload_id"]
+        assert meta["output_preview"] == "file1.txt\nfile2.txt"
         assert meta["error"] is False
         output_payload = next(p for p in payloads if p.payload_kind == "tool_output")
         assert meta["output_payload_id"] == output_payload.id
@@ -116,6 +124,7 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
 
         assert len(logs) == 1
         assert len(payloads) == 1
+        assert json.loads(logs[0].log_metadata)["output_preview"] == "plain string output"
         assert payloads[0].char_count == len("plain string output")
 
     async def test_resumed_run_ignores_history_until_current_system_init(self):
@@ -237,10 +246,7 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
         assert cursor.last_offset == 100 + len(chunk.encode('utf-8'))
         assert json.loads(logs[0].log_metadata)["tool_use_id"] == "next_tool"
 
-    # ── Non-streaming assistant message tests ──────────────────────────────
-
     async def test_assistant_message_projects_tool_use_and_text(self):
-        """Non-streaming assistant messages (type=assistant) should project tool_call and assistant_text."""
         event_lines = [
             '{"type":"system","subtype":"init","model":"MiniMax-M2.5","cwd":"/workspace"}',
             '{"type":"assistant","message":{"content":[{"text":"Let me check the environment.","type":"text"}]}}',
@@ -257,15 +263,18 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
         log_types = [log.log_type for log in logs]
         assert log_types == ['system_init', 'assistant_text', 'tool_call', 'assistant_text']
         assert len(payloads) == 4
+        assistant_meta = json.loads(next(l for l in logs if l.log_type == 'assistant_text').log_metadata)
+        assert assistant_meta['preview'] == 'Let me check the environment.'
         tool_log = next(l for l in logs if l.log_type == 'tool_call')
         meta = json.loads(tool_log.log_metadata)
         assert meta["input_payload_id"] is not None
+        assert meta["input_preview"] == '{"command": "git status"}'
         assert meta["output_payload_id"] is not None
+        assert meta["output_preview"] == 'On branch main'
         assert meta["name"] == "Bash"
         assert meta["error"] is False
 
     async def test_assistant_message_projects_thinking(self):
-        """Non-streaming assistant messages with thinking blocks should project thinking entries."""
         event_lines = [
             '{"type":"system","subtype":"init","model":"claude-sonnet","cwd":"/workspace"}',
             '{"type":"assistant","message":{"content":[{"thinking":"I need to analyze this...","type":"thinking"}]}}',
@@ -278,10 +287,11 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
 
         assert len(logs) == 1
         assert len(payloads) == 1
+        meta = json.loads(logs[0].log_metadata)
+        assert meta['preview'] == 'I need to analyze this...'
         assert payloads[0].char_count == len("I need to analyze this...")
 
     async def test_assistant_message_splits_thinking_from_response_in_text_block(self):
-        """Text blocks with tags should be split into thinking + assistant_text."""
         mixed_text = "<think>Let me check.</think>\n\n## Result\n\nHere is the info."
         record = {
             "type": "assistant",
@@ -299,11 +309,12 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
         assert len(text_logs) == 1
         assert len(thinking_payloads) == 1
         assert len(text_payloads) == 1
+        assert json.loads(thinking_logs[0].log_metadata)['preview'] == 'Let me check.'
+        assert json.loads(text_logs[0].log_metadata)['preview'] == '## Result Here is the info.'
         assert b"## Result" not in thinking_payloads[0].content
         assert b"## Result" in text_payloads[0].content
 
     async def test_assistant_message_pure_thinking_text_block(self):
-        """Text blocks with only <think>...</think> (no response after close) are pure thinking."""
         pure_thinking = "<think>Just thinking, no response yet.</think>"
         record = {
             "type": "assistant",
@@ -316,10 +327,10 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
             text_logs = (await db.execute(select(TaskLog).where(TaskLog.log_type == "assistant_text"))).scalars().all()
 
         assert len(thinking_logs) == 1
+        assert json.loads(thinking_logs[0].log_metadata)['preview'] == 'Just thinking, no response yet.'
         assert len(text_logs) == 0
 
     async def test_assistant_message_multiple_thinking_tags_in_text_block(self):
-        """Text blocks with multiple <think>...</think> pairs produce alternating thinking/assistant_text entries."""
         multi_text = "<think>First thought.</think>Response one.<think>Second thought.</think>Response two."
         record = {
             "type": "assistant",
@@ -337,6 +348,10 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
         assert len(text_logs) == 2
         assert len(thinking_payloads) == 2
         assert len(text_payloads) == 2
+        assert json.loads(thinking_logs[0].log_metadata)['preview'] == 'First thought.'
+        assert json.loads(thinking_logs[1].log_metadata)['preview'] == 'Second thought.'
+        assert json.loads(text_logs[0].log_metadata)['preview'] == 'Response one.'
+        assert json.loads(text_logs[1].log_metadata)['preview'] == 'Response two.'
         assert b"First thought" in thinking_payloads[0].content
         assert b"Second thought" in thinking_payloads[1].content
         assert b"Response one" in text_payloads[0].content

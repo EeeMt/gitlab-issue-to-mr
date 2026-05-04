@@ -44,9 +44,8 @@ const { t } = useI18n()
 
 const preview = computed(() => {
   const entry = props.row.textEntry
+  if (entry.preview) return entry.preview
   if (entry.text) return entry.text.slice(0, 120)
-  if (entry.payloadId && entry.charCount) return `${t('taskView.fullText')} (${entry.charCount})`
-  if (entry.payloadId) return t('taskView.fullText')
   return ''
 })
 </script>
@@ -58,7 +57,7 @@ const preview = computed(() => {
 }
 .event-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   min-height: 30px;
 }
@@ -67,14 +66,16 @@ const preview = computed(() => {
   align-items: center;
   flex-shrink: 0;
   width: 20px;
+  padding-top: 2px;
 }
 .event-info {
   flex: 1;
   display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   overflow: hidden;
+  min-width: 0;
 }
 .event-name {
   font-weight: 500;
@@ -82,13 +83,15 @@ const preview = computed(() => {
   flex-shrink: 0;
 }
 .event-preview {
+  display: block;
+  max-width: 100%;
   font-size: 12px;
+  line-height: 1.35;
   color: var(--n-text-color-3, #999);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   word-break: break-all;
-  max-width: 100%;
 }
 .event-ts {
   font-size: 11px;

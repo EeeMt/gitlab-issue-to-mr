@@ -311,6 +311,8 @@ export interface ToolCall {
   timestamp?: string
   // Archive payload fields (from event archive system)
   input_payload_id?: number
+  input_preview?: string
+  input_truncated?: boolean
   output_payload_id?: number
   output_preview?: string
   output_truncated?: boolean

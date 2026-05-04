@@ -15,6 +15,36 @@ logger = logging.getLogger(__name__)
 
 _THINKING_OPEN = '<think>'
 _THINKING_CLOSE = '</think>'
+_PREVIEW_LIMIT = 120
+
+
+def _build_preview(text: str, limit: int = _PREVIEW_LIMIT) -> tuple[str, bool]:
+    preview = text[:limit]
+    return preview, len(text) > limit
+
+
+def _serialize_tool_input(tool_input: Any) -> str:
+    return _json.dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input)
+
+
+def _normalize_preview_text(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _build_preview_from_serialized_tool_input(input_text: str) -> tuple[str, bool]:
+    try:
+        preview_source = _serialize_tool_input(_json.loads(input_text))
+    except Exception:  # noqa: BLE001
+        preview_source = input_text
+    return _build_preview(_normalize_preview_text(preview_source))
+
+
+def _build_text_preview(text: str) -> tuple[str, bool]:
+    return _build_preview(_normalize_preview_text(text))
+
+
+def _build_tool_output_preview(text: str) -> tuple[str, bool]:
+    return _build_preview(text, limit=500)
 
 
 class WorkerEventProjector:
@@ -170,12 +200,18 @@ class WorkerEventProjector:
             payload_kind=payload_kind,
             text=sanitized_text,
         )
+        preview, truncated = _build_text_preview(sanitized_text)
         db.add(TaskLog(
             task_id=task_id,
             log_level="INFO",
             message="",
             log_type=log_type,
-            log_metadata=_json.dumps({"payload_id": payload.id, "char_count": len(sanitized_text)}),
+            log_metadata=_json.dumps({
+                "payload_id": payload.id,
+                "char_count": len(sanitized_text),
+                "preview": preview,
+                "truncated": truncated,
+            }),
         ))
 
     async def _handle_user_event(self, *, task_id: int, record: dict, db: AsyncSession) -> None:
@@ -208,10 +244,11 @@ class WorkerEventProjector:
                     text=output_text,
                 )
                 sanitized_output_text = self._sanitize_sensitive_data(output_text)
+                output_preview, output_truncated = _build_tool_output_preview(sanitized_output_text)
                 meta = _json.loads(pending_log.log_metadata or "{}")
                 meta["output_payload_id"] = payload.id
-                meta["output_preview"] = sanitized_output_text[:500]
-                meta["output_truncated"] = len(sanitized_output_text) > 500
+                meta["output_preview"] = output_preview
+                meta["output_truncated"] = output_truncated
                 meta["output_char_count"] = len(sanitized_output_text)
                 meta["error"] = is_error
                 pending_log.log_metadata = _json.dumps(meta)
@@ -230,7 +267,9 @@ class WorkerEventProjector:
                 tool_use_id = block.get("id", "")
                 tool_name = block.get("name", "")
                 tool_input = block.get("input", {})
-                input_text = _json.dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input)
+                input_text = _serialize_tool_input(tool_input)
+                sanitized_input_text = self._sanitize_sensitive_data(input_text)
+                input_preview, input_truncated = _build_preview_from_serialized_tool_input(sanitized_input_text)
 
                 payload = await self._create_sanitized_text_payload(
                     db=db,
@@ -247,6 +286,8 @@ class WorkerEventProjector:
                         "tool_use_id": tool_use_id,
                         "name": tool_name,
                         "input_payload_id": payload.id,
+                        "input_preview": input_preview,
+                        "input_truncated": input_truncated,
                     }),
                 )
                 db.add(log)
@@ -313,12 +354,15 @@ class WorkerEventProjector:
         tool_use = self._active_tool_use
         if tool_use is None:
             return
+        input_text = "".join(tool_use["input_parts"])
+        sanitized_input_text = self._sanitize_sensitive_data(input_text)
         payload = await self._create_sanitized_text_payload(
             db=db,
             task_id=task_id,
             payload_kind="tool_input",
-            text="".join(tool_use["input_parts"]),
+            text=input_text,
         )
+        input_preview, input_truncated = _build_preview_from_serialized_tool_input(sanitized_input_text)
         log = TaskLog(
             task_id=task_id,
             log_level="INFO",
@@ -328,6 +372,8 @@ class WorkerEventProjector:
                 "tool_use_id": tool_use["id"],
                 "name": tool_use["name"],
                 "input_payload_id": payload.id,
+                "input_preview": input_preview,
+                "input_truncated": input_truncated,
             }),
         )
         db.add(log)
@@ -428,11 +474,9 @@ class WorkerEventProjector:
             text = result.output.decode("utf-8", errors="replace")
             if not text:
                 return
-            await append_raw_log_chunk(
-                db, task_id=task_id, sequence_no=cursor.last_sequence_no + 1, text=text
-            )
+            await append_raw_log_chunk(db, task_id=task_id, sequence_no=cursor.last_sequence_no + 1, text=text)
             cursor.last_sequence_no += 1
-            cursor.last_offset += len(text.encode("utf-8"))
-            await db.commit()
+            cursor.last_offset += len(result.output)
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"[Task {task_id}] _tail_console_log error: {exc}")
+        await db.commit()
