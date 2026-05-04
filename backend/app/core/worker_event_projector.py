@@ -1,0 +1,438 @@
+"""Event/archive projection helpers for worker execution."""
+
+import asyncio
+import json as _json
+import logging
+from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.task_event_archive import decode_event_line, get_or_create_cursor, iter_complete_jsonl_records
+from app.core.task_log_payloads import append_raw_log_chunk, create_payload
+from app.models import TaskLog
+
+logger = logging.getLogger(__name__)
+
+_THINKING_OPEN = '<think>'
+_THINKING_CLOSE = '</think>'
+
+
+class WorkerEventProjector:
+    """Projects worker runtime artifacts into TaskLog/TaskPayload rows."""
+
+    def __init__(self, sanitize_sensitive_data):
+        self._sanitize_sensitive_data = sanitize_sensitive_data
+        self.reset()
+
+    def reset(self) -> None:
+        self._active_tool_use: dict | None = None
+        self._active_text_block: dict | None = None
+        self._active_thinking_block: dict | None = None
+        self._pending_tool_log_by_id: dict = {}
+        self._latest_result_record: dict | None = None
+        self._run_is_resumed: bool | None = None
+        self._timeline_gate_open = True
+
+    async def load_resume_runtime_state(self, *, container: Any) -> None:
+        if self._run_is_resumed is not None:
+            return
+        try:
+            result = await asyncio.to_thread(
+                container.exec_run,
+                "python3 -c \"import json, pathlib; print(json.loads(pathlib.Path('/workspace/runtime.json').read_text()).get('resume_session', ''))\"",
+                demux=False,
+            )
+            if result.exit_code != 0:
+                self._run_is_resumed = False
+                self._timeline_gate_open = True
+                return
+            resume_session = result.output.decode("utf-8", errors="replace").strip()
+            self._run_is_resumed = bool(resume_session)
+            self._timeline_gate_open = not self._run_is_resumed
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"Failed to load runtime resume state: {exc}")
+            self._run_is_resumed = False
+            self._timeline_gate_open = True
+
+    @staticmethod
+    def _initial_event_cursor_is_pristine(cursor: Any) -> bool:
+        return cursor.last_offset == 0 and cursor.last_sequence_no == 0
+
+    @staticmethod
+    def _latest_init_index_from_raw_records(records: list[str]) -> int:
+        latest_init_index = -1
+        for index, raw in enumerate(records):
+            try:
+                record = decode_event_line(raw)
+            except Exception:  # noqa: BLE001
+                continue
+            if record.get("type") == "system" and record.get("subtype") == "init":
+                latest_init_index = index
+        return latest_init_index
+
+    def _trim_initial_resumed_records_for_latest_run(
+        self, *, cursor: Any, records: list[str]
+    ) -> tuple[list[str], int]:
+        if not self._run_is_resumed or not self._initial_event_cursor_is_pristine(cursor):
+            return records, 0
+
+        latest_init_index = self._latest_init_index_from_raw_records(records)
+        if latest_init_index <= 0:
+            return records, 0
+
+        self._timeline_gate_open = True
+        return records[latest_init_index:], latest_init_index
+
+    @staticmethod
+    def _processed_record_bytes(chunk: str, remainder: str) -> int:
+        return len(chunk.encode("utf-8")) - len(remainder.encode("utf-8"))
+
+    async def ingest_event_records_from_chunk(
+        self, *, task_id: int, chunk: str, cursor: Any, db: AsyncSession
+    ) -> None:
+        records, remainder = iter_complete_jsonl_records(chunk)
+        records_to_process, skipped_count = self._trim_initial_resumed_records_for_latest_run(
+            cursor=cursor,
+            records=records,
+        )
+        for raw in records_to_process:
+            try:
+                record = decode_event_line(raw)
+                await self.ingest_event_record(task_id=task_id, record=record, db=db)
+                cursor.last_sequence_no += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"[Task {task_id}] Failed to ingest event record: {exc}")
+        if skipped_count > 0:
+            logger.info(
+                f"[Task {task_id}] Skipped {skipped_count} resumed event records before latest system/init"
+            )
+        cursor.last_offset += self._processed_record_bytes(chunk, remainder)
+
+        if records_to_process and self._run_is_resumed:
+            self._timeline_gate_open = True
+
+    async def ingest_event_record(self, *, task_id: int, record: dict, db: AsyncSession) -> None:
+        """Project one raw event.jsonl record into TaskLog/TaskPayload rows."""
+        record_type = record.get("type")
+        if record_type == "system" and record.get("subtype") == "init":
+            if self._run_is_resumed:
+                self._timeline_gate_open = True
+            db.add(TaskLog(
+                task_id=task_id,
+                log_level="INFO",
+                message="",
+                log_type="system_init",
+                log_metadata=_json.dumps({"model": record.get("model"), "cwd": record.get("cwd")}),
+            ))
+        elif not self._timeline_gate_open:
+            return
+        elif record_type == "stream_event":
+            event = record.get("event", {})
+            await self._project_stream_event(task_id=task_id, event=event, db=db)
+        elif record_type == "assistant":
+            await self._project_assistant_message(task_id=task_id, record=record, db=db)
+        elif record_type == "user":
+            await self._handle_user_event(task_id=task_id, record=record, db=db)
+        elif record_type == "result":
+            self._latest_result_record = record
+
+    async def _create_sanitized_text_payload(
+        self,
+        *,
+        db: AsyncSession,
+        task_id: int,
+        payload_kind: str,
+        text: str,
+    ) -> Any:
+        sanitized_text = self._sanitize_sensitive_data(text)
+        return await create_payload(
+            db,
+            task_id=task_id,
+            payload_kind=payload_kind,
+            text=sanitized_text,
+        )
+
+    async def _add_text_log_with_payload(
+        self,
+        *,
+        db: AsyncSession,
+        task_id: int,
+        payload_kind: str,
+        log_type: str,
+        text: str,
+    ) -> None:
+        sanitized_text = self._sanitize_sensitive_data(text)
+        if not sanitized_text:
+            return
+        payload = await self._create_sanitized_text_payload(
+            db=db,
+            task_id=task_id,
+            payload_kind=payload_kind,
+            text=sanitized_text,
+        )
+        db.add(TaskLog(
+            task_id=task_id,
+            log_level="INFO",
+            message="",
+            log_type=log_type,
+            log_metadata=_json.dumps({"payload_id": payload.id, "char_count": len(sanitized_text)}),
+        ))
+
+    async def _handle_user_event(self, *, task_id: int, record: dict, db: AsyncSession) -> None:
+        """Handle user-turn events — primarily tool_result correlation."""
+        message = record.get("message", {})
+        for item in (message.get("content") or []):
+            if item.get("type") != "tool_result":
+                continue
+            tool_use_id = item.get("tool_use_id")
+            is_error = item.get("is_error", False)
+            raw_content = item.get("content", "")
+
+            if isinstance(raw_content, str):
+                output_text = raw_content
+            elif isinstance(raw_content, list):
+                parts: list[str] = []
+                for block in raw_content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        parts.append(block.get("text", ""))
+                output_text = "".join(parts)
+            else:
+                output_text = ""
+
+            pending_log = self._pending_tool_log_by_id.pop(tool_use_id, None)
+            if pending_log is not None:
+                payload = await self._create_sanitized_text_payload(
+                    db=db,
+                    task_id=task_id,
+                    payload_kind="tool_output",
+                    text=output_text,
+                )
+                sanitized_output_text = self._sanitize_sensitive_data(output_text)
+                meta = _json.loads(pending_log.log_metadata or "{}")
+                meta["output_payload_id"] = payload.id
+                meta["output_preview"] = sanitized_output_text[:500]
+                meta["output_truncated"] = len(sanitized_output_text) > 500
+                meta["output_char_count"] = len(sanitized_output_text)
+                meta["error"] = is_error
+                pending_log.log_metadata = _json.dumps(meta)
+
+    async def _project_assistant_message(self, *, task_id: int, record: dict, db: AsyncSession) -> None:
+        """Project a complete assistant message (non-streaming format)."""
+        message = record.get("message", {})
+        content_blocks = message.get("content") or []
+
+        for block in content_blocks:
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type")
+
+            if block_type == "tool_use":
+                tool_use_id = block.get("id", "")
+                tool_name = block.get("name", "")
+                tool_input = block.get("input", {})
+                input_text = _json.dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input)
+
+                payload = await self._create_sanitized_text_payload(
+                    db=db,
+                    task_id=task_id,
+                    payload_kind="tool_input",
+                    text=input_text,
+                )
+                log = TaskLog(
+                    task_id=task_id,
+                    log_level="INFO",
+                    message=f"Tool call: {tool_name}",
+                    log_type="tool_call",
+                    log_metadata=_json.dumps({
+                        "tool_use_id": tool_use_id,
+                        "name": tool_name,
+                        "input_payload_id": payload.id,
+                    }),
+                )
+                db.add(log)
+                if tool_use_id:
+                    self._pending_tool_log_by_id[tool_use_id] = log
+
+            elif block_type == "text":
+                text = block.get("text", "")
+                if not text:
+                    continue
+                remaining = text
+                while remaining:
+                    open_idx = remaining.find(_THINKING_OPEN)
+                    if open_idx < 0:
+                        await self._add_text_log_with_payload(
+                            db=db,
+                            task_id=task_id,
+                            payload_kind="assistant_text",
+                            log_type="assistant_text",
+                            text=remaining,
+                        )
+                        break
+
+                    if open_idx > 0:
+                        await self._add_text_log_with_payload(
+                            db=db,
+                            task_id=task_id,
+                            payload_kind="assistant_text",
+                            log_type="assistant_text",
+                            text=remaining[:open_idx],
+                        )
+
+                    close_idx = remaining.find(_THINKING_CLOSE, open_idx + len(_THINKING_OPEN))
+                    if close_idx < 0:
+                        await self._add_text_log_with_payload(
+                            db=db,
+                            task_id=task_id,
+                            payload_kind="thinking",
+                            log_type="thinking",
+                            text=remaining[open_idx + len(_THINKING_OPEN):],
+                        )
+                        break
+
+                    await self._add_text_log_with_payload(
+                        db=db,
+                        task_id=task_id,
+                        payload_kind="thinking",
+                        log_type="thinking",
+                        text=remaining[open_idx + len(_THINKING_OPEN):close_idx],
+                    )
+                    remaining = remaining[close_idx + len(_THINKING_CLOSE):].lstrip("\n")
+
+            elif block_type == "thinking":
+                await self._add_text_log_with_payload(
+                    db=db,
+                    task_id=task_id,
+                    payload_kind="thinking",
+                    log_type="thinking",
+                    text=block.get("thinking", ""),
+                )
+
+    async def _flush_tool_use_projection(self, *, task_id: int, db: AsyncSession) -> None:
+        """Flush accumulated tool_use block into TaskLog + TaskPayload."""
+        tool_use = self._active_tool_use
+        if tool_use is None:
+            return
+        payload = await self._create_sanitized_text_payload(
+            db=db,
+            task_id=task_id,
+            payload_kind="tool_input",
+            text="".join(tool_use["input_parts"]),
+        )
+        log = TaskLog(
+            task_id=task_id,
+            log_level="INFO",
+            message=f"Tool call: {tool_use['name']}",
+            log_type="tool_call",
+            log_metadata=_json.dumps({
+                "tool_use_id": tool_use["id"],
+                "name": tool_use["name"],
+                "input_payload_id": payload.id,
+            }),
+        )
+        db.add(log)
+        self._pending_tool_log_by_id[tool_use["id"]] = log
+        self._active_tool_use = None
+
+    async def _project_stream_event(self, *, task_id: int, event: dict, db: AsyncSession) -> None:
+        """Map one stream_event payload to TaskLog/TaskPayload mutations."""
+        event_type = event.get("type")
+        content_block = event.get("content_block", {})
+        block_type = content_block.get("type")
+
+        if event_type == "content_block_start":
+            if block_type == "tool_use":
+                self._active_tool_use = {
+                    "id": content_block["id"],
+                    "name": content_block["name"],
+                    "input_parts": [],
+                }
+                self._active_text_block = None
+                self._active_thinking_block = None
+            elif block_type == "text":
+                self._active_text_block = {"parts": []}
+                self._active_tool_use = None
+                self._active_thinking_block = None
+            elif block_type == "thinking":
+                self._active_thinking_block = {"parts": []}
+                self._active_text_block = None
+                self._active_tool_use = None
+
+        elif event_type == "content_block_delta":
+            delta = event.get("delta", {})
+            delta_type = delta.get("type")
+            if delta_type == "input_json_delta" and self._active_tool_use is not None:
+                self._active_tool_use["input_parts"].append(delta.get("partial_json", ""))
+            elif delta_type == "text_delta" and self._active_text_block is not None:
+                self._active_text_block["parts"].append(delta.get("text", ""))
+            elif delta_type == "thinking_delta" and self._active_thinking_block is not None:
+                self._active_thinking_block["parts"].append(delta.get("thinking", ""))
+
+        elif event_type == "content_block_stop":
+            if self._active_tool_use is not None:
+                await self._flush_tool_use_projection(task_id=task_id, db=db)
+            elif self._active_thinking_block is not None:
+                text = "".join(self._active_thinking_block["parts"])
+                await self._add_text_log_with_payload(
+                    db=db,
+                    task_id=task_id,
+                    payload_kind="thinking",
+                    log_type="thinking",
+                    text=text,
+                )
+                self._active_thinking_block = None
+            elif self._active_text_block is not None:
+                text = "".join(self._active_text_block["parts"])
+                await self._add_text_log_with_payload(
+                    db=db,
+                    task_id=task_id,
+                    payload_kind="assistant_text",
+                    log_type="assistant_text",
+                    text=text,
+                )
+                self._active_text_block = None
+
+    async def tail_event_jsonl(self, *, task_id: int, container: Any, db: AsyncSession) -> None:
+        """Read newly appended event records from container's event.jsonl and project them."""
+        await self.load_resume_runtime_state(container=container)
+        cursor = await get_or_create_cursor(db, task_id=task_id, stream_name="event_jsonl")
+        offset = cursor.last_offset + 1
+        try:
+            result = await asyncio.to_thread(
+                container.exec_run,
+                f"tail -c +{offset} /workspace/event.jsonl",
+                demux=False,
+            )
+            if result.exit_code != 0 or not result.output:
+                return
+            chunk = result.output.decode("utf-8", errors="replace")
+            if not chunk:
+                return
+            await self.ingest_event_records_from_chunk(task_id=task_id, chunk=chunk, cursor=cursor, db=db)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[Task {task_id}] _tail_event_jsonl error: {exc}")
+        await db.commit()
+
+    async def tail_console_log(self, *, task_id: int, container: Any, db: AsyncSession) -> None:
+        """Read newly appended bytes from console.log and persist as raw log chunks."""
+        cursor = await get_or_create_cursor(db, task_id=task_id, stream_name="console_log")
+        offset = cursor.last_offset + 1
+        try:
+            result = await asyncio.to_thread(
+                container.exec_run,
+                f"tail -c +{offset} /workspace/console.log",
+                demux=False,
+            )
+            if result.exit_code != 0 or not result.output:
+                return
+            text = result.output.decode("utf-8", errors="replace")
+            if not text:
+                return
+            await append_raw_log_chunk(
+                db, task_id=task_id, sequence_no=cursor.last_sequence_no + 1, text=text
+            )
+            cursor.last_sequence_no += 1
+            cursor.last_offset += len(text.encode("utf-8"))
+            await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[Task {task_id}] _tail_console_log error: {exc}")
