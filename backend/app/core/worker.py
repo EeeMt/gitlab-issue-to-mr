@@ -195,8 +195,15 @@ class WorkerExecutor:
                 task: Task,
                 logs: str,
                 issue: Optional[Issue] = None,
+                structured_diff: Optional[dict[str, Any]] = None,
             ) -> None:
-                await update_task_stats_from_logs_or_api(task, logs, self.gitlab, issue)
+                await update_task_stats_from_logs_or_api(
+                    task,
+                    logs,
+                    self.gitlab,
+                    issue,
+                    structured_diff,
+                )
 
             return _update_task_stats_wrapper
 

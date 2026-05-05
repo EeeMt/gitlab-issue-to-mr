@@ -109,34 +109,48 @@ class TestCodifySystemInitParsing(unittest.TestCase):
     def tearDown(self):
         self.patcher.stop()
 
-    def _run_parse(self, task, logs, *, system_init_metadata=None, exit_code=0):
+    def _run_parse(
+        self,
+        task,
+        logs,
+        *,
+        system_init_metadata=None,
+        run_result_metadata=None,
+        worker_finalization_metadata=None,
+        exit_code=0,
+    ):
         async def run():
             with patch.object(self.worker, '_parse_mr_from_logs', new=AsyncMock()):
                 with patch.object(self.worker, '_update_task_stats_from_logs_or_api', new=AsyncMock()):
                     mock_db = create_mock_db(task)
 
-                    # Configure the system_init structured log query
-                    if system_init_metadata is not None:
-                        mock_system_init = MagicMock()
-                        mock_system_init.log_metadata = system_init_metadata
-                    else:
-                        mock_system_init = None
+                    metadata_by_type = {
+                        "system_init": system_init_metadata,
+                        "run_result": run_result_metadata,
+                        "worker_finalization": worker_finalization_metadata,
+                    }
 
-                    # Override execute to return the right result for system_init query
                     async def mock_execute(stmt, *args, **kwargs):
                         try:
                             stmt_str = str(stmt.compile(compile_kwargs={"literal_binds": True}))
                         except Exception:
                             stmt_str = str(stmt)
-                        if 'system_init' in stmt_str:
-                            result = MagicMock()
-                            result.scalar_one_or_none.return_value = mock_system_init
-                            return result
+
                         result = MagicMock()
+                        for log_type, metadata in metadata_by_type.items():
+                            if log_type in stmt_str:
+                                if metadata is None:
+                                    result.scalar_one_or_none.return_value = None
+                                else:
+                                    log_entry = MagicMock()
+                                    log_entry.log_metadata = metadata
+                                    result.scalar_one_or_none.return_value = log_entry
+                                return result
+
                         result.scalar_one_or_none.return_value = task
                         return result
-                    mock_db.execute = mock_execute
 
+                    mock_db.execute = mock_execute
                     await self.worker._parse_task_result(task, logs, mock_db, exit_code=exit_code)
         asyncio.run(run())
 
@@ -169,6 +183,45 @@ class TestCodifySystemInitParsing(unittest.TestCase):
         task = _make_task()
         self._run_parse(task, '', system_init_metadata='not-valid-json')
         self.assertIsNone(task.model_name)
+
+    def test_updates_token_usage_from_structured_run_result(self):
+        """Structured run_result usage sets task token counts without CODIFY_STATS."""
+        task = _make_task()
+        self._run_parse(
+            task,
+            '',
+            run_result_metadata='{"subtype":"success","session_id":"session-123","usage":{"input_tokens":1500,"output_tokens":800}}',
+        )
+        self.assertEqual(task.input_tokens, 1500)
+        self.assertEqual(task.output_tokens, 800)
+
+    def test_extracts_session_id_from_structured_run_result(self):
+        """Structured run_result session_id sets the transient extracted session id."""
+        task = _make_task()
+        self._run_parse(
+            task,
+            '',
+            run_result_metadata='{"subtype":"success","session_id":"session-123","usage":{}}',
+        )
+        self.assertEqual(task._extracted_session_id, "session-123")
+
+    def test_updates_commit_diff_and_mr_title_from_worker_finalization(self):
+        """Structured finalization sets commit SHA, diff stats, and MR title without markers."""
+        task = _make_task()
+        self._run_parse(
+            task,
+            '',
+            worker_finalization_metadata=(
+                '{"commit_sha":"0123456789abcdef0123456789abcdef01234567",'
+                '"diff":{"additions":12,"deletions":3,"total":15},'
+                '"merge_request_title":"Fix worker result parsing"}'
+            ),
+        )
+        self.assertEqual(task.commit_sha, "0123456789abcdef0123456789abcdef01234567")
+        self.assertEqual(task.additions, 12)
+        self.assertEqual(task.deletions, 3)
+        self.assertEqual(task.total_changes, 15)
+        self.assertEqual(task.merge_request_title, "Fix worker result parsing")
 
 
 # ---------------------------------------------------------------------------

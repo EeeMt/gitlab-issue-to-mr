@@ -7,7 +7,7 @@ import logging
 import os as _os
 import re
 import tarfile as _tarfile
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -89,8 +89,24 @@ async def parse_mr_from_logs(task: Task, logs: str, gitlab_client) -> None:
         task._parsed_mr_url = parsed_mr_url
 
 
-async def update_task_stats_from_logs_or_api(task: Task, logs: str, gitlab_client, issue: Optional[Issue] = None) -> None:
+async def update_task_stats_from_logs_or_api(
+    task: Task,
+    logs: str,
+    gitlab_client,
+    issue: Optional[Issue] = None,
+    structured_diff: Optional[dict[str, Any]] = None,
+) -> None:
     """Update task with change statistics from logs or GitLab API."""
+    if structured_diff:
+        task.additions = int(structured_diff.get("additions") or 0)
+        task.deletions = int(structured_diff.get("deletions") or 0)
+        task.total_changes = int(structured_diff.get("total") or (task.additions + task.deletions))
+        logger.info(
+            f"[Task {task.id}] Diff stats (from structured log): "
+            f"+{task.additions} -{task.deletions} ({task.total_changes} total)"
+        )
+        return
+
     diff_match = _CODIFY_DIFF_RE.search(logs)
     if diff_match:
         task.additions = int(diff_match.group(1))
@@ -136,6 +152,26 @@ def sanitize_merge_request_title(title: str) -> str:
     return cleaned
 
 
+async def _load_latest_log_metadata(db: AsyncSession, task_id: int, log_type: str) -> dict[str, Any]:
+    """Return the newest structured log metadata for a task/log_type."""
+    try:
+        from sqlalchemy import select as _select
+        result = await db.execute(
+            _select(TaskLog).where(
+                TaskLog.task_id == task_id,
+                TaskLog.log_type == log_type,
+            ).order_by(TaskLog.id.desc()).limit(1)
+        )
+        structured = result.scalar_one_or_none()
+        if not structured or not structured.log_metadata:
+            return {}
+        parsed = _json.loads(structured.log_metadata)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        logger.debug(f"[Task {task_id}] Failed to read {log_type} structured log")
+        return {}
+
+
 async def parse_task_result(
     task: Task,
     logs: str,
@@ -146,51 +182,60 @@ async def parse_task_result(
     issue: Optional[Issue] = None,
 ) -> None:
     """Parse task execution logs and update task with results."""
-    stats_match = _CODIFY_STATS_RE.search(logs)
-    if stats_match:
-        try:
-            usage = _json.loads(stats_match.group(1).strip())
-            task.input_tokens = usage.get('input_tokens')
-            task.output_tokens = usage.get('output_tokens')
-            logger.info(f"[Task {task.id}] Token usage: in={task.input_tokens} out={task.output_tokens}")
-        except Exception:
-            logger.debug(f"[Task {task.id}] Failed to parse CODIFY_STATS")
+    run_result_meta = await _load_latest_log_metadata(db, task.id, "run_result")
+    system_init_meta = await _load_latest_log_metadata(db, task.id, "system_init")
+    finalization_meta = await _load_latest_log_metadata(db, task.id, "worker_finalization")
 
-    # Read model from the structured system_init log entry (event.jsonl projection).
-    model = None
-    try:
-        from sqlalchemy import select as _select
-        result = await db.execute(
-            _select(TaskLog).where(
-                TaskLog.task_id == task.id,
-                TaskLog.log_type == 'system_init',
-            ).order_by(TaskLog.id).limit(1)
-        )
-        structured = result.scalar_one_or_none()
-        if structured and structured.log_metadata:
-            meta = _json.loads(structured.log_metadata)
-            model = meta.get('model', '').strip()
-    except Exception:
-        logger.debug(f"[Task {task.id}] Failed to read system_init structured log")
+    usage = run_result_meta.get("usage") if isinstance(run_result_meta.get("usage"), dict) else {}
+    if usage:
+        task.input_tokens = usage.get('input_tokens')
+        task.output_tokens = usage.get('output_tokens')
+        logger.info(f"[Task {task.id}] Token usage: in={task.input_tokens} out={task.output_tokens}")
+    else:
+        stats_match = _CODIFY_STATS_RE.search(logs)
+        if stats_match:
+            try:
+                usage = _json.loads(stats_match.group(1).strip())
+                task.input_tokens = usage.get('input_tokens')
+                task.output_tokens = usage.get('output_tokens')
+                logger.info(f"[Task {task.id}] Token usage: in={task.input_tokens} out={task.output_tokens}")
+            except Exception:
+                logger.debug(f"[Task {task.id}] Failed to parse CODIFY_STATS")
 
+    model = str(system_init_meta.get('model') or '').strip()
     if model:
         task.model_name = model
         logger.info(f"[Task {task.id}] Model: {model}")
 
-    commit_sha_match = _CODIFY_COMMIT_SHA_RE.search(logs)
-    if commit_sha_match:
-        task.commit_sha = commit_sha_match.group(1).strip()
+    commit_sha = str(finalization_meta.get("commit_sha") or "").strip()
+    if commit_sha:
+        task.commit_sha = commit_sha
         logger.info(f"[Task {task.id}] Commit SHA: {task.commit_sha}")
+    else:
+        commit_sha_match = _CODIFY_COMMIT_SHA_RE.search(logs)
+        if commit_sha_match:
+            task.commit_sha = commit_sha_match.group(1).strip()
+            logger.info(f"[Task {task.id}] Commit SHA: {task.commit_sha}")
 
-    mr_title_match = _CODIFY_MR_TITLE_RE.search(logs)
-    if mr_title_match:
+    structured_title = str(finalization_meta.get("merge_request_title") or "").strip()
+    if structured_title:
         try:
-            title = sanitize_merge_request_title(mr_title_match.group(1).strip())
+            title = sanitize_merge_request_title(structured_title)
             if title:
                 task.merge_request_title = sanitize_sensitive_data(title)[:512]
                 logger.info(f"[Task {task.id}] MR title: {task.merge_request_title}")
         except Exception:
-            logger.debug(f"[Task {task.id}] Failed to parse CODIFY_MR_TITLE")
+            logger.debug(f"[Task {task.id}] Failed to parse structured MR title")
+    else:
+        mr_title_match = _CODIFY_MR_TITLE_RE.search(logs)
+        if mr_title_match:
+            try:
+                title = sanitize_merge_request_title(mr_title_match.group(1).strip())
+                if title:
+                    task.merge_request_title = sanitize_sensitive_data(title)[:512]
+                    logger.info(f"[Task {task.id}] MR title: {task.merge_request_title}")
+            except Exception:
+                logger.debug(f"[Task {task.id}] Failed to parse CODIFY_MR_TITLE")
 
     tool_calls_match = _CODIFY_TOOL_CALLS_RE.search(logs)
     if tool_calls_match:
@@ -213,15 +258,19 @@ async def parse_task_result(
         task.status = TaskStatus.COMPLETED
         task.completed_at = utcnow()
         await parse_mr_from_logs(task, logs, gitlab_client)
-        await update_task_stats_from_logs_or_api(task, logs, gitlab_client, issue)
+        structured_diff = finalization_meta.get("diff") if isinstance(finalization_meta.get("diff"), dict) else None
+        await update_task_stats_from_logs_or_api(task, logs, gitlab_client, issue, structured_diff)
     else:
         task.status = TaskStatus.FAILED
         task.completed_at = utcnow()
         task.error_message = sanitize_sensitive_data(logs)[-1000:]
 
-    session_match = _CODIFY_SESSION_ID_RE.search(logs)
-    if session_match:
-        extracted_session_id = session_match.group(1)
+    extracted_session_id = str(run_result_meta.get("session_id") or "").strip()
+    if not extracted_session_id:
+        session_match = _CODIFY_SESSION_ID_RE.search(logs)
+        if session_match:
+            extracted_session_id = session_match.group(1)
+    if extracted_session_id:
         logger.info(f"[Task {task.id}] Extracted session ID: {extracted_session_id}")
         task._extracted_session_id = extracted_session_id
 
