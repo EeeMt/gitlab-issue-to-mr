@@ -279,7 +279,12 @@ const columns = computed<DataTableColumns<AIProvider>>(() => [
     title: t('config.providers.systemPrompt'),
     key: 'system_prompt',
     minWidth: 120,
-    ellipsis: { tooltip: true },
+    ellipsis: {
+      tooltip: {
+        maxWidth: 420,
+        style: { maxWidth: '420px', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }
+      }
+    },
     render: (row: AIProvider) =>
       row.system_prompt
         ? h('span', { class: 'ai-providers-system-prompt-preview' }, row.system_prompt)
