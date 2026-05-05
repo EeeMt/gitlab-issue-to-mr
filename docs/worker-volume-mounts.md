@@ -111,19 +111,24 @@ fi
 
 ### 会话生命周期
 
-1. Issue 创建时生成 `session_storage_path` 和 `claude_session_id`
+1. Issue 创建时根据 workspace 配置生成 `session_storage_path`
 2. Worker 启动容器时挂载到 `/home/codify/.claude`
-3. 如果 Issue 已有 `claude_session_id`，entrypoint 用 `claude -r {session_id}` 恢复会话
+3. 如果 Issue 已有 `claude_session_id`，worker 将其作为 `RESUME_SESSION` 传入容器，脚本再用该值恢复 Claude 会话
 4. 容器退出后，entrypoint 从 session 文件中提取 `CODIFY_SESSION_ID`，worker 将其写回 `issue.claude_session_id`
 5. 下次任务继续复用同一会话，实现多轮对话的跨任务延续
 
 ### 与 Workspace 的关系
 
-Session Storage 现在归属于 issue workspace：
+当 `worker_workspace_host_path` 启用时，Session Storage 归属于 issue workspace：
 - `repo/` 存放 Git 仓库和未提交状态
 - `runtime/task-{task_id}/` 存放单个任务的运行时文件
 - `claude/` 存放 Claude CLI 会话状态
 - 清理 issue workspace 也会删除 Claude resume context
+
+当 `worker_workspace_host_path` 为空时，不创建 issue workspace，Session Storage 使用 `{session_storage_root}/{issue_id}/claude` legacy 路径：
+- Claude 会话状态仍会挂载到 `/home/codify/.claude`
+- legacy session 路径独立于 workspace cleanup
+- workspace 状态查询和删除接口在该模式下不清理 Claude resume context
 
 ---
 
