@@ -487,7 +487,7 @@ def _run_worker_task(task_id: int) -> bool:
 
     async def run_task():
         async with ThreadSessionLocal() as db:
-            worker = WorkerExecutor()
+            worker = WorkerExecutor(session_factory=ThreadSessionLocal)
             return await worker.execute_task(db, task_id)
 
     # Create new event loop for this thread
@@ -532,7 +532,7 @@ def _run_worker_resume_task(task_id: int, container_name: str) -> bool:
 
     async def run_task():
         async with ThreadSessionLocal() as db:
-            worker = WorkerExecutor()
+            worker = WorkerExecutor(session_factory=ThreadSessionLocal)
             return await worker.resume_task(db, task_id, container_name)
 
     loop = asyncio.new_event_loop()

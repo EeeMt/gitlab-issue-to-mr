@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from gitlab import Gitlab
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_effective_settings as get_settings
 from app.core.docker_client import DockerClientWrapper, get_docker_client
@@ -124,9 +124,11 @@ class WorkerExecutor:
         self,
         docker_client: Optional[DockerClientWrapper] = None,
         gitlab_client: Optional[GitLabClient] = None,
+        session_factory: Optional[async_sessionmaker[AsyncSession]] = None,
     ):
         self.docker = docker_client or get_docker_client()
         self.gitlab = gitlab_client or get_gitlab_client()
+        self._session_factory = session_factory
         self._event_projector = WorkerEventProjector(sanitize_sensitive_data)
         self._scrub_sensitive_data = scrub_sensitive_data
         self._sanitize_sensitive_data = sanitize_sensitive_data

@@ -502,6 +502,7 @@ const zhCN = {
     taskMetadata: '任务元数据',
     retryOf: '重试自',
     taskProcess: '任务进程',
+    followupReplayHint: '接续任务会通过 Claude replay 带入前序事件，事件流可能包含前序任务内容。',
     taskResult: '任务结果',
     branchFlow: '分支配置',
     directPush: '直接推送',

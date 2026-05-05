@@ -462,10 +462,12 @@ async def monitor_container_run(
     sudo_gl: Optional[Gitlab],
     resume_prefix: str = "",
 ) -> bool:
+    session_factory = getattr(worker, "_session_factory", None) or AsyncSessionLocal
+
     async def _poll_artifacts(stop: asyncio.Event) -> None:
         while not stop.is_set():
             try:
-                async with AsyncSessionLocal() as poll_db:
+                async with session_factory() as poll_db:
                     await worker._tail_event_jsonl(task_id=task.id, container=container, db=poll_db)
                     await worker._tail_console_log(task_id=task.id, container=container, db=poll_db)
             except Exception as exc:  # noqa: BLE001
@@ -473,7 +475,7 @@ async def monitor_container_run(
             await asyncio.sleep(2)
 
     async def _flush_artifacts_once() -> None:
-        async with AsyncSessionLocal() as artifact_db:
+        async with session_factory() as artifact_db:
             await worker._tail_event_jsonl(task_id=task.id, container=container, db=artifact_db)
             await worker._tail_console_log(task_id=task.id, container=container, db=artifact_db)
             await worker._finalize_archive(task_id=task.id, container=container, db=artifact_db)

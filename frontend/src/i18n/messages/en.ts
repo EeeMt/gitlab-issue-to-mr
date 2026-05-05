@@ -512,6 +512,7 @@ const en = {
     taskMetadata: 'Task Metadata',
     retryOf: 'Retry of',
     taskProcess: 'Task Process',
+    followupReplayHint: 'Follow-up tasks use Claude replay, so events may include previous task content.',
     taskResult: 'Task Result',
     branchFlow: 'Branch Config',
     directPush: 'Direct Push',

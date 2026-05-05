@@ -110,6 +110,21 @@ describe('TaskProcessPanel', () => {
     expect(wrapper.get('.task-process-panel').classes()).toContain('task-process-panel--running')
   })
 
+  it('renders the follow-up replay hint in the header when requested', () => {
+    const wrapper = mount(TaskProcessPanel, {
+      props: {
+        task: createTask('completed'),
+        taskLogs: [],
+        isActive: false,
+        terminalHtml: '',
+        taskStatus: 'completed',
+        showFollowupReplayHint: true,
+      },
+    })
+
+    expect(wrapper.get('.n-card__header').text()).toContain('taskView.followupReplayHint')
+  })
+
   it('keeps the running background glow subtle', () => {
     expect(taskProcessPanelSource).toContain('rgba(74, 222, 128, 0.07)')
   })

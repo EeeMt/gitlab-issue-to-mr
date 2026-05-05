@@ -5,9 +5,12 @@
     :bordered="false"
   >
     <template #header>
-      <span class="panel-title">{{ t('taskView.taskProcess') }}</span>
-      <n-tag v-if="isActive" type="success" size="small" round :class="{ 'live-badge--pulse': isActive }" style="margin-left: 8px">{{ t('taskView.realTime') }}</n-tag>
-      <span v-if="isActive && elapsedDisplay" class="elapsed-time">{{ elapsedDisplay }}</span>
+      <div class="process-header">
+        <span class="panel-title">{{ t('taskView.taskProcess') }}</span>
+        <n-tag v-if="isActive" type="success" size="small" round :class="{ 'live-badge--pulse': isActive }">{{ t('taskView.realTime') }}</n-tag>
+        <span v-if="showFollowupReplayHint" class="followup-replay-hint">{{ t('taskView.followupReplayHint') }}</span>
+        <span v-if="isActive && elapsedDisplay" class="elapsed-time">{{ elapsedDisplay }}</span>
+      </div>
     </template>
 
     <TaskProcessSystemInitBanner
@@ -96,8 +99,10 @@ const props = withDefaults(defineProps<{
   isActive: boolean
   terminalHtml: string
   taskStatus: string
+  showFollowupReplayHint?: boolean
 }>(), {
-  taskLogs: () => []
+  taskLogs: () => [],
+  showFollowupReplayHint: false,
 })
 
 const emit = defineEmits<{
@@ -301,6 +306,19 @@ defineExpose({ onCollapseChange })
 .panel-title {
   font-size: 18px;
   font-weight: 600;
+}
+.process-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.followup-replay-hint {
+  min-width: 0;
+  color: var(--n-text-color-3, #6b7280);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
 }
 .elapsed-time {
   margin-left: auto;

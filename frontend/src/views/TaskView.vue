@@ -252,6 +252,7 @@
             :is-active="isActiveTaskStatus(task?.status)"
             :terminal-html="terminalLogHtml"
             :task-status="task?.status ?? ''"
+            :show-followup-replay-hint="showFollowupReplayHint"
             @raw-tab-open="onRawTabOpen"
             @raw-tab-close="onRawTabClose"
           />
@@ -329,6 +330,7 @@ const slotMaxTasks = ref(0)
 const slotEnforce = ref(false)
 const taskLogs = ref<TaskLog[]>([])
 const activeRetryTask = ref<Task | null>(null)
+const issueTasks = ref<Task[]>([])
 let pollTimer: number | null = null
 let logEventSource: EventSource | null = null
 let logStreamContainerId: string | null = null
@@ -381,6 +383,16 @@ const canManageTask = computed(() => {
   )
 })
 
+const showFollowupReplayHint = computed(() => {
+  if (!task.value?.issue_id) return false
+  const tasks = [...issueTasks.value].sort((a, b) => {
+    const createdDelta = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    return createdDelta !== 0 ? createdDelta : a.id - b.id
+  })
+  const currentIndex = tasks.findIndex((item) => item.id === task.value?.id)
+  return currentIndex > 0
+})
+
 function syncRescheduleDatetime() {
   rescheduleDatetime.value = task.value?.scheduled_at ? parseUtcDate(task.value.scheduled_at).getTime() : null
 }
@@ -405,12 +417,11 @@ async function checkActiveRetry() {
     return
   }
   try {
-    const issueId = task.value.issue?.id
+    const issueId = task.value.issue_id ?? task.value.issue?.id
     if (issueId) {
-      const issueData = await getIssue(issueId)
-      if (issueData.tasks) {
+      if (issueTasks.value.length > 0) {
         // Find the latest retry task for this task (any status)
-        const retryMatch = issueData.tasks
+        const retryMatch = issueTasks.value
           .filter(t => t.retry_source_task_id === task.value!.id)
           .sort((a, b) => b.id - a.id)[0]
         activeRetryTask.value = retryMatch ?? null
@@ -422,6 +433,20 @@ async function checkActiveRetry() {
     }
   } catch {
     activeRetryTask.value = null
+  }
+}
+
+async function refreshIssueTasks() {
+  const issueId = task.value?.issue_id ?? task.value?.issue?.id
+  if (!issueId) {
+    issueTasks.value = []
+    return
+  }
+  try {
+    const issueData = await getIssue(issueId)
+    issueTasks.value = issueData.tasks ?? []
+  } catch {
+    issueTasks.value = []
   }
 }
 
@@ -540,6 +565,7 @@ async function fetchTask() {
       connectStructuredLogStream()
     }
 
+    await refreshIssueTasks()
     await checkActiveRetry()
   } catch (error) {
     message.error(t('taskView.failedToFetchTask'))
@@ -756,6 +782,7 @@ watch(
       resetLogsState()
       task.value = null
       activeRetryTask.value = null
+      issueTasks.value = []
       hasLoadedOnce.value = false
       fetchTask()
     }
