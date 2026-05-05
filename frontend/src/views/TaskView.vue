@@ -169,6 +169,16 @@
                         :disabled="!canManageTask"
                       />
                       <n-button
+                        secondary
+                        round
+                        :loading="scheduledTasksLoading"
+                        @click="openScheduleDrawer('retry')"
+                        :disabled="!canManageTask"
+                      >
+                        <template #icon><n-icon :component="CalendarOutline" /></template>
+                        {{ t('taskView.viewScheduleHeatmap') }}
+                      </n-button>
+                      <n-button
                         type="info"
                         secondary
                         strong
@@ -205,7 +215,7 @@
                         secondary
                         round
                         :loading="scheduledTasksLoading"
-                        @click="openScheduleDrawer"
+                        @click="openScheduleDrawer('reschedule')"
                         :disabled="!canManageTask"
                       >
                         <template #icon><n-icon :component="CalendarOutline" /></template>
@@ -297,7 +307,7 @@
         </p>
         <HeatmapChart
           :tasks="scheduledTasksForPreview"
-          :selected-ms="rescheduleDatetime"
+          :selected-ms="heatmapTarget === 'retry' ? retryScheduleDatetime : rescheduleDatetime"
           :max-per-slot="slotMaxTasks"
           :enforce-capacity="slotEnforce"
           @cell-click="handleScheduleHeatmapCellClick"
@@ -347,6 +357,7 @@ const taskRequestInFlight = ref(false)
 const rescheduleDatetime = ref<number | null>(null)
 const retryScheduleDatetime = ref<number | null>(null)
 const showScheduleDrawer = ref(false)
+const heatmapTarget = ref<'retry' | 'reschedule'>('reschedule')
 const scheduledTasksForPreview = ref<Task[]>([])
 const scheduledTasksLoading = ref(false)
 const slotMaxTasks = ref(0)
@@ -796,7 +807,8 @@ async function handleReschedule() {
   }
 }
 
-async function openScheduleDrawer() {
+async function openScheduleDrawer(target: 'retry' | 'reschedule' = 'reschedule') {
+  heatmapTarget.value = target
   showScheduleDrawer.value = true
   scheduledTasksLoading.value = true
   try {
@@ -814,7 +826,11 @@ async function openScheduleDrawer() {
 }
 
 function handleScheduleHeatmapCellClick(startMs: number) {
-  rescheduleDatetime.value = startMs
+  if (heatmapTarget.value === 'retry') {
+    retryScheduleDatetime.value = startMs
+  } else {
+    rescheduleDatetime.value = startMs
+  }
   showScheduleDrawer.value = false
 }
 
