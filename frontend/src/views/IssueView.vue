@@ -490,7 +490,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin,
   NIcon, NDataTable, NInput, NDrawer, NDrawerContent, NSelect,
-  NRadio, NRadioGroup, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NAlert,
+  NRadio, NRadioGroup, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NAlert, NSwitch,
   useMessage, useDialog,
   type DataTableColumns
 } from 'naive-ui'

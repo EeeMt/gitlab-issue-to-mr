@@ -33,6 +33,7 @@ RESERVED_WORKER_ENVIRONMENT_KEYS = frozenset(
         "ISSUE_TITLE",
         "MR_IID",
         "PROJECT_ID",
+        "REQUIRE_CHANGES",
         "RESUME_SESSION",
         "TARGET_BRANCH",
         "TASK_ID",

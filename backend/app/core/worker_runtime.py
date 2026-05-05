@@ -181,6 +181,9 @@ def build_legacy_container_env(
         environment["BASE_BRANCH"] = issue.base_branch
     if mr_iid:
         environment["MR_IID"] = str(mr_iid)
+
+    environment["REQUIRE_CHANGES"] = "true" if getattr(task, "require_changes", True) else "false"
+
     if settings.custom_ca_bundle:
         environment["CUSTOM_CA_BUNDLE"] = settings.custom_ca_bundle
     if custom_environment:

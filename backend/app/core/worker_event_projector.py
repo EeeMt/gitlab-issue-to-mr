@@ -1,15 +1,25 @@
 """Event/archive projection helpers for worker execution."""
 
 import asyncio
+import io
 import json as _json
 import logging
+import os as _os
+import tarfile as _tarfile
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.task_event_archive import decode_event_line, get_or_create_cursor, iter_complete_jsonl_records
+from app.core.task_event_archive import (
+    archive_bundle_name,
+    decode_event_line,
+    get_or_create_cursor,
+    iter_complete_jsonl_records,
+)
 from app.core.task_log_payloads import append_raw_log_chunk, create_payload
 from app.models import TaskLog
+
+_ARCHIVE_STORE = "/opt/codify-archives"
 
 logger = logging.getLogger(__name__)
 _CONTAINER_RUNTIME_DIR = "/tmp/codify-runtime"
@@ -462,6 +472,41 @@ class WorkerEventProjector:
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"[Task {task_id}] _tail_event_jsonl error: {exc}")
         await db.commit()
+
+    async def backfill_console_log_from_archive(
+        self, *, task_id: int, db: AsyncSession
+    ) -> None:
+        """Read console.log from the saved runtime archive and fill missing raw log chunks."""
+        archive_path = _os.path.join(_ARCHIVE_STORE, archive_bundle_name(task_id=task_id))
+        if not _os.path.exists(archive_path):
+            return
+        try:
+            with _tarfile.open(archive_path, "r:gz") as tf:
+                member = next((m for m in tf.getmembers() if m.name == "console.log"), None)
+                if member is None:
+                    return
+                extracted = tf.extractfile(member)
+                if extracted is None:
+                    return
+                full_text = extracted.read().decode("utf-8", errors="replace")
+        except Exception:
+            return
+
+        cursor = await get_or_create_cursor(db, task_id=task_id, stream_name="console_log")
+        if cursor.last_offset >= len(full_text.encode("utf-8")):
+            return
+
+        new_data = full_text.encode("utf-8")[cursor.last_offset:].decode("utf-8", errors="replace")
+        if not new_data:
+            return
+        await append_raw_log_chunk(
+            db,
+            task_id=task_id,
+            sequence_no=cursor.last_sequence_no + 1,
+            text=new_data,
+        )
+        cursor.last_offset = len(full_text.encode("utf-8"))
+        cursor.last_sequence_no += 1
 
     async def tail_console_log(self, *, task_id: int, container: Any, db: AsyncSession) -> None:
         """Read newly appended bytes from console.log and persist as raw log chunks."""

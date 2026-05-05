@@ -442,6 +442,7 @@ async def monitor_container_run(
             await worker._tail_event_jsonl(task_id=task.id, container=container, db=artifact_db)
             await worker._tail_console_log(task_id=task.id, container=container, db=artifact_db)
             await worker._finalize_archive(task_id=task.id, container=container, db=artifact_db)
+            await worker._backfill_console_log_from_archive(task_id=task.id, db=artifact_db)
 
     stop_event = asyncio.Event()
     poll_task = asyncio.create_task(_poll_artifacts(stop_event))

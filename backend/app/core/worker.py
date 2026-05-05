@@ -149,6 +149,7 @@ class WorkerExecutor:
             '_ingest_event_record': self._event_projector.ingest_event_record,
             '_tail_event_jsonl': self._event_projector.tail_event_jsonl,
             '_tail_console_log': self._event_projector.tail_console_log,
+            '_backfill_console_log_from_archive': self._event_projector.backfill_console_log_from_archive,
         }
         if name in projector_methods:
             return projector_methods[name]
