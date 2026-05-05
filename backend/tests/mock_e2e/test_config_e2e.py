@@ -208,6 +208,8 @@ class TestGetRuntimeConfig:
             "worker_volume_mounts", "maven_cache_host_path",
             "maven_settings_host_path", "slot_max_tasks", "slot_max_tasks_enforce",
             "worker_environment_variables",
+            "worker_workspace_host_path", "worker_workspace_retention_days",
+            "worker_failed_workspace_retention_days",
         }
         assert expected_keys == set(data.keys())
 
