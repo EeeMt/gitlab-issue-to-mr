@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import inspect
 from typing import Optional
 
 from sqlalchemy import delete, insert, select
@@ -16,24 +17,30 @@ logger = logging.getLogger(__name__)
 _TERMINAL_STATUSES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
 
 
+async def _maybe_await(value):
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
 async def acquire_issue_execution_lock(db: AsyncSession, task: Task) -> bool:
     """Acquire the issue-level execution lock for a task."""
     if task.issue_id is None:
         return True
 
     try:
-        await db.execute(
+        await _maybe_await(db.execute(
             insert(IssueExecutionLock).values(
                 issue_id=task.issue_id,
                 task_id=task.id,
                 acquired_at=utcnow(),
                 heartbeat_at=None,
             )
-        )
-        await db.flush()
+        ))
+        await _maybe_await(db.flush())
         return True
     except IntegrityError:
-        await db.rollback()
+        await _maybe_await(db.rollback())
         logger.info(
             "Issue %s is already locked; task %s will wait",
             task.issue_id,
@@ -51,8 +58,8 @@ async def release_issue_execution_lock(
     if issue_id is None:
         return
 
-    await db.execute(
-        delete(IssueExecutionLock).where(IssueExecutionLock.issue_id == issue_id)
+    await _maybe_await(
+        db.execute(delete(IssueExecutionLock).where(IssueExecutionLock.issue_id == issue_id))
     )
 
 

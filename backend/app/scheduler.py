@@ -143,15 +143,20 @@ class Scheduler:
             return
 
         settings = get_settings()
-        root = (getattr(settings, "worker_workspace_host_path", "") or "").strip()
+        raw_root = getattr(settings, "worker_workspace_host_path", "")
+        root = raw_root.strip() if isinstance(raw_root, str) else ""
         if not root:
+            self._last_workspace_cleanup_at = now
+            return
+        retention_days = getattr(settings, "worker_workspace_retention_days", 14)
+        if not isinstance(retention_days, int):
             self._last_workspace_cleanup_at = now
             return
 
         removed = await asyncio.to_thread(
             cleanup_expired_workspaces,
             root,
-            retention_days=settings.worker_workspace_retention_days,
+            retention_days=retention_days,
         )
         if removed:
             logger.info("Cleaned up %s expired worker workspace(s)", removed)

@@ -224,3 +224,12 @@ WORKER_FAILED_WORKSPACE_RETENTION_DAYS=30
 ## 推荐结论
 
 在同 issue task 严格串行的产品设定下，issue 级持久 workspace 是推荐方案。落地顺序应先加强 issue execution lock，再启用 workspace 挂载。这样可以保留失败现场、支持继续执行，同时避免并发写同一 repo 带来的文件冲突。
+
+## Implementation Notes
+
+Implemented in phases:
+
+- Database-backed `issue_execution_locks` provides the authoritative issue execution gate.
+- Worker workspace persistence is optional and controlled by `WORKER_WORKSPACE_HOST_PATH`.
+- Runtime files and archives remain outside `/workspace` and are read from `/tmp/codify-runtime`.
+- Backend persists downloadable archives to `/opt/codify-archives` before worker containers are removed.
