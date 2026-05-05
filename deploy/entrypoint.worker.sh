@@ -24,6 +24,23 @@ ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-http://localhost:11434/v1}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}"
 APPEND_SYSTEM_PROMPT="${APPEND_SYSTEM_PROMPT:-}"
+CODIFY_RUNTIME_DIR="${CODIFY_RUNTIME_DIR:-/tmp/codify-runtime}"
+export CODIFY_RUNTIME_DIR
+mkdir -p "${CODIFY_RUNTIME_DIR}"
+chown -R codify:codify "${CODIFY_RUNTIME_DIR}"
+CONSOLE_LOG="${CODIFY_RUNTIME_DIR}/console.log"
+touch "${CONSOLE_LOG}"
+chown codify:codify "${CONSOLE_LOG}"
+
+# Persist the same human-readable console stream that Docker exposes while the
+# task is running. TaskRawLogChunk tails this file after completion.
+CONSOLE_TEE_DIR=$(mktemp -d)
+CONSOLE_TEE_PIPE="${CONSOLE_TEE_DIR}/console.pipe"
+mkfifo "${CONSOLE_TEE_PIPE}"
+tee -a "${CONSOLE_LOG}" < "${CONSOLE_TEE_PIPE}" &
+exec > "${CONSOLE_TEE_PIPE}" 2>&1
+rm -f "${CONSOLE_TEE_PIPE}"
+rmdir "${CONSOLE_TEE_DIR}" 2>/dev/null || true
 
 echo "========================================"
 echo "Codify Worker"
@@ -159,10 +176,6 @@ GIT_AUTHOR_NAME_VALUE="${GIT_AUTHOR_NAME:-${CODIFY_AUTHOR_NAME:-Codify User}}"
 GIT_AUTHOR_EMAIL_VALUE="${GIT_AUTHOR_EMAIL:-${CODIFY_AUTHOR_EMAIL:-codify-task@codify.local}}"
 CODIFY_COAUTHOR_NAME_VALUE="${CODIFY_COAUTHOR_NAME:-Codify}"
 CODIFY_COAUTHOR_EMAIL_VALUE="${CODIFY_COAUTHOR_EMAIL:-codify@codify.local}"
-CODIFY_RUNTIME_DIR="${CODIFY_RUNTIME_DIR:-/tmp/codify-runtime}"
-export CODIFY_RUNTIME_DIR
-mkdir -p "${CODIFY_RUNTIME_DIR}"
-chown -R codify:codify "${CODIFY_RUNTIME_DIR}"
 
 # Checkout/create branch
 WORKSPACE_CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
@@ -545,7 +558,7 @@ update_mr_description "$(build_running_mr_description)" || true
 echo "Starting Claude CLI (streaming mode)..."
 set +e
 env HOME=/home/codify timeout "${TASK_TIMEOUT:-1800}" su -m -s /bin/bash codify -c \
-    'cd /workspace && export PATH="/usr/local/bin:/usr/bin:/bin:${JAVA_HOME}/bin" && ARTIFACT_DIR="${CODIFY_RUNTIME_DIR}" PROMPT_FILE=/tmp/claude_prompt.txt /usr/local/bin/ci-claude.sh' \
+    'cd /workspace && export PATH="/usr/local/bin:/usr/bin:/bin:${JAVA_HOME}/bin" && ARTIFACT_DIR="${CODIFY_RUNTIME_DIR}" CI_CLAUDE_DISABLE_CONSOLE_TEE=1 PROMPT_FILE=/tmp/claude_prompt.txt /usr/local/bin/ci-claude.sh' \
     > /tmp/claude_result.json
 SCRIPT_RESULT=$?
 set -e

@@ -668,11 +668,19 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         content = script.read_text()
 
         self.assertIn('CODIFY_RUNTIME_DIR="${CODIFY_RUNTIME_DIR:-/tmp/codify-runtime}"', content)
-        self.assertIn('ARTIFACT_DIR="${CODIFY_RUNTIME_DIR}" PROMPT_FILE=/tmp/claude_prompt.txt', content)
+        self.assertIn('CONSOLE_LOG="${CODIFY_RUNTIME_DIR}/console.log"', content)
+        self.assertIn('tee -a "${CONSOLE_LOG}"', content)
+        self.assertIn('exec > "${CONSOLE_TEE_PIPE}" 2>&1', content)
+        self.assertIn('CI_CLAUDE_DISABLE_CONSOLE_TEE=1', content)
+        self.assertIn('ARTIFACT_DIR="${CODIFY_RUNTIME_DIR}" CI_CLAUDE_DISABLE_CONSOLE_TEE=1 PROMPT_FILE=/tmp/claude_prompt.txt', content)
         self.assertIn('local archive_path="${CODIFY_RUNTIME_DIR}/${archive_name}"', content)
         self.assertIn('tar -czf "${archive_path}" -C "${CODIFY_RUNTIME_DIR}" event.jsonl runtime.json console.log', content)
         self.assertNotIn('[ -f "/workspace/event.jsonl" ]', content)
         self.assertNotIn('/workspace/.codify-archive', content)
+
+        tee_index = content.index('exec > "${CONSOLE_TEE_PIPE}" 2>&1')
+        banner_index = content.index('echo "Codify Worker"')
+        self.assertLess(tee_index, banner_index)
 
         git_add_index = content.index('git add -A')
         archive_success_index = content.index('    create_runtime_archive\n\n    echo "========================================"')

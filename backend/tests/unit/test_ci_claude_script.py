@@ -365,6 +365,32 @@ def test_ci_claude_writes_event_jsonl_runtime_json_and_console_log(tmp_path):
     assert "Claude Code CI Runner" in (tmp_path / "console.log").read_text(encoding="utf-8")
 
 
+def test_ci_claude_can_skip_console_log_tee_when_parent_owns_it(tmp_path):
+    script_copy = _prepare_script_copy(
+        tmp_path,
+        "#!/usr/bin/env bash\ncat <<'EOF'\n"
+        '{"type":"result","subtype":"success","result":"done","session_id":"s1","usage":{"input_tokens":1,"output_tokens":1}}\n'
+        "EOF\n",
+    )
+    env = os.environ.copy()
+    env["SANDBOX_MODE"] = "1"
+    env["ARTIFACT_DIR"] = str(tmp_path)
+    env["CI_CLAUDE_DISABLE_CONSOLE_TEE"] = "1"
+
+    result = subprocess.run(
+        [str(script_copy), "test prompt"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "console.log").exists()
+    assert (tmp_path / "console.log").read_text(encoding="utf-8") == ""
+
+
 def test_ci_claude_respects_artifact_dir_env(tmp_path):
     artifact_dir = tmp_path / "artifacts"
     script_copy = _prepare_script_copy(
