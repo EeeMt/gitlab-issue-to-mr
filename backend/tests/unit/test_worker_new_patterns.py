@@ -223,6 +223,28 @@ class TestCodifySystemInitParsing(unittest.TestCase):
         self.assertEqual(task.total_changes, 15)
         self.assertEqual(task.merge_request_title, "Fix worker result parsing")
 
+    def test_falls_back_to_codify_stats_marker_when_structured_usage_missing(self):
+        task = _make_task()
+        self._run_parse(task, 'CODIFY_STATS:{"input_tokens":100,"output_tokens":50}\n')
+        self.assertEqual(task.input_tokens, 100)
+        self.assertEqual(task.output_tokens, 50)
+
+    def test_falls_back_to_commit_diff_title_and_session_markers(self):
+        task = _make_task()
+        logs = (
+            'CODIFY_DIFF:+5-2\n'
+            'CODIFY_COMMIT_SHA:fedcba9876543210fedcba9876543210fedcba98\n'
+            'CODIFY_MR_TITLE:Fallback marker title\n'
+            'CODIFY_SESSION_ID:fallback-session\n'
+        )
+        self._run_parse(task, logs)
+        self.assertEqual(task.commit_sha, "fedcba9876543210fedcba9876543210fedcba98")
+        self.assertEqual(task.additions, 5)
+        self.assertEqual(task.deletions, 2)
+        self.assertEqual(task.total_changes, 7)
+        self.assertEqual(task.merge_request_title, "Fallback marker title")
+        self.assertEqual(task._extracted_session_id, "fallback-session")
+
 
 # ---------------------------------------------------------------------------
 # TestCodifyMrTitleParsing
