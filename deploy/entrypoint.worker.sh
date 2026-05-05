@@ -131,10 +131,17 @@ chown codify:codify /home/codify/.git-credentials
 git config --global credential.helper store
 git config --file "${CODIFY_GIT_CONFIG}" credential.helper store
 
-# Clone repository with authentication
-echo "Cloning repository..."
-git clone "${GIT_REPO_URL}" /workspace
-cd /workspace
+# Clone or reuse repository with authentication.
+if [ -d /workspace/.git ]; then
+    echo "Reusing existing workspace..."
+    cd /workspace
+    git remote set-url origin "${GIT_REPO_URL}"
+    git fetch origin
+else
+    echo "Cloning repository..."
+    git clone "${GIT_REPO_URL}" /workspace
+    cd /workspace
+fi
 
 # Configure git
 git config --global user.email "bot@codify.local"
@@ -155,6 +162,15 @@ mkdir -p "${CODIFY_RUNTIME_DIR}"
 chown -R codify:codify "${CODIFY_RUNTIME_DIR}"
 
 # Checkout/create branch
+WORKSPACE_CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+if [ -n "${WORKSPACE_CURRENT_BRANCH}" ] && [ "${WORKSPACE_CURRENT_BRANCH}" != "HEAD" ] && [ "${WORKSPACE_CURRENT_BRANCH}" != "${BRANCH_NAME}" ]; then
+    WORKSPACE_DIRTY=$(git status --porcelain || true)
+    if [ -n "${WORKSPACE_DIRTY}" ]; then
+        echo "ERROR: Workspace has uncommitted changes on branch ${WORKSPACE_CURRENT_BRANCH}, cannot switch to ${BRANCH_NAME}"
+        exit 1
+    fi
+fi
+
 echo "Checking out branch: ${BRANCH_NAME}"
 git fetch origin
 

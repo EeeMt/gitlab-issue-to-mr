@@ -58,6 +58,7 @@ def _make_settings(**overrides):
     s.maven_cache_host_path = ""
     s.maven_settings_host_path = ""
     s.worker_volume_mounts_parsed = []
+    s.worker_workspace_host_path = ""
     s.alert_on_failure = False
     s.alert_webhook_url = None
     s.claude_max_turns = 20
@@ -677,6 +678,17 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         archive_success_index = content.index('    create_runtime_archive\n\n    echo "========================================"')
         self.assertGreater(archive_success_index, git_add_index)
 
+    def test_entrypoint_reuses_existing_git_workspace_safely(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('if [ -d /workspace/.git ]; then', content)
+        self.assertIn('git remote set-url origin "${GIT_REPO_URL}"', content)
+        self.assertIn('git fetch origin', content)
+        self.assertIn('WORKSPACE_CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD', content)
+        self.assertIn('Workspace has uncommitted changes on branch', content)
+        self.assertIn('git clone "${GIT_REPO_URL}" /workspace', content)
+
 
 class TestBuildContainerVolumes(unittest.TestCase):
     """Tests for _build_container_volumes — lines 527-557."""
@@ -748,6 +760,36 @@ class TestBuildContainerVolumes(unittest.TestCase):
         volumes = worker._build_container_volumes(settings)
 
         self.assertEqual(volumes, {})
+
+    def test_issue_workspace_and_task_runtime_volumes_enabled(self):
+        """Persistent workspace mounts issue repo and task runtime outside repo."""
+        settings = _make_settings(worker_workspace_host_path="/opt/codify-workspaces")
+        worker = _make_worker()
+        issue = MagicMock()
+        issue.project_id = 123
+        issue.id = 456
+        task = MagicMock()
+        task.id = 789
+
+        volumes = worker._build_container_volumes(settings, issue, task=task)
+
+        repo_path = "/opt/codify-workspaces/project-123/issue-456/repo"
+        runtime_path = "/opt/codify-workspaces/project-123/issue-456/runtime/task-789"
+        self.assertEqual(volumes[repo_path]["bind"], "/workspace")
+        self.assertEqual(volumes[repo_path]["mode"], "rw")
+        self.assertEqual(volumes[runtime_path]["bind"], "/tmp/codify-runtime")
+        self.assertEqual(volumes[runtime_path]["mode"], "rw")
+
+    def test_issue_workspace_volumes_disabled_when_setting_empty(self):
+        settings = _make_settings(worker_workspace_host_path="")
+        worker = _make_worker()
+        issue = MagicMock(project_id=123, id=456)
+        task = MagicMock(id=789)
+
+        volumes = worker._build_container_volumes(settings, issue, task=task)
+
+        self.assertNotIn("/workspace", [v["bind"] for v in volumes.values()])
+        self.assertNotIn("/tmp/codify-runtime", [v["bind"] for v in volumes.values()])
 
     def test_generic_volume_mount_default_mode_is_ro(self):
         """Mount with no mode defaults to 'ro' — line 553."""
@@ -1886,6 +1928,20 @@ class TestProcessPendingTasks(unittest.TestCase):
             count = asyncio.run(worker.process_pending_tasks(db))
 
         self.assertEqual(count, 0)
+
+
+class TestDeployComposeWorkspaceMounts(unittest.TestCase):
+    def test_backend_compose_mounts_workspace_root(self):
+        compose = Path(__file__).resolve().parents[3] / "deploy" / "docker-compose.yml"
+        content = compose.read_text()
+
+        self.assertIn("/opt/codify-workspaces:/opt/codify-workspaces", content)
+
+    def test_offline_compose_mounts_workspace_root(self):
+        compose = Path(__file__).resolve().parents[3] / "deploy" / "offline-bundle" / "docker-compose.yml"
+        content = compose.read_text()
+
+        self.assertIn("/opt/codify-workspaces:/opt/codify-workspaces", content)
 
 
 if __name__ == "__main__":

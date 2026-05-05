@@ -190,7 +190,7 @@ async def create_execute_container(
     await persist_issue_mr_if_changed(db, issue, mr_iid, mr_web_url)
 
     environment, _target_branch = await worker._prepare_container_inputs(db, task, issue, mr_iid)
-    volumes = worker._build_container_volumes(settings, issue)
+    volumes = worker._build_container_volumes(settings, issue, task=task)
     container_name = worker._get_container_name(task)
     container = worker.docker.create_container(
         image=settings.worker_image,

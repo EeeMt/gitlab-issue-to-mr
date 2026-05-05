@@ -13,6 +13,8 @@ from app.models import AIProvider, Issue, Task, User
 
 _MAVEN_CACHE_CONTAINER_PATH = "/home/codify/.m2/repository"
 _MAVEN_SETTINGS_CONTAINER_PATH = "/home/codify/.m2/settings.xml"
+_WORKSPACE_CONTAINER_PATH = "/workspace"
+_RUNTIME_CONTAINER_PATH = "/tmp/codify-runtime"
 
 
 async def resolve_provider(db: AsyncSession, task: Task) -> AIProvider:
@@ -185,7 +187,12 @@ def build_legacy_container_env(
     return environment
 
 
-def build_container_volumes(settings: Any, issue: Optional[Issue] = None) -> dict:
+def build_container_volumes(
+    settings: Any,
+    issue: Optional[Issue] = None,
+    *,
+    task: Optional[Task] = None,
+) -> dict:
     """Build volume mounts for the worker container."""
     volumes: dict = {}
 
@@ -206,6 +213,27 @@ def build_container_volumes(settings: Any, issue: Optional[Issue] = None) -> dic
         mode = mount.get("mode", "ro")
         if host_path and container_path:
             volumes[host_path] = {"bind": container_path, "mode": mode}
+
+    workspace_root = getattr(settings, "worker_workspace_host_path", "") or ""
+    if workspace_root and issue is not None and task is not None:
+        project_id = getattr(issue, "project_id", None)
+        issue_id = getattr(issue, "id", None)
+        task_id = getattr(task, "id", None)
+        if project_id is not None and issue_id is not None and task_id is not None:
+            issue_root = os.path.join(
+                workspace_root,
+                f"project-{project_id}",
+                f"issue-{issue_id}",
+            )
+            repo_path = os.path.join(issue_root, "repo")
+            runtime_path = os.path.join(issue_root, "runtime", f"task-{task_id}")
+            try:
+                os.makedirs(repo_path, exist_ok=True)
+                os.makedirs(runtime_path, exist_ok=True)
+            except OSError:
+                pass
+            volumes[repo_path] = {"bind": _WORKSPACE_CONTAINER_PATH, "mode": "rw"}
+            volumes[runtime_path] = {"bind": _RUNTIME_CONTAINER_PATH, "mode": "rw"}
 
     if issue and issue.session_storage_path:
         os.makedirs(issue.session_storage_path, exist_ok=True)
