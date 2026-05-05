@@ -592,6 +592,7 @@ describe('TaskView', () => {
         archive_name: 'task-1-runtime-archive.tar.gz',
         archive_size_bytes: 42,
         created_at: '2026-05-01T10:00:00Z',
+        file_exists: true,
       })
 
       await wrapper.vm.fetchArchiveMetadata()
@@ -599,6 +600,28 @@ describe('TaskView', () => {
 
       expect(mockApi.getTaskArchive).toHaveBeenCalledWith(1)
       expect(wrapper.text()).toContain('taskView.downloadRuntimeArchive')
+    })
+
+    it('shows expired badge and disables download when archive file was cleaned up', async () => {
+      await mountComponent({ status: 'completed' })
+      ;(mockApi.getTaskArchive as Mock).mockResolvedValue({
+        archive_name: 'task-1-runtime-archive.tar.gz',
+        archive_size_bytes: 42,
+        created_at: '2026-05-01T10:00:00Z',
+        file_exists: false,
+      })
+
+      await wrapper.vm.fetchArchiveMetadata()
+      await nextTick()
+
+      expect(wrapper.text()).toContain('taskView.downloadRuntimeArchive')
+      expect(wrapper.text()).toContain('taskView.archiveFileExpired')
+      const buttons = wrapper.findAllComponents({ name: 'NButton' })
+      const downloadButton = buttons.find(
+        (b) => b.text() === 'taskView.downloadRuntimeArchive',
+      )
+      expect(downloadButton).toBeTruthy()
+      expect(downloadButton!.props('disabled')).toBe(true)
     })
 
     it('should disable actions based on permissions when not allowed', async () => {
@@ -651,6 +674,7 @@ describe('TaskView', () => {
         archive_name: 'task-1-runtime-archive.tar.gz',
         archive_size_bytes: 42,
         created_at: '2026-05-01T10:00:00Z',
+        file_exists: true,
       }
       await wrapper.vm.handleDownloadArchive()
 
@@ -660,6 +684,20 @@ describe('TaskView', () => {
 
       createObjectURL.mockRestore()
       revokeObjectURL.mockRestore()
+    })
+
+    it('does not attempt download when archive file is expired', async () => {
+      await mountComponent({ status: 'completed' })
+      ;(mockApi.downloadTaskArchive as Mock).mockResolvedValue(new Blob(['archive']))
+      wrapper.vm.archiveMetadata = {
+        archive_name: 'task-1-runtime-archive.tar.gz',
+        archive_size_bytes: 42,
+        created_at: '2026-05-01T10:00:00Z',
+        file_exists: false,
+      }
+      await wrapper.vm.handleDownloadArchive()
+
+      expect(mockApi.downloadTaskArchive).not.toHaveBeenCalled()
     })
 
     it('should call retryTask API on retry', async () => {

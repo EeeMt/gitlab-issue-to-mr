@@ -88,9 +88,19 @@
                     class="task-actions__item task-actions__item--info"
                   >
                     <div class="task-actions__meta">
-                      <div class="task-actions__label">{{ t('taskView.runtimeArchive') }}</div>
+                      <div class="task-actions__label">
+                        {{ t('taskView.runtimeArchive') }}
+                        <n-tag
+                          v-if="!archiveMetadata.file_exists"
+                          type="warning"
+                          size="small"
+                          :bordered="false"
+                        >
+                          {{ t('taskView.archiveFileExpired') }}
+                        </n-tag>
+                      </div>
                       <div class="task-actions__description">
-                        {{ t('taskView.runtimeArchiveDescription') }}
+                        {{ archiveMetadata.file_exists ? t('taskView.runtimeArchiveDescription') : t('taskView.archiveFileExpiredDescription') }}
                       </div>
                     </div>
                     <n-button
@@ -98,6 +108,7 @@
                       secondary
                       strong
                       round
+                      :disabled="!archiveMetadata.file_exists"
                       @click="handleDownloadArchive"
                       :loading="archiveDownloadLoading"
                     >
@@ -365,7 +376,7 @@ const slotEnforce = ref(false)
 const taskLogs = ref<TaskLog[]>([])
 const activeRetryTask = ref<Task | null>(null)
 const issueTasks = ref<Task[]>([])
-const archiveMetadata = ref<{ archive_name: string; archive_size_bytes: number; created_at: string } | null>(null)
+const archiveMetadata = ref<{ archive_name: string; archive_size_bytes: number; created_at: string; file_exists: boolean } | null>(null)
 const archiveDownloadLoading = ref(false)
 let pollTimer: number | null = null
 let logEventSource: EventSource | null = null
@@ -691,7 +702,7 @@ async function handleCancel() {
 }
 
 async function handleDownloadArchive() {
-  if (!archiveMetadata.value) return
+  if (!archiveMetadata.value?.file_exists) return
   archiveDownloadLoading.value = true
   try {
     const blob = await downloadTaskArchive(taskId.value)

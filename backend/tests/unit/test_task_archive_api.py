@@ -37,6 +37,30 @@ class TestGetTaskArchive(unittest.IsolatedAsyncioTestCase):
 
         assert result["archive_name"] == "task-1-runtime-archive.tar.gz"
         assert result["archive_size_bytes"] == 1024
+        assert result["file_exists"] is False
+
+    async def test_get_task_archive_file_exists_when_file_present(self):
+        """Test /tasks/{id}/archive returns file_exists=True when the file is on disk."""
+        from app.api.tasks import get_task_archive
+
+        with NamedTemporaryFile(suffix=".tar.gz") as tmp:
+            tmp.write(b"archive")
+            tmp.flush()
+            mock_db = AsyncMock()
+            mock_archive = TaskRunArchive(
+                task_id=1,
+                archive_name="task-1-runtime-archive.tar.gz",
+                archive_path=tmp.name,
+                archive_size_bytes=7,
+                created_at=datetime(2025, 1, 1, 12, 0, 0),
+            )
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = mock_archive
+            mock_db.execute = AsyncMock(return_value=mock_result)
+
+            result = await get_task_archive(task_id=1, db=mock_db, access_scope=MagicMock())
+
+            assert result["file_exists"] is True
 
     async def test_get_task_archive_404_when_no_archive(self):
         from app.api.tasks import get_task_archive

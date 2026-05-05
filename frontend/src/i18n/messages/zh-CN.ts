@@ -490,6 +490,8 @@ const zhCN = {
     runtimeArchiveDescription: '下载本次运行的 event.jsonl、runtime.json 和 console.log。',
     downloadRuntimeArchive: '下载运行归档',
     failedToDownloadRuntimeArchive: '下载运行归档失败',
+    archiveFileExpired: '文件已过期',
+    archiveFileExpiredDescription: '运行归档文件已被清理，无法继续下载。',
     timelineView: '时间线',
     terminalView: '终端',
     toolCallsCount: '{count} 次工具调用',

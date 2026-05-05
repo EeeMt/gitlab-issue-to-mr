@@ -1035,7 +1035,7 @@ export async function getTaskContainerLogs(id: number, source?: 'db' | 'auto'): 
   return response.data
 }
 
-export async function getTaskArchive(id: number): Promise<{ archive_name: string; archive_size_bytes: number; created_at: string }> {
+export async function getTaskArchive(id: number): Promise<{ archive_name: string; archive_size_bytes: number; created_at: string; file_exists: boolean }> {
   const response = await api.get(`/tasks/${id}/archive`)
   return response.data
 }

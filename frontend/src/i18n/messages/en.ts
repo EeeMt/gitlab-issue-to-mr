@@ -500,6 +500,8 @@ const en = {
     runtimeArchiveDescription: 'Download event.jsonl, runtime.json, and console.log for this run.',
     downloadRuntimeArchive: 'Download runtime archive',
     failedToDownloadRuntimeArchive: 'Failed to download runtime archive',
+    archiveFileExpired: 'File expired',
+    archiveFileExpiredDescription: 'The runtime archive file has been cleaned up and is no longer available for download.',
     timelineView: 'Timeline',
     terminalView: 'Terminal',
     toolCallsCount: '{count} tool calls',

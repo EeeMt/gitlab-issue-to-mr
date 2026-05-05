@@ -1006,6 +1006,7 @@ async def get_task_archive(
         "archive_name": archive.archive_name,
         "archive_size_bytes": archive.archive_size_bytes,
         "created_at": archive.created_at.isoformat(),
+        "file_exists": bool(archive.archive_path and os.path.exists(archive.archive_path)),
     }
 
 
