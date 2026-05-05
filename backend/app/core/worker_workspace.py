@@ -42,6 +42,30 @@ def remove_issue_workspace(issue_root: str) -> bool:
     return True
 
 
+def _latest_tree_mtime(path: str) -> float:
+    try:
+        latest = os.path.getmtime(path)
+    except OSError:
+        latest = 0.0
+
+    def _ignore_walk_error(_error: OSError) -> None:
+        return None
+
+    for dirpath, _dirnames, filenames in os.walk(path, onerror=_ignore_walk_error):
+        try:
+            latest = max(latest, os.path.getmtime(dirpath))
+        except OSError:
+            pass
+        for filename in filenames:
+            file_path = os.path.join(dirpath, filename)
+            try:
+                latest = max(latest, os.path.getmtime(file_path))
+            except OSError:
+                pass
+
+    return latest
+
+
 def cleanup_expired_workspaces(root: str, *, retention_days: int) -> int:
     if not root or retention_days <= 0 or not os.path.isdir(root):
         return 0
@@ -57,7 +81,7 @@ def cleanup_expired_workspaces(root: str, *, retention_days: int) -> int:
             issue_path = os.path.join(project_path, issue_name)
             if not os.path.isdir(issue_path):
                 continue
-            if os.path.getmtime(issue_path) < cutoff:
+            if _latest_tree_mtime(issue_path) < cutoff:
                 shutil.rmtree(issue_path)
                 removed += 1
 

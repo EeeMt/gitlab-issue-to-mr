@@ -43,6 +43,7 @@ Worker 容器有三种挂载来源：
 | 宿主机路径 | 容器内路径 | 模式 | 用途 |
 |-----------|-----------|------|------|
 | `.../issue-{id}/repo` | `/workspace` | `rw` | Git 仓库，跨任务复用 |
+| `.../issue-{id}/claude` | `/home/codify/.claude` | `rw` | Claude CLI 会话状态，跨任务复用 |
 | `.../issue-{id}/runtime/task-{id}` | `/tmp/codify-runtime` | `rw` | 任务运行时产物（event.jsonl、runtime.json、console.log） |
 
 ### 容器内行为（`entrypoint.worker.sh`）

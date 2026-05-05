@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from app.core.worker_workspace import (
     build_issue_workspace_paths,
+    cleanup_expired_workspaces,
     remove_issue_workspace,
 )
 
@@ -47,11 +48,14 @@ def test_remove_issue_workspace_returns_false_for_missing_path(tmp_path):
 
 
 def test_cleanup_expired_workspaces_removes_old_issue_dirs(tmp_path):
-    from app.core.worker_workspace import cleanup_expired_workspaces
-
     old_issue = tmp_path / "project-1" / "issue-1"
-    old_issue.mkdir(parents=True)
+    old_descendant = old_issue / "runtime" / "task-1" / "event.jsonl"
+    old_descendant.parent.mkdir(parents=True)
+    old_descendant.write_text("old", encoding="utf-8")
     old_mtime = time.time() - (40 * 24 * 60 * 60)
+    os.utime(old_descendant, (old_mtime, old_mtime))
+    os.utime(old_descendant.parent, (old_mtime, old_mtime))
+    os.utime(old_descendant.parent.parent, (old_mtime, old_mtime))
     os.utime(old_issue, (old_mtime, old_mtime))
 
     removed = cleanup_expired_workspaces(str(tmp_path), retention_days=30)
@@ -60,9 +64,24 @@ def test_cleanup_expired_workspaces_removes_old_issue_dirs(tmp_path):
     assert not old_issue.exists()
 
 
-def test_cleanup_expired_workspaces_keeps_recent_issue_dirs(tmp_path):
-    from app.core.worker_workspace import cleanup_expired_workspaces
+def test_cleanup_expired_workspaces_keeps_issue_with_recent_descendant(tmp_path):
+    old_issue = tmp_path / "project-1" / "issue-1"
+    recent_descendant = old_issue / "claude" / "session.jsonl"
+    recent_descendant.parent.mkdir(parents=True)
+    recent_descendant.write_text("recent", encoding="utf-8")
 
+    old_mtime = time.time() - (40 * 24 * 60 * 60)
+    recent_mtime = time.time()
+    os.utime(old_issue, (old_mtime, old_mtime))
+    os.utime(recent_descendant, (recent_mtime, recent_mtime))
+
+    removed = cleanup_expired_workspaces(str(tmp_path), retention_days=30)
+
+    assert removed == 0
+    assert old_issue.exists()
+
+
+def test_cleanup_expired_workspaces_keeps_recent_issue_dirs(tmp_path):
     recent_issue = tmp_path / "project-1" / "issue-2"
     recent_issue.mkdir(parents=True)
 
