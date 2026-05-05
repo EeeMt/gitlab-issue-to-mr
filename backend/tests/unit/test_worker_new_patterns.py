@@ -98,7 +98,7 @@ def _make_task(**kwargs):
 # ---------------------------------------------------------------------------
 
 class TestCodifySystemInitParsing(unittest.TestCase):
-    """Tests for CODIFY_SYSTEM_INIT parsing inside _parse_task_result."""
+    """Tests for model extraction from the structured system_init TaskLog entry."""
 
     def setUp(self):
         self.mock_settings = _make_mock_settings()
@@ -109,41 +109,65 @@ class TestCodifySystemInitParsing(unittest.TestCase):
     def tearDown(self):
         self.patcher.stop()
 
-    def _run_parse(self, task, logs, exit_code=0):
+    def _run_parse(self, task, logs, *, system_init_metadata=None, exit_code=0):
         async def run():
             with patch.object(self.worker, '_parse_mr_from_logs', new=AsyncMock()):
                 with patch.object(self.worker, '_update_task_stats_from_logs_or_api', new=AsyncMock()):
                     mock_db = create_mock_db(task)
+
+                    # Configure the system_init structured log query
+                    if system_init_metadata is not None:
+                        mock_system_init = MagicMock()
+                        mock_system_init.log_metadata = system_init_metadata
+                    else:
+                        mock_system_init = None
+
+                    # Override execute to return the right result for system_init query
+                    async def mock_execute(stmt, *args, **kwargs):
+                        try:
+                            stmt_str = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+                        except Exception:
+                            stmt_str = str(stmt)
+                        if 'system_init' in stmt_str:
+                            result = MagicMock()
+                            result.scalar_one_or_none.return_value = mock_system_init
+                            return result
+                        result = MagicMock()
+                        result.scalar_one_or_none.return_value = task
+                        return result
+                    mock_db.execute = mock_execute
+
                     await self.worker._parse_task_result(task, logs, mock_db, exit_code=exit_code)
         asyncio.run(run())
 
-    def test_updates_model_name_from_valid_system_init(self):
-        """CODIFY_SYSTEM_INIT with a model key sets task.model_name."""
+    def test_updates_model_name_from_structured_entry(self):
+        """Structured system_init entry with model key sets task.model_name."""
         task = _make_task()
-        logs = 'Starting...\nCODIFY_SYSTEM_INIT:{"model":"claude-sonnet-4-20250514","cwd":"/workspace"}\nDone\n'
-        self._run_parse(task, logs)
+        self._run_parse(task, '', system_init_metadata='{"model":"claude-sonnet-4-20250514","cwd":"/workspace"}')
         self.assertEqual(task.model_name, "claude-sonnet-4-20250514")
 
     def test_does_not_update_model_name_when_model_is_empty(self):
-        """CODIFY_SYSTEM_INIT with empty model string leaves task.model_name as None."""
+        """Structured entry with empty model string leaves task.model_name as None."""
         task = _make_task()
-        logs = 'CODIFY_SYSTEM_INIT:{"model":"","cwd":"/workspace"}\n'
-        self._run_parse(task, logs)
+        self._run_parse(task, '', system_init_metadata='{"model":"","cwd":"/workspace"}')
         self.assertIsNone(task.model_name)
 
     def test_does_not_update_model_name_when_model_missing_from_json(self):
-        """CODIFY_SYSTEM_INIT JSON without 'model' key leaves task.model_name as None."""
+        """Structured entry without 'model' key leaves task.model_name as None."""
         task = _make_task()
-        logs = 'CODIFY_SYSTEM_INIT:{"cwd":"/workspace"}\n'
-        self._run_parse(task, logs)
+        self._run_parse(task, '', system_init_metadata='{"cwd":"/workspace"}')
         self.assertIsNone(task.model_name)
 
-    def test_ignores_invalid_json_in_system_init(self):
-        """CODIFY_SYSTEM_INIT with invalid JSON does not crash and leaves model_name None."""
+    def test_no_crash_when_system_init_missing(self):
+        """No system_init entry in DB does not crash and leaves model_name None."""
         task = _make_task()
-        logs = 'CODIFY_SYSTEM_INIT:not-valid-json\n'
-        # Should not raise
-        self._run_parse(task, logs)
+        self._run_parse(task, '')
+        self.assertIsNone(task.model_name)
+
+    def test_no_crash_when_metadata_is_invalid_json(self):
+        """Invalid JSON in log_metadata does not crash and leaves model_name None."""
+        task = _make_task()
+        self._run_parse(task, '', system_init_metadata='not-valid-json')
         self.assertIsNone(task.model_name)
 
 

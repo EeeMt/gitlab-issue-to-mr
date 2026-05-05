@@ -23,7 +23,6 @@ _CODIFY_STATS_RE = re.compile(r'^CODIFY_STATS:(.+)$', re.MULTILINE)
 _CODIFY_COMMIT_SHA_RE = re.compile(r'^CODIFY_COMMIT_SHA:([a-f0-9]{40})$', re.MULTILINE)
 _CODIFY_DIFF_RE = re.compile(r'^CODIFY_DIFF:\+(\d+)-(\d+)$', re.MULTILINE)
 _CODIFY_TOOL_CALLS_RE = re.compile(r'^CODIFY_TOOL_CALLS:(.+)$', re.MULTILINE)
-_CODIFY_SYSTEM_INIT_RE = re.compile(r'^CODIFY_SYSTEM_INIT:(.+)$', re.MULTILINE)
 _CODIFY_MR_TITLE_RE = re.compile(r'^CODIFY_MR_TITLE:(.+)$', re.MULTILINE)
 _CODIFY_SESSION_ID_RE = re.compile(r'^CODIFY_SESSION_ID:(\S+)$', re.MULTILINE)
 _THINK_BLOCK_RE = re.compile(r'<think\b[^>]*>.*?</think>', re.IGNORECASE | re.DOTALL)
@@ -157,16 +156,26 @@ async def parse_task_result(
         except Exception:
             logger.debug(f"[Task {task.id}] Failed to parse CODIFY_STATS")
 
-    system_init_match = _CODIFY_SYSTEM_INIT_RE.search(logs)
-    if system_init_match:
-        try:
-            init_data = _json.loads(system_init_match.group(1).strip())
-            model = init_data.get('model', '').strip()
-            if model:
-                task.model_name = model
-                logger.info(f"[Task {task.id}] Model: {model}")
-        except Exception:
-            logger.debug(f"[Task {task.id}] Failed to parse CODIFY_SYSTEM_INIT")
+    # Read model from the structured system_init log entry (event.jsonl projection).
+    model = None
+    try:
+        from sqlalchemy import select as _select
+        result = await db.execute(
+            _select(TaskLog).where(
+                TaskLog.task_id == task.id,
+                TaskLog.log_type == 'system_init',
+            ).order_by(TaskLog.id).limit(1)
+        )
+        structured = result.scalar_one_or_none()
+        if structured and structured.log_metadata:
+            meta = _json.loads(structured.log_metadata)
+            model = meta.get('model', '').strip()
+    except Exception:
+        logger.debug(f"[Task {task.id}] Failed to read system_init structured log")
+
+    if model:
+        task.model_name = model
+        logger.info(f"[Task {task.id}] Model: {model}")
 
     commit_sha_match = _CODIFY_COMMIT_SHA_RE.search(logs)
     if commit_sha_match:
