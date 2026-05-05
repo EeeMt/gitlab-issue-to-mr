@@ -698,6 +698,15 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('git clone "${GIT_REPO_URL}" /workspace', content)
 
 
+    def test_entrypoint_no_changes_uses_require_changes_not_target_branch(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('REQUIRE_CHANGES', content)
+        self.assertIn('[ "${REQUIRE_CHANGES:-true}" = "false" ]', content)
+        self.assertIn('require_changes disabled: task completed without code changes', content)
+
+
 class TestBuildContainerVolumes(unittest.TestCase):
     """Tests for _build_container_volumes — lines 527-557."""
 
@@ -1826,6 +1835,75 @@ class TestDeployComposeWorkspaceMounts(unittest.TestCase):
         content = compose.read_text()
 
         self.assertIn("/opt/codify-workspaces:/opt/codify-workspaces", content)
+
+
+class TestRequireChangesEnvVar(unittest.TestCase):
+    def test_build_container_env_includes_require_changes(self):
+        from app.core.worker_runtime import build_container_env
+
+        task = MagicMock()
+        task.id = 1
+        task.issue_id = 1
+        task.project_id = 1
+        task.user_prompt = "test"
+        task.require_changes = True
+
+        issue = MagicMock()
+        issue.id = 1
+        issue.branch_name = "codify/issue-1"
+        issue.title = "Test"
+        issue.claude_session_id = None
+        issue.base_branch = None
+
+        with patch("app.core.worker_runtime.get_settings") as mock_settings:
+            settings = MagicMock()
+            settings.gitlab_url = "http://gitlab.example.com"
+            settings.gitlab_bot_token = "token"
+            settings.anthropic_api_key = "key"
+            settings.anthropic_base_url = "http://api.example.com"
+            settings.anthropic_model = "claude"
+            settings.claude_max_turns = 10
+            settings.task_timeout = 1800
+            settings.custom_ca_bundle = ""
+            mock_settings.return_value = settings
+
+            env = build_container_env(task, issue, mr_iid=None, target_branch="main")
+
+        self.assertIn("REQUIRE_CHANGES", env)
+        self.assertEqual(env["REQUIRE_CHANGES"], "true")
+
+    def test_build_container_env_require_changes_false(self):
+        from app.core.worker_runtime import build_container_env
+
+        task = MagicMock()
+        task.id = 1
+        task.issue_id = 1
+        task.project_id = 1
+        task.user_prompt = "test"
+        task.require_changes = False
+
+        issue = MagicMock()
+        issue.id = 1
+        issue.branch_name = "codify/issue-1"
+        issue.title = "Test"
+        issue.claude_session_id = None
+        issue.base_branch = None
+
+        with patch("app.core.worker_runtime.get_settings") as mock_settings:
+            settings = MagicMock()
+            settings.gitlab_url = "http://gitlab.example.com"
+            settings.gitlab_bot_token = "token"
+            settings.anthropic_api_key = "key"
+            settings.anthropic_base_url = "http://api.example.com"
+            settings.anthropic_model = "claude"
+            settings.claude_max_turns = 10
+            settings.task_timeout = 1800
+            settings.custom_ca_bundle = ""
+            mock_settings.return_value = settings
+
+            env = build_container_env(task, issue, mr_iid=None, target_branch="main")
+
+        self.assertEqual(env["REQUIRE_CHANGES"], "false")
 
 
 if __name__ == "__main__":

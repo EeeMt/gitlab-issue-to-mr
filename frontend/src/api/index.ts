@@ -215,6 +215,7 @@ export interface Task {
   output_tokens: number | null
   model_name?: string | null
   merge_request_title?: string | null
+  require_changes: boolean
   provider_id: number | null
   provider_name?: string | null
   created_at: string
@@ -286,6 +287,7 @@ export interface CreateTaskRequest {
   delay_seconds?: number
   scheduled_datetime?: string
   provider_id?: number | null
+  require_changes?: boolean
 }
 
 export interface RescheduleTaskRequest {

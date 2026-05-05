@@ -121,6 +121,8 @@ def build_container_env(
     if mr_iid:
         environment["MR_IID"] = str(mr_iid)
 
+    environment["REQUIRE_CHANGES"] = "true" if getattr(task, "require_changes", True) else "false"
+
     if settings.custom_ca_bundle:
         environment["CUSTOM_CA_BUNDLE"] = settings.custom_ca_bundle
 

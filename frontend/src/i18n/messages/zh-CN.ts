@@ -391,6 +391,8 @@ const zhCN = {
     taskCreated: '任务已创建',
     retryFailed: '重试任务失败',
     retrySuccess: '任务已重试',
+    requireChanges: '要求代码变更',
+    requireChangesHint: '若未勾选，即使未产生代码变更，任务也会视为成功',
     totalIssues: '需求总数',
     openCount: '待处理',
     inProgressCount: '进行中',

@@ -41,6 +41,7 @@ class CreateTaskRequest(BaseModel):
     delay_seconds: Optional[int] = None
     scheduled_datetime: Optional[datetime] = None
     provider_id: int
+    require_changes: Optional[bool] = True
 
     @model_validator(mode="after")
     def validate_schedule_is_future(self) -> "CreateTaskRequest":

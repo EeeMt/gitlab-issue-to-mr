@@ -390,6 +390,17 @@
               :placeholder="t('config.providers.systemDefault')"
             />
           </n-form-item>
+
+          <!-- Require Changes (only when issue has target_branch / MR mode) -->
+          <n-form-item
+            v-if="issue?.target_branch"
+            :label="t('issue.requireChanges')"
+          >
+            <n-switch v-model:value="requireChanges" />
+            <template #feedback>
+              {{ t('issue.requireChangesHint') }}
+            </template>
+          </n-form-item>
         </n-form>
 
         <!-- Slot capacity alert -->
@@ -552,6 +563,7 @@ const promptTemplatesLoading = ref(false)
 const promptVariableTips = ref<Record<string, string> | undefined>(undefined)
 const showTemplateDrawer = ref(false)
 const scheduleType = ref<'now' | 'scheduled'>('now')
+const requireChanges = ref(true)
 
 // Schedule heatmap
 const scheduledTasksForPreview = ref<Task[]>([])
@@ -642,11 +654,13 @@ const taskColumns = computed<DataTableColumns<Task>>(() => {
     {
       title: t('issue.field.description'),
       key: 'user_prompt',
-      ellipsis: { tooltip: true },
+      ellipsis: {
+        tooltip: {
+          maxWidth: 420,
+          style: { maxWidth: '420px', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }
+        }
+      },
       render: (row) => {
-        const truncated = row.user_prompt.length > 80
-          ? row.user_prompt.substring(0, 80) + '…'
-          : row.user_prompt
         return h(
           'a',
           {
@@ -656,7 +670,7 @@ const taskColumns = computed<DataTableColumns<Task>>(() => {
               router.push({ name: 'TaskView', params: { id: row.id } })
             }
           },
-          truncated
+          row.user_prompt
         )
       }
     },
@@ -880,6 +894,7 @@ async function handleCreateTask() {
       request.scheduled_datetime = new Date(newTaskSchedule.value).toISOString()
     }
     request.provider_id = selectedProviderId.value ?? defaultProviderId.value ?? undefined
+    request.require_changes = requireChanges.value
     await createTask(request)
     message.success(t('issue.taskCreated'))
     if (showScheduleDrawer.value) {

@@ -917,6 +917,9 @@ async def create_task(
         priority=request.priority,
         scheduled_at=scheduled_at,
         provider_id=request.provider_id,
+        require_changes=request.require_changes
+        if request.require_changes is not None
+        else True,
     )
     db.add(task)
     await db.commit()

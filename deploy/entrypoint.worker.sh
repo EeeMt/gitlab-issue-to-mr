@@ -802,8 +802,8 @@ AI-Generated: true"
     echo "========================================"
 else
     echo "No changes made by Claude CLI"
-    if [ -z "${TARGET_BRANCH:-}" ]; then
-        echo "No-MR mode: task completed without code changes"
+    if [ "${REQUIRE_CHANGES:-true}" = "false" ]; then
+        echo "require_changes disabled: task completed without code changes"
         create_runtime_archive
         echo "========================================"
         echo "Task completed successfully!"

@@ -315,6 +315,72 @@ class CancelTaskEndpointTests(unittest.TestCase):
         self.assertIs(response.json()["removed"], True)
 
 
+# ---------------------------------------------------------------------------
+# require_changes: CreateTaskRequest schema and serialization
+# ---------------------------------------------------------------------------
+
+
+class TestRequireChangesSchema(unittest.TestCase):
+    def test_create_task_request_defaults_require_changes_to_true(self):
+        from app.api.task_schemas import CreateTaskRequest
+
+        req = CreateTaskRequest(issue_id=1, provider_id=1)
+        self.assertTrue(req.require_changes)
+
+    def test_create_task_request_accepts_explicit_false(self):
+        from app.api.task_schemas import CreateTaskRequest
+
+        req = CreateTaskRequest(issue_id=1, provider_id=1, require_changes=False)
+        self.assertFalse(req.require_changes)
+
+
+class TestRequireChangesSerialization(unittest.TestCase):
+    def test_serialize_task_includes_require_changes(self):
+        from app.core.task_helpers import _serialize_task
+
+        task = MagicMock()
+        task.id = 1
+        task.issue_id = None
+        task.project_id = 1
+        task.user_prompt = "x"
+        task.initiator_user_id = None
+        task.initiator_gitlab_user_id = None
+        task.initiator_username = None
+        task.is_retry = False
+        task.retry_source_task_id = None
+        task.status = TaskStatus.PENDING
+        task.priority = 0
+        task.scheduled_at = None
+        task.container_id = None
+        task.commit_sha = None
+        task.error_message = None
+        task.additions = 0
+        task.deletions = 0
+        task.total_changes = 0
+        task.input_tokens = None
+        task.output_tokens = None
+        task.model_name = None
+        task.merge_request_title = None
+        task.provider_id = None
+        task.provider_name = None
+        task.created_at = datetime(2026, 5, 5, 12, 0, 0)
+        task.updated_at = datetime(2026, 5, 5, 12, 0, 0)
+        task.started_at = None
+        task.completed_at = None
+        task.require_changes = True
+
+        with patch("app.core.task_helpers.get_effective_settings",
+                   return_value=MagicMock(gitlab_url="http://gitlab.example.com")):
+            with patch("app.core.task_helpers.sa_inspect") as mock_inspect:
+                mock_insp = MagicMock()
+                mock_insp.unloaded = {"issue", "provider"}
+                mock_inspect.return_value = mock_insp
+                data = _serialize_task(task)
+
+        self.assertIn("require_changes", data)
+        self.assertTrue(data["require_changes"])
+
+
 if __name__ == "__main__":
     unittest.main()
 

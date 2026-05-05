@@ -187,6 +187,9 @@ class Task(Base):
     input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
+    # Require code changes for success (relevant when issue has target_branch)
+    require_changes: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
     # AI model used for this task (populated from CODIFY_SYSTEM_INIT marker)
     model_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
 
