@@ -370,44 +370,6 @@ def test_draft_removed_on_completion():
     print(f"  - updated title: {mock_existing_mr.title}")
 
 
-def test_mr_iid_in_issue_comment():
-    """Test that completion comments use the MR shorthand (!iid)."""
-    print("\n" + "=" * 60)
-    print("Testing: Completion comment uses GitLab shorthand (!iid)")
-    print("=" * 60)
-
-    mock_gitlab = MagicMock()
-    mock_docker = MagicMock()
-
-    worker = WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
-
-    task = Task(
-        id=5,
-        project_id=123,
-        issue_id=456,
-        user_prompt="Test",
-        priority=2,
-        status=TaskStatus.PENDING,
-    )
-
-    issue = create_mock_issue(456, 123)
-    issue.merge_request_iid = 42
-    issue.merge_request_url = "http://gitlab.example.com/project/-/merge_requests/42"
-
-    # _notify_task_completed with notify_target="mr" sends via create_mr_note
-    asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr", issue=issue))
-
-    mock_gitlab.create_mr_note.assert_called()
-    call_args = mock_gitlab.create_mr_note.call_args[0]
-
-    # The comment should contain !42 (GitLab shorthand)
-    comment_body = call_args[2]
-    assert "!42" in comment_body or "✅" in comment_body, \
-        "Comment should use GitLab shorthand format"
-
-    print("✓ Completion comment uses GitLab shorthand format")
-    print(f"  - Comment: {comment_body[:60]}...")
-
 
 if __name__ == "__main__":
     test_create_initial_mr()
@@ -415,7 +377,6 @@ if __name__ == "__main__":
     test_mr_iid_passed_to_container()
     test_mr_creation_failure_handled()
     test_draft_removed_on_completion()
-    test_mr_iid_in_issue_comment()
 
     print("\n" + "=" * 60)
     print("All P0.1 tests passed!")

@@ -138,11 +138,6 @@ async def prepare_execute_task_context(
 
     await mark_task_running_and_commit(db, task)
 
-    try:
-        worker._notify_task_started(task, issue)
-    except Exception as e:
-        logger.warning(f"Failed to send start notification: {e}")
-
     return {
         "handled": False,
         "settings": settings,
@@ -324,16 +319,6 @@ async def fail_resume_task(
         logger.warning(f"[Task {task_id}] Resume: failed to cleanup container: {cleanup_error}")
 
     try:
-        await worker._notify_task_completed(
-            task,
-            success=False,
-            notify_target="mr" if had_existing_mr else "issue",
-            issue=issue,
-        )
-    except Exception as notify_error:  # noqa: BLE001
-        logger.warning(f"[Task {task_id}] Resume: failed to send failure notification: {notify_error}")
-
-    try:
         await worker._send_failure_alert(task, issue)
     except Exception as notify_error:  # noqa: BLE001
         logger.warning(f"[Task {task_id}] Resume: failed to send failure alert: {notify_error}")
@@ -391,17 +376,6 @@ async def send_success_notifications(
     notify_task_event_fn=None,
     completion_event=None,
 ) -> None:
-    notify_target = "mr" if had_existing_mr else "issue"
-    try:
-        await worker._notify_task_completed(
-            task,
-            success=True,
-            notify_target=notify_target,
-            issue=issue,
-        )
-    except Exception as e:
-        logger.warning(f"Failed to send completion notification: {e}")
-
     try:
         await notify_task_event_fn(task, completion_event)
     except Exception as e:
@@ -418,17 +392,6 @@ async def send_failure_notifications(
     retry_scheduled_event=None,
     failed_event=None,
 ) -> None:
-    notify_target = "mr" if had_existing_mr else "issue"
-    try:
-        await worker._notify_task_completed(
-            task,
-            success=False,
-            notify_target=notify_target,
-            issue=issue,
-        )
-    except Exception as e:
-        logger.warning(f"Failed to send failure notification: {e}")
-
     try:
         await worker._send_failure_alert(task, issue)
     except Exception as e:

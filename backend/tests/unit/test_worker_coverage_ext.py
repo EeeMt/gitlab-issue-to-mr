@@ -713,29 +713,6 @@ class TestSendNotificationsExceptions(unittest.TestCase):
     """Test _send_notifications and _send_failure_notifications exception paths."""
 
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
-    def test_send_notifications_completion_exception(self, mock_notify_event):
-        """_send_notifications catches exception from _notify_task_completed — lines 809-810."""
-        mock_gitlab = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(issue_id=1)
-
-        # Make _notify_task_completed raise
-        with patch.object(worker, '_notify_task_completed', new=AsyncMock(side_effect=Exception("notify error"))):
-            # Should not raise
-            asyncio.run(worker._send_notifications(task, success=True, had_existing_mr=False, logs="", issue=task.issue))
-
-    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
-    def test_send_failure_notifications_completion_exception(self, mock_notify_event):
-        """_send_failure_notifications catches exception from _notify_task_completed — lines 835-836."""
-        mock_gitlab = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(issue_id=1, status=TaskStatus.FAILED)
-
-        with patch.object(worker, '_notify_task_completed', new=AsyncMock(side_effect=Exception("notify boom"))):
-            # Should not raise
-            asyncio.run(worker._send_failure_notifications(task, success=False, had_existing_mr=False, issue=task.issue))
-
-    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
     def test_send_failure_notifications_mattermost_exception(self, mock_notify_event):
         """_send_failure_notifications catches Mattermost exception — lines 851-852."""
         mock_gitlab = MagicMock()
@@ -1140,11 +1117,10 @@ class TestResumeTaskException(unittest.TestCase):
         task = _make_task(status=TaskStatus.RUNNING, merge_request_iid=None, is_manual=False)
         db = _make_db(task)
 
-        # Make both _notify_task_completed and notify_task_event raise
+        # Make stream raise
         with patch.object(worker, '_stream_logs_to_db', side_effect=RuntimeError("stream failed")):
-            with patch.object(worker, '_notify_task_completed', new=AsyncMock(side_effect=Exception("notify failed"))):
-                mock_notify.side_effect = Exception("mattermost failed")
-                result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
+            mock_notify.side_effect = Exception("mattermost failed")
+            result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
         self.assertFalse(result)
         self.assertEqual(task.status, TaskStatus.FAILED)
@@ -1261,83 +1237,14 @@ class TestExecuteTaskExceptionNotificationFailures(unittest.TestCase):
         task = _make_task(target_branch="main", merge_request_iid=None, is_manual=False)
         db = _make_db(task)
 
-        # Make stream raise, then also make notifications raise
+        # Make stream raise, Mattermost notification also fails
         mock_notify.side_effect = Exception("mattermost down")
 
         with patch.object(worker, '_stream_logs_to_db', side_effect=RuntimeError("stream failed")):
-            with patch.object(worker, '_notify_task_completed', new=AsyncMock(side_effect=Exception("notify failed"))):
-                result = asyncio.run(worker.execute_task(db, task.id))
+            result = asyncio.run(worker.execute_task(db, task.id))
 
         self.assertFalse(result)
         self.assertEqual(task.status, TaskStatus.FAILED)
-
-
-class TestNotifyTaskCompletedMrIidExtraction(unittest.TestCase):
-    """Test _notify_task_completed MR IID extraction edge cases — lines 1202-1203, 1208."""
-
-    @patch('app.core.worker.get_settings')
-    def test_mr_iid_extraction_from_url_failure(self, mock_get_settings):
-        """When MR URL parsing fails, uses fallback message — lines 1202-1203."""
-        mock_get_settings.return_value = _make_settings()
-        mock_gitlab = MagicMock()
-        mock_gitlab.create_mr_note = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-
-        # URL with /merge_requests/ but the IID part is not extractable
-        task = _make_task(
-            merge_request_iid=None,
-            merge_request_url="http://gitlab.example.com/project/-/merge_requests/",
-            is_manual=False,
-        )
-
-        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr"))
-
-        # Should use the "MR 已更新" fallback message since no numeric IID extracted
-
-    @patch('app.core.worker.get_settings')
-    def test_success_mr_url_with_no_extractable_iid(self, mock_get_settings):
-        """Success with MR URL but non-numeric IID — notify_target=issue does not send."""
-        mock_get_settings.return_value = _make_settings()
-        mock_gitlab = MagicMock()
-        mock_gitlab.create_note = MagicMock()
-        mock_gitlab.create_mr_note = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-
-        # URL that has merge_requests but splitting gives empty string
-        task = _make_task(
-            merge_request_iid=None,
-            merge_request_url="http://gitlab.example.com/merge_requests/abc?foo=bar",
-        )
-        issue = task.issue
-
-        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="issue", issue=issue))
-
-        # With no mr_iid and notify_target="issue", the worker doesn't send to issue
-        # Only MR notifications are supported now
-        mock_gitlab.create_note.assert_not_called()
-        mock_gitlab.create_mr_note.assert_not_called()
-
-
-class TestNotifyTaskCompletedNoDescUpdate(unittest.TestCase):
-    """Test _notify_task_completed no longer updates MR description inline."""
-
-    @patch('app.core.worker.get_settings')
-    def test_notification_does_not_call_update_mr_description(self, mock_get_settings):
-        """MR description update moved to execute_task; notification only creates a note."""
-        mock_get_settings.return_value = _make_settings()
-        mock_gitlab = MagicMock()
-        mock_gitlab.create_mr_note = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(
-            merge_request_iid=42,
-            merge_request_url="http://gitlab.example.com/-/merge_requests/42",
-        )
-        issue = task.issue
-
-        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr", issue=issue))
-
-        mock_gitlab.create_mr_note.assert_called_once()
-        mock_gitlab.get_merge_request.assert_not_called()
 
 
 class TestSendFailureAlertWebhookException(unittest.TestCase):

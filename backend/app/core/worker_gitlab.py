@@ -1,6 +1,5 @@
 """GitLab and notification helpers for worker execution."""
 
-import asyncio
 import logging
 import re
 from typing import Optional
@@ -208,46 +207,6 @@ async def update_mr_description_for_issue(
 
     except Exception as e:
         logger.warning(f"[Task {task.id}] Failed to update MR description: {e}")
-
-
-def notify_task_started(task: Task, gitlab_client, issue: Optional[Issue] = None) -> None:
-    if not issue:
-        logger.info(f"Skipping start notification for task {task.id} (no issue)")
-        return
-
-    settings = get_settings()
-    task_url = f"{settings.dashboard_url}/tasks/{task.id}"
-    message = f"🔄 开始处理请求... [任务 {task.id}]({task_url})"
-    if issue.merge_request_iid:
-        gitlab_client.create_mr_note(task.project_id, issue.merge_request_iid, message)
-        logger.info(f"Sent start notification to MR !{issue.merge_request_iid} for task {task.id}")
-
-
-async def notify_task_completed(task: Task, gitlab_client, sanitize_sensitive_data, success: bool, notify_target: str = "issue", issue: Optional[Issue] = None) -> None:
-    if not issue:
-        logger.info(f"Skipping completion notification for task {task.id} (no issue)")
-        return
-
-    mr_iid = issue.merge_request_iid
-    settings = get_settings()
-    task_url = f"{settings.dashboard_url}/tasks/{task.id}"
-
-    if success:
-        if issue.merge_request_url:
-            if mr_iid:
-                message = f"✅ 代码已更新到 MR !{mr_iid} [任务 {task.id}]({task_url})"
-            else:
-                message = f"✅ MR 已更新: [任务 {task.id}]({task_url})"
-        else:
-            message = f"✅ 任务已完成 [任务 {task.id}]({task_url})"
-    else:
-        error_msg = task.error_message[:200] if task.error_message else "未知错误"
-        error_msg = sanitize_sensitive_data(error_msg)
-        message = f"❌ 任务失败 [任务 {task.id}]({task_url}): {error_msg}"
-
-    if notify_target == "mr" and mr_iid:
-        await asyncio.to_thread(gitlab_client.create_mr_note, task.project_id, mr_iid, message)
-        logger.info(f"Sent completion notification to MR !{mr_iid} for task {task.id}, success={success}")
 
 
 async def send_failure_alert(task: Task, sanitize_sensitive_data, issue: Optional[Issue] = None) -> None:

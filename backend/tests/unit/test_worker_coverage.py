@@ -1158,155 +1158,6 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
 
 
 # ===================================================================
-# _notify_task_started
-# ===================================================================
-
-class TestNotifyTaskStarted(unittest.TestCase):
-    """Tests for _notify_task_started — now takes issue parameter."""
-
-    @patch('app.core.worker.get_settings')
-    def test_skips_when_no_issue(self, mock_get_settings):
-        """Skips notification when issue is None."""
-        mock_get_settings.return_value = _make_settings()
-        worker = _make_worker()
-        task = _make_task()
-
-        worker._notify_task_started(task, issue=None)
-
-        worker.gitlab.create_note.assert_not_called()
-        worker.gitlab.create_mr_note.assert_not_called()
-
-    @patch('app.core.worker.get_settings')
-    def test_notifies_mr_when_mr_iid_set(self, mock_get_settings):
-        """Sends notification to MR when merge_request_iid is set on issue."""
-        mock_get_settings.return_value = _make_settings()
-        worker = _make_worker()
-        task = _make_task(merge_request_iid=55)
-        issue = task.issue
-
-        worker._notify_task_started(task, issue=issue)
-
-        worker.gitlab.create_mr_note.assert_called_once()
-        args = worker.gitlab.create_mr_note.call_args
-        self.assertEqual(args[0][0], 100)  # project_id
-        self.assertEqual(args[0][1], 55)   # mr_iid
-        self.assertIn("开始处理", args[0][2])
-
-    @patch('app.core.worker.get_settings')
-    def test_only_notifies_mr_when_mr_iid_set(self, mock_get_settings):
-        """Start notification only sent to MR, not to issue."""
-        mock_get_settings.return_value = _make_settings()
-        worker = _make_worker()
-        task = _make_task(merge_request_iid=None)
-        issue = task.issue
-
-        worker._notify_task_started(task, issue=issue)
-
-        # With no MR, no notification is sent
-        worker.gitlab.create_note.assert_not_called()
-        worker.gitlab.create_mr_note.assert_not_called()
-
-
-# ===================================================================
-# _notify_task_completed
-# ===================================================================
-
-class TestNotifyTaskCompleted(unittest.TestCase):
-    """Tests for _notify_task_completed — now takes issue parameter."""
-
-    @patch('app.core.worker.get_settings')
-    def test_skips_when_no_issue(self, mock_get_settings):
-        """Skips notification when issue is None."""
-        mock_get_settings.return_value = _make_settings()
-        worker = _make_worker()
-        task = _make_task()
-
-        asyncio.run(worker._notify_task_completed(task, success=True, issue=None))
-
-        worker.gitlab.create_note.assert_not_called()
-
-    @patch('app.core.worker.get_settings')
-    def test_success_with_mr_url_and_iid(self, mock_get_settings):
-        """Success with MR URL and IID sends proper message."""
-        mock_get_settings.return_value = _make_settings()
-        mock_gitlab = MagicMock()
-        mock_gitlab.create_mr_note = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(
-            merge_request_iid=55,
-            merge_request_url="http://gitlab.example.com/mr/55",
-        )
-        issue = task.issue
-
-        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr", issue=issue))
-
-        mock_gitlab.create_mr_note.assert_called_once()
-        msg = mock_gitlab.create_mr_note.call_args[0][2]
-        self.assertIn("✅", msg)
-        self.assertIn("!55", msg)
-
-    @patch('app.core.worker.get_settings')
-    def test_success_without_mr_url(self, mock_get_settings):
-        """Success without MR URL — no notification to issue (only MR supported)."""
-        mock_get_settings.return_value = _make_settings()
-        mock_gitlab = MagicMock()
-        mock_gitlab.create_note = MagicMock()
-        mock_gitlab.create_mr_note = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(
-            merge_request_iid=None,
-            merge_request_url=None,
-        )
-        issue = task.issue
-
-        # With notify_target="issue" but no issue notification path, nothing happens
-        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="issue", issue=issue))
-
-        # No notification is sent since notify_target="issue" path only sends to MR when mr_iid
-        mock_gitlab.create_note.assert_not_called()
-        mock_gitlab.create_mr_note.assert_not_called()
-
-    @patch('app.core.worker.get_settings')
-    def test_failure_notification_to_mr(self, mock_get_settings):
-        """Failure sends error message to MR when mr_iid is set."""
-        mock_get_settings.return_value = _make_settings()
-        mock_gitlab = MagicMock()
-        mock_gitlab.create_mr_note = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(
-            merge_request_iid=55,
-            error_message="Container crashed with OOM",
-        )
-        issue = task.issue
-
-        asyncio.run(worker._notify_task_completed(task, success=False, notify_target="mr", issue=issue))
-
-        mock_gitlab.create_mr_note.assert_called_once()
-        msg = mock_gitlab.create_mr_note.call_args[0][2]
-        self.assertIn("❌", msg)
-        self.assertIn("Container crashed with OOM", msg)
-
-    @patch('app.core.worker.get_settings')
-    def test_success_mr_extracts_iid_from_url(self, mock_get_settings):
-        """Success message includes MR IID."""
-        mock_get_settings.return_value = _make_settings()
-        mock_gitlab = MagicMock()
-        mock_gitlab.create_mr_note = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(
-            merge_request_iid=42,
-            merge_request_url="http://gitlab.example.com/project/-/merge_requests/42",
-        )
-        issue = task.issue
-
-        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr", issue=issue))
-
-        mock_gitlab.create_mr_note.assert_called_once()
-        msg = mock_gitlab.create_mr_note.call_args[0][2]
-        self.assertIn("!42", msg)
-
-
-# ===================================================================
 # _send_failure_alert
 # ===================================================================
 
@@ -1554,7 +1405,6 @@ class TestExecuteTask(unittest.TestCase):
 
         with (
             patch('app.core.worker.logger') as mock_logger,
-            patch.object(worker, '_notify_task_completed', new=AsyncMock()) as mock_notify_task_completed,
         ):
             result = asyncio.run(worker.execute_task(db, task.id))
 
@@ -1569,7 +1419,6 @@ class TestExecuteTask(unittest.TestCase):
             mock_logger.error.call_args.args[0],
         )
         mock_logger.exception.assert_not_called()
-        mock_notify_task_completed.assert_awaited_once()
         mock_notify.assert_awaited_once()
         mock_docker.create_container.assert_not_called()
 

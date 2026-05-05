@@ -28,8 +28,6 @@ from app.core.worker_gitlab import (
     create_mr_if_needed,
     create_new_mr,
     find_existing_mr,
-    notify_task_completed,
-    notify_task_started,
     remove_mr_draft_status_for_issue,
     update_mr_description_for_issue,
 )
@@ -165,7 +163,6 @@ class WorkerExecutor:
             '_create_new_mr': lambda task, issue, sudo_gl=None: create_new_mr(task, issue, self.gitlab, sudo_gl=sudo_gl),
             '_build_container_volumes': lambda *args, **kwargs: build_container_volumes(*args, **kwargs),
             '_get_container_name': lambda task: get_container_name(task),
-            '_notify_task_started': lambda task, issue=None: notify_task_started(task, self.gitlab, issue),
         }
         if name in sync_wrappers:
             return sync_wrappers[name]
@@ -215,17 +212,7 @@ class WorkerExecutor:
 
             return _update_mr_description_wrapper
 
-        if name == '_notify_task_completed':
 
-            async def _notify_task_completed_wrapper(
-                task: Task,
-                success: bool,
-                notify_target: str = 'issue',
-                issue: Optional[Issue] = None,
-            ) -> None:
-                await notify_task_completed(task, self.gitlab, sanitize_sensitive_data, success, notify_target, issue)
-
-            return _notify_task_completed_wrapper
 
         raise AttributeError(name)
 
