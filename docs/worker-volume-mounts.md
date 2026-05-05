@@ -16,13 +16,13 @@ Worker 容器有三种挂载来源：
 
 ### 配置
 
-| 配置项 | 默认值 | 说明 |
-|--------|--------|------|
-| `worker_workspace_host_path` | `/opt/codify-workspaces` | 宿主机根路径；设为空字符串可关闭持久 workspace |
-| `worker_workspace_retention_days` | `14` | 正常任务 workspace 保留天数 |
-| `worker_failed_workspace_retention_days` | `30` | 失败任务 workspace 保留天数（配置已定义，清理逻辑尚未区分） |
+| 配置项 | 环境变量 | 默认值 | 说明 |
+|--------|----------|--------|------|
+| `worker_workspace_host_path` | `WORKER_WORKSPACE_HOST_PATH` | `""` (空) | 宿主机根路径（绝对路径）；设为空字符串可关闭持久 workspace |
+| `worker_workspace_retention_days` | `WORKER_WORKSPACE_RETENTION_DAYS` | `14` | 正常任务 workspace 保留天数 |
+| `worker_failed_workspace_retention_days` | `WORKER_FAILED_WORKSPACE_RETENTION_DAYS` | `30` | 失败任务 workspace 保留天数（配置已定义，清理逻辑尚未区分） |
 
-配置方式：环境变量 `WORKER_WORKSPACE_HOST_PATH` 或通过 `/api/config/runtime` 运行时修改。
+配置方式：环境变量（推荐）或通过 `/api/config/runtime` 运行时修改（当前前端暂无 UI 入口）。
 
 ### 路径构建
 
