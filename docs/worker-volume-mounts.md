@@ -18,7 +18,7 @@ Worker 容器有三种挂载来源：
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
-| `worker_workspace_host_path` | `""`（空，功能关闭） | 宿主机根路径，例如 `/opt/codify-workspaces` |
+| `worker_workspace_host_path` | `/opt/codify-workspaces` | 宿主机根路径；设为空字符串可关闭持久 workspace |
 | `worker_workspace_retention_days` | `14` | 正常任务 workspace 保留天数 |
 | `worker_failed_workspace_retention_days` | `30` | 失败任务 workspace 保留天数（配置已定义，清理逻辑尚未区分） |
 
@@ -33,6 +33,7 @@ Worker 容器有三种挂载来源：
 └── project-{project_id}/
     └── issue-{issue_id}/
         ├── repo/                  → 容器内 /workspace
+        ├── claude/                → 容器内 /home/codify/.claude
         └── runtime/
             └── task-{task_id}/    → 容器内 /tmp/codify-runtime
 ```
@@ -90,19 +91,23 @@ fi
 
 ### 路径生成
 
-创建 Issue 时（`backend/app/api/issues.py:144`）：
+当 `worker_workspace_host_path` 启用时，Claude 会话目录是 issue workspace 的一部分：
 
-```python
-issue.session_storage_path = f"{settings.session_storage_root}/{issue.id}/claude"
+```
+/opt/codify-workspaces/project-{project_id}/issue-{issue_id}/claude
 ```
 
-实际路径：`/var/codify/sessions/{issue_id}/claude`
+当 `worker_workspace_host_path` 设为空字符串并关闭持久 workspace 时，回退到旧版 session 路径：
+
+```
+{session_storage_root}/{issue_id}/claude
+```
 
 ### 挂载映射
 
 | 宿主机路径 | 容器内路径 | 模式 | 用途 |
 |-----------|-----------|------|------|
-| `/var/codify/sessions/{issue_id}/claude` | `/home/codify/.claude` | `rw` | Claude CLI 会话文件（`.jsonl`） |
+| `.../issue-{issue_id}/claude` 或 `{session_storage_root}/{issue_id}/claude` | `/home/codify/.claude` | `rw` | Claude CLI 会话文件（`.jsonl`） |
 
 ### 会话生命周期
 
@@ -114,10 +119,11 @@ issue.session_storage_path = f"{settings.session_storage_root}/{issue.id}/claude
 
 ### 与 Workspace 的关系
 
-Session Storage 和 Persistent Workspace 是两套独立机制：
-- Session Storage 存的是 Claude CLI 的对话状态（`.jsonl` 文件）
-- Workspace 存的是 Git 仓库和构建产物
-- Session Storage 始终基于 Issue（不需要 `worker_workspace_host_path`），路径在 Issue 创建时就确定了
+Session Storage 现在归属于 issue workspace：
+- `repo/` 存放 Git 仓库和未提交状态
+- `runtime/task-{task_id}/` 存放单个任务的运行时文件
+- `claude/` 存放 Claude CLI 会话状态
+- 清理 issue workspace 也会删除 Claude resume context
 
 ---
 
@@ -269,9 +275,10 @@ build_container_volumes(settings, issue, task=task)
 ├─ worker_workspace_host_path 非空 && issue && task?
 │   └─ YES → build_issue_workspace_paths()
 │       ├─ volumes[repo_path]    = {bind: /workspace,          mode: rw}
+│       ├─ volumes[claude_path]  = {bind: /home/codify/.claude, mode: rw}
 │       └─ volumes[runtime_path] = {bind: /tmp/codify-runtime, mode: rw}
 │
-└─ issue.session_storage_path 非空?
+└─ worker_workspace_host_path 为空 && issue.session_storage_path 非空?
     └─ YES → volumes[session_storage_path] = {bind: /home/codify/.claude, mode: rw}
 ```
 
@@ -283,7 +290,7 @@ build_container_volumes(settings, issue, task=task)
 |------|------|
 | `backend/app/config.py` | 所有配置项定义和默认值 |
 | `backend/app/api/config_runtime.py` | 运行时配置读写 + 校验 |
-| `backend/app/api/issues.py:144` | Issue 创建时生成 `session_storage_path` |
+| `backend/app/api/issues.py:144` | Issue 创建时生成 workspace-local 或 legacy fallback 的 `session_storage_path` |
 | `backend/app/core/worker_workspace.py` | Workspace 路径构建、删除、过期清理 |
 | `backend/app/core/worker_runtime.py` | `build_container_volumes()` 组装所有挂载 |
 | `backend/app/core/worker_results.py` | `finalize_archive()` 拉取运行时归档 |
