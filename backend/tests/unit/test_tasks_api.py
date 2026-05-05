@@ -211,6 +211,28 @@ class CancelTaskEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(task.status, TaskStatus.CANCELLED)
 
+    def test_cancel_task_releases_issue_execution_lock(self) -> None:
+        """POST /cancel should release the DB issue execution lock."""
+        task = MagicMock()
+        task.id = 2
+        task.project_id = 1
+        task.issue_id = 33
+        task.status = TaskStatus.RUNNING
+        task.scheduled_at = None
+
+        client, app = self._get_client(task)
+
+        with patch("app.api.task_operations.notify_task_cancelled", new=AsyncMock()):
+            with patch("app.core.task_helpers._require_task_operator", return_value=None):
+                with patch("app.api.tasks.release_issue_execution_lock", new=AsyncMock()) as mock_release:
+                    response = client.post("/api/tasks/2/cancel")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        mock_release.assert_awaited_once()
+        self.assertEqual(mock_release.await_args.kwargs["issue_id"], 33)
+
     def test_cancel_task_404_when_not_found(self) -> None:
         """POST /api/tasks/{id}/cancel should return 404 when task not found."""
         from app.main import app

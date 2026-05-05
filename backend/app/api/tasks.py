@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.docker_client import get_docker_client
+from app.core.issue_execution_locks import release_issue_execution_lock
 from app.core.projects import build_project_lookup, get_project_metadata
 from app.core.scheduling import resolve_scheduled_at
 from app.core.task_helpers import _serialize_task, maybe_update_issue_status
@@ -646,6 +647,9 @@ async def cancel_task(
     task.error_message = "Cancelled by user"
     await db.commit()
     await db.refresh(task)
+
+    await release_issue_execution_lock(db, issue_id=task.issue_id)
+    await db.commit()
 
     # Kill the running container (if any) to free the thread pool slot immediately
     container_name = f"codify-{task_id}-issue{task.issue_id}"

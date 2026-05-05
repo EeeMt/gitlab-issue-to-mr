@@ -340,6 +340,8 @@ class SchedulerTaskExecutionTests(unittest.IsolatedAsyncioTestCase):
             patch("app.scheduler.asyncio.create_task") as mock_create_task,
             patch.object(scheduler, "_transition_issue_to_in_progress", new=AsyncMock()) as mock_transition,
             patch("app.scheduler.maybe_update_issue_status", new=AsyncMock()) as mock_update_issue_status,
+            patch("app.scheduler.acquire_issue_execution_lock", new=AsyncMock(return_value=True)),
+            patch("app.scheduler.release_issue_execution_lock", new=AsyncMock()),
         ):
             await scheduler._execute_task(mock_db, task)
 
@@ -598,6 +600,35 @@ class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         # Should still commit (even if nothing to update)
         mock_db.commit.assert_awaited_once()
 
+    async def test_crash_recovery_cleans_inactive_issue_execution_locks(self) -> None:
+        """_crash_recovery should clear stale DB locks before marking stuck tasks."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        empty_result = MagicMock()
+        empty_result.scalars.return_value.all.return_value = []
+        mock_db.execute.return_value = empty_result
+
+        mock_context = MagicMock()
+        mock_context.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_context.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.scheduler.AsyncSessionLocal", return_value=mock_context):
+            with patch(
+                "app.scheduler.cleanup_inactive_issue_execution_locks",
+                new=AsyncMock(return_value=2),
+            ) as mock_cleanup:
+                with patch("app.scheduler.get_docker_client") as mock_docker:
+                    mock_docker.side_effect = Exception("docker unavailable")
+                    await scheduler._crash_recovery()
+
+        mock_cleanup.assert_awaited_once_with(mock_db)
+        mock_db.commit.assert_awaited_once()
+
 
 # ---------------------------------------------------------------------------
 # _run_cycle
@@ -771,9 +802,10 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
         mock_db = MagicMock()
         mock_db.commit = AsyncMock()
 
-        with patch.object(scheduler, "_run_task_background", new=MagicMock()) as mock_bg:
-            with patch("app.scheduler.asyncio.create_task") as mock_create_task:
-                await scheduler._execute_task(mock_db, task)
+        with patch("app.scheduler.acquire_issue_execution_lock", new=AsyncMock(return_value=True)):
+            with patch.object(scheduler, "_run_task_background", new=MagicMock()) as mock_bg:
+                with patch("app.scheduler.asyncio.create_task") as mock_create_task:
+                    await scheduler._execute_task(mock_db, task)
 
         self.assertEqual(task.status, TaskStatus.RUNNING)
         self.assertIsNotNone(task.started_at)
@@ -799,12 +831,61 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
         # First commit (marking running) raises an exception
         mock_db.commit = AsyncMock(side_effect=[Exception("DB failure"), None])
 
-        await scheduler._execute_task(mock_db, task)
+        with patch("app.scheduler.acquire_issue_execution_lock", new=AsyncMock(return_value=True)):
+            with patch("app.scheduler.release_issue_execution_lock", new=AsyncMock()):
+                await scheduler._execute_task(mock_db, task)
 
         self.assertEqual(task.status, TaskStatus.FAILED)
         self.assertIn("DB failure", task.error_message)
         self.assertNotIn(6, scheduler._running_tasks)
         self.assertNotIn(21, scheduler._running_issues)
+
+    async def test_execute_task_skips_when_issue_db_lock_is_held(self) -> None:
+        """_execute_task should leave queued task untouched when DB issue lock is held."""
+        from app.scheduler import Scheduler
+        from app.models import TaskStatus
+
+        scheduler = Scheduler()
+
+        task = MagicMock()
+        task.id = 17
+        task.issue_id = 44
+        task.status = TaskStatus.QUEUED
+
+        mock_db = MagicMock()
+        mock_db.commit = AsyncMock()
+
+        with patch("app.scheduler.acquire_issue_execution_lock", new=AsyncMock(return_value=False)):
+            with patch("app.scheduler.asyncio.create_task") as mock_create_task:
+                await scheduler._execute_task(mock_db, task)
+
+        self.assertEqual(task.status, TaskStatus.QUEUED)
+        self.assertNotIn(17, scheduler._running_tasks)
+        self.assertNotIn(44, scheduler._running_issues)
+        mock_db.commit.assert_not_called()
+        mock_create_task.assert_not_called()
+
+    async def test_execute_task_releases_db_lock_when_commit_fails_after_acquire(self) -> None:
+        """_execute_task should release DB issue lock if marking RUNNING fails."""
+        from app.scheduler import Scheduler
+        from app.models import TaskStatus
+
+        scheduler = Scheduler()
+
+        task = MagicMock()
+        task.id = 18
+        task.issue_id = 45
+        task.status = TaskStatus.QUEUED
+
+        mock_db = MagicMock()
+        mock_db.commit = AsyncMock(side_effect=Exception("commit failed"))
+
+        with patch("app.scheduler.acquire_issue_execution_lock", new=AsyncMock(return_value=True)):
+            with patch("app.scheduler.release_issue_execution_lock", new=AsyncMock()) as mock_release:
+                await scheduler._execute_task(mock_db, task)
+
+        mock_release.assert_awaited_once_with(mock_db, issue_id=45)
+        self.assertEqual(task.status, TaskStatus.FAILED)
 
 
 # ---------------------------------------------------------------------------
