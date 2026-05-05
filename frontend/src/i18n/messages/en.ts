@@ -26,7 +26,7 @@ const en = {
   },
   app: {
     brandTitle: 'Codify Admin',
-    brandSubtitle: 'Task operations console',
+    brandSubtitle: 'From idea to code',
     navigation: 'Navigation',
     language: 'Language'
   },

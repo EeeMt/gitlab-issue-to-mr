@@ -26,7 +26,7 @@ const zhCN = {
   },
   app: {
     brandTitle: 'Codify Admin',
-    brandSubtitle: '任务运营控制台',
+    brandSubtitle: '从想法到代码',
     navigation: '导航',
     language: '语言'
   },
