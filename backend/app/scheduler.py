@@ -15,6 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings as get_settings
 from app.core.docker_client import get_docker_client
+from app.core.issue_execution_locks import (
+    acquire_issue_execution_lock,
+    cleanup_inactive_issue_execution_locks,
+    release_issue_execution_lock,
+)
 from app.core.session import cleanup_stale_sessions
 from app.core.utcnow import utcnow
 from app.core.usage_limits import (
@@ -23,6 +28,7 @@ from app.core.usage_limits import (
     usage_limit_exceeded_detail,
 )
 from app.core.worker import WorkerExecutor
+from app.core.worker_workspace import cleanup_expired_workspaces
 from app.database import AsyncSessionLocal
 from app.models import Task, TaskStatus, Issue, IssueStatus
 from app.core.task_helpers import maybe_update_issue_status
@@ -30,6 +36,7 @@ from app.runtime_config import load_runtime_config_from_db
 
 logger = logging.getLogger(__name__)
 _SESSION_CLEANUP_INTERVAL_SECONDS = 3600
+_WORKSPACE_CLEANUP_INTERVAL_SECONDS = 21600
 
 # Thread pool for running worker tasks (to avoid blocking the event loop)
 _worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-")
@@ -55,6 +62,7 @@ class Scheduler:
         self._running_tasks: Set[int] = set()  # task_ids currently running
         self._running_issues: Set[int] = set()  # issue_ids with running tasks
         self._last_session_cleanup_at = 0.0
+        self._last_workspace_cleanup_at = 0.0
 
     async def start(self) -> None:
         """Start the scheduler loop."""
@@ -87,6 +95,7 @@ class Scheduler:
         async with AsyncSessionLocal() as db:
             await load_runtime_config_from_db(db)
             await self._maybe_cleanup_sessions(db)
+            await self._maybe_cleanup_workspaces(db)
 
             # Transition eligible PENDING tasks → QUEUED
             await self._mark_eligible_as_queued(db)
@@ -126,6 +135,32 @@ class Scheduler:
             await db.commit()
             logger.info("Cleaned up %s stale dashboard sessions", deleted_count)
         self._last_session_cleanup_at = now
+
+    async def _maybe_cleanup_workspaces(self, db: AsyncSession) -> None:
+        """Periodically delete expired persistent worker workspaces."""
+        now = time.time()
+        if now - self._last_workspace_cleanup_at < _WORKSPACE_CLEANUP_INTERVAL_SECONDS:
+            return
+
+        settings = get_settings()
+        raw_root = getattr(settings, "worker_workspace_host_path", "")
+        root = raw_root.strip() if isinstance(raw_root, str) else ""
+        if not root:
+            self._last_workspace_cleanup_at = now
+            return
+        retention_days = getattr(settings, "worker_workspace_retention_days", 14)
+        if not isinstance(retention_days, int):
+            self._last_workspace_cleanup_at = now
+            return
+
+        removed = await asyncio.to_thread(
+            cleanup_expired_workspaces,
+            root,
+            retention_days=retention_days,
+        )
+        if removed:
+            logger.info("Cleaned up %s expired worker workspace(s)", removed)
+        self._last_workspace_cleanup_at = now
 
     async def _mark_eligible_as_queued(self, db: AsyncSession) -> None:
         """Mark eligible PENDING tasks as QUEUED.
@@ -192,7 +227,11 @@ class Scheduler:
         """Execute a task in a separate thread to avoid blocking the event loop."""
         logger.info(f"Executing task {task.id} for issue {task.issue_id}")
 
-        # Mark as running
+        lock_acquired = await acquire_issue_execution_lock(db, task)
+        if not lock_acquired:
+            logger.debug("Issue %s locked; task %s remains queued", task.issue_id, task.id)
+            return
+
         self._running_tasks.add(task.id)
         if task.issue_id is not None:
             self._running_issues.add(task.issue_id)
@@ -216,6 +255,7 @@ class Scheduler:
                     task.completed_at = utcnow()
                     await db.commit()
                     if task.issue_id is not None:
+                        await release_issue_execution_lock(db, issue_id=task.issue_id)
                         await maybe_update_issue_status(db, task.issue_id)
                     self._running_tasks.discard(task.id)
                     if task.issue_id is not None:
@@ -240,7 +280,11 @@ class Scheduler:
             task.status = TaskStatus.FAILED
             task.error_message = str(e)[:500]
             task.completed_at = utcnow()
-            await db.commit()
+            await release_issue_execution_lock(db, issue_id=task.issue_id)
+            try:
+                await db.commit()
+            except Exception:
+                logger.exception("Failed to persist failure state for task %s", task.id)
 
             # Clean up tracking
             self._running_tasks.discard(task.id)
@@ -288,6 +332,7 @@ class Scheduler:
                     task = result.scalar_one_or_none()
                     if task and task.issue_id is not None:
                         self._running_issues.discard(task.issue_id)
+                        await release_issue_execution_lock(db, issue_id=task.issue_id)
                         # Auto-transition issue to COMPLETED if all tasks done
                         await self._maybe_complete_issue(db, task.issue_id)
             except Exception:
@@ -309,6 +354,10 @@ class Scheduler:
         logger.info("Running crash recovery...")
 
         async with AsyncSessionLocal() as db:
+            removed_locks = await cleanup_inactive_issue_execution_locks(db)
+            if removed_locks:
+                logger.warning("Cleaned up %s inactive issue execution lock(s)", removed_locks)
+
             # Find all tasks that are still marked RUNNING in the DB
             result = await db.execute(
                 select(Task).where(Task.status == TaskStatus.RUNNING)
@@ -384,6 +433,7 @@ class Scheduler:
                 task.status = TaskStatus.FAILED
                 task.error_message = "Task was running when scheduler restarted (container not found)"
                 task.completed_at = utcnow()
+                await release_issue_execution_lock(db, issue_id=task.issue_id)
                 logger.warning(f"Marked task {task.id} as failed (no running container)")
 
             await db.commit()
@@ -419,6 +469,7 @@ class Scheduler:
                     task = result.scalar_one_or_none()
                     if task and task.issue_id is not None:
                         self._running_issues.discard(task.issue_id)
+                        await release_issue_execution_lock(db, issue_id=task.issue_id)
                         await self._maybe_complete_issue(db, task.issue_id)
             except Exception:
                 pass

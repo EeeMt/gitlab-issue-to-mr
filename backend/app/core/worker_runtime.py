@@ -9,10 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.providers import _decrypt_provider_api_key
 from app.config import get_effective_settings as get_settings
 from app.core.worker_environment_variables import validate_worker_environment_variable_key as validate_worker_environment_key
+from app.core.worker_workspace import build_issue_workspace_paths
 from app.models import AIProvider, Issue, Task, User
 
 _MAVEN_CACHE_CONTAINER_PATH = "/home/codify/.m2/repository"
 _MAVEN_SETTINGS_CONTAINER_PATH = "/home/codify/.m2/settings.xml"
+_WORKSPACE_CONTAINER_PATH = "/workspace"
+_RUNTIME_CONTAINER_PATH = "/tmp/codify-runtime"
 
 
 async def resolve_provider(db: AsyncSession, task: Task) -> AIProvider:
@@ -185,7 +188,12 @@ def build_legacy_container_env(
     return environment
 
 
-def build_container_volumes(settings: Any, issue: Optional[Issue] = None) -> dict:
+def build_container_volumes(
+    settings: Any,
+    issue: Optional[Issue] = None,
+    *,
+    task: Optional[Task] = None,
+) -> dict:
     """Build volume mounts for the worker container."""
     volumes: dict = {}
 
@@ -206,6 +214,20 @@ def build_container_volumes(settings: Any, issue: Optional[Issue] = None) -> dic
         mode = mount.get("mode", "ro")
         if host_path and container_path:
             volumes[host_path] = {"bind": container_path, "mode": mode}
+
+    workspace_paths = (
+        build_issue_workspace_paths(settings, issue, task)
+        if issue is not None and task is not None
+        else None
+    )
+    if workspace_paths is not None:
+        try:
+            os.makedirs(workspace_paths.repo_path, exist_ok=True)
+            os.makedirs(workspace_paths.runtime_path, exist_ok=True)
+        except OSError:
+            pass
+        volumes[workspace_paths.repo_path] = {"bind": _WORKSPACE_CONTAINER_PATH, "mode": "rw"}
+        volumes[workspace_paths.runtime_path] = {"bind": _RUNTIME_CONTAINER_PATH, "mode": "rw"}
 
     if issue and issue.session_storage_path:
         os.makedirs(issue.session_storage_path, exist_ok=True)

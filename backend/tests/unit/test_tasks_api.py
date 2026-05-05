@@ -211,6 +211,28 @@ class CancelTaskEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(task.status, TaskStatus.CANCELLED)
 
+    def test_cancel_task_releases_issue_execution_lock(self) -> None:
+        """POST /cancel should release the DB issue execution lock."""
+        task = MagicMock()
+        task.id = 2
+        task.project_id = 1
+        task.issue_id = 33
+        task.status = TaskStatus.RUNNING
+        task.scheduled_at = None
+
+        client, app = self._get_client(task)
+
+        with patch("app.api.task_operations.notify_task_cancelled", new=AsyncMock()):
+            with patch("app.core.task_helpers._require_task_operator", return_value=None):
+                with patch("app.api.tasks.release_issue_execution_lock", new=AsyncMock()) as mock_release:
+                    response = client.post("/api/tasks/2/cancel")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        mock_release.assert_awaited_once()
+        self.assertEqual(mock_release.await_args.kwargs["issue_id"], 33)
+
     def test_cancel_task_404_when_not_found(self) -> None:
         """POST /api/tasks/{id}/cancel should return 404 when task not found."""
         from app.main import app
@@ -239,6 +261,58 @@ class CancelTaskEndpointTests(unittest.TestCase):
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 404)
+
+    def test_get_task_workspace_status_returns_disabled_when_not_configured(self) -> None:
+        """GET /workspace returns disabled when workspace root is empty."""
+        task = MagicMock()
+        task.id = 3
+        task.project_id = 100
+        task.issue_id = 1
+        task.issue = MagicMock(id=1, project_id=100)
+        task.status = TaskStatus.FAILED
+
+        client, app = self._get_client(task)
+
+        with patch(
+            "app.api.tasks.get_effective_settings",
+            return_value=MagicMock(worker_workspace_host_path=""),
+        ):
+            response = client.get("/api/tasks/3/workspace")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIs(response.json()["enabled"], False)
+
+    def test_delete_task_workspace_calls_remove_helper(self) -> None:
+        """DELETE /workspace removes the issue workspace root."""
+        task = MagicMock()
+        task.id = 4
+        task.project_id = 100
+        task.issue_id = 1
+        task.issue = MagicMock(id=1, project_id=100)
+        task.status = TaskStatus.FAILED
+
+        client, app = self._get_client(task)
+
+        paths = MagicMock()
+        paths.issue_root = "/opt/codify-workspaces/project-100/issue-1"
+        paths.repo_path = "/opt/codify-workspaces/project-100/issue-1/repo"
+        paths.runtime_path = "/opt/codify-workspaces/project-100/issue-1/runtime/task-4"
+
+        with patch(
+            "app.api.tasks.get_effective_settings",
+            return_value=MagicMock(worker_workspace_host_path="/opt/codify-workspaces"),
+        ):
+            with patch("app.api.tasks.build_issue_workspace_paths", return_value=paths):
+                with patch("app.api.tasks.remove_issue_workspace", return_value=True) as mock_remove:
+                    response = client.delete("/api/tasks/4/workspace")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        mock_remove.assert_called_once_with("/opt/codify-workspaces/project-100/issue-1")
+        self.assertIs(response.json()["removed"], True)
 
 
 if __name__ == "__main__":

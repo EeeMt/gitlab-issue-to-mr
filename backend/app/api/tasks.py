@@ -14,7 +14,9 @@ from sqlalchemy import delete, func, or_, select, false
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import get_effective_settings
 from app.core.docker_client import get_docker_client
+from app.core.issue_execution_locks import release_issue_execution_lock
 from app.core.projects import build_project_lookup, get_project_metadata
 from app.core.scheduling import resolve_scheduled_at
 from app.core.task_helpers import _serialize_task, maybe_update_issue_status
@@ -24,6 +26,7 @@ from app.core.usage_limits import (
     get_usage_quota_service,
     usage_limit_exceeded_detail,
 )
+from app.core.worker_workspace import build_issue_workspace_paths, remove_issue_workspace
 from app.database import get_db
 from app.dependencies.auth import get_optional_current_user, require_page_access
 from app.dependencies.project_access import (
@@ -647,6 +650,9 @@ async def cancel_task(
     await db.commit()
     await db.refresh(task)
 
+    await release_issue_execution_lock(db, issue_id=task.issue_id)
+    await db.commit()
+
     # Kill the running container (if any) to free the thread pool slot immediately
     container_name = f"codify-{task_id}-issue{task.issue_id}"
     try:
@@ -926,6 +932,59 @@ async def create_task(
     if slot_warning:
         response["slot_warning"] = slot_warning
     return response
+
+
+@router.get("/tasks/{task_id}/workspace")
+async def get_task_workspace_status(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    task = await get_task_with_access_check(task_id, db, access_scope, current_user)
+    if task.issue is None and task.issue_id is not None:
+        task.issue = await db.get(Issue, task.issue_id)
+
+    settings = get_effective_settings()
+    if not task.issue:
+        return {"enabled": False, "reason": "task has no issue"}
+
+    paths = build_issue_workspace_paths(settings, task.issue, task)
+    if paths is None:
+        return {"enabled": False, "reason": "worker workspace host path is not configured"}
+
+    repo_exists = os.path.isdir(paths.repo_path)
+    return {
+        "enabled": True,
+        "issue_root": paths.issue_root,
+        "repo_path": paths.repo_path,
+        "runtime_path": paths.runtime_path,
+        "repo_exists": repo_exists,
+    }
+
+
+@router.delete("/tasks/{task_id}/workspace")
+async def delete_task_workspace(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    task = await get_task_with_access_check(task_id, db, access_scope, current_user)
+    if task.status == TaskStatus.RUNNING:
+        raise HTTPException(status_code=400, detail="Cannot delete workspace while task is running")
+    if task.issue is None and task.issue_id is not None:
+        task.issue = await db.get(Issue, task.issue_id)
+    if not task.issue:
+        raise HTTPException(status_code=404, detail="Workspace not available for task without issue")
+
+    settings = get_effective_settings()
+    paths = build_issue_workspace_paths(settings, task.issue, task)
+    if paths is None:
+        raise HTTPException(status_code=404, detail="Worker workspace host path is not configured")
+
+    removed = remove_issue_workspace(paths.issue_root)
+    return {"removed": removed, "issue_root": paths.issue_root}
 
 
 @router.get("/tasks/{task_id}/archive")

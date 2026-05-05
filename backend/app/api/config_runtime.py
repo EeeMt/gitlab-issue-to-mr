@@ -70,6 +70,9 @@ class RuntimeConfigSection(BaseModel):
     allow_analytics_for_users: bool
     allow_oidc_diagnostics_for_users: bool
     worker_volume_mounts: str
+    worker_workspace_host_path: str
+    worker_workspace_retention_days: int
+    worker_failed_workspace_retention_days: int
     maven_cache_host_path: str
     maven_settings_host_path: str
     slot_max_tasks: int
@@ -100,6 +103,9 @@ class RuntimeConfigUpdate(BaseModel):
     allow_analytics_for_users: Optional[bool] = None
     allow_oidc_diagnostics_for_users: Optional[bool] = None
     worker_volume_mounts: Optional[str] = None
+    worker_workspace_host_path: Optional[str] = None
+    worker_workspace_retention_days: Optional[int] = None
+    worker_failed_workspace_retention_days: Optional[int] = None
     maven_cache_host_path: Optional[str] = None
     maven_settings_host_path: Optional[str] = None
     slot_max_tasks: Optional[int] = None
@@ -129,6 +135,9 @@ def _serialize_runtime_config(
         allow_analytics_for_users=settings.allow_analytics_for_users,
         allow_oidc_diagnostics_for_users=settings.allow_oidc_diagnostics_for_users,
         worker_volume_mounts=settings.worker_volume_mounts,
+        worker_workspace_host_path=settings.worker_workspace_host_path,
+        worker_workspace_retention_days=settings.worker_workspace_retention_days,
+        worker_failed_workspace_retention_days=settings.worker_failed_workspace_retention_days,
         maven_cache_host_path=settings.maven_cache_host_path,
         maven_settings_host_path=settings.maven_settings_host_path,
         slot_max_tasks=settings.slot_max_tasks,
@@ -221,6 +230,28 @@ def _validate_config_value(key: str, value: object) -> object:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="slot_max_tasks must be between 0 and 100",
+            )
+        return value
+
+    if key == "worker_workspace_host_path":
+        if not isinstance(value, str):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="worker_workspace_host_path must be a string",
+            )
+        stripped = value.strip()
+        if stripped and not stripped.startswith("/"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="worker_workspace_host_path must be empty or an absolute path",
+            )
+        return stripped
+
+    if key in {"worker_workspace_retention_days", "worker_failed_workspace_retention_days"}:
+        if not isinstance(value, int) or value < 0 or value > 365:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{key} must be between 0 and 365 days",
             )
         return value
 

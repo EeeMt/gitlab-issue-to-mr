@@ -75,6 +75,54 @@ class ConfigRuntimeAPITests(unittest.TestCase):
         self.assertIn("anthropic_model", data)
         self.assertIn("claude_max_turns", data)
 
+    def test_get_runtime_config_includes_worker_workspace_settings(self):
+        """GET /config/runtime should expose persistent workspace settings."""
+        response = self.client.get("/api/config/runtime")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("worker_workspace_host_path", data)
+        self.assertIn("worker_workspace_retention_days", data)
+        self.assertIn("worker_failed_workspace_retention_days", data)
+
+    def test_serialize_runtime_config_includes_worker_workspace_settings(self):
+        from app.api.config_runtime import _serialize_runtime_config
+        from app.config import Settings
+
+        settings = Settings(
+            worker_workspace_host_path="/opt/codify-workspaces",
+            worker_workspace_retention_days=14,
+            worker_failed_workspace_retention_days=30,
+        )
+
+        result = _serialize_runtime_config(settings)
+
+        self.assertEqual(result.worker_workspace_host_path, "/opt/codify-workspaces")
+        self.assertEqual(result.worker_workspace_retention_days, 14)
+        self.assertEqual(result.worker_failed_workspace_retention_days, 30)
+
+    def test_validate_worker_workspace_retention_days_bounds(self):
+        from fastapi import HTTPException
+        from app.api.config_runtime import _validate_config_value
+
+        self.assertEqual(_validate_config_value("worker_workspace_retention_days", 14), 14)
+        with self.assertRaises(HTTPException) as ctx:
+            _validate_config_value("worker_workspace_retention_days", -1)
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_validate_worker_workspace_host_path_allows_empty_or_absolute(self):
+        from fastapi import HTTPException
+        from app.api.config_runtime import _validate_config_value
+
+        self.assertEqual(_validate_config_value("worker_workspace_host_path", ""), "")
+        self.assertEqual(
+            _validate_config_value("worker_workspace_host_path", "/opt/codify-workspaces"),
+            "/opt/codify-workspaces",
+        )
+        with self.assertRaises(HTTPException) as ctx:
+            _validate_config_value("worker_workspace_host_path", "relative/path")
+        self.assertEqual(ctx.exception.status_code, 400)
+
     def test_patch_runtime_config_updates_max_concurrency(self):
         """PATCH /config/runtime should accept valid max_concurrency update.
 
