@@ -44,6 +44,23 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
         executor._timeline_gate_open = True
         await executor._ingest_event_record(task_id=task_id, record=record, db=db)
 
+    async def test_event_tailer_projects_result_event_to_run_result_log(self):
+        event_lines = [
+            '{"type":"result","subtype":"success","result":"done","session_id":"session-123","usage":{"input_tokens":1500,"output_tokens":800}}',
+        ]
+        async with self.session_factory() as db:
+            await self._ingest_lines(task_id=1, lines=event_lines, db=db)
+            await db.flush()
+            logs = (await db.execute(select(TaskLog).where(TaskLog.log_type == "run_result"))).scalars().all()
+
+        assert len(logs) == 1
+        meta = json.loads(logs[0].log_metadata)
+        assert meta == {
+            "subtype": "success",
+            "session_id": "session-123",
+            "usage": {"input_tokens": 1500, "output_tokens": 800},
+        }
+
     async def test_event_tailer_projects_tool_use_to_tasklog_and_payload(self):
         event_lines = [
             '{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","id":"tool_1","name":"Write"}}}',
