@@ -154,6 +154,7 @@ class CreateIssueTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("app.api.issues.get_effective_settings") as mock_settings:
             mock_settings.return_value.session_storage_root = "/var/codify/sessions"
+            mock_settings.return_value.worker_workspace_host_path = "/opt/codify-workspaces"
             result = await create_issue(body=body, db=mock_db, current_user=mock_user)
 
         mock_db.add.assert_called_once()
@@ -166,6 +167,47 @@ class CreateIssueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(created.initiator_user_id, 1)
         self.assertEqual(created.initiator_username, "alice")
         self.assertEqual(created.branch_name, "codify/issue-42")
+        self.assertEqual(
+            created.session_storage_path,
+            "/opt/codify-workspaces/project-10/issue-42/claude",
+        )
+
+    async def test_create_issue_uses_legacy_session_path_when_workspace_disabled(self):
+        """Should keep legacy session path when persistent workspace is disabled."""
+        from app.api.issues import create_issue, CreateIssueRequest
+
+        mock_db = MagicMock()
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        captured_issues = []
+
+        def capture_add(obj):
+            obj.id = 42
+            obj.created_at = datetime(2025, 1, 1, 12, 0, 0)
+            obj.updated_at = datetime(2025, 1, 1, 12, 0, 0)
+            captured_issues.append(obj)
+
+        mock_db.add = MagicMock(side_effect=capture_add)
+
+        mock_user = MagicMock()
+        mock_user.id = 1
+        mock_user.username = "alice"
+
+        body = CreateIssueRequest(
+            title="Implement feature X",
+            description="Add feature X to the system",
+            project_id=10,
+            base_branch="main",
+        )
+
+        with patch("app.api.issues.get_effective_settings") as mock_settings:
+            mock_settings.return_value.session_storage_root = "/var/codify/sessions"
+            mock_settings.return_value.worker_workspace_host_path = ""
+            await create_issue(body=body, db=mock_db, current_user=mock_user)
+
+        created = captured_issues[0]
         self.assertEqual(created.session_storage_path, "/var/codify/sessions/42/claude")
 
     async def test_create_issue_sets_open_status(self):

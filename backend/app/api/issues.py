@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import get_effective_settings
 from app.core.task_helpers import _require_issue_operator
+from app.core.worker_workspace import build_issue_workspace_paths
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_user
 from app.dependencies.project_access import ProjectAccessScope, require_project_access, require_project_access_scope
@@ -141,7 +142,16 @@ async def create_issue(
     # Set derived fields that depend on the auto-generated id
     settings = get_effective_settings()
     issue.branch_name = f"codify/issue-{issue.id}"
-    issue.session_storage_path = f"{settings.session_storage_root}/{issue.id}/claude"
+    workspace_paths = build_issue_workspace_paths(
+        settings,
+        issue,
+        type("TaskPathSeed", (), {"id": 0})(),
+    )
+    issue.session_storage_path = (
+        workspace_paths.claude_path
+        if workspace_paths is not None
+        else f"{settings.session_storage_root}/{issue.id}/claude"
+    )
 
     await db.commit()
     await db.refresh(issue)
