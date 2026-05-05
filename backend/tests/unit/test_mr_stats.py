@@ -186,10 +186,11 @@ def test_worker_handles_missing_mr_stats():
         mock_issue = _make_mock_issue(branch_name="codify-4-p123-i456", target_branch=None)
         mock_db = create_mock_db(task, issue=mock_issue)
 
-        # Logs without CODIFY_DIFF → fallback to GitLab API
+        # Logs without CODIFY_DIFF but with CODIFY_COMMIT_SHA → fallback to GitLab API
         fake_logs = (
             "Cloning repo...\n"
             "http://gitlab.example.com/project/-/merge_requests/42\n"
+            "CODIFY_COMMIT_SHA:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
             "CODIFY_STATS:{\"input_tokens\":500,\"output_tokens\":100}\n"
         )
 

@@ -625,7 +625,7 @@ class TestUpdateTaskStatsFromApi(unittest.TestCase):
     """Test MR stats from API paths — lines 737-747."""
 
     def test_mr_stats_from_api_success(self):
-        """When diff stats not in logs, fetches from API — lines 737-745."""
+        """When diff stats not in logs but commit exists, fetches from API."""
         mock_gitlab = MagicMock()
         mock_gitlab.get_merge_request_stats = AsyncMock(return_value={
             "additions": 25,
@@ -635,6 +635,7 @@ class TestUpdateTaskStatsFromApi(unittest.TestCase):
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task()
         task.issue.merge_request_iid = 42
+        task.commit_sha = "a" * 40
         logs = "no diff stats here\n"
 
         asyncio.run(worker._update_task_stats_from_logs_or_api(task, logs, issue=task.issue))
@@ -643,13 +644,29 @@ class TestUpdateTaskStatsFromApi(unittest.TestCase):
         self.assertEqual(task.deletions, 10)
         self.assertEqual(task.total_changes, 35)
 
+    def test_mr_stats_skipped_when_no_commit_sha(self):
+        """When no CODIFY_DIFF and no commit_sha, stats stay at 0 (no changes made)."""
+        mock_gitlab = MagicMock()
+        mock_gitlab.get_merge_request_stats = AsyncMock()
+        worker = _make_worker(mock_gitlab=mock_gitlab)
+        task = _make_task()
+        task.issue.merge_request_iid = 42
+        logs = "no diff stats\n"
+
+        asyncio.run(worker._update_task_stats_from_logs_or_api(task, logs, issue=task.issue))
+
+        mock_gitlab.get_merge_request_stats.assert_not_awaited()
+        self.assertEqual(task.additions, 0)
+        self.assertEqual(task.deletions, 0)
+
     def test_mr_stats_from_api_returns_none(self):
-        """When API returns None for stats — lines 746-747."""
+        """When API returns None for stats."""
         mock_gitlab = MagicMock()
         mock_gitlab.get_merge_request_stats = AsyncMock(return_value=None)
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task()
         task.issue.merge_request_iid = 42
+        task.commit_sha = "a" * 40
         logs = "no diff stats\n"
 
         # Should not raise, stats remain at defaults
@@ -659,12 +676,13 @@ class TestUpdateTaskStatsFromApi(unittest.TestCase):
         self.assertEqual(task.deletions, 0)
 
     def test_mr_stats_from_api_exception(self):
-        """When API call raises, stats remain unchanged — line 749."""
+        """When API call raises, stats remain unchanged."""
         mock_gitlab = MagicMock()
         mock_gitlab.get_merge_request_stats = AsyncMock(side_effect=Exception("API error"))
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task()
         task.issue.merge_request_iid = 42
+        task.commit_sha = "a" * 40
         logs = "no diff stats\n"
 
         # Should not raise
@@ -679,6 +697,7 @@ class TestUpdateTaskStatsFromApi(unittest.TestCase):
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task()
         task.issue.merge_request_iid = None
+        task.commit_sha = "a" * 40
         logs = "no diff stats\n"
 
         asyncio.run(worker._update_task_stats_from_logs_or_api(task, logs, issue=task.issue))

@@ -100,7 +100,7 @@ async def update_task_stats_from_logs_or_api(task: Task, logs: str, gitlab_clien
             f"[Task {task.id}] Diff stats (from log): "
             f"+{task.additions} -{task.deletions} ({task.total_changes} total)"
         )
-    else:
+    elif task.commit_sha:
         mr_iid = (issue.merge_request_iid if issue else None) or getattr(task, '_parsed_mr_iid', None)
         if mr_iid:
             try:
