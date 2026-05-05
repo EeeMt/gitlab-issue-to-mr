@@ -780,11 +780,15 @@ class TestBuildContainerVolumes(unittest.TestCase):
         task = MagicMock()
         task.id = 789
 
-        volumes = worker._build_container_volumes(settings, issue, task=task)
-
         repo_path = "/opt/codify-workspaces/project-123/issue-456/repo"
         claude_path = "/opt/codify-workspaces/project-123/issue-456/claude"
         runtime_path = "/opt/codify-workspaces/project-123/issue-456/runtime/task-789"
+
+        with patch("app.core.worker_runtime.os.makedirs") as makedirs:
+            makedirs.side_effect = [None, OSError("claude unavailable"), None]
+
+            volumes = worker._build_container_volumes(settings, issue, task=task)
+
         self.assertEqual(volumes[repo_path]["bind"], "/workspace")
         self.assertEqual(volumes[repo_path]["mode"], "rw")
         self.assertEqual(volumes[claude_path]["bind"], "/home/codify/.claude")
@@ -792,6 +796,9 @@ class TestBuildContainerVolumes(unittest.TestCase):
         self.assertEqual(volumes[runtime_path]["bind"], "/tmp/codify-runtime")
         self.assertEqual(volumes[runtime_path]["mode"], "rw")
         self.assertNotIn("/var/codify/sessions/456/claude", volumes)
+        makedirs.assert_any_call(repo_path, exist_ok=True)
+        makedirs.assert_any_call(claude_path, exist_ok=True)
+        makedirs.assert_any_call(runtime_path, exist_ok=True)
 
     def test_issue_workspace_volumes_disabled_when_setting_empty(self):
         settings = _make_settings(worker_workspace_host_path="")

@@ -222,12 +222,15 @@ def build_container_volumes(
         else None
     )
     if workspace_paths is not None:
-        try:
-            os.makedirs(workspace_paths.repo_path, exist_ok=True)
-            os.makedirs(workspace_paths.claude_path, exist_ok=True)
-            os.makedirs(workspace_paths.runtime_path, exist_ok=True)
-        except OSError:
-            pass
+        for path in (
+            workspace_paths.repo_path,
+            workspace_paths.claude_path,
+            workspace_paths.runtime_path,
+        ):
+            try:
+                os.makedirs(path, exist_ok=True)
+            except OSError:
+                pass
         volumes[workspace_paths.repo_path] = {"bind": _WORKSPACE_CONTAINER_PATH, "mode": "rw"}
         volumes[workspace_paths.claude_path] = {"bind": _CLAUDE_CONTAINER_PATH, "mode": "rw"}
         volumes[workspace_paths.runtime_path] = {"bind": _RUNTIME_CONTAINER_PATH, "mode": "rw"}
