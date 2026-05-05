@@ -262,6 +262,58 @@ class CancelTaskEndpointTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_get_task_workspace_status_returns_disabled_when_not_configured(self) -> None:
+        """GET /workspace returns disabled when workspace root is empty."""
+        task = MagicMock()
+        task.id = 3
+        task.project_id = 100
+        task.issue_id = 1
+        task.issue = MagicMock(id=1, project_id=100)
+        task.status = TaskStatus.FAILED
+
+        client, app = self._get_client(task)
+
+        with patch(
+            "app.api.tasks.get_effective_settings",
+            return_value=MagicMock(worker_workspace_host_path=""),
+        ):
+            response = client.get("/api/tasks/3/workspace")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIs(response.json()["enabled"], False)
+
+    def test_delete_task_workspace_calls_remove_helper(self) -> None:
+        """DELETE /workspace removes the issue workspace root."""
+        task = MagicMock()
+        task.id = 4
+        task.project_id = 100
+        task.issue_id = 1
+        task.issue = MagicMock(id=1, project_id=100)
+        task.status = TaskStatus.FAILED
+
+        client, app = self._get_client(task)
+
+        paths = MagicMock()
+        paths.issue_root = "/opt/codify-workspaces/project-100/issue-1"
+        paths.repo_path = "/opt/codify-workspaces/project-100/issue-1/repo"
+        paths.runtime_path = "/opt/codify-workspaces/project-100/issue-1/runtime/task-4"
+
+        with patch(
+            "app.api.tasks.get_effective_settings",
+            return_value=MagicMock(worker_workspace_host_path="/opt/codify-workspaces"),
+        ):
+            with patch("app.api.tasks.build_issue_workspace_paths", return_value=paths):
+                with patch("app.api.tasks.remove_issue_workspace", return_value=True) as mock_remove:
+                    response = client.delete("/api/tasks/4/workspace")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        mock_remove.assert_called_once_with("/opt/codify-workspaces/project-100/issue-1")
+        self.assertIs(response.json()["removed"], True)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -28,6 +28,7 @@ from app.core.usage_limits import (
     usage_limit_exceeded_detail,
 )
 from app.core.worker import WorkerExecutor
+from app.core.worker_workspace import cleanup_expired_workspaces
 from app.database import AsyncSessionLocal
 from app.models import Task, TaskStatus, Issue, IssueStatus
 from app.core.task_helpers import maybe_update_issue_status
@@ -35,6 +36,7 @@ from app.runtime_config import load_runtime_config_from_db
 
 logger = logging.getLogger(__name__)
 _SESSION_CLEANUP_INTERVAL_SECONDS = 3600
+_WORKSPACE_CLEANUP_INTERVAL_SECONDS = 21600
 
 # Thread pool for running worker tasks (to avoid blocking the event loop)
 _worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-")
@@ -60,6 +62,7 @@ class Scheduler:
         self._running_tasks: Set[int] = set()  # task_ids currently running
         self._running_issues: Set[int] = set()  # issue_ids with running tasks
         self._last_session_cleanup_at = 0.0
+        self._last_workspace_cleanup_at = 0.0
 
     async def start(self) -> None:
         """Start the scheduler loop."""
@@ -92,6 +95,7 @@ class Scheduler:
         async with AsyncSessionLocal() as db:
             await load_runtime_config_from_db(db)
             await self._maybe_cleanup_sessions(db)
+            await self._maybe_cleanup_workspaces(db)
 
             # Transition eligible PENDING tasks → QUEUED
             await self._mark_eligible_as_queued(db)
@@ -131,6 +135,27 @@ class Scheduler:
             await db.commit()
             logger.info("Cleaned up %s stale dashboard sessions", deleted_count)
         self._last_session_cleanup_at = now
+
+    async def _maybe_cleanup_workspaces(self, db: AsyncSession) -> None:
+        """Periodically delete expired persistent worker workspaces."""
+        now = time.time()
+        if now - self._last_workspace_cleanup_at < _WORKSPACE_CLEANUP_INTERVAL_SECONDS:
+            return
+
+        settings = get_settings()
+        root = (getattr(settings, "worker_workspace_host_path", "") or "").strip()
+        if not root:
+            self._last_workspace_cleanup_at = now
+            return
+
+        removed = await asyncio.to_thread(
+            cleanup_expired_workspaces,
+            root,
+            retention_days=settings.worker_workspace_retention_days,
+        )
+        if removed:
+            logger.info("Cleaned up %s expired worker workspace(s)", removed)
+        self._last_workspace_cleanup_at = now
 
     async def _mark_eligible_as_queued(self, db: AsyncSession) -> None:
         """Mark eligible PENDING tasks as QUEUED.

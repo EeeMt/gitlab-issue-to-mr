@@ -778,6 +778,25 @@ class SchedulerCleanupWithDeletesTests(unittest.IsolatedAsyncioTestCase):
 
         mock_db.commit.assert_not_called()
 
+    async def test_maybe_cleanup_workspaces_invokes_helper_when_configured(self) -> None:
+        from app.scheduler import Scheduler
+        from types import SimpleNamespace
+
+        scheduler = Scheduler()
+        scheduler._last_workspace_cleanup_at = 0.0
+        mock_db = MagicMock()
+
+        settings = SimpleNamespace(
+            worker_workspace_host_path="/opt/codify-workspaces",
+            worker_workspace_retention_days=14,
+        )
+
+        with patch("app.scheduler.get_settings", return_value=settings):
+            with patch("app.scheduler.cleanup_expired_workspaces", return_value=3) as mock_cleanup:
+                await scheduler._maybe_cleanup_workspaces(mock_db)
+
+        mock_cleanup.assert_called_once_with("/opt/codify-workspaces", retention_days=14)
+
 
 # ---------------------------------------------------------------------------
 # _execute_task
