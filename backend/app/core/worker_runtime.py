@@ -16,6 +16,7 @@ _MAVEN_CACHE_CONTAINER_PATH = "/home/codify/.m2/repository"
 _MAVEN_SETTINGS_CONTAINER_PATH = "/home/codify/.m2/settings.xml"
 _WORKSPACE_CONTAINER_PATH = "/workspace"
 _RUNTIME_CONTAINER_PATH = "/tmp/codify-runtime"
+_CLAUDE_CONTAINER_PATH = "/home/codify/.claude"
 
 
 async def resolve_provider(db: AsyncSession, task: Task) -> AIProvider:
@@ -223,16 +224,17 @@ def build_container_volumes(
     if workspace_paths is not None:
         try:
             os.makedirs(workspace_paths.repo_path, exist_ok=True)
+            os.makedirs(workspace_paths.claude_path, exist_ok=True)
             os.makedirs(workspace_paths.runtime_path, exist_ok=True)
         except OSError:
             pass
         volumes[workspace_paths.repo_path] = {"bind": _WORKSPACE_CONTAINER_PATH, "mode": "rw"}
+        volumes[workspace_paths.claude_path] = {"bind": _CLAUDE_CONTAINER_PATH, "mode": "rw"}
         volumes[workspace_paths.runtime_path] = {"bind": _RUNTIME_CONTAINER_PATH, "mode": "rw"}
-
-    if issue and issue.session_storage_path:
+    elif issue and issue.session_storage_path:
         os.makedirs(issue.session_storage_path, exist_ok=True)
         volumes[issue.session_storage_path] = {
-            "bind": "/home/codify/.claude",
+            "bind": _CLAUDE_CONTAINER_PATH,
             "mode": "rw",
         }
 

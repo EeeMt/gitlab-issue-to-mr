@@ -770,23 +770,28 @@ class TestBuildContainerVolumes(unittest.TestCase):
         self.assertEqual(volumes, {})
 
     def test_issue_workspace_and_task_runtime_volumes_enabled(self):
-        """Persistent workspace mounts issue repo and task runtime outside repo."""
+        """Persistent workspace mounts issue repo, Claude state, and task runtime."""
         settings = _make_settings(worker_workspace_host_path="/opt/codify-workspaces")
         worker = _make_worker()
         issue = MagicMock()
         issue.project_id = 123
         issue.id = 456
+        issue.session_storage_path = "/var/codify/sessions/456/claude"
         task = MagicMock()
         task.id = 789
 
         volumes = worker._build_container_volumes(settings, issue, task=task)
 
         repo_path = "/opt/codify-workspaces/project-123/issue-456/repo"
+        claude_path = "/opt/codify-workspaces/project-123/issue-456/claude"
         runtime_path = "/opt/codify-workspaces/project-123/issue-456/runtime/task-789"
         self.assertEqual(volumes[repo_path]["bind"], "/workspace")
         self.assertEqual(volumes[repo_path]["mode"], "rw")
+        self.assertEqual(volumes[claude_path]["bind"], "/home/codify/.claude")
+        self.assertEqual(volumes[claude_path]["mode"], "rw")
         self.assertEqual(volumes[runtime_path]["bind"], "/tmp/codify-runtime")
         self.assertEqual(volumes[runtime_path]["mode"], "rw")
+        self.assertNotIn("/var/codify/sessions/456/claude", volumes)
 
     def test_issue_workspace_volumes_disabled_when_setting_empty(self):
         settings = _make_settings(worker_workspace_host_path="")
@@ -798,6 +803,21 @@ class TestBuildContainerVolumes(unittest.TestCase):
 
         self.assertNotIn("/workspace", [v["bind"] for v in volumes.values()])
         self.assertNotIn("/tmp/codify-runtime", [v["bind"] for v in volumes.values()])
+
+    def test_legacy_session_storage_mount_used_when_workspace_disabled(self):
+        settings = _make_settings(worker_workspace_host_path="")
+        worker = _make_worker()
+        issue = MagicMock(project_id=123, id=456)
+        issue.session_storage_path = "/var/codify/sessions/456/claude"
+        task = MagicMock(id=789)
+
+        with patch("app.core.worker_runtime.os.makedirs"):
+            volumes = worker._build_container_volumes(settings, issue, task=task)
+
+        self.assertEqual(
+            volumes["/var/codify/sessions/456/claude"],
+            {"bind": "/home/codify/.claude", "mode": "rw"},
+        )
 
     def test_generic_volume_mount_default_mode_is_ro(self):
         """Mount with no mode defaults to 'ro' — line 553."""
