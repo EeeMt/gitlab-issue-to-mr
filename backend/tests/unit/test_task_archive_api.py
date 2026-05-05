@@ -5,6 +5,7 @@ import sys
 import unittest
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
+from tempfile import NamedTemporaryFile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -48,6 +49,51 @@ class TestGetTaskArchive(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(HTTPException) as ctx:
             await get_task_archive(task_id=999, db=mock_db, access_scope=MagicMock())
+        assert ctx.exception.status_code == 404
+
+    async def test_download_task_archive_returns_file_response(self):
+        from app.api.tasks import download_task_archive
+        from fastapi.responses import FileResponse
+
+        with NamedTemporaryFile(suffix=".tar.gz") as tmp:
+            tmp.write(b"archive")
+            tmp.flush()
+            mock_db = AsyncMock()
+            mock_archive = TaskRunArchive(
+                task_id=1,
+                archive_name="task-1-runtime-archive.tar.gz",
+                archive_path=tmp.name,
+                archive_size_bytes=7,
+                created_at=datetime(2025, 1, 1, 12, 0, 0),
+            )
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = mock_archive
+            mock_db.execute = AsyncMock(return_value=mock_result)
+
+            result = await download_task_archive(task_id=1, db=mock_db, access_scope=MagicMock())
+
+            assert isinstance(result, FileResponse)
+            assert result.path == tmp.name
+            assert result.filename == "task-1-runtime-archive.tar.gz"
+
+    async def test_download_task_archive_404_when_file_missing(self):
+        from app.api.tasks import download_task_archive
+        from fastapi import HTTPException
+
+        mock_db = AsyncMock()
+        mock_archive = TaskRunArchive(
+            task_id=1,
+            archive_name="task-1-runtime-archive.tar.gz",
+            archive_path="/tmp/not-present-runtime-archive.tar.gz",
+            archive_size_bytes=7,
+            created_at=datetime(2025, 1, 1, 12, 0, 0),
+        )
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_archive
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        with self.assertRaises(HTTPException) as ctx:
+            await download_task_archive(task_id=1, db=mock_db, access_scope=MagicMock())
         assert ctx.exception.status_code == 404
 
     async def test_get_task_payload_returns_content(self):

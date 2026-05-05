@@ -83,6 +83,29 @@
                     </n-button>
                   </div>
 
+                  <div
+                    v-if="archiveMetadata"
+                    class="task-actions__item task-actions__item--info"
+                  >
+                    <div class="task-actions__meta">
+                      <div class="task-actions__label">{{ t('taskView.runtimeArchive') }}</div>
+                      <div class="task-actions__description">
+                        {{ t('taskView.runtimeArchiveDescription') }}
+                      </div>
+                    </div>
+                    <n-button
+                      type="primary"
+                      secondary
+                      strong
+                      round
+                      @click="handleDownloadArchive"
+                      :loading="archiveDownloadLoading"
+                    >
+                      <template #icon><n-icon :component="DownloadOutline" /></template>
+                      {{ t('taskView.downloadRuntimeArchive') }}
+                    </n-button>
+                  </div>
+
                   <!-- Existing active retry — link to it instead of showing retry buttons -->
                   <div
                     v-if="task && ['failed', 'cancelled'].includes(task.status) && activeRetryTask"
@@ -289,7 +312,7 @@ import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin, NDatePicker, NDrawer, NDrawerContent, NIcon, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, streamTaskLogs, getScheduledTasks, getConfig, getIssue, type Task, type TaskLog } from '../api'
+import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, streamTaskLogs, getScheduledTasks, getConfig, getIssue, getTaskArchive, downloadTaskArchive, type Task, type TaskLog } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
 import PageHeader from '../components/PageHeader.vue'
 import TaskMetadataPanel from '../components/TaskMetadataPanel.vue'
@@ -298,7 +321,7 @@ import TaskResultPanel from '../components/TaskResultPanel.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { parseUtcDate } from '../utils/datetime'
 import { extractSlotErrorMessage } from '../utils/slotError'
-import { CalendarOutline } from '@vicons/ionicons5'
+import { CalendarOutline, DownloadOutline } from '@vicons/ionicons5'
 import HeatmapChart from '../components/HeatmapChart.vue'
 import AnsiToHtml from 'ansi-to-html'
 
@@ -331,6 +354,8 @@ const slotEnforce = ref(false)
 const taskLogs = ref<TaskLog[]>([])
 const activeRetryTask = ref<Task | null>(null)
 const issueTasks = ref<Task[]>([])
+const archiveMetadata = ref<{ archive_name: string; archive_size_bytes: number; created_at: string } | null>(null)
+const archiveDownloadLoading = ref(false)
 let pollTimer: number | null = null
 let logEventSource: EventSource | null = null
 let logStreamContainerId: string | null = null
@@ -360,6 +385,7 @@ const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 
 
 const hasActions = computed(() => {
   if (!task.value) return false
+  if (archiveMetadata.value) return true
   return ['pending', 'queued', 'running', 'failed', 'cancelled'].includes(task.value.status)
 })
 
@@ -567,12 +593,25 @@ async function fetchTask() {
 
     await refreshIssueTasks()
     await checkActiveRetry()
+    void fetchArchiveMetadata()
   } catch (error) {
     message.error(t('taskView.failedToFetchTask'))
   } finally {
     hasLoadedOnce.value = true
     loading.value = false
     taskRequestInFlight.value = false
+  }
+}
+
+async function fetchArchiveMetadata() {
+  if (!task.value || !isTerminal.value) {
+    archiveMetadata.value = null
+    return
+  }
+  try {
+    archiveMetadata.value = await getTaskArchive(taskId.value)
+  } catch {
+    archiveMetadata.value = null
   }
 }
 
@@ -640,10 +679,34 @@ async function handleCancel() {
   }
 }
 
+async function handleDownloadArchive() {
+  if (!archiveMetadata.value) return
+  archiveDownloadLoading.value = true
+  try {
+    const blob = await downloadTaskArchive(taskId.value)
+    const url = URL.createObjectURL(blob)
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = archiveMetadata.value.archive_name
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+  } catch {
+    message.error(t('taskView.failedToDownloadRuntimeArchive'))
+  } finally {
+    archiveDownloadLoading.value = false
+  }
+}
+
 function resetLogsState() {
   taskLogs.value = []
   logs.value = ''
   containerLogs.value = ''
+  archiveMetadata.value = null
   closeStructuredLogStream()
   closeLogStream()
 }
@@ -783,6 +846,7 @@ watch(
       task.value = null
       activeRetryTask.value = null
       issueTasks.value = []
+      archiveMetadata.value = null
       hasLoadedOnce.value = false
       fetchTask()
     }

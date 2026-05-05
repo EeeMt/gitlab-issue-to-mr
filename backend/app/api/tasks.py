@@ -3,12 +3,13 @@
 import asyncio
 import json as _json
 import logging
+import os
 import time
 from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import delete, func, or_, select, false
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -947,6 +948,30 @@ async def get_task_archive(
         "archive_size_bytes": archive.archive_size_bytes,
         "created_at": archive.created_at.isoformat(),
     }
+
+
+@router.get("/tasks/{task_id}/archive/download")
+async def download_task_archive(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Download the compressed runtime archive for a completed task."""
+    from app.models import TaskRunArchive
+    archive = (
+        await db.execute(
+            select(TaskRunArchive).where(TaskRunArchive.task_id == task_id)
+        )
+    ).scalar_one_or_none()
+    if not archive:
+        raise HTTPException(status_code=404, detail="Archive not available")
+    if not archive.archive_path or not os.path.exists(archive.archive_path):
+        raise HTTPException(status_code=404, detail="Archive file not found")
+    return FileResponse(
+        archive.archive_path,
+        media_type="application/gzip",
+        filename=archive.archive_name,
+    )
 
 
 @router.get("/tasks/{task_id}/payloads/{payload_id}")

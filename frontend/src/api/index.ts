@@ -1040,6 +1040,11 @@ export async function getTaskArchive(id: number): Promise<{ archive_name: string
   return response.data
 }
 
+export async function downloadTaskArchive(id: number): Promise<Blob> {
+  const response = await api.get(`/tasks/${id}/archive/download`, { responseType: 'blob' })
+  return response.data
+}
+
 export async function getTaskPayload(taskId: number, payloadId: number): Promise<TaskPayloadResponse> {
   const response = await api.get(`/tasks/${taskId}/payloads/${payloadId}`)
   return response.data

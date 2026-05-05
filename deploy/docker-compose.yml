@@ -40,6 +40,7 @@ services:
       postgres:
         condition: service_healthy
     volumes:
+      - /opt/codify-archives:/opt/codify-archives
       - /var/run/docker.sock:/var/run/docker.sock
       # Mount CA cert (local-only, not in git — place /opt/ca.crt on Docker host)
       - type: bind

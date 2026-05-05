@@ -53,7 +53,8 @@ import {
   getStats,
   getProjects,
   getBranches,
-  getAuthStatus
+  getAuthStatus,
+  downloadTaskArchive
 } from './index'
 import * as apiModule from './index'
 
@@ -143,6 +144,18 @@ describe('API functions', () => {
       mockAxiosGet.mockRejectedValue(error)
 
       await expect(getTask(999)).rejects.toEqual(error)
+    })
+  })
+
+  describe('downloadTaskArchive', () => {
+    it('downloads the task runtime archive as a blob', async () => {
+      const blob = new Blob(['archive'])
+      mockAxiosGet.mockResolvedValue({ data: blob })
+
+      const result = await downloadTaskArchive(42)
+
+      expect(result).toBe(blob)
+      expect(mockAxiosGet).toHaveBeenCalledWith('/tasks/42/archive/download', { responseType: 'blob' })
     })
   })
 

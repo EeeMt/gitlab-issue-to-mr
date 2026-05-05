@@ -20,7 +20,9 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     streamTaskLogs: vi.fn<() => any>(),
     getScheduledTasks: vi.fn<() => Promise<any[]>>(),
     getConfig: vi.fn<() => Promise<any>>(),
-    getIssue: vi.fn<() => Promise<any>>()
+    getIssue: vi.fn<() => Promise<any>>(),
+    getTaskArchive: vi.fn<() => Promise<any>>(),
+    downloadTaskArchive: vi.fn<() => Promise<any>>()
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => {
@@ -72,7 +74,9 @@ vi.mock('../api', () => ({
   streamTaskLogs: mockApi.streamTaskLogs,
   getScheduledTasks: mockApi.getScheduledTasks,
   getConfig: mockApi.getConfig,
-  getIssue: mockApi.getIssue
+  getIssue: mockApi.getIssue,
+  getTaskArchive: mockApi.getTaskArchive,
+  downloadTaskArchive: mockApi.downloadTaskArchive
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -471,6 +475,8 @@ describe('TaskView', () => {
     ;(mockApi.getScheduledTasks as Mock).mockResolvedValue([])
     ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: {} })
     ;(mockApi.getIssue as Mock).mockResolvedValue({ tasks: [] })
+    ;(mockApi.getTaskArchive as Mock).mockRejectedValue({ response: { status: 404 } })
+    ;(mockApi.downloadTaskArchive as Mock).mockResolvedValue(new Blob(['archive']))
 
     wrapper = mount(TaskView, {
       global: {
@@ -483,6 +489,7 @@ describe('TaskView', () => {
       return (mockApi.getTask as Mock).mock.calls.length > 0
     })
 
+    await flushPromises()
     await nextTick()
 
     return wrapper
@@ -579,6 +586,21 @@ describe('TaskView', () => {
       expect(wrapper.vm.canReschedule).toBe(true)
     })
 
+    it('loads runtime archive metadata for terminal tasks', async () => {
+      await mountComponent({ status: 'completed' })
+      ;(mockApi.getTaskArchive as Mock).mockResolvedValue({
+        archive_name: 'task-1-runtime-archive.tar.gz',
+        archive_size_bytes: 42,
+        created_at: '2026-05-01T10:00:00Z',
+      })
+
+      await wrapper.vm.fetchArchiveMetadata()
+      await nextTick()
+
+      expect(mockApi.getTaskArchive).toHaveBeenCalledWith(1)
+      expect(wrapper.text()).toContain('taskView.downloadRuntimeArchive')
+    })
+
     it('should disable actions based on permissions when not allowed', async () => {
       // Mock OIDC enabled but user is not admin and not the task initiator
       const { authState } = await import('../auth')
@@ -615,6 +637,29 @@ describe('TaskView', () => {
       })
 
       expect(mockApi.cancelTask).toHaveBeenCalledWith(1)
+    })
+
+    it('downloads the runtime archive when requested', async () => {
+      Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(), configurable: true })
+      Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), configurable: true })
+      const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:archive')
+      const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+      const archiveBlob = new Blob(['archive'])
+      ;(mockApi.downloadTaskArchive as Mock).mockResolvedValue(archiveBlob)
+      await mountComponent({ status: 'completed' })
+      wrapper.vm.archiveMetadata = {
+        archive_name: 'task-1-runtime-archive.tar.gz',
+        archive_size_bytes: 42,
+        created_at: '2026-05-01T10:00:00Z',
+      }
+      await wrapper.vm.handleDownloadArchive()
+
+      expect(mockApi.downloadTaskArchive).toHaveBeenCalledWith(1)
+      expect(createObjectURL).toHaveBeenCalledWith(archiveBlob)
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:archive')
+
+      createObjectURL.mockRestore()
+      revokeObjectURL.mockRestore()
     })
 
     it('should call retryTask API on retry', async () => {

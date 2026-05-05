@@ -107,13 +107,15 @@ const preview = computed(() => {
 }
 .event-content {
   margin: 0;
-  padding: 4px 0;
+  padding: 8px;
   font-size: 13px;
   line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--n-text-color-2);
   font-family: inherit;
+  background: var(--n-color-embedded, rgba(128, 128, 128, 0.05));
+  border-radius: 4px;
 }
 .markdown-content {
   white-space: normal;
