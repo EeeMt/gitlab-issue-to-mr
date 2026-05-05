@@ -560,13 +560,26 @@ watch(
   { immediate: true }
 )
 
+let scrollTimer: ReturnType<typeof setTimeout>
+
+function onDocumentScroll() {
+  document.documentElement.classList.add('is-scrolling')
+  clearTimeout(scrollTimer)
+  scrollTimer = setTimeout(() => {
+    document.documentElement.classList.remove('is-scrolling')
+  }, 600)
+}
+
 onMounted(() => {
   initializeAuth()
+  document.addEventListener('scroll', onDocumentScroll, { capture: true, passive: true })
 })
 
 onBeforeUnmount(() => {
   stopUsageRefresh()
   usageSummaryRequestToken.value += 1
+  document.removeEventListener('scroll', onDocumentScroll, { capture: true })
+  clearTimeout(scrollTimer)
 })
 </script>
 
@@ -1139,5 +1152,33 @@ a.app-link:visited:hover {
     padding: 20px 16px 20px;
     margin: -12px -12px 12px;
   }
+}
+
+/* Unified native scrollbar — thin, subtle, cross-platform consistent */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+  transition: background 0.3s ease 0.1s;
+}
+
+html.is-scrolling ::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.3);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.5) !important;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 </style>
