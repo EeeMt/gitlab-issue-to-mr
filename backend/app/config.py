@@ -146,7 +146,7 @@ class Settings(BaseSettings):
     # Shortcut: absolute path to CA cert on Docker host → automatically mounted into workers.
     # Simpler alternative to encoding a full JSON entry in worker_volume_mounts.
     worker_ca_cert_host_path: str = Field(default="")
-    worker_workspace_host_path: str = Field(default="")
+    worker_workspace_host_path: str = Field(default="/opt/codify-workspaces")
     worker_workspace_retention_days: int = Field(default=14)
     worker_failed_workspace_retention_days: int = Field(default=30)
 

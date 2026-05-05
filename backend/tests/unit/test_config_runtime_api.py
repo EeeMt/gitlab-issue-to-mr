@@ -85,6 +85,14 @@ class ConfigRuntimeAPITests(unittest.TestCase):
         self.assertIn("worker_workspace_retention_days", data)
         self.assertIn("worker_failed_workspace_retention_days", data)
 
+    def test_worker_workspace_host_path_defaults_to_issue_workspace_root(self):
+        """Persistent issue workspace should be enabled by default."""
+        from app.config import Settings
+
+        settings = Settings()
+
+        self.assertEqual(settings.worker_workspace_host_path, "/opt/codify-workspaces")
+
     def test_serialize_runtime_config_includes_worker_workspace_settings(self):
         from app.api.config_runtime import _serialize_runtime_config
         from app.config import Settings
