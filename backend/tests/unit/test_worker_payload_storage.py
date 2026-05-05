@@ -61,6 +61,28 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
             "usage": {"input_tokens": 1500, "output_tokens": 800},
         }
 
+    async def test_event_tailer_projects_worker_finalization_event(self):
+        event_lines = [
+            (
+                '{"type":"codify_worker","subtype":"finalization",'
+                '"commit_sha":"0123456789abcdef0123456789abcdef01234567",'
+                '"diff":{"additions":12,"deletions":3,"total":15},'
+                '"merge_request_title":"Fix worker result parsing"}'
+            ),
+        ]
+        async with self.session_factory() as db:
+            await self._ingest_lines(task_id=1, lines=event_lines, db=db)
+            await db.flush()
+            logs = (await db.execute(select(TaskLog).where(TaskLog.log_type == "worker_finalization"))).scalars().all()
+
+        assert len(logs) == 1
+        meta = json.loads(logs[0].log_metadata)
+        assert meta == {
+            "commit_sha": "0123456789abcdef0123456789abcdef01234567",
+            "diff": {"additions": 12, "deletions": 3, "total": 15},
+            "merge_request_title": "Fix worker result parsing",
+        }
+
     async def test_event_tailer_projects_tool_use_to_tasklog_and_payload(self):
         event_lines = [
             '{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","id":"tool_1","name":"Write"}}}',
