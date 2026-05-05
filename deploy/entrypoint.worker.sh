@@ -131,6 +131,9 @@ chown codify:codify /home/codify/.git-credentials
 git config --global credential.helper store
 git config --file "${CODIFY_GIT_CONFIG}" credential.helper store
 
+# Mark /workspace as safe before any git operations on reused workspaces
+git config --global --add safe.directory /workspace
+
 # Clone or reuse repository with authentication.
 if [ -d /workspace/.git ]; then
     echo "Reusing existing workspace..."
