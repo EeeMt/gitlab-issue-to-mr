@@ -18,6 +18,7 @@ def test_build_issue_workspace_paths():
 
     assert paths.issue_root == "/opt/codify-workspaces/project-123/issue-456"
     assert paths.repo_path == "/opt/codify-workspaces/project-123/issue-456/repo"
+    assert paths.claude_path == "/opt/codify-workspaces/project-123/issue-456/claude"
     assert paths.runtime_path == "/opt/codify-workspaces/project-123/issue-456/runtime/task-789"
 
 

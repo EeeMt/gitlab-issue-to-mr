@@ -13,6 +13,7 @@ from typing import Any
 class IssueWorkspacePaths:
     issue_root: str
     repo_path: str
+    claude_path: str
     runtime_path: str
 
 
@@ -29,6 +30,7 @@ def build_issue_workspace_paths(settings: Any, issue: Any, task: Any) -> IssueWo
     return IssueWorkspacePaths(
         issue_root=issue_root,
         repo_path=os.path.join(issue_root, "repo"),
+        claude_path=os.path.join(issue_root, "claude"),
         runtime_path=os.path.join(issue_root, "runtime", f"task-{task.id}"),
     )
 
