@@ -220,6 +220,30 @@ class Task(Base):
     )
 
 
+class IssueExecutionLock(Base):
+    """Authoritative lock ensuring only one task per issue executes at a time."""
+
+    __tablename__ = "issue_execution_locks"
+
+    issue_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("issues.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    task_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    acquired_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
+    heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 class TaskLog(Base):
     """Task log model for storing execution logs."""
 
