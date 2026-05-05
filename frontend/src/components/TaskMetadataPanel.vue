@@ -105,7 +105,7 @@
         <span class="metadata-value">
           <template v-if="task.issue?.merge_request_url">
             <a :href="task.issue.merge_request_url" target="_blank" rel="noopener noreferrer" class="app-link mr-link">
-              {{ task.merge_request_title || 'Merge Request' }}
+              {{ mergeRequestLabel }}
             </a>
           </template>
           <template v-else-if="task.issue?.target_branch">
@@ -172,12 +172,15 @@ import { useI18n } from 'vue-i18n'
 import type { Task } from '../api'
 import { formatPriority } from '../utils/format'
 import { formatDateTimeUtc8 } from '../utils/datetime'
+import { getMergeRequestLabel } from '../utils/mergeRequest'
 
 const props = defineProps<{
   task: Task
 }>()
 
 const { t } = useI18n()
+
+const mergeRequestLabel = computed(() => getMergeRequestLabel(props.task))
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
   pending: 'default',

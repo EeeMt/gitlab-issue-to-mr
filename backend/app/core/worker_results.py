@@ -17,6 +17,7 @@ from app.core.usage_limits import upsert_task_usage_ledger
 from app.models import Issue, Task, TaskLog, TaskRunArchive, TaskStatus
 
 logger = logging.getLogger(__name__)
+_CONTAINER_RUNTIME_DIR = "/tmp/codify-runtime"
 
 _CODIFY_STATS_RE = re.compile(r'^CODIFY_STATS:(.+)$', re.MULTILINE)
 _CODIFY_COMMIT_SHA_RE = re.compile(r'^CODIFY_COMMIT_SHA:([a-f0-9]{40})$', re.MULTILINE)
@@ -25,6 +26,8 @@ _CODIFY_TOOL_CALLS_RE = re.compile(r'^CODIFY_TOOL_CALLS:(.+)$', re.MULTILINE)
 _CODIFY_SYSTEM_INIT_RE = re.compile(r'^CODIFY_SYSTEM_INIT:(.+)$', re.MULTILINE)
 _CODIFY_MR_TITLE_RE = re.compile(r'^CODIFY_MR_TITLE:(.+)$', re.MULTILINE)
 _CODIFY_SESSION_ID_RE = re.compile(r'^CODIFY_SESSION_ID:(\S+)$', re.MULTILINE)
+_THINK_BLOCK_RE = re.compile(r'<think\b[^>]*>.*?</think>', re.IGNORECASE | re.DOTALL)
+_OPEN_THINK_RE = re.compile(r'<think\b[^>]*>', re.IGNORECASE)
 
 
 async def finalize_archive(*, task_id: int, container, db: AsyncSession) -> None:
@@ -33,7 +36,7 @@ async def finalize_archive(*, task_id: int, container, db: AsyncSession) -> None
     try:
         stream, _stat_info = await asyncio.to_thread(
             container.get_archive,
-            f"/workspace/.codify-archive/{archive_name}",
+            f"{_CONTAINER_RUNTIME_DIR}/{archive_name}",
         )
         raw_bytes = b"".join(stream)
         outer_tar_buf = io.BytesIO(raw_bytes)
@@ -119,6 +122,21 @@ async def update_task_stats_from_logs_or_api(task: Task, logs: str, gitlab_clien
                 logger.warning(f"[Task {task.id}] Failed to get MR stats: {e}")
 
 
+def sanitize_merge_request_title(title: str) -> str:
+    """Clean model-generated MR titles before persisting/displaying them."""
+    if not title:
+        return ""
+
+    cleaned = _THINK_BLOCK_RE.sub("", title)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+    # If the title starts with an unclosed thinking block, it is not usable.
+    if _OPEN_THINK_RE.match(cleaned):
+        return ""
+
+    return cleaned
+
+
 async def parse_task_result(
     task: Task,
     logs: str,
@@ -158,7 +176,7 @@ async def parse_task_result(
     mr_title_match = _CODIFY_MR_TITLE_RE.search(logs)
     if mr_title_match:
         try:
-            title = mr_title_match.group(1).strip()
+            title = sanitize_merge_request_title(mr_title_match.group(1).strip())
             if title:
                 task.merge_request_title = sanitize_sensitive_data(title)[:512]
                 logger.info(f"[Task {task.id}] MR title: {task.merge_request_title}")

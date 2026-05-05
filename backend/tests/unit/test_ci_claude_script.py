@@ -365,6 +365,34 @@ def test_ci_claude_writes_event_jsonl_runtime_json_and_console_log(tmp_path):
     assert "Claude Code CI Runner" in (tmp_path / "console.log").read_text(encoding="utf-8")
 
 
+def test_ci_claude_respects_artifact_dir_env(tmp_path):
+    artifact_dir = tmp_path / "artifacts"
+    script_copy = _prepare_script_copy(
+        tmp_path,
+        "#!/usr/bin/env bash\ncat <<'EOF'\n"
+        '{"type":"result","subtype":"success","result":"done","session_id":"s1","usage":{"input_tokens":1,"output_tokens":1}}\n'
+        "EOF\n",
+    )
+    env = os.environ.copy()
+    env["SANDBOX_MODE"] = "1"
+    env["ARTIFACT_DIR"] = str(artifact_dir)
+
+    result = subprocess.run(
+        [str(script_copy), "test prompt"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (artifact_dir / "event.jsonl").exists()
+    assert (artifact_dir / "runtime.json").exists()
+    assert (artifact_dir / "console.log").exists()
+    assert not (tmp_path / "event.jsonl").exists()
+
+
 def test_ci_claude_no_longer_emits_codify_markers(tmp_path):
     result = run_fake_ci_claude(tmp_path, fake_stream_lines=[
         '{"type":"result","subtype":"success","result":"done","session_id":"s1","usage":{"input_tokens":1,"output_tokens":1}}',

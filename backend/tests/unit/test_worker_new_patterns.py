@@ -205,6 +205,20 @@ class TestCodifyMrTitleParsing(unittest.TestCase):
         self.assertNotIn("glpat-abcdefghijklmnopqrst", task.merge_request_title)
         self.assertIn("[GITLAB_TOKEN]", task.merge_request_title)
 
+    def test_strips_completed_think_block_from_title(self):
+        """CODIFY_MR_TITLE removes model thinking tags before storing."""
+        task = _make_task()
+        logs = 'CODIFY_MR_TITLE:<think>用户要求输出 MR 标题</think>修复 Git 配置\n'
+        self._run_parse(task, logs)
+        self.assertEqual(task.merge_request_title, "修复 Git 配置")
+
+    def test_ignores_unclosed_think_title(self):
+        """CODIFY_MR_TITLE with only an unclosed thinking block is not stored."""
+        task = _make_task()
+        logs = 'CODIFY_MR_TITLE:<think>用户要求输出一个 GitLab Merge Request 标题\n'
+        self._run_parse(task, logs)
+        self.assertIsNone(task.merge_request_title)
+
 
 # ---------------------------------------------------------------------------
 # TestCodifyThinkingRealTimeParsing

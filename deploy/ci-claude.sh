@@ -26,15 +26,22 @@
 set -euo pipefail
 
 # ── Artifact files (written to cwd so callers can locate them) ────────────────
-ARTIFACT_DIR="${PWD}"
+ARTIFACT_DIR="${ARTIFACT_DIR:-${PWD}}"
+mkdir -p "$ARTIFACT_DIR"
 EVENT_JSONL="${ARTIFACT_DIR}/event.jsonl"
 RUNTIME_JSON="${ARTIFACT_DIR}/runtime.json"
 CONSOLE_LOG="${ARTIFACT_DIR}/console.log"
 touch "$EVENT_JSONL" "$CONSOLE_LOG"
-# Tee all stderr to console.log; >&2 inside the substitution refers to the
-# original stderr (before exec redirects fd 2), so output still appears on
-# the caller's terminal/log stream.
-exec 2> >(tee -a "$CONSOLE_LOG" >&2)
+# Tee all stderr to console.log while preserving the caller's stderr.
+# Use a FIFO instead of process substitution so this works in restricted
+# environments where /dev/fd process-substitution targets cannot be opened.
+STDERR_TEE_DIR=$(mktemp -d)
+STDERR_TEE_PIPE="${STDERR_TEE_DIR}/stderr.pipe"
+mkfifo "$STDERR_TEE_PIPE"
+tee -a "$CONSOLE_LOG" < "$STDERR_TEE_PIPE" >&2 &
+exec 2> "$STDERR_TEE_PIPE"
+rm -f "$STDERR_TEE_PIPE"
+rmdir "$STDERR_TEE_DIR" 2>/dev/null || true
 
 # ── Colors on stderr ──────────────────────────────────────────────────────────
 if [[ -t 2 && "${NO_COLOR:-}" != "1" ]]; then

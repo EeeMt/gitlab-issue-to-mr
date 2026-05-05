@@ -640,6 +640,43 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('CODIFY_COAUTHOR_EMAIL_VALUE', content)
         self.assertNotIn('Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>', content)
 
+    def test_entrypoint_configures_git_for_codify_runtime_user(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('CODIFY_GIT_CONFIG="/home/codify/.gitconfig"', content)
+        self.assertIn('/home/codify/.git-credentials', content)
+        self.assertIn('git config --file "${CODIFY_GIT_CONFIG}" credential.helper store', content)
+        self.assertIn('git config --file "${CODIFY_GIT_CONFIG}" user.email "bot@codify.local"', content)
+        self.assertIn('git config --file "${CODIFY_GIT_CONFIG}" user.name "Codify Bot"', content)
+        self.assertIn('git config --file "${CODIFY_GIT_CONFIG}" --add safe.directory /workspace', content)
+        self.assertIn('chown codify:codify /home/codify/.git-credentials', content)
+        self.assertIn('chown codify:codify "${CODIFY_GIT_CONFIG}"', content)
+
+    def test_entrypoint_normalizes_generated_mr_title(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('normalize_model_title() {', content)
+        self.assertIn('<[Tt][Hh][Ii][Nn][Kk]', content)
+        self.assertIn("grep -qi '^<think'", content)
+        self.assertIn('FINAL_MR_TITLE=$(normalize_model_title "${GENERATED_MR_TITLE}")', content)
+
+    def test_entrypoint_keeps_runtime_artifacts_outside_worktree_until_after_commit(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('CODIFY_RUNTIME_DIR="${CODIFY_RUNTIME_DIR:-/tmp/codify-runtime}"', content)
+        self.assertIn('ARTIFACT_DIR="${CODIFY_RUNTIME_DIR}" PROMPT_FILE=/tmp/claude_prompt.txt', content)
+        self.assertIn('local archive_path="${CODIFY_RUNTIME_DIR}/${archive_name}"', content)
+        self.assertIn('tar -czf "${archive_path}" -C "${CODIFY_RUNTIME_DIR}" event.jsonl runtime.json console.log', content)
+        self.assertNotIn('[ -f "/workspace/event.jsonl" ]', content)
+        self.assertNotIn('/workspace/.codify-archive', content)
+
+        git_add_index = content.index('git add -A')
+        archive_success_index = content.index('    create_runtime_archive\n\n    echo "========================================"')
+        self.assertGreater(archive_success_index, git_add_index)
+
 
 class TestBuildContainerVolumes(unittest.TestCase):
     """Tests for _build_container_volumes — lines 527-557."""

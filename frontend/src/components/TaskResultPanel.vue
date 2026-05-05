@@ -13,7 +13,7 @@
         </div>
         <div class="result-card__content">
           <a :href="task.issue.merge_request_url" target="_blank" rel="noopener noreferrer" class="app-link mr-link">
-            {{ task.merge_request_title || task.issue.merge_request_url }}
+            {{ mergeRequestLabel }}
           </a>
           <div v-if="task.issue?.branch_name && task.issue?.target_branch" class="mr-branch-flow">
             <span class="branch-item branch-item--work">{{ task.issue.branch_name }}</span>
@@ -81,6 +81,7 @@ import { NCard, NIcon } from 'naive-ui'
 import { GitMergeOutline, AlertCircleOutline, CodeOutline, TimeOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { formatLargeNumber } from '../utils/usageLimits'
+import { getMergeRequestLabel } from '../utils/mergeRequest'
 import type { Task } from '../api'
 
 const props = defineProps<{
@@ -88,6 +89,8 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+
+const mergeRequestLabel = computed(() => getMergeRequestLabel(props.task))
 
 const hasChanges = computed(() =>
   props.task.additions !== undefined || props.task.deletions !== undefined

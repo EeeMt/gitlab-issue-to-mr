@@ -49,6 +49,7 @@ echo "========================================"
 GITLAB_SCHEME="${GITLAB_URL%%://*}"
 case "${GITLAB_SCHEME}" in http | https) ;; *) GITLAB_SCHEME="http" ;; esac
 GITLAB_HOST=$(echo "${GITLAB_URL}" | sed 's|https://||' | sed 's|http://||')
+CODIFY_GIT_CONFIG="/home/codify/.gitconfig"
 
 # Configure git SSL verification early, before any GitLab API requests.
 # When a custom CA bundle is provided, install it into the system trust store,
@@ -60,6 +61,8 @@ if [ -n "${CUSTOM_CA_BUNDLE}" ] && [ -f "${CUSTOM_CA_BUNDLE}" ]; then
     update-ca-certificates --fresh 2>/dev/null || true
     git config --global http.sslVerify true
     git config --global http.sslCAInfo "${CUSTOM_CA_BUNDLE}"
+    git config --file "${CODIFY_GIT_CONFIG}" http.sslVerify true
+    git config --file "${CODIFY_GIT_CONFIG}" http.sslCAInfo "${CUSTOM_CA_BUNDLE}"
     # Claude CLI (Node.js) picks up extra CA certs from this env var
     export NODE_EXTRA_CA_CERTS="${CUSTOM_CA_BUNDLE}"
     # Python requests / httpx pick this up automatically
@@ -78,6 +81,7 @@ if [ -n "${CUSTOM_CA_BUNDLE}" ] && [ -f "${CUSTOM_CA_BUNDLE}" ]; then
 else
     # No custom CA — disable git SSL verification to allow self-signed GitLab certs
     git config --global http.sslVerify false
+    git config --file "${CODIFY_GIT_CONFIG}" http.sslVerify false
 fi
 
 # Get correct git repo URL from GitLab API (handles external_url misconfiguration)
@@ -114,14 +118,18 @@ GIT_REPO_URL="${GITLAB_SCHEME}://${GITLAB_HOST}/${PROJECT_PATH}.git"
 # Log repository URL without exposing token
 echo "Repository URL: ${GITLAB_SCHEME}://[TOKEN]@${GITLAB_HOST}/${PROJECT_PATH}.git"
 
-# Set up credential helper - write credentials file
-rm -rf ~/.git-credentials
-touch ~/.git-credentials
-chmod 600 ~/.git-credentials
-# Write credentials in format: protocol://username:password@host
-echo "${GITLAB_SCHEME}://oauth2:${GITLAB_TOKEN}@${GITLAB_HOST}" > ~/.git-credentials
+# Set up credential helper - write credentials file for both root and codify.
+# The entrypoint clones as root, but Claude runs as codify with HOME=/home/codify.
+GIT_CREDENTIAL_LINE="${GITLAB_SCHEME}://oauth2:${GITLAB_TOKEN}@${GITLAB_HOST}"
+rm -rf /root/.git-credentials /home/codify/.git-credentials
+printf '%s\n' "${GIT_CREDENTIAL_LINE}" > /root/.git-credentials
+chmod 600 /root/.git-credentials
+printf '%s\n' "${GIT_CREDENTIAL_LINE}" > /home/codify/.git-credentials
+chmod 600 /home/codify/.git-credentials
+chown codify:codify /home/codify/.git-credentials
 
 git config --global credential.helper store
+git config --file "${CODIFY_GIT_CONFIG}" credential.helper store
 
 # Clone repository with authentication
 echo "Cloning repository..."
@@ -132,11 +140,19 @@ cd /workspace
 git config --global user.email "bot@codify.local"
 git config --global user.name "Codify Bot"
 git config --global --add safe.directory /workspace
+git config --file "${CODIFY_GIT_CONFIG}" user.email "bot@codify.local"
+git config --file "${CODIFY_GIT_CONFIG}" user.name "Codify Bot"
+git config --file "${CODIFY_GIT_CONFIG}" --add safe.directory /workspace
+chown codify:codify "${CODIFY_GIT_CONFIG}"
 
 GIT_AUTHOR_NAME_VALUE="${GIT_AUTHOR_NAME:-${CODIFY_AUTHOR_NAME:-Codify User}}"
 GIT_AUTHOR_EMAIL_VALUE="${GIT_AUTHOR_EMAIL:-${CODIFY_AUTHOR_EMAIL:-codify-task@codify.local}}"
 CODIFY_COAUTHOR_NAME_VALUE="${CODIFY_COAUTHOR_NAME:-Codify}"
 CODIFY_COAUTHOR_EMAIL_VALUE="${CODIFY_COAUTHOR_EMAIL:-codify@codify.local}"
+CODIFY_RUNTIME_DIR="${CODIFY_RUNTIME_DIR:-/tmp/codify-runtime}"
+export CODIFY_RUNTIME_DIR
+mkdir -p "${CODIFY_RUNTIME_DIR}"
+chown -R codify:codify "${CODIFY_RUNTIME_DIR}"
 
 # Checkout/create branch
 echo "Checking out branch: ${BRANCH_NAME}"
@@ -411,6 +427,23 @@ ${summary_text}
 EOF
 }
 
+normalize_model_title() {
+    local raw_title="$1"
+    local cleaned_title=""
+
+    cleaned_title=$(printf '%s\n' "${raw_title}" | tr '\n' ' ' | sed -E \
+        -e 's/<[Tt][Hh][Ii][Nn][Kk][^>]*>[^<]*<\/[Tt][Hh][Ii][Nn][Kk]>//g' \
+        -e 's/[[:space:]]+/ /g' \
+        -e 's/^ *//' \
+        -e 's/ *$//')
+
+    if printf '%s\n' "${cleaned_title}" | grep -qi '^<think'; then
+        cleaned_title=""
+    fi
+
+    printf '%s' "${cleaned_title}"
+}
+
 cat > /tmp/claude_prompt.txt <<EOF
 你在 /workspace 中工作，请直接完成下面的需求，不要先输出规划或步骤清单。
 
@@ -467,6 +500,24 @@ FINAL_SUMMARY_CONTENT=""
 FINAL_CHANGED_FILES_TEXT=""
 FINAL_MR_TITLE=""
 FINAL_COMMIT_MESSAGE=""
+RUNTIME_ARCHIVE_CREATED=0
+
+create_runtime_archive() {
+    if [ "${RUNTIME_ARCHIVE_CREATED}" -eq 1 ]; then
+        return 0
+    fi
+
+    local archive_name="task-${TASK_ID:-0}-runtime-archive.tar.gz"
+    local archive_path="${CODIFY_RUNTIME_DIR}/${archive_name}"
+
+    if [ -f "${CODIFY_RUNTIME_DIR}/event.jsonl" ] && [ -f "${CODIFY_RUNTIME_DIR}/runtime.json" ]; then
+        tar -czf "${archive_path}" -C "${CODIFY_RUNTIME_DIR}" event.jsonl runtime.json console.log 2>/dev/null || true
+        echo "Archive created: ${archive_path}"
+        RUNTIME_ARCHIVE_CREATED=1
+    fi
+}
+
+trap create_runtime_archive EXIT
 
 echo "Claude CLI version: $(/usr/local/bin/claude --version)"
 echo "Updating MR with execution status..."
@@ -475,23 +526,13 @@ update_mr_description "$(build_running_mr_description)" || true
 echo "Starting Claude CLI (streaming mode)..."
 set +e
 env HOME=/home/codify timeout "${TASK_TIMEOUT:-1800}" su -m -s /bin/bash codify -c \
-    'cd /workspace && export PATH="/usr/local/bin:/usr/bin:/bin:${JAVA_HOME}/bin" && PROMPT_FILE=/tmp/claude_prompt.txt /usr/local/bin/ci-claude.sh' \
+    'cd /workspace && export PATH="/usr/local/bin:/usr/bin:/bin:${JAVA_HOME}/bin" && ARTIFACT_DIR="${CODIFY_RUNTIME_DIR}" PROMPT_FILE=/tmp/claude_prompt.txt /usr/local/bin/ci-claude.sh' \
     > /tmp/claude_result.json
 SCRIPT_RESULT=$?
 set -e
 echo "Claude CLI exited with code: ${SCRIPT_RESULT}"
 
 RESULT=${SCRIPT_RESULT}
-
-# Package runtime artifacts for post-execution inspection
-ARCHIVE_DIR="/workspace/.codify-archive"
-mkdir -p "$ARCHIVE_DIR"
-ARCHIVE_NAME="task-${TASK_ID:-0}-runtime-archive.tar.gz"
-ARCHIVE_PATH="${ARCHIVE_DIR}/${ARCHIVE_NAME}"
-if [ -f "/workspace/event.jsonl" ] && [ -f "/workspace/runtime.json" ]; then
-    tar -czf "$ARCHIVE_PATH" -C /workspace event.jsonl runtime.json console.log 2>/dev/null || true
-    echo "Archive created: ${ARCHIVE_PATH}"
-fi
 
 # Always emit structured tool calls if the JSON file exists, even on failure.
 # This lets the frontend show a timeline of what was attempted before the failure.
@@ -525,6 +566,7 @@ fi
 
 if [ $RESULT -ne 0 ]; then
     echo "Claude execution failed with exit code: ${RESULT}"
+    create_runtime_archive
     exit $RESULT
 fi
 
@@ -710,7 +752,7 @@ AI-Generated: true"
         set -e
 
         if [ ${TITLE_RESULT} -eq 0 ]; then
-            FINAL_MR_TITLE=$(printf '%s' "${GENERATED_MR_TITLE}" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g; s/^ *//; s/ *$//')
+            FINAL_MR_TITLE=$(normalize_model_title "${GENERATED_MR_TITLE}")
             FINAL_MR_TITLE="${FINAL_MR_TITLE:0:120}"
         fi
 
@@ -721,6 +763,8 @@ AI-Generated: true"
         echo "CODIFY_MR_TITLE:${FINAL_MR_TITLE}"
     fi
 
+    create_runtime_archive
+
     echo "========================================"
     echo "Task completed successfully!"
     echo "========================================"
@@ -728,10 +772,12 @@ else
     echo "No changes made by Claude CLI"
     if [ -z "${TARGET_BRANCH:-}" ]; then
         echo "No-MR mode: task completed without code changes"
+        create_runtime_archive
         echo "========================================"
         echo "Task completed successfully!"
         echo "========================================"
         exit 0
     fi
+    create_runtime_archive
     exit 1
 fi

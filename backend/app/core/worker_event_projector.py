@@ -12,6 +12,10 @@ from app.core.task_log_payloads import append_raw_log_chunk, create_payload
 from app.models import TaskLog
 
 logger = logging.getLogger(__name__)
+_CONTAINER_RUNTIME_DIR = "/tmp/codify-runtime"
+_CONTAINER_EVENT_JSONL = f"{_CONTAINER_RUNTIME_DIR}/event.jsonl"
+_CONTAINER_RUNTIME_JSON = f"{_CONTAINER_RUNTIME_DIR}/runtime.json"
+_CONTAINER_CONSOLE_LOG = f"{_CONTAINER_RUNTIME_DIR}/console.log"
 
 _THINKING_OPEN = '<think>'
 _THINKING_CLOSE = '</think>'
@@ -69,7 +73,7 @@ class WorkerEventProjector:
         try:
             result = await asyncio.to_thread(
                 container.exec_run,
-                "python3 -c \"import json, pathlib; print(json.loads(pathlib.Path('/workspace/runtime.json').read_text()).get('resume_session', ''))\"",
+                f"python3 -c \"import json, pathlib; print(json.loads(pathlib.Path('{_CONTAINER_RUNTIME_JSON}').read_text()).get('resume_session', ''))\"",
                 demux=False,
             )
             if result.exit_code != 0:
@@ -446,7 +450,7 @@ class WorkerEventProjector:
         try:
             result = await asyncio.to_thread(
                 container.exec_run,
-                f"tail -c +{offset} /workspace/event.jsonl",
+                f"tail -c +{offset} {_CONTAINER_EVENT_JSONL}",
                 demux=False,
             )
             if result.exit_code != 0 or not result.output:
@@ -466,7 +470,7 @@ class WorkerEventProjector:
         try:
             result = await asyncio.to_thread(
                 container.exec_run,
-                f"tail -c +{offset} /workspace/console.log",
+                f"tail -c +{offset} {_CONTAINER_CONSOLE_LOG}",
                 demux=False,
             )
             if result.exit_code != 0 or not result.output:
