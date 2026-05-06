@@ -26,6 +26,9 @@ Covers functionality NOT tested by test_worker_new_patterns.py or test_mr_stats.
 
 import asyncio
 import json
+import re
+import subprocess
+import textwrap
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -630,6 +633,13 @@ class TestResolveCommitAuthor(unittest.IsolatedAsyncioTestCase):
 class TestEntrypointCommitAttribution(unittest.TestCase):
     """Regression tests for commit attribution shell logic."""
 
+    @staticmethod
+    def _extract_shell_function(content, name):
+        match = re.search(rf"(?ms)^{re.escape(name)}\(\) \{{\n.*?^\}}\n", content)
+        if match is None:
+            raise AssertionError(f"{name} shell function not found")
+        return match.group(0)
+
     def test_entrypoint_uses_codify_coauthor_and_git_author_env(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = script.read_text()
@@ -662,6 +672,73 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('<[Tt][Hh][Ii][Nn][Kk]', content)
         self.assertIn("grep -qi '^<think'", content)
         self.assertIn('FINAL_MR_TITLE=$(normalize_model_title "${GENERATED_MR_TITLE}")', content)
+
+    def test_entrypoint_sanitizes_generated_commit_message(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+        function_definition = self._extract_shell_function(content, "normalize_model_commit_message")
+        raw_message = textwrap.dedent(
+            """
+            <think>
+            选择 docs 类型，因为 joke.md 是文档文件。
+            </think>
+
+            docs: 新增程序员笑话文件
+
+            - 添加 joke.md
+
+            AI-Generated: true
+
+            docs: 后续说明不应被截断
+            """
+        ).strip()
+
+        result = subprocess.run(
+            ["bash", "-c", f"{function_definition}\nnormalize_model_commit_message \"$(cat)\""],
+            input=raw_message,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertEqual(
+            result.stdout,
+            "docs: 新增程序员笑话文件\n\n- 添加 joke.md\n\nAI-Generated: true\n\ndocs: 后续说明不应被截断",
+        )
+
+    def test_entrypoint_does_not_clear_commit_message_for_unclosed_think_tag(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+        function_definition = self._extract_shell_function(content, "normalize_model_commit_message")
+        raw_message = "<think>\ndocs: 新增程序员笑话文件\n\nAI-Generated: true"
+
+        result = subprocess.run(
+            ["bash", "-c", f"{function_definition}\nnormalize_model_commit_message \"$(cat)\""],
+            input=raw_message,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertEqual(
+            result.stdout,
+            "docs: 新增程序员笑话文件\n\nAI-Generated: true",
+        )
+
+    def test_entrypoint_logs_commit_message_generation_steps(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('echo "Generating commit message with Claude..."', content)
+        self.assertIn('echo "Commit message prompt written to /tmp/commit_message_prompt.txt"', content)
+        self.assertIn('echo "Claude commit message generation succeeded"', content)
+        self.assertIn('echo "Claude raw commit message response:"', content)
+        self.assertIn("printf '%s\\n' \"${GENERATED_COMMIT_MESSAGE}\" | sed 's/^/  /'", content)
+        self.assertIn('echo "Claude commit message generation failed with exit code ${COMMIT_MESSAGE_RESULT}; using fallback"', content)
+        self.assertIn('echo "Generated commit message was empty after normalization; using fallback"', content)
+        self.assertIn('echo "Commit message written to /tmp/commit_message.txt"', content)
+        self.assertIn('echo "Final commit message:"', content)
+        self.assertIn("sed 's/^/  /' /tmp/commit_message.txt", content)
 
     def test_entrypoint_keeps_runtime_artifacts_outside_worktree_until_after_commit(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"

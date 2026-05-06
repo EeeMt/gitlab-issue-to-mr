@@ -476,6 +476,12 @@ normalize_model_title() {
     printf '%s' "${cleaned_title}"
 }
 
+normalize_model_commit_message() {
+    local raw_message="$1"
+
+    printf '%s' "${raw_message}" | python3 -c 'import re, sys; text = sys.stdin.read(); text = re.sub(r"\r$", "", text, flags=re.MULTILINE); text = re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL); text = re.sub(r"</?think\b[^>]*>", "", text, flags=re.IGNORECASE); print(text.strip(), end="")'
+}
+
 cat > /tmp/claude_prompt.txt <<EOF
 你在 /workspace 中工作，请直接完成下面的需求，不要先输出规划或步骤清单。
 
@@ -688,10 +694,12 @@ if [ -n "$CHANGES" ]; then
     FINAL_CHANGED_FILES_TEXT="$(build_changed_files_table "${NEW_FILES}" "${MODIFIED_FILES}" "${DELETED_FILES}" "${FINAL_SUMMARY_CONTENT}")"
 
     COMMIT_DIFF_STATS=$(git diff --cached --stat || echo "0 files changed")
+    echo "Generating commit message with Claude..."
     COMMIT_MESSAGE_PROMPT=$(build_commit_message_prompt "${CHANGED_FILES_TEXT}" "${COMMIT_DIFF_STATS}" "${FINAL_SUMMARY_CONTENT}")
     printf '%s\n' "${COMMIT_MESSAGE_PROMPT}" > /tmp/commit_message_prompt.txt
     chmod 644 /tmp/commit_message_prompt.txt
     chown codify:codify /tmp/commit_message_prompt.txt
+    echo "Commit message prompt written to /tmp/commit_message_prompt.txt"
 
     set +e
     GENERATED_COMMIT_MESSAGE=$(env HOME=/home/codify timeout 60 su -m -s /bin/bash codify -c '/usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" "$(cat /tmp/commit_message_prompt.txt)"' 2>/dev/null)
@@ -699,15 +707,16 @@ if [ -n "$CHANGES" ]; then
     set -e
 
     if [ ${COMMIT_MESSAGE_RESULT} -eq 0 ]; then
-        FINAL_COMMIT_MESSAGE=$(printf '%s\n' "${GENERATED_COMMIT_MESSAGE}" | sed 's/\r$//')
-        # Strip preamble: remove lines before the first conventional commit type
-        STRIPPED=$(printf '%s\n' "${FINAL_COMMIT_MESSAGE}" | sed -n '/^\(feat\|fix\|refactor\|docs\|test\|build\|chore\|ci\)[:(]/,$p')
-        if [ -n "${STRIPPED}" ]; then
-            FINAL_COMMIT_MESSAGE="${STRIPPED}"
-        fi
+        echo "Claude commit message generation succeeded"
+        echo "Claude raw commit message response:"
+        printf '%s\n' "${GENERATED_COMMIT_MESSAGE}" | sed 's/^/  /'
+        FINAL_COMMIT_MESSAGE=$(normalize_model_commit_message "${GENERATED_COMMIT_MESSAGE}")
+    else
+        echo "Claude commit message generation failed with exit code ${COMMIT_MESSAGE_RESULT}; using fallback"
     fi
 
     if [ -z "${FINAL_COMMIT_MESSAGE}" ]; then
+        echo "Generated commit message was empty after normalization; using fallback"
         FINAL_COMMIT_MESSAGE="chore: 更新 ${BRANCH_NAME} 分支实现
 
 - 完成用户请求对应的代码修改
@@ -726,6 +735,9 @@ AI-Generated: true"
         printf '%s\n' "${FINAL_COMMIT_MESSAGE}"
         printf '\nCo-authored-by: %s <%s>\n' "${CODIFY_COAUTHOR_NAME_VALUE}" "${CODIFY_COAUTHOR_EMAIL_VALUE}"
     } > /tmp/commit_message.txt
+    echo "Commit message written to /tmp/commit_message.txt"
+    echo "Final commit message:"
+    sed 's/^/  /' /tmp/commit_message.txt
 
     # Create commit
     GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME_VALUE}" \
