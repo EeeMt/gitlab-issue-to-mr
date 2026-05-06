@@ -92,6 +92,7 @@ import TaskProcessTextRow from './task-process/TaskProcessTextRow.vue'
 import TaskProcessToolRow from './task-process/TaskProcessToolRow.vue'
 import { normalizeTaskProcessRows, parseSystemInitEntry, isTextRow, isToolRow, type ParsedTextEntry } from './task-process/taskProcessUtils'
 import { useTaskPayloadExpansion } from './task-process/useTaskPayloadExpansion'
+import { parseUtcDate } from '../utils/datetime'
 
 const props = withDefaults(defineProps<{
   task: Task | null
@@ -193,7 +194,7 @@ function onCollapseChange(expandedNames: (string | number)[], index: number) {
 function updateElapsed() {
   if (!props.task?.started_at) return
   try {
-    const ms = Date.now() - new Date(props.task.started_at).getTime()
+    const ms = Date.now() - parseUtcDate(props.task.started_at).getTime()
     elapsedMs.value = ms > 0 ? ms : 0
   } catch {
     elapsedMs.value = 0
