@@ -584,6 +584,75 @@ class TestSerializeTaskNewFields(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# TestBackfillEventJsonlCommit
+# ---------------------------------------------------------------------------
+
+class TestBackfillEventJsonlCommit(unittest.TestCase):
+    """Verify backfill_event_jsonl_from_archive commits projected events."""
+
+    def setUp(self):
+        from app.core.worker_event_projector import WorkerEventProjector
+        self.sanitize = MagicMock(return_value="sanitized")
+        self.projector = WorkerEventProjector(sanitize_sensitive_data=self.sanitize)
+
+    def _finalization_event_jsonl(self) -> str:
+        import json as _json
+        return _json.dumps({
+            "type": "codify_worker",
+            "subtype": "finalization",
+            "commit_sha": "a" * 40,
+            "diff": {"additions": 20, "deletions": 7, "total": 27},
+            "merge_request_title": "feat: add tests",
+        }) + "\n"
+
+    def test_backfill_commits_after_projecting_finalization_event(self):
+        import io
+        import tarfile as _tarfile
+
+        archive_buf = io.BytesIO()
+        with _tarfile.open(fileobj=archive_buf, mode="w:gz") as tf:
+            event_data = self._finalization_event_jsonl().encode("utf-8")
+            info = _tarfile.TarInfo(name="event.jsonl")
+            info.size = len(event_data)
+            tf.addfile(info, io.BytesIO(event_data))
+
+            runtime_data = b'{"resume_session":""}'
+            runtime_info = _tarfile.TarInfo(name="runtime.json")
+            runtime_info.size = len(runtime_data)
+            tf.addfile(runtime_info, io.BytesIO(runtime_data))
+
+        archive_bytes = archive_buf.getvalue()
+        mock_db = MagicMock()
+        mock_db.commit = AsyncMock()
+        mock_db.add = MagicMock()
+
+        mock_cursor = MagicMock()
+        mock_cursor.last_offset = 0
+        mock_cursor.last_sequence_no = 0
+
+        with patch(
+            "app.core.worker_event_projector._os.path.exists", return_value=True
+        ), patch(
+            "app.core.worker_event_projector._tarfile.open",
+            return_value=_tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz"),
+        ), patch(
+            "app.core.worker_event_projector.get_or_create_cursor",
+            AsyncMock(return_value=mock_cursor),
+        ):
+            async def run():
+                await self.projector.backfill_event_jsonl_from_archive(
+                    task_id=1, db=mock_db
+                )
+
+            asyncio.run(run())
+
+        mock_db.commit.assert_awaited()
+        mock_db.add.assert_called()
+        added_log = mock_db.add.call_args[0][0]
+        self.assertEqual(added_log.log_type, "worker_finalization")
+
+
+# ---------------------------------------------------------------------------
 # Entry point for direct execution
 # ---------------------------------------------------------------------------
 

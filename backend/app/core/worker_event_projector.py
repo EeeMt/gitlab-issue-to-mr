@@ -545,6 +545,7 @@ class WorkerEventProjector:
         await self.ingest_event_records_from_chunk(
             task_id=task_id, chunk=new_data, cursor=cursor, db=db
         )
+        await db.commit()
 
     async def backfill_console_log_from_archive(
         self, *, task_id: int, db: AsyncSession
