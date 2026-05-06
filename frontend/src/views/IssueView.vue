@@ -14,6 +14,9 @@
           </n-tag>
         </template>
         <template #actions>
+          <n-button @click="refreshIssue" :loading="loading">
+            {{ t('common.refresh') }}
+          </n-button>
           <template v-if="isOwner">
             <n-button data-testid="issue-edit-button" :disabled="issue.status === 'closed'" @click="openEditModal">
               {{ t('issue.edit') }}
@@ -541,6 +544,7 @@ const isOwner = computed(() => {
 // --- State ---
 const issue = ref<Issue | null>(null)
 const loading = ref(false)
+let pollTimer: number | null = null
 const projects = ref<Project[]>([])
 
 const projectName = computed(() => {
@@ -804,6 +808,10 @@ watch(showCreateDrawer, (val) => {
 onUnmounted(() => {
   if (slotCheckTimeout) clearTimeout(slotCheckTimeout)
   slotCheckGeneration++
+  if (pollTimer !== null) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
 })
 
 async function openScheduleDrawer() {
@@ -840,6 +848,13 @@ async function fetchIssue() {
   } finally {
     loading.value = false
   }
+}
+
+async function refreshIssue() {
+  await fetchIssue()
+  fetchPromptTemplates()
+  getProjects().then(p => { projects.value = p }).catch(() => {})
+  getProviders().then(data => { providers.value = data }).catch(() => {})
 }
 
 async function handleClose() {
@@ -998,6 +1013,12 @@ onMounted(() => {
   fetchPromptTemplates()
   getProjects().then(p => { projects.value = p }).catch(() => {})
   getProviders().then(data => { providers.value = data }).catch(() => {})
+  pollTimer = window.setInterval(() => {
+    if (document.visibilityState !== 'visible') return
+    if (issue.value?.status !== 'closed') {
+      fetchIssue()
+    }
+  }, 5000)
 })
 </script>
 
