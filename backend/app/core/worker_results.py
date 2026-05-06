@@ -19,12 +19,6 @@ from app.models import Issue, Task, TaskLog, TaskRunArchive, TaskStatus
 logger = logging.getLogger(__name__)
 _CONTAINER_RUNTIME_DIR = "/tmp/codify-runtime"
 
-_CODIFY_STATS_RE = re.compile(r'^CODIFY_STATS:(.+)$', re.MULTILINE)
-_CODIFY_COMMIT_SHA_RE = re.compile(r'^CODIFY_COMMIT_SHA:([a-f0-9]{40})$', re.MULTILINE)
-_CODIFY_DIFF_RE = re.compile(r'^CODIFY_DIFF:\+(\d+)-(\d+)$', re.MULTILINE)
-_CODIFY_TOOL_CALLS_RE = re.compile(r'^CODIFY_TOOL_CALLS:(.+)$', re.MULTILINE)
-_CODIFY_MR_TITLE_RE = re.compile(r'^CODIFY_MR_TITLE:(.+)$', re.MULTILINE)
-_CODIFY_SESSION_ID_RE = re.compile(r'^CODIFY_SESSION_ID:(\S+)$', re.MULTILINE)
 _THINK_BLOCK_RE = re.compile(r'<think\b[^>]*>.*?</think>', re.IGNORECASE | re.DOTALL)
 _OPEN_THINK_RE = re.compile(r'<think\b[^>]*>', re.IGNORECASE)
 
@@ -107,16 +101,7 @@ async def update_task_stats_from_logs_or_api(
         )
         return
 
-    diff_match = _CODIFY_DIFF_RE.search(logs)
-    if diff_match:
-        task.additions = int(diff_match.group(1))
-        task.deletions = int(diff_match.group(2))
-        task.total_changes = task.additions + task.deletions
-        logger.info(
-            f"[Task {task.id}] Diff stats (from log): "
-            f"+{task.additions} -{task.deletions} ({task.total_changes} total)"
-        )
-    elif task.commit_sha:
+    if task.commit_sha:
         mr_iid = (issue.merge_request_iid if issue else None) or getattr(task, '_parsed_mr_iid', None)
         if mr_iid:
             try:
@@ -191,16 +176,6 @@ async def parse_task_result(
         task.input_tokens = usage.get('input_tokens')
         task.output_tokens = usage.get('output_tokens')
         logger.info(f"[Task {task.id}] Token usage: in={task.input_tokens} out={task.output_tokens}")
-    else:
-        stats_match = _CODIFY_STATS_RE.search(logs)
-        if stats_match:
-            try:
-                usage = _json.loads(stats_match.group(1).strip())
-                task.input_tokens = usage.get('input_tokens')
-                task.output_tokens = usage.get('output_tokens')
-                logger.info(f"[Task {task.id}] Token usage: in={task.input_tokens} out={task.output_tokens}")
-            except Exception:
-                logger.debug(f"[Task {task.id}] Failed to parse CODIFY_STATS")
 
     model = str(system_init_meta.get('model') or '').strip()
     if model:
@@ -211,11 +186,6 @@ async def parse_task_result(
     if commit_sha:
         task.commit_sha = commit_sha
         logger.info(f"[Task {task.id}] Commit SHA: {task.commit_sha}")
-    else:
-        commit_sha_match = _CODIFY_COMMIT_SHA_RE.search(logs)
-        if commit_sha_match:
-            task.commit_sha = commit_sha_match.group(1).strip()
-            logger.info(f"[Task {task.id}] Commit SHA: {task.commit_sha}")
 
     structured_title = str(finalization_meta.get("merge_request_title") or "").strip()
     if structured_title:
@@ -226,33 +196,6 @@ async def parse_task_result(
                 logger.info(f"[Task {task.id}] MR title: {task.merge_request_title}")
         except Exception:
             logger.debug(f"[Task {task.id}] Failed to parse structured MR title")
-    else:
-        mr_title_match = _CODIFY_MR_TITLE_RE.search(logs)
-        if mr_title_match:
-            try:
-                title = sanitize_merge_request_title(mr_title_match.group(1).strip())
-                if title:
-                    task.merge_request_title = sanitize_sensitive_data(title)[:512]
-                    logger.info(f"[Task {task.id}] MR title: {task.merge_request_title}")
-            except Exception:
-                logger.debug(f"[Task {task.id}] Failed to parse CODIFY_MR_TITLE")
-
-    tool_calls_match = _CODIFY_TOOL_CALLS_RE.search(logs)
-    if tool_calls_match:
-        try:
-            tool_calls_json = tool_calls_match.group(1).strip()
-            _json.loads(tool_calls_json)
-            db.add(TaskLog(
-                task_id=task.id,
-                log_level="INFO",
-                message="",
-                log_type="tool_calls_json",
-                log_metadata=tool_calls_json,
-            ))
-            await db.commit()
-            logger.info(f"[Task {task.id}] Stored structured tool calls log entry")
-        except Exception:
-            logger.debug(f"[Task {task.id}] Failed to parse CODIFY_TOOL_CALLS")
 
     if exit_code == 0:
         task.status = TaskStatus.COMPLETED
@@ -266,10 +209,6 @@ async def parse_task_result(
         task.error_message = sanitize_sensitive_data(logs)[-1000:]
 
     extracted_session_id = str(run_result_meta.get("session_id") or "").strip()
-    if not extracted_session_id:
-        session_match = _CODIFY_SESSION_ID_RE.search(logs)
-        if session_match:
-            extracted_session_id = session_match.group(1)
     if extracted_session_id:
         logger.info(f"[Task {task.id}] Extracted session ID: {extracted_session_id}")
         task._extracted_session_id = extracted_session_id

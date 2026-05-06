@@ -590,23 +590,6 @@ if [ -f /tmp/claude_result.json ] && [ -s /tmp/claude_result.json ]; then
     fi
     FINAL_SUMMARY_CONTENT="$(sanitize_summary_content "${SUMMARY_CONTENT}")"
 
-    # Emit machine-parseable usage stats for backend collection
-    USAGE_JSON=$(jq -c '.usage // {}' /tmp/claude_result.json 2>/dev/null || echo '{}')
-    echo "CODIFY_STATS:${USAGE_JSON}"
-
-    # Emit structured tool calls for backend to store and frontend to render as timeline.
-    # Each tool output is truncated to 2000 chars to keep the payload manageable.
-    TOOL_CALLS_JSON=$(jq -c '[
-      .tool_calls[]? |
-      .output = ((.output // "") | if length > 2000 then .[:2000] + "…(truncated)" else . end)
-    ]' /tmp/claude_result.json 2>/dev/null || echo '[]')
-    echo "CODIFY_TOOL_CALLS:${TOOL_CALLS_JSON}"
-
-    # Extract and emit session ID for backend to store on the Issue
-    SESSION_ID=$(jq -r '.session_id // ""' /tmp/claude_result.json 2>/dev/null || echo '')
-    if [ -n "${SESSION_ID}" ]; then
-        echo "CODIFY_SESSION_ID:${SESSION_ID}"
-    fi
 fi
 
 if [ $RESULT -ne 0 ]; then
@@ -665,7 +648,6 @@ if [ -n "$CHANGES" ]; then
     TOTAL_CHANGES=$((ADDITIONS + DELETIONS))
 
     echo "Changes: +${ADDITIONS} -${DELETIONS} (${TOTAL_CHANGES} total)"
-    echo "CODIFY_DIFF:+${ADDITIONS}-${DELETIONS}"
 
     # Collect changed file lists from the staged diff before committing.
     NEW_FILES=""
@@ -753,7 +735,6 @@ AI-Generated: true"
     # Get commit SHA
     COMMIT_SHA=$(git rev-parse HEAD)
     echo "Committed: ${COMMIT_SHA}"
-    echo "CODIFY_COMMIT_SHA:${COMMIT_SHA}"
 
     # MR was already created by backend before worker started.
     # In no-MR mode (TARGET_BRANCH is empty), skip all MR operations.
@@ -790,7 +771,7 @@ AI-Generated: true"
 
     if [ -n "${MR_IID}" ]; then
         # MR title is managed by the backend (based on issue title).
-        # We only generate a title here for logging / CODIFY_MR_TITLE marker;
+        # We only generate a title here for structured finalization metadata;
         # we do NOT call update_mr to overwrite the MR title.
         TITLE_PROMPT=$(build_mr_title_prompt "${CHANGED_FILES_TEXT}")
         printf '%s\n' "${TITLE_PROMPT}" > /tmp/mr_title_prompt.txt
@@ -811,7 +792,6 @@ AI-Generated: true"
             FINAL_MR_TITLE="AI: ${USER_PROMPT:0:60}"
         fi
 
-        echo "CODIFY_MR_TITLE:${FINAL_MR_TITLE}"
     fi
 
     FINALIZATION_EVENT=$(jq -nc \

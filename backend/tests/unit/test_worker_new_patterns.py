@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """
-Test: New CODIFY marker parsing features in the worker.
+Test: structured worker result parsing features.
 
 Covers:
-- CODIFY_SYSTEM_INIT  → task.model_name  (parsed in _parse_task_result)
-- CODIFY_MR_TITLE     → task.merge_request_title  (parsed in _parse_task_result)
 - CODIFY_THINKING     → TaskLog(log_type='thinking')  (parsed in _stream_logs_to_db)
 - CODIFY_ASSISTANT_TEXT → TaskLog(log_type='assistant_text')  (parsed in _stream_logs_to_db)
 - model_name / merge_request_title included in _serialize_task output
@@ -223,13 +221,13 @@ class TestCodifySystemInitParsing(unittest.TestCase):
         self.assertEqual(task.total_changes, 15)
         self.assertEqual(task.merge_request_title, "Fix worker result parsing")
 
-    def test_falls_back_to_codify_stats_marker_when_structured_usage_missing(self):
+    def test_ignores_codify_stats_marker_when_structured_usage_missing(self):
         task = _make_task()
         self._run_parse(task, 'CODIFY_STATS:{"input_tokens":100,"output_tokens":50}\n')
-        self.assertEqual(task.input_tokens, 100)
-        self.assertEqual(task.output_tokens, 50)
+        self.assertIsNone(task.input_tokens)
+        self.assertIsNone(task.output_tokens)
 
-    def test_falls_back_to_commit_diff_title_and_session_markers(self):
+    def test_ignores_legacy_commit_diff_title_and_session_markers(self):
         task = _make_task()
         logs = (
             'CODIFY_DIFF:+5-2\n'
@@ -238,20 +236,20 @@ class TestCodifySystemInitParsing(unittest.TestCase):
             'CODIFY_SESSION_ID:fallback-session\n'
         )
         self._run_parse(task, logs)
-        self.assertEqual(task.commit_sha, "fedcba9876543210fedcba9876543210fedcba98")
-        self.assertEqual(task.additions, 5)
-        self.assertEqual(task.deletions, 2)
-        self.assertEqual(task.total_changes, 7)
-        self.assertEqual(task.merge_request_title, "Fallback marker title")
-        self.assertEqual(task._extracted_session_id, "fallback-session")
+        self.assertIsNone(task.commit_sha)
+        self.assertEqual(task.additions, 0)
+        self.assertEqual(task.deletions, 0)
+        self.assertEqual(task.total_changes, 0)
+        self.assertIsNone(task.merge_request_title)
+        self.assertFalse(hasattr(task, "_extracted_session_id"))
 
 
 # ---------------------------------------------------------------------------
 # TestCodifyMrTitleParsing
 # ---------------------------------------------------------------------------
 
-class TestCodifyMrTitleParsing(unittest.TestCase):
-    """Tests for CODIFY_MR_TITLE parsing inside _parse_task_result."""
+class TestStructuredMrTitleParsing(unittest.TestCase):
+    """Tests for structured worker_finalization MR title parsing inside _parse_task_result."""
 
     def setUp(self):
         self.mock_settings = _make_mock_settings()
@@ -262,60 +260,86 @@ class TestCodifyMrTitleParsing(unittest.TestCase):
     def tearDown(self):
         self.patcher.stop()
 
-    def _run_parse(self, task, logs, exit_code=0):
+    def _run_parse(self, task, logs, exit_code=0, worker_finalization_metadata=None):
         async def run():
             with patch.object(self.worker, '_parse_mr_from_logs', new=AsyncMock()):
                 with patch.object(self.worker, '_update_task_stats_from_logs_or_api', new=AsyncMock()):
                     mock_db = create_mock_db(task)
+
+                    async def mock_execute(stmt, *args, **kwargs):
+                        try:
+                            stmt_str = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+                        except Exception:
+                            stmt_str = str(stmt)
+
+                        result = MagicMock()
+                        if "worker_finalization" in stmt_str:
+                            if worker_finalization_metadata is None:
+                                result.scalar_one_or_none.return_value = None
+                            else:
+                                log_entry = MagicMock()
+                                log_entry.log_metadata = worker_finalization_metadata
+                                result.scalar_one_or_none.return_value = log_entry
+                            return result
+                        result.scalar_one_or_none.return_value = None
+                        return result
+
+                    mock_db.execute = mock_execute
                     await self.worker._parse_task_result(task, logs, mock_db, exit_code=exit_code)
         asyncio.run(run())
 
-    def test_updates_merge_request_title_from_codify_mr_title(self):
-        """CODIFY_MR_TITLE line sets task.merge_request_title."""
+    def test_updates_merge_request_title_from_structured_finalization(self):
+        """worker_finalization metadata sets task.merge_request_title."""
         task = _make_task()
-        logs = 'Some output\nCODIFY_MR_TITLE:Fix the login bug\nMore output\n'
-        self._run_parse(task, logs)
+        self._run_parse(task, '', worker_finalization_metadata='{"merge_request_title":"Fix the login bug"}')
         self.assertEqual(task.merge_request_title, "Fix the login bug")
 
     def test_ignores_empty_title(self):
-        """CODIFY_MR_TITLE with only whitespace leaves merge_request_title as None."""
+        """Structured title with only whitespace leaves merge_request_title as None."""
         task = _make_task()
-        logs = 'CODIFY_MR_TITLE:   \n'
-        self._run_parse(task, logs)
+        self._run_parse(task, '', worker_finalization_metadata='{"merge_request_title":"   "}')
         self.assertIsNone(task.merge_request_title)
 
     def test_truncates_title_to_512_characters(self):
-        """CODIFY_MR_TITLE with a very long title is truncated to 512 characters."""
+        """Structured title with a very long title is truncated to 512 characters."""
         task = _make_task()
         long_title = "A" * 600
-        logs = f'CODIFY_MR_TITLE:{long_title}\n'
-        self._run_parse(task, logs)
+        self._run_parse(task, '', worker_finalization_metadata=f'{{"merge_request_title":"{long_title}"}}')
         self.assertIsNotNone(task.merge_request_title)
         self.assertLessEqual(len(task.merge_request_title), 512)
         # First 512 characters of the title should be stored
         self.assertTrue(task.merge_request_title.startswith("A" * 10))
 
     def test_sanitizes_gitlab_token_from_title(self):
-        """CODIFY_MR_TITLE containing a GitLab token has it redacted."""
+        """Structured title containing a GitLab token has it redacted."""
         task = _make_task()
-        logs = 'CODIFY_MR_TITLE:Fix auth glpat-abcdefghijklmnopqrst issue\n'
-        self._run_parse(task, logs)
+        self._run_parse(
+            task,
+            '',
+            worker_finalization_metadata='{"merge_request_title":"Fix auth glpat-abcdefghijklmnopqrst issue"}',
+        )
         self.assertIsNotNone(task.merge_request_title)
         self.assertNotIn("glpat-abcdefghijklmnopqrst", task.merge_request_title)
         self.assertIn("[GITLAB_TOKEN]", task.merge_request_title)
 
     def test_strips_completed_think_block_from_title(self):
-        """CODIFY_MR_TITLE removes model thinking tags before storing."""
+        """Structured title removes model thinking tags before storing."""
         task = _make_task()
-        logs = 'CODIFY_MR_TITLE:<think>用户要求输出 MR 标题</think>修复 Git 配置\n'
-        self._run_parse(task, logs)
+        self._run_parse(
+            task,
+            '',
+            worker_finalization_metadata='{"merge_request_title":"<think>用户要求输出 MR 标题</think>修复 Git 配置"}',
+        )
         self.assertEqual(task.merge_request_title, "修复 Git 配置")
 
     def test_ignores_unclosed_think_title(self):
-        """CODIFY_MR_TITLE with only an unclosed thinking block is not stored."""
+        """Structured title with only an unclosed thinking block is not stored."""
         task = _make_task()
-        logs = 'CODIFY_MR_TITLE:<think>用户要求输出一个 GitLab Merge Request 标题\n'
-        self._run_parse(task, logs)
+        self._run_parse(
+            task,
+            '',
+            worker_finalization_metadata='{"merge_request_title":"<think>用户要求输出一个 GitLab Merge Request 标题"}',
+        )
         self.assertIsNone(task.merge_request_title)
 
 

@@ -770,6 +770,20 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('update-ca-certificates --fresh >/dev/null 2>&1 || true', content)
         self.assertNotIn('update-ca-certificates --fresh 2>/dev/null || true', content)
 
+    def test_entrypoint_does_not_emit_legacy_codify_markers_to_console(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        for marker in [
+            "CODIFY_STATS",
+            "CODIFY_TOOL_CALLS",
+            "CODIFY_SESSION_ID",
+            "CODIFY_DIFF",
+            "CODIFY_COMMIT_SHA",
+            "CODIFY_MR_TITLE",
+        ]:
+            self.assertNotIn(f'echo "{marker}:', content)
+
     def test_entrypoint_reuses_existing_git_workspace_safely(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = script.read_text()
@@ -1069,10 +1083,10 @@ class TestCreateMrIfNeeded(unittest.TestCase):
 # ===================================================================
 
 class TestParseTaskResult(unittest.TestCase):
-    """Tests for _parse_task_result — lines 559-646."""
+    """Tests for _parse_task_result."""
 
-    def test_parses_codify_stats(self):
-        """Parses CODIFY_STATS for token usage — lines 575-586."""
+    def test_ignores_codify_stats_marker(self):
+        """Legacy CODIFY_STATS marker no longer sets token usage."""
         worker = _make_worker()
         task = _make_task()
         db = _make_db()
@@ -1080,11 +1094,11 @@ class TestParseTaskResult(unittest.TestCase):
 
         asyncio.run(worker._parse_task_result(task, logs, db, exit_code=0))
 
-        self.assertEqual(task.input_tokens, 500)
-        self.assertEqual(task.output_tokens, 150)
+        self.assertIsNone(task.input_tokens)
+        self.assertIsNone(task.output_tokens)
 
-    def test_handles_invalid_codify_stats(self):
-        """Invalid JSON in CODIFY_STATS should not crash — lines 585-586."""
+    def test_invalid_codify_stats_marker_is_ignored(self):
+        """Invalid legacy CODIFY_STATS marker should not crash."""
         worker = _make_worker()
         task = _make_task()
         db = _make_db()
@@ -1095,8 +1109,8 @@ class TestParseTaskResult(unittest.TestCase):
 
         self.assertIsNone(task.input_tokens)
 
-    def test_parses_codify_commit_sha(self):
-        """Parses CODIFY_COMMIT_SHA marker — lines 601-604."""
+    def test_ignores_codify_commit_sha_marker(self):
+        """Legacy CODIFY_COMMIT_SHA marker no longer sets commit_sha."""
         worker = _make_worker()
         task = _make_task()
         db = _make_db()
@@ -1105,10 +1119,10 @@ class TestParseTaskResult(unittest.TestCase):
 
         asyncio.run(worker._parse_task_result(task, logs, db, exit_code=0))
 
-        self.assertEqual(task.commit_sha, sha)
+        self.assertIsNone(task.commit_sha)
 
-    def test_parses_codify_tool_calls(self):
-        """Parses CODIFY_TOOL_CALLS and stores as TaskLog — lines 620-635."""
+    def test_ignores_codify_tool_calls_marker(self):
+        """Legacy CODIFY_TOOL_CALLS marker no longer stores a batch TaskLog."""
         worker = _make_worker()
         task = _make_task()
         db = _make_db()
@@ -1117,13 +1131,10 @@ class TestParseTaskResult(unittest.TestCase):
 
         asyncio.run(worker._parse_task_result(task, logs, db, exit_code=0))
 
-        db.add.assert_called()
-        added_log = db.add.call_args[0][0]
-        self.assertEqual(added_log.log_type, "tool_calls_json")
-        self.assertEqual(added_log.log_metadata, tool_calls)
+        db.add.assert_not_called()
 
-    def test_handles_invalid_codify_tool_calls(self):
-        """Invalid JSON in CODIFY_TOOL_CALLS should not crash — line 634-635."""
+    def test_invalid_codify_tool_calls_marker_is_ignored(self):
+        """Invalid legacy CODIFY_TOOL_CALLS marker should not crash."""
         worker = _make_worker()
         task = _make_task()
         db = _make_db()

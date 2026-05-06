@@ -19,6 +19,20 @@ EXIT_CODE="${FAKE_CLAUDE_EXIT_CODE:-0}"
 RESULT_TEXT="${FAKE_CLAUDE_RESULT:-Created hello.py with greeting function}"
 FAIL_MSG="${FAKE_CLAUDE_FAIL_MSG:-Task failed}"
 DELAY_SECONDS=0
+ARTIFACT_DIR="${ARTIFACT_DIR:-${PWD}}"
+mkdir -p "${ARTIFACT_DIR}"
+EVENT_JSONL="${ARTIFACT_DIR}/event.jsonl"
+RUNTIME_JSON="${ARTIFACT_DIR}/runtime.json"
+CONSOLE_LOG="${ARTIFACT_DIR}/console.log"
+touch "${EVENT_JSONL}" "${CONSOLE_LOG}"
+jq -n \
+    --arg model "fake-claude-1.0" \
+    --arg cwd "${PWD}" \
+    '{model: $model, cwd: $cwd, resume_session: ""}' > "${RUNTIME_JSON}"
+
+append_event() {
+    printf '%s\n' "$1" >> "${EVENT_JSONL}"
+}
 
 # Fetch dynamic config from mock server — GITLAB_URL points to mock-services in test env.
 # This allows tests to change behavior at runtime via PATCH /mock/config.
@@ -104,6 +118,8 @@ echo 'CODIFY_ASSISTANT_TEXT:{"text":"I created two files:\n1. hello.py — main 
 
 # Build and output JSON result to stdout (entrypoint.sh captures this)
 if [[ "$EXIT_CODE" == "0" ]]; then
+    append_event '{"type":"system","subtype":"init","model":"fake-claude-1.0","cwd":"/workspace"}'
+    append_event '{"type":"result","subtype":"success","result":"Created hello.py with greeting function","session_id":"fake-session","usage":{"input_tokens":1500,"output_tokens":800,"cache_read_input_tokens":200,"cache_creation_input_tokens":100}}'
     jq -n \
         --argjson success true \
         --arg subtype "success" \
@@ -122,6 +138,8 @@ if [[ "$EXIT_CODE" == "0" ]]; then
             ]
         }'
 else
+    append_event '{"type":"system","subtype":"init","model":"fake-claude-1.0","cwd":"/workspace"}'
+    append_event '{"type":"result","subtype":"error","result":"Task failed","session_id":"","usage":{"input_tokens":500,"output_tokens":100}}'
     jq -n \
         --argjson success false \
         --arg subtype "error" \
