@@ -75,7 +75,7 @@ CODIFY_GIT_CONFIG="/home/codify/.gitconfig"
 if [ -n "${CUSTOM_CA_BUNDLE}" ] && [ -f "${CUSTOM_CA_BUNDLE}" ]; then
     echo "Installing custom CA certificate from ${CUSTOM_CA_BUNDLE}"
     cp "${CUSTOM_CA_BUNDLE}" /usr/local/share/ca-certificates/custom-ca.crt
-    update-ca-certificates --fresh 2>/dev/null || true
+    update-ca-certificates --fresh >/dev/null 2>&1 || true
     git config --global http.sslVerify true
     git config --global http.sslCAInfo "${CUSTOM_CA_BUNDLE}"
     git config --file "${CODIFY_GIT_CONFIG}" http.sslVerify true

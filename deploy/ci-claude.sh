@@ -273,6 +273,58 @@ process_stream() {
         esac
         ;;
 
+      # ── Complete assistant messages (non-delta stream-json records) ───────
+      assistant)
+        local assistant_count
+        assistant_count=$(printf '%s' "$line" | jq '.message.content | length' 2>/dev/null || echo 0)
+        local assistant_i
+        for (( assistant_i=0; assistant_i<assistant_count; assistant_i++ )); do
+          local block_type
+          block_type=$(printf '%s' "$line" | jq -r --argjson i "$assistant_i" \
+            '.message.content[$i].type // empty' 2>/dev/null)
+
+          case "$block_type" in
+            thinking)
+              local thinking_text
+              thinking_text=$(printf '%s' "$line" | jq -rj --argjson i "$assistant_i" \
+                '.message.content[$i].thinking // empty' 2>/dev/null)
+              if [[ -n "$thinking_text" ]]; then
+                _e "\n${DIM}${CYAN}╔═ 🧠 Thinking ════════════════════════════════${RESET}\n"
+                _e "${DIM}%s${RESET}\n" "$thinking_text"
+                _e "${DIM}${CYAN}╚══════════════════════════════════════════════${RESET}\n"
+              fi
+              ;;
+            text)
+              local text
+              text=$(printf '%s' "$line" | jq -rj --argjson i "$assistant_i" \
+                '.message.content[$i].text // empty' 2>/dev/null)
+              if [[ -n "$text" ]]; then
+                _e "\n${GREEN}${BOLD}── Response ───────────────────────────────────${RESET}\n"
+                _e '%s\n' "$text"
+              fi
+              ;;
+            tool_use)
+              local tool_id tool_name tool_input_json
+              tool_id=$(printf '%s' "$line" | jq -r --argjson i "$assistant_i" \
+                '.message.content[$i].id // empty' 2>/dev/null)
+              tool_name=$(printf '%s' "$line" | jq -r --argjson i "$assistant_i" \
+                '.message.content[$i].name // empty' 2>/dev/null)
+              tool_input_json=$(printf '%s' "$line" | jq -c --argjson i "$assistant_i" \
+                '.message.content[$i].input // {}' 2>/dev/null || echo '{}')
+              _e "\n${YELLOW}┌─ ⚡ Tool: ${BOLD}${tool_name}${RESET}\n"
+              _e "${YELLOW}│  Input: ${DIM}%s${RESET}\n" "$tool_input_json"
+              _e "${YELLOW}└──────────────────────────────────────────────${RESET}\n"
+              jq -nc \
+                --arg id "$tool_id" \
+                --arg name "$tool_name" \
+                --argjson input "$tool_input_json" \
+                '{id: $id, name: $name, input: $input, output: null, error: false}' \
+                >> "$TOOL_CALLS_FILE"
+              ;;
+          esac
+        done
+        ;;
+
       # ── Tool execution results (delivered in top-level user messages)
       # stream-json emits these as {"type":"user","message":{"content":[...]}}.
       user)
@@ -293,9 +345,9 @@ process_stream() {
             '[.message.content[]? | select(.type == "tool_result")][$i].is_error // false' 2>/dev/null)
 
           if [[ "$is_error" == "true" ]]; then
-            _e "${RED}  ╰─ ❌ Error:  ${DIM}%.400s${RESET}\n" "$output"
+            _e "${RED}  ╰─ ❌ Error:${RESET}\n${DIM}%s${RESET}\n" "$output"
           else
-            _e "${CYAN}  ╰─ ✅ Output: ${DIM}%.400s${RESET}\n" "$output"
+            _e "${CYAN}  ╰─ ✅ Output:${RESET}\n${DIM}%s${RESET}\n" "$output"
           fi
 
           # Update TOOL_CALLS_FILE stub (for backward-compat batch in entrypoint.sh)

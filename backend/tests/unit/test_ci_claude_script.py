@@ -144,6 +144,107 @@ def test_ci_claude_captures_tool_result_from_user_message():
         # CODIFY markers removed; verify tool_calls content instead (already asserted above)
 
 
+def test_ci_claude_console_log_keeps_complete_tool_result(tmp_path):
+    long_output = "start-" + ("x" * 650) + "-end"
+    result = run_fake_ci_claude(tmp_path, fake_stream_lines=[
+        json.dumps({
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "tool_use", "id": "call_long", "name": "Bash", "input": {}},
+            },
+        }),
+        json.dumps({
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "input_json_delta", "partial_json": '{"command":"make test"}'},
+            },
+        }),
+        json.dumps({"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}}),
+        json.dumps({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "tool_use_id": "call_long",
+                    "type": "tool_result",
+                    "content": long_output,
+                    "is_error": False,
+                }],
+            },
+        }),
+        json.dumps({
+            "type": "result",
+            "subtype": "success",
+            "result": "done",
+            "session_id": "s1",
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        }),
+    ])
+
+    assert result.returncode == 0, result.stderr
+    console_log = (tmp_path / "console.log").read_text(encoding="utf-8")
+    assert long_output in console_log
+
+
+def test_ci_claude_console_log_renders_top_level_assistant_event(tmp_path):
+    result = run_fake_ci_claude(tmp_path, fake_stream_lines=[
+        json.dumps({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "thinking", "thinking": "consider the failing test"},
+                    {"type": "text", "text": "I changed the parser."},
+                    {
+                        "type": "tool_use",
+                        "id": "call_top_level",
+                        "name": "Bash",
+                        "input": {"command": "pytest tests/unit/test_ci_claude_script.py"},
+                    },
+                ],
+            },
+        }),
+        json.dumps({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "tool_use_id": "call_top_level",
+                    "type": "tool_result",
+                    "content": "3 passed",
+                    "is_error": False,
+                }],
+            },
+        }),
+        json.dumps({
+            "type": "result",
+            "subtype": "success",
+            "result": "done",
+            "session_id": "s1",
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        }),
+    ])
+
+    assert result.returncode == 0, result.stderr
+    console_log = (tmp_path / "console.log").read_text(encoding="utf-8")
+    assert "consider the failing test" in console_log
+    assert "I changed the parser." in console_log
+    assert "Tool: Bash" in console_log
+    assert "pytest tests/unit/test_ci_claude_script.py" in console_log
+    assert "3 passed" in console_log
+
+    payload = json.loads(result.stdout)
+    assert payload["tool_calls"] == [{
+        "name": "Bash",
+        "input": {"command": "pytest tests/unit/test_ci_claude_script.py"},
+        "output": "3 passed",
+        "error": False,
+    }]
+
+
 def test_ci_claude_matches_tool_results_by_tool_use_id():
     fake_stream_lines = [
         json.dumps(

@@ -763,6 +763,13 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         archive_success_index = content.index('    create_runtime_archive\n\n    echo "========================================"')
         self.assertGreater(archive_success_index, git_add_index)
 
+    def test_entrypoint_silences_update_ca_certificate_noise(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('update-ca-certificates --fresh >/dev/null 2>&1 || true', content)
+        self.assertNotIn('update-ca-certificates --fresh 2>/dev/null || true', content)
+
     def test_entrypoint_reuses_existing_git_workspace_safely(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = script.read_text()

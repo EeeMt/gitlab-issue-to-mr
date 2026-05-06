@@ -15,7 +15,7 @@ from app.main import app
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_context
 from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
-from app.api.containers import _get_container_pattern
+from app.api.containers import _compact_raw_log_noise, _get_container_pattern
 
 
 class ContainerPatternTests(unittest.TestCase):
@@ -65,6 +65,22 @@ class ContainerPatternTests(unittest.TestCase):
 
 class ContainerLogsHelpersTests(unittest.TestCase):
     """Test helper functions for container handling."""
+
+    def test_compact_raw_log_noise_collapses_ca_replacement_lines(self):
+        logs = (
+            "Installing custom CA certificate\n"
+            "Replacing debian:Amazon_Root_CA_1.pem\n"
+            "Replacing debian:Amazon_Root_CA_2.pem\n"
+            "Replacing debian:Amazon_Root_CA_3.pem\n"
+            "Custom CA installed; SSL verification enabled\n"
+            "Tool output stays complete\n"
+        )
+
+        compacted = _compact_raw_log_noise(logs)
+
+        self.assertIn("[suppressed 3 CA certificate replacement lines]", compacted)
+        self.assertNotIn("Replacing debian:Amazon_Root_CA_3.pem", compacted)
+        self.assertIn("Tool output stays complete", compacted)
 
     @patch("app.api.containers.get_settings")
     def test_extract_container_info_valid_name(self, mock_settings):

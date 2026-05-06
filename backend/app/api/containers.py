@@ -23,6 +23,36 @@ from app.api.task_operations import get_task_with_access_check
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+_CA_REPLACEMENT_LINE_RE = re.compile(r"^Replacing debian:[^\r\n]+\.pem\r?$")
+
+
+def _compact_raw_log_noise(logs: str) -> str:
+    """Collapse noisy certificate replacement chatter while preserving other raw output."""
+    if "Replacing debian:" not in logs:
+        return logs
+
+    output_lines: list[str] = []
+    suppressed_count = 0
+
+    def flush_suppressed() -> None:
+        nonlocal suppressed_count
+        if suppressed_count:
+            output_lines.append(f"[suppressed {suppressed_count} CA certificate replacement lines]")
+            suppressed_count = 0
+
+    for line in logs.splitlines():
+        if _CA_REPLACEMENT_LINE_RE.match(line):
+            suppressed_count += 1
+            continue
+        flush_suppressed()
+        output_lines.append(line)
+
+    flush_suppressed()
+    compacted = "\n".join(output_lines)
+    if logs.endswith("\n"):
+        compacted += "\n"
+    return compacted
+
 
 def _get_container_pattern() -> re.Pattern:
     """Build container name regex using configured prefix."""
@@ -241,7 +271,7 @@ async def get_task_container_logs(
         logs = await _fetch_db_chunks()
         return {
             "container_id": task.container_id,
-            "logs": logs,
+            "logs": _compact_raw_log_noise(logs),
             "status": task.status,
             "source": "db",
         }
@@ -254,7 +284,7 @@ async def get_task_container_logs(
         return {
             "container_id": task.container_id,
             "container_status": container.status,
-            "logs": logs,
+            "logs": _compact_raw_log_noise(logs),
             "status": task.status,
         }
     except Exception as e:
@@ -263,7 +293,7 @@ async def get_task_container_logs(
         if logs:
             return {
                 "container_id": task.container_id,
-                "logs": logs,
+                "logs": _compact_raw_log_noise(logs),
                 "status": task.status,
                 "source": "db",
             }
