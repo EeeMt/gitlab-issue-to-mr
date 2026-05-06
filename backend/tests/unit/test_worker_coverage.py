@@ -740,6 +740,18 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('echo "Final commit message:"', content)
         self.assertIn("sed 's/^/  /' /tmp/commit_message.txt", content)
 
+    def test_entrypoint_logs_mr_title_generation_steps(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('echo "Generating MR title with Claude..."', content)
+        self.assertIn('echo "MR title prompt written to /tmp/mr_title_prompt.txt"', content)
+        self.assertIn('echo "Claude MR title generation succeeded"', content)
+        self.assertIn('echo "Claude raw MR title response:"', content)
+        self.assertIn("printf '%s\\n' \"${GENERATED_MR_TITLE}\" | sed 's/^/  /'", content)
+        self.assertIn('echo "Claude MR title generation failed with exit code ${TITLE_RESULT}; using fallback"', content)
+        self.assertIn('echo "Generated MR title was empty after normalization; using fallback"', content)
+
     def test_entrypoint_keeps_runtime_artifacts_outside_worktree_until_after_commit(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = script.read_text()

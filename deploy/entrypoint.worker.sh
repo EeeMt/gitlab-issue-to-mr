@@ -773,10 +773,12 @@ AI-Generated: true"
         # MR title is managed by the backend (based on issue title).
         # We only generate a title here for structured finalization metadata;
         # we do NOT call update_mr to overwrite the MR title.
+        echo "Generating MR title with Claude..."
         TITLE_PROMPT=$(build_mr_title_prompt "${CHANGED_FILES_TEXT}")
         printf '%s\n' "${TITLE_PROMPT}" > /tmp/mr_title_prompt.txt
         chmod 644 /tmp/mr_title_prompt.txt
         chown codify:codify /tmp/mr_title_prompt.txt
+        echo "MR title prompt written to /tmp/mr_title_prompt.txt"
 
         set +e
         GENERATED_MR_TITLE=$(env HOME=/home/codify timeout 60 su -m -s /bin/bash codify -c '/usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" "$(cat /tmp/mr_title_prompt.txt)"' 2>/dev/null)
@@ -784,12 +786,18 @@ AI-Generated: true"
         set -e
 
         if [ ${TITLE_RESULT} -eq 0 ]; then
+            echo "Claude MR title generation succeeded"
+            echo "Claude raw MR title response:"
+            printf '%s\n' "${GENERATED_MR_TITLE}" | sed 's/^/  /'
             FINAL_MR_TITLE=$(normalize_model_title "${GENERATED_MR_TITLE}")
             FINAL_MR_TITLE="${FINAL_MR_TITLE:0:120}"
+        else
+            echo "Claude MR title generation failed with exit code ${TITLE_RESULT}; using fallback"
         fi
 
         if [ -z "${FINAL_MR_TITLE}" ]; then
-            FINAL_MR_TITLE="AI: ${USER_PROMPT:0:60}"
+            echo "Generated MR title was empty after normalization; using fallback"
+            FINAL_MR_TITLE="${USER_PROMPT:0:120}"
         fi
 
     fi
