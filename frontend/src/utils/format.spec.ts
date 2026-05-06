@@ -150,30 +150,30 @@ describe('format utilities', () => {
       expect(formatDurationMs(-1000)).toBe('-')
     })
 
-    it('returns "<1m" for durations less than 60 000 ms', () => {
-      expect(formatDurationMs(1)).toBe('<1m')
-      expect(formatDurationMs(30_000)).toBe('<1m')
-      expect(formatDurationMs(59_999)).toBe('<1m')
+    it('returns seconds for durations less than 60 000 ms', () => {
+      expect(formatDurationMs(1)).toBe('0s')
+      expect(formatDurationMs(30_000)).toBe('30s')
+      expect(formatDurationMs(59_999)).toBe('59s')
     })
 
-    it('returns "1m" for exactly 60 000 ms', () => {
-      expect(formatDurationMs(60_000)).toBe('1m')
+    it('returns "1m 0s" for exactly 60 000 ms', () => {
+      expect(formatDurationMs(60_000)).toBe('1m 0s')
     })
 
-    it('returns "5m" for 300 000 ms', () => {
-      expect(formatDurationMs(300_000)).toBe('5m')
+    it('returns "5m 0s" for 300 000 ms', () => {
+      expect(formatDurationMs(300_000)).toBe('5m 0s')
     })
 
-    it('returns "1h 0m" for exactly 1 hour', () => {
-      expect(formatDurationMs(3_600_000)).toBe('1h 0m')
+    it('returns "1h 0m 0s" for exactly 1 hour', () => {
+      expect(formatDurationMs(3_600_000)).toBe('1h 0m 0s')
     })
 
-    it('returns "1h 30m" for 5 400 000 ms', () => {
-      expect(formatDurationMs(5_400_000)).toBe('1h 30m')
+    it('returns "1h 30m 0s" for 5 400 000 ms', () => {
+      expect(formatDurationMs(5_400_000)).toBe('1h 30m 0s')
     })
 
-    it('returns "2h 30m" for 9 000 000 ms', () => {
-      expect(formatDurationMs(9_000_000)).toBe('2h 30m')
+    it('returns "2h 30m 0s" for 9 000 000 ms', () => {
+      expect(formatDurationMs(9_000_000)).toBe('2h 30m 0s')
     })
   })
 

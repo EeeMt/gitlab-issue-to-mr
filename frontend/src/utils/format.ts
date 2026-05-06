@@ -43,17 +43,18 @@ export function getProjectLabel(
 export function formatDurationMs(milliseconds: number): string {
   if (milliseconds <= 0) return '-'
 
-  const totalMinutes = Math.floor(milliseconds / 60000)
-  const hours = Math.floor(totalMinutes / 60)
-  const minutes = totalMinutes % 60
+  const totalSeconds = Math.floor(milliseconds / 1000)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
 
   if (hours > 0) {
-    return `${hours}h ${minutes}m`
+    return `${hours}h ${minutes}m ${seconds}s`
   }
   if (minutes > 0) {
-    return `${minutes}m`
+    return `${minutes}m ${seconds}s`
   }
-  return '<1m'
+  return `${seconds}s`
 }
 
 /**
