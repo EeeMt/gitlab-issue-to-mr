@@ -54,6 +54,10 @@
           {{ t('taskView.executionSummary') }}
         </div>
         <div class="result-card__content summary-grid">
+          <div v-if="task.commit_sha" class="summary-item">
+            <span class="summary-label">{{ t('taskView.commitSha') }}</span>
+            <span class="summary-value summary-value--mono">{{ task.commit_sha.slice(0, 8) }}</span>
+          </div>
           <div class="summary-item">
             <span class="summary-label">{{ t('taskView.modelName') }}</span>
             <span class="summary-value">{{ task.model_name || '-' }}</span>
@@ -276,6 +280,10 @@ const totalTokens = computed(() => {
   font-weight: 500;
   color: var(--n-text-color-1);
   word-break: break-word;
+}
+
+.summary-value--mono {
+  font-family: var(--n-font-family-mono, monospace);
 }
 
 .summary-item__sub {

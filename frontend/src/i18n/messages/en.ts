@@ -527,6 +527,7 @@ const en = {
     mrWillBeCreated: 'Will create MR',
     mrNotCreated: 'No MR',
     manualCreation: 'Manual',
+    commitSha: 'Commit',
     modelName: 'Model',
     duration: 'Duration',
     mrTitle: 'MR Title',
