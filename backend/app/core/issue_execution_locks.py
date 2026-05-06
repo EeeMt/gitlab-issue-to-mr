@@ -28,11 +28,13 @@ async def acquire_issue_execution_lock(db: AsyncSession, task: Task) -> bool:
     if task.issue_id is None:
         return True
 
+    issue_id = task.issue_id
+    task_id = task.id
     try:
         await _maybe_await(db.execute(
             insert(IssueExecutionLock).values(
-                issue_id=task.issue_id,
-                task_id=task.id,
+                issue_id=issue_id,
+                task_id=task_id,
                 acquired_at=utcnow(),
                 heartbeat_at=None,
             )
@@ -43,8 +45,8 @@ async def acquire_issue_execution_lock(db: AsyncSession, task: Task) -> bool:
         await _maybe_await(db.rollback())
         logger.info(
             "Issue %s is already locked; task %s will wait",
-            task.issue_id,
-            task.id,
+            issue_id,
+            task_id,
         )
         return False
 

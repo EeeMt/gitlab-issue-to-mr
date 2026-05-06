@@ -37,6 +37,7 @@ from app.runtime_config import load_runtime_config_from_db
 logger = logging.getLogger(__name__)
 _SESSION_CLEANUP_INTERVAL_SECONDS = 3600
 _WORKSPACE_CLEANUP_INTERVAL_SECONDS = 21600
+_LOCK_CLEANUP_INTERVAL_SECONDS = 300
 
 # Thread pool for running worker tasks (to avoid blocking the event loop)
 _worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-")
@@ -63,6 +64,7 @@ class Scheduler:
         self._running_issues: Set[int] = set()  # issue_ids with running tasks
         self._last_session_cleanup_at = 0.0
         self._last_workspace_cleanup_at = 0.0
+        self._last_lock_cleanup_at = 0.0
 
     async def start(self) -> None:
         """Start the scheduler loop."""
@@ -96,6 +98,7 @@ class Scheduler:
             await load_runtime_config_from_db(db)
             await self._maybe_cleanup_sessions(db)
             await self._maybe_cleanup_workspaces(db)
+            await self._maybe_cleanup_issue_locks(db)
 
             # Transition eligible PENDING tasks → QUEUED
             await self._mark_eligible_as_queued(db)
@@ -161,6 +164,18 @@ class Scheduler:
         if removed:
             logger.info("Cleaned up %s expired worker workspace(s)", removed)
         self._last_workspace_cleanup_at = now
+
+    async def _maybe_cleanup_issue_locks(self, db: AsyncSession) -> None:
+        """Periodically delete locks for completed/failed/cancelled tasks."""
+        now = time.time()
+        if now - self._last_lock_cleanup_at < _LOCK_CLEANUP_INTERVAL_SECONDS:
+            return
+
+        removed = await cleanup_inactive_issue_execution_locks(db)
+        if removed:
+            await db.commit()
+            logger.warning("Cleaned up %s inactive issue execution lock(s)", removed)
+        self._last_lock_cleanup_at = now
 
     async def _mark_eligible_as_queued(self, db: AsyncSession) -> None:
         """Mark eligible PENDING tasks as QUEUED.
@@ -333,10 +348,11 @@ class Scheduler:
                     if task and task.issue_id is not None:
                         self._running_issues.discard(task.issue_id)
                         await release_issue_execution_lock(db, issue_id=task.issue_id)
+                        await db.commit()
                         # Auto-transition issue to COMPLETED if all tasks done
                         await self._maybe_complete_issue(db, task.issue_id)
             except Exception:
-                pass
+                logger.exception("Failed to release lock for task %s", task_id)
 
     async def _maybe_complete_issue(self, db: AsyncSession, issue_id: int) -> None:
         """Delegate to shared helper."""

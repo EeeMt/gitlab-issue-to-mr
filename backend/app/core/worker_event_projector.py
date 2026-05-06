@@ -473,6 +473,56 @@ class WorkerEventProjector:
             logger.debug(f"[Task {task_id}] _tail_event_jsonl error: {exc}")
         await db.commit()
 
+    async def backfill_event_jsonl_from_archive(
+        self, *, task_id: int, db: AsyncSession
+    ) -> None:
+        """Read event.jsonl from the saved archive and project missing event records."""
+        archive_path = _os.path.join(_ARCHIVE_STORE, archive_bundle_name(task_id=task_id))
+        if not _os.path.exists(archive_path):
+            return
+        try:
+            with _tarfile.open(archive_path, "r:gz") as tf:
+                event_member = next(
+                    (m for m in tf.getmembers() if m.name == "event.jsonl"), None
+                )
+                if event_member is None:
+                    return
+                extracted = tf.extractfile(event_member)
+                if extracted is None:
+                    return
+                full_text = extracted.read().decode("utf-8", errors="replace")
+
+                runtime_member = next(
+                    (m for m in tf.getmembers() if m.name == "runtime.json"), None
+                )
+                if runtime_member is not None:
+                    runtime_extracted = tf.extractfile(runtime_member)
+                    if runtime_extracted is not None:
+                        runtime_data = _json.loads(runtime_extracted.read())
+                        resume_session = runtime_data.get("resume_session", "")
+                        self._run_is_resumed = bool(resume_session)
+                        self._timeline_gate_open = not self._run_is_resumed
+        except Exception:
+            return
+
+        cursor = await get_or_create_cursor(db, task_id=task_id, stream_name="event_jsonl")
+        full_bytes = full_text.encode("utf-8")
+        if cursor.last_offset >= len(full_bytes):
+            return
+
+        # If the system/init record was already ingested (non-zero cursor), the
+        # timeline gate should already be open regardless of resume state.
+        if cursor.last_sequence_no > 0:
+            self._timeline_gate_open = True
+
+        new_data_bytes = full_bytes[cursor.last_offset:]
+        new_data = new_data_bytes.decode("utf-8", errors="replace")
+        if not new_data:
+            return
+        await self.ingest_event_records_from_chunk(
+            task_id=task_id, chunk=new_data, cursor=cursor, db=db
+        )
+
     async def backfill_console_log_from_archive(
         self, *, task_id: int, db: AsyncSession
     ) -> None:
