@@ -168,6 +168,18 @@ class WorkerEventProjector:
                 log_type="system_init",
                 log_metadata=_json.dumps({"model": record.get("model"), "cwd": record.get("cwd")}),
             ))
+        elif record_type == "codify_worker" and record.get("subtype") == "finalization":
+            db.add(TaskLog(
+                task_id=task_id,
+                log_level="INFO",
+                message="",
+                log_type="worker_finalization",
+                log_metadata=_json.dumps({
+                    "commit_sha": record.get("commit_sha") or "",
+                    "diff": record.get("diff") or {},
+                    "merge_request_title": record.get("merge_request_title") or "",
+                }),
+            ))
         elif not self._timeline_gate_open:
             return
         elif record_type == "stream_event":
@@ -179,6 +191,17 @@ class WorkerEventProjector:
             await self._handle_user_event(task_id=task_id, record=record, db=db)
         elif record_type == "result":
             self._latest_result_record = record
+            db.add(TaskLog(
+                task_id=task_id,
+                log_level="INFO",
+                message="",
+                log_type="run_result",
+                log_metadata=_json.dumps({
+                    "subtype": record.get("subtype"),
+                    "session_id": record.get("session_id"),
+                    "usage": record.get("usage") or {},
+                }),
+            ))
 
     async def _create_sanitized_text_payload(
         self,

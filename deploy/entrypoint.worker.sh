@@ -549,6 +549,13 @@ create_runtime_archive() {
     fi
 }
 
+append_runtime_event() {
+    local event_json="$1"
+    if [ -n "${event_json}" ] && [ -d "${CODIFY_RUNTIME_DIR}" ]; then
+        printf '%s\n' "${event_json}" >> "${CODIFY_RUNTIME_DIR}/event.jsonl"
+    fi
+}
+
 trap create_runtime_archive EXIT
 
 echo "Claude CLI version: $(/usr/local/bin/claude --version)"
@@ -794,6 +801,21 @@ AI-Generated: true"
 
         echo "CODIFY_MR_TITLE:${FINAL_MR_TITLE}"
     fi
+
+    FINALIZATION_EVENT=$(jq -nc \
+        --arg commit_sha "${COMMIT_SHA:-}" \
+        --argjson additions "${ADDITIONS:-0}" \
+        --argjson deletions "${DELETIONS:-0}" \
+        --argjson total "${TOTAL_CHANGES:-0}" \
+        --arg merge_request_title "${FINAL_MR_TITLE:-}" \
+        '{
+            type:"codify_worker",
+            subtype:"finalization",
+            commit_sha:$commit_sha,
+            diff:{additions:$additions,deletions:$deletions,total:$total},
+            merge_request_title:$merge_request_title
+        }')
+    append_runtime_event "${FINALIZATION_EVENT}"
 
     create_runtime_archive
 
