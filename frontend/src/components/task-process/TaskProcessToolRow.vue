@@ -127,7 +127,8 @@ const outputDisplayText = computed(() => {
   margin-left: auto;
 }
 .event-collapse {
-  margin: 8px 0 8px 28px;
+  width: calc(100% - 16px);
+  margin: 8px 8px 8px 8px;
   --n-item-margin: 8px 0 0 0;
   --n-title-padding: 8px 0;
 }
@@ -145,7 +146,7 @@ const outputDisplayText = computed(() => {
   background: var(--n-color-embedded, rgba(128, 128, 128, 0.05));
   border-radius: 4px;
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: break-word;
   line-height: 1.5;
 }
 .tool-pre--input {

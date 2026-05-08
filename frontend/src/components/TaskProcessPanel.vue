@@ -384,7 +384,8 @@ defineExpose({ onCollapseChange })
   white-space: nowrap;
 }
 .event-collapse {
-  margin: 8px 0 8px 28px;
+  width: calc(100% - 16px);
+  margin: 8px 8px 8px 8px;
   --n-item-margin: 8px 0 0 0;
   --n-title-padding: 8px 0;
 }

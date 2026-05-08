@@ -101,7 +101,8 @@ const preview = computed(() => {
   margin-left: auto;
 }
 .event-collapse {
-  margin: 8px 0 8px 28px;
+  width: calc(100% - 16px);
+  margin: 8px 8px 8px 8px;
   --n-item-margin: 8px 0 0 0;
   --n-title-padding: 8px 0;
 }
@@ -111,7 +112,7 @@ const preview = computed(() => {
   font-size: 13px;
   line-height: 1.65;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: break-word;
   color: var(--n-text-color-2);
   font-family: inherit;
   background: var(--n-color-embedded, rgba(128, 128, 128, 0.05));
