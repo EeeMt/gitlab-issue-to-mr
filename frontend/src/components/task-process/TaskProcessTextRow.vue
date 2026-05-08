@@ -44,8 +44,9 @@ const { t } = useI18n()
 
 const preview = computed(() => {
   const entry = props.row.textEntry
-  if (entry.preview) return entry.preview
-  if (entry.text) return entry.text.slice(0, 120)
+  if (entry.preview) {
+    return entry.truncated ? entry.preview + '…' : entry.preview
+  }
   return ''
 })
 </script>
@@ -91,7 +92,6 @@ const preview = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  word-break: break-all;
 }
 .event-ts {
   font-size: 11px;

@@ -68,7 +68,7 @@ export function getToolColor(name: string): string {
 }
 
 export function getInputSummary(call: ToolCall): string {
-  if (call.input_preview) return call.input_preview
+  if (call.input_preview) return call.input_truncated ? call.input_preview + '…' : call.input_preview
   const input = call.input
   if (!input || Object.keys(input).length === 0) return ''
   switch (call.name) {
@@ -97,7 +97,9 @@ export function getInputSummary(call: ToolCall): string {
     }
     default: {
       const firstStr = Object.values(input).find((v) => typeof v === 'string')
-      return typeof firstStr === 'string' ? String(firstStr).slice(0, 80) : ''
+      if (typeof firstStr !== 'string') return ''
+      const s = String(firstStr)
+      return s.length > 80 ? s.slice(0, 80) + '…' : s
     }
   }
 }

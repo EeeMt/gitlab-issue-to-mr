@@ -117,7 +117,6 @@ const outputDisplayText = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  word-break: break-all;
 }
 .event-ts {
   font-size: 11px;
