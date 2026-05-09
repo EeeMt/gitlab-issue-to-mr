@@ -204,8 +204,16 @@ if ! git rev-parse --verify "origin/${BASE_BRANCH}" > /dev/null 2>&1; then
 fi
 
 if git checkout "${BRANCH_NAME}" 2>/dev/null; then
-    echo "Branch already exists, pulling latest..."
-    git pull origin "${BRANCH_NAME}"
+    echo "Branch ${BRANCH_NAME} exists locally, checking for uncommitted changes..."
+    BRANCH_DIRTY=$(git status --porcelain || true)
+    if [ -n "${BRANCH_DIRTY}" ]; then
+        echo "Warning: Workspace has uncommitted changes from a previous task, skipping pull to preserve work"
+    elif git ls-remote --exit-code --heads origin "${BRANCH_NAME}" > /dev/null 2>&1; then
+        echo "Remote branch found, pulling latest..."
+        git pull origin "${BRANCH_NAME}"
+    else
+        echo "Branch exists locally but not on remote yet (prior task may not have pushed), continuing with local state"
+    fi
 else
     echo "Creating new branch from ${BASE_BRANCH}..."
     git checkout -b "${BRANCH_NAME}" "origin/${BASE_BRANCH}"
