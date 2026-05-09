@@ -81,7 +81,7 @@ def _make_task(
     input_tokens=None,
     output_tokens=None,
     model_name=None,
-    merge_request_title=None,
+    commit_message=None,
     created_at=None,
     updated_at=None,
     started_at=None,
@@ -105,7 +105,7 @@ def _make_task(
     task.input_tokens = input_tokens
     task.output_tokens = output_tokens
     task.model_name = model_name
-    task.merge_request_title = merge_request_title
+    task.commit_message = commit_message
     task.created_at = created_at or datetime(2025, 1, 1, 13, 0, 0)
     task.updated_at = updated_at or datetime(2025, 1, 1, 13, 0, 0)
     task.started_at = started_at

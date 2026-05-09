@@ -126,7 +126,7 @@ def test_worker_saves_mr_stats_after_completion():
             worker_finalization_metadata=(
                 '{"commit_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",'
                 '"diff":{"additions":100,"deletions":50,"total":150},'
-                '"merge_request_title":"Structured title"}'
+                '"commit_message":"Structured title"}'
             ),
         )
 
@@ -204,7 +204,7 @@ def test_worker_handles_missing_mr_stats():
         mock_db = create_mock_db(
             task,
             issue=mock_issue,
-            worker_finalization_metadata='{"commit_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","merge_request_title":""}',
+            worker_finalization_metadata='{"commit_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","commit_message":""}',
         )
 
         # Logs with MR URL; commit SHA comes from structured metadata, diff falls back to API.

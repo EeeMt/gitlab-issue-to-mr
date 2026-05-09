@@ -96,7 +96,7 @@ def _serialize_issue_detail(issue: Issue) -> dict:
             "input_tokens": t.input_tokens,
             "output_tokens": t.output_tokens,
             "model_name": t.model_name,
-            "merge_request_title": t.merge_request_title,
+            "commit_message": t.commit_message,
             "created_at": t.created_at.isoformat(),
             "updated_at": t.updated_at.isoformat(),
             "started_at": t.started_at.isoformat() if t.started_at else None,

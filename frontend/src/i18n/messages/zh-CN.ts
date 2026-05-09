@@ -517,6 +517,7 @@ const zhCN = {
     mrWillBeCreated: '将创建 MR',
     mrNotCreated: '不创建 MR',
     manualCreation: '手动创建',
+    commitRecord: '提交记录',
     commitSha: '提交 SHA',
     modelName: '执行模型',
     duration: '执行时长',

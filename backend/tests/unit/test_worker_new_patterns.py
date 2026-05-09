@@ -5,7 +5,7 @@ Test: structured worker result parsing features.
 Covers:
 - CODIFY_THINKING     → TaskLog(log_type='thinking')  (parsed in _stream_logs_to_db)
 - CODIFY_ASSISTANT_TEXT → TaskLog(log_type='assistant_text')  (parsed in _stream_logs_to_db)
-- model_name / merge_request_title included in _serialize_task output
+- model_name / commit_message included in _serialize_task output
 """
 
 import os
@@ -212,14 +212,14 @@ class TestCodifySystemInitParsing(unittest.TestCase):
             worker_finalization_metadata=(
                 '{"commit_sha":"0123456789abcdef0123456789abcdef01234567",'
                 '"diff":{"additions":12,"deletions":3,"total":15},'
-                '"merge_request_title":"Fix worker result parsing"}'
+                '"commit_message":"Fix worker result parsing"}'
             ),
         )
         self.assertEqual(task.commit_sha, "0123456789abcdef0123456789abcdef01234567")
         self.assertEqual(task.additions, 12)
         self.assertEqual(task.deletions, 3)
         self.assertEqual(task.total_changes, 15)
-        self.assertEqual(task.merge_request_title, "Fix worker result parsing")
+        self.assertEqual(task.commit_message, "Fix worker result parsing")
 
     def test_ignores_codify_stats_marker_when_structured_usage_missing(self):
         task = _make_task()
@@ -240,7 +240,7 @@ class TestCodifySystemInitParsing(unittest.TestCase):
         self.assertEqual(task.additions, 0)
         self.assertEqual(task.deletions, 0)
         self.assertEqual(task.total_changes, 0)
-        self.assertIsNone(task.merge_request_title)
+        self.assertIsNone(task.commit_message)
         self.assertFalse(hasattr(task, "_extracted_session_id"))
 
 
@@ -288,27 +288,27 @@ class TestStructuredMrTitleParsing(unittest.TestCase):
                     await self.worker._parse_task_result(task, logs, mock_db, exit_code=exit_code)
         asyncio.run(run())
 
-    def test_updates_merge_request_title_from_structured_finalization(self):
-        """worker_finalization metadata sets task.merge_request_title."""
+    def test_updates_commit_message_from_structured_finalization(self):
+        """worker_finalization metadata sets task.commit_message."""
         task = _make_task()
-        self._run_parse(task, '', worker_finalization_metadata='{"merge_request_title":"Fix the login bug"}')
-        self.assertEqual(task.merge_request_title, "Fix the login bug")
+        self._run_parse(task, '', worker_finalization_metadata='{"commit_message":"Fix the login bug"}')
+        self.assertEqual(task.commit_message, "Fix the login bug")
 
     def test_ignores_empty_title(self):
-        """Structured title with only whitespace leaves merge_request_title as None."""
+        """Structured title with only whitespace leaves commit_message as None."""
         task = _make_task()
-        self._run_parse(task, '', worker_finalization_metadata='{"merge_request_title":"   "}')
-        self.assertIsNone(task.merge_request_title)
+        self._run_parse(task, '', worker_finalization_metadata='{"commit_message":"   "}')
+        self.assertIsNone(task.commit_message)
 
     def test_truncates_title_to_512_characters(self):
         """Structured title with a very long title is truncated to 512 characters."""
         task = _make_task()
         long_title = "A" * 600
-        self._run_parse(task, '', worker_finalization_metadata=f'{{"merge_request_title":"{long_title}"}}')
-        self.assertIsNotNone(task.merge_request_title)
-        self.assertLessEqual(len(task.merge_request_title), 512)
+        self._run_parse(task, '', worker_finalization_metadata=f'{{"commit_message":"{long_title}"}}')
+        self.assertIsNotNone(task.commit_message)
+        self.assertLessEqual(len(task.commit_message), 512)
         # First 512 characters of the title should be stored
-        self.assertTrue(task.merge_request_title.startswith("A" * 10))
+        self.assertTrue(task.commit_message.startswith("A" * 10))
 
     def test_sanitizes_gitlab_token_from_title(self):
         """Structured title containing a GitLab token has it redacted."""
@@ -316,11 +316,11 @@ class TestStructuredMrTitleParsing(unittest.TestCase):
         self._run_parse(
             task,
             '',
-            worker_finalization_metadata='{"merge_request_title":"Fix auth glpat-abcdefghijklmnopqrst issue"}',
+            worker_finalization_metadata='{"commit_message":"Fix auth glpat-abcdefghijklmnopqrst issue"}',
         )
-        self.assertIsNotNone(task.merge_request_title)
-        self.assertNotIn("glpat-abcdefghijklmnopqrst", task.merge_request_title)
-        self.assertIn("[GITLAB_TOKEN]", task.merge_request_title)
+        self.assertIsNotNone(task.commit_message)
+        self.assertNotIn("glpat-abcdefghijklmnopqrst", task.commit_message)
+        self.assertIn("[GITLAB_TOKEN]", task.commit_message)
 
     def test_strips_completed_think_block_from_title(self):
         """Structured title removes model thinking tags before storing."""
@@ -328,9 +328,9 @@ class TestStructuredMrTitleParsing(unittest.TestCase):
         self._run_parse(
             task,
             '',
-            worker_finalization_metadata='{"merge_request_title":"<think>用户要求输出 MR 标题</think>修复 Git 配置"}',
+            worker_finalization_metadata='{"commit_message":"<think>用户要求输出 MR 标题</think>修复 Git 配置"}',
         )
-        self.assertEqual(task.merge_request_title, "修复 Git 配置")
+        self.assertEqual(task.commit_message, "修复 Git 配置")
 
     def test_ignores_unclosed_think_title(self):
         """Structured title with only an unclosed thinking block is not stored."""
@@ -338,9 +338,19 @@ class TestStructuredMrTitleParsing(unittest.TestCase):
         self._run_parse(
             task,
             '',
-            worker_finalization_metadata='{"merge_request_title":"<think>用户要求输出一个 GitLab Merge Request 标题"}',
+            worker_finalization_metadata='{"commit_message":"<think>用户要求输出一个 GitLab Merge Request 标题"}',
         )
-        self.assertIsNone(task.merge_request_title)
+        self.assertIsNone(task.commit_message)
+
+    def test_preserves_newlines_in_multiline_commit_message(self):
+        """Multi-line commit messages retain internal newlines (not collapsed to spaces)."""
+        import json
+        msg = "feat: 实现用户认证\n\n- 更新 auth 模块\n- 添加 JWT 支持\n\nAI-Generated: true"
+        task = _make_task()
+        self._run_parse(task, '', worker_finalization_metadata=json.dumps({"commit_message": msg}))
+        self.assertIsNotNone(task.commit_message)
+        self.assertIn("\n", task.commit_message)
+        self.assertTrue(task.commit_message.startswith("feat: 实现用户认证"))
 
 
 # ---------------------------------------------------------------------------
@@ -505,7 +515,7 @@ class TestCodifyAssistantTextRealTimeParsing(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestSerializeTaskNewFields(unittest.TestCase):
-    """Tests verifying model_name and merge_request_title appear in _serialize_task output."""
+    """Tests verifying model_name and commit_message appear in _serialize_task output."""
 
     def setUp(self):
         self.mock_settings = _make_mock_settings()
@@ -558,13 +568,13 @@ class TestSerializeTaskNewFields(unittest.TestCase):
         self.assertIn("model_name", result)
         self.assertEqual(result["model_name"], "claude-3-5-sonnet")
 
-    def test_merge_request_title_included_in_serialized_task(self):
-        """_serialize_task includes merge_request_title when it is set."""
+    def test_commit_message_included_in_serialized_task(self):
+        """_serialize_task includes commit_message when it is set."""
         from app.core.task_helpers import _serialize_task
-        task = self._make_full_task(merge_request_title="Fix login bug")
+        task = self._make_full_task(commit_message="Fix login bug")
         result = _serialize_task(task)
-        self.assertIn("merge_request_title", result)
-        self.assertEqual(result["merge_request_title"], "Fix login bug")
+        self.assertIn("commit_message", result)
+        self.assertEqual(result["commit_message"], "Fix login bug")
 
     def test_model_name_is_none_when_not_set(self):
         """_serialize_task returns None for model_name when it is not set."""
@@ -574,13 +584,13 @@ class TestSerializeTaskNewFields(unittest.TestCase):
         self.assertIn("model_name", result)
         self.assertIsNone(result["model_name"])
 
-    def test_merge_request_title_is_none_when_not_set(self):
-        """_serialize_task returns None for merge_request_title when it is not set."""
+    def test_commit_message_is_none_when_not_set(self):
+        """_serialize_task returns None for commit_message when it is not set."""
         from app.core.task_helpers import _serialize_task
-        task = self._make_full_task(merge_request_title=None)
+        task = self._make_full_task(commit_message=None)
         result = _serialize_task(task)
-        self.assertIn("merge_request_title", result)
-        self.assertIsNone(result["merge_request_title"])
+        self.assertIn("commit_message", result)
+        self.assertIsNone(result["commit_message"])
 
 
 # ---------------------------------------------------------------------------
@@ -602,7 +612,7 @@ class TestBackfillEventJsonlCommit(unittest.TestCase):
             "subtype": "finalization",
             "commit_sha": "a" * 40,
             "diff": {"additions": 20, "deletions": 7, "total": 27},
-            "merge_request_title": "feat: add tests",
+            "commit_message": "feat: add tests",
         }) + "\n"
 
     def test_backfill_commits_after_projecting_finalization_event(self):

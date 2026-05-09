@@ -617,8 +617,8 @@ class TestParseMrTitleException(unittest.TestCase):
             # Should not raise
             asyncio.run(worker._parse_task_result(task, logs, db, exit_code=0))
 
-        # merge_request_title should remain unset
-        self.assertIsNone(task.merge_request_title)
+        # commit_message should remain unset
+        self.assertIsNone(task.commit_message)
 
 
 class TestUpdateTaskStatsFromApi(unittest.TestCase):

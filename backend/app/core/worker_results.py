@@ -122,15 +122,14 @@ async def update_task_stats_from_logs_or_api(
                 logger.warning(f"[Task {task.id}] Failed to get MR stats: {e}")
 
 
-def sanitize_merge_request_title(title: str) -> str:
-    """Clean model-generated MR titles before persisting/displaying them."""
-    if not title:
+def sanitize_commit_message(message: str) -> str:
+    """Clean model-generated commit messages before persisting/displaying them."""
+    if not message:
         return ""
 
-    cleaned = _THINK_BLOCK_RE.sub("", title)
-    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    cleaned = _THINK_BLOCK_RE.sub("", message)
+    cleaned = cleaned.strip()
 
-    # If the title starts with an unclosed thinking block, it is not usable.
     if _OPEN_THINK_RE.match(cleaned):
         return ""
 
@@ -187,15 +186,15 @@ async def parse_task_result(
         task.commit_sha = commit_sha
         logger.info(f"[Task {task.id}] Commit SHA: {task.commit_sha}")
 
-    structured_title = str(finalization_meta.get("merge_request_title") or "").strip()
-    if structured_title:
+    raw_commit_message = str(finalization_meta.get("commit_message") or "").strip()
+    if raw_commit_message:
         try:
-            title = sanitize_merge_request_title(structured_title)
-            if title:
-                task.merge_request_title = sanitize_sensitive_data(title)[:512]
-                logger.info(f"[Task {task.id}] MR title: {task.merge_request_title}")
+            message = sanitize_commit_message(raw_commit_message)
+            if message:
+                task.commit_message = sanitize_sensitive_data(message)[:512]
+                logger.info(f"[Task {task.id}] Commit message: {task.commit_message[:80]!r}")
         except Exception:
-            logger.debug(f"[Task {task.id}] Failed to parse structured MR title")
+            logger.debug(f"[Task {task.id}] Failed to parse structured commit message")
 
     if exit_code == 0:
         task.status = TaskStatus.COMPLETED

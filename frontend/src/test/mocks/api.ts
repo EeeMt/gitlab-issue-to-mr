@@ -39,7 +39,7 @@ export const createMockTask = (overrides = {}): Task => ({
   input_tokens: null,
   output_tokens: null,
   model_name: null,
-  merge_request_title: null,
+  commit_message: null,
   created_at: '2026-03-31T10:00:00Z',
   updated_at: '2026-03-31T10:00:00Z',
   started_at: null,

@@ -214,7 +214,7 @@ export interface Task {
   input_tokens: number | null
   output_tokens: number | null
   model_name?: string | null
-  merge_request_title?: string | null
+  commit_message?: string | null
   require_changes: boolean
   provider_id: number | null
   provider_name?: string | null

@@ -360,7 +360,7 @@ class TestRequireChangesSerialization(unittest.TestCase):
         task.input_tokens = None
         task.output_tokens = None
         task.model_name = None
-        task.merge_request_title = None
+        task.commit_message = None
         task.provider_id = None
         task.provider_name = None
         task.created_at = datetime(2026, 5, 5, 12, 0, 0)
@@ -413,7 +413,7 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.input_tokens = 0
     task.output_tokens = 0
     task.model_name = None
-    task.merge_request_title = None
+    task.commit_message = None
     task.provider_id = None
     task.provider = None
     task.issue = None
@@ -1344,8 +1344,8 @@ class GetTaskEndpointTests(unittest.TestCase):
         self.assertIn("model_name", data)
         self.assertIsNone(data["model_name"])
 
-    def test_get_task_response_includes_merge_request_title_field(self):
-        """GET /api/tasks/{id} response should include merge_request_title field (None when not set)."""
+    def test_get_task_response_includes_commit_message_field(self):
+        """GET /api/tasks/{id} response should include commit_message field (None when not set)."""
         task = _make_serializable_task(task_status=TaskStatus.COMPLETED, task_id=56)
 
         mock_result = MagicMock()
@@ -1363,8 +1363,8 @@ class GetTaskEndpointTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertIn("merge_request_title", data)
-        self.assertIsNone(data["merge_request_title"])
+        self.assertIn("commit_message", data)
+        self.assertIsNone(data["commit_message"])
 
 
 # ---------------------------------------------------------------------------

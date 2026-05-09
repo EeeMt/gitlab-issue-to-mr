@@ -664,14 +664,12 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('chown codify:codify /home/codify/.git-credentials', content)
         self.assertIn('chown codify:codify "${CODIFY_GIT_CONFIG}"', content)
 
-    def test_entrypoint_normalizes_generated_mr_title(self):
+    def test_entrypoint_includes_commit_message_in_finalization(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = script.read_text()
 
-        self.assertIn('normalize_model_title() {', content)
-        self.assertIn('<[Tt][Hh][Ii][Nn][Kk]', content)
-        self.assertIn("grep -qi '^<think'", content)
-        self.assertIn('FINAL_MR_TITLE=$(normalize_model_title "${GENERATED_MR_TITLE}")', content)
+        self.assertIn('commit_message:$commit_message', content)
+        self.assertIn('--arg commit_message "${FINAL_COMMIT_MESSAGE:-}"', content)
 
     def test_entrypoint_sanitizes_generated_commit_message(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
@@ -740,17 +738,13 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('echo "Final commit message:"', content)
         self.assertIn("sed 's/^/  /' /tmp/commit_message.txt", content)
 
-    def test_entrypoint_logs_mr_title_generation_steps(self):
+    def test_entrypoint_logs_commit_message_generation_steps(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = script.read_text()
 
-        self.assertIn('echo "Generating MR title with Claude..."', content)
-        self.assertIn('echo "MR title prompt written to /tmp/mr_title_prompt.txt"', content)
-        self.assertIn('echo "Claude MR title generation succeeded"', content)
-        self.assertIn('echo "Claude raw MR title response:"', content)
-        self.assertIn("printf '%s\\n' \"${GENERATED_MR_TITLE}\" | sed 's/^/  /'", content)
-        self.assertIn('echo "Claude MR title generation failed with exit code ${TITLE_RESULT}; using fallback"', content)
-        self.assertIn('echo "Generated MR title was empty after normalization; using fallback"', content)
+        self.assertIn('echo "Generating commit message with Claude..."', content)
+        self.assertIn('echo "Claude commit message generation succeeded"', content)
+        self.assertIn('echo "Claude raw commit message response:"', content)
 
     def test_entrypoint_keeps_runtime_artifacts_outside_worktree_until_after_commit(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"

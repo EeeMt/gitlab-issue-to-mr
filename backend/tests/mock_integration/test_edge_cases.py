@@ -244,7 +244,7 @@ class TestMRTitleParsing:
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """merge_request_title should be parsed from CODIFY_MR_TITLE marker."""
+        """commit_message should be parsed from CODIFY_MR_TITLE marker."""
         issue, task = await create_issue_and_task(
             http_client, backend_url, admin_auth_headers,
             title="MR title parsing test",
@@ -262,9 +262,9 @@ class TestMRTitleParsing:
 
         # entrypoint.sh calls `claude -p` to generate MR title, emits as CODIFY_MR_TITLE
         # fake-claude-binary outputs "chore: AI-generated code changes..."
-        mr_title = task.get("merge_request_title")
-        assert mr_title is not None, "merge_request_title should be parsed from CODIFY_MR_TITLE"
-        assert len(mr_title) > 0, "merge_request_title should not be empty"
+        mr_title = task.get("commit_message")
+        assert mr_title is not None, "commit_message should be parsed from CODIFY_MR_TITLE"
+        assert len(mr_title) > 0, "commit_message should not be empty"
 
         logger.info(f"✅ MR title: {mr_title}")
 

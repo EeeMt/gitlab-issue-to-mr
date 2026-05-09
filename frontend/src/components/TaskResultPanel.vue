@@ -5,21 +5,30 @@
     </template>
 
     <div class="result-body">
-      <!-- MR Card -->
-      <div v-if="task.issue?.merge_request_url" class="result-card result-card--mr">
+      <!-- Commit Record Card -->
+      <div v-if="task.commit_sha || task.commit_message || hasChanges" class="result-card result-card--commit">
         <div class="result-card__title">
-          <n-icon size="16" class="result-card__icon"><GitMergeOutline /></n-icon>
-          {{ t('taskView.mergeRequest') }}
+          <n-icon size="16" class="result-card__icon result-card__icon--commit"><GitCommitOutline /></n-icon>
+          {{ t('taskView.commitRecord') }}
         </div>
         <div class="result-card__content">
-          <a :href="task.issue.merge_request_url" target="_blank" rel="noopener noreferrer" class="app-link mr-link">
-            {{ mergeRequestLabel }}
-          </a>
-          <div v-if="task.issue?.branch_name && task.issue?.target_branch" class="mr-branch-flow">
-            <span class="branch-item branch-item--work">{{ task.issue.branch_name }}</span>
-            <span class="branch-arrow">→</span>
-            <span class="branch-item branch-item--target">{{ task.issue.target_branch }}</span>
+          <div class="commit-meta">
+            <a v-if="task.commit_sha && commitUrl" :href="commitUrl" target="_blank" rel="noopener noreferrer" class="commit-sha-chip commit-sha-chip--link">
+              <n-icon size="12"><GitCommitOutline /></n-icon>
+              <span>{{ task.commit_sha.slice(0, 8) }}</span>
+              <n-icon size="11" class="commit-sha-chip__ext"><OpenOutline /></n-icon>
+            </a>
+            <span v-else-if="task.commit_sha" class="commit-sha-chip">
+              <n-icon size="12"><GitCommitOutline /></n-icon>
+              <span>{{ task.commit_sha.slice(0, 8) }}</span>
+            </span>
+            <span v-if="hasChanges" class="commit-stats">
+              <span class="changes-add">+{{ task.additions || 0 }}</span>
+              <span class="changes-sep"> / </span>
+              <span class="changes-del">-{{ task.deletions || 0 }}</span>
+            </span>
           </div>
+          <pre v-if="task.commit_message" class="commit-message">{{ task.commit_message }}</pre>
         </div>
       </div>
 
@@ -34,19 +43,6 @@
         </div>
       </div>
 
-      <!-- Code Changes -->
-      <div v-if="hasChanges" class="result-card result-card--changes">
-        <div class="result-card__title">
-          <n-icon size="16" class="result-card__icon"><CodeOutline /></n-icon>
-          {{ t('common.changes') }}
-        </div>
-        <div class="result-card__content changes-row">
-          <span class="changes-add">+{{ task.additions || 0 }}</span>
-          <span class="changes-del">-{{ task.deletions || 0 }}</span>
-          <span class="changes-total">{{ t('taskView.totalSuffix', { total: task.total_changes || 0 }) }}</span>
-        </div>
-      </div>
-
       <!-- Execution Summary -->
       <div class="result-card result-card--summary">
         <div class="result-card__title">
@@ -54,10 +50,6 @@
           {{ t('taskView.executionSummary') }}
         </div>
         <div class="result-card__content summary-grid">
-          <div v-if="task.commit_sha" class="summary-item">
-            <span class="summary-label">{{ t('taskView.commitSha') }}</span>
-            <span class="summary-value summary-value--mono">{{ task.commit_sha.slice(0, 8) }}</span>
-          </div>
           <div class="summary-item">
             <span class="summary-label">{{ t('taskView.modelName') }}</span>
             <span class="summary-value">{{ task.model_name || '-' }}</span>
@@ -82,10 +74,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NCard, NIcon } from 'naive-ui'
-import { GitMergeOutline, AlertCircleOutline, CodeOutline, TimeOutline } from '@vicons/ionicons5'
+import { AlertCircleOutline, TimeOutline, GitCommitOutline, OpenOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { formatLargeNumber } from '../utils/usageLimits'
-import { getMergeRequestLabel } from '../utils/mergeRequest'
 import type { Task } from '../api'
 
 const props = defineProps<{
@@ -94,7 +85,10 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-const mergeRequestLabel = computed(() => getMergeRequestLabel(props.task))
+const commitUrl = computed(() => {
+  if (!props.task.commit_sha || !props.task.project_url) return null
+  return `${props.task.project_url}/-/commit/${props.task.commit_sha}`
+})
 
 const hasChanges = computed(() =>
   props.task.additions !== undefined || props.task.deletions !== undefined
@@ -145,18 +139,14 @@ const totalTokens = computed(() => {
   background: rgba(128, 128, 128, 0.03);
 }
 
-.result-card--mr {
-  border-color: rgba(5, 150, 105, 0.2);
-  background: rgba(5, 150, 105, 0.04);
+.result-card--commit {
+  border-color: rgba(59, 130, 246, 0.2);
+  background: rgba(59, 130, 246, 0.04);
 }
 
 .result-card--error {
   border-color: rgba(239, 68, 68, 0.2);
   background: rgba(239, 68, 68, 0.04);
-}
-
-.result-card--changes {
-  border-color: rgba(128, 128, 128, 0.15);
 }
 
 .result-card--summary {
@@ -181,43 +171,12 @@ const totalTokens = computed(() => {
   color: #ef4444;
 }
 
+.result-card__icon--commit {
+  color: #3b82f6;
+}
+
 .result-card__content {
   font-size: 14px;
-}
-
-.mr-link {
-  font-weight: 500;
-  word-break: break-all;
-}
-
-.mr-branch-flow {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-  flex-wrap: wrap;
-}
-
-.branch-item {
-  padding: 2px 7px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-family: var(--n-font-family-mono, monospace);
-}
-
-.branch-item--work {
-  background: rgba(5, 150, 105, 0.1);
-  color: #059669;
-}
-
-.branch-item--target {
-  background: rgba(124, 58, 237, 0.1);
-  color: #7c3aed;
-}
-
-.branch-arrow {
-  color: var(--n-text-color-3, #999);
-  font-size: 12px;
 }
 
 .error-message {
@@ -234,26 +193,75 @@ const totalTokens = computed(() => {
   overflow-y: auto;
 }
 
-.changes-row {
+.commit-meta {
   display: flex;
   align-items: center;
-  gap: 14px;
-  font-size: 16px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.commit-sha-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--n-font-family-mono, monospace);
+  font-size: 12.5px;
   font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 5px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  color: var(--n-text-color-2, #555);
+  text-decoration: none;
+}
+
+.commit-sha-chip--link {
+  color: #3b82f6;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.commit-sha-chip--link:hover {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.3);
+  text-decoration: none;
+}
+
+.commit-sha-chip__ext {
+  opacity: 0.55;
+}
+
+.commit-stats {
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--n-font-family-mono, monospace);
 }
 
 .changes-add {
   color: #18a053;
 }
 
+.changes-sep {
+  color: var(--n-text-color-3, #bbb);
+}
+
 .changes-del {
   color: #db3b21;
 }
 
-.changes-total {
-  font-size: 13px;
-  font-weight: 400;
-  color: var(--n-text-color-3, #999);
+.commit-message {
+  margin: 0;
+  font-size: 12.5px;
+  font-family: var(--n-font-family-mono, monospace);
+  padding: 8px 0 0 0;
+  border-top: 1px solid rgba(59, 130, 246, 0.15);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--n-text-color-1, #333);
+  line-height: 1.65;
+  max-height: 160px;
+  overflow-y: auto;
+  background: transparent;
 }
 
 .summary-grid {
@@ -298,5 +306,19 @@ const totalTokens = computed(() => {
 }
 .app-link:hover {
   text-decoration: underline;
+}
+
+.error-message {
+  margin: 0;
+  padding: 10px;
+  font-size: 12px;
+  font-family: var(--n-font-family-mono, monospace);
+  background: rgba(239, 68, 68, 0.06);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #dc2626;
+  max-height: 200px;
+  overflow-y: auto;
 }
 </style>

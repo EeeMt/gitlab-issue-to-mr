@@ -49,7 +49,7 @@ def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = Non
         "input_tokens": task.input_tokens,
         "output_tokens": task.output_tokens,
         "model_name": task.model_name,
-        "merge_request_title": task.merge_request_title,
+        "commit_message": task.commit_message,
         "require_changes": task.require_changes,
         "provider_id": task.provider_id,
         "provider_name": None,

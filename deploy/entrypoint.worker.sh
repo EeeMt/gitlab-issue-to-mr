@@ -407,26 +407,6 @@ $(build_issue_reference_block)
 EOF
 }
 
-build_mr_title_prompt() {
-    local changed_files_text="$1"
-    cat <<EOF
-直接输出一个简洁的 GitLab Merge Request 标题。
-
-重要：直接输出标题文本本身，不要有任何前言、解释或说明。第一个字就是标题内容。
-
-要求：
-1. 只输出标题，不要引号、编号、前缀或 markdown。
-2. 中文优先，控制在 30 字以内。
-3. 体现主要结果。
-
-需求：
-${USER_PROMPT}
-
-改动文件：
-${changed_files_text}
-EOF
-}
-
 build_commit_message_prompt() {
     local changed_files_text="$1"
     local diff_stats_text="$2"
@@ -457,23 +437,6 @@ ${diff_stats_text}
 执行摘要：
 ${summary_text}
 EOF
-}
-
-normalize_model_title() {
-    local raw_title="$1"
-    local cleaned_title=""
-
-    cleaned_title=$(printf '%s\n' "${raw_title}" | tr '\n' ' ' | sed -E \
-        -e 's/<[Tt][Hh][Ii][Nn][Kk][^>]*>[^<]*<\/[Tt][Hh][Ii][Nn][Kk]>//g' \
-        -e 's/[[:space:]]+/ /g' \
-        -e 's/^ *//' \
-        -e 's/ *$//')
-
-    if printf '%s\n' "${cleaned_title}" | grep -qi '^<think'; then
-        cleaned_title=""
-    fi
-
-    printf '%s' "${cleaned_title}"
 }
 
 normalize_model_commit_message() {
@@ -536,7 +499,6 @@ export CLAUDE_MODEL="${ANTHROPIC_MODEL}"
 export APPEND_SYSTEM_PROMPT
 FINAL_SUMMARY_CONTENT=""
 FINAL_CHANGED_FILES_TEXT=""
-FINAL_MR_TITLE=""
 FINAL_COMMIT_MESSAGE=""
 RUNTIME_ARCHIVE_CREATED=0
 
@@ -770,36 +732,7 @@ AI-Generated: true"
     fi
 
     if [ -n "${MR_IID}" ]; then
-        # MR title is managed by the backend (based on issue title).
-        # We only generate a title here for structured finalization metadata;
-        # we do NOT call update_mr to overwrite the MR title.
-        echo "Generating MR title with Claude..."
-        TITLE_PROMPT=$(build_mr_title_prompt "${CHANGED_FILES_TEXT}")
-        printf '%s\n' "${TITLE_PROMPT}" > /tmp/mr_title_prompt.txt
-        chmod 644 /tmp/mr_title_prompt.txt
-        chown codify:codify /tmp/mr_title_prompt.txt
-        echo "MR title prompt written to /tmp/mr_title_prompt.txt"
-
-        set +e
-        GENERATED_MR_TITLE=$(env HOME=/home/codify timeout 60 su -m -s /bin/bash codify -c '/usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" "$(cat /tmp/mr_title_prompt.txt)"' 2>/dev/null)
-        TITLE_RESULT=$?
-        set -e
-
-        if [ ${TITLE_RESULT} -eq 0 ]; then
-            echo "Claude MR title generation succeeded"
-            echo "Claude raw MR title response:"
-            printf '%s\n' "${GENERATED_MR_TITLE}" | sed 's/^/  /'
-            FINAL_MR_TITLE=$(normalize_model_title "${GENERATED_MR_TITLE}")
-            FINAL_MR_TITLE="${FINAL_MR_TITLE:0:120}"
-        else
-            echo "Claude MR title generation failed with exit code ${TITLE_RESULT}; using fallback"
-        fi
-
-        if [ -z "${FINAL_MR_TITLE}" ]; then
-            echo "Generated MR title was empty after normalization; using fallback"
-            FINAL_MR_TITLE="${USER_PROMPT:0:120}"
-        fi
-
+        echo "MR IID: ${MR_IID}"
     fi
 
     FINALIZATION_EVENT=$(jq -nc \
@@ -807,13 +740,13 @@ AI-Generated: true"
         --argjson additions "${ADDITIONS:-0}" \
         --argjson deletions "${DELETIONS:-0}" \
         --argjson total "${TOTAL_CHANGES:-0}" \
-        --arg merge_request_title "${FINAL_MR_TITLE:-}" \
+        --arg commit_message "${FINAL_COMMIT_MESSAGE:-}" \
         '{
             type:"codify_worker",
             subtype:"finalization",
             commit_sha:$commit_sha,
             diff:{additions:$additions,deletions:$deletions,total:$total},
-            merge_request_title:$merge_request_title
+            commit_message:$commit_message
         }')
     append_runtime_event "${FINALIZATION_EVENT}"
 

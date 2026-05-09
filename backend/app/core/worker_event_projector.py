@@ -177,7 +177,7 @@ class WorkerEventProjector:
                 log_metadata=_json.dumps({
                     "commit_sha": record.get("commit_sha") or "",
                     "diff": record.get("diff") or {},
-                    "merge_request_title": record.get("merge_request_title") or "",
+                    "commit_message": record.get("commit_message") or "",
                 }),
             ))
         elif not self._timeline_gate_open:

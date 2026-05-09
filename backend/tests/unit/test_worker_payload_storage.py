@@ -67,7 +67,7 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
                 '{"type":"codify_worker","subtype":"finalization",'
                 '"commit_sha":"0123456789abcdef0123456789abcdef01234567",'
                 '"diff":{"additions":12,"deletions":3,"total":15},'
-                '"merge_request_title":"Fix worker result parsing"}'
+                '"commit_message":"Fix worker result parsing"}'
             ),
         ]
         async with self.session_factory() as db:
@@ -80,7 +80,7 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
         assert meta == {
             "commit_sha": "0123456789abcdef0123456789abcdef01234567",
             "diff": {"additions": 12, "deletions": 3, "total": 15},
-            "merge_request_title": "Fix worker result parsing",
+            "commit_message": "Fix worker result parsing",
         }
 
     async def test_event_tailer_projects_tool_use_to_tasklog_and_payload(self):

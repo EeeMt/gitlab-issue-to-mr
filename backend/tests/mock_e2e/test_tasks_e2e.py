@@ -666,7 +666,7 @@ class TestGetTask:
             "scheduled_at", "container_id", "container_name",
             "commit_sha", "error_message", "additions",
             "deletions", "total_changes", "input_tokens", "output_tokens",
-            "model_name", "merge_request_title", "created_at",
+            "model_name", "commit_message", "created_at",
             "updated_at", "started_at", "completed_at",
         }
         assert expected_keys.issubset(data.keys())

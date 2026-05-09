@@ -59,7 +59,7 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.input_tokens = 0
     task.output_tokens = 0
     task.model_name = None
-    task.merge_request_title = None
+    task.commit_message = None
     task.issue = None
     now = datetime(2024, 1, 1, 12, 0, 0)
     task.created_at = now
