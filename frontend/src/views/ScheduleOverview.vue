@@ -7,9 +7,25 @@
           :subtitle="t('scheduleOverview.subtitle')"
         >
           <template #actions>
-            <n-button @click="refresh" :loading="loading">
-              {{ t('common.refresh') }}
-            </n-button>
+            <n-space align="center">
+              <div class="schedule-toggle" role="tablist">
+                <button
+                  type="button"
+                  class="schedule-toggle__button"
+                  :class="{ 'schedule-toggle__button--active': !myTasksOnly }"
+                  @click="myTasksOnly = false"
+                >{{ t('common.all') }}</button>
+                <button
+                  type="button"
+                  class="schedule-toggle__button"
+                  :class="{ 'schedule-toggle__button--active': myTasksOnly }"
+                  @click="myTasksOnly = true"
+                >{{ t('scheduleOverview.myTasksOnly') }}</button>
+              </div>
+              <n-button @click="refresh" :loading="loading">
+                {{ t('common.refresh') }}
+              </n-button>
+            </n-space>
           </template>
         </PageHeader>
 
@@ -256,7 +272,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -317,6 +333,7 @@ const savingTaskId = ref<number | null>(null)
 let pollTimer: number | null = null
 
 const canEditScheduleOverview = computed(() => !authState.oidcEnabled || isAdmin.value)
+const myTasksOnly = ref(false)
 
 function getProjectLabel(task: Task): string {
   return _getProjectLabel(task, t('dashboard.projectFallback', { id: task.project_id }))
@@ -581,9 +598,10 @@ async function fetchData() {
   if (loading.value) return
   loading.value = true
   try {
+    const my = myTasksOnly.value || undefined
     const [statsData, scheduledTaskData, config] = await Promise.all([
-      getScheduledStats(),
-      getScheduledTasks(),
+      getScheduledStats(my ? { my } : undefined),
+      getScheduledTasks(my ? { my } : undefined),
       getConfig().catch(() => null),
     ])
     scheduledStats.value = statsData
@@ -644,6 +662,10 @@ onMounted(() => {
   }, 15000)
 })
 
+watch(myTasksOnly, () => {
+  fetchData()
+})
+
 onBeforeUnmount(() => {
   if (pollTimer !== null) {
     clearInterval(pollTimer)
@@ -653,6 +675,45 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.schedule-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.schedule-toggle__button {
+  position: relative;
+  z-index: 1;
+  border: none;
+  background: transparent;
+  color: rgba(15, 23, 42, 0.62);
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.22s ease, color 0.22s ease, box-shadow 0.22s ease, transform 0.22s ease;
+}
+
+.schedule-toggle__button:hover {
+  color: rgba(15, 23, 42, 0.88);
+}
+
+.schedule-toggle__button--active {
+  background: rgba(255, 255, 255, 0.92);
+  color: rgba(15, 23, 42, 0.92);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+  transform: translateY(-1px);
+}
+
+.schedule-toggle__button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.18), 0 1px 3px rgba(15, 23, 42, 0.12);
+}
 .schedule-overview {
   max-width: 1240px;
 }
