@@ -9,7 +9,6 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.api.tasks import list_scheduled_tasks
-from app.dependencies.project_access import ProjectAccessScope
 from app.models import Task, TaskStatus
 
 
@@ -36,7 +35,6 @@ async def test_list_scheduled_tasks_serializes_active_scheduled_rows():
     task = _make_task(1, 101, scheduled_time, TaskStatus.PENDING)
     db = AsyncMock()
     db.execute.return_value = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [task]))
-    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
     with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={
         101: {
@@ -44,7 +42,7 @@ async def test_list_scheduled_tasks_serializes_active_scheduled_rows():
             "project_path_with_namespace": "group/project-alpha",
         }
     })):
-        result = await list_scheduled_tasks(db=db, access_scope=access_scope, hour_start=None)
+        result = await list_scheduled_tasks(db=db, hour_start=None)
 
     assert len(result) == 1
     assert result[0]["id"] == 1
@@ -55,20 +53,53 @@ async def test_list_scheduled_tasks_serializes_active_scheduled_rows():
 
 
 @pytest.mark.asyncio
-async def test_list_scheduled_tasks_uses_accessible_project_scope():
+async def test_list_scheduled_tasks_returns_all_projects_unrestricted():
+    """Schedule overview is a global view — no project-level filtering is applied."""
     task = _make_task(2, 202, datetime.now(UTC) + timedelta(hours=1), TaskStatus.QUEUED)
     db = AsyncMock()
     db.execute.return_value = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [task]))
-    access_scope = ProjectAccessScope(
-        is_unrestricted=False,
-        accessible_projects=[{"id": 202, "name": "Project Beta"}],
-    )
 
-    with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
-        result = await list_scheduled_tasks(db=db, access_scope=access_scope, hour_start=None)
+    with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})) as mock_lookup:
+        result = await list_scheduled_tasks(db=db, hour_start=None)
+
+    # build_project_lookup must be called with is_unrestricted=True (global view)
+    mock_lookup.assert_awaited_once_with(is_unrestricted=True)
 
     executed_query = db.execute.await_args.args[0]
 
     assert len(result) == 1
     assert "scheduled_at IS NOT NULL" in str(executed_query)
-    assert "tasks.project_id IN" in str(executed_query)
+    # No project_id IN (...) clause — all projects are visible
+    assert "tasks.project_id IN" not in str(executed_query)
+
+
+@pytest.mark.asyncio
+async def test_list_scheduled_tasks_my_true_adds_initiator_username_condition():
+    """When my=True and current user has a username, query filters by initiator_username."""
+    task = _make_task(3, 303, datetime.now(UTC) + timedelta(hours=1), TaskStatus.PENDING)
+    db = AsyncMock()
+    db.execute.return_value = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [task]))
+    current_user = SimpleNamespace(username="alice")
+
+    with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+        await list_scheduled_tasks(db=db, hour_start=None, my=True, _current_user=current_user)
+
+    executed_query = db.execute.await_args.args[0]
+    # "initiator_username = " appears only when a WHERE filter is applied
+    assert "initiator_username = " in str(executed_query)
+
+
+@pytest.mark.asyncio
+async def test_list_scheduled_tasks_my_false_does_not_filter_by_username():
+    """When my=False (default), no initiator_username filter is applied."""
+    task = _make_task(4, 404, datetime.now(UTC) + timedelta(hours=1), TaskStatus.QUEUED)
+    db = AsyncMock()
+    db.execute.return_value = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [task]))
+    current_user = SimpleNamespace(username="alice")
+
+    with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+        await list_scheduled_tasks(db=db, hour_start=None, my=False, _current_user=current_user)
+
+    executed_query = db.execute.await_args.args[0]
+    # "initiator_username = " only appears in WHERE conditions, not in SELECT column list
+    assert "initiator_username = " not in str(executed_query)

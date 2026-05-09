@@ -928,7 +928,7 @@ export async function getTasksPaginated(params: {
   return response.data
 }
 
-export async function getScheduledTasks(params?: { project_id?: number; hour_start?: string }): Promise<Task[]> {
+export async function getScheduledTasks(params?: { project_id?: number; hour_start?: string; my?: boolean }): Promise<Task[]> {
   const response = await api.get('/tasks/scheduled', { params })
   return response.data
 }
@@ -955,7 +955,7 @@ export interface ScheduledStatsResponse {
   max_count: number
 }
 
-export async function getScheduledStats(params?: { project_id?: number }): Promise<ScheduledStatsResponse> {
+export async function getScheduledStats(params?: { project_id?: number; my?: boolean }): Promise<ScheduledStatsResponse> {
   const response = await api.get('/stats/scheduled', { params })
   return response.data
 }

@@ -978,14 +978,16 @@ async def get_activity_heatmap(
 @router.get("/stats/scheduled")
 async def get_scheduled_stats(
     project_id: Optional[int] = None,
+    my: bool = Query(False, description="When true, restrict to tasks initiated by the current user"),
     db: AsyncSession = Depends(get_db),
     _current_user=Depends(require_page_access("schedule_overview")),
-    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Get aggregated statistics for scheduled tasks.
 
     Returns summary counts and 24-hour hourly distribution without
     fetching individual task objects — designed for ScheduleOverview polling.
+    All authenticated users with schedule_overview access see the global queue.
+    When my=True, restricts results to the current user's tasks.
     """
     now = utcnow()
     now_hour = now.replace(minute=0, second=0, microsecond=0)
@@ -997,14 +999,10 @@ async def get_scheduled_stats(
         Task.scheduled_at.isnot(None),
         Task.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING]),
     ]
-    if not access_scope.is_unrestricted:
-        allowed_project_ids = access_scope.accessible_project_ids
-        if not allowed_project_ids:
-            base_conditions.append(false())
-        else:
-            base_conditions.append(Task.project_id.in_(allowed_project_ids))
     if project_id is not None:
         base_conditions.append(Task.project_id == project_id)
+    if my and _current_user and getattr(_current_user, "username", None):
+        base_conditions.append(Task.initiator_username == _current_user.username)
 
     # Summary counts in a single query using conditional aggregation
     summary_q = select(

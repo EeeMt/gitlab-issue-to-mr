@@ -287,12 +287,18 @@ async def list_tasks(
 async def list_scheduled_tasks(
     project_id: Optional[int] = None,
     hour_start: Optional[str] = Query(None, description="ISO datetime; filter tasks in this 1-hour window"),
+    my: bool = Query(False, description="When true, restrict to tasks initiated by the current user"),
     db: AsyncSession = Depends(get_db),
     _current_user=Depends(require_page_access("schedule_overview")),
-    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """List active scheduled tasks for queue analytics views.
 
+    Returns all scheduled tasks regardless of project membership — the schedule
+    overview is a global queue view where all authenticated users with page access
+    can see the full pipeline. Project-level access is only enforced for write
+    operations (reschedule, cancel, etc.).
+
+    When my=True, restricts results to the current user's tasks.
     When hour_start is provided, returns only tasks within that 1-hour window.
     """
     query = (
@@ -321,19 +327,13 @@ async def list_scheduled_tasks(
 
     if project_id:
         query = query.where(Task.project_id == project_id)
-    elif not access_scope.is_unrestricted:
-        allowed_project_ids = access_scope.accessible_project_ids
-        if not allowed_project_ids:
-            query = query.where(false())
-        else:
-            query = query.where(Task.project_id.in_(allowed_project_ids))
+
+    if my and _current_user and getattr(_current_user, "username", None):
+        query = query.where(Task.initiator_username == _current_user.username)
 
     result = await db.execute(query)
     tasks = result.scalars().all()
-    project_lookup = await build_project_lookup(
-        accessible_projects=access_scope.accessible_projects,
-        is_unrestricted=access_scope.is_unrestricted,
-    )
+    project_lookup = await build_project_lookup(is_unrestricted=True)
 
     return [
         _serialize_task(task, project_lookup.get(task.project_id))

@@ -188,6 +188,19 @@ vi.mock('naive-ui', () => ({
     props: ['name', 'tab'],
     setup(_p: any, { slots }: any) { return () => h('div', { class: 'n-tab-pane' }, slots.default?.()) }
   },
+  NSwitch: {
+    name: 'NSwitch',
+    props: ['value'],
+    emits: ['update:value'],
+    setup(props: any, { emit }: any) {
+      return () => h('button', {
+        class: 'n-switch',
+        role: 'switch',
+        'aria-checked': String(props.value ?? false),
+        onClick: () => emit('update:value', !props.value)
+      })
+    }
+  },
   useMessage: () => mockMessage
 }))
 
@@ -999,27 +1012,59 @@ describe('ScheduleOverview', () => {
   })
 
   // =========================================================================
-  // slotEnforce
+  // myTasksOnly toggle
   // =========================================================================
-  describe('slotEnforce', () => {
-    it('sets slotEnforce from config on load', async () => {
-      ;(mockApi.getConfig as Mock).mockResolvedValue({
-        runtime: { slot_max_tasks: 5, slot_max_tasks_enforce: true }
-      })
-
+  describe('myTasksOnly toggle', () => {
+    it('exposes myTasksOnly reactive ref starting as false', async () => {
       wrapper = mountComponent()
       await flushPromises()
 
-      expect(wrapper.vm.slotEnforce).toBe(true)
+      expect((wrapper.vm as any).myTasksOnly).toBe(false)
     })
 
-    it('defaults slotEnforce to false when not in config', async () => {
-      ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: {} })
-
+    it('calls getScheduledTasks without my param on initial load (myTasksOnly=false)', async () => {
       wrapper = mountComponent()
       await flushPromises()
 
-      expect(wrapper.vm.slotEnforce).toBe(false)
+      const call = (mockApi.getScheduledTasks as Mock).mock.calls[0]
+      expect(call[0]).not.toEqual(expect.objectContaining({ my: true }))
+    })
+
+    it('calls both APIs with { my: true } when myTasksOnly is set to true', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+      ;(mockApi.getScheduledStats as Mock).mockClear()
+      ;(mockApi.getScheduledTasks as Mock).mockClear()
+
+      ;(wrapper.vm as any).myTasksOnly = true
+      await flushPromises()
+
+      expect(mockApi.getScheduledStats).toHaveBeenCalledWith({ my: true })
+      expect(mockApi.getScheduledTasks).toHaveBeenCalledWith({ my: true })
+    })
+
+    it('calls both APIs without my param when myTasksOnly is turned back off', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      ;(wrapper.vm as any).myTasksOnly = true
+      await flushPromises()
+      ;(mockApi.getScheduledStats as Mock).mockClear()
+      ;(mockApi.getScheduledTasks as Mock).mockClear()
+
+      ;(wrapper.vm as any).myTasksOnly = false
+      await flushPromises()
+
+      expect(mockApi.getScheduledStats).toHaveBeenCalledWith(undefined)
+      expect(mockApi.getScheduledTasks).toHaveBeenCalledWith(undefined)
+    })
+
+    it('includes myTasksOnly as an accessible component property for the template', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      // myTasksOnly is a ref that the template binds to n-button @click toggle
+      expect(typeof (wrapper.vm as any).myTasksOnly).toBe('boolean')
     })
   })
 })

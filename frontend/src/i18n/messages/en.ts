@@ -820,6 +820,7 @@ const en = {
     subtitle:
       'Review active scheduled tasks, understand hourly load, and spot busy versus idle time windows.',
     loading: 'Loading schedule overview...',
+    myTasksOnly: 'My Tasks Only',
     statusPlaceholder: 'Status',
     searchPlaceholder: 'Search project, branch, prompt',
     next24Hours: 'Next 24 Hours',

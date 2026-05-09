@@ -805,6 +805,7 @@ const zhCN = {
     title: '调度总览',
     subtitle: '查看活跃的定时任务，理解小时级负载，并识别繁忙与空闲时间窗口。',
     loading: '正在加载调度总览...',
+    myTasksOnly: '只看我的',
     statusPlaceholder: '状态',
     searchPlaceholder: '搜索项目、分支、提示词',
     next24Hours: '未来 24 小时',
