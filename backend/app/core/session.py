@@ -18,7 +18,7 @@ from app.core.config_crypto import decrypt_config_secret, encrypt_config_secret
 from app.core.utcnow import utcnow
 from app.models import User, UserSession
 
-SESSION_RETENTION_DAYS = 30
+SESSION_RETENTION_DAYS = 30  # kept for backward compat (tests); runtime uses get_effective_settings()
 
 # Backward-compatible alias for tests that import the old private helper.
 _utcnow = utcnow
@@ -239,9 +239,11 @@ async def revoke_session_by_id(db: AsyncSession, session_id: str) -> bool:
 async def cleanup_stale_sessions(
     db: AsyncSession,
     *,
-    retention_days: int = SESSION_RETENTION_DAYS,
+    retention_days: int | None = None,
 ) -> int:
     """Delete sessions that expired or were revoked before the retention cutoff."""
+    if retention_days is None:
+        retention_days = get_effective_settings().session_retention_days
     cutoff = utcnow() - timedelta(days=retention_days)
     result = await db.execute(
         delete(UserSession).where(

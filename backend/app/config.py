@@ -42,6 +42,7 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "oidc_redirect_uri": str,
     "session_cookie_name": str,
     "session_ttl_seconds": int,
+    "session_retention_days": int,
     "cookie_secure": bool,
     "cookie_samesite": str,
     "auth_admin_usernames": str,
@@ -126,6 +127,7 @@ class Settings(BaseSettings):
     oidc_redirect_uri: str = Field(default="")
     session_cookie_name: str = Field(default="codify_session")
     session_ttl_seconds: int = Field(default=28800)
+    session_retention_days: int = Field(default=30)
     cookie_secure: bool = Field(default=True)
     cookie_samesite: str = Field(default="lax")
     auth_admin_usernames: str = Field(default="")

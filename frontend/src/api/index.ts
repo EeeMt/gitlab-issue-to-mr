@@ -573,6 +573,7 @@ export interface AuthConfig {
   oidc_redirect_uri: string
   session_cookie_name: string
   session_ttl_seconds: number
+  session_retention_days: number
   cookie_secure: boolean
   cookie_samesite: string
   auth_admin_usernames: string

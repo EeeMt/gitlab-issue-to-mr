@@ -37,6 +37,7 @@ class AuthConfigSection(BaseModel):
     oidc_redirect_uri: str
     session_cookie_name: str
     session_ttl_seconds: int
+    session_retention_days: int
     cookie_secure: bool
     cookie_samesite: str
     auth_admin_usernames: str
@@ -54,6 +55,7 @@ class AuthConfigUpdate(BaseModel):
     oidc_redirect_uri: Optional[str] = None
     session_cookie_name: Optional[str] = None
     session_ttl_seconds: Optional[int] = None
+    session_retention_days: Optional[int] = None
     cookie_secure: Optional[bool] = None
     cookie_samesite: Optional[str] = None
     auth_admin_usernames: Optional[str] = None
@@ -82,6 +84,7 @@ def _serialize_auth_config(settings: Settings) -> AuthConfigSection:
         oidc_redirect_uri=settings.oidc_redirect_uri,
         session_cookie_name=settings.session_cookie_name,
         session_ttl_seconds=settings.session_ttl_seconds,
+        session_retention_days=settings.session_retention_days,
         cookie_secure=settings.cookie_secure,
         cookie_samesite=settings.cookie_samesite,
         auth_admin_usernames=settings.auth_admin_usernames,
