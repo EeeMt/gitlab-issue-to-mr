@@ -471,6 +471,96 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(failed), 1)
         self.assertIn("connection lost", failed[0].args[0].error_message)
 
+    async def test_expired_task_reloaded_and_notification_sent(self) -> None:
+        """When a task is expired (after intermediate db.commit()), it is reloaded
+        from DB and the notification is sent successfully.
+
+        This is a regression test for the bug where completion notifications were
+        silently dropped because db.commit() in monitor_container_run expired the
+        task's SQLAlchemy state, causing attribute access to raise MissingGreenlet.
+        """
+        # Build the fresh task that will be returned by the reload query
+        reloaded_task = Task(
+            id=13, project_id=1, user_prompt="x",
+            status=TaskStatus.COMPLETED, initiator_username="alice",
+        )
+        reloaded_task.issue_id = None  # no issue → simpler path
+        reloaded_task.__dict__.pop("issue", None)
+
+        profile = MattermostNotificationProfile(
+            id=5, name="C", enabled=True,
+            target_type=MATTERMOST_TARGET_TYPE_CHANNEL,
+            channel_id="channel-1",
+            mention_in_channel=False,
+            event_types_json='["task_completed"]',
+            field_keys_json='["task_id","status"]',
+        )
+
+        # The reload session returns the reloaded task; the profile session returns profiles
+        reload_session = MagicMock()
+        reload_session.execute = AsyncMock(
+            return_value=SimpleNamespace(
+                scalar_one_or_none=lambda: reloaded_task
+            )
+        )
+        reload_session.expunge = MagicMock()
+
+        profile_session = MagicMock()
+        profile_session.execute = AsyncMock(
+            return_value=SimpleNamespace(
+                scalars=lambda: SimpleNamespace(all=lambda: [profile])
+            )
+        )
+        profile_session.commit = AsyncMock()
+
+        session_call_count = 0
+
+        class _MultiSessionContext:
+            """Returns reload_session on first call, profile_session on second."""
+            def __init__(self_inner):
+                pass
+            async def __aenter__(self_inner):
+                nonlocal session_call_count
+                session_call_count += 1
+                return reload_session if session_call_count == 1 else profile_session
+            async def __aexit__(self_inner, exc_type, exc, tb):
+                return False
+
+        mock_client = AsyncMock()
+
+        # Simulate the expired state: inspect(task).expired is True, identity = (13,)
+        expired_state = MagicMock()
+        expired_state.expired = True
+        expired_state.identity = (13,)
+
+        original_task = Task(id=13, project_id=1, user_prompt="x", status=TaskStatus.COMPLETED)
+
+        with patch(
+            "app.core.mattermost_notifications.inspect",
+            side_effect=lambda obj: expired_state if obj is original_task else __import__("sqlalchemy").inspect(obj),
+        ), patch(
+            "app.core.mattermost_notifications.AsyncSessionLocal",
+            return_value=_MultiSessionContext(),
+        ), patch(
+            "app.core.mattermost_notifications.MattermostClient",
+            return_value=mock_client,
+        ), patch(
+            "app.core.mattermost_notifications.get_effective_settings",
+            return_value=SimpleNamespace(
+                mattermost_server_url="https://mm",
+                mattermost_bot_token="tok",
+                dashboard_url="https://dash",
+            ),
+        ):
+            await notify_task_event(original_task, MATTERMOST_EVENT_TASK_COMPLETED)
+
+        # Reload session was used (expunge called for reloaded task)
+        reload_session.expunge.assert_called()
+        # Notification was posted
+        mock_client.create_post.assert_awaited_once()
+        post_args = mock_client.create_post.await_args.args
+        self.assertEqual(post_args[0], "channel-1")
+
 
 # =======================================================================
 # Pure-function tests (no async, no DB)

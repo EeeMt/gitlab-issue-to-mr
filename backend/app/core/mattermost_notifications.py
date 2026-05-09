@@ -412,7 +412,37 @@ async def notify_task_event(
     # Ensure task.issue is loaded so that _build_card_markdown and
     # _build_attachment_fields can safely access it without triggering
     # async lazy-load failures (the Task model does not use AsyncAttrs).
-    if task.issue_id is not None and "issue" in inspect(task).unloaded:
+    task_state = inspect(task)
+    if task_state.expired:
+        # The task was expired by an intermediate db.commit() in the caller
+        # (e.g. after persisting issue.claude_session_id or merge_request_iid
+        # on task completion).  Accessing any expired column attribute in async
+        # context raises MissingGreenlet because Task does not use AsyncAttrs.
+        # Reload the task — and its issue — from a fresh session so that all
+        # attribute access below is safe.
+        task_pk = task_state.identity
+        if not task_pk:
+            logger.warning("notify_task_event: expired task has no identity key; skipping notification")
+            return
+        task_id_val = task_pk[0]
+        async with AsyncSessionLocal() as reload_session:
+            reload_result = await reload_session.execute(select(Task).where(Task.id == task_id_val))
+            task = reload_result.scalar_one_or_none()
+            if task is None:
+                logger.warning(
+                    "notify_task_event: task %s not found on reload; skipping notification", task_id_val
+                )
+                return
+            if task.issue_id is not None:
+                issue_result = await reload_session.execute(select(Issue).where(Issue.id == task.issue_id))
+                reloaded_issue = issue_result.scalar_one_or_none()
+                if reloaded_issue is not None:
+                    reload_session.expunge(reloaded_issue)
+                reload_session.expunge(task)
+                task.issue = reloaded_issue
+            else:
+                reload_session.expunge(task)
+    elif task.issue_id is not None and "issue" in task_state.unloaded:
         async with AsyncSessionLocal() as session:
             issue_result = await session.execute(
                 select(Issue).where(Issue.id == task.issue_id)
@@ -423,7 +453,6 @@ async def notify_task_event(
             # Detach the task from any active session so that setting
             # task.issue does not conflict with an already-cached Issue
             # instance (e.g. when the caller still holds a session open).
-            task_state = inspect(task)
             if task_state.session is not None:
                 task_state.session.expunge(task)
             task.issue = issue
