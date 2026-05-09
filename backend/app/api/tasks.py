@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-TASKS_SORT_FIELDS = {"created_at", "status", "priority", "total_changes", "input_tokens", "output_tokens"}
+TASKS_SORT_FIELDS = {"created_at", "status", "priority", "total_changes", "input_tokens", "output_tokens", "duration"}
 SORT_ORDERS = {"asc", "desc"}
 
 
@@ -101,11 +101,22 @@ async def list_tasks(
             )
         effective_sort_order = sort_order
 
-    sort_column = getattr(Task, effective_sort_by)
-    if effective_sort_order == "asc":
-        order_clause = sort_column.asc().nullslast()
+    if effective_sort_by == "duration":
+        # Duration = completed_at - started_at (or now - started_at for running tasks)
+        duration_expr = func.coalesce(
+            func.extract("epoch", Task.completed_at - Task.started_at),
+            func.extract("epoch", func.now() - Task.started_at),
+        )
+        if effective_sort_order == "asc":
+            order_clause = duration_expr.asc().nullslast()
+        else:
+            order_clause = duration_expr.desc().nullslast()
     else:
-        order_clause = sort_column.desc().nullslast()
+        sort_column = getattr(Task, effective_sort_by)
+        if effective_sort_order == "asc":
+            order_clause = sort_column.asc().nullslast()
+        else:
+            order_clause = sort_column.desc().nullslast()
 
     query = select(Task).options(selectinload(Task.issue), selectinload(Task.provider)).order_by(order_clause)
 

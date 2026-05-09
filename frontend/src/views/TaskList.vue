@@ -194,6 +194,7 @@ const filterConfig: FilterSortConfig = {
     { key: 'status', label: 'filter.sortStatus' },
     { key: 'total_changes', label: 'filter.sortChanges' },
     { key: 'input_tokens', label: 'filter.sortTokens' },
+    { key: 'duration', label: 'filter.sortDuration' },
   ],
   columns: [
     { key: 'id', label: 'dashboard.id', defaultVisible: true, alwaysVisible: true },

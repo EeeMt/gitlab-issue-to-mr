@@ -300,6 +300,56 @@ class TestListTasksSortParams(unittest.IsolatedAsyncioTestCase):
             )
         self.assertIn("items", result)
 
+    async def test_valid_sort_by_duration_asc(self):
+        """duration sort should not raise and uses computed epoch expression."""
+        db = _mock_paginated_db([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            result = await list_tasks(
+                sort_by="duration",
+                sort_order="asc",
+                page=1,
+                page_size=20,
+                db=db,
+                access_scope=scope,
+            )
+        self.assertIn("items", result)
+
+    async def test_valid_sort_by_duration_desc(self):
+        """duration sort desc should not raise."""
+        db = _mock_paginated_db([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            result = await list_tasks(
+                sort_by="duration",
+                sort_order="desc",
+                page=1,
+                page_size=20,
+                db=db,
+                access_scope=scope,
+            )
+        self.assertIn("items", result)
+
+    async def test_other_sort_fields_still_work_alongside_duration(self):
+        """Regression: non-duration sort fields must still work (UnboundLocalError guard)."""
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        for field in ("created_at", "status", "priority", "total_changes", "input_tokens", "output_tokens"):
+            with self.subTest(sort_by=field):
+                db = _mock_paginated_db([], total=0)
+                with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+                    result = await list_tasks(
+                        sort_by=field,
+                        sort_order="desc",
+                        page=1,
+                        page_size=20,
+                        db=db,
+                        access_scope=scope,
+                    )
+                self.assertIn("items", result)
+
 
 class TestListTasksSearchParam(unittest.IsolatedAsyncioTestCase):
     """Test search param on GET /api/tasks."""
