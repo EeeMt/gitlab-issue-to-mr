@@ -388,7 +388,7 @@
                   :pagination="false"
                   :row-props="activeTaskRowProps"
                   size="small"
-                  scroll-x="960"
+                  scroll-x="1040"
                   :max-height="400"
                 />
               </n-card>
@@ -576,6 +576,7 @@ import {
   NTabPane,
   NTabs,
   NTag,
+  NTooltip,
   type DataTableColumns,
   useMessage
 } from 'naive-ui'
@@ -1006,43 +1007,56 @@ const activeTaskColumns = computed<DataTableColumns<Task>>(() => [
   {
     title: t('common.project'),
     key: 'project',
-    minWidth: 180,
+    minWidth: 170,
     render: (task) => getProjectLabel(task)
+  },
+  {
+    title: t('common.initiator'),
+    key: 'initiator_username',
+    width: 100,
+    render: (task) => task.initiator_username || '—'
   },
   {
     title: t('monitor.task'),
     key: 'task',
-    minWidth: 240,
-    render: (task) => formatPromptPreview(task.user_prompt)
+    minWidth: 220,
+    render: (task) => {
+      const preview = formatPromptPreview(task.user_prompt)
+      const full = (task.user_prompt || '').replace(/\s+/g, ' ').trim()
+      if (!full) return '—'
+      return h(NTooltip, { trigger: 'hover', placement: 'top-start' }, {
+        trigger: () => h('span', { style: 'cursor: default' }, preview),
+        default: () => h('div', { style: 'max-width: 420px; white-space: pre-wrap; word-break: break-word' }, full)
+      })
+    }
   },
   {
     title: t('monitor.status'),
     key: 'status',
-    width: 110,
-    render: (task) => renderStatusTag(task.status)
-  },
-  {
-    title: t('common.priority'),
-    key: 'priority',
-    width: 90,
-    render: (task) => formatPriority(task.priority)
+    width: 130,
+    render: (task) =>
+      h('div', { style: 'display: flex; align-items: center; gap: 6px' }, [
+        renderStatusTag(task.status),
+        h('span', { style: 'font-size: 12px; font-weight: 600; white-space: nowrap' }, formatPriority(task.priority))
+      ])
   },
   {
     title: t('common.scheduledAt'),
     key: 'scheduled_at',
-    width: 160,
-    render: (task) => task.scheduled_at ? formatTimestamp(task.scheduled_at) : t('monitor.immediateTask')
-  },
-  {
-    title: t('monitor.waitingOrRunning'),
-    key: 'elapsed',
-    width: 140,
-    render: (task) => getTaskElapsedLabel(task)
+    width: 170,
+    render: (task) => {
+      const scheduled = task.scheduled_at ? formatTimestamp(task.scheduled_at) : t('monitor.immediateTask')
+      const elapsed = getTaskElapsedLabel(task)
+      return h('div', {}, [
+        h('div', { style: 'line-height: 1.4' }, scheduled),
+        h('div', { style: 'font-size: 12px; color: var(--n-text-color-3); line-height: 1.4' }, elapsed)
+      ])
+    }
   },
   {
     title: t('common.createdAt'),
     key: 'created_at',
-    width: 160,
+    width: 140,
     render: (task) => formatTimestamp(task.created_at)
   }
 ])
