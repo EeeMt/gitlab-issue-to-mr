@@ -818,8 +818,9 @@ class DeleteIssueBranchEndpointTests(unittest.IsolatedAsyncioTestCase):
         mock_client.delete_branch.return_value = True
 
         with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
-            await self._call(issue, mock_db)
+            resp = await self._call(issue, mock_db)
 
+        self.assertEqual(resp, {"success": True})
         mock_client.delete_branch.assert_called_once_with(42, "codify/issue-1")
         self.assertTrue(issue.branch_deleted)
         mock_db.commit.assert_awaited_once()
@@ -892,6 +893,33 @@ class DeleteIssueBranchEndpointTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as ctx:
                 await self._call(issue, mock_db)
         self.assertEqual(ctx.exception.status_code, 500)
+
+    async def test_delete_branch_already_deleted(self):
+        """Should return success early when branch already deleted."""
+        from app.models import IssueStatus
+
+        issue = _make_issue(
+            id=1,
+            status=IssueStatus.CLOSED.value,
+            branch_name="feature/test",
+            branch_deleted=True,
+        )
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        mock_client = MagicMock()
+        mock_client.delete_branch.return_value = True
+
+        with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
+            resp = await self._call(issue, mock_db)
+
+        self.assertEqual(resp, {"success": True})
+        mock_client.delete_branch.assert_not_called()
 
     async def test_delete_branch_gitlab_exception_returns_500(self):
         """Should return 500 when GitLab client raises an exception."""

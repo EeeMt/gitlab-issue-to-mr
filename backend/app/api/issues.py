@@ -505,6 +505,9 @@ async def delete_issue_branch(
     if not issue.branch_name:
         raise HTTPException(status_code=400, detail="Issue has no branch to delete")
 
+    if issue.branch_deleted:
+        return {"success": True}
+
     try:
         client = get_gitlab_client()
         success = client.delete_branch(issue.project_id, issue.branch_name)
@@ -518,7 +521,7 @@ async def delete_issue_branch(
     issue.branch_deleted = True
     await db.commit()
     await db.refresh(issue, attribute_names=["tasks"])
-    return _serialize_issue_detail(issue)
+    return {"success": True}
 
 
 @router.delete("/{issue_id}")
