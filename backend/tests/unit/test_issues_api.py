@@ -885,6 +885,7 @@ class DeleteIssueBranchEndpointTests(unittest.IsolatedAsyncioTestCase):
         result_mock.scalar_one_or_none.return_value = issue
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
 
         mock_client = MagicMock()
         mock_client.delete_branch.return_value = False
@@ -893,6 +894,8 @@ class DeleteIssueBranchEndpointTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as ctx:
                 await self._call(issue, mock_db)
         self.assertEqual(ctx.exception.status_code, 500)
+        self.assertFalse(issue.branch_deleted)
+        mock_db.commit.assert_not_awaited()
 
     async def test_delete_branch_already_deleted(self):
         """Should return success early when branch already deleted."""
@@ -913,13 +916,14 @@ class DeleteIssueBranchEndpointTests(unittest.IsolatedAsyncioTestCase):
         mock_db.refresh = AsyncMock()
 
         mock_client = MagicMock()
-        mock_client.delete_branch.return_value = True
 
         with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
             resp = await self._call(issue, mock_db)
 
         self.assertEqual(resp, {"success": True})
         mock_client.delete_branch.assert_not_called()
+        mock_db.commit.assert_not_awaited()
+        mock_db.refresh.assert_not_awaited()
 
     async def test_delete_branch_gitlab_exception_returns_500(self):
         """Should return 500 when GitLab client raises an exception."""
@@ -943,6 +947,34 @@ class DeleteIssueBranchEndpointTests(unittest.IsolatedAsyncioTestCase):
                 await self._call(issue, mock_db)
         self.assertEqual(ctx.exception.status_code, 500)
         self.assertEqual(ctx.exception.detail, "Failed to delete branch in GitLab")
+
+    async def test_delete_branch_forbidden(self):
+        """Should raise 403 when non-owner tries to delete branch."""
+        from fastapi import HTTPException
+        from app.api.issues import delete_issue_branch
+        from app.models import IssueStatus
+
+        issue = _make_issue(id=1, initiator_user_id=10, status=IssueStatus.CLOSED.value)
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+
+        non_owner = MagicMock()
+        non_owner.id = 99
+        non_owner.platform_role = "platform_user"
+
+        with patch("app.core.task_helpers.get_effective_settings") as mock_settings_fn:
+            mock_settings = MagicMock()
+            mock_settings.oidc_enabled = True
+            mock_settings_fn.return_value = mock_settings
+            
+            with self.assertRaises(HTTPException) as ctx:
+                await delete_issue_branch(issue_id=1, db=mock_db, current_user=non_owner)
+
+        self.assertEqual(ctx.exception.status_code, 403)
 
 
 if __name__ == "__main__":

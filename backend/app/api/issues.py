@@ -487,9 +487,7 @@ async def delete_issue_branch(
 ):
     """Manually delete the GitLab branch associated with a closed issue."""
     result = await db.execute(
-        select(Issue)
-        .where(Issue.id == issue_id)
-        .options(selectinload(Issue.tasks))
+        select(Issue).where(Issue.id == issue_id)
     )
     issue = result.scalar_one_or_none()
     if issue is None:
@@ -520,7 +518,6 @@ async def delete_issue_branch(
 
     issue.branch_deleted = True
     await db.commit()
-    await db.refresh(issue, attribute_names=["tasks"])
     return {"success": True}
 
 
