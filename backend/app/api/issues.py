@@ -36,6 +36,7 @@ class CreateIssueRequest(BaseModel):
     project_id: int
     base_branch: Optional[str] = None
     target_branch: Optional[str] = None
+    delete_branch_on_close: bool = True
 
 
 class UpdateIssueRequest(BaseModel):
@@ -155,6 +156,7 @@ async def create_issue(
         status=IssueStatus.OPEN.value,
         base_branch=body.base_branch,
         target_branch=body.target_branch,
+        delete_branch_on_close=body.delete_branch_on_close,
         initiator_user_id=current_user.id if current_user else None,
         initiator_username=current_user.username if current_user else None,
     )
@@ -471,6 +473,7 @@ async def close_issue(
 
     issue.status = IssueStatus.CLOSED.value
     issue.closed_via = "manual"
+    await _try_delete_issue_branch(issue, db)
     await db.commit()
     await db.refresh(issue, attribute_names=["tasks"])
     return _serialize_issue_detail(issue)

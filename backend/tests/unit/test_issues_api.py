@@ -654,6 +654,62 @@ class IssueOwnershipTests(unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------------------
+# close_issue with branch deletion
+# ---------------------------------------------------------------------------
+
+class CloseIssueWithBranchDeletionTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for close_issue with branch deletion integration."""
+
+    async def test_close_issue_calls_branch_deletion(self):
+        """close_issue should call _try_delete_issue_branch when branch_name is set."""
+        from app.api.issues import close_issue
+        from app.models import IssueStatus
+
+        issue = _make_issue(
+            id=1,
+            status=IssueStatus.OPEN.value,
+            branch_name="codify/issue-1",
+            delete_branch_on_close=True,
+            branch_deleted=False,
+        )
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        mock_user = MagicMock()
+
+        with patch("app.api.issues._try_delete_issue_branch") as mock_helper:
+            mock_helper.side_effect = AsyncMock(return_value=None)
+            await close_issue(issue_id=1, db=mock_db, current_user=mock_user)
+
+        mock_helper.assert_awaited_once_with(issue, mock_db)
+
+    async def test_close_issue_commits_even_when_branch_deletion_helper_is_skipped(self):
+        """close_issue should commit even if _try_delete_issue_branch does nothing."""
+        from app.api.issues import close_issue
+        from app.models import IssueStatus
+
+        issue = _make_issue(id=1, status=IssueStatus.OPEN.value, delete_branch_on_close=False)
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        mock_user = MagicMock()
+
+        with patch("app.api.issues._try_delete_issue_branch") as mock_helper:
+            mock_helper.side_effect = AsyncMock(return_value=None)
+            await close_issue(issue_id=1, db=mock_db, current_user=mock_user)
+
+        mock_db.commit.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
 # _try_delete_issue_branch helper
 # ---------------------------------------------------------------------------
 
