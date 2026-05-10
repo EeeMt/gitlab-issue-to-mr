@@ -479,6 +479,43 @@ async def close_issue(
     return _serialize_issue_detail(issue)
 
 
+@router.post("/{issue_id}/delete-branch")
+async def delete_issue_branch(
+    issue_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_authenticated_user),
+):
+    """Manually delete the GitLab branch associated with a closed issue."""
+    result = await db.execute(
+        select(Issue)
+        .where(Issue.id == issue_id)
+        .options(selectinload(Issue.tasks))
+    )
+    issue = result.scalar_one_or_none()
+    if issue is None:
+        raise HTTPException(status_code=404, detail=f"Issue {issue_id} not found")
+
+    _require_issue_operator(issue, current_user)
+
+    if issue.status != IssueStatus.CLOSED.value:
+        raise HTTPException(
+            status_code=400,
+            detail="Issue must be closed before its branch can be deleted",
+        )
+    if not issue.branch_name:
+        raise HTTPException(status_code=400, detail="Issue has no branch to delete")
+
+    client = get_gitlab_client()
+    success = client.delete_branch(issue.project_id, issue.branch_name)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete branch in GitLab")
+
+    issue.branch_deleted = True
+    await db.commit()
+    await db.refresh(issue, attribute_names=["tasks"])
+    return _serialize_issue_detail(issue)
+
+
 @router.delete("/{issue_id}")
 async def delete_issue(
     issue_id: int,

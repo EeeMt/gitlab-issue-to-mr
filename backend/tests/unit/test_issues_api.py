@@ -782,5 +782,117 @@ class TryDeleteIssueBranchTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(issue.branch_deleted)
 
 
+# ---------------------------------------------------------------------------
+# DELETE /issues/{id}/delete-branch endpoint
+# ---------------------------------------------------------------------------
+
+class DeleteIssueBranchEndpointTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for POST /issues/{id}/delete-branch."""
+
+    async def _call(self, issue, mock_db, mock_user=None):
+        from app.api.issues import delete_issue_branch
+        if mock_user is None:
+            mock_user = MagicMock()
+        return await delete_issue_branch(
+            issue_id=issue.id, db=mock_db, current_user=mock_user
+        )
+
+    async def test_delete_branch_success(self):
+        """Should delete branch and set branch_deleted=True."""
+        from app.models import IssueStatus
+
+        issue = _make_issue(
+            id=1, status=IssueStatus.CLOSED.value,
+            branch_name="codify/issue-1", project_id=42,
+            branch_deleted=False,
+        )
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        mock_client = MagicMock()
+        mock_client.delete_branch.return_value = True
+
+        with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
+            await self._call(issue, mock_db)
+
+        mock_client.delete_branch.assert_called_once_with(42, "codify/issue-1")
+        self.assertTrue(issue.branch_deleted)
+        mock_db.commit.assert_awaited_once()
+
+    async def test_delete_branch_not_found(self):
+        """Should return 404 when issue does not exist."""
+        from fastapi import HTTPException
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = None
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+
+        issue = _make_issue(id=999)
+        with self.assertRaises(HTTPException) as ctx:
+            await self._call(issue, mock_db)
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    async def test_delete_branch_issue_not_closed_returns_400(self):
+        """Should return 400 when issue is still open."""
+        from fastapi import HTTPException
+
+        issue = _make_issue(id=1, status="open", branch_name="codify/issue-1")
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+
+        with self.assertRaises(HTTPException) as ctx:
+            await self._call(issue, mock_db)
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_delete_branch_no_branch_name_returns_400(self):
+        """Should return 400 when issue has no branch_name."""
+        from fastapi import HTTPException
+        from app.models import IssueStatus
+
+        issue = _make_issue(id=1, status=IssueStatus.CLOSED.value, branch_name=None)
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+
+        with self.assertRaises(HTTPException) as ctx:
+            await self._call(issue, mock_db)
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_delete_branch_gitlab_failure_returns_500(self):
+        """Should return 500 when GitLab deletion fails."""
+        from fastapi import HTTPException
+        from app.models import IssueStatus
+
+        issue = _make_issue(
+            id=1, status=IssueStatus.CLOSED.value,
+            branch_name="codify/issue-1", project_id=42,
+            branch_deleted=False,
+        )
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+
+        mock_client = MagicMock()
+        mock_client.delete_branch.return_value = False
+
+        with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
+            with self.assertRaises(HTTPException) as ctx:
+                await self._call(issue, mock_db)
+        self.assertEqual(ctx.exception.status_code, 500)
+
+
 if __name__ == "__main__":
     unittest.main()
