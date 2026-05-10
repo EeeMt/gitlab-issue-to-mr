@@ -10,22 +10,41 @@
       </div>
       <span class="event-ts">{{ formatTimestamp(row.event.created_at) }}</span>
     </div>
-    <n-collapse class="event-collapse" @update:expanded-names="(names) => emit('collapse-change', names)">
-      <n-collapse-item name="detail">
-        <template #header>
-          <span class="tool-detail-label">{{ t('taskView.fullText') }}</span>
-        </template>
-        <n-spin v-if="loading" size="small" />
-        <div v-else-if="showContent" class="event-content markdown-content" :class="{ 'event-content--thinking': row.kind === 'thinking' }" v-html="renderMarkdown(expandedText)"></div>
-      </n-collapse-item>
-    </n-collapse>
+    <div class="tool-sections">
+      <div class="tool-badge-row">
+        <button
+          class="tool-badge"
+          :class="{ 'tool-badge--active': showDetail, 'tool-badge--loading': showDetail && loading }"
+          :disabled="showDetail && loading"
+          @click="toggleDetail"
+        >
+          <span v-if="showDetail && loading" class="badge-spin-ring"></span>
+          <n-icon v-else size="10" class="badge-chevron" :class="{ 'badge-chevron--open': showDetail }">
+            <ChevronForward />
+          </n-icon>
+          {{ t('taskView.fullText') }}
+        </button>
+      </div>
+      <Transition
+        name="tool-expand"
+        @enter="onExpandEnter"
+        @after-enter="onExpandAfterEnter"
+        @leave="onExpandLeave"
+        @after-leave="onExpandAfterLeave"
+      >
+        <div v-if="showDetail" class="tool-content">
+          <div v-if="showContent && expandedText.trim()" class="event-content markdown-content" :class="{ 'event-content--thinking': row.kind === 'thinking' }" v-html="renderMarkdown(expandedText.trim())"></div>
+          <div v-else-if="showContent" class="event-content event-content--placeholder">{{ t('taskView.emptyContent') }}</div>
+        </div>
+      </Transition>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { NCollapse, NCollapseItem, NIcon, NSpin } from 'naive-ui'
-import { BulbOutline, ChatboxOutline } from '@vicons/ionicons5'
+import { computed, ref } from 'vue'
+import { NIcon } from 'naive-ui'
+import { BulbOutline, ChatboxOutline, ChevronForward } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { formatTimestamp, renderMarkdown, type NormalizedTextEventRow } from './taskProcessUtils'
 
@@ -41,6 +60,41 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+const showDetail = ref(false)
+
+function onExpandEnter(el: Element) {
+  const h = el as HTMLElement
+  const naturalHeight = h.scrollHeight
+  h.style.height = '0'
+  h.style.overflow = 'hidden'
+  requestAnimationFrame(() => {
+    h.style.height = naturalHeight + 'px'
+  })
+}
+function onExpandAfterEnter(el: Element) {
+  const h = el as HTMLElement
+  h.style.height = ''
+  h.style.overflow = ''
+}
+function onExpandLeave(el: Element) {
+  const h = el as HTMLElement
+  h.style.height = h.scrollHeight + 'px'
+  h.style.overflow = 'hidden'
+  requestAnimationFrame(() => {
+    h.style.height = '0'
+  })
+}
+function onExpandAfterLeave(el: Element) {
+  const h = el as HTMLElement
+  h.style.height = ''
+  h.style.overflow = ''
+}
+
+function toggleDetail() {
+  showDetail.value = !showDetail.value
+  emit('collapse-change', showDetail.value ? ['detail'] : [])
+}
 
 const preview = computed(() => {
   const entry = props.row.textEntry
@@ -100,11 +154,77 @@ const preview = computed(() => {
   font-family: var(--n-font-family-mono, monospace);
   margin-left: auto;
 }
-.event-collapse {
-  width: calc(100% - 16px);
-  margin: 8px 8px 8px 8px;
-  --n-item-margin: 8px 0 0 0;
-  --n-title-padding: 8px 0;
+.tool-sections {
+  margin: 4px 8px 2px 28px;
+}
+.tool-badge-row {
+  display: flex;
+  gap: 6px;
+}
+.tool-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px 2px 5px;
+  font-size: 11px;
+  color: var(--n-text-color-3, #999);
+  background: transparent;
+  border: 1px solid var(--n-border-color, rgba(128, 128, 128, 0.2));
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  font-family: inherit;
+  line-height: 1.6;
+}
+.tool-badge:hover {
+  color: var(--n-text-color, inherit);
+  border-color: rgba(128, 128, 128, 0.4);
+}
+.tool-badge--active {
+  color: var(--n-primary-color, #18a058);
+  border-color: var(--n-primary-color, #18a058);
+  background: rgba(24, 160, 88, 0.05);
+}
+.badge-chevron {
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+.badge-chevron--open {
+  transform: rotate(90deg);
+}
+.tool-badge:disabled,
+.tool-badge--loading {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.badge-spin-ring {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  flex-shrink: 0;
+  animation: badge-rotate 0.7s linear infinite;
+}
+@keyframes badge-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.tool-content {
+  margin-top: 6px;
+}
+.tool-expand-enter-active {
+  transition: opacity 0.2s ease, height 0.25s ease;
+  overflow: hidden;
+}
+.tool-expand-leave-active {
+  transition: opacity 0.15s ease, height 0.2s ease;
+  overflow: hidden;
+}
+.tool-expand-enter-from,
+.tool-expand-leave-to {
+  opacity: 0;
 }
 .event-content {
   margin: 0;
@@ -126,8 +246,9 @@ const preview = computed(() => {
   color: var(--n-text-color-3, #888);
   font-style: italic;
 }
-.tool-detail-label {
-  font-size: 11px;
-  color: var(--n-text-color-3, #999);
+.event-content--placeholder {
+  font-style: italic;
+  opacity: 0.4;
+  padding: 4px 0;
 }
 </style>

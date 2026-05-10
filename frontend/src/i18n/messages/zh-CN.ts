@@ -508,6 +508,7 @@ const zhCN = {
     archivedOutputPending: '正在加载归档输出…',
     noToolInputCaptured: '未捕获输入内容',
     noToolOutputCaptured: '未捕获输出内容',
+    emptyContent: '（空）',
     timelineRunning: '运行中…',
     taskMetadata: '任务元数据',
     retryOf: '重试自',

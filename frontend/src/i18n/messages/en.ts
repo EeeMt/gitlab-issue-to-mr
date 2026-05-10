@@ -518,6 +518,7 @@ const en = {
     archivedOutputPending: 'Loading archived output…',
     noToolInputCaptured: 'No input captured',
     noToolOutputCaptured: 'No output captured',
+    emptyContent: '(empty)',
     timelineRunning: 'Running…',
     taskMetadata: 'Task Metadata',
     retryOf: 'Retry of',
