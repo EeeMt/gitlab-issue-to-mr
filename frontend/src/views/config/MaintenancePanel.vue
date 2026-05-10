@@ -15,7 +15,7 @@
           <n-button @click="handleReload" :disabled="isBusy">
             {{ t('common.reload') }}
           </n-button>
-          <n-button @click="openResetConfirm" :loading="pageActionLoading" :disabled="isBusy" secondary>
+          <n-button @click="openResetConfirm" :loading="pageActionLoading" :disabled="isBusy" type="error" secondary>
             {{ t('config.resetEnvDefaults') }}
           </n-button>
         </n-space>
@@ -136,7 +136,7 @@
       style="width: min(460px, calc(100vw - 32px))"
     >
       <div class="config-cleanup-confirm__body">
-        <div class="config-cleanup-confirm__icon" style="background: rgba(202, 138, 4, 0.1); color: #92400e;">!</div>
+        <div class="config-cleanup-confirm__icon" style="background: rgba(220, 38, 38, 0.1); color: #b91c1c;">!</div>
         <div class="config-cleanup-confirm__content">
           <div class="config-cleanup-confirm__title">{{ t('config.resetEnvDefaults') }}</div>
           <div class="config-cleanup-confirm__text">{{ t('config.confirmResetEnvDefaults') }}</div>
@@ -149,7 +149,7 @@
             {{ t('common.cancel') }}
           </n-button>
           <n-button
-            type="warning"
+            type="error"
             :loading="pageActionLoading"
             @click="handleResetConfirmed"
           >
