@@ -371,6 +371,7 @@ const zhCN = {
     taskCount: '{count} 个任务',
     createFirstTask: '创建首个任务',
     createTask: '创建任务',
+    appendTask: '追加任务',
     retryTask: '重试',
     noMergeRequest: '无合并请求',
     closedViaLabel: '关闭方式',

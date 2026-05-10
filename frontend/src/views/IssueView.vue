@@ -235,7 +235,7 @@
               @click="showCreateDrawer = true"
               data-testid="issue-toggle-create-task"
             >
-              {{ t('issue.createTask') }}
+              {{ issue.tasks?.length ? t('issue.appendTask') : t('issue.createTask') }}
             </n-button>
           </div>
         </template>

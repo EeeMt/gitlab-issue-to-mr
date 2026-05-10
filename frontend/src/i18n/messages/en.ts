@@ -373,6 +373,7 @@ const en = {
     taskCount: '{count} tasks',
     createFirstTask: 'Create First Task',
     createTask: 'Create Task',
+    appendTask: 'Append Task',
     retryTask: 'Retry',
     noMergeRequest: 'No MR',
     closedViaLabel: 'Closed Via',
