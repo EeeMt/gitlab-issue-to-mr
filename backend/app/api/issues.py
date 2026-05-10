@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import get_effective_settings
+from app.core.gitlab_client import get_gitlab_client
 from app.core.task_helpers import _require_issue_operator
 from app.core.worker_workspace import build_issue_workspace_paths
 from app.database import get_db
@@ -64,6 +65,8 @@ def _serialize_issue(issue: Issue, task_count: Optional[int] = None) -> dict:
         "target_branch": issue.target_branch,
         "merge_request_iid": issue.merge_request_iid,
         "merge_request_url": issue.merge_request_url,
+        "delete_branch_on_close": issue.delete_branch_on_close,
+        "branch_deleted": issue.branch_deleted,
         "claude_session_id": issue.claude_session_id,
         "session_storage_path": issue.session_storage_path,
         "initiator_user_id": issue.initiator_user_id,
@@ -112,6 +115,24 @@ def _serialize_issue_detail(issue: Issue) -> dict:
         "output_tokens": sum(t.output_tokens or 0 for t in tasks),
     }
     return data
+
+
+async def _try_delete_issue_branch(issue: Issue, db: AsyncSession) -> None:
+    """Attempt to delete the issue's GitLab branch. Silently handles all failures."""
+    if not issue.branch_name or not issue.delete_branch_on_close:
+        return
+    try:
+        client = get_gitlab_client()
+        success = client.delete_branch(issue.project_id, issue.branch_name)
+        if success:
+            issue.branch_deleted = True
+        else:
+            logger.warning(
+                f"Branch deletion failed for issue {issue.id} "
+                f"(branch: {issue.branch_name}) — leaving branch_deleted=False"
+            )
+    except Exception as e:
+        logger.warning(f"Unexpected error in _try_delete_issue_branch for issue {issue.id}: {e}")
 
 
 # ---------------------------------------------------------------------------

@@ -43,6 +43,8 @@ def _make_issue(
     created_at=None,
     updated_at=None,
     tasks=None,
+    delete_branch_on_close=True,
+    branch_deleted=False,
 ):
     """Build a mock Issue ORM object."""
     issue = MagicMock()
@@ -63,6 +65,8 @@ def _make_issue(
     issue.created_at = created_at or datetime(2025, 1, 1, 12, 0, 0)
     issue.updated_at = updated_at or datetime(2025, 1, 1, 12, 0, 0)
     issue.tasks = tasks or []
+    issue.delete_branch_on_close = delete_branch_on_close
+    issue.branch_deleted = branch_deleted
     return issue
 
 
@@ -647,6 +651,65 @@ class IssueOwnershipTests(unittest.IsolatedAsyncioTestCase):
                 await delete_issue(issue_id=1, db=mock_db, current_user=non_owner)
 
         self.assertEqual(ctx.exception.status_code, 403)
+
+
+# ---------------------------------------------------------------------------
+# _try_delete_issue_branch helper
+# ---------------------------------------------------------------------------
+
+class TryDeleteIssueBranchTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for the _try_delete_issue_branch helper."""
+
+    async def test_skips_when_no_branch_name(self):
+        """Should do nothing when branch_name is None."""
+        from app.api.issues import _try_delete_issue_branch
+        issue = _make_issue(branch_name=None)
+        issue.delete_branch_on_close = True
+        issue.branch_deleted = False
+        mock_db = MagicMock()
+        with patch("app.api.issues.get_gitlab_client") as mock_gc:
+            await _try_delete_issue_branch(issue, mock_db)
+        mock_gc.assert_not_called()
+        self.assertFalse(issue.branch_deleted)
+
+    async def test_skips_when_delete_branch_on_close_is_false(self):
+        """Should do nothing when delete_branch_on_close is False."""
+        from app.api.issues import _try_delete_issue_branch
+        issue = _make_issue(branch_name="codify/issue-1")
+        issue.delete_branch_on_close = False
+        issue.branch_deleted = False
+        mock_db = MagicMock()
+        with patch("app.api.issues.get_gitlab_client") as mock_gc:
+            await _try_delete_issue_branch(issue, mock_db)
+        mock_gc.assert_not_called()
+        self.assertFalse(issue.branch_deleted)
+
+    async def test_sets_branch_deleted_true_on_success(self):
+        """Should set branch_deleted=True when GitLab client returns True."""
+        from app.api.issues import _try_delete_issue_branch
+        issue = _make_issue(branch_name="codify/issue-1", project_id=42)
+        issue.delete_branch_on_close = True
+        issue.branch_deleted = False
+        mock_db = MagicMock()
+        mock_client = MagicMock()
+        mock_client.delete_branch.return_value = True
+        with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
+            await _try_delete_issue_branch(issue, mock_db)
+        mock_client.delete_branch.assert_called_once_with(42, "codify/issue-1")
+        self.assertTrue(issue.branch_deleted)
+
+    async def test_leaves_branch_deleted_false_on_failure(self):
+        """Should leave branch_deleted=False when GitLab client returns False."""
+        from app.api.issues import _try_delete_issue_branch
+        issue = _make_issue(branch_name="codify/issue-1", project_id=42)
+        issue.delete_branch_on_close = True
+        issue.branch_deleted = False
+        mock_db = MagicMock()
+        mock_client = MagicMock()
+        mock_client.delete_branch.return_value = False
+        with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
+            await _try_delete_issue_branch(issue, mock_db)
+        self.assertFalse(issue.branch_deleted)
 
 
 if __name__ == "__main__":
