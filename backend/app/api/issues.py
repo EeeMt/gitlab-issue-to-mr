@@ -126,6 +126,7 @@ async def _try_delete_issue_branch(issue: Issue, db: AsyncSession) -> None:
         success = client.delete_branch(issue.project_id, issue.branch_name)
         if success:
             issue.branch_deleted = True
+            await db.flush()
         else:
             logger.warning(
                 f"Branch deletion failed for issue {issue.id} "

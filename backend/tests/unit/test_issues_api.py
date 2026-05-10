@@ -691,12 +691,14 @@ class TryDeleteIssueBranchTests(unittest.IsolatedAsyncioTestCase):
         issue.delete_branch_on_close = True
         issue.branch_deleted = False
         mock_db = MagicMock()
+        mock_db.flush = AsyncMock()
         mock_client = MagicMock()
         mock_client.delete_branch.return_value = True
         with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
             await _try_delete_issue_branch(issue, mock_db)
         mock_client.delete_branch.assert_called_once_with(42, "codify/issue-1")
         self.assertTrue(issue.branch_deleted)
+        mock_db.flush.assert_awaited_once()
 
     async def test_leaves_branch_deleted_false_on_failure(self):
         """Should leave branch_deleted=False when GitLab client returns False."""
@@ -708,6 +710,18 @@ class TryDeleteIssueBranchTests(unittest.IsolatedAsyncioTestCase):
         mock_client = MagicMock()
         mock_client.delete_branch.return_value = False
         with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
+            await _try_delete_issue_branch(issue, mock_db)
+        self.assertFalse(issue.branch_deleted)
+
+    async def test_logs_warning_on_unexpected_exception(self):
+        """Should log a warning and not crash when get_gitlab_client raises."""
+        from app.api.issues import _try_delete_issue_branch
+        issue = _make_issue(branch_name="codify/issue-1", project_id=42,
+                            delete_branch_on_close=True, branch_deleted=False)
+        mock_db = MagicMock()
+        mock_db.flush = AsyncMock()
+        with patch("app.api.issues.get_gitlab_client", side_effect=RuntimeError("boom")):
+            # Should not raise
             await _try_delete_issue_branch(issue, mock_db)
         self.assertFalse(issue.branch_deleted)
 
