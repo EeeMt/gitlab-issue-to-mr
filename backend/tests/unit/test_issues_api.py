@@ -893,6 +893,29 @@ class DeleteIssueBranchEndpointTests(unittest.IsolatedAsyncioTestCase):
                 await self._call(issue, mock_db)
         self.assertEqual(ctx.exception.status_code, 500)
 
+    async def test_delete_branch_gitlab_exception_returns_500(self):
+        """Should return 500 when GitLab client raises an exception."""
+        from fastapi import HTTPException
+        from app.models import IssueStatus
+
+        issue = _make_issue(
+            id=1, status=IssueStatus.CLOSED.value,
+            branch_name="codify/issue-1", project_id=42,
+        )
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+
+        mock_client = MagicMock()
+        mock_client.delete_branch.side_effect = RuntimeError("network error")
+
+        with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
+            with self.assertRaises(HTTPException) as ctx:
+                await self._call(issue, mock_db)
+        self.assertEqual(ctx.exception.status_code, 500)
+        self.assertEqual(ctx.exception.detail, "Failed to delete branch in GitLab")
+
 
 if __name__ == "__main__":
     unittest.main()

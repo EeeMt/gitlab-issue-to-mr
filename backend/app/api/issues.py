@@ -505,8 +505,13 @@ async def delete_issue_branch(
     if not issue.branch_name:
         raise HTTPException(status_code=400, detail="Issue has no branch to delete")
 
-    client = get_gitlab_client()
-    success = client.delete_branch(issue.project_id, issue.branch_name)
+    try:
+        client = get_gitlab_client()
+        success = client.delete_branch(issue.project_id, issue.branch_name)
+    except Exception as e:
+        logger.warning(f"GitLab error deleting branch for issue {issue_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete branch in GitLab")
+
     if not success:
         raise HTTPException(status_code=500, detail="Failed to delete branch in GitLab")
 
