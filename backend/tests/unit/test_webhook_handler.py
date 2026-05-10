@@ -278,6 +278,32 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(data["results"]), 2)
         self.assertTrue(all(r["result"] == "issue_closed" for r in data["results"]))
 
+    @patch("app.api.webhook_handler._try_delete_issue_branch", new_callable=AsyncMock)
+    def test_mr_merge_calls_try_delete_issue_branch(self, mock_delete_branch):
+        """When MR is merged, _try_delete_issue_branch is called for the issue."""
+        mock_issue = MagicMock()
+        mock_issue.id = 1
+        mock_issue.status = "in_review"
+        mock_issue.project_id = 42
+        mock_issue.merge_request_iid = 7
+        mock_issue.branch_name = "codify/issue-1"
+        mock_issue.delete_branch_on_close = True
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [mock_issue]
+        self.mock_db.execute = AsyncMock(return_value=mock_result)
+
+        payload = _build_mr_merge_payload(project_id=42, mr_iid=7)
+        resp = self.client.post(
+            "/api/webhook/gitlab",
+            json=payload,
+            headers={"X-Gitlab-Token": "global-secret"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(mock_issue.status, "closed")
+        # Verify _try_delete_issue_branch was called with the issue and db
+        mock_delete_branch.assert_awaited_once_with(mock_issue, self.mock_db)
+
 
 class TestWebhookEventsEndpoint(unittest.IsolatedAsyncioTestCase):
     """Tests for GET /api/webhook/events."""

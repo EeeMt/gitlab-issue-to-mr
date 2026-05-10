@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.issues import _try_delete_issue_branch
 from app.config import get_effective_settings
 from app.database import get_db
 from app.models import Issue, IssueStatus, WebhookEvent
@@ -247,6 +248,7 @@ async def receive_gitlab_webhook(
             prev_status = issue.status
             issue.status = IssueStatus.CLOSED.value
             issue.closed_via = "webhook_mr_merged"
+            await _try_delete_issue_branch(issue, db)
             await _log_event(
                 db,
                 event_type=event_type,
