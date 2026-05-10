@@ -9,7 +9,7 @@ from urllib.parse import urlsplit, urlunsplit
 import gitlab
 import httpx
 from gitlab import Gitlab
-from gitlab.exceptions import GitlabCreateError, GitlabGetError
+from gitlab.exceptions import GitlabCreateError, GitlabDeleteError, GitlabGetError
 from gitlab.v4.objects import MergeRequest, Project
 
 from app.config import Settings, get_effective_settings
@@ -143,13 +143,13 @@ class GitLabClient:
 
     def delete_branch(self, project_id: int, branch_name: str) -> bool:
         """Delete a branch. Returns True if deleted or already gone. Returns False on other errors."""
+        project = self.get_project(project_id)
         try:
-            project = self.get_project(project_id)
             branch = project.branches.get(branch_name)
             branch.delete()
             logger.info(f"Deleted branch: {branch_name} in project {project_id}")
             return True
-        except GitlabGetError as e:
+        except (GitlabGetError, GitlabDeleteError) as e:
             if e.response_code == 404:
                 logger.info(f"Branch already gone: {branch_name} in project {project_id}")
                 return True

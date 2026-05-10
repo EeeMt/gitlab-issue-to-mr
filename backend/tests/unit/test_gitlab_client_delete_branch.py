@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import MagicMock, patch
-from gitlab.exceptions import GitlabGetError
+from gitlab.exceptions import GitlabGetError, GitlabDeleteError
 
 
 class DeleteBranchTests(unittest.TestCase):
@@ -47,6 +47,28 @@ class DeleteBranchTests(unittest.TestCase):
         client = self._get_client()
         mock_project = MagicMock()
         mock_project.branches.get.side_effect = RuntimeError("timeout")
+        with patch.object(client, "get_project", return_value=mock_project):
+            result = client.delete_branch(42, "codify/issue-1")
+        self.assertFalse(result)
+
+    def test_delete_branch_delete_error_404_returns_true(self):
+        """Returns True when branch.delete() raises GitlabDeleteError 404 (TOCTOU race)."""
+        client = self._get_client()
+        mock_project = MagicMock()
+        mock_branch = MagicMock()
+        mock_project.branches.get.return_value = mock_branch
+        mock_branch.delete.side_effect = GitlabDeleteError("Not Found", 404)
+        with patch.object(client, "get_project", return_value=mock_project):
+            result = client.delete_branch(42, "codify/issue-1")
+        self.assertTrue(result)
+
+    def test_delete_branch_delete_error_403_returns_false(self):
+        """Returns False when branch.delete() raises GitlabDeleteError 403 (protected branch)."""
+        client = self._get_client()
+        mock_project = MagicMock()
+        mock_branch = MagicMock()
+        mock_project.branches.get.return_value = mock_branch
+        mock_branch.delete.side_effect = GitlabDeleteError("Forbidden", 403)
         with patch.object(client, "get_project", return_value=mock_project):
             result = client.delete_branch(42, "codify/issue-1")
         self.assertFalse(result)
