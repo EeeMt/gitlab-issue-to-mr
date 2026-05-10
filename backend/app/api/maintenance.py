@@ -17,7 +17,7 @@ router = APIRouter()
 
 
 class CleanupSystemDataRequest(BaseModel):
-    older_than_days: int | None = Field(default=None, ge=1)
+    older_than_days: int = Field(ge=1)
     force: bool = False
 
 

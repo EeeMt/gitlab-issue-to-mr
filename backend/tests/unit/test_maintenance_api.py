@@ -48,10 +48,16 @@ class MaintenanceApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_cleanup_system_data_request_defaults_force_to_false(self):
         from app.api.maintenance import CleanupSystemDataRequest
 
-        request = CleanupSystemDataRequest()
+        request = CleanupSystemDataRequest(older_than_days=30)
 
-        self.assertIsNone(request.older_than_days)
+        self.assertEqual(request.older_than_days, 30)
         self.assertFalse(request.force)
+
+    async def test_cleanup_system_data_request_requires_older_than_days(self):
+        from app.api.maintenance import CleanupSystemDataRequest
+
+        with self.assertRaises(ValidationError):
+            CleanupSystemDataRequest()
 
     async def test_cleanup_system_data_request_rejects_zero_retention(self):
         from app.api.maintenance import CleanupSystemDataRequest
