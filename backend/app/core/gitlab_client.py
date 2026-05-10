@@ -141,6 +141,24 @@ class GitLabClient:
             })
             return branch.__dict__["_attrs"]
 
+    def delete_branch(self, project_id: int, branch_name: str) -> bool:
+        """Delete a branch. Returns True if deleted or already gone. Returns False on other errors."""
+        try:
+            project = self.get_project(project_id)
+            branch = project.branches.get(branch_name)
+            branch.delete()
+            logger.info(f"Deleted branch: {branch_name} in project {project_id}")
+            return True
+        except GitlabGetError as e:
+            if e.response_code == 404:
+                logger.info(f"Branch already gone: {branch_name} in project {project_id}")
+                return True
+            logger.warning(f"GitLab error deleting branch {branch_name} in project {project_id}: {e}")
+            return False
+        except Exception as e:
+            logger.warning(f"Unexpected error deleting branch {branch_name} in project {project_id}: {e}")
+            return False
+
     def create_merge_request(
         self,
         project_id: int,
