@@ -1330,6 +1330,7 @@ const en = {
       clearMattermostBotToken: 'Clear stored Mattermost bot token',
       clearAlertWebhook: 'Clear stored alert webhook',
      resetEnvDefaults: 'Reset to env/defaults',
+     confirmResetEnvDefaults: 'Reset all configuration sections to their environment variable / default values? Unsaved changes will be lost.',
      sharedPages: 'Shared Pages',
      adminOnly: 'Admin only',
      oidcLogin: 'OIDC Login',

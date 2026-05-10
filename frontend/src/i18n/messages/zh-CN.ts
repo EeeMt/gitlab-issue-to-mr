@@ -1304,6 +1304,7 @@ const zhCN = {
     clearMattermostBotToken: '清除已存储 Mattermost Bot Token',
     clearAlertWebhook: '清除已存储告警 Webhook',
     resetEnvDefaults: '重置为环境变量/默认值',
+    confirmResetEnvDefaults: '将所有配置项重置为环境变量/默认值？未保存的修改将会丢失。',
     sharedPages: '共享页面',
     adminOnly: '仅管理员',
     oidcLogin: 'OIDC 登录',

@@ -15,7 +15,7 @@
           <n-button @click="handleReload" :disabled="isBusy">
             {{ t('common.reload') }}
           </n-button>
-          <n-button @click="handleReset" :loading="pageActionLoading" :disabled="isBusy" secondary>
+          <n-button @click="openResetConfirm" :loading="pageActionLoading" :disabled="isBusy" secondary>
             {{ t('config.resetEnvDefaults') }}
           </n-button>
         </n-space>
@@ -127,6 +127,37 @@
         </div>
       </template>
     </n-modal>
+    <n-modal
+      v-model:show="resetConfirmVisible"
+      preset="card"
+      :closable="false"
+      :mask-closable="!pageActionLoading"
+      class="config-editor-modal config-reset-confirm"
+      style="width: min(460px, calc(100vw - 32px))"
+    >
+      <div class="config-cleanup-confirm__body">
+        <div class="config-cleanup-confirm__icon" style="background: rgba(202, 138, 4, 0.1); color: #92400e;">!</div>
+        <div class="config-cleanup-confirm__content">
+          <div class="config-cleanup-confirm__title">{{ t('config.resetEnvDefaults') }}</div>
+          <div class="config-cleanup-confirm__text">{{ t('config.confirmResetEnvDefaults') }}</div>
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="config-cleanup-confirm__footer">
+          <n-button :disabled="pageActionLoading" @click="resetConfirmVisible = false">
+            {{ t('common.cancel') }}
+          </n-button>
+          <n-button
+            type="warning"
+            :loading="pageActionLoading"
+            @click="handleResetConfirmed"
+          >
+            {{ t('config.resetEnvDefaults') }}
+          </n-button>
+        </div>
+      </template>
+    </n-modal>
   </div>
 </template>
 
@@ -153,6 +184,7 @@ const cleanupOlderThanDays = ref<number | null>(30)
 const forceCleanupActiveTasks = ref(false)
 const cleanupLoading = ref(false)
 const cleanupConfirmVisible = ref(false)
+const resetConfirmVisible = ref(false)
 
 const isBusy = computed(() =>
   loading.value ||
@@ -160,6 +192,15 @@ const isBusy = computed(() =>
   anySectionSaving.value ||
   cleanupLoading.value
 )
+
+function openResetConfirm() {
+  resetConfirmVisible.value = true
+}
+
+async function handleResetConfirmed() {
+  await handleReset()
+  resetConfirmVisible.value = false
+}
 
 function openCleanupConfirm() {
   cleanupConfirmVisible.value = true
