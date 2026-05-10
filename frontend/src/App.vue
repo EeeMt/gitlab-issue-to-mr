@@ -1,5 +1,5 @@
 <template>
-  <n-config-provider :locale="naiveUiLocale" :date-locale="naiveUiDateLocale">
+  <n-config-provider :locale="naiveUiLocale" :date-locale="naiveUiDateLocale" :theme-overrides="popconfirmThemeOverrides">
     <n-message-provider>
     <n-dialog-provider>
       <div v-if="!authState.initialized" class="app-loading">
@@ -288,6 +288,13 @@ const collapsed = ref(false)
 const showDrawer = ref(false)
 
 const { isMobile } = useBreakpoints()
+
+const popconfirmThemeOverrides = {
+  Popover: {
+    borderRadius: '18px',
+    boxShadow: '0 8px 32px rgba(15, 23, 42, 0.25)',
+  }
+}
 
 const activeKey = computed(() => route.name as string)
 const isLoginRoute = computed(() => route.name === 'Login')
@@ -1180,5 +1187,10 @@ html.is-scrolling ::-webkit-scrollbar-thumb {
 
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* Popconfirm: additional padding via CSS */
+.n-popover-body:has(.n-popconfirm) {
+  padding: 16px 20px !important;
 }
 </style>

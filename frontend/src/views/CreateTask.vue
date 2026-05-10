@@ -91,7 +91,8 @@
                       size="small"
                       :disabled="promptTemplatesLoading || promptTemplates.length === 0"
                       :loading="promptTemplatesLoading"
-                      type="default"
+                      type="primary"
+                      ghost
                       @click="showTemplateDrawer = true"
                     >
                       <template #icon>
@@ -291,8 +292,23 @@
 
       <!-- Template Picker Drawer -->
       <n-drawer v-model:show="showTemplateDrawer" :width="isMobile ? '100%' : 480" placement="right">
-        <n-drawer-content :title="t('createTask.selectTemplate')" closable>
-          <div style="overflow-y: auto;">
+        <div class="template-drawer-layout">
+          <div class="template-drawer-layout__header">
+            <span class="template-drawer-layout__title">{{ t('createTask.selectTemplate') }}</span>
+            <n-button quaternary circle @click="showTemplateDrawer = false">
+              <template #icon><n-icon size="18"><CloseOutline /></n-icon></template>
+            </n-button>
+          </div>
+          <Transition name="banner-slide">
+            <div v-if="pendingTemplate" class="template-overwrite-banner">
+              <span class="template-overwrite-banner__text">{{ t('createTask.templateOverwriteConfirm') }}</span>
+              <div class="template-overwrite-banner__actions">
+                <n-button size="small" @click="cancelTemplateOverwrite">{{ t('common.cancel') }}</n-button>
+                <n-button size="small" type="primary" @click="confirmTemplateOverwrite">{{ t('common.confirm') }}</n-button>
+              </div>
+            </div>
+          </Transition>
+          <div class="template-drawer-layout__body">
             <div v-if="promptTemplates.length === 0" class="prompt-template-dropdown__empty">
               {{ t('createTask.noPromptTemplates') }}
             </div>
@@ -300,13 +316,14 @@
               v-for="tmpl in promptTemplates"
               :key="tmpl.id"
               class="prompt-template-dropdown__item"
-              @click="applyPromptTemplate(tmpl); showTemplateDrawer = false"
+              :class="{ 'prompt-template-dropdown__item--pending': pendingTemplate?.id === tmpl.id }"
+              @click="handleTemplateItemClick(tmpl)"
             >
               <div class="prompt-template-dropdown__item-name">{{ tmpl.name }}</div>
               <div class="prompt-template-dropdown__item-preview">{{ tmpl.content.substring(0, 80) }}...</div>
             </div>
           </div>
-        </n-drawer-content>
+        </div>
       </n-drawer>
     </n-space>
   </div>
@@ -327,7 +344,7 @@ import { createTask, getIssues, getPromptTemplates, getScheduledTasks, getSlotCa
 import { formatDateTimeUtc8, formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
 import { isSameLocalDay } from '../utils/format'
 import { extractSlotErrorMessage } from '../utils/slotError'
-import { DocumentTextOutline, WarningOutline, CalendarOutline } from '@vicons/ionicons5'
+import { DocumentTextOutline, WarningOutline, CalendarOutline, CloseOutline } from '@vicons/ionicons5'
 import PageHeader from '../components/PageHeader.vue'
 import VariableEditor from '../components/VariableEditor.vue'
 import HeatmapChart from '../components/HeatmapChart.vue'
@@ -360,6 +377,10 @@ const unreplacedVariables = computed(() => {
   if (!matches) return []
   return matches.map(m => m.replace(/\{\{|\}\}/g, ''))
 })
+
+const hasExistingPrompt = computed(() =>
+  Boolean(formValue.value.user_prompt && formValue.value.user_prompt.trim())
+)
 
 const providerOptions = computed(() =>
   providers.value.map(p => ({
@@ -462,6 +483,11 @@ onUnmounted(() => {
 })
 
 const showTemplateDrawer = ref(false)
+const pendingTemplate = ref<PromptTemplate | null>(null)
+
+watch(showTemplateDrawer, (val) => {
+  if (!val) pendingTemplate.value = null
+})
 
 // Computed selected time for heatmap: works for both delay and scheduled modes
 const heatmapSelectedMs = computed<number | null>(() => {
@@ -627,13 +653,29 @@ async function fetchPromptTemplates() {
 
 // Apply prompt template
 function applyPromptTemplate(template: PromptTemplate) {
-  if (formValue.value.user_prompt && formValue.value.user_prompt.trim() !== '') {
-    if (!confirm(t('createTask.confirmOverwritePrompt'))) {
-      return
-    }
-  }
   formValue.value.user_prompt = template.content
   promptVariableTips.value = template.variable_tips
+}
+
+function handleTemplateItemClick(tmpl: PromptTemplate) {
+  if (hasExistingPrompt.value) {
+    pendingTemplate.value = tmpl
+  } else {
+    applyPromptTemplate(tmpl)
+    showTemplateDrawer.value = false
+  }
+}
+
+function confirmTemplateOverwrite() {
+  if (pendingTemplate.value) {
+    applyPromptTemplate(pendingTemplate.value)
+    pendingTemplate.value = null
+    showTemplateDrawer.value = false
+  }
+}
+
+function cancelTemplateOverwrite() {
+  pendingTemplate.value = null
 }
 
 // Handle issue selection change
@@ -860,7 +902,7 @@ watch(scheduleType, (newType) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .prompt-label {
@@ -871,6 +913,34 @@ watch(scheduleType, (newType) => {
 .prompt-label__required {
   color: var(--n-color-error);
   margin-left: 2px;
+}
+
+.template-drawer-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--n-color, #fff);
+}
+
+.template-drawer-layout__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.09);
+  flex-shrink: 0;
+}
+
+.template-drawer-layout__title {
+  font-size: 18px;
+  font-weight: 500;
+  color: rgba(15, 23, 42, 0.9);
+}
+
+.template-drawer-layout__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
 }
 
 .prompt-template-dropdown {
@@ -902,6 +972,12 @@ watch(scheduleType, (newType) => {
 
 .prompt-template-dropdown__item:hover {
   background-color: rgba(32, 128, 240, 0.08);
+}
+
+.prompt-template-dropdown__item--pending {
+  background-color: rgba(32, 128, 240, 0.08);
+  border-left: 3px solid #2080f0;
+  padding-left: 9px;
 }
 
 .prompt-template-dropdown__item-name {
@@ -1092,5 +1168,47 @@ watch(scheduleType, (newType) => {
   font-size: 12px;
   color: rgba(15, 23, 42, 0.54);
   line-height: 1.4;
+}
+
+.template-overwrite-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin: 0 12px;
+  background: rgba(255, 160, 32, 0.1);
+  border: 1px solid rgba(255, 160, 32, 0.4);
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.banner-slide-enter-active,
+.banner-slide-leave-active {
+  transition: opacity 0.22s ease, transform 0.22s ease, max-height 0.22s ease, margin 0.22s ease, padding 0.22s ease;
+  overflow: hidden;
+  max-height: 80px;
+}
+
+.banner-slide-enter-from,
+.banner-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+  max-height: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.template-overwrite-banner__text {
+  flex: 1;
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.82);
+}
+
+.template-overwrite-banner__actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
 }
 </style>
