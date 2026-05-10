@@ -72,6 +72,13 @@ class Issue(Base):
     branch_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     base_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     target_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Branch deletion policy
+    delete_branch_on_close: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true"), nullable=False
+    )
+    branch_deleted: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
     merge_request_iid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     merge_request_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
