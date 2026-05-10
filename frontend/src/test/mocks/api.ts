@@ -146,6 +146,7 @@ export const mockApi = {
   updateConfig: vi.fn<() => Promise<Config>>(),
   resetConfig: vi.fn<() => Promise<Config>>(),
   resetConfigKey: vi.fn<() => Promise<Config>>(),
+  cleanupSystemData: vi.fn<() => Promise<unknown>>(),
   getProjects: vi.fn<() => Promise<Project[]>>(),
   getBranches: vi.fn<() => Promise<Branch[]>>(),
   createTask: vi.fn<() => Promise<Task>>(),
