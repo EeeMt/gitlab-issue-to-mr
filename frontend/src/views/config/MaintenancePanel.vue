@@ -62,7 +62,7 @@
           v-if="forceCleanupActiveTasks"
           type="warning"
           :bordered="false"
-          class="config-system-cleanup__warning"
+          class="config-system-cleanup__warning config-warning-muted"
         >
           {{ t('config.forceCleanupActiveTasksWarning') }}
         </n-alert>
@@ -104,7 +104,7 @@
             v-if="forceCleanupActiveTasks"
             type="warning"
             :bordered="false"
-            class="config-cleanup-confirm__warning"
+            class="config-cleanup-confirm__warning config-warning-muted"
           >
             {{ t('config.forceCleanupActiveTasksWarning') }}
           </n-alert>
@@ -322,5 +322,13 @@ async function handleCleanupSystemData() {
   .config-cleanup-confirm__footer {
     flex-direction: column-reverse;
   }
+}
+</style>
+
+<style>
+.config-warning-muted {
+  --n-color: rgba(245, 158, 11, 0.07) !important;
+  --n-icon-color: rgba(161, 98, 7, 0.55) !important;
+  --n-content-text-color: rgba(60, 38, 5, 0.62) !important;
 }
 </style>
