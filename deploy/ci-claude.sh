@@ -311,8 +311,11 @@ process_stream() {
                 '.message.content[$i].name // empty' 2>/dev/null)
               tool_input_json=$(printf '%s' "$line" | jq -c --argjson i "$assistant_i" \
                 '.message.content[$i].input // {}' 2>/dev/null || echo '{}')
+              local display_input_json
+              display_input_json="${tool_input_json:0:500}"
+              [[ ${#tool_input_json} -gt 500 ]] && display_input_json+="…(truncated)"
               _e "\n${YELLOW}┌─ ⚡ Tool: ${BOLD}${tool_name}${RESET}\n"
-              _e "${YELLOW}│  Input: ${DIM}%s${RESET}\n" "$tool_input_json"
+              _e "${YELLOW}│  Input: ${DIM}%s${RESET}\n" "$display_input_json"
               _e "${YELLOW}└──────────────────────────────────────────────${RESET}\n"
               jq -nc \
                 --arg id "$tool_id" \
@@ -344,10 +347,13 @@ process_stream() {
           is_error=$(printf '%s' "$line" | jq -r --argjson i "$i" \
             '[.message.content[]? | select(.type == "tool_result")][$i].is_error // false' 2>/dev/null)
 
+          local display_out
+          display_out="${output:0:500}"
+          [[ ${#output} -gt 500 ]] && display_out+="…(truncated, ${#output} chars total)"
           if [[ "$is_error" == "true" ]]; then
-            _e "${RED}  ╰─ ❌ Error:${RESET}\n${DIM}%s${RESET}\n" "$output"
+            _e "${RED}  ╰─ ❌ Error:${RESET}\n${DIM}%s${RESET}\n" "$display_out"
           else
-            _e "${CYAN}  ╰─ ✅ Output:${RESET}\n${DIM}%s${RESET}\n" "$output"
+            _e "${CYAN}  ╰─ ✅ Output:${RESET}\n${DIM}%s${RESET}\n" "$display_out"
           fi
 
           # Update TOOL_CALLS_FILE stub (for backward-compat batch in entrypoint.sh)

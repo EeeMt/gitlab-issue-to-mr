@@ -144,7 +144,7 @@ def test_ci_claude_captures_tool_result_from_user_message():
         # CODIFY markers removed; verify tool_calls content instead (already asserted above)
 
 
-def test_ci_claude_console_log_keeps_complete_tool_result(tmp_path):
+def test_ci_claude_console_log_truncates_long_tool_result(tmp_path):
     long_output = "start-" + ("x" * 650) + "-end"
     result = run_fake_ci_claude(tmp_path, fake_stream_lines=[
         json.dumps({
@@ -187,7 +187,10 @@ def test_ci_claude_console_log_keeps_complete_tool_result(tmp_path):
 
     assert result.returncode == 0, result.stderr
     console_log = (tmp_path / "console.log").read_text(encoding="utf-8")
-    assert long_output in console_log
+    # Output is truncated at 500 chars in the raw log display
+    assert long_output[:500] in console_log
+    assert long_output not in console_log, "Full long output should not appear (truncated)"
+    assert "truncated" in console_log
 
 
 def test_ci_claude_console_log_renders_top_level_assistant_event(tmp_path):
