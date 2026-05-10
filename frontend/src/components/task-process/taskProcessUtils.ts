@@ -151,40 +151,31 @@ export function formatTimestamp(iso: string): string {
 }
 
 export function parseToolCall(log: TaskLog): ToolCall {
-  try {
-    const call = JSON.parse(log.metadata ?? '{}') as ToolCall
-    return { ...call, timestamp: log.created_at }
-  } catch {
-    return { name: 'Unknown', input: {}, output: null, error: false }
-  }
+  const call = (log.metadata && typeof log.metadata === 'object' && !Array.isArray(log.metadata))
+    ? log.metadata as unknown as ToolCall
+    : { name: 'Unknown', input: {}, output: null, error: false }
+  return { ...call, timestamp: log.created_at }
 }
 
-export function parseTextEntry(metadata: string | null | undefined): ParsedTextEntry {
-  if (!metadata) return { text: '', preview: '', payloadId: null, charCount: null, truncated: false }
-  try {
-    const obj = JSON.parse(metadata) as Record<string, unknown>
-    const text = typeof obj.text === 'string' ? obj.text : ''
-    const preview = typeof obj.preview === 'string' ? obj.preview : ''
-    const payloadId = typeof obj.payload_id === 'number' ? obj.payload_id : null
-    const charCount = typeof obj.char_count === 'number' ? obj.char_count : null
-    const truncated = obj.truncated === true
-    return { text, preview, payloadId, charCount, truncated }
-  } catch {
-    return { text: metadata, preview: metadata, payloadId: null, charCount: null, truncated: false }
-  }
+export function parseTextEntry(metadata: unknown): ParsedTextEntry {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata))
+    return { text: '', preview: '', payloadId: null, charCount: null, truncated: false }
+  const obj = metadata as Record<string, unknown>
+  const text = typeof obj.text === 'string' ? obj.text : ''
+  const preview = typeof obj.preview === 'string' ? obj.preview : ''
+  const payloadId = typeof obj.payload_id === 'number' ? obj.payload_id : null
+  const charCount = typeof obj.char_count === 'number' ? obj.char_count : null
+  const truncated = obj.truncated === true
+  return { text, preview, payloadId, charCount, truncated }
 }
 
 export function parseSystemInitEntry(taskLogs: TaskLog[]) {
   const entry = taskLogs.find((l) => l.log_type === 'system_init')
-  if (!entry?.metadata) return null
-  try {
-    const obj = JSON.parse(entry.metadata) as Record<string, unknown>
-    return {
-      model: typeof obj.model === 'string' ? obj.model : null,
-      cwd: typeof obj.cwd === 'string' ? obj.cwd : null,
-    }
-  } catch {
-    return null
+  if (!entry?.metadata || typeof entry.metadata !== 'object' || Array.isArray(entry.metadata)) return null
+  const obj = entry.metadata as Record<string, unknown>
+  return {
+    model: typeof obj.model === 'string' ? obj.model : null,
+    cwd: typeof obj.cwd === 'string' ? obj.cwd : null,
   }
 }
 
@@ -193,33 +184,29 @@ export function normalizeTaskProcessRows(taskLogs: TaskLog[]): NormalizedTaskPro
   const batchEvents: TaskLog[] = []
 
   for (const batch of taskLogs.filter((l) => l.log_type === 'tool_calls_json')) {
-    if (!batch.metadata) continue
-    try {
-      const calls = JSON.parse(batch.metadata) as ToolCall[]
-      calls.forEach((call, i) => {
-        batchEvents.push({
-          id: -(batch.id * 1000 + i + 1),
-          task_id: batch.task_id,
-          log_level: 'info',
-          log_type: 'tool_call',
-          metadata: JSON.stringify(call),
-          message: '',
-          created_at: batch.created_at,
-        })
+    if (!batch.metadata || !Array.isArray(batch.metadata)) continue
+    const calls = batch.metadata as ToolCall[]
+    calls.forEach((call, i) => {
+      batchEvents.push({
+        id: -(batch.id * 1000 + i + 1),
+        task_id: batch.task_id,
+        log_level: 'info',
+        log_type: 'tool_call',
+        metadata: call,
+        message: '',
+        created_at: batch.created_at,
       })
-    } catch {
-      // ignore parse errors
-    }
+    })
   }
 
   const individualToolCallKeys = new Set(
     directEvents
       .filter((event) => event.log_type === 'tool_call')
-      .map((event) => `${event.created_at}:${event.metadata ?? ''}`),
+      .map((event) => `${event.created_at}:${JSON.stringify(event.metadata)}`),
   )
 
   const dedupedBatchEvents = batchEvents.filter(
-    (event) => !individualToolCallKeys.has(`${event.created_at}:${event.metadata ?? ''}`),
+    (event) => !individualToolCallKeys.has(`${event.created_at}:${JSON.stringify(event.metadata)}`),
   )
 
   const sortedEvents = [...directEvents, ...dedupedBatchEvents].sort((a, b) => a.created_at.localeCompare(b.created_at))

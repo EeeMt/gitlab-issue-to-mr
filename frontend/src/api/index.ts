@@ -299,7 +299,7 @@ export interface TaskLog {
   task_id: number
   log_level: string
   log_type?: string | null
-  metadata?: string | null
+  metadata?: unknown
   message: string
   created_at: string
 }

@@ -415,50 +415,35 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
 # ===================================================================
 
 class TestFlushLogChunk(unittest.TestCase):
-    """Tests for _flush_log_chunk — lines 180-195."""
+    """Tests for _flush_log_chunk — no longer writes to DB; raw logs stored via TaskRawLogChunk."""
 
-    def test_saves_log_chunk(self):
-        """Normal chunk should be saved as TaskLog."""
+    def test_completes_without_error(self):
+        """Normal chunk should complete without any DB interaction."""
         worker = _make_worker()
         db = _make_db()
 
-        asyncio.run(worker._flush_log_chunk(1, ["line1\n", "line2\n"], 0, db))
-
-        db.add.assert_called_once()
-        db.commit.assert_awaited_once()
-
-    def test_skips_empty_content(self):
-        """Empty or whitespace-only content should be skipped — line 190."""
-        worker = _make_worker()
-        db = _make_db()
-
-        asyncio.run(worker._flush_log_chunk(1, ["   \n", "  \n"], 0, db))
+        asyncio.run(worker._flush_log_chunk(1, ["line1\n", "line2\n"], 0))
 
         db.add.assert_not_called()
-        db.commit.assert_not_awaited()
 
-    def test_truncates_large_content(self):
-        """Content > 8000 chars should be truncated — line 192."""
+    def test_skips_empty_content(self):
+        """Empty or whitespace-only content should not crash."""
         worker = _make_worker()
-        db = _make_db()
+
+        asyncio.run(worker._flush_log_chunk(1, ["   \n", "  \n"], 0))
+
+    def test_handles_large_content(self):
+        """Large content should not crash."""
+        worker = _make_worker()
         long_line = "x" * 9000 + "\n"
 
-        asyncio.run(worker._flush_log_chunk(1, [long_line], 0, db))
+        asyncio.run(worker._flush_log_chunk(1, [long_line], 0))
 
-        db.add.assert_called_once()
-        log_entry = db.add.call_args[0][0]
-        self.assertLessEqual(len(log_entry.message), 8000)
-
-    def test_scrubs_sensitive_data(self):
-        """Token in log should be scrubbed before saving."""
+    def test_handles_sensitive_data(self):
+        """Method should complete without crashing even for sensitive-looking data."""
         worker = _make_worker()
-        db = _make_db()
 
-        asyncio.run(worker._flush_log_chunk(1, ["token=glpat-abcdef1234567890\n"], 0, db))
-
-        log_entry = db.add.call_args[0][0]
-        self.assertNotIn("glpat-", log_entry.message)
-        self.assertIn("[GITLAB_TOKEN]", log_entry.message)
+        asyncio.run(worker._flush_log_chunk(1, ["token=glpat-abcdef1234567890\n"], 0))
 
 
 # ===================================================================

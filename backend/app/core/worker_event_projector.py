@@ -281,10 +281,9 @@ class WorkerEventProjector:
                     text=output_text,
                 )
                 sanitized_output_text = self._sanitize_sensitive_data(output_text)
-                output_preview, output_truncated = _build_tool_output_preview(sanitized_output_text)
+                _, output_truncated = _build_tool_output_preview(sanitized_output_text)
                 meta = _json.loads(pending_log.log_metadata or "{}")
                 meta["output_payload_id"] = payload.id
-                meta["output_preview"] = output_preview
                 meta["output_truncated"] = output_truncated
                 meta["output_char_count"] = len(sanitized_output_text)
                 meta["error"] = is_error

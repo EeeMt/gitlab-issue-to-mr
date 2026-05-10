@@ -1,4 +1,3 @@
-import asyncio
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock
 
@@ -21,18 +20,14 @@ class TestWorkerLogStreamer(IsolatedAsyncioTestCase):
         )
 
     async def test_flush_log_chunk_skips_blank_content(self):
-        await self.streamer.flush_log_chunk(1, ['   \n', '  \n'], 0, self.db)
+        await self.streamer.flush_log_chunk(1, ['   \n', '  \n'], 0)
+        self.db.add.assert_not_called()
+
+    async def test_flush_log_chunk_no_longer_writes_to_db(self):
+        long_text = 'glpat-secret' + ('x' * 9000)
+        await self.streamer.flush_log_chunk(1, [long_text], 0)
         self.db.add.assert_not_called()
         self.db.commit.assert_not_awaited()
-
-    async def test_flush_log_chunk_truncates_and_scrubs(self):
-        long_text = 'glpat-secret' + ('x' * 9000)
-        await self.streamer.flush_log_chunk(1, [long_text], 0, self.db)
-        self.db.add.assert_called_once()
-        entry = self.db.add.call_args[0][0]
-        self.assertIsInstance(entry, TaskLog)
-        self.assertIn('[GITLAB_TOKEN]', entry.message)
-        self.assertLessEqual(len(entry.message), 8000)
 
     async def test_stream_logs_to_db_returns_exit_code_and_logs(self):
         container = MagicMock()

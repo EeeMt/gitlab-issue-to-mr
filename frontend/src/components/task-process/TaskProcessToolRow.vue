@@ -173,6 +173,8 @@ const inputDisplayText = computed(() => {
     return text || t('taskView.emptyContent')
   }
   if (props.inputFailed) return t('taskView.failedToLoadPayload')
+  // While fetching the archived payload, show a loading message instead of stale preview
+  if (props.inputLoading) return t('taskView.archivedInputPending')
   const hasInlineInput = !!props.row.toolCall.input && Object.keys(props.row.toolCall.input).length > 0
   const inlineInput = hasInlineInput ? formatInput(props.row.toolCall).trim() : ''
   if (inlineInput) return inlineInput
@@ -185,6 +187,9 @@ const outputDisplayText = computed(() => {
     return text || t('taskView.emptyContent')
   }
   if (props.outputFailed) return t('taskView.failedToLoadPayload')
+  // While fetching the archived payload, show a loading message instead of stale preview
+  if (props.outputLoading) return t('taskView.archivedOutputPending')
+  // No payload — inline content is the real data, show it directly
   if (props.row.toolCall.output_preview !== undefined) {
     const preview = props.row.toolCall.output_preview?.trim() ?? ''
     if (preview) return preview
@@ -196,12 +201,32 @@ const outputDisplayText = computed(() => {
   if (props.row.toolCall.output_payload_id) return t('taskView.archivedOutputPending')
   return t('taskView.noToolOutputCaptured')
 })
-const inputIsPlaceholder = computed(() =>
-  !props.inputLoaded || !(props.inputExpandedText ?? '').trim()
-)
-const outputIsPlaceholder = computed(() =>
-  !props.outputLoaded || !(props.outputExpandedText ?? '').trim()
-)
+const inputIsPlaceholder = computed(() => {
+  if (props.inputLoaded) return !(props.inputExpandedText ?? '').trim()
+  if (props.inputFailed) return false
+  if (props.inputLoading) return true
+  // No payload — inline content is real, only treat as placeholder if there's nothing to show
+  if (!props.row.toolCall.input_payload_id) {
+    const hasInlineInput = !!props.row.toolCall.input && Object.keys(props.row.toolCall.input).length > 0
+    return !hasInlineInput
+  }
+  return false
+})
+const outputIsPlaceholder = computed(() => {
+  if (props.outputLoaded) return !(props.outputExpandedText ?? '').trim()
+  if (props.outputFailed) return false
+  if (props.outputLoading) return true
+  // No payload — inline content is real, only treat as placeholder if there's nothing to show
+  if (!props.row.toolCall.output_payload_id) {
+    const hasInlineContent =
+      !!(props.row.toolCall.output_preview?.trim()) ||
+      (props.row.toolCall.output !== null &&
+        props.row.toolCall.output !== undefined &&
+        !!(props.row.toolCall.output.trim()))
+    return !hasInlineContent
+  }
+  return false
+})
 </script>
 
 <style scoped>

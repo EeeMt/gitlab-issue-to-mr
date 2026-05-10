@@ -143,7 +143,7 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
         assert meta["input_preview"] == '{"command": "ls"}'
         assert meta["output_payload_id"] is not None
         assert meta["output_payload_id"] != meta["input_payload_id"]
-        assert meta["output_preview"] == "file1.txt\nfile2.txt"
+        assert "output_preview" not in meta
         assert meta["error"] is False
         output_payload = next(p for p in payloads if p.payload_kind == "tool_output")
         assert meta["output_payload_id"] == output_payload.id
@@ -163,7 +163,7 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
 
         assert len(logs) == 1
         assert len(payloads) == 1
-        assert json.loads(logs[0].log_metadata)["output_preview"] == "plain string output"
+        assert "output_preview" not in json.loads(logs[0].log_metadata)
         assert payloads[0].char_count == len("plain string output")
 
     async def test_resumed_run_ignores_history_until_current_system_init(self):
@@ -309,7 +309,7 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
         assert meta["input_payload_id"] is not None
         assert meta["input_preview"] == '{"command": "git status"}'
         assert meta["output_payload_id"] is not None
-        assert meta["output_preview"] == 'On branch main'
+        assert "output_preview" not in meta
         assert meta["name"] == "Bash"
         assert meta["error"] is False
 

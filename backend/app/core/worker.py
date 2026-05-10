@@ -363,9 +363,8 @@ class WorkerExecutor:
         task_id: int,
         lines: list[str],
         chunk_index: int,
-        db: AsyncSession,
     ) -> None:
-        await self._log_streamer.flush_log_chunk(task_id, lines, chunk_index, db)
+        await self._log_streamer.flush_log_chunk(task_id, lines, chunk_index)
 
     async def _stream_logs_to_db(
         self,

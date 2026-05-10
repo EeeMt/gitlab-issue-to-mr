@@ -8,8 +8,6 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import TaskLog
-
 logger = logging.getLogger(__name__)
 
 
@@ -25,16 +23,8 @@ class WorkerLogStreamer:
         task_id: int,
         lines: list[str],
         chunk_index: int,
-        db: AsyncSession,
     ) -> None:
-        content = self._scrub_sensitive_data("".join(lines)).strip()
-        if not content:
-            return
-        if len(content) > 8000:
-            content = content[:8000]
-        db.add(TaskLog(task_id=task_id, log_level="INFO", message=content))
-        await db.commit()
-        logger.debug(f"[Task {task_id}] Saved log chunk {chunk_index} ({len(lines)} lines)")
+        logger.debug(f"[Task {task_id}] Log chunk {chunk_index}: {len(lines)} lines buffered")
 
     async def stream_logs_to_db(
         self,
@@ -72,7 +62,7 @@ class WorkerLogStreamer:
             if remaining <= 0:
                 logger.warning(f"[Task {task_id}] Log stream timed out after {timeout}s")
                 if buffer:
-                    await self.flush_log_chunk(task_id, buffer, chunk_index, db)
+                    await self.flush_log_chunk(task_id, buffer, chunk_index)
                     chunk_index += 1
                 stream_thread.join(timeout=2)
                 return -1, "".join(all_lines), chunk_index, True
@@ -82,7 +72,7 @@ class WorkerLogStreamer:
             except asyncio.TimeoutError:
                 now = time.monotonic()
                 if buffer and (now - last_flush) >= flush_interval:
-                    await self.flush_log_chunk(task_id, buffer, chunk_index, db)
+                    await self.flush_log_chunk(task_id, buffer, chunk_index)
                     chunk_index += 1
                     buffer = []
                     last_flush = now
@@ -107,13 +97,13 @@ class WorkerLogStreamer:
 
             now = time.monotonic()
             if len(buffer) >= max_buffer_lines or (now - last_flush) >= flush_interval:
-                await self.flush_log_chunk(task_id, buffer, chunk_index, db)
+                await self.flush_log_chunk(task_id, buffer, chunk_index)
                 chunk_index += 1
                 buffer = []
                 last_flush = now
 
         if buffer:
-            await self.flush_log_chunk(task_id, buffer, chunk_index, db)
+            await self.flush_log_chunk(task_id, buffer, chunk_index)
             chunk_index += 1
 
         stream_thread.join(timeout=5)

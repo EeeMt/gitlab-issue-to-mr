@@ -478,6 +478,7 @@ class GetTaskLogsAPITests(unittest.TestCase):
         log1.log_level = "INFO"
         log1.message = "Starting task execution"
         log1.created_at = datetime(2024, 1, 1, 12, 0, 0)
+        log1.log_metadata = None
 
         task_result = MagicMock()
         task_result.scalar_one_or_none.return_value = task
@@ -594,7 +595,7 @@ class GetTaskLogsAPITests(unittest.TestCase):
         data = response.json()
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["log_type"], "thinking")
-        self.assertEqual(data[0]["metadata"], '{"text":"I need to think about this problem"}')
+        self.assertEqual(data[0]["metadata"], {"text": "I need to think about this problem"})
         self.assertEqual(data[0]["message"], "")
 
     def test_get_task_logs_returns_assistant_text_log_type(self):
@@ -627,7 +628,7 @@ class GetTaskLogsAPITests(unittest.TestCase):
         data = response.json()
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["log_type"], "assistant_text")
-        self.assertEqual(data[0]["metadata"], '{"text":"Here is my response to your request"}')
+        self.assertEqual(data[0]["metadata"], {"text": "Here is my response to your request"})
 
     def test_get_task_logs_returns_tool_call_log_type(self):
         """GET /api/tasks/{id}/logs should return tool_call log entries with log_type='tool_call'."""
