@@ -88,6 +88,7 @@
       :closable="false"
       :mask-closable="!cleanupLoading"
       class="config-editor-modal config-cleanup-confirm"
+      style="width: min(460px, calc(100vw - 32px))"
     >
       <div class="config-cleanup-confirm__body">
         <div class="config-cleanup-confirm__icon">!</div>
