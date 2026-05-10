@@ -1121,6 +1121,28 @@ export async function getConfig(): Promise<Config> {
   return response.data
 }
 
+export interface CleanupSystemDataRequest {
+  older_than_days?: number | null
+  force: boolean
+}
+
+export interface CleanupSystemDataResult {
+  deleted_issues: number
+  deleted_tasks: number
+  skipped_active_issues: number
+  skipped_active_tasks: number
+  deleted_archives: number
+  missing_archives: number
+  deleted_workspaces: number
+  container_cleanup_errors: Array<{ task_id: number; container_name: string; error: string }>
+  file_cleanup_errors: Array<{ kind: string; path: string; error: string }>
+}
+
+export async function cleanupSystemData(request: CleanupSystemDataRequest): Promise<CleanupSystemDataResult> {
+  const response = await api.post('/config/maintenance/cleanup-system-data', request)
+  return response.data
+}
+
 export async function updateConfig(config: ConfigUpdate): Promise<Config> {
   const response = await api.patch('/config', config)
   return response.data

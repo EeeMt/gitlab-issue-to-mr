@@ -54,7 +54,8 @@ import {
   getProjects,
   getBranches,
   getAuthStatus,
-  downloadTaskArchive
+  downloadTaskArchive,
+  cleanupSystemData
 } from './index'
 import * as apiModule from './index'
 
@@ -156,6 +157,31 @@ describe('API functions', () => {
 
       expect(result).toBe(blob)
       expect(mockAxiosGet).toHaveBeenCalledWith('/tasks/42/archive/download', { responseType: 'blob' })
+    })
+  })
+
+  describe('cleanupSystemData', () => {
+    it('posts cleanup options to the maintenance endpoint', async () => {
+      const response = {
+        deleted_issues: 1,
+        deleted_tasks: 2,
+        skipped_active_issues: 0,
+        skipped_active_tasks: 0,
+        deleted_archives: 2,
+        missing_archives: 0,
+        deleted_workspaces: 1,
+        container_cleanup_errors: [],
+        file_cleanup_errors: []
+      }
+      mockAxiosPost.mockResolvedValue({ data: response })
+
+      const result = await cleanupSystemData({ older_than_days: 30, force: true })
+
+      expect(result).toEqual(response)
+      expect(mockAxiosPost).toHaveBeenCalledWith('/config/maintenance/cleanup-system-data', {
+        older_than_days: 30,
+        force: true
+      })
     })
   })
 
