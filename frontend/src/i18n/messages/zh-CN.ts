@@ -1250,7 +1250,7 @@ const zhCN = {
     systemDataCleanupSubtitle: '按 Issue 删除旧的系统记录及其任务数据。',
     cleanupOlderThanDays: '清理 N 天以前的数据',
     cleanupOlderThanDaysUnit: '天',
-    cleanupOlderThanDaysPlaceholder: '留空表示清理全部符合条件的数据',
+    cleanupOlderThanDaysPlaceholder: '请输入天数（必填）',
     forceCleanupActiveTasks: '强制清理活跃任务',
     forceCleanupActiveTasksHint: '当任务状态已不可信时，也删除 pending、queued 和 running 任务。',
     forceCleanupActiveTasksWarning: '强制清理会删除活跃任务记录，并尽力停止正在运行的容器。',

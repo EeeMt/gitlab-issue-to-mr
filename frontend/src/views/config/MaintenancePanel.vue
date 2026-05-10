@@ -40,7 +40,6 @@
               data-test="cleanup-older-than-days-input"
               class="config-system-cleanup__days-input"
               :min="1"
-              clearable
               :placeholder="t('config.cleanupOlderThanDaysPlaceholder')"
             />
             <span class="config-system-cleanup__unit">{{ t('config.cleanupOlderThanDaysUnit') }}</span>
@@ -73,7 +72,7 @@
           type="error"
           secondary
           :loading="cleanupLoading"
-          :disabled="isBusy"
+          :disabled="isBusy || cleanupOlderThanDays === null"
           class="config-system-cleanup__action"
           @click="openCleanupConfirm"
         >
@@ -150,7 +149,7 @@ const {
   handleReset
 } = useConfigForm()
 
-const cleanupOlderThanDays = ref<number | null>(null)
+const cleanupOlderThanDays = ref<number | null>(30)
 const forceCleanupActiveTasks = ref(false)
 const cleanupLoading = ref(false)
 const cleanupConfirmVisible = ref(false)
