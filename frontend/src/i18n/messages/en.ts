@@ -1275,6 +1275,7 @@ const en = {
     systemDataCleanup: 'System Data Cleanup',
     systemDataCleanupSubtitle: 'Delete old issue-scoped system records and their task data.',
     cleanupOlderThanDays: 'Clean data older than N days',
+    cleanupOlderThanDaysUnit: 'days',
     cleanupOlderThanDaysPlaceholder: 'Leave empty to clean all eligible data',
     forceCleanupActiveTasks: 'Force cleanup active tasks',
     forceCleanupActiveTasksHint: 'Also delete pending, queued, and running tasks when their state is stale.',

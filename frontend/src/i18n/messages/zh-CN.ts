@@ -1249,6 +1249,7 @@ const zhCN = {
     systemDataCleanup: '系统数据清理',
     systemDataCleanupSubtitle: '按 Issue 删除旧的系统记录及其任务数据。',
     cleanupOlderThanDays: '清理 N 天以前的数据',
+    cleanupOlderThanDaysUnit: '天',
     cleanupOlderThanDaysPlaceholder: '留空表示清理全部符合条件的数据',
     forceCleanupActiveTasks: '强制清理活跃任务',
     forceCleanupActiveTasksHint: '当任务状态已不可信时，也删除 pending、queued 和 running 任务。',

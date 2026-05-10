@@ -37,7 +37,10 @@ vi.mock('naive-ui', () => ({
         class: ['n-button', props.type],
         ...attrs,
         disabled: props.disabled || props.loading,
-        onClick: () => {}
+        onClick: (event: MouseEvent) => {
+          const click = attrs.onClick as ((event: MouseEvent) => void) | undefined
+          click?.(event)
+        }
       }, slots.default?.())
     }
   },
@@ -94,6 +97,18 @@ vi.mock('naive-ui', () => ({
         h('span', { class: 'n-popconfirm__positive' }, props.positiveText),
         h('span', { class: 'n-popconfirm__negative' }, props.negativeText)
       ])
+    }
+  },
+  NModal: {
+    name: 'NModal',
+    props: ['show', 'preset', 'closable', 'maskClosable'],
+    setup(props: any, { slots, attrs }: any) {
+      return () => props.show
+        ? h('div', { class: 'n-modal', ...attrs }, [
+          slots.default?.(),
+          slots.footer?.()
+        ])
+        : null
     }
   },
   NAlert: {
@@ -186,6 +201,25 @@ describe('MaintenancePanel', () => {
     expect(wrapper.text()).toContain('config.forceCleanupActiveTasks')
   })
 
+  it('renders the retention days input as a compact field with a unit label', () => {
+    const wrapper = mountComponent()
+
+    expect(wrapper.find('.config-system-cleanup__retention-field').exists()).toBe(true)
+    expect(wrapper.find('[data-test="cleanup-older-than-days-input"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('config.cleanupOlderThanDaysUnit')
+  })
+
+  it('opens a styled modal confirmation instead of an inline popconfirm', async () => {
+    const wrapper = mountComponent()
+
+    await wrapper.find('[data-test="cleanup-system-data-button"]').trigger('click')
+
+    expect(wrapper.find('.n-popconfirm').exists()).toBe(false)
+    expect(wrapper.find('.config-cleanup-confirm').exists()).toBe(true)
+    expect(wrapper.text()).toContain('config.cleanSystemData')
+    expect(wrapper.text()).toContain('config.confirmCleanSystemData')
+  })
+
   it('submits cleanup payload with force disabled by default', async () => {
     mockApi.cleanupSystemData.mockResolvedValue({
       deleted_issues: 1,
@@ -201,6 +235,7 @@ describe('MaintenancePanel', () => {
     const wrapper = mountComponent()
 
     await wrapper.find('[data-test="cleanup-system-data-button"]').trigger('click')
+    await wrapper.find('[data-test="confirm-cleanup-system-data-button"]').trigger('click')
 
     expect(mockApi.cleanupSystemData).toHaveBeenCalledWith({
       older_than_days: null,
@@ -226,6 +261,7 @@ describe('MaintenancePanel', () => {
     await wrapper.find('[data-test="cleanup-older-than-days-input"]').setValue('30')
     await wrapper.find('[data-test="force-cleanup-active-switch"]').setValue(true)
     await wrapper.find('[data-test="cleanup-system-data-button"]').trigger('click')
+    await wrapper.find('[data-test="confirm-cleanup-system-data-button"]').trigger('click')
 
     expect(mockApi.cleanupSystemData).toHaveBeenCalledWith({
       older_than_days: 30,
