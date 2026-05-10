@@ -4,9 +4,6 @@
       <div class="panel-header">
         <span class="panel-title">{{ t('taskView.taskMetadata') }}</span>
         <div class="panel-badges">
-          <n-tag :type="statusColors[task.status] ?? 'default'" round size="small">
-            {{ t(`status.${task.status}`) }}
-          </n-tag>
           <n-tag type="default" round size="small">{{ formatPriority(task.priority) }}</n-tag>
         </div>
       </div>
@@ -179,15 +176,6 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
-
-const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
-  pending: 'default',
-  queued: 'info',
-  running: 'warning',
-  completed: 'success',
-  failed: 'error',
-  cancelled: 'default'
-}
 
 const projectDisplayName = computed(() => {
   return props.task.project_path_with_namespace

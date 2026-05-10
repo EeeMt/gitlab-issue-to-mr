@@ -206,9 +206,10 @@ vi.mock('naive-ui', () => ({
   NButton: {
     name: 'NButton',
     props: ['type', 'secondary', 'strong', 'round', 'loading', 'disabled'],
-    setup(props: any, { slots }: any) {
+    setup(props: any, { slots, attrs }: any) {
       return () => h('button', {
-        class: ['n-button', `n-button--${props.type || 'default'}`, { loading: props.loading, disabled: props.disabled }],
+        ...attrs,
+        class: [attrs.class, 'n-button', `n-button--${props.type || 'default'}`, { loading: props.loading, disabled: props.disabled }],
         disabled: props.disabled || props.loading,
         'data-type': props.type
       }, slots.default?.())
@@ -388,7 +389,10 @@ vi.mock('@vicons/ionicons5', () => ({
   CreateOutline: { name: 'CreateOutline' },
   BulbOutline: { name: 'BulbOutline' },
   SearchOutline: { name: 'SearchOutline' },
-  CalendarOutline: { name: 'CalendarOutline' }
+  CalendarOutline: { name: 'CalendarOutline' },
+  DownloadOutline: { name: 'DownloadOutline' },
+  PlayOutline: { name: 'PlayOutline' },
+  RefreshOutline: { name: 'RefreshOutline' }
 }))
 
 // Mock ansi-to-html
@@ -509,17 +513,17 @@ describe('TaskView', () => {
       expect(mockApi.getTask).toHaveBeenCalledWith(1)
     })
 
-    it('should display summary cards', async () => {
+    it('should display task summary and header actions', async () => {
       await mountComponent()
 
       await vi.waitFor(() => {
-        return wrapper.find('[data-testid="task-actions-card"]').exists()
+        return wrapper.find('[data-testid="task-actions"]').exists()
       })
 
-      // New layout: TaskMetadataPanel + actions card in top row, TaskProcessPanel below
+      // Header carries compact actions; the detail card is only rendered when an action needs extra context.
       expect(wrapper.find('.task-metadata-panel').exists()).toBe(true)
-      expect(wrapper.find('[data-testid="task-actions-card"]').exists()).toBe(true)
       expect(wrapper.find('[data-testid="task-actions"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="task-actions-card"]').exists()).toBe(false)
     })
 
     it('should display error message for failed tasks', async () => {
@@ -559,6 +563,46 @@ describe('TaskView', () => {
 
       // hasActions should be true for failed tasks
       expect(wrapper.vm.hasActions).toBe(true)
+    })
+
+    it('should open scheduled retry drawer from the header action', async () => {
+      await mountComponent({ status: 'failed' })
+
+      await vi.waitFor(() => {
+        return wrapper.vm.task !== null
+      })
+
+      const scheduleRetryButton = wrapper
+        .findAll('button')
+        .find((button) => button.text().includes('taskView.retryWithSchedule'))
+      expect(scheduleRetryButton).toBeTruthy()
+
+      await scheduleRetryButton!.trigger('click')
+      await flushPromises()
+
+      expect(wrapper.vm.showScheduleDrawer).toBe(true)
+      expect(wrapper.vm.heatmapTarget).toBe('retry')
+      expect(wrapper.find('[data-testid="task-actions-card"]').exists()).toBe(false)
+      expect(wrapper.find('.n-date-picker').exists()).toBe(true)
+      expect(wrapper.text()).toContain('taskView.scheduleRetry')
+      expect(mockApi.getScheduledTasks).toHaveBeenCalled()
+    })
+
+    it('should keep scheduled retry drawer open when selecting a heatmap time', async () => {
+      await mountComponent({ status: 'failed' })
+
+      const scheduleRetryButton = wrapper
+        .findAll('button')
+        .find((button) => button.text().includes('taskView.retryWithSchedule'))
+      await scheduleRetryButton!.trigger('click')
+      await flushPromises()
+
+      const selectedTime = Date.now() + 3600000
+      wrapper.vm.handleScheduleHeatmapCellClick(selectedTime)
+      await nextTick()
+
+      expect(wrapper.vm.showScheduleDrawer).toBe(true)
+      expect(wrapper.vm.retryScheduleDatetime).toBe(selectedTime)
     })
 
     it('should show execute button for pending tasks', async () => {
@@ -1369,6 +1413,19 @@ describe('TaskView', () => {
       expect(wrapper.vm.rescheduleDatetime).toBe(clickTime)
       expect(wrapper.vm.showScheduleDrawer).toBe(false)
     })
+
+    it('should set retryScheduleDatetime and keep retry drawer open', async () => {
+      await mountComponent({ status: 'failed' })
+
+      wrapper.vm.showScheduleDrawer = true
+      wrapper.vm.heatmapTarget = 'retry'
+      const clickTime = Date.now() + 3600000
+
+      wrapper.vm.handleScheduleHeatmapCellClick(clickTime)
+
+      expect(wrapper.vm.retryScheduleDatetime).toBe(clickTime)
+      expect(wrapper.vm.showScheduleDrawer).toBe(true)
+    })
   })
 
   describe('no actions display', () => {
@@ -1382,9 +1439,10 @@ describe('TaskView', () => {
     it('should not show cancel button for completed tasks', async () => {
       await mountComponent({ status: 'completed' })
 
-      // Cancel section should not exist
-      const cancelItems = wrapper.findAll('.task-actions__item--error')
-      expect(cancelItems.length).toBe(0)
+      const cancelCommands = wrapper
+        .findAll('.task-actions__command')
+        .filter((command) => command.text().includes('common.cancel'))
+      expect(cancelCommands.length).toBe(0)
     })
   })
 

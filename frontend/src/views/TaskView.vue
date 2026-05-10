@@ -13,9 +13,128 @@
           <n-tag v-if="task" :type="statusColors[task.status]" round>{{ t(`status.${task.status}`) }}</n-tag>
         </template>
         <template #actions>
-          <n-button @click="refreshTask" :loading="loading">
-            {{ t('common.refresh') }}
-          </n-button>
+          <div class="task-actions task-actions--header" data-testid="task-actions">
+            <div class="task-actions__toolbar">
+              <n-button
+                v-if="task && ['pending', 'queued', 'running'].includes(task.status)"
+                class="task-actions__command task-actions__command--danger"
+                type="error"
+                secondary
+                strong
+                @click="handleCancel"
+                :title="t('taskView.cancelTaskDescription')"
+                :loading="actionLoading"
+                :disabled="!canManageTask"
+              >
+                <template #icon><n-icon :component="CloseCircleOutline" /></template>
+                {{ t('common.cancel') }}
+              </n-button>
+
+              <n-button
+                v-if="archiveMetadata"
+                class="task-actions__command task-actions__command--neutral"
+                type="primary"
+                secondary
+                strong
+                :disabled="!archiveMetadata.file_exists"
+                :title="archiveMetadata.file_exists ? t('taskView.runtimeArchiveDescription') : t('taskView.archiveFileExpiredDescription')"
+                @click="handleDownloadArchive"
+                :loading="archiveDownloadLoading"
+              >
+                <template #icon><n-icon :component="DownloadOutline" /></template>
+                {{ t('taskView.downloadRuntimeArchive') }}
+              </n-button>
+
+              <div
+                v-if="task && ['failed', 'cancelled'].includes(task.status) && activeRetryTask"
+                class="task-actions__linked-task"
+              >
+                <span>{{ t('taskView.retryExists') }}</span>
+                <n-button
+                  type="primary"
+                  text
+                  @click="router.push(`/tasks/${activeRetryTask.id}`)"
+                >
+                  Task #{{ activeRetryTask.id }}
+                </n-button>
+              </div>
+
+              <n-button
+                v-if="task && ['failed', 'cancelled'].includes(task.status) && !activeRetryTask"
+                class="task-actions__command task-actions__command--retry"
+                type="warning"
+                secondary
+                strong
+                @click="handleRetry"
+                :title="t('taskView.retryTaskDescription')"
+                :loading="actionLoading"
+                :disabled="!canManageTask"
+              >
+                <template #icon><n-icon :component="RefreshOutline" /></template>
+                {{ t('common.retry') }}
+              </n-button>
+
+              <n-button
+                v-if="task && ['failed', 'cancelled'].includes(task.status) && !activeRetryTask"
+                class="task-actions__command task-actions__command--primary"
+                :class="{ 'task-actions__command--active': showScheduleDrawer && heatmapTarget === 'retry' }"
+                type="info"
+                secondary
+                strong
+                @click="openScheduleDrawer('retry')"
+                :title="t('taskView.retryWithScheduleDescription')"
+                :disabled="!canManageTask"
+              >
+                <template #icon><n-icon :component="CalendarOutline" /></template>
+                {{ t('taskView.retryWithSchedule') }}
+              </n-button>
+
+              <n-button
+                v-if="task && canReschedule"
+                class="task-actions__command task-actions__command--primary"
+                :class="{ 'task-actions__command--active': showRescheduleEditor }"
+                type="info"
+                secondary
+                strong
+                @click="showRescheduleEditor = !showRescheduleEditor"
+                :title="t('taskView.rescheduleTaskDescription')"
+                :disabled="!canManageTask"
+              >
+                <template #icon><n-icon :component="TimeOutline" /></template>
+                {{ t('taskView.rescheduleTask') }}
+              </n-button>
+
+              <n-button
+                v-if="task && task.status === 'pending'"
+                class="task-actions__command task-actions__command--primary"
+                type="info"
+                secondary
+                strong
+                @click="handleExecute"
+                :title="t('taskView.executeNowDescription')"
+                :loading="actionLoading"
+                :disabled="!canManageTask"
+              >
+                <template #icon><n-icon :component="PlayOutline" /></template>
+                {{ t('common.execute') }}
+              </n-button>
+
+              <span v-if="task && !hasActions" class="task-actions__empty task-actions__empty--header">
+                {{ t('taskView.noManualAction') }}
+              </span>
+
+              <n-button
+                class="task-actions__command task-actions__command--neutral task-actions__command--refresh"
+                secondary
+                strong
+                @click="refreshTask"
+                :loading="loading"
+              >
+                <template #icon><n-icon :component="RefreshOutline" /></template>
+                {{ t('common.refresh') }}
+              </n-button>
+            </div>
+          </div>
         </template>
       </PageHeader>
 
@@ -40,254 +159,79 @@
             </n-gi>
           </n-grid>
 
-          <!-- Actions card -->
-          <n-card class="task-card" :bordered="false" data-testid="task-actions-card">
-                <template #header>
-                  <div class="task-card__header">
-                    <div>
-                      <div class="task-card__title">{{ t('taskView.actions') }}</div>
-                      <div class="task-card__subtitle">{{ t('taskView.actionsSubtitle') }}</div>
-                    </div>
-                  </div>
-                </template>
+          <!-- Action detail panel: only shown when an action needs extra context or inline inputs. -->
+          <n-card v-if="hasActionDetails" class="task-card task-card--actions" :bordered="false" data-testid="task-actions-card">
+            <div class="task-actions task-actions--details">
+              <div v-if="hasActions && !canManageTask" class="task-actions__permission-note">
+                {{ t('taskView.actionPermissionHint') }}
+              </div>
 
-                <div class="task-actions" data-testid="task-actions">
-                  <div class="task-actions__intro" v-if="hasActions">
-                    {{ t('taskView.actionsIntro') }}
-                  </div>
+              <div
+                v-if="archiveMetadata && !archiveMetadata.file_exists"
+                class="task-actions__state-note task-actions__state-note--warning"
+              >
+                <n-tag type="warning" size="small" :bordered="false">
+                  {{ t('taskView.archiveFileExpired') }}
+                </n-tag>
+                <span>{{ t('taskView.archiveFileExpiredDescription') }}</span>
+              </div>
 
-                  <div v-if="hasActions && !canManageTask" class="task-actions__permission-note">
-                    {{ t('taskView.actionPermissionHint') }}
-                  </div>
+              <div
+                v-if="task && task.status === 'queued'"
+                class="task-actions__state-note"
+              >
+                <n-tag type="info" size="small" :bordered="false">{{ t('status.queued') }}</n-tag>
+                <span>{{ t('taskView.queuedStatusDescription') }}</span>
+              </div>
 
-                  <div
-                    v-if="task && ['pending', 'queued', 'running'].includes(task.status)"
-                    class="task-actions__item task-actions__item--error"
-                  >
-                    <div class="task-actions__meta">
-                      <div class="task-actions__label">{{ t('taskView.cancelTask') }}</div>
-                      <div class="task-actions__description">
-                        {{ t('taskView.cancelTaskDescription') }}
-                      </div>
-                    </div>
-                    <n-button
-                      type="error"
-                      secondary
-                      strong
-                      round
-                      @click="handleCancel"
-                      :loading="actionLoading"
-                      :disabled="!canManageTask"
-                    >
-                      {{ t('common.cancel') }}
-                    </n-button>
-                  </div>
+              <div
+                v-if="task && ['failed', 'cancelled'].includes(task.status) && activeRetryTask"
+                class="task-actions__state-note"
+              >
+                <span>{{ t('taskView.retryExistsDescription') }}</span>
+              </div>
 
-                  <div
-                    v-if="archiveMetadata"
-                    class="task-actions__item task-actions__item--info"
-                  >
-                    <div class="task-actions__meta">
-                      <div class="task-actions__label">
-                        {{ t('taskView.runtimeArchive') }}
-                        <n-tag
-                          v-if="!archiveMetadata.file_exists"
-                          type="warning"
-                          size="small"
-                          :bordered="false"
-                        >
-                          {{ t('taskView.archiveFileExpired') }}
-                        </n-tag>
-                      </div>
-                      <div class="task-actions__description">
-                        {{ archiveMetadata.file_exists ? t('taskView.runtimeArchiveDescription') : t('taskView.archiveFileExpiredDescription') }}
-                      </div>
-                    </div>
-                    <n-button
-                      type="primary"
-                      secondary
-                      strong
-                      round
-                      :disabled="!archiveMetadata.file_exists"
-                      @click="handleDownloadArchive"
-                      :loading="archiveDownloadLoading"
-                    >
-                      <template #icon><n-icon :component="DownloadOutline" /></template>
-                      {{ t('taskView.downloadRuntimeArchive') }}
-                    </n-button>
-                  </div>
-
-                  <!-- Existing active retry — link to it instead of showing retry buttons -->
-                  <div
-                    v-if="task && ['failed', 'cancelled'].includes(task.status) && activeRetryTask"
-                    class="task-actions__item task-actions__item--info"
-                  >
-                    <div class="task-actions__meta">
-                      <div class="task-actions__label">{{ t('taskView.retryExists') }}</div>
-                      <div class="task-actions__description">
-                        {{ t('taskView.retryExistsDescription') }}
-                      </div>
-                    </div>
-                    <n-button
-                      type="primary"
-                      text
-                      @click="router.push(`/tasks/${activeRetryTask.id}`)"
-                    >
-                      Task #{{ activeRetryTask.id }}
-                    </n-button>
-                  </div>
-
-                  <div
-                    v-if="task && ['failed', 'cancelled'].includes(task.status) && !activeRetryTask"
-                    class="task-actions__item task-actions__item--warning"
-                  >
-                    <div class="task-actions__meta">
-                      <div class="task-actions__label">{{ t('taskView.retryTask') }}</div>
-                      <div class="task-actions__description">
-                        {{ t('taskView.retryTaskDescription') }}
-                      </div>
-                    </div>
-                    <n-button
-                      type="warning"
-                      secondary
-                      strong
-                      round
-                      @click="handleRetry"
-                      :loading="actionLoading"
-                      :disabled="!canManageTask"
-                    >
-                      {{ t('common.retry') }}
-                    </n-button>
-                  </div>
-
-                  <div
-                    v-if="task && ['failed', 'cancelled'].includes(task.status) && !activeRetryTask"
-                    class="task-actions__item task-actions__item--info"
-                  >
-                    <div class="task-actions__meta">
-                      <div class="task-actions__label">{{ t('taskView.retryWithSchedule') }}</div>
-                      <div class="task-actions__description">
-                        {{ t('taskView.retryWithScheduleDescription') }}
-                      </div>
-                    </div>
-                    <div class="task-actions__controls">
-                      <n-date-picker
-                        v-model:value="retryScheduleDatetime"
-                        type="datetime"
-                        class="task-actions__date-picker"
-                        :placeholder="t('taskView.selectRescheduleTime')"
-                        :is-date-disabled="isScheduledDateDisabled"
-                        :disabled="!canManageTask"
-                      />
-                      <n-button
-                        secondary
-                        round
-                        :loading="scheduledTasksLoading"
-                        @click="openScheduleDrawer('retry')"
-                        :disabled="!canManageTask"
-                      >
-                        <template #icon><n-icon :component="CalendarOutline" /></template>
-                        {{ t('taskView.viewScheduleHeatmap') }}
-                      </n-button>
-                      <n-button
-                        type="info"
-                        secondary
-                        strong
-                        round
-                        @click="handleRetryWithSchedule"
-                        :loading="actionLoading"
-                        :disabled="!canManageTask || retryScheduleDatetime === null"
-                      >
-                        {{ t('taskView.scheduleRetry') }}
-                      </n-button>
-                    </div>
-                  </div>
-
-                  <div
-                    v-if="task && canReschedule"
-                    class="task-actions__item task-actions__item--info"
-                  >
-                    <div class="task-actions__meta">
-                      <div class="task-actions__label">{{ t('taskView.rescheduleTask') }}</div>
-                      <div class="task-actions__description">
-                        {{ t('taskView.rescheduleTaskDescription') }}
-                      </div>
-                    </div>
-                    <div class="task-actions__controls">
-                      <n-date-picker
-                        v-model:value="rescheduleDatetime"
-                        type="datetime"
-                        class="task-actions__date-picker"
-                        :placeholder="t('taskView.selectRescheduleTime')"
-                        :is-date-disabled="isScheduledDateDisabled"
-                        :disabled="!canManageTask"
-                      />
-                      <n-button
-                        secondary
-                        round
-                        :loading="scheduledTasksLoading"
-                        @click="openScheduleDrawer('reschedule')"
-                        :disabled="!canManageTask"
-                      >
-                        <template #icon><n-icon :component="CalendarOutline" /></template>
-                        {{ t('taskView.viewScheduleHeatmap') }}
-                      </n-button>
-                      <n-button
-                        type="info"
-                        secondary
-                        strong
-                        round
-                        @click="handleReschedule"
-                        :loading="actionLoading"
-                        :disabled="!canManageTask || rescheduleDatetime === null"
-                      >
-                        {{ t('taskView.saveScheduledTime') }}
-                      </n-button>
-                    </div>
-                  </div>
-
-                  <div
-                    v-if="task && task.status === 'pending'"
-                    class="task-actions__item task-actions__item--info"
-                  >
-                    <div class="task-actions__meta">
-                      <div class="task-actions__label">{{ t('taskView.executeNow') }}</div>
-                      <div class="task-actions__description">
-                        {{ t('taskView.executeNowDescription') }}
-                      </div>
-                    </div>
-                    <n-button
-                      type="info"
-                      secondary
-                      strong
-                      round
-                      @click="handleExecute"
-                      :loading="actionLoading"
-                      :disabled="!canManageTask"
-                    >
-                      {{ t('common.execute') }}
-                    </n-button>
-                  </div>
-
-                  <!-- QUEUED info -->
-                  <div
-                    v-if="task && task.status === 'queued'"
-                    class="task-actions__item task-actions__item--info"
-                  >
-                    <div class="task-actions__meta">
-                      <div class="task-actions__label">{{ t('taskView.queuedStatus') }}</div>
-                      <div class="task-actions__description">
-                        {{ t('taskView.queuedStatusDescription') }}
-                      </div>
-                    </div>
-                    <n-tag type="info" round>{{ t('status.queued') }}</n-tag>
-                  </div>
-
-                  <div v-if="!hasActions" class="task-actions__empty">
-                    {{ t('taskView.noManualAction') }}
-                  </div>
+              <div
+                v-if="task && canReschedule && showRescheduleEditor"
+                class="task-actions__editor"
+              >
+                <div class="task-actions__editor-copy">
+                  <div class="task-actions__label">{{ t('taskView.rescheduleTask') }}</div>
+                  <div class="task-actions__description">{{ t('taskView.rescheduleTaskDescription') }}</div>
                 </div>
-              </n-card>
+                <div class="task-actions__editor-controls">
+                  <n-date-picker
+                    v-model:value="rescheduleDatetime"
+                    type="datetime"
+                    class="task-actions__date-picker"
+                    :placeholder="t('taskView.selectRescheduleTime')"
+                    :is-date-disabled="isScheduledDateDisabled"
+                    :disabled="!canManageTask"
+                  />
+                  <n-button
+                    secondary
+                    :loading="scheduledTasksLoading"
+                    @click="openScheduleDrawer('reschedule')"
+                    :disabled="!canManageTask"
+                  >
+                    <template #icon><n-icon :component="CalendarOutline" /></template>
+                    {{ t('taskView.viewScheduleHeatmap') }}
+                  </n-button>
+                  <n-button
+                    type="info"
+                    secondary
+                    strong
+                    @click="handleReschedule"
+                    :loading="actionLoading"
+                    :disabled="!canManageTask || rescheduleDatetime === null"
+                  >
+                    {{ t('taskView.saveScheduledTime') }}
+                  </n-button>
+                </div>
+              </div>
+
+            </div>
+          </n-card>
 
           <!-- Process Panel -->
           <TaskProcessPanel
@@ -308,14 +252,30 @@
     </n-space>
   </div>
 
-  <!-- Schedule Heatmap Drawer -->
-  <n-drawer v-model:show="showScheduleDrawer" :width="isMobile ? '100%' : 580" placement="right">
-    <n-drawer-content :title="t('taskView.schedulePreviewTitle')" closable>
+  <!-- Schedule Drawer -->
+  <n-drawer v-model:show="showScheduleDrawer" :width="isMobile ? '100%' : (heatmapTarget === 'retry' ? 680 : 580)" placement="right">
+    <n-drawer-content :title="heatmapTarget === 'retry' ? t('taskView.retryWithSchedule') : t('taskView.schedulePreviewTitle')" closable>
       <n-spin v-if="scheduledTasksLoading" />
-      <template v-else>
-        <p style="margin-bottom: 12px; color: rgba(15, 23, 42, 0.58); font-size: 13px;">
+      <div v-else class="task-schedule-drawer">
+        <div v-if="heatmapTarget === 'retry'" class="task-schedule-drawer__form">
+          <div>
+            <div class="task-actions__label">{{ t('taskView.retryWithSchedule') }}</div>
+            <div class="task-actions__description">{{ t('taskView.retryWithScheduleDescription') }}</div>
+          </div>
+          <n-date-picker
+            v-model:value="retryScheduleDatetime"
+            type="datetime"
+            class="task-actions__date-picker"
+            :placeholder="t('taskView.selectRescheduleTime')"
+            :is-date-disabled="isScheduledDateDisabled"
+            :disabled="!canManageTask"
+          />
+        </div>
+
+        <p class="task-schedule-drawer__hint">
           {{ t('taskView.schedulePreviewHint') }}
         </p>
+
         <HeatmapChart
           :tasks="scheduledTasksForPreview"
           :selected-ms="heatmapTarget === 'retry' ? retryScheduleDatetime : rescheduleDatetime"
@@ -323,7 +283,24 @@
           :enforce-capacity="slotEnforce"
           @cell-click="handleScheduleHeatmapCellClick"
         />
-      </template>
+
+        <div v-if="heatmapTarget === 'retry'" class="task-schedule-drawer__actions">
+          <n-button class="task-actions__command task-actions__command--neutral" @click="showScheduleDrawer = false">
+            {{ t('common.cancel') }}
+          </n-button>
+          <n-button
+            class="task-actions__command task-actions__command--primary"
+            type="info"
+            secondary
+            strong
+            @click="handleRetryWithSchedule"
+            :loading="actionLoading"
+            :disabled="!canManageTask || retryScheduleDatetime === null"
+          >
+            {{ t('taskView.scheduleRetry') }}
+          </n-button>
+        </div>
+      </div>
     </n-drawer-content>
   </n-drawer>
 </template>
@@ -342,7 +319,14 @@ import TaskResultPanel from '../components/TaskResultPanel.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { parseUtcDate } from '../utils/datetime'
 import { extractSlotErrorMessage } from '../utils/slotError'
-import { CalendarOutline, DownloadOutline } from '@vicons/ionicons5'
+import {
+  CalendarOutline,
+  CloseCircleOutline,
+  DownloadOutline,
+  PlayOutline,
+  RefreshOutline,
+  TimeOutline,
+} from '@vicons/ionicons5'
 import HeatmapChart from '../components/HeatmapChart.vue'
 import AnsiToHtml from 'ansi-to-html'
 
@@ -378,6 +362,7 @@ const activeRetryTask = ref<Task | null>(null)
 const issueTasks = ref<Task[]>([])
 const archiveMetadata = ref<{ archive_name: string; archive_size_bytes: number; created_at: string; file_exists: boolean } | null>(null)
 const archiveDownloadLoading = ref(false)
+const showRescheduleEditor = ref(false)
 let pollTimer: number | null = null
 let logEventSource: EventSource | null = null
 let logStreamContainerId: string | null = null
@@ -409,6 +394,21 @@ const hasActions = computed(() => {
   if (!task.value) return false
   if (archiveMetadata.value) return true
   return ['pending', 'queued', 'running', 'failed', 'cancelled'].includes(task.value.status)
+})
+
+const hasActionDetails = computed(() => {
+  if (!task.value) return false
+
+  const retryHasContext = ['failed', 'cancelled'].includes(task.value.status) && !!activeRetryTask.value
+  const rescheduleEditorOpen = canReschedule.value && showRescheduleEditor.value
+
+  return (
+    (hasActions.value && !canManageTask.value) ||
+    (!!archiveMetadata.value && !archiveMetadata.value.file_exists) ||
+    task.value.status === 'queued' ||
+    retryHasContext ||
+    rescheduleEditorOpen
+  )
 })
 
 const canReschedule = computed(() => {
@@ -765,6 +765,7 @@ async function handleRetryWithSchedule() {
   try {
     const newTask = await retryTask(taskId.value, new Date(retryScheduleDatetime.value).toISOString())
     retryScheduleDatetime.value = null
+    showScheduleDrawer.value = false
     resetLogsState()
     message.success(t('taskView.taskRetryRescheduled'))
     router.push(`/tasks/${newTask.id}`)
@@ -810,6 +811,7 @@ async function handleReschedule() {
       scheduled_datetime: new Date(rescheduleDatetime.value).toISOString()
     })
     syncRescheduleDatetime()
+    showRescheduleEditor.value = false
     message.success(t('taskView.taskRescheduled'))
   } catch (error: any) {
     message.error(extractSlotErrorMessage(error, t, 'taskView.failedToRescheduleTask'))
@@ -839,6 +841,7 @@ async function openScheduleDrawer(target: 'retry' | 'reschedule' = 'reschedule')
 function handleScheduleHeatmapCellClick(startMs: number) {
   if (heatmapTarget.value === 'retry') {
     retryScheduleDatetime.value = startMs
+    return
   } else {
     rescheduleDatetime.value = startMs
   }
@@ -874,6 +877,8 @@ watch(
       activeRetryTask.value = null
       issueTasks.value = []
       archiveMetadata.value = null
+      showRescheduleEditor.value = false
+      showScheduleDrawer.value = false
       hasLoadedOnce.value = false
       fetchTask()
     }
@@ -914,6 +919,7 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+  flex: 1 1 360px;
 }
 
 .task-view__content {
@@ -985,68 +991,187 @@ onBeforeUnmount(() => {
   color: rgba(15, 23, 42, 0.58);
 }
 
-.task-actions {
-  display: grid;
-  gap: 12px;
+.task-card--actions :deep(.n-card__content) {
+  padding-top: 12px;
 }
 
-.task-actions__intro {
-  padding: 14px 16px;
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.035);
-  color: rgba(15, 23, 42, 0.66);
-  line-height: 1.5;
+.task-card--actions {
+  order: -1;
+}
+
+.task-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.task-actions--header {
+  width: 100%;
+}
+
+.task-actions__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.task-actions__command {
+  flex: 0 0 auto;
+  --n-height: 34px !important;
+  --n-padding: 0 12px !important;
+  --n-font-weight: 400 !important;
+  --n-border-radius: 10px !important;
+  --n-ripple-color: rgba(37, 99, 235, 0.18) !important;
+}
+
+.task-actions__command--neutral {
+  --n-color: rgba(255, 255, 255, 0.68) !important;
+  --n-color-hover: rgba(248, 250, 252, 0.96) !important;
+  --n-color-focus: rgba(248, 250, 252, 0.96) !important;
+  --n-color-pressed: rgba(241, 245, 249, 0.96) !important;
+  --n-color-disabled: rgba(248, 250, 252, 0.58) !important;
+  --n-text-color: rgba(51, 65, 85, 0.92) !important;
+  --n-text-color-hover: rgba(30, 41, 59, 0.96) !important;
+  --n-text-color-focus: rgba(30, 41, 59, 0.96) !important;
+  --n-text-color-pressed: rgba(15, 23, 42, 0.98) !important;
+  --n-text-color-disabled: rgba(100, 116, 139, 0.52) !important;
+  --n-border: 1px solid rgba(15, 23, 42, 0.12) !important;
+  --n-border-hover: 1px solid rgba(15, 23, 42, 0.18) !important;
+  --n-border-focus: 1px solid rgba(37, 99, 235, 0.28) !important;
+  --n-border-pressed: 1px solid rgba(15, 23, 42, 0.22) !important;
+  --n-border-disabled: 1px solid rgba(15, 23, 42, 0.08) !important;
+}
+
+.task-actions__command--primary {
+  --n-color: rgba(32, 128, 240, 0.08) !important;
+  --n-color-hover: rgba(32, 128, 240, 0.12) !important;
+  --n-color-focus: rgba(32, 128, 240, 0.12) !important;
+  --n-color-pressed: rgba(32, 128, 240, 0.16) !important;
+  --n-color-disabled: rgba(32, 128, 240, 0.05) !important;
+  --n-text-color: #1d4ed8 !important;
+  --n-text-color-hover: #1e40af !important;
+  --n-text-color-focus: #1e40af !important;
+  --n-text-color-pressed: #1e3a8a !important;
+  --n-text-color-disabled: rgba(29, 78, 216, 0.42) !important;
+  --n-border: 1px solid rgba(32, 128, 240, 0.18) !important;
+  --n-border-hover: 1px solid rgba(32, 128, 240, 0.28) !important;
+  --n-border-focus: 1px solid rgba(32, 128, 240, 0.32) !important;
+  --n-border-pressed: 1px solid rgba(32, 128, 240, 0.36) !important;
+  --n-border-disabled: 1px solid rgba(32, 128, 240, 0.1) !important;
+  --n-ripple-color: rgba(32, 128, 240, 0.2) !important;
+}
+
+.task-actions__command--retry {
+  --n-color: rgba(217, 119, 6, 0.08) !important;
+  --n-color-hover: rgba(217, 119, 6, 0.12) !important;
+  --n-color-focus: rgba(217, 119, 6, 0.12) !important;
+  --n-color-pressed: rgba(217, 119, 6, 0.16) !important;
+  --n-color-disabled: rgba(217, 119, 6, 0.05) !important;
+  --n-text-color: #a16207 !important;
+  --n-text-color-hover: #854d0e !important;
+  --n-text-color-focus: #854d0e !important;
+  --n-text-color-pressed: #713f12 !important;
+  --n-text-color-disabled: rgba(161, 98, 7, 0.42) !important;
+  --n-border: 1px solid rgba(217, 119, 6, 0.18) !important;
+  --n-border-hover: 1px solid rgba(217, 119, 6, 0.28) !important;
+  --n-border-focus: 1px solid rgba(217, 119, 6, 0.32) !important;
+  --n-border-pressed: 1px solid rgba(217, 119, 6, 0.36) !important;
+  --n-border-disabled: 1px solid rgba(217, 119, 6, 0.1) !important;
+  --n-ripple-color: rgba(217, 119, 6, 0.18) !important;
+}
+
+.task-actions__command--danger {
+  --n-color: rgba(208, 48, 80, 0.07) !important;
+  --n-color-hover: rgba(208, 48, 80, 0.1) !important;
+  --n-color-focus: rgba(208, 48, 80, 0.1) !important;
+  --n-color-pressed: rgba(208, 48, 80, 0.14) !important;
+  --n-color-disabled: rgba(208, 48, 80, 0.04) !important;
+  --n-text-color: #b42342 !important;
+  --n-text-color-hover: #9f1d38 !important;
+  --n-text-color-focus: #9f1d38 !important;
+  --n-text-color-pressed: #88172f !important;
+  --n-text-color-disabled: rgba(180, 35, 66, 0.42) !important;
+  --n-border: 1px solid rgba(208, 48, 80, 0.18) !important;
+  --n-border-hover: 1px solid rgba(208, 48, 80, 0.28) !important;
+  --n-border-focus: 1px solid rgba(208, 48, 80, 0.32) !important;
+  --n-border-pressed: 1px solid rgba(208, 48, 80, 0.36) !important;
+  --n-border-disabled: 1px solid rgba(208, 48, 80, 0.1) !important;
+  --n-ripple-color: rgba(208, 48, 80, 0.18) !important;
+}
+
+.task-actions__command--active {
+  --n-color: rgba(32, 128, 240, 0.14) !important;
+  --n-border: 1px solid rgba(32, 128, 240, 0.34) !important;
+  box-shadow: 0 0 0 2px rgba(32, 128, 240, 0.08);
+}
+
+.task-actions__command--refresh {
+  margin-left: 2px;
+}
+
+.task-actions__linked-task {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(32, 128, 240, 0.16);
+  border-radius: 8px;
+  background: rgba(32, 128, 240, 0.06);
+  color: rgba(15, 23, 42, 0.72);
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .task-actions__permission-note {
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: rgba(240, 160, 32, 0.08);
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(240, 160, 32, 0.075);
   color: rgba(163, 94, 12, 0.92);
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
-.task-actions__item {
+.task-actions__state-note {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 16px;
-  padding: 16px 18px;
-  border-radius: 16px;
-  border: 1px solid transparent;
-  background: rgba(248, 250, 252, 0.9);
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.035);
+  color: rgba(15, 23, 42, 0.66);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
-.task-actions__item--error {
-  border-color: rgba(208, 48, 80, 0.14);
-  background: linear-gradient(180deg, rgba(208, 48, 80, 0.06), rgba(208, 48, 80, 0.02));
+.task-actions__state-note--warning {
+  background: rgba(240, 160, 32, 0.075);
+  color: rgba(163, 94, 12, 0.92);
 }
 
-.task-actions__item--warning {
-  border-color: rgba(240, 160, 32, 0.16);
-  background: linear-gradient(180deg, rgba(240, 160, 32, 0.07), rgba(240, 160, 32, 0.025));
+.task-actions__editor {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid rgba(32, 128, 240, 0.14);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.74);
 }
 
-.task-actions__item--info {
-  border-color: rgba(32, 128, 240, 0.16);
-  background: linear-gradient(180deg, rgba(32, 128, 240, 0.07), rgba(32, 128, 240, 0.025));
-}
-
-.task-actions__meta {
+.task-actions__editor-copy {
   min-width: 0;
 }
 
-.task-actions__controls {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: fit-content;
-  max-width: 100%;
-  flex-shrink: 0;
-}
-
-.task-actions__controls :deep(.n-button) {
-  width: 100%;
+.task-actions__editor-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
 }
 
 .task-actions__label {
@@ -1056,23 +1181,67 @@ onBeforeUnmount(() => {
 }
 
 .task-actions__description {
-  margin-top: 6px;
+  margin-top: 4px;
   font-size: 13px;
-  line-height: 1.55;
+  line-height: 1.45;
   color: rgba(15, 23, 42, 0.64);
 }
 
 .task-actions__empty {
-  padding: 14px 16px;
-  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
   background: rgba(15, 23, 42, 0.04);
   color: rgba(15, 23, 42, 0.64);
+  font-size: 13px;
+}
+
+.task-actions__empty--header {
+  min-height: 34px;
+}
+
+.task-actions__date-picker {
+  width: 100%;
+}
+
+.task-schedule-drawer {
+  display: grid;
+  gap: 14px;
+}
+
+.task-schedule-drawer__form {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 2px;
+}
+
+.task-schedule-drawer__form .task-actions__date-picker {
+  width: min(100%, 200px);
+}
+
+.task-schedule-drawer__hint {
+  margin: 0;
+  color: rgba(15, 23, 42, 0.58);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.task-schedule-drawer__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 2px;
 }
 
 @media (max-width: 768px) {
   .task-view__actions {
     width: 100%;
     justify-content: flex-start;
+    flex-basis: auto;
   }
 
   .task-card__header {
@@ -1080,13 +1249,35 @@ onBeforeUnmount(() => {
     align-items: flex-start;
   }
 
-  .task-actions__item {
-    flex-direction: column;
+  .task-actions__toolbar {
     align-items: stretch;
+    justify-content: flex-start;
   }
 
-  .task-actions__controls {
-    justify-items: stretch;
+  .task-actions__command,
+  .task-actions__linked-task {
+    flex: 1 1 150px;
+    justify-content: center;
+  }
+
+  .task-actions__editor {
+    grid-template-columns: 1fr;
+  }
+
+  .task-actions__editor-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .task-actions__editor-controls :deep(.n-button) {
+    width: 100%;
+  }
+
+  .task-schedule-drawer__form .task-actions__date-picker {
+    width: 100%;
+  }
+
+  .task-schedule-drawer__actions :deep(.n-button) {
+    flex: 1 1 140px;
   }
 }
 </style>
