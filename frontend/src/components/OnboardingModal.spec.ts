@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { h, nextTick } from 'vue'
@@ -182,6 +184,8 @@ vi.mock('naive-ui', () => ({
 
 import OnboardingModal from './OnboardingModal.vue'
 
+const onboardingModalSource = readFileSync(resolve(process.cwd(), 'src/components/OnboardingModal.vue'), 'utf8')
+
 const stepHeights: Record<number, number> = {
   1: 506,
   2: 462,
@@ -344,6 +348,12 @@ describe('OnboardingModal', () => {
     expect(wrapper.find('.onboarding-modal__background-set').exists()).toBe(true)
   })
 
+  it('uses Chrome 109 compatible color values for background motifs', () => {
+    const motifStyleBlocks = onboardingModalSource.match(/\.onboarding-modal__motif(?:--[\w-]+)?\s*\{[\s\S]*?\n\}/g) ?? []
+
+    expect(motifStyleBlocks.length).toBeGreaterThan(0)
+    expect(motifStyleBlocks.join('\n')).not.toContain('color-mix(')
+  })
 
   it('uses translucent surfaces for concept and architecture cards', async () => {
     const wrapper = mountComponent()

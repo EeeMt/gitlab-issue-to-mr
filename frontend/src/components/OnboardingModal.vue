@@ -879,7 +879,7 @@ function handleCreateIssue() {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: color-mix(in srgb, var(--n-primary-color, #18a058) 34%, transparent);
+  color: rgba(24, 160, 88, 0.34);
   opacity: 0.11;
   filter: saturate(0.9);
   transform: translateZ(0);
@@ -909,7 +909,7 @@ function handleCreateIssue() {
   width: clamp(230px, 32vw, 330px);
   height: clamp(230px, 32vw, 330px);
   opacity: 0.085;
-  color: color-mix(in srgb, var(--n-text-color-3, #64748b) 40%, transparent);
+  color: rgba(100, 116, 139, 0.4);
   transform: translateY(-50%) rotate(-18deg);
 }
 
@@ -919,7 +919,7 @@ function handleCreateIssue() {
   width: clamp(210px, 28vw, 300px);
   height: clamp(210px, 28vw, 300px);
   opacity: 0.08;
-  color: color-mix(in srgb, var(--n-primary-color, #18a058) 24%, transparent);
+  color: rgba(24, 160, 88, 0.24);
   transform: rotate(14deg);
 }
 
@@ -929,7 +929,7 @@ function handleCreateIssue() {
   width: clamp(220px, 30vw, 320px);
   height: clamp(220px, 30vw, 320px);
   opacity: 0.08;
-  color: color-mix(in srgb, var(--n-text-color-3, #64748b) 46%, transparent);
+  color: rgba(100, 116, 139, 0.46);
   transform: translateY(-50%) rotate(-10deg);
 }
 
@@ -939,7 +939,7 @@ function handleCreateIssue() {
   width: clamp(230px, 31vw, 330px);
   height: clamp(230px, 31vw, 330px);
   opacity: 0.072;
-  color: color-mix(in srgb, var(--n-primary-color, #18a058) 34%, transparent);
+  color: rgba(24, 160, 88, 0.34);
   transform: rotate(8deg);
 }
 
@@ -949,7 +949,7 @@ function handleCreateIssue() {
   width: clamp(220px, 29vw, 310px);
   height: clamp(220px, 29vw, 310px);
   opacity: 0.09;
-  color: color-mix(in srgb, var(--n-primary-color, #18a058) 30%, transparent);
+  color: rgba(24, 160, 88, 0.3);
   transform: rotate(-8deg);
 }
 
@@ -959,7 +959,7 @@ function handleCreateIssue() {
   width: clamp(200px, 27vw, 290px);
   height: clamp(200px, 27vw, 290px);
   opacity: 0.09;
-  color: color-mix(in srgb, var(--n-text-color-3, #64748b) 40%, transparent);
+  color: rgba(100, 116, 139, 0.4);
   transform: rotate(-6deg);
 }
 
@@ -969,7 +969,7 @@ function handleCreateIssue() {
   width: clamp(210px, 28vw, 300px);
   height: clamp(210px, 28vw, 300px);
   opacity: 0.08;
-  color: color-mix(in srgb, var(--n-primary-color, #18a058) 26%, transparent);
+  color: rgba(24, 160, 88, 0.26);
   transform: translateY(-50%) rotate(12deg);
 }
 
@@ -979,7 +979,7 @@ function handleCreateIssue() {
   width: clamp(200px, 27vw, 290px);
   height: clamp(200px, 27vw, 290px);
   opacity: 0.08;
-  color: color-mix(in srgb, var(--n-primary-color, #18a058) 32%, transparent);
+  color: rgba(24, 160, 88, 0.32);
   transform: rotate(10deg);
 }
 
