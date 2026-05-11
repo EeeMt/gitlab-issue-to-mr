@@ -529,8 +529,8 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
 
 
 @pytest.mark.asyncio
-async def test_get_analytics_returns_provider_metrics_and_unknown_legacy_bucket():
-    """It returns separate provider/model rows plus an Unknown / Legacy bucket for legacy tasks."""
+async def test_get_analytics_returns_provider_metrics():
+    """It returns provider rows built from joined provider records."""
     fixed_now = datetime(2026, 3, 14, 12, 0, 0)
     db = MagicMock()
 
@@ -577,9 +577,9 @@ async def test_get_analytics_returns_provider_metrics_and_unknown_legacy_bucket(
                     avg_execution_seconds_per_changed_line=3.0,
                 ),
                 SimpleNamespace(
-                    provider_id=1,
-                    provider_name="Claude Sonnet",
-                    provider_model="claude-3-5-sonnet",
+                    provider_id=2,
+                    provider_name="Claude Haiku",
+                    provider_model="claude-haiku-4-6",
                     task_count=1,
                     completed_tasks=0,
                     failed_tasks=1,
@@ -593,24 +593,6 @@ async def test_get_analytics_returns_provider_metrics_and_unknown_legacy_bucket(
                     avg_tokens_per_changed_line=10.0,
                     avg_execution_seconds=250.0,
                     avg_execution_seconds_per_changed_line=5.0,
-                ),
-                SimpleNamespace(
-                    provider_id=None,
-                    provider_name=None,
-                    provider_model=None,
-                    task_count=2,
-                    completed_tasks=1,
-                    failed_tasks=0,
-                    cancelled_tasks=1,
-                    finished_tasks=2,
-                    total_input_tokens=200,
-                    total_output_tokens=300,
-                    total_tokens=500,
-                    avg_tokens_per_task=250.0,
-                    avg_tokens_per_second=None,
-                    avg_tokens_per_changed_line=None,
-                    avg_execution_seconds=450.0,
-                    avg_execution_seconds_per_changed_line=None,
                 ),
             ],
         )
@@ -629,10 +611,10 @@ async def test_get_analytics_returns_provider_metrics_and_unknown_legacy_bucket(
             access_scope=access_scope,
         )
 
-    assert response["provider_summary"]["active_provider_count"] == 3
-    assert response["provider_summary"]["provider_covered_task_count"] == 5
-    assert response["provider_summary"]["provider_covered_total_tokens"] == 2000
-    assert response["provider_summary"]["provider_success_rate"] == pytest.approx(3 / 5)
+    assert response["provider_summary"]["active_provider_count"] == 2
+    assert response["provider_summary"]["provider_covered_task_count"] == 3
+    assert response["provider_summary"]["provider_covered_total_tokens"] == 1500
+    assert response["provider_summary"]["provider_success_rate"] == pytest.approx(2 / 3)
 
     provider_rows = {
         (row["provider_name"], row["provider_model"]): row for row in response["providers"]
@@ -641,13 +623,8 @@ async def test_get_analytics_returns_provider_metrics_and_unknown_legacy_bucket(
     claude_sonnet_46 = provider_rows[("Claude Sonnet", "claude-sonnet-4-6")]
     assert claude_sonnet_46["avg_tokens_per_second"] == pytest.approx(1.0909090909090908)
 
-    unknown_legacy = provider_rows[("Unknown / Legacy", None)]
-    assert unknown_legacy["avg_tokens_per_second"] is None
-    assert unknown_legacy["avg_tokens_per_changed_line"] is None
-    assert unknown_legacy["avg_execution_seconds_per_changed_line"] is None
-
-    claude_sonnet_35 = provider_rows[("Claude Sonnet", "claude-3-5-sonnet")]
-    assert claude_sonnet_35["success_rate"] == pytest.approx(0.0)
+    claude_haiku = provider_rows[("Claude Haiku", "claude-haiku-4-6")]
+    assert claude_haiku["success_rate"] == pytest.approx(0.0)
 
     assert response["provider_chart_series"]["success_rate"] == [
         {
@@ -656,14 +633,9 @@ async def test_get_analytics_returns_provider_metrics_and_unknown_legacy_bucket(
             "value": pytest.approx(1.0),
         },
         {
-            "provider_id": 1,
-            "label": "Claude Sonnet / claude-3-5-sonnet",
+            "provider_id": 2,
+            "label": "Claude Haiku / claude-haiku-4-6",
             "value": pytest.approx(0.0),
-        },
-        {
-            "provider_id": None,
-            "label": "Unknown / Legacy",
-            "value": pytest.approx(0.5),
         },
     ]
     assert response["provider_chart_series"]["avg_tokens_per_second"] == [
@@ -673,16 +645,16 @@ async def test_get_analytics_returns_provider_metrics_and_unknown_legacy_bucket(
             "value": pytest.approx(1.0909090909090908),
         },
         {
-            "provider_id": 1,
-            "label": "Claude Sonnet / claude-3-5-sonnet",
+            "provider_id": 2,
+            "label": "Claude Haiku / claude-haiku-4-6",
             "value": pytest.approx(2.0),
         },
     ]
 
 
 @pytest.mark.asyncio
-async def test_get_analytics_provider_query_groups_by_provider_and_model():
-    """It groups provider analytics by provider/model pair instead of provider only."""
+async def test_get_analytics_provider_query_groups_by_joined_provider_model():
+    """It groups provider analytics by the joined provider configuration."""
     fixed_now = datetime(2026, 3, 14, 12, 0, 0)
     db = MagicMock()
 
@@ -708,7 +680,10 @@ async def test_get_analytics_provider_query_groups_by_provider_and_model():
         if AnalyticsQueryStub._is_error_query(sql):
             return MockResult([])
         if AnalyticsQueryStub._is_provider_query(sql):
-            assert "GROUP BY tasks.provider_id, ai_providers.name, tasks.model_name" in sql
+            assert "JOIN ai_providers ON ai_providers.id = tasks.provider_id" in sql
+            assert "LEFT OUTER JOIN ai_providers" not in sql
+            assert "GROUP BY tasks.provider_id, ai_providers.name, ai_providers.model" in sql
+            assert "tasks.model_name" not in sql
             provider_metric_sql = sql.split(" AS avg_tokens_per_second")[0].rsplit(" AS avg_tokens_per_task, ", 1)[-1]
             assert "tasks.output_tokens" in provider_metric_sql
             assert "tasks.input_tokens" not in provider_metric_sql

@@ -651,7 +651,7 @@ async def get_analytics(
         select(
             Task.provider_id.label("provider_id"),
             AIProvider.name.label("provider_name"),
-            Task.model_name.label("provider_model"),
+            AIProvider.model.label("provider_model"),
             func.count(Task.id).label("task_count"),
             func.coalesce(func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0)), 0).label(
                 "completed_tasks"
@@ -701,17 +701,17 @@ async def get_analytics(
             ).label("avg_execution_seconds_per_changed_line"),
         )
         .select_from(Task)
-        .outerjoin(AIProvider, AIProvider.id == Task.provider_id)
+        .join(AIProvider, AIProvider.id == Task.provider_id)
         .where(
             Task.created_at >= since,
-            (Task.provider_id.is_not(None)) | (Task.model_name.is_not(None)),
+            Task.status.in_(FINISHED_TASK_STATUSES),
         )
-        .group_by(Task.provider_id, AIProvider.name, Task.model_name)
+        .group_by(Task.provider_id, AIProvider.name, AIProvider.model)
         .order_by(
             func.count(Task.id).desc(),
             func.coalesce(func.sum(token_total_expr), 0).desc(),
             AIProvider.name.asc(),
-            Task.model_name.asc(),
+            AIProvider.model.asc(),
             Task.provider_id.asc(),
         )
     )

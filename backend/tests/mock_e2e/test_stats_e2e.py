@@ -42,7 +42,7 @@ from app.dependencies.project_access import (
     require_project_access_scope,
 )
 from app.main import app
-from app.models import Base, Issue, Task, TaskStatus
+from app.models import AIProvider, Base, Issue, Task, TaskStatus
 from app.core.utcnow import utcnow
 
 
@@ -271,6 +271,24 @@ async def _seed_task(db_session: AsyncSession, issue: Issue = None, **overrides)
     await db_session.commit()
     await db_session.refresh(task)
     return task
+
+
+async def _seed_provider(db_session: AsyncSession, **overrides) -> AIProvider:
+    """Create an AI provider directly in the test database."""
+    defaults = dict(
+        name="Claude Test",
+        base_url="https://api.example.test",
+        api_key="test-key",
+        model="claude-sonnet-test",
+        max_turns=20,
+        is_default=False,
+    )
+    defaults.update(overrides)
+    provider = AIProvider(**defaults)
+    db_session.add(provider)
+    await db_session.commit()
+    await db_session.refresh(provider)
+    return provider
 
 
 # ---------------------------------------------------------------------------
@@ -805,6 +823,90 @@ class TestGetAnalytics:
         data = resp.json()
         assert data["summary"]["success_rate"] is None
         assert data["summary"]["failure_rate"] is None
+
+    async def test_provider_analytics_excludes_unfinished_tasks(self, client, db_session):
+        """Provider tab metrics should be based on finished tasks only."""
+        now = utcnow()
+        provider = await _seed_provider(db_session)
+        for status in (
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+            TaskStatus.PENDING,
+            TaskStatus.QUEUED,
+            TaskStatus.RUNNING,
+        ):
+            await _seed_task(
+                db_session,
+                status=status,
+                provider_id=provider.id,
+                model_name="claude-sonnet-test",
+                input_tokens=100,
+                output_tokens=50,
+                created_at=now - timedelta(days=1),
+            )
+
+        resp = await client.get("/api/stats/analytics")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert data["provider_summary"]["provider_covered_task_count"] == 3
+        assert data["provider_summary"]["provider_covered_total_tokens"] == 450
+        assert data["provider_summary"]["provider_success_rate"] == pytest.approx(1 / 3)
+
+        provider = data["providers"][0]
+        assert provider["task_count"] == 3
+        assert provider["finished_task_count"] == 3
+        assert provider["completed_task_count"] == 1
+        assert provider["failed_task_count"] == 1
+        assert provider["cancelled_task_count"] == 1
+        assert provider["total_tokens"] == 450
+
+    async def test_provider_analytics_uses_provider_model_and_ignores_unlinked_tasks(self, client, db_session):
+        """Provider tab metrics should ignore tasks that cannot join to a provider row."""
+        now = utcnow()
+        provider = await _seed_provider(
+            db_session,
+            name="Claude Config",
+            model="configured-claude-model",
+        )
+        await _seed_task(
+            db_session,
+            status=TaskStatus.COMPLETED,
+            provider_id=provider.id,
+            model_name=None,
+            input_tokens=100,
+            output_tokens=50,
+            created_at=now - timedelta(days=1),
+        )
+        await _seed_task(
+            db_session,
+            status=TaskStatus.COMPLETED,
+            provider_id=None,
+            model_name="legacy-model",
+            input_tokens=100,
+            output_tokens=50,
+            created_at=now - timedelta(days=1),
+        )
+        await _seed_task(
+            db_session,
+            status=TaskStatus.COMPLETED,
+            provider_id=999,
+            model_name="deleted-provider-model",
+            input_tokens=100,
+            output_tokens=50,
+            created_at=now - timedelta(days=1),
+        )
+
+        resp = await client.get("/api/stats/analytics")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert data["provider_summary"]["provider_covered_task_count"] == 1
+        assert len(data["providers"]) == 1
+        assert data["providers"][0]["provider_name"] == "Claude Config"
+        assert data["providers"][0]["provider_model"] == "configured-claude-model"
+        assert data["providers"][0]["task_count"] == 1
 
     async def test_available_initiators_list(self, client, db_session):
         """available_initiators lists all initiators with task counts."""
