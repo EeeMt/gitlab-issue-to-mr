@@ -16,7 +16,7 @@ from app.core.mattermost_notifications import (
     MATTERMOST_TARGET_TYPE_INITIATOR_DM,
     notify_task_event,
 )
-from app.models import MattermostNotificationProfile, Task, TaskStatus
+from app.models import Issue, MattermostNotificationProfile, Task, TaskStatus
 
 
 class _SessionContext:
@@ -560,6 +560,100 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
         mock_client.create_post.assert_awaited_once()
         post_args = mock_client.create_post.await_args.args
         self.assertEqual(post_args[0], "channel-1")
+
+    async def test_unloaded_issue_does_not_detach_caller_task(self) -> None:
+        """Loading an unloaded issue for rendering must not mutate the caller's session.
+
+        Successful task notifications run before monitor_container_run commits the
+        final task status and stats.  Detaching the caller's Task there can make
+        the later commit miss those changes, while failed/retry paths already
+        have the terminal state persisted before notifying.
+        """
+        task = Task(
+            id=14,
+            project_id=1,
+            issue_id=44,
+            user_prompt="x",
+            status=TaskStatus.COMPLETED,
+            initiator_username="alice",
+        )
+
+        issue = Issue(
+            id=44,
+            project_id=1,
+            title="Notify",
+            description="Notify",
+            branch_name="feature/notify",
+            target_branch="main",
+            merge_request_iid=7,
+            merge_request_url="https://gitlab.example.com/project/-/merge_requests/7",
+        )
+        profile = MattermostNotificationProfile(
+            id=6,
+            name="C",
+            enabled=True,
+            target_type=MATTERMOST_TARGET_TYPE_CHANNEL,
+            channel_id="channel-1",
+            mention_in_channel=False,
+            event_types_json='["task_completed"]',
+            field_keys_json='["task_id","status","merge_request"]',
+        )
+
+        caller_session = MagicMock()
+        task_state = MagicMock()
+        task_state.expired = False
+        task_state.unloaded = {"issue"}
+        task_state.session = caller_session
+
+        issue_session = MagicMock()
+        issue_session.execute = AsyncMock(
+            return_value=SimpleNamespace(scalar_one_or_none=lambda: issue)
+        )
+        issue_session.expunge = MagicMock()
+
+        profile_session = MagicMock()
+        profile_session.execute = AsyncMock(
+            return_value=SimpleNamespace(
+                scalars=lambda: SimpleNamespace(all=lambda: [profile])
+            )
+        )
+        profile_session.commit = AsyncMock()
+
+        session_call_count = 0
+
+        class _MultiSessionContext:
+            async def __aenter__(self_inner):
+                nonlocal session_call_count
+                session_call_count += 1
+                return issue_session if session_call_count == 1 else profile_session
+
+            async def __aexit__(self_inner, exc_type, exc, tb):
+                return False
+
+        mock_client = AsyncMock()
+
+        with patch(
+            "app.core.mattermost_notifications.inspect",
+            return_value=task_state,
+        ), patch(
+            "app.core.mattermost_notifications.AsyncSessionLocal",
+            return_value=_MultiSessionContext(),
+        ), patch(
+            "app.core.mattermost_notifications.MattermostClient",
+            return_value=mock_client,
+        ), patch(
+            "app.core.mattermost_notifications.get_effective_settings",
+            return_value=SimpleNamespace(
+                mattermost_server_url="https://mm",
+                mattermost_bot_token="tok",
+                dashboard_url="https://dash",
+            ),
+        ):
+            await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
+
+        caller_session.expunge.assert_not_called()
+        issue_session.expunge.assert_called_once_with(issue)
+        mock_client.create_post.assert_awaited_once()
 
 
 # =======================================================================

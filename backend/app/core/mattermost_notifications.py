@@ -76,6 +76,7 @@ MATTERMOST_FIELD_KEYS = (
     MATTERMOST_FIELD_TASK_LINK,
 )
 MATTERMOST_FIELD_KEY_SET = set(MATTERMOST_FIELD_KEYS)
+_ISSUE_NOT_PROVIDED = object()
 
 
 class MattermostNotificationError(RuntimeError):
@@ -314,9 +315,23 @@ async def _resolve_mattermost_user_id(
     return mattermost_user_id
 
 
-def _build_attachment_fields(task: Task, event_type: str, field_keys: list[str], context: dict[str, Any]) -> list[dict[str, Any]]:
+def _resolve_render_issue(task: Task, issue: Any = _ISSUE_NOT_PROVIDED) -> Any:
+    if issue is not _ISSUE_NOT_PROVIDED:
+        return issue
+    return getattr(task, "issue", None)
+
+
+def _build_attachment_fields(
+    task: Task,
+    event_type: str,
+    field_keys: list[str],
+    context: dict[str, Any],
+    *,
+    issue: Any = _ISSUE_NOT_PROVIDED,
+) -> list[dict[str, Any]]:
     settings = get_effective_settings()
     task_url = f"{settings.dashboard_url}/tasks/{task.id}"
+    render_issue = _resolve_render_issue(task, issue)
     schedule_change = None
     if context.get("previous_scheduled_at") is not None or context.get("scheduled_at") is not None:
         schedule_change = (
@@ -334,13 +349,13 @@ def _build_attachment_fields(task: Task, event_type: str, field_keys: list[str],
         ),
         MATTERMOST_FIELD_MERGE_REQUEST: (
             "Merge Request",
-            (getattr(task.issue, 'merge_request_url', None) or "-") if task.issue_id else "-",
+            (getattr(render_issue, "merge_request_url", None) or "-") if task.issue_id else "-",
             True,
         ),
         MATTERMOST_FIELD_INITIATOR: ("发起人", task.initiator_username or "-", True),
         MATTERMOST_FIELD_STATUS: ("状态", task.status.value, True),
-        MATTERMOST_FIELD_BRANCH: ("分支", (getattr(task.issue, 'branch_name', None) or "-") if task.issue_id else "-", True),
-        MATTERMOST_FIELD_TARGET_BRANCH: ("目标分支", (getattr(task.issue, 'target_branch', None) or "-") if task.issue_id else "-", True),
+        MATTERMOST_FIELD_BRANCH: ("分支", (getattr(render_issue, "branch_name", None) or "-") if task.issue_id else "-", True),
+        MATTERMOST_FIELD_TARGET_BRANCH: ("目标分支", (getattr(render_issue, "target_branch", None) or "-") if task.issue_id else "-", True),
         MATTERMOST_FIELD_SCHEDULED_AT: ("预约时间", _format_datetime(task.scheduled_at), False),
         MATTERMOST_FIELD_SCHEDULE_CHANGE: ("时间变更", schedule_change or "-", False),
         MATTERMOST_FIELD_ERROR: ("错误摘要", (task.error_message or "-")[:500], False),
@@ -363,7 +378,13 @@ def _build_attachment_fields(task: Task, event_type: str, field_keys: list[str],
     return fields
 
 
-def _build_card_markdown(task: Task, event_type: str, context: dict[str, Any]) -> str:
+def _build_card_markdown(
+    task: Task,
+    event_type: str,
+    context: dict[str, Any],
+    *,
+    issue: Any = _ISSUE_NOT_PROVIDED,
+) -> str:
     settings = get_effective_settings()
     task_url = f"{settings.dashboard_url}/tasks/{task.id}"
     lines = [
@@ -375,9 +396,9 @@ def _build_card_markdown(task: Task, event_type: str, context: dict[str, Any]) -
 
     if task.issue_id is not None:
         lines.append(f"- Issue: `#{task.issue_id}`")
-    issue = getattr(task, 'issue', None)
-    if issue and getattr(issue, 'merge_request_iid', None) is not None:
-        lines.append(f"- Merge Request: `!{issue.merge_request_iid}`")
+    render_issue = _resolve_render_issue(task, issue)
+    if render_issue and getattr(render_issue, "merge_request_iid", None) is not None:
+        lines.append(f"- Merge Request: `!{render_issue.merge_request_iid}`")
     if task.initiator_username:
         lines.append(f"- 发起人: `{task.initiator_username}`")
     if task.scheduled_at is not None:
@@ -409,9 +430,11 @@ async def notify_task_event(
 
     context_data = context or {}
 
-    # Ensure task.issue is loaded so that _build_card_markdown and
-    # _build_attachment_fields can safely access it without triggering
-    # async lazy-load failures (the Task model does not use AsyncAttrs).
+    # Resolve issue data for rendering without mutating the caller's Task.
+    # Successful worker notifications run before the caller commits final task
+    # status/stats; detaching or reassigning that Task here can drop those
+    # pending changes.
+    render_issue: Any = _ISSUE_NOT_PROVIDED
     task_state = inspect(task)
     if task_state.expired:
         # The task was expired by an intermediate db.commit() in the caller
@@ -435,27 +458,25 @@ async def notify_task_event(
                 return
             if task.issue_id is not None:
                 issue_result = await reload_session.execute(select(Issue).where(Issue.id == task.issue_id))
-                reloaded_issue = issue_result.scalar_one_or_none()
-                if reloaded_issue is not None:
-                    reload_session.expunge(reloaded_issue)
+                render_issue = issue_result.scalar_one_or_none()
+                if render_issue is not None:
+                    reload_session.expunge(render_issue)
                 reload_session.expunge(task)
-                task.issue = reloaded_issue
             else:
+                render_issue = None
                 reload_session.expunge(task)
     elif task.issue_id is not None and "issue" in task_state.unloaded:
         async with AsyncSessionLocal() as session:
             issue_result = await session.execute(
                 select(Issue).where(Issue.id == task.issue_id)
             )
-            issue = issue_result.scalar_one_or_none()
-            if issue is not None:
-                session.expunge(issue)
-            # Detach the task from any active session so that setting
-            # task.issue does not conflict with an already-cached Issue
-            # instance (e.g. when the caller still holds a session open).
-            if task_state.session is not None:
-                task_state.session.expunge(task)
-            task.issue = issue
+            render_issue = issue_result.scalar_one_or_none()
+            if render_issue is not None:
+                session.expunge(render_issue)
+    elif task.issue_id is not None:
+        render_issue = getattr(task, "issue", None)
+    else:
+        render_issue = None
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -486,6 +507,7 @@ async def notify_task_event(
                         event_type,
                         deserialize_string_list(profile.field_keys_json),
                         context_data,
+                        issue=render_issue,
                     )
                     task_url = f"{settings.dashboard_url}/tasks/{task.id}"
                     mention_prefix = (
@@ -502,7 +524,7 @@ async def notify_task_event(
                             "title": _event_label(event_type),
                             "fields": fields,
                         }],
-                        "card": _build_card_markdown(task, event_type, context_data),
+                        "card": _build_card_markdown(task, event_type, context_data, issue=render_issue),
                     }
 
                     if profile.target_type == MATTERMOST_TARGET_TYPE_CHANNEL:
