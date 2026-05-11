@@ -393,7 +393,7 @@ const summaryItems = computed(() => {
     },
   ]
 
-  if (slotMaxTasks.value > 0) {
+  if (slotMaxTasks.value > 0 && !myTasksOnly.value) {
     baseItems.push({
       label: t('scheduleOverview.fullSlots'),
       value: String(fullSlotCount.value),

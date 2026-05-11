@@ -1055,5 +1055,24 @@ describe('ScheduleOverview', () => {
       // myTasksOnly is a ref that the template binds to n-button @click toggle
       expect(typeof (wrapper.vm as any).myTasksOnly).toBe('boolean')
     })
+
+    it('hides full slots card when myTasksOnly is true even with slot_max_tasks > 0', async () => {
+      ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 5 })
+
+      wrapper = mountComponent()
+      await flushPromises()
+
+      // Verify card is present in global view
+      expect((wrapper.vm.summaryItems as any[]).find((i: any) => i.label === 'scheduleOverview.fullSlots')).toBeTruthy()
+
+      ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 5 })
+      ;(mockApi.getScheduledTasks as Mock).mockResolvedValue(mockScheduledTasks)
+      ;(wrapper.vm as any).myTasksOnly = true
+      await flushPromises()
+
+      const items = wrapper.vm.summaryItems as any[]
+      const fullSlotsItem = items.find((i: any) => i.label === 'scheduleOverview.fullSlots')
+      expect(fullSlotsItem).toBeUndefined()
+    })
   })
 })
