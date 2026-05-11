@@ -33,6 +33,15 @@ export type NormalizedTaskProcessRow = NormalizedTextEventRow | NormalizedToolEv
 
 const STRUCTURED_TYPES = new Set(['thinking', 'assistant_text', 'tool_call'])
 
+function parseJsonMetadata(metadata: unknown): unknown {
+  if (typeof metadata !== 'string') return metadata
+  try {
+    return JSON.parse(metadata)
+  } catch {
+    return metadata
+  }
+}
+
 export function isTextRow(row: NormalizedTaskProcessRow): row is NormalizedTextEventRow {
   return row.kind === 'thinking' || row.kind === 'assistant_text'
 }
@@ -151,16 +160,18 @@ export function formatTimestamp(iso: string): string {
 }
 
 export function parseToolCall(log: TaskLog): ToolCall {
-  const call = (log.metadata && typeof log.metadata === 'object' && !Array.isArray(log.metadata))
-    ? log.metadata as unknown as ToolCall
+  const metadata = parseJsonMetadata(log.metadata)
+  const call = (metadata && typeof metadata === 'object' && !Array.isArray(metadata))
+    ? metadata as unknown as ToolCall
     : { name: 'Unknown', input: {}, output: null, error: false }
   return { ...call, timestamp: log.created_at }
 }
 
 export function parseTextEntry(metadata: unknown): ParsedTextEntry {
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata))
+  const parsedMetadata = parseJsonMetadata(metadata)
+  if (!parsedMetadata || typeof parsedMetadata !== 'object' || Array.isArray(parsedMetadata))
     return { text: '', preview: '', payloadId: null, charCount: null, truncated: false }
-  const obj = metadata as Record<string, unknown>
+  const obj = parsedMetadata as Record<string, unknown>
   const text = typeof obj.text === 'string' ? obj.text : ''
   const preview = typeof obj.preview === 'string' ? obj.preview : ''
   const payloadId = typeof obj.payload_id === 'number' ? obj.payload_id : null
@@ -171,8 +182,9 @@ export function parseTextEntry(metadata: unknown): ParsedTextEntry {
 
 export function parseSystemInitEntry(taskLogs: TaskLog[]) {
   const entry = taskLogs.find((l) => l.log_type === 'system_init')
-  if (!entry?.metadata || typeof entry.metadata !== 'object' || Array.isArray(entry.metadata)) return null
-  const obj = entry.metadata as Record<string, unknown>
+  const metadata = parseJsonMetadata(entry?.metadata)
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null
+  const obj = metadata as Record<string, unknown>
   return {
     model: typeof obj.model === 'string' ? obj.model : null,
     cwd: typeof obj.cwd === 'string' ? obj.cwd : null,
@@ -184,8 +196,9 @@ export function normalizeTaskProcessRows(taskLogs: TaskLog[]): NormalizedTaskPro
   const batchEvents: TaskLog[] = []
 
   for (const batch of taskLogs.filter((l) => l.log_type === 'tool_calls_json')) {
-    if (!batch.metadata || !Array.isArray(batch.metadata)) continue
-    const calls = batch.metadata as ToolCall[]
+    const metadata = parseJsonMetadata(batch.metadata)
+    if (!metadata || !Array.isArray(metadata)) continue
+    const calls = metadata as ToolCall[]
     calls.forEach((call, i) => {
       batchEvents.push({
         id: -(batch.id * 1000 + i + 1),

@@ -14,11 +14,11 @@
       <div class="tool-badge-row">
         <button
           class="tool-badge"
-          :class="{ 'tool-badge--active': showDetail, 'tool-badge--loading': showDetail && loading }"
-          :disabled="showDetail && loading"
+          :class="{ 'tool-badge--active': showDetail, 'tool-badge--loading': isDetailBusy }"
+          :disabled="isDetailBusy"
           @click="toggleDetail"
         >
-          <span v-if="showDetail && loading" class="badge-spin-ring"></span>
+          <span v-if="isDetailBusy" class="badge-spin-ring"></span>
           <n-icon v-else size="10" class="badge-chevron" :class="{ 'badge-chevron--open': showDetail }">
             <ChevronForward />
           </n-icon>
@@ -33,8 +33,8 @@
         @after-leave="onExpandAfterLeave"
       >
         <div v-if="showDetail" class="tool-content">
-          <div v-if="showContent && expandedText.trim()" class="event-content markdown-content" :class="{ 'event-content--thinking': row.kind === 'thinking' }" v-html="renderMarkdown(expandedText.trim())"></div>
-          <div v-else-if="showContent" class="event-content event-content--placeholder">{{ t('taskView.emptyContent') }}</div>
+          <div v-if="showContent && renderedHtml" class="event-content markdown-content" :class="{ 'event-content--thinking': row.kind === 'thinking' }" v-html="renderedHtml"></div>
+          <div v-else-if="showContent && !trimmedExpandedText" class="event-content event-content--placeholder">{{ t('taskView.emptyContent') }}</div>
         </div>
       </Transition>
     </div>
@@ -42,7 +42,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { NIcon } from 'naive-ui'
 import { BulbOutline, ChatboxOutline, ChevronForward } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
@@ -62,6 +62,64 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const showDetail = ref(false)
+const renderedHtml = ref('')
+const renderedSource = ref('')
+const isRenderingContent = ref(false)
+let renderFrame: number | null = null
+let renderToken = 0
+
+const trimmedExpandedText = computed(() => props.expandedText.trim())
+const isDetailBusy = computed(() => showDetail.value && (props.loading || isRenderingContent.value))
+
+function scheduleFrame(callback: FrameRequestCallback): number {
+  if (typeof requestAnimationFrame === 'function') return requestAnimationFrame(callback)
+  return window.setTimeout(() => callback(performance.now()), 0)
+}
+
+function cancelScheduledFrame(handle: number) {
+  if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(handle)
+  else window.clearTimeout(handle)
+}
+
+function clearScheduledRender() {
+  if (renderFrame === null) return
+  cancelScheduledFrame(renderFrame)
+  renderFrame = null
+}
+
+function scheduleMarkdownRender() {
+  const text = trimmedExpandedText.value
+  const token = ++renderToken
+  clearScheduledRender()
+
+  if (!showDetail.value || !props.showContent || !text) {
+    if (!text || !props.showContent) {
+      renderedHtml.value = ''
+      renderedSource.value = ''
+    }
+    isRenderingContent.value = false
+    return
+  }
+
+  if (renderedSource.value === text && renderedHtml.value) {
+    isRenderingContent.value = false
+    return
+  }
+
+  renderedHtml.value = ''
+  isRenderingContent.value = true
+  renderFrame = scheduleFrame(() => {
+    renderFrame = null
+    if (token !== renderToken) return
+    const html = renderMarkdown(text)
+    if (token !== renderToken) return
+    renderedSource.value = text
+    renderedHtml.value = html
+    isRenderingContent.value = false
+  })
+}
+
+watch([showDetail, () => props.showContent, trimmedExpandedText], scheduleMarkdownRender, { immediate: true })
 
 function onExpandEnter(el: Element) {
   const h = el as HTMLElement
@@ -102,6 +160,11 @@ const preview = computed(() => {
     return entry.truncated ? entry.preview + '…' : entry.preview
   }
   return ''
+})
+
+onBeforeUnmount(() => {
+  renderToken++
+  clearScheduledRender()
 })
 </script>
 

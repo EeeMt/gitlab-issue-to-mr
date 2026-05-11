@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { h } from 'vue'
+import { h, nextTick } from 'vue'
 import type { Task, TaskLog } from '../api'
 import TaskProcessPanel from './TaskProcessPanel.vue'
 import taskProcessPanelSource from './TaskProcessPanel.vue?raw'
@@ -15,6 +15,7 @@ vi.mock('../api', () => ({
 }))
 
 vi.mock('vue-i18n', () => ({
+  createI18n: () => ({ global: { locale: { value: 'zh-CN' } } }),
   useI18n: () => ({
     t: (key: string) => key,
   }),
@@ -50,6 +51,10 @@ vi.mock('naive-ui', () => {
     NCollapseItem: makePassthrough('NCollapseItem'),
     NButton: makePassthrough('NButton', 'button'),
     NSpin: makePassthrough('NSpin'),
+    dateEnUS: {},
+    dateZhCN: {},
+    enUS: {},
+    zhCN: {},
     useMessage: () => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }),
     useDialog: () => ({}),
   }
@@ -57,6 +62,14 @@ vi.mock('naive-ui', () => {
 
 function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+async function flushAnimationFrame() {
+  await new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve(undefined))
+    else setTimeout(resolve, 0)
+  })
+  await nextTick()
 }
 
 function createTask(status: Task['status']): Task {
@@ -129,7 +142,7 @@ describe('TaskProcessPanel', () => {
     expect(taskProcessPanelSource).toContain('rgba(74, 222, 128, 0.07)')
   })
 
-  it('renders input preview in tool_call header and output preview in body', () => {
+  it('renders input preview in tool_call header and output preview in body', async () => {
     const task = createTask('completed')
     const toolCallLog: TaskLog = {
       id: 42,
@@ -143,7 +156,6 @@ describe('TaskProcessPanel', () => {
         input_preview: 'git status --short',
         output: null,
         error: false,
-        output_payload_id: 15,
         output_preview: 'first few lines...',
         output_truncated: true,
       }),
@@ -160,6 +172,10 @@ describe('TaskProcessPanel', () => {
         taskStatus: 'completed',
       },
     })
+
+    const outputButton = wrapper.findAll('button.tool-badge').find((button) => button.text().includes('taskView.toolOutput'))
+    expect(outputButton).toBeTruthy()
+    await outputButton!.trigger('click')
 
     expect(wrapper.text()).toContain('git status --short')
     expect(wrapper.text()).toContain('first few lines...')
@@ -220,8 +236,9 @@ describe('TaskProcessPanel', () => {
       },
     })
 
-    await (wrapper.vm as unknown as { onCollapseChange: (names: string[], index: number) => void }).onCollapseChange(['detail'], 0)
+    await wrapper.get('button.tool-badge').trigger('click')
     await flushPromises()
+    await flushAnimationFrame()
 
     expect(mockGetTaskPayload).toHaveBeenCalledWith(1, 21)
     expect(wrapper.text()).toContain('full assistant body')
@@ -251,8 +268,9 @@ describe('TaskProcessPanel', () => {
       },
     })
 
-    await (wrapper.vm as unknown as { onCollapseChange: (names: string[], index: number) => void }).onCollapseChange(['detail'], 0)
+    await wrapper.get('button.tool-badge').trigger('click')
     await flushPromises()
+    await flushAnimationFrame()
 
     expect(wrapper.text()).toContain('taskView.failedToLoadPayload')
   })

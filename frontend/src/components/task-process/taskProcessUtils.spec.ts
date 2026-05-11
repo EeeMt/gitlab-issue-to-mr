@@ -7,6 +7,7 @@ import TaskProcessToolRow from './TaskProcessToolRow.vue'
 import { formatInput, getInputSummary, normalizeTaskProcessRows } from './taskProcessUtils'
 
 vi.mock('vue-i18n', () => ({
+  createI18n: () => ({ global: { locale: { value: 'zh-CN' } } }),
   useI18n: () => ({
     t: (key: string) => key,
   }),
@@ -52,6 +53,10 @@ vi.mock('naive-ui', () => {
     NCollapseItem,
     NButton: makePassthrough('NButton', 'button'),
     NSpin: makePassthrough('NSpin'),
+    dateEnUS: {},
+    dateZhCN: {},
+    enUS: {},
+    zhCN: {},
   }
 })
 
@@ -81,6 +86,7 @@ vi.mock('@vicons/ionicons5', () => {
     SearchOutline: icon,
     ExtensionPuzzleOutline: icon,
     ServerOutline: icon,
+    ChevronForward: icon,
   }
 })
 
@@ -186,7 +192,7 @@ describe('TaskProcessToolRow', () => {
     expect(wrapper.text()).not.toContain('taskView.noToolOutputCaptured')
   })
 
-  it('shows input preview in the header and pending text in the body for payload-backed tool calls', () => {
+  it('shows input preview in the header and pending text in the body for payload-backed tool calls', async () => {
     const wrapper = mount(TaskProcessToolRow, {
       props: {
         row: {
@@ -201,11 +207,13 @@ describe('TaskProcessToolRow', () => {
       },
     })
 
+    await wrapper.get('button.tool-badge').trigger('click')
+
     expect(wrapper.text()).toContain('/tmp/example.txt')
     expect(wrapper.text()).toContain('taskView.archivedInputPending')
   })
 
-  it('shows failure text for tool payload load errors', () => {
+  it('shows failure text for tool payload load errors', async () => {
     const wrapper = mount(TaskProcessToolRow, {
       props: {
         row: {
@@ -220,6 +228,8 @@ describe('TaskProcessToolRow', () => {
         outputFailed: true,
       },
     })
+
+    await wrapper.get('button.tool-badge').trigger('click')
 
     expect(wrapper.text()).toContain('taskView.failedToLoadPayload')
   })
