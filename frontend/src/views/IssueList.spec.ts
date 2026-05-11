@@ -25,7 +25,7 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
 const mockFilterState = vi.hoisted(() => ({
   filters: { value: {} },
   sort: { value: { field: 'created_at', order: 'desc' as const } },
-  visibleColumns: { value: ['id', 'title', 'project_id', 'status', 'task_count', 'merge_request', 'total_changes', 'total_tokens', 'created_at'] },
+  visibleColumns: { value: ['id', 'title', 'project_id', 'status', 'task_count', 'merge_request', 'total_changes', 'duration', 'total_tokens', 'created_at'] },
   apiParams: { value: { sort_by: 'created_at', sort_order: 'desc' } },
   addFilter: vi.fn(),
   removeFilter: vi.fn(),
@@ -248,6 +248,7 @@ function createMockIssue(overrides: Record<string, any> = {}): Issue {
       total_changes: 15,
       input_tokens: 1000,
       output_tokens: 500,
+      duration_seconds: 5400,
     },
     ...overrides,
   } as Issue
@@ -479,6 +480,37 @@ describe('IssueList', () => {
 
       const rows = wrapper.findAll('.n-data-table-row')
       expect(rows.length).toBe(0)
+    })
+
+    it('adds duration to the sort menu and default visible columns', async () => {
+      await mountComponent()
+
+      expect(wrapper.vm.filterConfig.sortFields).toContainEqual({
+        key: 'duration',
+        label: 'filter.sortDuration',
+      })
+      expect(wrapper.vm.filterConfig.columns).toContainEqual({
+        key: 'duration',
+        label: 'dashboard.duration',
+        defaultVisible: true,
+      })
+      expect(wrapper.vm.columns.some((column: any) => column.key === 'duration')).toBe(true)
+    })
+
+    it('renders issue total task duration from totals', async () => {
+      await mountComponent()
+      const durationColumn = wrapper.vm.allColumns.find((column: any) => column.key === 'duration')
+
+      expect(durationColumn.render(createMockIssue({
+        totals: {
+          additions: 0,
+          deletions: 0,
+          total_changes: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          duration_seconds: 3661,
+        },
+      }))).toBe('1h 1m')
     })
   })
 
@@ -905,7 +937,7 @@ describe('IssueList', () => {
       await mountComponent()
       const col = getColumn('total_changes')
       const result = col.render(createMockIssue({
-        totals: { additions: 0, deletions: 0, total_changes: 0, input_tokens: 0, output_tokens: 0 },
+        totals: { additions: 0, deletions: 0, total_changes: 0, input_tokens: 0, output_tokens: 0, duration_seconds: 0 },
       }))
       expect(result).toBe('—')
     })
@@ -929,7 +961,7 @@ describe('IssueList', () => {
       await mountComponent()
       const col = getColumn('total_tokens')
       const result = col.render(createMockIssue({
-        totals: { additions: 0, deletions: 0, total_changes: 0, input_tokens: 0, output_tokens: 0 },
+        totals: { additions: 0, deletions: 0, total_changes: 0, input_tokens: 0, output_tokens: 0, duration_seconds: 0 },
       }))
       expect(result).toBe('—')
     })

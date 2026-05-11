@@ -91,6 +91,7 @@ import FilterToolbar from '../components/filter/FilterToolbar.vue'
 import { useFilterSort, type FilterSortConfig } from '../composables/useFilterSort'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
+import { formatDurationSec } from '../utils/format'
 import { EllipseOutline, FolderOpenOutline, CalendarOutline, PersonOutline, GitMergeOutline, DocumentTextOutline, AlertCircleOutline, SyncOutline, CheckmarkCircleOutline } from '@vicons/ionicons5'
 
 const router = useRouter()
@@ -177,6 +178,7 @@ const filterConfig: FilterSortConfig = {
     { key: 'status', label: 'filter.sortStatus' },
     { key: 'total_changes', label: 'filter.sortChanges' },
     { key: 'total_input_tokens', label: 'filter.sortTokens' },
+    { key: 'duration', label: 'filter.sortDuration' },
   ],
   columns: [
     { key: 'id', label: 'dashboard.id', defaultVisible: true, alwaysVisible: true },
@@ -186,6 +188,7 @@ const filterConfig: FilterSortConfig = {
     { key: 'task_count', label: 'issue.field.tasks', defaultVisible: true },
     { key: 'merge_request', label: 'filter.hasMr', defaultVisible: true },
     { key: 'total_changes', label: 'common.changes', defaultVisible: true },
+    { key: 'duration', label: 'dashboard.duration', defaultVisible: true },
     { key: 'total_tokens', label: 'analytics.tokens', defaultVisible: true },
     { key: 'initiator_username', label: 'issue.field.creator', defaultVisible: false },
     { key: 'created_at', label: 'issue.field.createdAt', defaultVisible: true },
@@ -327,6 +330,16 @@ const allColumns = computed<DataTableColumns<Issue>>(() => [
         h('div', String(totals.total_changes)),
         h('div', { style: secondaryTextStyle }, t('analytics.changeBreakdown', { additions: totals.additions, deletions: totals.deletions })),
       ])
+    },
+  },
+  {
+    title: t('dashboard.duration'),
+    key: 'duration',
+    width: 100,
+    render: (row) => {
+      const durationSeconds = row.totals?.duration_seconds ?? 0
+      if (durationSeconds <= 0) return '—'
+      return formatDurationSec(durationSeconds)
     },
   },
   {

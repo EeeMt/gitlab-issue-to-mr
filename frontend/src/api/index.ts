@@ -169,6 +169,7 @@ export interface Issue {
     total_changes: number
     input_tokens: number
     output_tokens: number
+    duration_seconds: number
   }
   // New fields for branch deletion handling
   delete_branch_on_close: boolean

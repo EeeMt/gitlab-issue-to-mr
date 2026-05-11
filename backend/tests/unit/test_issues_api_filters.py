@@ -51,9 +51,27 @@ def _mock_db_with_rows(rows, total=None):
     return mock_db
 
 
-def _row(issue, task_count=0, additions=0, deletions=0, total_changes=0, input_tokens=0, output_tokens=0):
+def _row(
+    issue,
+    task_count=0,
+    additions=0,
+    deletions=0,
+    total_changes=0,
+    input_tokens=0,
+    output_tokens=0,
+    duration_seconds=0,
+):
     row = MagicMock()
-    vals = [issue, task_count, additions, deletions, total_changes, input_tokens, output_tokens]
+    vals = [
+        issue,
+        task_count,
+        additions,
+        deletions,
+        total_changes,
+        input_tokens,
+        output_tokens,
+        duration_seconds,
+    ]
     row.__getitem__ = lambda self, idx: vals[idx]
     return row
 
@@ -783,6 +801,23 @@ class TestListIssuesSortByAggregateFields(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("items", result)
 
+    async def test_sort_by_duration(self):
+        """Sort by duration should use the issue task duration aggregate."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        result = await list_issues(
+            status=None, project_id=None, initiator_user_id=None,
+            search=None, created_after=None, created_before=None,
+            sort_by="duration", sort_order="desc",
+            page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+
 
 # ---------------------------------------------------------------------------
 # Update issue edge cases (lines 394, 403, 412)
@@ -882,4 +917,3 @@ class TestListIssuesCombinedFilters(unittest.IsolatedAsyncioTestCase):
             access_scope=scope,
         )
         self.assertIn("items", result)
-

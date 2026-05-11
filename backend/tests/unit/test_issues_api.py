@@ -261,9 +261,9 @@ class ListIssuesTests(unittest.IsolatedAsyncioTestCase):
 
         issue = _make_issue(id=1, title="Issue 1")
 
-        # Mock for the main query returning (Issue, task_count, additions, deletions, total_changes, input_tokens, output_tokens) rows
+        # Mock for the main query returning Issue plus task aggregate columns.
         row = MagicMock()
-        row.__getitem__ = lambda self, idx: [issue, 3, 100, 20, 120, 5000, 3000][idx]
+        row.__getitem__ = lambda self, idx: [issue, 3, 100, 20, 120, 5000, 3000, 5400][idx]
         main_result = MagicMock()
         main_result.all.return_value = [row]
 
@@ -296,6 +296,7 @@ class ListIssuesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["items"][0]["totals"]["additions"], 100)
         self.assertEqual(result["items"][0]["totals"]["deletions"], 20)
         self.assertEqual(result["items"][0]["totals"]["input_tokens"], 5000)
+        self.assertEqual(result["items"][0]["totals"]["duration_seconds"], 5400)
 
 
 # ---------------------------------------------------------------------------

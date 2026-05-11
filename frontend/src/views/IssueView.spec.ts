@@ -401,7 +401,7 @@ function createMockIssue(overrides: Record<string, any> = {}): any {
     ],
     totals: {
       additions: 10, deletions: 5, total_changes: 15,
-      input_tokens: 150, output_tokens: 75,
+      input_tokens: 150, output_tokens: 75, duration_seconds: 0,
     },
     ...overrides,
   }

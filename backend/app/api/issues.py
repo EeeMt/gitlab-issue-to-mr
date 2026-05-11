@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 from app.config import get_effective_settings
 from app.core.gitlab_client import get_gitlab_client
 from app.core.task_helpers import _require_issue_operator
+from app.core.utcnow import utcnow
 from app.core.worker_workspace import build_issue_workspace_paths
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_user
@@ -80,6 +81,16 @@ def _serialize_issue(issue: Issue, task_count: Optional[int] = None) -> dict:
     return data
 
 
+def _task_duration_seconds(task: Task, now: Optional[datetime] = None) -> float:
+    """Return runtime seconds for one task, including currently running tasks."""
+    if not task.started_at:
+        return 0.0
+    ended_at = task.completed_at or now or utcnow()
+    if ended_at < task.started_at:
+        return 0.0
+    return (ended_at - task.started_at).total_seconds()
+
+
 def _serialize_issue_detail(issue: Issue) -> dict:
     """Serialize an Issue with its eagerly-loaded tasks."""
     data = _serialize_issue(issue)
@@ -108,12 +119,14 @@ def _serialize_issue_detail(issue: Issue) -> dict:
         }
         for t in tasks
     ]
+    now = utcnow()
     data["totals"] = {
         "additions": sum(t.additions or 0 for t in tasks),
         "deletions": sum(t.deletions or 0 for t in tasks),
         "total_changes": sum(t.total_changes or 0 for t in tasks),
         "input_tokens": sum(t.input_tokens or 0 for t in tasks),
         "output_tokens": sum(t.output_tokens or 0 for t in tasks),
+        "duration_seconds": sum(_task_duration_seconds(t, now) for t in tasks),
     }
     return data
 
@@ -183,7 +196,14 @@ async def create_issue(
     return _serialize_issue(issue)
 
 
-ISSUES_SORT_FIELDS = {"created_at", "status", "total_changes", "total_input_tokens", "total_output_tokens"}
+ISSUES_SORT_FIELDS = {
+    "created_at",
+    "status",
+    "total_changes",
+    "total_input_tokens",
+    "total_output_tokens",
+    "duration",
+}
 SORT_ORDERS = {"asc", "desc"}
 
 
@@ -228,6 +248,11 @@ async def list_issues(
             )
         effective_sort_order = sort_order
 
+    duration_seconds_expr = func.coalesce(
+        func.extract("epoch", Task.completed_at - Task.started_at),
+        func.extract("epoch", func.now() - Task.started_at),
+    )
+
     # Build a subquery for task_count and totals
     task_agg_subq = (
         select(
@@ -238,15 +263,21 @@ async def list_issues(
             func.coalesce(func.sum(Task.total_changes), 0).label("total_changes"),
             func.coalesce(func.sum(Task.input_tokens), 0).label("total_input_tokens"),
             func.coalesce(func.sum(Task.output_tokens), 0).label("total_output_tokens"),
+            func.coalesce(func.sum(duration_seconds_expr), 0).label("duration_seconds"),
         )
         .group_by(Task.issue_id)
         .subquery()
     )
 
     # Determine sort column and direction
-    agg_sort_fields = {"total_changes", "total_input_tokens", "total_output_tokens"}
-    if effective_sort_by in agg_sort_fields:
-        sort_column = func.coalesce(getattr(task_agg_subq.c, effective_sort_by), 0)
+    agg_sort_columns = {
+        "total_changes": task_agg_subq.c.total_changes,
+        "total_input_tokens": task_agg_subq.c.total_input_tokens,
+        "total_output_tokens": task_agg_subq.c.total_output_tokens,
+        "duration": task_agg_subq.c.duration_seconds,
+    }
+    if effective_sort_by in agg_sort_columns:
+        sort_column = func.coalesce(agg_sort_columns[effective_sort_by], 0)
     else:
         sort_column = getattr(Issue, effective_sort_by)
     order_clause = sort_column.asc() if effective_sort_order == "asc" else sort_column.desc()
@@ -260,6 +291,7 @@ async def list_issues(
             task_agg_subq.c.total_changes,
             task_agg_subq.c.total_input_tokens,
             task_agg_subq.c.total_output_tokens,
+            task_agg_subq.c.duration_seconds,
         )
         .outerjoin(task_agg_subq, Issue.id == task_agg_subq.c.issue_id)
         .order_by(order_clause)
@@ -375,6 +407,7 @@ async def list_issues(
                 "total_changes": row[4] or 0,
                 "input_tokens": row[5] or 0,
                 "output_tokens": row[6] or 0,
+                "duration_seconds": float(row[7] or 0),
             },
         }
         for row in rows
