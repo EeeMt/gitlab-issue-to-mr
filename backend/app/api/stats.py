@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import case, select, func, false, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_effective_settings
 from app.database import get_db
 from app.dependencies.auth import get_optional_current_user, require_page_access
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
@@ -1056,6 +1057,8 @@ async def get_scheduled_stats(
     # Find busiest hour
     busiest = max(hourly_distribution, key=lambda b: b["count"])
 
+    settings = get_effective_settings()
+
     return {
         "summary": {
             "total": s.total,
@@ -1069,4 +1072,6 @@ async def get_scheduled_stats(
         },
         "hourly_distribution": hourly_distribution,
         "max_count": max_count,
+        "slot_max_tasks": settings.slot_max_tasks,
+        "slot_max_tasks_enforce": settings.slot_max_tasks_enforce,
     }

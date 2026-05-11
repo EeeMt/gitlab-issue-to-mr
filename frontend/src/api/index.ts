@@ -959,6 +959,8 @@ export interface ScheduledStatsResponse {
   summary: ScheduledStatsSummary
   hourly_distribution: HourlyBucket[]
   max_count: number
+  slot_max_tasks: number
+  slot_max_tasks_enforce: boolean
 }
 
 export async function getScheduledStats(params?: { project_id?: number; my?: boolean }): Promise<ScheduledStatsResponse> {

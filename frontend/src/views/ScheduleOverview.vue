@@ -288,7 +288,7 @@ import { useWindowSize } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { authState, isAdmin, initializeAuth } from '../auth'
-import { getScheduledTasks, getScheduledStats, rescheduleTask, getConfig, type Task, type ScheduledStatsResponse } from '../api'
+import { getScheduledTasks, getScheduledStats, rescheduleTask, type Task, type ScheduledStatsResponse } from '../api'
 import { formatDateTimeUtc8Compact, formatMonthDayTimeUtc8, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
 import { formatPriority, getProjectLabel as _getProjectLabel, isSameLocalDay } from '../utils/format'
 import { extractSlotErrorMessage } from '../utils/slotError'
@@ -599,17 +599,14 @@ async function fetchData() {
   loading.value = true
   try {
     const my = myTasksOnly.value || undefined
-    const [statsData, scheduledTaskData, config] = await Promise.all([
+    const [statsData, scheduledTaskData] = await Promise.all([
       getScheduledStats(my ? { my } : undefined),
       getScheduledTasks(my ? { my } : undefined),
-      getConfig().catch(() => null),
     ])
     scheduledStats.value = statsData
     scheduledTasks.value = scheduledTaskData
-    if (config) {
-      slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
-      slotEnforce.value = config.runtime?.slot_max_tasks_enforce ?? false
-    }
+    slotMaxTasks.value = statsData.slot_max_tasks ?? 0
+    slotEnforce.value = statsData.slot_max_tasks_enforce ?? false
     if (selectedWindow.value) {
       syncScheduleDrafts()
     }
