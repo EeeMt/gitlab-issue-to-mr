@@ -1169,5 +1169,51 @@ describe('CreateIssue', () => {
       const emptyMsg = wrapper.find('.prompt-template-dropdown__empty')
       expect(emptyMsg.exists()).toBe(true)
     })
+
+  // ── Delete Branch on Close Toggle ────────────────────────────
+  describe('delete_branch_on_close toggle', () => {
+    it('should default delete_branch_on_close to true', async () => {
+      await mountComponent()
+
+      expect(wrapper.vm.formValue.delete_branch_on_close).toBe(true)
+    })
+
+    it('should render delete branch toggle alongside MR toggle', async () => {
+      await mountComponent()
+
+      const switches = wrapper.findAll('button.n-switch')
+      // Expect one for create_mr and one for delete_branch_on_close
+      expect(switches.length).toBeGreaterThanOrEqual(2)
+    })
+
+    it('should toggle delete_branch_on_close when switch clicked', async () => {
+      await mountComponent()
+
+      const switches = wrapper.findAll('button.n-switch')
+      const deleteSwitch = switches[1]
+      expect(deleteSwitch).toBeTruthy()
+
+      await deleteSwitch.trigger('click')
+      await nextTick()
+
+      expect(wrapper.vm.formValue.delete_branch_on_close).toBe(false)
+    })
+
+    it('should include delete_branch_on_close in createIssue payload', async () => {
+      await mountComponent()
+
+      // Fill required fields
+      wrapper.vm.formValue.title = 'Test Issue'
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+
+      await wrapper.vm.handleSubmit()
+      await flushPromises()
+
+      const call = (mockApi.createIssue as Mock).mock.calls[0][0]
+      expect(call.delete_branch_on_close).toBe(true)
+    })
+  })
+
   })
 })

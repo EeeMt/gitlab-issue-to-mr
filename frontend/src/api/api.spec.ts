@@ -467,4 +467,26 @@ describe('API functions', () => {
       expect(mockAxiosPatch).toHaveBeenCalledWith('/admin/usage-limits/users/7', payload)
     })
   })
+
+  describe('deleteIssueBranch', () => {
+    it('should POST to /issues/123/delete-branch and return issue', async () => {
+      const mockIssue = {
+        id: 123,
+        project_id: 1,
+        issue_iid: 10,
+        title: 'Test issue',
+        delete_branch_on_close: true,
+        branch_deleted: false
+      }
+      mockAxiosPost.mockResolvedValue({ data: mockIssue })
+
+      const fn = (apiModule as unknown as Record<string, any>).deleteIssueBranch
+      expect(typeof fn).toBe('function')
+
+      const result = await fn(123)
+
+      expect(mockAxiosPost).toHaveBeenCalledWith('/issues/123/delete-branch')
+      expect(result).toEqual(mockIssue)
+    })
+  })
 })

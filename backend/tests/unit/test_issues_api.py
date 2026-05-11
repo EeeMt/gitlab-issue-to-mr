@@ -820,7 +820,10 @@ class DeleteIssueBranchEndpointTests(unittest.IsolatedAsyncioTestCase):
         with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
             resp = await self._call(issue, mock_db)
 
-        self.assertEqual(resp, {"success": True})
+        self.assertIn("id", resp)
+        self.assertEqual(resp["id"], 1)
+        self.assertIn("branch_deleted", resp)
+        self.assertTrue(resp["branch_deleted"])
         mock_client.delete_branch.assert_called_once_with(42, "codify/issue-1")
         self.assertTrue(issue.branch_deleted)
         mock_db.commit.assert_awaited_once()
@@ -920,7 +923,9 @@ class DeleteIssueBranchEndpointTests(unittest.IsolatedAsyncioTestCase):
         with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
             resp = await self._call(issue, mock_db)
 
-        self.assertEqual(resp, {"success": True})
+        self.assertIn("id", resp)
+        self.assertEqual(resp["id"], 1)
+        self.assertTrue(resp["branch_deleted"])
         mock_client.delete_branch.assert_not_called()
         mock_db.commit.assert_not_awaited()
         mock_db.refresh.assert_not_awaited()

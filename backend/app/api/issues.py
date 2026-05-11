@@ -487,7 +487,9 @@ async def delete_issue_branch(
 ):
     """Manually delete the GitLab branch associated with a closed issue."""
     result = await db.execute(
-        select(Issue).where(Issue.id == issue_id)
+        select(Issue)
+        .where(Issue.id == issue_id)
+        .options(selectinload(Issue.tasks))
     )
     issue = result.scalar_one_or_none()
     if issue is None:
@@ -504,7 +506,8 @@ async def delete_issue_branch(
         raise HTTPException(status_code=400, detail="Issue has no branch to delete")
 
     if issue.branch_deleted:
-        return {"success": True}
+        # Already deleted: return the full serialized issue detail to match frontend expectations
+        return _serialize_issue_detail(issue)
 
     try:
         client = get_gitlab_client()
@@ -518,7 +521,9 @@ async def delete_issue_branch(
 
     issue.branch_deleted = True
     await db.commit()
-    return {"success": True}
+    # Refresh tasks relationship (match pattern used by close_issue)
+    await db.refresh(issue, attribute_names=["tasks"])
+    return _serialize_issue_detail(issue)
 
 
 @router.delete("/{issue_id}")

@@ -34,6 +34,37 @@
               </template>
               {{ t('issue.confirmClose') }}
             </n-popconfirm>
+            <n-tooltip v-if="issue.status === 'closed' && issue.branch_name && issue.branch_deleted" :title="t('issue.branchAlreadyDeleted')">
+              <n-button
+                data-testid="issue-delete-branch-button"
+                type="error"
+                secondary
+                strong
+                :disabled="deletingBranch || issue.branch_deleted"
+                :loading="deletingBranch"
+                @click="handleDeleteBranch"
+              >
+                {{ t('issue.deleteBranch') }}
+              </n-button>
+            </n-tooltip>
+            <n-popconfirm
+              v-else-if="issue.status === 'closed' && issue.branch_name"
+              @positive-click="handleDeleteBranch"
+            >
+              <template #trigger>
+                <n-button
+                  data-testid="issue-delete-branch-button"
+                  type="error"
+                  secondary
+                  strong
+                  :disabled="deletingBranch"
+                  :loading="deletingBranch"
+                >
+                  {{ t('issue.deleteBranch') }}
+                </n-button>
+              </template>
+              {{ t('issue.deleteBranchConfirm', { branch: issue.branch_name }) }}
+            </n-popconfirm>
           </template>
         </template>
       </PageHeader>
@@ -134,6 +165,26 @@
                     !{{ issue.merge_request_iid }}
                   </a>
                   <span v-else class="metadata-muted">{{ t('issue.noMergeRequest') }}</span>
+                </span>
+              </div>
+
+              <!-- Branch policy -->
+              <div v-if="issue.branch_name || issue.branch_deleted" class="metadata-row" data-testid="issue-branch-policy-row">
+                <span class="metadata-label">
+                  <n-icon size="14" class="metadata-label-icon"><GitBranchOutline /></n-icon>
+                  {{ t('issue.deleteBranchOnClose') }}
+                </span>
+                <span class="metadata-value">
+                  <n-tag size="small" round data-testid="delete-branch-badge" v-if="issue.delete_branch_on_close">
+                    {{ t('issue.deleteBranchBadge') }}
+                  </n-tag>
+                  <n-tag size="small" round data-testid="keep-branch-badge" v-else>
+                    {{ t('issue.keepBranchBadge') }}
+                  </n-tag>
+
+                  <n-tag size="small" round data-testid="branch-deleted-badge" v-if="issue.branch_deleted">
+                    {{ t('issue.branchDeletedBadge') }}
+                  </n-tag>
                 </span>
               </div>
 
@@ -510,8 +561,8 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin,
   NIcon, NDataTable, NInput, NDrawer, NDrawerContent, NSelect,
-  NRadio, NRadioGroup, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NAlert, NSwitch,
-  useMessage,
+  NRadio, NRadioGroup, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NAlert, NTooltip, NSwitch,
+  useMessage, useDialog,
   type DataTableColumns
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -531,7 +582,7 @@ import {
 import VariableEditor from '../components/VariableEditor.vue'
 import HeatmapChart from '../components/HeatmapChart.vue'
 import {
-  getIssue, updateIssue, closeIssue, createTask, retryTask, getPromptTemplates,
+  getIssue, updateIssue, closeIssue, createTask, retryTask, deleteIssueBranch, getPromptTemplates,
   getScheduledTasks, getSlotCapacity, getConfig, getProjects, getProviders,
   type Issue, type Task, type PromptTemplate, type SlotCapacityInfo, type Project, type AIProvider
 } from '../api'
@@ -561,6 +612,7 @@ const isOwner = computed(() => {
 // --- State ---
 const issue = ref<Issue | null>(null)
 const loading = ref(false)
+const deletingBranch = ref(false)
 let pollTimer: number | null = null
 const projects = ref<Project[]>([])
 
@@ -691,6 +743,8 @@ const taskColumns = computed<DataTableColumns<Task>>(() => {
         }
       },
       render: (row) => {
+        const prompt = row.user_prompt || ''
+        const display = prompt.length > 80 ? prompt.slice(0, 80) + '…' : prompt
         return h(
           'a',
           {
@@ -700,7 +754,7 @@ const taskColumns = computed<DataTableColumns<Task>>(() => {
               router.push({ name: 'TaskView', params: { id: row.id } })
             }
           },
-          row.user_prompt
+          display
         )
       }
     },
@@ -892,6 +946,19 @@ async function handleClose() {
   }
 }
 
+async function handleDeleteBranch() {
+  if (!issue.value) return
+  deletingBranch.value = true
+  try {
+    issue.value = await deleteIssueBranch(issueId.value)
+    message.success(t('issue.deleteBranchSuccess'))
+  } catch {
+    message.error(t('issue.deleteBranchFailed'))
+  } finally {
+    deletingBranch.value = false
+  }
+}
+
 async function handleSaveEdit() {
   editLoading.value = true
   try {
@@ -1005,6 +1072,28 @@ function handleTemplateItemClick(tmpl: PromptTemplate) {
     pendingTemplate.value = tmpl
   }
 }
+
+function handleTemplateClick(tmpl: PromptTemplate) {
+  const dialog = useDialog()
+  if (!hasExistingPrompt.value) {
+    applyPromptTemplate(tmpl)
+    showTemplateDrawer.value = false
+    return
+  }
+
+  dialog.warning({
+    title: t('common.confirm'),
+    content: t('createTask.templateOverwriteConfirm'),
+    positiveText: t('common.confirm'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: () => {
+      applyPromptTemplate(tmpl)
+      showTemplateDrawer.value = false
+    }
+  })
+}
+
+defineExpose({ handleTemplateClick })
 
 function confirmTemplateOverwrite() {
   if (pendingTemplate.value) {

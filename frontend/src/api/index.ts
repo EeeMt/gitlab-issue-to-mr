@@ -170,6 +170,9 @@ export interface Issue {
     input_tokens: number
     output_tokens: number
   }
+  // New fields for branch deletion handling
+  delete_branch_on_close: boolean
+  branch_deleted: boolean
 }
 
 export interface CreateIssueRequest {
@@ -178,6 +181,8 @@ export interface CreateIssueRequest {
   project_id: number
   base_branch?: string
   target_branch?: string
+  // Option to delete branch on issue close
+  delete_branch_on_close?: boolean
 }
 
 export interface IssueListResponse {
@@ -1464,6 +1469,11 @@ export async function setDefaultProvider(id: number): Promise<AIProvider> {
 export async function getMyUsageSummary(): Promise<CurrentUserUsageSummary> {
   const { data } = await api.get('/usage/me')
   return data
+}
+
+export async function deleteIssueBranch(id: number): Promise<Issue> {
+  const response = await api.post(`/issues/${id}/delete-branch`)
+  return response.data
 }
 
 export default api

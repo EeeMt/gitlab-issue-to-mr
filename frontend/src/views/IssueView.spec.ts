@@ -14,6 +14,7 @@ const { mockApi, resetMockApi, mockMessage, mockDialog } = vi.hoisted(() => {
     closeIssue: vi.fn<() => Promise<any>>(),
     createTask: vi.fn<() => Promise<any>>(),
     retryTask: vi.fn<() => Promise<any>>(),
+    deleteIssueBranch: vi.fn<() => Promise<any>>(),
     getPromptTemplates: vi.fn<() => Promise<any[]>>(),
     getScheduledTasks: vi.fn<() => Promise<any[]>>(),
     getSlotCapacity: vi.fn<() => Promise<any>>(),
@@ -58,6 +59,7 @@ vi.mock('../api', () => ({
   closeIssue: mockApi.closeIssue,
   createTask: mockApi.createTask,
   retryTask: mockApi.retryTask,
+  deleteIssueBranch: mockApi.deleteIssueBranch,
   getPromptTemplates: mockApi.getPromptTemplates,
   getScheduledTasks: mockApi.getScheduledTasks,
   getSlotCapacity: mockApi.getSlotCapacity,
@@ -108,7 +110,7 @@ vi.mock('../components/PageHeader.vue', () => ({
     setup(_p: any, { slots }: any) {
       return () => h('div', { class: 'page-header-mock', 'data-testid': 'page-header' }, [
         slots.title?.(),
-        slots.actions?.(),
+        h('div', { class: 'page-header-actions-mock', 'data-testid': 'page-header-actions' }, slots.actions?.()),
       ])
     },
   },
@@ -317,6 +319,30 @@ vi.mock('naive-ui', () => ({
     setup(_p: any, { slots }: any) {
       return () => h('div', { class: 'n-alert' }, slots.default?.())
     },
+  },
+  NSwitch: {
+    name: 'NSwitch',
+    props: ['value', 'disabled'],
+    emits: ['update:value'],
+    setup(props: any, { emit }: any) {
+      return () => h('button', {
+        class: 'n-switch',
+        disabled: props.disabled,
+        onClick: () => {
+          if (!props.disabled) {
+            emit('update:value', !props.value)
+          }
+        },
+      })
+    },
+  },
+  // Simple NTooltip stub that exposes the title via data-tooltip attribute for tests
+  NTooltip: {
+    name: 'NTooltip',
+    props: ['title'],
+    setup(props: any, { slots }: any) {
+      return () => h('span', { class: 'n-tooltip', 'data-tooltip': props.title, 'data-testid': 'n-tooltip' }, slots.default?.())
+    }
   },
   useMessage: () => mockMessage,
   useDialog: () => mockDialog,
@@ -555,6 +581,77 @@ describe('IssueView', () => {
       const branchFlow = wrapper.find('.branch-flow')
       expect(branchFlow.exists()).toBe(true)
       expect(branchFlow.text()).toBe('-')
+    })
+  })
+
+  // =========================================================================
+  // Branch policy & delete branch (Task 11)
+  // =========================================================================
+  describe('branch policy and delete branch', () => {
+    it('renders a branch-policy metadata row when issue.branch_name exists', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      // Expect a dedicated branch policy row to be rendered (data-testid used by implementation)
+      expect(wrapper.find('[data-testid="issue-branch-policy-row"]').exists()).toBe(true)
+    })
+
+    it('shows deleteBranchBadge or keepBranchBadge based on delete_branch_on_close', async () => {
+      setupDefaultMocks({ delete_branch_on_close: true })
+      wrapper = await mountComponent()
+      expect(wrapper.find('[data-testid="delete-branch-badge"]').exists()).toBe(true)
+
+      await wrapper.unmount()
+      setupDefaultMocks({ delete_branch_on_close: false })
+      wrapper = await mountComponent()
+      expect(wrapper.find('[data-testid="keep-branch-badge"]').exists()).toBe(true)
+    })
+
+    it('shows branchDeletedBadge when issue.branch_deleted is true', async () => {
+      setupDefaultMocks({ branch_deleted: true })
+      wrapper = await mountComponent()
+      expect(wrapper.find('[data-testid="branch-deleted-badge"]').exists()).toBe(true)
+    })
+
+    it('shows a delete-branch button only when issue.status === \"closed\" and issue.branch_name exists', async () => {
+      setupDefaultMocks({ status: 'open', branch_name: 'codify/issue-1' })
+      wrapper = await mountComponent()
+      expect(wrapper.find('[data-testid="issue-delete-branch-button"]').exists()).toBe(false)
+
+      await wrapper.unmount()
+      setupDefaultMocks({ status: 'closed', branch_name: 'codify/issue-1' })
+      wrapper = await mountComponent()
+      expect(wrapper.find('[data-testid="page-header-actions"] [data-testid="issue-delete-branch-button"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="issue-branch-policy-row"] [data-testid="issue-delete-branch-button"]').exists()).toBe(false)
+    })
+
+    it('clicking delete-branch calls deleteIssueBranch, updates issue state, and shows success message', async () => {
+      const initial = setupDefaultMocks({ status: 'closed', branch_name: 'codify/issue-1' })
+      mockApi.deleteIssueBranch.mockResolvedValue({ ...initial, branch_deleted: true })
+
+      wrapper = await mountComponent()
+      const btn = wrapper.find('[data-testid="issue-delete-branch-button"]')
+      expect(btn.exists()).toBe(true)
+
+      const confirmButtons = wrapper.findAll('.popconfirm-confirm-btn')
+      await confirmButtons[confirmButtons.length - 1].trigger('click')
+      await flushPromises()
+
+      expect(mockApi.deleteIssueBranch).toHaveBeenCalledWith(1)
+      expect(mockMessage.success).toHaveBeenCalledWith('issue.deleteBranchSuccess')
+      expect(wrapper.find('[data-testid="branch-deleted-badge"]').exists()).toBe(true)
+    })
+
+    it('when issue.branch_deleted is true, delete-branch button is disabled and tooltip text branchAlreadyDeleted is available', async () => {
+      setupDefaultMocks({ status: 'closed', branch_name: 'codify/issue-1', branch_deleted: true })
+      wrapper = await mountComponent()
+      const btn = wrapper.find('[data-testid="issue-delete-branch-button"]')
+      expect(btn.exists()).toBe(true)
+      expect(btn.attributes('disabled')).toBeDefined()
+
+      // Tooltip should be available via NTooltip stub (data-tooltip attribute)
+      const tooltip = wrapper.find('[data-testid="n-tooltip"]')
+      expect(tooltip.exists()).toBe(true)
+      expect(tooltip.attributes('data-tooltip')).toBe('issue.branchAlreadyDeleted')
     })
   })
 

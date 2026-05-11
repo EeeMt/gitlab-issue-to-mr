@@ -108,6 +108,17 @@
                     </n-space>
                   </n-form-item>
                 </n-gi>
+
+                <n-gi>
+                  <n-form-item :label="t('issue.deleteBranchOnClose')" path="delete_branch_on_close">
+                    <n-space align="center" :size="8">
+                      <n-switch v-model:value="formValue.delete_branch_on_close" />
+                      <span style="font-size: 13px; color: var(--n-text-color-2)">
+                        {{ formValue.delete_branch_on_close ? t('issue.deleteBranchOnCloseEnabled') : t('issue.deleteBranchOnCloseDisabled') }}
+                      </span>
+                    </n-space>
+                  </n-form-item>
+                </n-gi>
                 <n-gi v-if="formValue.create_mr">
                   <n-form-item :label="t('issue.field.targetBranch')" path="target_branch">
                     <n-select
@@ -256,6 +267,7 @@ function createInitialFormValue(): {
   base_branch: string | undefined
   target_branch: string | undefined
   create_mr: boolean
+  delete_branch_on_close: boolean
 } {
   return {
     title: '',
@@ -264,6 +276,7 @@ function createInitialFormValue(): {
     base_branch: undefined,
     target_branch: undefined,
     create_mr: true,
+    delete_branch_on_close: true,
   }
 }
 
@@ -434,6 +447,7 @@ async function handleSubmit() {
       description: formValue.value.description || undefined,
       base_branch: formValue.value.base_branch,
       target_branch: formValue.value.create_mr ? formValue.value.target_branch || undefined : undefined,
+      delete_branch_on_close: formValue.value.delete_branch_on_close,
     }
 
     const issue = await createIssue(request)
