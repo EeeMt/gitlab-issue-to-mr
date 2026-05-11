@@ -440,6 +440,73 @@ def test_ci_claude_accepts_prompt_file_and_pipes_prompt_to_claude():
         assert payload["result"] == "prompt from file"
 
 
+def test_ci_claude_redacts_append_system_prompt_from_logs(tmp_path):
+    secret_prompt = "internal policy: do not leak $(echo secret)\nsecond line"
+    script_copy = _prepare_script_copy(
+        tmp_path,
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$*\" > claude_argv.txt\n"
+        "cat <<'EOF'\n"
+        '{"type":"result","subtype":"success","result":"done","session_id":"s1","usage":{"input_tokens":1,"output_tokens":1}}\n'
+        "EOF\n",
+    )
+
+    env = os.environ.copy()
+    env["SANDBOX_MODE"] = "1"
+    env["APPEND_SYSTEM_PROMPT"] = secret_prompt
+
+    result = subprocess.run(
+        [str(script_copy), "normal prompt"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert secret_prompt in (tmp_path / "claude_argv.txt").read_text(encoding="utf-8")
+    assert secret_prompt not in result.stderr
+    assert secret_prompt not in (tmp_path / "console.log").read_text(encoding="utf-8")
+    assert "--append-system-prompt [REDACTED]" in result.stderr
+
+
+def test_ci_claude_prefers_append_system_prompt_file_when_set(tmp_path):
+    system_prompt_file = tmp_path / "system-prompt.txt"
+    system_prompt_file.write_text("file policy: keep this private", encoding="utf-8")
+    legacy_prompt = "legacy env policy should not be used"
+    script_copy = _prepare_script_copy(
+        tmp_path,
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$@\" > claude_args.txt\n"
+        "cat <<'EOF'\n"
+        '{"type":"result","subtype":"success","result":"done","session_id":"s1","usage":{"input_tokens":1,"output_tokens":1}}\n'
+        "EOF\n",
+    )
+
+    env = os.environ.copy()
+    env["SANDBOX_MODE"] = "1"
+    env["APPEND_SYSTEM_PROMPT"] = legacy_prompt
+    env["APPEND_SYSTEM_PROMPT_FILE"] = str(system_prompt_file)
+
+    result = subprocess.run(
+        [str(script_copy), "normal prompt"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    args = (tmp_path / "claude_args.txt").read_text(encoding="utf-8").splitlines()
+    assert result.returncode == 0, result.stderr
+    assert "--append-system-prompt-file" in args
+    assert str(system_prompt_file) in args
+    assert "--append-system-prompt" not in args
+    assert legacy_prompt not in result.stderr
+    assert "file policy: keep this private" not in result.stderr
+
+
 def run_fake_ci_claude(tmp_path, fake_stream_lines):
     script_copy = _prepare_script_copy(
         tmp_path,

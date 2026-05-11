@@ -17,6 +17,8 @@
 #                          Ignored when SANDBOX_MODE=1. Default: "Bash,Read,Edit,Write"
 #   PROMPT_FILE            Read prompt from a file instead of argv (safer for large prompts)
 #   APPEND_SYSTEM_PROMPT   Extra system instructions appended to default prompt
+#   APPEND_SYSTEM_PROMPT_FILE
+#                          Read extra system instructions from a file
 #   RESUME_SESSION         Session ID to resume a specific conversation
 #   CONTINUE_SESSION       "1" → --continue the most recent conversation
 #   CLAUDE_MAX_TURNS       Max agent turns (default: unlimited)
@@ -87,10 +89,16 @@ fi
 SANDBOX_MODE="${SANDBOX_MODE:-0}"
 ALLOWED_TOOLS="${ALLOWED_TOOLS:-Bash,Read,Edit,Write}"
 APPEND_SYSTEM="${APPEND_SYSTEM_PROMPT:-}"
+APPEND_SYSTEM_FILE="${APPEND_SYSTEM_PROMPT_FILE:-}"
 CONTINUE_SESSION="${CONTINUE_SESSION:-0}"
 MAX_TURNS="${CLAUDE_MAX_TURNS:-}"
 CLAUDE_MODEL="${CLAUDE_MODEL:-}"
 SESSION_ID_FILE=".claude_session_id"
+
+if [[ -n "$APPEND_SYSTEM_FILE" && ! -f "$APPEND_SYSTEM_FILE" ]]; then
+  printf "APPEND_SYSTEM_PROMPT_FILE not found: %s\n" "$APPEND_SYSTEM_FILE" >&2
+  exit 1
+fi
 
 RESUME="${RESUME_SESSION:-}"
 if [[ -z "$RESUME" && -f "$SESSION_ID_FILE" && "$CONTINUE_SESSION" != "1" ]]; then
@@ -110,11 +118,43 @@ else
   CLAUDE_ARGS+=(--allowedTools "$ALLOWED_TOOLS")
 fi
 
-[[ -n "$APPEND_SYSTEM" ]]            && CLAUDE_ARGS+=(--append-system-prompt "$APPEND_SYSTEM")
+if [[ -n "$APPEND_SYSTEM_FILE" ]]; then
+  CLAUDE_ARGS+=(--append-system-prompt-file "$APPEND_SYSTEM_FILE")
+elif [[ -n "$APPEND_SYSTEM" ]]; then
+  CLAUDE_ARGS+=(--append-system-prompt "$APPEND_SYSTEM")
+fi
 [[ -n "$MAX_TURNS" ]]                && CLAUDE_ARGS+=(--max-turns "$MAX_TURNS")
 [[ -n "$CLAUDE_MODEL" ]]             && CLAUDE_ARGS+=(--model "$CLAUDE_MODEL")
 [[ "$CONTINUE_SESSION" == "1" ]]     && CLAUDE_ARGS+=(--continue)
 [[ -n "$RESUME" && "$CONTINUE_SESSION" != "1" ]] && CLAUDE_ARGS+=(--resume "$RESUME")
+
+print_claude_args() {
+  local redact_next=0
+  local arg
+
+  _e "${DIM}[ci-claude] CLI args:"
+  for arg in "$@"; do
+    if [[ "$redact_next" == "1" ]]; then
+      _e " %s" "[REDACTED]"
+      redact_next=0
+      continue
+    fi
+
+    case "$arg" in
+      --append-system-prompt)
+        _e " %s" "$arg"
+        redact_next=1
+        ;;
+      --append-system-prompt=*)
+        _e " %s" "--append-system-prompt=[REDACTED]"
+        ;;
+      *)
+        _e " %s" "$arg"
+        ;;
+    esac
+  done
+  _e "${RESET}\n\n"
+}
 
 # ── Header ────────────────────────────────────────────────────────────────────
 _e "${BLUE}${BOLD}╔═══════════════════════════════════════╗${RESET}\n"
@@ -136,11 +176,7 @@ fi
 [[ "$CONTINUE_SESSION" == "1" ]] && info "Session: continuing last conversation"
 
 # Print full CLI args (prompt is piped via stdin/file, not argv)
-_e "${DIM}[ci-claude] CLI args:"
-for arg in "${CLAUDE_ARGS[@]}"; do
-  _e " %s" "$arg"
-done
-_e "${RESET}\n\n"
+print_claude_args "${CLAUDE_ARGS[@]}"
 
 # ── Temp files for accumulating structured data ───────────────────────────────
 # Needed because process_stream runs in a pipe subshell and can't set outer vars.

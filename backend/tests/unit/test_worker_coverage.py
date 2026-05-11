@@ -723,6 +723,21 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('echo "Final commit message:"', content)
         self.assertIn("sed 's/^/  /' /tmp/commit_message.txt", content)
 
+    def test_entrypoint_pipes_commit_message_prompt_to_claude_stdin(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn("< /tmp/commit_message_prompt.txt", content)
+        self.assertNotIn('"$(cat /tmp/commit_message_prompt.txt)"', content)
+
+    def test_entrypoint_writes_system_prompt_file_for_ci_claude(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('CLAUDE_SYSTEM_PROMPT_FILE="/tmp/claude_system_prompt.txt"', content)
+        self.assertIn('printf \'%s\' "${APPEND_SYSTEM_PROMPT}" > "${CLAUDE_SYSTEM_PROMPT_FILE}"', content)
+        self.assertIn('APPEND_SYSTEM_PROMPT_FILE="${CLAUDE_SYSTEM_PROMPT_FILE}"', content)
+
     def test_entrypoint_logs_commit_message_generation_steps(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = script.read_text()

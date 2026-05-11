@@ -477,6 +477,15 @@ ${USER_PROMPT}
 6. 不要要求人工确认，除非你真的被阻塞。
 EOF
 
+CLAUDE_SYSTEM_PROMPT_FILE="/tmp/claude_system_prompt.txt"
+if [ -n "${APPEND_SYSTEM_PROMPT}" ]; then
+    printf '%s' "${APPEND_SYSTEM_PROMPT}" > "${CLAUDE_SYSTEM_PROMPT_FILE}"
+    chmod 600 "${CLAUDE_SYSTEM_PROMPT_FILE}"
+    chown codify:codify "${CLAUDE_SYSTEM_PROMPT_FILE}"
+    export APPEND_SYSTEM_PROMPT_FILE="${CLAUDE_SYSTEM_PROMPT_FILE}"
+    unset APPEND_SYSTEM_PROMPT
+fi
+
 chmod 644 /tmp/claude_prompt.txt
 chown -R codify:codify /workspace /tmp/claude_prompt.txt
 # Ensure session storage directory is writable by the codify user
@@ -654,7 +663,7 @@ if [ -n "$CHANGES" ]; then
     echo "Commit message prompt written to /tmp/commit_message_prompt.txt"
 
     set +e
-    GENERATED_COMMIT_MESSAGE=$(env HOME=/home/codify timeout 60 su -m -s /bin/bash codify -c '/usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" "$(cat /tmp/commit_message_prompt.txt)"' 2>/dev/null)
+    GENERATED_COMMIT_MESSAGE=$(env HOME=/home/codify timeout 60 su -m -s /bin/bash codify -c 'cd /workspace && /usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" < /tmp/commit_message_prompt.txt' 2>/dev/null)
     COMMIT_MESSAGE_RESULT=$?
     set -e
 
