@@ -229,7 +229,7 @@ const en = {
       },
       tasks: {
         title: 'Tasks',
-        body: 'Tasks are the execution units created from the issue. Use them to schedule work, retry with updated instructions, and keep progress visible step by step.',
+        body: 'Tasks are the execution units created from the issue. All tasks under the same issue share a persistent workspace and Claude session — follow-up tasks pick up exactly where the previous one left off.',
       },
       results: {
         title: 'Results',
@@ -253,7 +253,7 @@ const en = {
         second: {
           step: '2',
           title: 'Isolated execution',
-          body: 'Each task gets its own Docker container. The container clones the repo and invokes the AI engine in a clean environment.',
+          body: 'Each task gets its own Docker container, but all tasks under the same issue share a persistent workspace and Claude session so follow-up tasks can continue from where the previous one stopped.',
         },
         third: {
           step: '3',
@@ -286,6 +286,11 @@ const en = {
           step: '3',
           title: 'Review progress and outcomes',
           body: 'Track task status, inspect logs, and review delivery details from the dashboard so you know what completed successfully and what needs attention next.',
+        },
+        fourth: {
+          step: '4',
+          title: 'Append follow-up tasks',
+          body: 'Tasks within the same issue share a persistent workspace and Claude session. Add follow-up tasks to continue where the previous one left off — no context is lost between runs.',
         },
       },
     },

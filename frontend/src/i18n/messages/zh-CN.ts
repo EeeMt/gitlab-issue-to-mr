@@ -227,7 +227,7 @@ const zhCN = {
       },
       tasks: {
         title: '任务',
-        body: '任务是从该需求派生出的执行单元。你可以用它安排执行、在更新指令后重试，并逐步查看整体进展。',
+        body: '任务是从该需求派生出的执行单元。同一需求下的所有任务共享同一个 workspace 和 Claude session，追加任务可以在上次停下的位置继续执行。',
       },
       results: {
         title: '结果',
@@ -251,7 +251,7 @@ const zhCN = {
         second: {
           step: '2',
           title: '隔离执行',
-          body: '每个任务独占一个 Docker 容器。容器克隆代码仓库后，在干净环境中调用 AI 引擎。',
+          body: '每个任务独占一个 Docker 容器，但同一需求下的所有任务共享持久化的 workspace 和 Claude session，追加任务可以延续上次的工作进度。',
         },
         third: {
           step: '3',
@@ -285,6 +285,11 @@ const zhCN = {
           step: '3',
           title: '回顾进展与结果',
           body: '在仪表盘中跟踪任务状态、查看日志并回顾交付信息，明确哪些工作已完成，哪些还需要继续处理。',
+        },
+        fourth: {
+          step: '4',
+          title: '追加后续任务',
+          body: '同一需求下的所有任务共享持久化的 workspace 和 Claude session。追加任务可以在上次停下的位置继续执行，上下文完整保留，无需重新说明背景。',
         },
       },
     },

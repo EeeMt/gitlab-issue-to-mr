@@ -376,7 +376,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from 'vue'
 import { NButton, NCard, NIcon, NModal, NStep, NSteps } from 'naive-ui'
-import { SparklesOutline, GitMergeOutline, CalendarClearOutline, DocumentTextOutline, LayersOutline, CheckmarkDoneCircleOutline, PlayCircleOutline, CubeOutline, CogOutline, ChevronForwardOutline, OptionsOutline } from '@vicons/ionicons5'
+import { SparklesOutline, GitMergeOutline, CalendarClearOutline, DocumentTextOutline, LayersOutline, CheckmarkDoneCircleOutline, PlayCircleOutline, CubeOutline, CogOutline, ChevronForwardOutline, OptionsOutline, AddCircleOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 
 interface OnboardingStep {
@@ -476,7 +476,7 @@ const conceptItems: OnboardingContentItem[] = [
 
 const architectureIcons = [OptionsOutline, CubeOutline, SparklesOutline, GitMergeOutline]
 
-const workflowIcons = [DocumentTextOutline, PlayCircleOutline, CheckmarkDoneCircleOutline]
+const workflowIcons = [DocumentTextOutline, PlayCircleOutline, CheckmarkDoneCircleOutline, AddCircleOutline]
 
 const architectureItems: OnboardingWorkflowItem[] = [
   {
@@ -516,6 +516,11 @@ const workflowItems: OnboardingWorkflowItem[] = [
     stepKey: 'onboarding.workflow.steps.third.step',
     titleKey: 'onboarding.workflow.steps.third.title',
     bodyKey: 'onboarding.workflow.steps.third.body',
+  },
+  {
+    stepKey: 'onboarding.workflow.steps.fourth.step',
+    titleKey: 'onboarding.workflow.steps.fourth.title',
+    bodyKey: 'onboarding.workflow.steps.fourth.body',
   },
 ]
 
