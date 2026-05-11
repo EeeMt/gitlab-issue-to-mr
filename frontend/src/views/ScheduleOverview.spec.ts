@@ -11,8 +11,7 @@ const { mockApi, mockMessage, resetMockApi } = vi.hoisted(() => {
   const api = {
     getScheduledStats: vi.fn(),
     getScheduledTasks: vi.fn(),
-    rescheduleTask: vi.fn(),
-    getConfig: vi.fn()
+    rescheduleTask: vi.fn()
   }
   const msg = {
     error: vi.fn(),
@@ -33,8 +32,7 @@ const { mockApi, mockMessage, resetMockApi } = vi.hoisted(() => {
 vi.mock('../api', () => ({
   getScheduledStats: mockApi.getScheduledStats,
   getScheduledTasks: mockApi.getScheduledTasks,
-  rescheduleTask: mockApi.rescheduleTask,
-  getConfig: mockApi.getConfig
+  rescheduleTask: mockApi.rescheduleTask
 }))
 
 vi.mock('../auth', () => ({
@@ -233,7 +231,9 @@ const mockScheduledStats = {
     { hour_start: laterTodayTime, count: 1 },
     { hour_start: farFutureTime, count: 1 }
   ],
-  max_count: 1
+  max_count: 1,
+  slot_max_tasks: 0,
+  slot_max_tasks_enforce: false
 }
 
 // ---------------------------------------------------------------------------
@@ -261,7 +261,6 @@ describe('ScheduleOverview', () => {
     resetMockApi()
     ;(mockApi.getScheduledStats as Mock).mockResolvedValue(mockScheduledStats)
     ;(mockApi.getScheduledTasks as Mock).mockResolvedValue(mockScheduledTasks)
-    ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 0 } })
     vi.spyOn(window, 'setInterval').mockImplementation(() => 1 as any)
     vi.spyOn(window, 'clearInterval').mockImplementation(() => undefined)
   })
@@ -388,7 +387,7 @@ describe('ScheduleOverview', () => {
 
   // -------------------------------------------------------------------------
   it('derives selected window details from the loaded scheduled tasks', async () => {
-    ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 5 } })
+    ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 5 })
 
     wrapper = mountComponent()
     await flushPromises()
@@ -449,8 +448,8 @@ describe('ScheduleOverview', () => {
   // -------------------------------------------------------------------------
   // Slot capacity integration
   // -------------------------------------------------------------------------
-  it('sets slotMaxTasks from config on load', async () => {
-    ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 8 } })
+  it('sets slotMaxTasks from scheduled stats on load', async () => {
+    ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 8 })
 
     wrapper = mountComponent()
     await flushPromises()
@@ -458,17 +457,9 @@ describe('ScheduleOverview', () => {
     expect(wrapper.vm.slotMaxTasks).toBe(8)
   })
 
-  it('defaults slotMaxTasks to 0 when config has no slot_max_tasks', async () => {
-    ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: {} })
-
-    wrapper = mountComponent()
-    await flushPromises()
-
-    expect(wrapper.vm.slotMaxTasks).toBe(0)
-  })
-
-  it('defaults slotMaxTasks to 0 when getConfig fails', async () => {
-    ;(mockApi.getConfig as Mock).mockRejectedValue(new Error('config error'))
+  it('defaults slotMaxTasks to 0 when stats has no slot_max_tasks field', async () => {
+    const { slot_max_tasks: _, ...withoutSlotMax } = { ...mockScheduledStats, slot_max_tasks: undefined }
+    ;(mockApi.getScheduledStats as Mock).mockResolvedValue(withoutSlotMax)
 
     wrapper = mountComponent()
     await flushPromises()
@@ -477,7 +468,7 @@ describe('ScheduleOverview', () => {
   })
 
   it('includes slot capacity in summaryItems when slotMaxTasks > 0', async () => {
-    ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 5 } })
+    ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 5 })
 
     wrapper = mountComponent()
     await flushPromises()
@@ -704,8 +695,6 @@ describe('ScheduleOverview', () => {
     })
 
     it('selectedWindowLoadLabel returns null when no window selected', async () => {
-      ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 5 } })
-
       wrapper = mountComponent()
       await flushPromises()
 
@@ -986,7 +975,7 @@ describe('ScheduleOverview', () => {
       const sameHour1 = createMockTask({ id: 10, status: 'queued', scheduled_at: futureTime })
       const sameHour2 = createMockTask({ id: 11, status: 'queued', scheduled_at: futureTime })
       ;(mockApi.getScheduledTasks as Mock).mockResolvedValue([sameHour1, sameHour2])
-      ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 2 } })
+      ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 2 })
 
       wrapper = mountComponent()
       await flushPromises()

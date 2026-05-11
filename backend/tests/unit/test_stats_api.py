@@ -501,6 +501,19 @@ class ScheduledStatsTests(unittest.TestCase):
         self.assertIn("summary", data)
         self.assertEqual(len(data["hourly_distribution"]), 24)
 
+    def test_scheduled_stats_includes_slot_capacity(self):
+        """GET /api/stats/scheduled response includes slot_max_tasks and slot_max_tasks_enforce."""
+        self.mock_db.execute = AsyncMock(
+            side_effect=self._build_side_effects()
+        )
+        response = self.client.get("/api/stats/scheduled")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("slot_max_tasks", data)
+        self.assertIn("slot_max_tasks_enforce", data)
+        self.assertIsInstance(data["slot_max_tasks"], int)
+        self.assertIsInstance(data["slot_max_tasks_enforce"], bool)
+
 
 class ScheduledTasksHourFilterTests(unittest.TestCase):
     """Tests for the hour_start query parameter on GET /api/tasks/scheduled."""
