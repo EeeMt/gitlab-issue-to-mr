@@ -149,8 +149,8 @@
           <HeatmapChart
             :tasks="scheduledTasks"
             :selected-ms="selectedWindow?.startMs ?? null"
-            :max-per-slot="slotMaxTasks"
-            :enforce-capacity="slotEnforce"
+            :max-per-slot="myTasksOnly ? 0 : slotMaxTasks"
+            :enforce-capacity="!myTasksOnly && slotEnforce"
             :allow-full-selection="true"
             @cell-click="handleHeatmapCellClick"
           />
@@ -557,7 +557,7 @@ const selectedWindowTasks = computed(() => {
 })
 
 const selectedWindowLoadLabel = computed(() => {
-  if (!selectedWindow.value || slotMaxTasks.value <= 0) {
+  if (!selectedWindow.value || slotMaxTasks.value <= 0 || myTasksOnly.value) {
     return null
   }
 

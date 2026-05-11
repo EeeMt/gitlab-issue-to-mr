@@ -78,6 +78,8 @@ vi.mock('../components/HeatmapChart.vue', () => ({
         class: 'heatmap-chart-stub',
         'data-task-count': String(props.tasks?.length ?? 0),
         'data-selected-ms': props.selectedMs ?? '',
+        'data-max-per-slot': String(props.maxPerSlot ?? 0),
+        'data-enforce-capacity': String(props.enforceCapacity ?? false),
         'data-allow-full-selection': String(props.allowFullSelection ?? false)
       })
     }
@@ -1073,6 +1075,39 @@ describe('ScheduleOverview', () => {
       const items = wrapper.vm.summaryItems as any[]
       const fullSlotsItem = items.find((i: any) => i.label === 'scheduleOverview.fullSlots')
       expect(fullSlotsItem).toBeUndefined()
+    })
+
+    it('passes maxPerSlot=0 to heatmap when myTasksOnly is true', async () => {
+      ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 5, slot_max_tasks_enforce: true })
+
+      wrapper = mountComponent()
+      await flushPromises()
+
+      ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 5, slot_max_tasks_enforce: true })
+      ;(mockApi.getScheduledTasks as Mock).mockResolvedValue(mockScheduledTasks)
+      ;(wrapper.vm as any).myTasksOnly = true
+      await flushPromises()
+
+      const heatmap = wrapper.find('.heatmap-chart-stub')
+      expect(heatmap.attributes('data-max-per-slot')).toBe('0')
+      expect(heatmap.attributes('data-enforce-capacity')).toBe('false')
+    })
+
+    it('returns null selectedWindowLoadLabel when myTasksOnly is true', async () => {
+      ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 5 })
+
+      wrapper = mountComponent()
+      await flushPromises()
+
+      ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 5 })
+      ;(mockApi.getScheduledTasks as Mock).mockResolvedValue(mockScheduledTasks)
+      ;(wrapper.vm as any).myTasksOnly = true
+      await flushPromises()
+
+      wrapper.vm.handleHeatmapCellClick(new Date(futureTime).getTime())
+      await nextTick()
+
+      expect(wrapper.vm.selectedWindowLoadLabel).toBeNull()
     })
   })
 })
