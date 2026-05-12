@@ -142,6 +142,12 @@
                       <p class="onboarding-modal__section-text">{{ t(workflowItems[carouselStep].bodyKey) }}</p>
                     </div>
                   </Transition>
+                  <div class="onboarding-modal__carousel-progress">
+                    <div
+                      :key="carouselStep"
+                      class="onboarding-modal__carousel-progress-fill"
+                    />
+                  </div>
                   <div class="onboarding-modal__carousel-thumbs">
                     <button
                       v-for="(item, idx) in workflowItems"
@@ -322,6 +328,12 @@
                     </div>
                     <h3 class="onboarding-modal__section-title">{{ t(workflowItems[carouselStep].titleKey) }}</h3>
                     <p class="onboarding-modal__section-text">{{ t(workflowItems[carouselStep].bodyKey) }}</p>
+                  </div>
+                  <div class="onboarding-modal__carousel-progress">
+                    <div
+                      :key="carouselStep"
+                      class="onboarding-modal__carousel-progress-fill"
+                    />
                   </div>
                   <div class="onboarding-modal__carousel-thumbs">
                     <div
@@ -690,7 +702,7 @@ function startCarousel() {
   stopCarousel()
   carouselTimer = setInterval(() => {
     carouselTransition.value = 'carousel-slide'
-    carouselStep.value = (carouselStep.value + 1) % 3
+    carouselStep.value = (carouselStep.value + 1) % workflowItems.length
   }, 3500)
 }
 
@@ -709,7 +721,7 @@ function goToCarouselStep(idx: number) {
   stopCarousel()
   carouselTimer = setInterval(() => {
     carouselTransition.value = 'carousel-slide'
-    carouselStep.value = (carouselStep.value + 1) % 3
+    carouselStep.value = (carouselStep.value + 1) % workflowItems.length
   }, 3500)
 }
 
@@ -1310,6 +1322,30 @@ function handleCreateIssue() {
 
 .onboarding-modal__carousel-thumb--active .onboarding-modal__carousel-thumb-title {
   color: var(--n-primary-color, #18a058);
+}
+
+/* ── Carousel progress bar ── */
+
+.onboarding-modal__carousel-progress {
+  width: 100%;
+  max-width: 420px;
+  height: 3px;
+  background: rgba(148, 163, 184, 0.15);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.onboarding-modal__carousel-progress-fill {
+  height: 100%;
+  width: 0;
+  background: var(--n-primary-color, #18a058);
+  border-radius: 2px;
+  animation: carousel-timer 3500ms linear forwards;
+}
+
+@keyframes carousel-timer {
+  from { width: 0%; }
+  to   { width: 100%; }
 }
 
 /* ── Transitions ── */

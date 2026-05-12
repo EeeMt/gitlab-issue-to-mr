@@ -290,7 +290,7 @@ const en = {
         fourth: {
           step: '4',
           title: 'Append follow-up tasks',
-          body: 'Tasks within the same issue share a persistent workspace and Claude session. Add follow-up tasks to continue where the previous one left off — no context is lost between runs.',
+          body: 'All tasks in the same issue share a workspace and Claude session. Follow-up tasks pick up right where the previous one left off.',
         },
       },
     },

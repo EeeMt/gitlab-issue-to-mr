@@ -289,7 +289,7 @@ const zhCN = {
         fourth: {
           step: '4',
           title: '追加后续任务',
-          body: '同一需求下的所有任务共享持久化的 workspace 和 Claude session。追加任务可以在上次停下的位置继续执行，上下文完整保留，无需重新说明背景。',
+          body: '同一需求下的任务共享 workspace 和 Claude session，追加任务将从上次停下的位置继续执行。',
         },
       },
     },
