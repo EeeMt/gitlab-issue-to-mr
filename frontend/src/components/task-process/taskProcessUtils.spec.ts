@@ -192,7 +192,7 @@ describe('TaskProcessToolRow', () => {
     expect(wrapper.text()).not.toContain('taskView.noToolOutputCaptured')
   })
 
-  it('shows input preview in the header and pending text in the body for payload-backed tool calls', async () => {
+  it('shows input preview in the header and spinner badge (no body content) for payload-backed tool calls while loading', async () => {
     const wrapper = mount(TaskProcessToolRow, {
       props: {
         row: {
@@ -209,8 +209,12 @@ describe('TaskProcessToolRow', () => {
 
     await wrapper.get('button.tool-badge').trigger('click')
 
+    // Preview still shows in the event header
     expect(wrapper.text()).toContain('/tmp/example.txt')
-    expect(wrapper.text()).toContain('taskView.archivedInputPending')
+    // While payload hasn't loaded, content body is hidden (no placeholder text shown)
+    expect(wrapper.text()).not.toContain('taskView.archivedInputPending')
+    // Badge shows a spinner (busy state) instead of placeholder text in the body
+    expect(wrapper.find('.badge-spin-ring').exists()).toBe(true)
   })
 
   it('shows failure text for tool payload load errors', async () => {

@@ -16,11 +16,11 @@
         <button
           v-if="hasDetailedToolInput"
           class="tool-badge"
-          :class="{ 'tool-badge--active': showInput, 'tool-badge--loading': showInput && inputLoading }"
-          :disabled="showInput && inputLoading"
+          :class="{ 'tool-badge--active': showInput, 'tool-badge--loading': inputBusy }"
+          :disabled="inputBusy"
           @click="toggleInput"
         >
-          <span v-if="showInput && inputLoading" class="badge-spin-ring"></span>
+          <span v-if="inputBusy" class="badge-spin-ring"></span>
           <n-icon v-else size="10" class="badge-chevron" :class="{ 'badge-chevron--open': showInput }">
             <ChevronForward />
           </n-icon>
@@ -29,38 +29,33 @@
         <button
           v-if="hasToolEventOutput"
           class="tool-badge"
-          :class="{ 'tool-badge--active': showOutput, 'tool-badge--error': row.toolCall.error, 'tool-badge--loading': showOutput && outputLoading }"
-          :disabled="showOutput && outputLoading"
+          :class="{ 'tool-badge--active': showOutput, 'tool-badge--error': row.toolCall.error, 'tool-badge--loading': outputBusy }"
+          :disabled="outputBusy"
           @click="toggleOutput"
         >
-          <span v-if="showOutput && outputLoading" class="badge-spin-ring"></span>
+          <span v-if="outputBusy" class="badge-spin-ring"></span>
           <n-icon v-else size="10" class="badge-chevron" :class="{ 'badge-chevron--open': showOutput }">
             <ChevronForward />
           </n-icon>
           {{ t('taskView.toolOutput') }}
         </button>
       </div>
-      <!-- Input and output each get their own CSS-grid expand track so height
-           animation runs without any JS layout reads (no scrollHeight/offsetHeight). -->
       <div class="tool-expand-track" :class="{ 'tool-expand-track--open': showInput && hasDetailedToolInput }">
         <div class="tool-expand-body">
-          <div v-if="showInput && hasDetailedToolInput" class="tool-content">
-            <!-- :key forces a re-mount (and thus re-animation) when placeholder -> real content -->
+          <div v-if="showInputContent" class="tool-content">
             <pre
               class="tool-pre tool-pre--input"
               :class="{ 'tool-pre--placeholder': inputIsPlaceholder }"
-              :key="inputIsPlaceholder ? 'input-placeholder' : 'input-content'"
             >{{ inputDisplayText }}</pre>
           </div>
         </div>
       </div>
       <div class="tool-expand-track" :class="{ 'tool-expand-track--open': showOutput && hasToolEventOutput }">
         <div class="tool-expand-body">
-          <div v-if="showOutput && hasToolEventOutput" class="tool-content">
+          <div v-if="showOutputContent" class="tool-content">
             <pre
               class="tool-pre"
               :class="{ 'tool-pre--error': row.toolCall.error, 'tool-pre--placeholder': outputIsPlaceholder }"
-              :key="outputIsPlaceholder ? 'output-placeholder' : 'output-content'"
             >{{ outputDisplayText }}</pre>
           </div>
         </div>
@@ -119,6 +114,25 @@ function toggleOutput() {
 const summary = computed(() => getInputSummary(props.row.toolCall))
 const hasDetailedToolInput = computed(() => hasDetailedInput(props.row.toolCall))
 const hasToolEventOutput = computed(() => props.row.toolCall.output !== null || !!props.row.toolCall.output_payload_id || !!props.row.toolCall.output_preview)
+
+// Content is ready when: not loading AND (no payload OR payload is done)
+const showInputContent = computed(() => {
+  if (!showInput.value || !hasDetailedToolInput.value) return false
+  if (props.inputLoading) return false
+  if (props.row.toolCall.input_payload_id && !props.inputLoaded && !props.inputFailed) return false
+  return true
+})
+const showOutputContent = computed(() => {
+  if (!showOutput.value || !hasToolEventOutput.value) return false
+  if (props.outputLoading) return false
+  if (props.row.toolCall.output_payload_id && !props.outputLoaded && !props.outputFailed) return false
+  return true
+})
+
+// Busy = panel open but content not yet ready (spinner on badge, no panel content)
+const inputBusy = computed(() => showInput.value && hasDetailedToolInput.value && !showInputContent.value)
+const outputBusy = computed(() => showOutput.value && hasToolEventOutput.value && !showOutputContent.value)
+
 const inputDisplayText = computed(() => {
   if (props.inputLoaded) {
     const text = (props.inputExpandedText ?? '').trim()
