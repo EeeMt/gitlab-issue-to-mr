@@ -482,11 +482,26 @@ async def stream_task_logs(
 
     _TERMINAL_STATUSES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
 
+    def _log_to_event_data(log: TaskLog) -> dict:
+        return {
+            "id": log.id,
+            "log_type": log.log_type,
+            "metadata": _json.loads(log.log_metadata) if log.log_metadata else None,
+            "message": log.message,
+            "created_at": log.created_at.isoformat(),
+        }
+
     async def generate_log_events():
         cursor = since_id
+        # Track tool_call log IDs that were emitted without output_payload_id.
+        # These logs are updated in-place (not appended) by the worker, so they
+        # are never re-emitted by the id > cursor query.  We re-query them each
+        # cycle and push an "update" SSE event the moment output_payload_id
+        # appears, eliminating the need for a client-side fetchLogs() poll.
+        pending_tool_calls: set[int] = set()
         try:
             while True:
-                # Fetch next batch of log entries after cursor
+                # Fetch new log entries since last cursor
                 log_result = await db.execute(
                     select(TaskLog)
                     .where(TaskLog.task_id == task_id, TaskLog.id > cursor)
@@ -496,15 +511,29 @@ async def stream_task_logs(
                 new_logs = log_result.scalars().all()
 
                 for log in new_logs:
-                    event_data = {
-                        "id": log.id,
-                        "log_type": log.log_type,
-                        "metadata": _json.loads(log.log_metadata) if log.log_metadata else None,
-                        "message": log.message,
-                        "created_at": log.created_at.isoformat(),
-                    }
+                    event_data = _log_to_event_data(log)
                     yield f"data: {_json.dumps(event_data)}\n\n"
                     cursor = log.id
+                    # Queue tool_call logs that don't yet have output_payload_id
+                    if log.log_type == "tool_call":
+                        meta = event_data["metadata"] or {}
+                        if not meta.get("output_payload_id"):
+                            pending_tool_calls.add(log.id)
+
+                # Re-check pending tool_call logs for in-place updates.
+                # Use populate_existing=True so SQLAlchemy refreshes cached
+                # ORM objects in the session's identity map from the DB.
+                if pending_tool_calls:
+                    updated_result = await db.execute(
+                        select(TaskLog)
+                        .where(TaskLog.id.in_(pending_tool_calls))
+                        .execution_options(populate_existing=True)
+                    )
+                    for log in updated_result.scalars().all():
+                        meta = _json.loads(log.log_metadata) if log.log_metadata else {}
+                        if meta.get("output_payload_id"):
+                            yield f"event: update\ndata: {_json.dumps(_log_to_event_data(log))}\n\n"
+                            pending_tool_calls.discard(log.id)
 
                 # Check current task status (re-query to get fresh state)
                 task_result = await db.execute(

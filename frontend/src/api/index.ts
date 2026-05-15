@@ -1006,6 +1006,7 @@ export function streamTaskLogs(
   sinceId: number,
   onLog: (log: TaskLog) => void,
   onDone?: () => void,
+  onUpdate?: (log: TaskLog) => void,
 ): EventSource {
   const url = `/api/tasks/${id}/log-stream?since_id=${sinceId}`
   const source = new EventSource(url)
@@ -1026,6 +1027,17 @@ export function streamTaskLogs(
   source.addEventListener('done', () => {
     source.close()
     onDone?.()
+  })
+
+  // "update" events carry an in-place metadata change to an existing log row
+  // (e.g. output_payload_id becoming available on a tool_call log).
+  source.addEventListener('update', (event) => {
+    try {
+      const data = JSON.parse((event as MessageEvent).data)
+      onUpdate?.(data as TaskLog)
+    } catch (e) {
+      console.warn('[streamTaskLogs] failed to parse SSE update event', e)
+    }
   })
 
   source.onerror = (e) => {

@@ -527,6 +527,16 @@ function connectStructuredLogStream() {
     ? Math.max(...taskLogs.value.map(l => l.id ?? 0))
     : 0
 
+  // Shared handler: merge an updated log entry into taskLogs by id.
+  const mergeLogUpdate = (log: TaskLog) => {
+    const idx = taskLogs.value.findIndex(l => l.id === log.id)
+    if (idx !== -1) {
+      const updated = [...taskLogs.value]
+      updated[idx] = log
+      taskLogs.value = updated
+    }
+  }
+
   structuredLogSse = streamTaskLogs(
     taskId.value,
     sinceId,
@@ -535,11 +545,7 @@ function connectStructuredLogStream() {
       if (existingIdx === -1) {
         taskLogs.value = [...taskLogs.value, log]
       } else {
-        // Update existing entry so live changes (e.g. output_payload_id becoming
-        // available on a tool_call log) are reflected without a full page reload.
-        const updated = [...taskLogs.value]
-        updated[existingIdx] = log
-        taskLogs.value = updated
+        mergeLogUpdate(log)
       }
     },
     () => {
@@ -548,6 +554,9 @@ function connectStructuredLogStream() {
       fetchTask()
       fetchLogs()
     },
+    // "update" events carry in-place metadata changes (e.g. output_payload_id
+    // added to an existing tool_call log row by the worker).
+    mergeLogUpdate,
   )
 
   structuredLogSse.onerror = () => {
@@ -867,10 +876,6 @@ onMounted(async () => {
     if (isActiveTaskStatus(task.value?.status)) {
       fetchTask()
       if (!structuredLogSse) connectStructuredLogStream() // reconnect if disconnected
-      // SSE only emits NEW log rows; existing tool_call logs get their
-      // output_payload_id updated in-place (not re-emitted).  Refresh the
-      // full log list every 5 s so those metadata changes are visible.
-      fetchLogs()
     } else {
       closeLogStream()
       closeStructuredLogStream()
