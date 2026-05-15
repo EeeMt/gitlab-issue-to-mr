@@ -55,29 +55,11 @@ function createTaskLog(): TaskLog {
 }
 
 describe('TaskProcessTextRow', () => {
-  const rafCallbacks: FrameRequestCallback[] = []
-
   beforeEach(() => {
     renderMarkdownMock.mockClear()
-    rafCallbacks.length = 0
-    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
-      rafCallbacks.push(callback)
-      return rafCallbacks.length
-    }))
-    vi.stubGlobal('cancelAnimationFrame', vi.fn())
   })
 
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  async function flushAnimationFrame() {
-    const callbacks = rafCallbacks.splice(0)
-    callbacks.forEach((callback) => callback(0))
-    await nextTick()
-  }
-
-  it('keeps the badge loading while full text markdown is prepared off the click render path', async () => {
+  it('pre-renders markdown eagerly when text and showContent are both available', async () => {
     const wrapper = mount(TaskProcessTextRow, {
       props: {
         row: {
@@ -97,12 +79,45 @@ describe('TaskProcessTextRow', () => {
       },
     })
 
+    // Rendering happens synchronously on mount — no RAF or click required.
+    expect(renderMarkdownMock).toHaveBeenCalledWith('**full assistant body**')
+
+    // Clicking the badge reveals the pre-rendered content immediately.
     await wrapper.get('button.tool-badge').trigger('click')
 
+    expect(wrapper.get('button.tool-badge').classes()).not.toContain('tool-badge--loading')
+    expect(wrapper.html()).toContain('<p>**full assistant body**</p>')
+  })
+
+  it('shows badge as loading while the payload API fetch is in progress', async () => {
+    const wrapper = mount(TaskProcessTextRow, {
+      props: {
+        row: {
+          kind: 'assistant_text',
+          event: createTaskLog(),
+          textEntry: {
+            text: '',
+            preview: 'summary',
+            payloadId: 21,
+            charCount: 22,
+            truncated: true,
+          },
+        },
+        expandedText: '',
+        loading: true,
+        showContent: false,
+      },
+    })
+
+    await wrapper.get('button.tool-badge').trigger('click')
+
+    // No text yet — nothing rendered, badge shows loading spinner.
     expect(renderMarkdownMock).not.toHaveBeenCalled()
     expect(wrapper.get('button.tool-badge').classes()).toContain('tool-badge--loading')
 
-    await flushAnimationFrame()
+    // Payload arrives.
+    await wrapper.setProps({ expandedText: '**full assistant body**', showContent: true, loading: false })
+    await nextTick()
 
     expect(renderMarkdownMock).toHaveBeenCalledWith('**full assistant body**')
     expect(wrapper.get('button.tool-badge').classes()).not.toContain('tool-badge--loading')

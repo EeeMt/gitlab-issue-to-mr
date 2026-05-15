@@ -25,18 +25,22 @@
           {{ t('taskView.fullText') }}
         </button>
       </div>
-      <Transition
-        name="tool-expand"
-        @enter="onExpandEnter"
-        @after-enter="onExpandAfterEnter"
-        @leave="onExpandLeave"
-        @after-leave="onExpandAfterLeave"
-      >
-        <div v-if="showDetail" class="tool-content">
-          <div v-if="showContent && renderedHtml" class="event-content markdown-content" :class="{ 'event-content--thinking': row.kind === 'thinking' }" v-html="renderedHtml"></div>
-          <div v-else-if="showContent && !trimmedExpandedText" class="event-content event-content--placeholder">{{ t('taskView.emptyContent') }}</div>
+      <div class="tool-expand-track" :class="{ 'tool-expand-track--open': showDetail }">
+        <div class="tool-expand-body">
+          <div class="tool-content">
+            <div
+              v-if="showContent && renderedHtml"
+              class="event-content markdown-content"
+              :class="[
+                'event-content--fadein',
+                { 'event-content--thinking': row.kind === 'thinking' }
+              ]"
+              v-html="renderedHtml"
+            ></div>
+            <div v-else-if="showContent && !trimmedExpandedText" class="event-content event-content--placeholder">{{ t('taskView.emptyContent') }}</div>
+          </div>
         </div>
-      </Transition>
+      </div>
     </div>
   </div>
 </template>
@@ -64,92 +68,38 @@ const { t } = useI18n()
 const showDetail = ref(false)
 const renderedHtml = ref('')
 const renderedSource = ref('')
-const isRenderingContent = ref(false)
-let renderFrame: number | null = null
-let renderToken = 0
 
 const trimmedExpandedText = computed(() => props.expandedText.trim())
-const isDetailBusy = computed(() => showDetail.value && (props.loading || isRenderingContent.value))
+// Busy only while waiting for the API payload — rendering is now synchronous
+const isDetailBusy = computed(() => showDetail.value && props.loading)
 
-function scheduleFrame(callback: FrameRequestCallback): number {
-  if (typeof requestAnimationFrame === 'function') return requestAnimationFrame(callback)
-  return window.setTimeout(() => callback(performance.now()), 0)
-}
-
-function cancelScheduledFrame(handle: number) {
-  if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(handle)
-  else window.clearTimeout(handle)
-}
-
-function clearScheduledRender() {
-  if (renderFrame === null) return
-  cancelScheduledFrame(renderFrame)
-  renderFrame = null
-}
-
-function scheduleMarkdownRender() {
+function syncRender() {
   const text = trimmedExpandedText.value
-  const token = ++renderToken
-  clearScheduledRender()
-
-  if (!showDetail.value || !props.showContent || !text) {
-    if (!text || !props.showContent) {
-      renderedHtml.value = ''
-      renderedSource.value = ''
-    }
-    isRenderingContent.value = false
+  if (!text) {
+    renderedHtml.value = ''
+    renderedSource.value = ''
     return
   }
+  if (renderedSource.value === text) return
+  renderedHtml.value = renderMarkdown(text)
+  renderedSource.value = text
+}
 
-  if (renderedSource.value === text && renderedHtml.value) {
-    isRenderingContent.value = false
-    return
+// Pre-render eagerly whenever text is available, regardless of open/close state.
+// markdown-it is synchronous and fast (<1 ms for typical sizes), so no RAF needed.
+watch([trimmedExpandedText, () => props.showContent], ([text, ready]) => {
+  if (ready && text) syncRender()
+  else if (!text) {
+    renderedHtml.value = ''
+    renderedSource.value = ''
   }
-
-  renderedHtml.value = ''
-  isRenderingContent.value = true
-  renderFrame = scheduleFrame(() => {
-    renderFrame = null
-    if (token !== renderToken) return
-    const html = renderMarkdown(text)
-    if (token !== renderToken) return
-    renderedSource.value = text
-    renderedHtml.value = html
-    isRenderingContent.value = false
-  })
-}
-
-watch([showDetail, () => props.showContent, trimmedExpandedText], scheduleMarkdownRender, { immediate: true })
-
-function onExpandEnter(el: Element) {
-  const h = el as HTMLElement
-  const naturalHeight = h.scrollHeight
-  h.style.height = '0'
-  h.style.overflow = 'hidden'
-  requestAnimationFrame(() => {
-    h.style.height = naturalHeight + 'px'
-  })
-}
-function onExpandAfterEnter(el: Element) {
-  const h = el as HTMLElement
-  h.style.height = ''
-  h.style.overflow = ''
-}
-function onExpandLeave(el: Element) {
-  const h = el as HTMLElement
-  h.style.height = h.scrollHeight + 'px'
-  h.style.overflow = 'hidden'
-  requestAnimationFrame(() => {
-    h.style.height = '0'
-  })
-}
-function onExpandAfterLeave(el: Element) {
-  const h = el as HTMLElement
-  h.style.height = ''
-  h.style.overflow = ''
-}
+}, { immediate: true })
 
 function toggleDetail() {
+  if (!showDetail.value) {
+    // Ensure content is rendered before the expand animation starts.
+    if (props.showContent && trimmedExpandedText.value) syncRender()
+  }
   showDetail.value = !showDetail.value
   emit('collapse-change', showDetail.value ? ['detail'] : [])
 }
@@ -163,8 +113,8 @@ const preview = computed(() => {
 })
 
 onBeforeUnmount(() => {
-  renderToken++
-  clearScheduledRender()
+  renderedHtml.value = ''
+  renderedSource.value = ''
 })
 </script>
 
@@ -277,17 +227,18 @@ onBeforeUnmount(() => {
 .tool-content {
   margin-top: 6px;
 }
-.tool-expand-enter-active {
-  transition: opacity 0.2s ease, height 0.25s ease;
-  overflow: hidden;
+/* CSS grid expand trick: zero layout-reflow height animation */
+.tool-expand-track {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.22s ease;
 }
-.tool-expand-leave-active {
-  transition: opacity 0.15s ease, height 0.2s ease;
-  overflow: hidden;
+.tool-expand-track--open {
+  grid-template-rows: 1fr;
 }
-.tool-expand-enter-from,
-.tool-expand-leave-to {
-  opacity: 0;
+.tool-expand-body {
+  overflow: hidden;
+  min-height: 0;
 }
 .event-content {
   margin: 0;
@@ -304,6 +255,110 @@ onBeforeUnmount(() => {
 .markdown-content {
   white-space: normal;
 }
+/* markdown-it rendered content */
+.markdown-content :deep(p) {
+  margin: 0 0 0.6em;
+}
+.markdown-content :deep(p:last-child) {
+  margin-bottom: 0;
+}
+.markdown-content :deep(h1),
+.markdown-content :deep(h2),
+.markdown-content :deep(h3),
+.markdown-content :deep(h4) {
+  margin: 0.8em 0 0.4em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.markdown-content :deep(h1) { font-size: 1.25em; }
+.markdown-content :deep(h2) { font-size: 1.1em; }
+.markdown-content :deep(h3) { font-size: 1em; }
+.markdown-content :deep(ul),
+.markdown-content :deep(ol) {
+  margin: 0.4em 0;
+  padding-left: 1.5em;
+}
+.markdown-content :deep(li) {
+  margin: 0.15em 0;
+}
+.markdown-content :deep(blockquote) {
+  margin: 0.5em 0;
+  padding: 0.2em 0.8em;
+  border-left: 3px solid var(--n-border-color, rgba(128,128,128,0.35));
+  color: var(--n-text-color-3, #888);
+}
+.markdown-content :deep(a) {
+  color: var(--n-primary-color, #18a058);
+  text-decoration: none;
+}
+.markdown-content :deep(a:hover) {
+  text-decoration: underline;
+}
+/* inline code */
+.markdown-content :deep(code) {
+  font-family: var(--n-font-family-mono, monospace);
+  font-size: 0.88em;
+  background: rgba(128, 128, 128, 0.12);
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+}
+/* fenced code blocks */
+.markdown-content :deep(pre.md-code-block) {
+  margin: 0.5em 0;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 5px;
+  overflow-x: auto;
+  font-family: var(--n-font-family-mono, monospace);
+  font-size: 0.85em;
+  line-height: 1.55;
+  white-space: pre;
+}
+.markdown-content :deep(pre.md-code-block code) {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+  color: inherit;
+}
+/* highlight.js token colors (minimal, theme-agnostic) */
+.markdown-content :deep(.hljs-keyword) { color: #c678dd; }
+.markdown-content :deep(.hljs-string) { color: #98c379; }
+.markdown-content :deep(.hljs-number) { color: #d19a66; }
+.markdown-content :deep(.hljs-comment) { color: #5c6370; font-style: italic; }
+.markdown-content :deep(.hljs-function),
+.markdown-content :deep(.hljs-title) { color: #61afef; }
+.markdown-content :deep(.hljs-variable),
+.markdown-content :deep(.hljs-attr) { color: #e06c75; }
+.markdown-content :deep(.hljs-built_in) { color: #56b6c2; }
+.markdown-content :deep(.hljs-literal) { color: #d19a66; }
+/* tables */
+.markdown-content :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 0.9em;
+  overflow-x: auto;
+  display: block;
+}
+.markdown-content :deep(th),
+.markdown-content :deep(td) {
+  border: 1px solid var(--n-border-color, rgba(128, 128, 128, 0.25));
+  padding: 5px 10px;
+  text-align: left;
+}
+.markdown-content :deep(th) {
+  background: rgba(128, 128, 128, 0.08);
+  font-weight: 600;
+}
+.markdown-content :deep(tr:nth-child(even) td) {
+  background: rgba(128, 128, 128, 0.04);
+}
+.markdown-content :deep(hr) {
+  border: none;
+  border-top: 1px solid var(--n-border-color, rgba(128, 128, 128, 0.2));
+  margin: 0.8em 0;
+}
 .event-content--thinking {
   font-size: 12px;
   color: var(--n-text-color-3, #888);
@@ -313,5 +368,13 @@ onBeforeUnmount(() => {
   font-style: italic;
   opacity: 0.4;
   padding: 4px 0;
+}
+/* Fade-in for content that arrives after the panel is already open (payload case) */
+@keyframes content-fadein {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.event-content--fadein {
+  animation: content-fadein 0.18s ease;
 }
 </style>
