@@ -40,22 +40,21 @@
           {{ t('taskView.toolOutput') }}
         </button>
       </div>
-      <div ref="contentWrapper" class="tool-content-outer">
-        <Transition
-          name="tool-expand"
-          @before-leave="onBeforeLeave"
-          @leave="onLeave"
-          @after-leave="onAfterLeave"
-          @enter="onEnter"
-          @after-enter="onAfterEnter"
-        >
-          <div v-if="showInput && hasDetailedToolInput" key="input" class="tool-content">
+      <!-- Input and output each get their own CSS-grid expand track so height
+           animation runs without any JS layout reads (no scrollHeight/offsetHeight). -->
+      <div class="tool-expand-track" :class="{ 'tool-expand-track--open': showInput && hasDetailedToolInput }">
+        <div class="tool-expand-body">
+          <div v-if="showInput && hasDetailedToolInput" class="tool-content">
             <pre class="tool-pre tool-pre--input" :class="{ 'tool-pre--placeholder': inputIsPlaceholder }">{{ inputDisplayText }}</pre>
           </div>
-          <div v-else-if="showOutput && hasToolEventOutput" key="output" class="tool-content">
+        </div>
+      </div>
+      <div class="tool-expand-track" :class="{ 'tool-expand-track--open': showOutput && hasToolEventOutput }">
+        <div class="tool-expand-body">
+          <div v-if="showOutput && hasToolEventOutput" class="tool-content">
             <pre class="tool-pre" :class="{ 'tool-pre--error': row.toolCall.error, 'tool-pre--placeholder': outputIsPlaceholder }">{{ outputDisplayText }}</pre>
           </div>
-        </Transition>
+        </div>
       </div>
     </div>
   </div>
@@ -88,62 +87,6 @@ const { t } = useI18n()
 
 const showInput = ref(false)
 const showOutput = ref(false)
-const contentWrapper = ref<HTMLElement>()
-
-function onBeforeLeave() {
-  // Lock wrapper height before entering element is inserted
-  const w = contentWrapper.value
-  if (!w) return
-  w.style.height = w.offsetHeight + 'px'
-  w.style.overflow = 'hidden'
-}
-
-function onLeave(el: Element) {
-  // Pull leaving element out of flow so entering element drives layout
-  const h = el as HTMLElement
-  h.style.position = 'absolute'
-  h.style.width = '100%'
-  h.style.top = '0'
-  h.style.left = '0'
-}
-
-function onAfterLeave(el: Element) {
-  const h = el as HTMLElement
-  h.style.cssText = ''
-  const w = contentWrapper.value
-  if (!w) return
-  if (!showInput.value && !showOutput.value) {
-    // Closing: animate wrapper height to 0
-    requestAnimationFrame(() => {
-      w.style.transition = 'height 0.2s ease'
-      w.style.height = '0'
-    })
-    setTimeout(() => {
-      if (contentWrapper.value) contentWrapper.value.style.cssText = ''
-    }, 220)
-  }
-}
-
-function onEnter(el: Element) {
-  const w = contentWrapper.value
-  if (!w) return
-  const newHeight = (el as HTMLElement).scrollHeight
-  if (!w.style.height) {
-    // Opening from nothing
-    w.style.overflow = 'hidden'
-    w.style.height = '0'
-  }
-  requestAnimationFrame(() => {
-    w.style.transition = 'height 0.25s ease'
-    w.style.height = newHeight + 'px'
-  })
-}
-
-function onAfterEnter() {
-  const w = contentWrapper.value
-  if (!w) return
-  w.style.cssText = ''
-}
 
 function emitCollapseChange() {
   const names: string[] = []
@@ -173,7 +116,6 @@ const inputDisplayText = computed(() => {
     return text || t('taskView.emptyContent')
   }
   if (props.inputFailed) return t('taskView.failedToLoadPayload')
-  // While fetching the archived payload, show a loading message instead of stale preview
   if (props.inputLoading) return t('taskView.archivedInputPending')
   const hasInlineInput = !!props.row.toolCall.input && Object.keys(props.row.toolCall.input).length > 0
   const inlineInput = hasInlineInput ? formatInput(props.row.toolCall).trim() : ''
@@ -187,9 +129,7 @@ const outputDisplayText = computed(() => {
     return text || t('taskView.emptyContent')
   }
   if (props.outputFailed) return t('taskView.failedToLoadPayload')
-  // While fetching the archived payload, show a loading message instead of stale preview
   if (props.outputLoading) return t('taskView.archivedOutputPending')
-  // No payload — inline content is the real data, show it directly
   if (props.row.toolCall.output_preview !== undefined) {
     const preview = props.row.toolCall.output_preview?.trim() ?? ''
     if (preview) return preview
@@ -205,7 +145,6 @@ const inputIsPlaceholder = computed(() => {
   if (props.inputLoaded) return !(props.inputExpandedText ?? '').trim()
   if (props.inputFailed) return false
   if (props.inputLoading) return true
-  // No payload — inline content is real, only treat as placeholder if there's nothing to show
   if (!props.row.toolCall.input_payload_id) {
     const hasInlineInput = !!props.row.toolCall.input && Object.keys(props.row.toolCall.input).length > 0
     return !hasInlineInput
@@ -216,7 +155,6 @@ const outputIsPlaceholder = computed(() => {
   if (props.outputLoaded) return !(props.outputExpandedText ?? '').trim()
   if (props.outputFailed) return false
   if (props.outputLoading) return true
-  // No payload — inline content is real, only treat as placeholder if there's nothing to show
   if (!props.row.toolCall.output_payload_id) {
     const hasInlineContent =
       !!(props.row.toolCall.output_preview?.trim()) ||
@@ -340,19 +278,21 @@ const outputIsPlaceholder = computed(() => {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
-.tool-content-outer {
-  position: relative;
-}
 .tool-content {
   margin-top: 6px;
 }
-.tool-expand-enter-active,
-.tool-expand-leave-active {
-  transition: opacity 0.08s ease;
+/* CSS grid expand — same zero-reflow pattern as TaskProcessTextRow */
+.tool-expand-track {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.22s ease;
 }
-.tool-expand-enter-from,
-.tool-expand-leave-to {
-  opacity: 0;
+.tool-expand-track--open {
+  grid-template-rows: 1fr;
+}
+.tool-expand-body {
+  overflow: hidden;
+  min-height: 0;
 }
 .tool-pre {
   margin: 0;
