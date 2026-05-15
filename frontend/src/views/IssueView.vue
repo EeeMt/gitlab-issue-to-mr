@@ -76,7 +76,7 @@
           <n-card class="issue-card" :bordered="false" data-testid="issue-metadata-card">
             <template #header>
               <div class="issue-card__header">
-                <div class="issue-card__title">{{ t('issue.detail') }}</div>
+                <div class="issue-card__title">{{ t('issue.metadata') }}</div>
               </div>
             </template>
             <div class="metadata-body">
@@ -229,6 +229,17 @@
                     ({{ t('analytics.tokenInputLine', { value: formatNumber(issue.totals.input_tokens) }) }} /
                     {{ t('analytics.tokenOutputLine', { value: formatNumber(issue.totals.output_tokens) }) }})
                   </span>
+                </span>
+              </div>
+
+              <!-- Total task duration -->
+              <div v-if="issue.totals" class="metadata-row">
+                <span class="metadata-label">
+                  <n-icon size="14" class="metadata-label-icon"><TimeOutline /></n-icon>
+                  {{ t('issue.totalTaskDuration') }}
+                </span>
+                <span class="metadata-value">
+                  {{ formatDurationSec(issue.totals.duration_seconds) }}
                 </span>
               </div>
 
@@ -589,6 +600,7 @@ import {
 import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
+import { formatDurationSec } from '../utils/format'
 import { extractSlotErrorMessage } from '../utils/slotError'
 import { formatUsageResetAt, isUsageLimitExceededDetail, type UsageLimitExceededDetail } from '../utils/usageLimits'
 import { authState, isAdmin } from '../auth'
@@ -1427,20 +1439,26 @@ onMounted(() => {
 
 .metadata-body {
   display: grid;
-  gap: 14px;
-}
-
-.metadata-row {
-  display: flex;
-  gap: 12px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 14px;
   align-items: baseline;
 }
 
+.metadata-row {
+  display: contents;
+}
+
 .metadata-label {
+  display: inline-flex;
+  align-items: center;
   font-size: 13px;
   color: var(--n-text-color-3, #999);
-  min-width: 90px;
-  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.metadata-row > :last-child {
+  min-width: 0;
 }
 
 .metadata-label-icon {
@@ -1450,6 +1468,7 @@ onMounted(() => {
 }
 
 .metadata-value {
+  min-width: 0;
   font-size: 14px;
   color: var(--n-text-color-1);
   word-break: break-word;

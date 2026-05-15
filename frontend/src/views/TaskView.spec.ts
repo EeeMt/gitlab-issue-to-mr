@@ -324,11 +324,25 @@ vi.mock('naive-ui', () => ({
       return () => h('div', { class: 'n-tabs' }, slots.default?.())
     }
   },
+  NTab: {
+    name: 'NTab',
+    props: ['name', 'disabled'],
+    setup(_props: any, { slots }: any) {
+      return () => h('button', { class: 'n-tab' }, slots.default?.())
+    }
+  },
   NTabPane: {
     name: 'NTabPane',
     props: ['name', 'tab', 'disabled'],
     setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-tab-pane' }, slots.default?.())
+    }
+  },
+  NBadge: {
+    name: 'NBadge',
+    props: ['value', 'max', 'show-zero'],
+    setup(props: any) {
+      return () => h('span', { class: 'n-badge' }, String(props.value ?? ''))
     }
   },
   NCollapse: {
@@ -497,6 +511,13 @@ describe('TaskView', () => {
     await nextTick()
 
     return wrapper
+  }
+
+  const showRawLogsTab = async () => {
+    const processPanel = wrapper.findComponent({ name: 'TaskProcessPanel' })
+    expect(processPanel.exists()).toBe(true)
+    ;(processPanel.vm as any).activeTab = 'raw'
+    await nextTick()
   }
 
   describe('basic rendering', () => {
@@ -880,6 +901,7 @@ describe('TaskView', () => {
       })
 
       await flushPromises()
+      await showRawLogsTab()
       await nextTick()
 
       expect(wrapper.find('.log-content').exists()).toBe(true)
@@ -907,6 +929,7 @@ describe('TaskView', () => {
       })
 
       await flushPromises()
+      await showRawLogsTab()
       await nextTick()
 
       const logContent = wrapper.find('.log-content')

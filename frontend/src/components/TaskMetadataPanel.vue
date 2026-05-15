@@ -35,8 +35,9 @@
         </span>
         <span class="metadata-value">
           <template v-if="task.issue">
-            <router-link :to="`/issues/${task.issue.id}`" class="app-link">
-              #{{ task.issue.id }} {{ task.issue.title }}
+            <router-link :to="`/issues/${task.issue.id}`" class="app-link task-issue-link">
+              <span class="task-issue-link__id">#{{ task.issue.id }}</span>
+              <span class="task-issue-link__title">{{ task.issue.title }}</span>
             </router-link>
             <span v-if="task.initiator_username" class="metadata-initiator"> · {{ task.initiator_username }}</span>
           </template>
@@ -223,23 +224,30 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 
 .metadata-body {
   display: grid;
-  gap: 14px;
-}
-
-.metadata-row {
-  display: flex;
-  gap: 12px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 14px;
   align-items: baseline;
 }
 
+.metadata-row {
+  display: contents;
+}
+
 .metadata-label {
+  display: inline-flex;
+  align-items: center;
   font-size: 13px;
   color: var(--n-text-color-3, #999);
-  min-width: 90px;
-  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.metadata-row > :last-child {
+  min-width: 0;
 }
 
 .metadata-value {
+  min-width: 0;
   font-size: 14px;
   color: var(--n-text-color-1);
   word-break: break-word;
@@ -348,6 +356,49 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 }
 .app-link:hover {
   text-decoration: underline;
+}
+
+.task-issue-link {
+  --task-issue-link-color: #3b82f6;
+  --task-issue-link-border: rgba(37, 99, 235, 0.28);
+  --task-issue-link-bg: rgba(37, 99, 235, 0.12);
+  --task-issue-link-hover-border: rgba(37, 99, 235, 0.44);
+  --task-issue-link-hover-bg: rgba(37, 99, 235, 0.18);
+
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 10px;
+  border: 1px solid var(--task-issue-link-border);
+  border-radius: 999px;
+  background: var(--task-issue-link-bg);
+  color: var(--task-issue-link-color);
+  font-weight: 400;
+  line-height: 1.45;
+  vertical-align: middle;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.task-issue-link:hover {
+  border-color: var(--task-issue-link-hover-border);
+  background: var(--task-issue-link-hover-bg);
+  text-decoration: none;
+}
+
+.task-issue-link__id {
+  flex: 0 0 auto;
+  font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.task-issue-link__title {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .metadata-label-icon {

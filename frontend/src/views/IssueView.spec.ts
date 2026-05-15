@@ -3,6 +3,7 @@ import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { h, ref, nextTick } from 'vue'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import IssueView from './IssueView.vue'
+import issueViewSource from './IssueView.vue?raw'
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks
@@ -484,6 +485,7 @@ describe('IssueView', () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const text = wrapper.text()
+      expect(text).toContain('issue.metadata')
       expect(text).toContain('common.status')
       expect(text).toContain('issue.field.project')
       expect(text).toContain('issue.field.creator')
@@ -493,6 +495,12 @@ describe('IssueView', () => {
       expect(text).toContain('codify/issue-1')
       expect(text).toContain('!42')
       expect(text).toContain('session-abc')
+    })
+
+    it('aligns issue metadata values after the widest field label', () => {
+      expect(issueViewSource).toContain('grid-template-columns: max-content minmax(0, 1fr);')
+      expect(issueViewSource).toContain('display: contents;')
+      expect(issueViewSource).not.toContain('min-width: 90px;')
     })
 
     it('displays description card when description exists', async () => {
@@ -558,6 +566,23 @@ describe('IssueView', () => {
       expect(text).toContain('common.changes')
       expect(text).toContain('15')
       expect(text).toContain('analytics.tokens')
+    })
+
+    it('shows total duration from backend issue totals', async () => {
+      setupDefaultMocks({
+        totals: {
+          additions: 10,
+          deletions: 5,
+          total_changes: 15,
+          input_tokens: 150,
+          output_tokens: 75,
+          duration_seconds: 3661,
+        },
+      })
+      wrapper = await mountComponent()
+
+      expect(wrapper.text()).toContain('issue.totalTaskDuration')
+      expect(wrapper.text()).toContain('1h 1m')
     })
 
     it('shows timeline with created and updated dates', async () => {
