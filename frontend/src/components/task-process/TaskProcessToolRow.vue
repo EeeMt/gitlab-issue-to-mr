@@ -45,14 +45,23 @@
       <div class="tool-expand-track" :class="{ 'tool-expand-track--open': showInput && hasDetailedToolInput }">
         <div class="tool-expand-body">
           <div v-if="showInput && hasDetailedToolInput" class="tool-content">
-            <pre class="tool-pre tool-pre--input" :class="{ 'tool-pre--placeholder': inputIsPlaceholder }">{{ inputDisplayText }}</pre>
+            <!-- :key forces a re-mount (and thus re-animation) when placeholder -> real content -->
+            <pre
+              class="tool-pre tool-pre--input"
+              :class="{ 'tool-pre--placeholder': inputIsPlaceholder }"
+              :key="inputIsPlaceholder ? 'input-placeholder' : 'input-content'"
+            >{{ inputDisplayText }}</pre>
           </div>
         </div>
       </div>
       <div class="tool-expand-track" :class="{ 'tool-expand-track--open': showOutput && hasToolEventOutput }">
         <div class="tool-expand-body">
           <div v-if="showOutput && hasToolEventOutput" class="tool-content">
-            <pre class="tool-pre" :class="{ 'tool-pre--error': row.toolCall.error, 'tool-pre--placeholder': outputIsPlaceholder }">{{ outputDisplayText }}</pre>
+            <pre
+              class="tool-pre"
+              :class="{ 'tool-pre--error': row.toolCall.error, 'tool-pre--placeholder': outputIsPlaceholder }"
+              :key="outputIsPlaceholder ? 'output-placeholder' : 'output-content'"
+            >{{ outputDisplayText }}</pre>
           </div>
         </div>
       </div>
