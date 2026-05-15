@@ -232,9 +232,15 @@ const totalTokens = computed(() => {
 }
 
 .commit-stats {
-  font-size: 13px;
-  font-weight: 600;
-  font-family: var(--n-font-family-mono, monospace);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  font-family: var(--n-font-family, inherit);
+  font-size: 25px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+  line-height: 1.3;
 }
 
 .changes-add {
