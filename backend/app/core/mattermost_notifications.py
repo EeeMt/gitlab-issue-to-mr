@@ -419,8 +419,16 @@ async def notify_task_event(
     event_type: str,
     *,
     context: Optional[dict[str, Any]] = None,
+    session_factory: Any = None,
 ) -> None:
-    """Send Mattermost notifications for one task lifecycle event."""
+    """Send Mattermost notifications for one task lifecycle event.
+
+    session_factory: Optional async_sessionmaker to use for DB queries.
+    Defaults to the main engine's AsyncSessionLocal. Worker threads that
+    run in their own event loop must pass their thread-local session factory
+    to avoid "Future attached to a different loop" errors from asyncpg.
+    """
+    _Session = session_factory if session_factory is not None else AsyncSessionLocal
     if event_type not in MATTERMOST_EVENT_TYPE_SET:
         raise ValueError(f"Unsupported Mattermost event type: {event_type}")
 
@@ -448,7 +456,7 @@ async def notify_task_event(
             logger.warning("notify_task_event: expired task has no identity key; skipping notification")
             return
         task_id_val = task_pk[0]
-        async with AsyncSessionLocal() as reload_session:
+        async with _Session() as reload_session:
             reload_result = await reload_session.execute(select(Task).where(Task.id == task_id_val))
             task = reload_result.scalar_one_or_none()
             if task is None:
@@ -466,7 +474,7 @@ async def notify_task_event(
                 render_issue = None
                 reload_session.expunge(task)
     elif task.issue_id is not None and "issue" in task_state.unloaded:
-        async with AsyncSessionLocal() as session:
+        async with _Session() as session:
             issue_result = await session.execute(
                 select(Issue).where(Issue.id == task.issue_id)
             )
@@ -478,7 +486,7 @@ async def notify_task_event(
     else:
         render_issue = None
 
-    async with AsyncSessionLocal() as session:
+    async with _Session() as session:
         result = await session.execute(
             select(MattermostNotificationProfile)
             .where(MattermostNotificationProfile.enabled.is_(True))

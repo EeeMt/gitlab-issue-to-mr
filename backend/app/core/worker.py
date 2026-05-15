@@ -320,6 +320,7 @@ class WorkerExecutor:
             issue=issue,
             notify_task_event_fn=notify_task_event,
             completion_event=MATTERMOST_EVENT_TASK_COMPLETED,
+            session_factory=self._session_factory,
         )
 
     async def _send_failure_notifications(
@@ -337,6 +338,7 @@ class WorkerExecutor:
             notify_task_event_fn=notify_task_event,
             retry_scheduled_event=MATTERMOST_EVENT_TASK_RETRY_SCHEDULED,
             failed_event=MATTERMOST_EVENT_TASK_FAILED,
+            session_factory=self._session_factory,
         )
 
     async def _try_upsert_usage_ledger(self, db: AsyncSession, task: Task) -> None:

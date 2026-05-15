@@ -529,12 +529,13 @@ def _run_worker_task(task_id: int) -> bool:
     import asyncio
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-    # Get database URL from settings
-    from app.config import get_settings
-    settings = get_settings()
     from app.database import _database_url
 
-    # Create a new engine for this thread (not shared with main event loop)
+    # Create new event loop for this thread BEFORE creating the engine,
+    # so asyncpg binds to this thread's loop rather than the scheduler's main loop.
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     engine = create_async_engine(
         _database_url,
         pool_pre_ping=True,
@@ -542,24 +543,18 @@ def _run_worker_task(task_id: int) -> bool:
         max_overflow=2,
     )
 
-    # Create session maker for this engine
     ThreadSessionLocal = async_sessionmaker(
         engine,
         class_=AsyncSession,
         expire_on_commit=False,
     )
 
-    # Import worker
     from app.core.worker import WorkerExecutor
 
     async def run_task():
         async with ThreadSessionLocal() as db:
             worker = WorkerExecutor(session_factory=ThreadSessionLocal)
             return await worker.execute_task(db, task_id)
-
-    # Create new event loop for this thread
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
 
     try:
         return loop.run_until_complete(run_task())
@@ -582,6 +577,11 @@ def _run_worker_resume_task(task_id: int, container_name: str) -> bool:
 
     from app.database import _database_url
 
+    # Create new event loop for this thread BEFORE creating the engine,
+    # so asyncpg binds to this thread's loop rather than the scheduler's main loop.
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     engine = create_async_engine(
         _database_url,
         pool_pre_ping=True,
@@ -601,9 +601,6 @@ def _run_worker_resume_task(task_id: int, container_name: str) -> bool:
         async with ThreadSessionLocal() as db:
             worker = WorkerExecutor(session_factory=ThreadSessionLocal)
             return await worker.resume_task(db, task_id, container_name)
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
 
     try:
         return loop.run_until_complete(run_task())

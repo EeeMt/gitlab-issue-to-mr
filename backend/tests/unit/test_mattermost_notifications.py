@@ -655,6 +655,94 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
         issue_session.expunge.assert_called_once_with(issue)
         mock_client.create_post.assert_awaited_once()
 
+    async def test_custom_session_factory_is_used_for_database_queries(self) -> None:
+        """Worker threads must be able to keep notification queries on their loop."""
+        task = Task(
+            id=15,
+            project_id=1,
+            issue_id=45,
+            user_prompt="x",
+            status=TaskStatus.COMPLETED,
+            initiator_username="alice",
+        )
+        task.__dict__.pop("issue", None)
+
+        issue = Issue(
+            id=45,
+            project_id=1,
+            title="Notify",
+            description="Notify",
+            branch_name="feature/thread-local-session",
+            target_branch="main",
+            merge_request_iid=8,
+            merge_request_url="https://gitlab.example.com/project/-/merge_requests/8",
+        )
+        profile = MattermostNotificationProfile(
+            id=7,
+            name="C",
+            enabled=True,
+            target_type=MATTERMOST_TARGET_TYPE_CHANNEL,
+            channel_id="channel-1",
+            mention_in_channel=False,
+            event_types_json='["task_completed"]',
+            field_keys_json='["task_id","status"]',
+        )
+
+        issue_session = MagicMock()
+        issue_session.execute = AsyncMock(
+            return_value=SimpleNamespace(scalar_one_or_none=lambda: issue)
+        )
+        issue_session.expunge = MagicMock()
+
+        profile_session = MagicMock()
+        profile_session.execute = AsyncMock(
+            return_value=SimpleNamespace(
+                scalars=lambda: SimpleNamespace(all=lambda: [profile])
+            )
+        )
+        profile_session.commit = AsyncMock()
+
+        session_factory = MagicMock(
+            side_effect=[
+                _SessionContext(issue_session),
+                _SessionContext(profile_session),
+            ]
+        )
+        mock_client = AsyncMock()
+        task_state = MagicMock()
+        task_state.expired = False
+        task_state.unloaded = {"issue"}
+
+        def default_session_factory():
+            raise AssertionError("default AsyncSessionLocal should not be used")
+
+        with patch(
+            "app.core.mattermost_notifications.inspect",
+            return_value=task_state,
+        ), patch(
+            "app.core.mattermost_notifications.AsyncSessionLocal",
+            side_effect=default_session_factory,
+        ), patch(
+            "app.core.mattermost_notifications.MattermostClient",
+            return_value=mock_client,
+        ), patch(
+            "app.core.mattermost_notifications.get_effective_settings",
+            return_value=SimpleNamespace(
+                mattermost_server_url="https://mm",
+                mattermost_bot_token="tok",
+                dashboard_url="https://dash",
+            ),
+        ):
+            await notify_task_event(
+                task,
+                MATTERMOST_EVENT_TASK_COMPLETED,
+                session_factory=session_factory,
+            )
+
+        self.assertEqual(session_factory.call_count, 2)
+        issue_session.expunge.assert_called_once_with(issue)
+        mock_client.create_post.assert_awaited_once()
+
 
 # =======================================================================
 # Pure-function tests (no async, no DB)

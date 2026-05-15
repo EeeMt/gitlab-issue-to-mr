@@ -375,9 +375,10 @@ async def send_success_notifications(
     issue: Optional[Issue] = None,
     notify_task_event_fn=None,
     completion_event=None,
+    session_factory=None,
 ) -> None:
     try:
-        await notify_task_event_fn(task, completion_event)
+        await notify_task_event_fn(task, completion_event, session_factory=session_factory)
     except Exception as e:
         logger.warning(f"Failed to send Mattermost completion notification: {e}")
 
@@ -391,6 +392,7 @@ async def send_failure_notifications(
     notify_task_event_fn=None,
     retry_scheduled_event=None,
     failed_event=None,
+    session_factory=None,
 ) -> None:
     try:
         await worker._send_failure_alert(task, issue)
@@ -406,9 +408,10 @@ async def send_failure_notifications(
                     "previous_scheduled_at": task.scheduled_at,
                     "scheduled_at": task.scheduled_at,
                 },
+                session_factory=session_factory,
             )
         else:
-            await notify_task_event_fn(task, failed_event)
+            await notify_task_event_fn(task, failed_event, session_factory=session_factory)
     except Exception as e:
         logger.warning(f"Failed to send Mattermost failure notification: {e}")
 
