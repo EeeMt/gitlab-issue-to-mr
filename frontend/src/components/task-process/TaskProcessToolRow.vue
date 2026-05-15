@@ -65,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { NIcon, NTag } from 'naive-ui'
 import { ChevronForward } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
@@ -113,6 +113,16 @@ function toggleOutput() {
 
 const summary = computed(() => getInputSummary(props.row.toolCall))
 const hasDetailedToolInput = computed(() => hasDetailedInput(props.row.toolCall))
+
+// When payload IDs become available on an already-open panel (e.g. after task
+// completes and the parent refreshes all logs), auto-trigger loading so the
+// user doesn't have to click the badge a second time.
+watch(() => props.row.toolCall.output_payload_id, (newId) => {
+  if (newId && showOutput.value) emitCollapseChange()
+})
+watch(() => props.row.toolCall.input_payload_id, (newId) => {
+  if (newId && showInput.value) emitCollapseChange()
+})
 const hasToolEventOutput = computed(() => props.row.toolCall.output !== null || !!props.row.toolCall.output_payload_id || !!props.row.toolCall.output_preview)
 
 // Content is ready when: not loading AND (no payload OR payload is done)

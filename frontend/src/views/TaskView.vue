@@ -531,9 +531,15 @@ function connectStructuredLogStream() {
     taskId.value,
     sinceId,
     (log) => {
-      // Avoid duplicates (safety check)
-      if (!taskLogs.value.some(l => l.id === log.id)) {
+      const existingIdx = taskLogs.value.findIndex(l => l.id === log.id)
+      if (existingIdx === -1) {
         taskLogs.value = [...taskLogs.value, log]
+      } else {
+        // Update existing entry so live changes (e.g. output_payload_id becoming
+        // available on a tool_call log) are reflected without a full page reload.
+        const updated = [...taskLogs.value]
+        updated[existingIdx] = log
+        taskLogs.value = updated
       }
     },
     () => {
@@ -861,6 +867,10 @@ onMounted(async () => {
     if (isActiveTaskStatus(task.value?.status)) {
       fetchTask()
       if (!structuredLogSse) connectStructuredLogStream() // reconnect if disconnected
+      // SSE only emits NEW log rows; existing tool_call logs get their
+      // output_payload_id updated in-place (not re-emitted).  Refresh the
+      // full log list every 5 s so those metadata changes are visible.
+      fetchLogs()
     } else {
       closeLogStream()
       closeStructuredLogStream()

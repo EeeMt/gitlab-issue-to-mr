@@ -272,7 +272,11 @@ class WorkerEventProjector:
             else:
                 output_text = ""
 
-            pending_log = self._pending_tool_log_by_id.pop(tool_use_id, None)
+            log_id = self._pending_tool_log_by_id.pop(tool_use_id, None)
+            if log_id is not None:
+                pending_log = await db.get(TaskLog, log_id)
+            else:
+                pending_log = None
             if pending_log is not None:
                 payload = await self._create_sanitized_text_payload(
                     db=db,
@@ -327,8 +331,9 @@ class WorkerEventProjector:
                     }),
                 )
                 db.add(log)
-                if tool_use_id:
-                    self._pending_tool_log_by_id[tool_use_id] = log
+                await db.flush()
+                if tool_use_id and log.id:
+                    self._pending_tool_log_by_id[tool_use_id] = log.id
 
             elif block_type == "text":
                 text = block.get("text", "")
@@ -413,7 +418,9 @@ class WorkerEventProjector:
             }),
         )
         db.add(log)
-        self._pending_tool_log_by_id[tool_use["id"]] = log
+        await db.flush()
+        if tool_use["id"] and log.id:
+            self._pending_tool_log_by_id[tool_use["id"]] = log.id
         self._active_tool_use = None
 
     async def _project_stream_event(self, *, task_id: int, event: dict, db: AsyncSession) -> None:
