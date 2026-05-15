@@ -6,10 +6,21 @@
   >
     <template #header>
       <div class="process-header">
-        <span class="panel-title">{{ t('taskView.taskProcess') }}</span>
-        <n-tag v-if="isActive" type="success" size="small" round :class="{ 'live-badge--pulse': isActive }">{{ t('taskView.realTime') }}</n-tag>
-        <span v-if="showFollowupReplayHint" class="followup-replay-hint">{{ t('taskView.followupReplayHint') }}</span>
-        <span v-if="isActive && elapsedDisplay" class="elapsed-time">{{ elapsedDisplay }}</span>
+        <div class="process-header__meta">
+          <span class="panel-title">{{ t('taskView.taskProcess') }}</span>
+          <n-tag v-if="isActive" type="success" size="small" round :class="{ 'live-badge--pulse': isActive }">{{ t('taskView.realTime') }}</n-tag>
+          <span v-if="showFollowupReplayHint" class="followup-replay-hint">{{ t('taskView.followupReplayHint') }}</span>
+          <span v-if="isActive && elapsedDisplay" class="elapsed-time">{{ elapsedDisplay }}</span>
+        </div>
+        <n-tabs v-model:value="activeTab" type="segment" size="small" class="process-tabs process-tabs--header">
+          <n-tab name="events">
+            <span class="event-tab-label">
+              <span>{{ t('taskView.eventsTab') }}</span>
+              <n-badge class="event-count-badge" :value="eventStreamCount" :max="999" :show-zero="true" />
+            </span>
+          </n-tab>
+          <n-tab name="raw" :disabled="isRawTabDisabled">{{ t('taskView.rawLogsTab') }}</n-tab>
+        </n-tabs>
       </div>
     </template>
 
@@ -20,22 +31,16 @@
       :container-name="props.task?.container_name ?? null"
     />
 
-    <template v-if="!hasStructuredContent">
-      <n-tabs v-model:value="activeTab" type="line" size="small" class="process-tabs">
-        <n-tab-pane name="events" :tab="t('taskView.eventsTab')">
-          <n-empty v-if="taskStatus === 'pending' || taskStatus === 'queued'" :description="t('taskView.taskNotStarted')" class="empty-state" />
-          <n-empty v-else-if="!isActive && !terminalHtml" :description="t('taskView.noLogsAvailable')" class="empty-state" />
-          <n-empty v-else :description="t('taskView.noProcessYet')" class="empty-state" />
-        </n-tab-pane>
-        <n-tab-pane name="raw" :tab="t('taskView.rawLogsTab')" :disabled="!terminalHtml && !props.task?.container_id">
-          <TaskProcessRawPane ref="rawPaneRef" :terminal-html="terminalHtml" />
-        </n-tab-pane>
-      </n-tabs>
-    </template>
-
-    <template v-else>
-      <n-tabs v-model:value="activeTab" type="line" size="small" class="process-tabs">
-        <n-tab-pane name="events" :tab="t('taskView.eventsTab')">
+    <div class="process-content">
+      <template v-if="activeTab === 'events'">
+        <template v-if="!hasStructuredContent">
+          <div class="process-content__pane">
+            <n-empty v-if="taskStatus === 'pending' || taskStatus === 'queued'" :description="t('taskView.taskNotStarted')" class="empty-state" />
+            <n-empty v-else-if="!isActive && !terminalHtml" :description="t('taskView.noLogsAvailable')" class="empty-state" />
+            <n-empty v-else :description="t('taskView.noProcessYet')" class="empty-state" />
+          </div>
+        </template>
+        <div v-else class="process-content__pane">
           <div class="event-stream" ref="eventStreamRef">
             <template v-for="(row, index) in processRows" :key="row.event.id">
               <div :ref="(el) => { collapseRefs[index] = el as HTMLElement }">
@@ -63,12 +68,12 @@
               </div>
             </template>
           </div>
-        </n-tab-pane>
-        <n-tab-pane name="raw" :tab="t('taskView.rawLogsTab')" :disabled="!terminalHtml && !props.task?.container_id">
-          <TaskProcessRawPane ref="rawPaneRef" :terminal-html="terminalHtml" />
-        </n-tab-pane>
-      </n-tabs>
-    </template>
+        </div>
+      </template>
+      <div v-else class="process-content__pane process-content__pane--raw">
+        <TaskProcessRawPane ref="rawPaneRef" :terminal-html="terminalHtml" />
+      </div>
+    </div>
 
     <div v-if="!autoScroll && isActive" class="scroll-to-latest">
       <n-button size="small" type="primary" @click="scrollToLatest">
@@ -81,7 +86,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
-import { NCard, NIcon, NTag, NEmpty, NTabs, NTabPane, NButton } from 'naive-ui'
+import { NCard, NIcon, NTag, NEmpty, NTabs, NTab, NButton, NBadge } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { formatDurationMs } from '../utils/format'
 import { ArrowDownCircleOutline } from '@vicons/ionicons5'
@@ -142,6 +147,8 @@ const runtimeInfoEntry = computed(() => {
   return null
 })
 const hasStructuredContent = computed(() => processRows.value.length > 0)
+const eventStreamCount = computed(() => processRows.value.length)
+const isRawTabDisabled = computed(() => !props.terminalHtml && !props.task?.container_id)
 const elapsedDisplay = computed(() => (!props.isActive || elapsedMs.value <= 0 ? '' : formatDurationMs(elapsedMs.value)))
 
 function getExpandedText(entry: ParsedTextEntry): string {
@@ -219,6 +226,10 @@ watch(activeTab, (val) => {
   if (val === 'raw') emit('raw-tab-open')
   else emit('raw-tab-close')
 })
+
+watch(isRawTabDisabled, (disabled) => {
+  if (disabled && activeTab.value === 'raw') activeTab.value = 'events'
+}, { immediate: true })
 
 function setProgrammaticScroll() {
   isProgrammaticScroll = true
@@ -311,6 +322,15 @@ defineExpose({ onCollapseChange })
 .process-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.process-header__meta {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
   gap: 8px;
   min-width: 0;
 }
@@ -320,9 +340,12 @@ defineExpose({ onCollapseChange })
   font-size: 12px;
   font-weight: 400;
   line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .elapsed-time {
-  margin-left: auto;
+  flex: 0 0 auto;
   font-size: 12px;
   color: var(--n-text-color-3, #999);
   font-family: var(--n-font-family-mono, monospace);
@@ -330,13 +353,25 @@ defineExpose({ onCollapseChange })
   padding: 2px 10px;
   border-radius: 10px;
 }
+.process-content {
+  height: clamp(320px, 52vh, 520px);
+  min-width: 0;
+}
+.process-content__pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+}
 .event-stream {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   overflow-x: hidden;
   overflow-y: auto;
   min-width: 0;
-  max-height: 600px;
+  height: 100%;
+  max-height: none;
   padding-right: 4px;
 }
 .event-item {
@@ -418,7 +453,59 @@ defineExpose({ onCollapseChange })
 .process-tabs {
   margin-top: 0;
 }
+.process-tabs--header {
+  flex: 0 0 264px;
+  width: 264px;
+  min-width: 0;
+}
+:deep(.process-tabs .n-tabs-rail) {
+  border-radius: 14px;
+}
+:deep(.process-tabs .n-tabs-capsule) {
+  border-radius: 12px;
+}
+.event-tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.event-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+:deep(.event-count-badge .n-badge-sup) {
+  position: static;
+  transform: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(100, 116, 139, 0.22);
+  background: rgba(100, 116, 139, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+:deep(.process-content .log-content) {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  box-sizing: border-box;
+}
 .empty-state {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
   padding: 24px 0;
 }
 .scroll-to-latest {
