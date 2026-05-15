@@ -749,9 +749,9 @@ const taskColumns = computed<DataTableColumns<Task>>(() => {
       key: 'user_prompt',
       ellipsis: {
         tooltip: {
-          maxWidth: 420,
           style: { maxWidth: '420px', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }
-        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any
       },
       render: (row) => {
         const prompt = row.user_prompt || ''

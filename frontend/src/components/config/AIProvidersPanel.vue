@@ -281,9 +281,9 @@ const columns = computed<DataTableColumns<AIProvider>>(() => [
     minWidth: 120,
     ellipsis: {
       tooltip: {
-        maxWidth: 420,
         style: { maxWidth: '420px', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }
-      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any
     },
     render: (row: AIProvider) =>
       row.system_prompt
