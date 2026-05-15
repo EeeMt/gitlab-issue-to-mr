@@ -473,9 +473,8 @@
             />
           </n-form-item>
 
-          <!-- Require Changes (only when issue has target_branch / MR mode) -->
+          <!-- Require Changes: controls whether task fails when AI makes no code changes -->
           <n-form-item
-            v-if="issue?.target_branch"
             :label="t('issue.requireChanges')"
           >
             <n-switch v-model:value="requireChanges" />
