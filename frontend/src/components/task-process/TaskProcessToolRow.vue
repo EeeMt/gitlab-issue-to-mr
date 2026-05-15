@@ -278,6 +278,10 @@ const outputIsPlaceholder = computed(() => {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+@keyframes content-fadein {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
 .tool-content {
   margin-top: 6px;
 }
@@ -295,6 +299,7 @@ const outputIsPlaceholder = computed(() => {
   min-height: 0;
 }
 .tool-pre {
+  animation: content-fadein 0.18s ease;
   margin: 0;
   padding: 8px;
   font-size: 11px;
