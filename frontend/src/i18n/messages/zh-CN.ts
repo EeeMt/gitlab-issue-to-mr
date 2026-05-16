@@ -406,6 +406,7 @@ const zhCN = {
     taskCreated: '任务已创建',
     retryFailed: '重试任务失败',
     retrySuccess: '任务已重试',
+    prompt: '提示词',
     requireChanges: '要求代码变更',
     requireChangesHint: '若未勾选，即使未产生代码变更，任务也会视为成功',
     totalTaskDuration: '总耗时',

@@ -408,6 +408,7 @@ const en = {
     taskCreated: 'Task created',
     retryFailed: 'Failed to retry task',
     retrySuccess: 'Task retried',
+    prompt: 'Prompt',
     requireChanges: 'Require Changes',
     requireChangesHint: 'If unchecked, the task succeeds even without code changes',
     totalTaskDuration: 'Total Duration',
