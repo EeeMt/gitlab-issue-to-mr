@@ -97,6 +97,15 @@ vi.mock('naive-ui', () => {
     NCollapseItem: makePassthrough('NCollapseItem'),
     NButton: makePassthrough('NButton', 'button'),
     NSpin: makePassthrough('NSpin'),
+    NScrollbar: {
+      name: 'NScrollbar',
+      inheritAttrs: false,
+      props: ['trigger'],
+      setup(props: { trigger?: string }, { slots, attrs, expose }: { slots: Record<string, () => unknown>; attrs: Record<string, unknown>; expose: (obj: Record<string, unknown>) => void }) {
+        expose({ scrollTo: vi.fn(), scrollBy: vi.fn() })
+        return () => h('div', { ...attrs, class: ['NScrollbar', attrs.class], 'data-trigger': props.trigger }, slots.default?.())
+      },
+    },
     dateEnUS: {},
     dateZhCN: {},
     enUS: {},

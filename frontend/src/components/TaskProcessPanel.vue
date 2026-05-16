@@ -41,33 +41,41 @@
           </div>
         </template>
         <div v-else class="process-content__pane">
-          <div class="event-stream" ref="eventStreamRef">
-            <template v-for="(row, index) in processRows" :key="row.event.id">
-              <div :ref="(el) => { collapseRefs[index] = el as HTMLElement }">
-                <TaskProcessTextRow
-                  v-if="isTextRow(row)"
-                  :row="row"
-                  :expanded-text="getExpandedText(row.textEntry)"
-                  :loading="hasTextPayloadLoading(row.textEntry)"
-                  :show-content="shouldShowTextContent(row.textEntry)"
-                  @collapse-change="(names) => onCollapseChange(names, index)"
-                />
-                <TaskProcessToolRow
-                  v-else-if="isToolRow(row)"
-                  :row="row"
-                  :input-loaded="isPayloadLoaded(row.toolCall.input_payload_id ?? null)"
-                  :output-loaded="isPayloadLoaded(row.toolCall.output_payload_id ?? null)"
-                  :input-loading="isPayloadLoading(row.toolCall.input_payload_id ?? null)"
-                  :output-loading="isPayloadLoading(row.toolCall.output_payload_id ?? null)"
-                  :input-failed="hasPayloadLoadError(row.toolCall.input_payload_id ?? null)"
-                  :output-failed="hasPayloadLoadError(row.toolCall.output_payload_id ?? null)"
-                  :input-expanded-text="getExpandedPayloadText(row.toolCall.input_payload_id ?? null)"
-                  :output-expanded-text="getExpandedPayloadText(row.toolCall.output_payload_id ?? null)"
-                  @collapse-change="(names) => onCollapseChange(names, index)"
-                />
-              </div>
-            </template>
-          </div>
+          <n-scrollbar
+            class="event-stream-scrollbar"
+            trigger="hover"
+            ref="eventStreamRef"
+            :content-style="{ paddingRight: '12px' }"
+            @scroll="onEventStreamScroll"
+          >
+            <div class="event-stream">
+              <template v-for="(row, index) in processRows" :key="row.event.id">
+                <div :ref="(el) => { collapseRefs[index] = el as HTMLElement }">
+                  <TaskProcessTextRow
+                    v-if="isTextRow(row)"
+                    :row="row"
+                    :expanded-text="getExpandedText(row.textEntry)"
+                    :loading="hasTextPayloadLoading(row.textEntry)"
+                    :show-content="shouldShowTextContent(row.textEntry)"
+                    @collapse-change="(names) => onCollapseChange(names, index)"
+                  />
+                  <TaskProcessToolRow
+                    v-else-if="isToolRow(row)"
+                    :row="row"
+                    :input-loaded="isPayloadLoaded(row.toolCall.input_payload_id ?? null)"
+                    :output-loaded="isPayloadLoaded(row.toolCall.output_payload_id ?? null)"
+                    :input-loading="isPayloadLoading(row.toolCall.input_payload_id ?? null)"
+                    :output-loading="isPayloadLoading(row.toolCall.output_payload_id ?? null)"
+                    :input-failed="hasPayloadLoadError(row.toolCall.input_payload_id ?? null)"
+                    :output-failed="hasPayloadLoadError(row.toolCall.output_payload_id ?? null)"
+                    :input-expanded-text="getExpandedPayloadText(row.toolCall.input_payload_id ?? null)"
+                    :output-expanded-text="getExpandedPayloadText(row.toolCall.output_payload_id ?? null)"
+                    @collapse-change="(names) => onCollapseChange(names, index)"
+                  />
+                </div>
+              </template>
+            </div>
+          </n-scrollbar>
         </div>
       </template>
       <div v-else class="process-content__pane process-content__pane--raw">
@@ -86,7 +94,8 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
-import { NCard, NIcon, NTag, NEmpty, NTabs, NTab, NButton, NBadge } from 'naive-ui'
+import { NCard, NIcon, NTag, NEmpty, NTabs, NTab, NButton, NBadge, NScrollbar } from 'naive-ui'
+import type { ScrollbarInst } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { formatDurationMs } from '../utils/format'
 import { ArrowDownCircleOutline } from '@vicons/ionicons5'
@@ -117,7 +126,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const eventStreamRef = ref<HTMLElement | null>(null)
+const eventStreamRef = ref<ScrollbarInst | null>(null)
 const rawPaneRef = ref<{ logContentRef: HTMLElement | null } | null>(null)
 const logContentRef = computed(() => rawPaneRef.value?.logContentRef ?? null)
 const activeTab = ref<'events' | 'raw'>('events')
@@ -188,7 +197,7 @@ function onCollapseChange(expandedNames: (string | number)[], index: number) {
       lastRowScrollTimer = setTimeout(() => {
         if (eventStreamRef.value) {
           setProgrammaticScroll()
-          eventStreamRef.value.scrollTo?.({ top: eventStreamRef.value.scrollHeight, behavior: 'smooth' })
+          eventStreamRef.value.scrollTo({ position: 'bottom', behavior: 'smooth' })
         }
       }, 260)
     } else {
@@ -255,9 +264,9 @@ function setProgrammaticScroll() {
   programmaticScrollTimer = setTimeout(() => { isProgrammaticScroll = false }, 300)
 }
 
-function onEventStreamScroll() {
-  if (isProgrammaticScroll || !eventStreamRef.value) return
-  const el = eventStreamRef.value
+function onEventStreamScroll(e: Event) {
+  if (isProgrammaticScroll) return
+  const el = e.target as HTMLElement
   autoScroll.value = el.scrollHeight - el.scrollTop - el.clientHeight <= 50
 }
 
@@ -266,11 +275,6 @@ function onLogContentScroll() {
   const el = logContentRef.value
   autoScroll.value = el.scrollHeight - el.scrollTop - el.clientHeight <= 50
 }
-
-watch(eventStreamRef, (el, oldEl) => {
-  oldEl?.removeEventListener('scroll', onEventStreamScroll)
-  el?.addEventListener('scroll', onEventStreamScroll)
-})
 
 watch(logContentRef, (el, oldEl) => {
   oldEl?.removeEventListener('scroll', onLogContentScroll)
@@ -281,7 +285,7 @@ function scrollToLatest() {
   autoScroll.value = true
   setProgrammaticScroll()
   nextTick(() => {
-    eventStreamRef.value?.scrollTo?.({ top: eventStreamRef.value.scrollHeight, behavior: 'smooth' })
+    eventStreamRef.value?.scrollTo({ position: 'bottom', behavior: 'smooth' })
     logContentRef.value?.scrollTo?.({ top: logContentRef.value.scrollHeight, behavior: 'smooth' })
   })
 }
@@ -291,7 +295,7 @@ watch(processRows, async () => {
   await nextTick()
   if (eventStreamRef.value) {
     setProgrammaticScroll()
-    eventStreamRef.value.scrollTo?.({ top: eventStreamRef.value.scrollHeight, behavior: 'smooth' })
+    eventStreamRef.value.scrollTo({ position: 'bottom', behavior: 'smooth' })
   }
 })
 
@@ -301,7 +305,7 @@ watch(expandedPayloads, async () => {
   await nextTick()
   if (eventStreamRef.value) {
     setProgrammaticScroll()
-    eventStreamRef.value.scrollTo?.({ top: eventStreamRef.value.scrollHeight, behavior: 'smooth' })
+    eventStreamRef.value.scrollTo({ position: 'bottom', behavior: 'smooth' })
   }
 })
 
@@ -316,7 +320,6 @@ watch(() => props.terminalHtml, async () => {
 
 onBeforeUnmount(() => {
   if (elapsedTimer) clearInterval(elapsedTimer)
-  eventStreamRef.value?.removeEventListener('scroll', onEventStreamScroll)
   logContentRef.value?.removeEventListener('scroll', onLogContentScroll)
   if (programmaticScrollTimer) clearTimeout(programmaticScrollTimer)
   if (lastRowScrollTimer) clearTimeout(lastRowScrollTimer)
@@ -392,16 +395,16 @@ defineExpose({ onCollapseChange })
   min-width: 0;
   height: 100%;
 }
+.event-stream-scrollbar {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
 .event-stream {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
-  overflow-x: hidden;
-  overflow-y: auto;
   min-width: 0;
-  height: 100%;
-  max-height: none;
-  padding-right: 4px;
 }
 .event-item {
   border-bottom: 1px solid var(--n-border-color, rgba(128, 128, 128, 0.1));

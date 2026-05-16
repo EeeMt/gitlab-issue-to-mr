@@ -28,7 +28,11 @@
       </div>
     </template>
 
-    <div class="my-work-board__panel" data-testid="my-work-board-panel">
+    <div
+      class="my-work-board__panel"
+      :class="{ 'my-work-board__panel--mobile': isMobile }"
+      data-testid="my-work-board-panel"
+    >
       <div
         v-if="hasMoreItems"
         class="my-work-board__notice"
@@ -45,7 +49,11 @@
         {{ t('dashboard.myWorkBoard.emptyBoard') }}
       </div>
 
-      <div class="my-work-board__columns" :class="{ 'my-work-board__columns--mobile': isMobile }">
+      <div
+        class="my-work-board__columns"
+        :class="{ 'my-work-board__columns--mobile': isMobile }"
+        :style="boardColumnsStyle"
+      >
         <section
           v-for="column in activeColumns"
           :key="`${activeTab}-${column.status}`"
@@ -62,26 +70,28 @@
             <span>{{ column.count }}</span>
           </header>
 
-          <div class="my-work-board__column-body">
-            <button
-              v-for="item in column.items"
-              :key="item.id"
-              type="button"
-              class="my-work-board__card"
-              :class="{ 'my-work-board__card--task': activeTab === 'tasks' }"
-              :data-testid="`${activeTab === 'issues' ? 'issue' : 'task'}-card-${item.id}`"
-              :title="item.fullTitle || item.title"
-              @click="emit('select', item.route)"
-            >
-              <div class="my-work-board__card-title">{{ item.title }}</div>
-              <div class="my-work-board__card-subtitle">{{ item.subtitle }}</div>
-              <div class="my-work-board__card-meta">{{ item.meta.join(' · ') }}</div>
-            </button>
+          <n-scrollbar class="my-work-board__column-body-scrollbar" trigger="hover">
+            <div class="my-work-board__column-body">
+              <button
+                v-for="item in column.items"
+                :key="item.id"
+                type="button"
+                class="my-work-board__card"
+                :class="{ 'my-work-board__card--task': activeTab === 'tasks' }"
+                :data-testid="`${activeTab === 'issues' ? 'issue' : 'task'}-card-${item.id}`"
+                :title="item.fullTitle || item.title"
+                @click="emit('select', item.route)"
+              >
+                <div class="my-work-board__card-title">{{ item.title }}</div>
+                <div class="my-work-board__card-subtitle">{{ item.subtitle }}</div>
+                <div class="my-work-board__card-meta">{{ item.meta.join(' · ') }}</div>
+              </button>
 
-            <div v-if="column.items.length === 0" class="my-work-board__column-empty">
-              {{ t('dashboard.myWorkBoard.emptyColumn') }}
+              <div v-if="column.items.length === 0" class="my-work-board__column-empty">
+                {{ t('dashboard.myWorkBoard.emptyColumn') }}
+              </div>
             </div>
-          </div>
+          </n-scrollbar>
         </section>
       </div>
     </div>
@@ -90,7 +100,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { NCard, NIcon } from 'naive-ui'
+import { NCard, NIcon, NScrollbar } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
   CheckmarkCircleOutline,
@@ -159,6 +169,15 @@ const activeTotal = computed(() =>
 )
 
 const hasMoreItems = computed(() => activeTotal.value > props.visibleLimit)
+const boardColumnsStyle = computed(() => {
+  const columnCount = activeColumns.value.length
+  const desktopMinWidth = columnCount * 220 + Math.max(columnCount - 1, 0) * 12
+
+  return {
+    '--my-work-board-column-count': String(columnCount),
+    minWidth: props.isMobile ? '100%' : `${desktopMinWidth}px`,
+  }
+})
 
 function getColumnIcon(status: string) {
   return columnIcons[status as keyof typeof columnIcons] ?? EllipseOutline
@@ -227,6 +246,11 @@ function getColumnIcon(status: string) {
   overflow: hidden;
 }
 
+.my-work-board__panel--mobile {
+  height: auto;
+  overflow: visible;
+}
+
 .my-work-board__notice {
   margin-bottom: 12px;
 }
@@ -242,22 +266,22 @@ function getColumnIcon(status: string) {
 .my-work-board__columns {
   flex: 1;
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(220px, 1fr);
+  grid-template-columns: repeat(var(--my-work-board-column-count), minmax(220px, 1fr));
   gap: 12px;
   min-height: 0;
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
   align-items: stretch;
+  scrollbar-color: auto;
+  scrollbar-width: auto;
 }
 
 .my-work-board__columns--mobile {
-  grid-auto-flow: row;
-  grid-auto-columns: unset;
+  flex: none;
   grid-template-columns: 1fr;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: visible;
+  min-width: 100% !important;
 }
 
 .my-work-board__column {
@@ -295,13 +319,31 @@ function getColumnIcon(status: string) {
   flex-shrink: 0;
 }
 
+.my-work-board__columns--mobile .my-work-board__column {
+  height: clamp(220px, 42vh, 320px);
+  min-width: 0;
+}
+
+.my-work-board__column-body-scrollbar {
+  flex: 1;
+  min-height: 0;
+}
+
 .my-work-board__column-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
+}
+
+.my-work-board__columns::-webkit-scrollbar {
+  width: auto;
+  height: auto;
+}
+
+.my-work-board__columns::-webkit-scrollbar-track,
+.my-work-board__columns::-webkit-scrollbar-thumb,
+.my-work-board__columns::-webkit-scrollbar-corner {
+  all: revert;
 }
 
 .my-work-board__card {
@@ -358,4 +400,3 @@ function getColumnIcon(status: string) {
   }
 }
 </style>
-

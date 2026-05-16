@@ -98,6 +98,43 @@ vi.mock('naive-ui', () => ({
       return () => h('i', { class: 'n-icon' }, slots.default?.())
     },
   },
+  NButton: {
+    name: 'NButton',
+    props: ['size', 'quaternary', 'loading'],
+    setup(_p: any, { slots, attrs }: any) {
+      return () => h('button', attrs, [slots.icon?.(), slots.default?.()])
+    },
+  },
+  NSwitch: {
+    name: 'NSwitch',
+    props: ['value', 'size'],
+    emits: ['update:value'],
+    setup(_p: any, { attrs }: any) {
+      return () => h('button', { ...attrs, class: 'n-switch' })
+    },
+  },
+  NSelect: {
+    name: 'NSelect',
+    props: ['value', 'disabled', 'size', 'options'],
+    emits: ['update:value'],
+    setup(_p: any, { attrs }: any) {
+      return () => h('select', { ...attrs, class: 'n-select' })
+    },
+  },
+  NDivider: {
+    name: 'NDivider',
+    props: ['vertical'],
+    setup(_p: any, { attrs }: any) {
+      return () => h('span', { ...attrs, class: 'n-divider' })
+    },
+  },
+  NScrollbar: {
+    name: 'NScrollbar',
+    props: ['trigger'],
+    setup(_p: any, { attrs, slots }: any) {
+      return () => h('div', { ...attrs, class: ['n-scrollbar', attrs.class] }, slots.default?.())
+    },
+  },
   NTooltip: {
     name: 'NTooltip',
     props: ['trigger'],
