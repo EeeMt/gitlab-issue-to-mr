@@ -15,6 +15,7 @@ const { mockApi, resetMockApi, mockMessage, mockDialog } = vi.hoisted(() => {
     closeIssue: vi.fn<() => Promise<any>>(),
     createTask: vi.fn<() => Promise<any>>(),
     retryTask: vi.fn<() => Promise<any>>(),
+    rescheduleTask: vi.fn<() => Promise<any>>(),
     deleteIssueBranch: vi.fn<() => Promise<any>>(),
     getPromptTemplates: vi.fn<() => Promise<any[]>>(),
     getScheduledTasks: vi.fn<() => Promise<any[]>>(),
@@ -39,10 +40,14 @@ vi.mock('../i18n', () => ({ currentLocale: ref('en') }))
 vi.mock('../utils/datetime', () => ({
   formatDateTimeUtc8Compact: vi.fn((value: any) => `formatted-${value}`),
   formatTimeUtc8: vi.fn((value: any) => `time-${value}`),
+  parseUtcDate: vi.fn((value: any) => new Date(value)),
 }))
 
 vi.mock('../utils/slotError', () => ({
-  extractSlotErrorMessage: vi.fn((_error: any, t: any, fallbackKey: string) => t(fallbackKey)),
+  extractSlotErrorMessage: vi.fn((error: any, t: any, fallbackKey: string) => {
+    const detail = error?.response?.data?.detail
+    return typeof detail === 'string' ? detail : t(fallbackKey)
+  }),
 }))
 
 vi.mock('../auth', () => ({
@@ -60,6 +65,7 @@ vi.mock('../api', () => ({
   closeIssue: mockApi.closeIssue,
   createTask: mockApi.createTask,
   retryTask: mockApi.retryTask,
+  rescheduleTask: mockApi.rescheduleTask,
   deleteIssueBranch: mockApi.deleteIssueBranch,
   getPromptTemplates: mockApi.getPromptTemplates,
   getScheduledTasks: mockApi.getScheduledTasks,
@@ -1287,17 +1293,42 @@ describe('IssueView', () => {
   // Task column render functions
   // =========================================================================
   describe('taskColumns render functions', () => {
-    it('renders status column with NTag vnode', async () => {
+    it('renders status column with a status tag only', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
       const columns = vm.taskColumns
       const statusCol = columns.find((c: any) => c.key === 'status')
       expect(statusCol).toBeDefined()
-      const vnode = statusCol.render({ status: 'completed' })
+      const vnode = statusCol.render({ status: 'completed', is_retry: true })
       expect(vnode).toBeDefined()
-      // vnode created by h(NTag, ...) — should be an object with type
       expect(vnode.type).toBeDefined()
+      expect(vnode.props.type).toBe('success')
+      expect(vnode.props.size).toBe('small')
+    })
+
+    it('renders retry badge before prompt text in the description column', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const descCol = columns.find((c: any) => c.key === 'user_prompt')
+
+      const vnode = descCol.render({ id: 2, user_prompt: 'Retry me', is_retry: true })
+
+      expect(vnode.props.class).toBe('task-prompt-link')
+      expect(vnode.children).toHaveLength(2)
+      expect(vnode.children[0].props).toMatchObject({
+        class: 'task-prompt-link__retry-badge',
+        size: 'tiny',
+        round: true,
+      })
+      expect(vnode.children[0].props.type).toBeUndefined()
+      expect(vnode.children[1]).toBe('Retry me')
+      expect(issueViewSource).toContain('.issue-view :deep(.task-prompt-link)')
+      expect(issueViewSource).toContain('.issue-view :deep(.task-prompt-link__retry-badge)')
+      expect(issueViewSource).toContain('--n-color: #eef2ff')
+      expect(issueViewSource).toContain('--n-text-color: #4338ca')
     })
 
     it('renders description column with truncation for long text', async () => {
@@ -1309,7 +1340,7 @@ describe('IssueView', () => {
       expect(descCol).toBeDefined()
 
       const longPrompt = 'A'.repeat(100)
-      const vnode = descCol.render({ id: 1, user_prompt: longPrompt })
+      const vnode = descCol.render({ id: 1, user_prompt: longPrompt, is_retry: false })
       // Should truncate to 80 chars + '…'
       expect(vnode).toBeDefined()
       expect(vnode.children).toContain('A'.repeat(80) + '…')
@@ -1323,32 +1354,17 @@ describe('IssueView', () => {
       const descCol = columns.find((c: any) => c.key === 'user_prompt')
 
       const shortPrompt = 'Fix a bug'
-      const vnode = descCol.render({ id: 1, user_prompt: shortPrompt })
+      const vnode = descCol.render({ id: 1, user_prompt: shortPrompt, is_retry: false })
       expect(vnode.children).toBe('Fix a bug')
     })
 
-    it('renders retry column with tag when is_retry is true', async () => {
+    it('does not render a separate retry column', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
       const columns = vm.taskColumns
       const retryCol = columns.find((c: any) => c.key === 'is_retry')
-      expect(retryCol).toBeDefined()
-
-      const vnodeRetry = retryCol.render({ is_retry: true })
-      expect(vnodeRetry).toBeDefined()
-      expect(vnodeRetry.type).toBeDefined() // h(NTag, ...)
-    })
-
-    it('renders retry column with empty string when is_retry is false', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const retryCol = columns.find((c: any) => c.key === 'is_retry')
-
-      const vnode = retryCol.render({ is_retry: false })
-      expect(vnode).toBe('')
+      expect(retryCol).toBeUndefined()
     })
 
     it('renders created_at column with formatted date', async () => {
@@ -1372,6 +1388,32 @@ describe('IssueView', () => {
 
       const result = createdCol.render({ created_at: null })
       expect(result).toBe('-')
+    })
+
+    it('renders duration column from task start and completion time', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const durationCol = columns.find((c: any) => c.key === 'duration')
+      expect(durationCol).toBeDefined()
+
+      const result = durationCol.render({
+        started_at: '2024-01-01T10:00:00Z',
+        completed_at: '2024-01-01T10:05:00Z',
+      })
+      expect(result).toBe('5m 0s')
+    })
+
+    it('renders duration column with dash when task has not started', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const durationCol = columns.find((c: any) => c.key === 'duration')
+      expect(durationCol).toBeDefined()
+
+      expect(durationCol.render({ started_at: null, completed_at: null })).toBe('—')
     })
 
     it('renders actions column with retry button for failed task when isOwner', async () => {
@@ -1469,7 +1511,7 @@ describe('IssueView', () => {
       expect(router.currentRoute.value.params.id).toBe('42')
     })
 
-    it('actions column retry button onClick calls handleRetryTask', async () => {
+    it('actions column retry button onClick opens retry drawer', async () => {
       setupDefaultMocks()
       mockApi.retryTask.mockResolvedValue(undefined)
       wrapper = await mountComponent()
@@ -1486,7 +1528,96 @@ describe('IssueView', () => {
       await flushPromises()
 
       expect(mockEvent.stopPropagation).toHaveBeenCalled()
-      expect(mockApi.retryTask).toHaveBeenCalledWith(7)
+      expect(mockApi.retryTask).not.toHaveBeenCalled()
+      expect(vm.showRetryDrawer).toBe(true)
+      expect(vm.retryTargetTask?.id).toBe(7)
+    })
+
+    it('actions column reschedule button opens reschedule drawer for pending scheduled task', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const actionsCol = columns.find((c: any) => c.key === 'actions')
+
+      const vnode = actionsCol.render({
+        id: 8,
+        status: 'pending',
+        scheduled_at: '2024-01-01T12:00:00Z',
+        is_retry: false,
+        retry_source_task_id: null,
+      })
+      const mockEvent = { stopPropagation: vi.fn() }
+      vnode.props.onClick(mockEvent)
+      await flushPromises()
+
+      expect(mockEvent.stopPropagation).toHaveBeenCalled()
+      expect(vm.showRescheduleDrawer).toBe(true)
+      expect(vm.rescheduleTargetTask?.id).toBe(8)
+      expect(vm.rescheduleTaskSchedule).toBe(new Date('2024-01-01T12:00:00Z').getTime())
+    })
+
+    it('renders reschedule action for task initiator even when issue is owned by another user', async () => {
+      const { authState } = await import('../auth')
+      authState.oidcEnabled = true
+      authState.user = { id: 99 } as any
+      setupDefaultMocks({ initiator_user_id: 5 })
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const actionsCol = columns.find((c: any) => c.key === 'actions')
+
+      const vnode = actionsCol.render({
+        id: 8,
+        status: 'pending',
+        scheduled_at: '2024-01-01T12:00:00Z',
+        is_retry: false,
+        retry_source_task_id: null,
+        initiator_user_id: 99,
+        initiator_gitlab_user_id: null,
+      })
+
+      expect(vnode).not.toBe('')
+
+      authState.oidcEnabled = false
+      authState.user = null
+    })
+
+    it('actions column reschedule button opens reschedule drawer for queued task', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const actionsCol = columns.find((c: any) => c.key === 'actions')
+
+      const vnode = actionsCol.render({
+        id: 9,
+        status: 'queued',
+        scheduled_at: null,
+        is_retry: false,
+        retry_source_task_id: null,
+      })
+
+      expect(vnode).toBeDefined()
+      expect(vnode.type).toBeDefined()
+    })
+
+    it('actions column does not render reschedule for unscheduled pending task', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const actionsCol = columns.find((c: any) => c.key === 'actions')
+
+      const vnode = actionsCol.render({
+        id: 10,
+        status: 'pending',
+        scheduled_at: null,
+        is_retry: false,
+        retry_source_task_id: null,
+      })
+
+      expect(vnode).toBe('')
     })
 
     it('actions column "retried as" button navigates to retry task', async () => {
@@ -1580,6 +1711,140 @@ describe('IssueView', () => {
       await flushPromises()
 
       expect(mockMessage.error).toHaveBeenCalledWith('issue.retryFailed')
+    })
+  })
+
+  // =========================================================================
+  // retry drawer scheduling
+  // =========================================================================
+  describe('retry drawer scheduling', () => {
+    it('opens retry drawer and preloads schedule context', async () => {
+      setupDefaultMocks()
+      mockApi.getScheduledTasks.mockResolvedValue([{ id: 31 }])
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+
+      await vm.openRetryDrawer({ id: 2, user_prompt: 'Retry me' })
+      await flushPromises()
+
+      expect(vm.showRetryDrawer).toBe(true)
+      expect(vm.retryTargetTask.id).toBe(2)
+      expect(vm.retryScheduleType).toBe('now')
+      expect(mockApi.getScheduledTasks).toHaveBeenCalled()
+      expect(mockApi.getConfig).toHaveBeenCalled()
+    })
+
+    it('submits scheduled retry with selected future time', async () => {
+      setupDefaultMocks()
+      mockApi.retryTask.mockResolvedValue({ id: 8 })
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const futureMs = Date.now() + 3600000
+
+      await vm.openRetryDrawer({ id: 2, user_prompt: 'Retry me' })
+      vm.retryScheduleType = 'scheduled'
+      vm.retryTaskSchedule = futureMs
+
+      await vm.handleSubmitRetry()
+      await flushPromises()
+
+      expect(mockApi.retryTask).toHaveBeenCalledWith(2, new Date(futureMs).toISOString())
+      expect(mockMessage.success).toHaveBeenCalledWith('issue.retrySuccess')
+      expect(vm.showRetryDrawer).toBe(false)
+      expect(vm.retryTargetTask).toBeNull()
+    })
+
+    it('submits immediate retry when retry drawer is set to now', async () => {
+      setupDefaultMocks()
+      mockApi.retryTask.mockResolvedValue({ id: 8 })
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+
+      await vm.openRetryDrawer({ id: 2, user_prompt: 'Retry me' })
+      vm.retryScheduleType = 'now'
+
+      await vm.handleSubmitRetry()
+      await flushPromises()
+
+      expect(mockApi.retryTask).toHaveBeenCalledWith(2)
+      expect(mockMessage.success).toHaveBeenCalledWith('issue.retrySuccess')
+    })
+
+    it('warns when scheduled retry has no selected time', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+
+      await vm.openRetryDrawer({ id: 2, user_prompt: 'Retry me' })
+      vm.retryScheduleType = 'scheduled'
+      vm.retryTaskSchedule = null
+
+      await vm.handleSubmitRetry()
+      await flushPromises()
+
+      expect(mockMessage.warning).toHaveBeenCalledWith('createTask.pleaseSelectScheduledTime')
+      expect(mockApi.retryTask).not.toHaveBeenCalled()
+    })
+  })
+
+  // =========================================================================
+  // reschedule drawer
+  // =========================================================================
+  describe('reschedule drawer', () => {
+    it('opens reschedule drawer and preloads schedule context', async () => {
+      setupDefaultMocks()
+      mockApi.getScheduledTasks.mockResolvedValue([{ id: 41 }])
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+
+      await vm.openRescheduleDrawer({
+        id: 8,
+        user_prompt: 'Scheduled task',
+        scheduled_at: '2024-01-01T12:00:00Z',
+      })
+      await flushPromises()
+
+      expect(vm.showRescheduleDrawer).toBe(true)
+      expect(vm.rescheduleTargetTask.id).toBe(8)
+      expect(vm.rescheduleTaskSchedule).toBe(new Date('2024-01-01T12:00:00Z').getTime())
+      expect(mockApi.getScheduledTasks).toHaveBeenCalled()
+      expect(mockApi.getConfig).toHaveBeenCalled()
+    })
+
+    it('submits reschedule with selected future time', async () => {
+      setupDefaultMocks()
+      mockApi.rescheduleTask.mockResolvedValue({ id: 8 })
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const futureMs = Date.now() + 7200000
+
+      await vm.openRescheduleDrawer({ id: 8, user_prompt: 'Scheduled task', scheduled_at: null })
+      vm.rescheduleTaskSchedule = futureMs
+
+      await vm.handleSubmitReschedule()
+      await flushPromises()
+
+      expect(mockApi.rescheduleTask).toHaveBeenCalledWith(8, {
+        scheduled_datetime: new Date(futureMs).toISOString(),
+      })
+      expect(mockMessage.success).toHaveBeenCalledWith('taskView.taskRescheduled')
+      expect(vm.showRescheduleDrawer).toBe(false)
+      expect(vm.rescheduleTargetTask).toBeNull()
+    })
+
+    it('warns when reschedule drawer has no selected time', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+
+      await vm.openRescheduleDrawer({ id: 8, user_prompt: 'Scheduled task', scheduled_at: null })
+      vm.rescheduleTaskSchedule = null
+
+      await vm.handleSubmitReschedule()
+      await flushPromises()
+
+      expect(mockMessage.warning).toHaveBeenCalledWith('taskView.selectRescheduleTime')
+      expect(mockApi.rescheduleTask).not.toHaveBeenCalled()
     })
   })
 

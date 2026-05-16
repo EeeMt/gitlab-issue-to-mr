@@ -99,7 +99,11 @@ def _serialize_issue_detail(issue: Issue) -> dict:
         {
             "id": t.id,
             "user_prompt": t.user_prompt,
+            "initiator_user_id": t.initiator_user_id,
+            "initiator_gitlab_user_id": t.initiator_gitlab_user_id,
+            "initiator_username": t.initiator_username,
             "status": t.status.value if isinstance(t.status, TaskStatus) else t.status,
+            "scheduled_at": t.scheduled_at.isoformat() if t.scheduled_at else None,
             "is_retry": t.is_retry,
             "retry_source_task_id": t.retry_source_task_id,
             "container_id": t.container_id,

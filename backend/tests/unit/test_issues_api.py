@@ -74,8 +74,12 @@ def _make_task(
     id=100,
     user_prompt="Fix the bug",
     status=None,
+    scheduled_at=None,
     is_retry=False,
     retry_source_task_id=None,
+    initiator_user_id=None,
+    initiator_gitlab_user_id=None,
+    initiator_username=None,
     container_id=None,
     commit_sha=None,
     error_message=None,
@@ -98,8 +102,12 @@ def _make_task(
     task.id = id
     task.user_prompt = user_prompt
     task.status = status or TaskStatus.COMPLETED
+    task.scheduled_at = scheduled_at
     task.is_retry = is_retry
     task.retry_source_task_id = retry_source_task_id
+    task.initiator_user_id = initiator_user_id
+    task.initiator_gitlab_user_id = initiator_gitlab_user_id
+    task.initiator_username = initiator_username
     task.container_id = container_id
     task.commit_sha = commit_sha
     task.error_message = error_message
@@ -350,6 +358,37 @@ class GetIssueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result["tasks"]), 2)
         self.assertEqual(result["tasks"][0]["id"], 100)
         self.assertEqual(result["tasks"][1]["id"], 101)
+
+    async def test_get_issue_includes_task_schedule_and_initiator_metadata(self):
+        """Issue detail tasks should include fields needed for task row actions."""
+        from app.api.issues import get_issue
+        from app.dependencies.project_access import ProjectAccessScope
+
+        scheduled_at = datetime(2026, 5, 18, 2, 0, 0)
+        task = _make_task(
+            id=355,
+            status="pending",
+            scheduled_at=scheduled_at,
+            initiator_user_id=1,
+            initiator_gitlab_user_id=42,
+            initiator_username="admin",
+        )
+        issue = _make_issue(id=44, title="mm", tasks=[task])
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_user = MagicMock()
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        result = await get_issue(issue_id=44, db=mock_db, current_user=mock_user, access_scope=access_scope)
+
+        self.assertEqual(result["tasks"][0]["scheduled_at"], scheduled_at.isoformat())
+        self.assertEqual(result["tasks"][0]["initiator_user_id"], 1)
+        self.assertEqual(result["tasks"][0]["initiator_gitlab_user_id"], 42)
+        self.assertEqual(result["tasks"][0]["initiator_username"], "admin")
 
 
 # ---------------------------------------------------------------------------

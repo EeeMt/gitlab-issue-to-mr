@@ -550,6 +550,140 @@
       </n-drawer-content>
     </n-drawer>
 
+    <!-- Retry Task Drawer -->
+    <n-drawer
+      v-model:show="showRetryDrawer"
+      :width="isMobile ? '100%' : 680"
+      placement="right"
+      data-testid="issue-retry-task-drawer"
+    >
+      <n-drawer-content :title="t('taskView.retryWithSchedule')" closable>
+        <div class="retry-drawer">
+          <div v-if="retryTargetTask" class="retry-drawer__summary">
+            <div class="retry-drawer__summary-title">Task #{{ retryTargetTask.id }}</div>
+            <div class="retry-drawer__summary-prompt">
+              {{ retryTargetTask.user_prompt || '-' }}
+            </div>
+          </div>
+
+          <n-form label-placement="top">
+            <n-form-item :label="t('createTask.schedule')">
+              <div class="schedule-section">
+                <n-radio-group v-model:value="retryScheduleType">
+                  <n-radio value="now">{{ t('createTask.executeNow') }}</n-radio>
+                  <n-radio value="scheduled">{{ t('createTask.scheduleAt') }}</n-radio>
+                </n-radio-group>
+                <div class="schedule-row" :class="{ 'schedule-row--hidden': retryScheduleType !== 'scheduled' }">
+                  <n-date-picker
+                    v-model:value="retryTaskSchedule"
+                    type="datetime"
+                    clearable
+                    style="width: 220px; flex-shrink: 0"
+                    :is-date-disabled="isScheduleDateDisabled"
+                  />
+                </div>
+              </div>
+            </n-form-item>
+          </n-form>
+
+          <div v-if="retryScheduleType === 'scheduled'" class="retry-drawer__schedule-preview">
+            <n-spin v-if="scheduledTasksLoading" :description="t('createTask.schedulePreviewLoading')" />
+            <template v-else>
+              <p class="retry-drawer__hint">
+                {{ t('createTask.schedulePreviewHint') }}
+              </p>
+              <HeatmapChart
+                :tasks="scheduledTasksForPreview"
+                :selected-ms="retryTaskSchedule"
+                :max-per-slot="slotMaxTasks"
+                :enforce-capacity="slotEnforce"
+                @cell-click="handleRetryHeatmapCellClick"
+              />
+            </template>
+          </div>
+        </div>
+
+        <template #footer>
+          <div class="retry-drawer__footer">
+            <n-button @click="showRetryDrawer = false">
+              {{ t('common.cancel') }}
+            </n-button>
+            <n-button
+              type="primary"
+              :loading="retryTaskLoading"
+              data-testid="issue-submit-retry-button"
+              @click="handleSubmitRetry"
+            >
+              {{ retryScheduleType === 'scheduled' ? t('taskView.scheduleRetry') : t('common.retry') }}
+            </n-button>
+          </div>
+        </template>
+      </n-drawer-content>
+    </n-drawer>
+
+    <!-- Reschedule Task Drawer -->
+    <n-drawer
+      v-model:show="showRescheduleDrawer"
+      :width="isMobile ? '100%' : 680"
+      placement="right"
+      data-testid="issue-reschedule-task-drawer"
+    >
+      <n-drawer-content :title="t('taskView.rescheduleTask')" closable>
+        <div class="retry-drawer">
+          <div v-if="rescheduleTargetTask" class="retry-drawer__summary">
+            <div class="retry-drawer__summary-title">Task #{{ rescheduleTargetTask.id }}</div>
+            <div class="retry-drawer__summary-prompt">
+              {{ rescheduleTargetTask.user_prompt || '-' }}
+            </div>
+          </div>
+
+          <n-form label-placement="top">
+            <n-form-item :label="t('taskView.selectRescheduleTime')">
+              <n-date-picker
+                v-model:value="rescheduleTaskSchedule"
+                type="datetime"
+                clearable
+                style="width: 240px; max-width: 100%"
+                :is-date-disabled="isScheduleDateDisabled"
+              />
+            </n-form-item>
+          </n-form>
+
+          <div class="retry-drawer__schedule-preview">
+            <n-spin v-if="scheduledTasksLoading" :description="t('createTask.schedulePreviewLoading')" />
+            <template v-else>
+              <p class="retry-drawer__hint">
+                {{ t('taskView.schedulePreviewHint') }}
+              </p>
+              <HeatmapChart
+                :tasks="scheduledTasksForPreview"
+                :selected-ms="rescheduleTaskSchedule"
+                :max-per-slot="slotMaxTasks"
+                :enforce-capacity="slotEnforce"
+                @cell-click="handleRescheduleHeatmapCellClick"
+              />
+            </template>
+          </div>
+        </div>
+
+        <template #footer>
+          <div class="retry-drawer__footer">
+            <n-button @click="showRescheduleDrawer = false">
+              {{ t('common.cancel') }}
+            </n-button>
+            <n-button
+              type="primary"
+              :loading="rescheduleTaskLoading"
+              data-testid="issue-submit-reschedule-button"
+              @click="handleSubmitReschedule"
+            >
+              {{ t('taskView.saveScheduledTime') }}
+            </n-button>
+          </div>
+        </template>
+      </n-drawer-content>
+    </n-drawer>
+
     <!-- Schedule Heatmap Drawer -->
     <n-drawer v-model:show="showScheduleDrawer" :width="isMobile ? '100%' : 580" placement="right">
       <n-drawer-content :title="t('createTask.schedulePreviewTitle')" closable>
@@ -601,14 +735,14 @@ import {
 import VariableEditor from '../components/VariableEditor.vue'
 import HeatmapChart from '../components/HeatmapChart.vue'
 import {
-  getIssue, updateIssue, closeIssue, createTask, retryTask, deleteIssueBranch, getPromptTemplates,
+  getIssue, updateIssue, closeIssue, createTask, retryTask, rescheduleTask, deleteIssueBranch, getPromptTemplates,
   getScheduledTasks, getSlotCapacity, getConfig, getProjects, getProviders,
   type Issue, type Task, type PromptTemplate, type SlotCapacityInfo, type Project, type AIProvider
 } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
-import { formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
-import { formatDurationSec } from '../utils/format'
+import { formatDateTimeUtc8Compact, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
+import { formatDurationMs, formatDurationSec } from '../utils/format'
 import { extractSlotErrorMessage } from '../utils/slotError'
 import { formatUsageResetAt, isUsageLimitExceededDetail, type UsageLimitExceededDetail } from '../utils/usageLimits'
 import { authState, isAdmin } from '../auth'
@@ -628,6 +762,25 @@ const isOwner = computed(() => {
   if (isAdmin.value) return true
   return issue.value.initiator_user_id === authState.user.id
 })
+
+function canManageIssueTask(task: Pick<Task, 'initiator_user_id' | 'initiator_gitlab_user_id'>): boolean {
+  if (!authState.oidcEnabled) return true
+  if (!authState.user) return false
+  if (isAdmin.value) return true
+
+  return (
+    (
+      task.initiator_user_id !== null
+      && task.initiator_user_id !== undefined
+      && task.initiator_user_id === authState.user.id
+    )
+    || (
+      task.initiator_gitlab_user_id !== null
+      && task.initiator_gitlab_user_id !== undefined
+      && task.initiator_gitlab_user_id === authState.user.gitlab_user_id
+    )
+  )
+}
 
 // --- State ---
 const issue = ref<Issue | null>(null)
@@ -673,6 +826,15 @@ watch(showTemplateDrawer, (val) => {
 })
 const scheduleType = ref<'now' | 'scheduled'>('now')
 const requireChanges = ref(true)
+const showRetryDrawer = ref(false)
+const retryTargetTask = ref<Task | null>(null)
+const retryScheduleType = ref<'now' | 'scheduled'>('now')
+const retryTaskSchedule = ref<number | null>(null)
+const retryTaskLoading = ref(false)
+const showRescheduleDrawer = ref(false)
+const rescheduleTargetTask = ref<Task | null>(null)
+const rescheduleTaskSchedule = ref<number | null>(null)
+const rescheduleTaskLoading = ref(false)
 
 // Schedule heatmap
 const scheduledTasksForPreview = ref<Task[]>([])
@@ -761,7 +923,7 @@ const taskColumns = computed<DataTableColumns<Task>>(() => {
     {
       title: t('common.status'),
       key: 'status',
-      width: 100,
+      width: 130,
       render: renderTaskStatus
     },
     {
@@ -776,27 +938,30 @@ const taskColumns = computed<DataTableColumns<Task>>(() => {
       render: (row) => {
         const prompt = row.user_prompt || ''
         const display = prompt.length > 80 ? prompt.slice(0, 80) + '…' : prompt
+        const children = row.is_retry
+          ? [
+              h(NTag, { class: 'task-prompt-link__retry-badge', size: 'tiny', round: true }, () => t('common.retry')),
+              display
+            ]
+          : display
         return h(
           'a',
           {
-            style: 'cursor: pointer; color: var(--n-text-color);',
+            class: 'task-prompt-link',
             onClick: (e: MouseEvent) => {
               e.stopPropagation()
               router.push({ name: 'TaskView', params: { id: row.id } })
             }
           },
-          display
+          children
         )
       }
     },
     {
-      title: t('common.retry'),
-      key: 'is_retry',
-      width: 70,
-      render: (row) =>
-        row.is_retry
-          ? h(NTag, { size: 'tiny', round: true, type: 'warning' }, () => t('common.retry'))
-          : ''
+      title: t('dashboard.duration'),
+      key: 'duration',
+      width: 90,
+      render: (row) => formatTaskDuration(row)
     },
     {
       title: t('common.created'),
@@ -829,8 +994,25 @@ const taskColumns = computed<DataTableColumns<Task>>(() => {
             )
           ])
         }
+        if (!canManageIssueTask(row)) return ''
+        if (canRescheduleIssueTask(row)) {
+          return h(
+            NButton,
+            {
+              size: 'small',
+              secondary: true,
+              strong: true,
+              round: true,
+              type: 'info',
+              onClick: (e: MouseEvent) => {
+                e.stopPropagation()
+                void openRescheduleDrawer(row)
+              }
+            },
+            () => t('taskView.rescheduleTask')
+          )
+        }
         if (!['failed', 'cancelled'].includes(row.status)) return ''
-        if (!isOwner.value) return ''
         return h(
           NButton,
           {
@@ -841,7 +1023,7 @@ const taskColumns = computed<DataTableColumns<Task>>(() => {
             type: 'default',
             onClick: (e: MouseEvent) => {
               e.stopPropagation()
-              handleRetryTask(row.id)
+              void openRetryDrawer(row)
             }
           },
           () => t('issue.retryTask')
@@ -855,6 +1037,19 @@ const taskColumns = computed<DataTableColumns<Task>>(() => {
 function formatCompactDateTime(value?: string | null): string {
   if (!value) return '-'
   return formatDateTimeUtc8Compact(value)
+}
+
+function formatTaskDuration(task: Pick<Task, 'started_at' | 'completed_at'>): string {
+  if (!task.started_at) return '—'
+  const started = parseUtcDate(task.started_at).getTime()
+  const ended = task.completed_at ? parseUtcDate(task.completed_at).getTime() : Date.now()
+  if (!Number.isFinite(started) || !Number.isFinite(ended) || ended < started) return '—'
+  return formatDurationMs(ended - started)
+}
+
+function canRescheduleIssueTask(task: Pick<Task, 'status' | 'scheduled_at'>): boolean {
+  if (task.status === 'queued') return true
+  return task.status === 'pending' && !!task.scheduled_at
 }
 
 function formatNumber(value: number | null | undefined): string {
@@ -916,6 +1111,21 @@ watch(showCreateDrawer, (val) => {
   }
 })
 
+watch(showRetryDrawer, (val) => {
+  if (!val) {
+    retryTargetTask.value = null
+    retryScheduleType.value = 'now'
+    retryTaskSchedule.value = null
+  }
+})
+
+watch(showRescheduleDrawer, (val) => {
+  if (!val) {
+    rescheduleTargetTask.value = null
+    rescheduleTaskSchedule.value = null
+  }
+})
+
 onUnmounted(() => {
   if (slotCheckTimeout) clearTimeout(slotCheckTimeout)
   slotCheckGeneration++
@@ -925,9 +1135,8 @@ onUnmounted(() => {
   }
 })
 
-async function openScheduleDrawer() {
-  showScheduleDrawer.value = true
-  if (scheduledTasksForPreview.value.length === 0) {
+async function loadScheduleContext(force = false) {
+  if (force || scheduledTasksForPreview.value.length === 0) {
     scheduledTasksLoading.value = true
     try {
       scheduledTasksForPreview.value = await getScheduledTasks()
@@ -944,9 +1153,37 @@ async function openScheduleDrawer() {
   } catch { /* ignore */ }
 }
 
+async function openScheduleDrawer() {
+  showScheduleDrawer.value = true
+  await loadScheduleContext()
+}
+
 function handleScheduleHeatmapCellClick(startMs: number) {
   newTaskSchedule.value = startMs
   showScheduleDrawer.value = false
+}
+
+function handleRetryHeatmapCellClick(startMs: number) {
+  retryTaskSchedule.value = startMs
+}
+
+function handleRescheduleHeatmapCellClick(startMs: number) {
+  rescheduleTaskSchedule.value = startMs
+}
+
+async function openRetryDrawer(task: Task) {
+  retryTargetTask.value = task
+  retryScheduleType.value = 'now'
+  retryTaskSchedule.value = null
+  showRetryDrawer.value = true
+  await loadScheduleContext(true)
+}
+
+async function openRescheduleDrawer(task: Task) {
+  rescheduleTargetTask.value = task
+  rescheduleTaskSchedule.value = task.scheduled_at ? parseUtcDate(task.scheduled_at).getTime() : null
+  showRescheduleDrawer.value = true
+  await loadScheduleContext(true)
 }
 
 // --- API Actions ---
@@ -1066,14 +1303,72 @@ async function handleCreateTask() {
   }
 }
 
-async function handleRetryTask(taskId: number) {
+async function handleRetryTask(taskId: number, scheduledDatetime?: string): Promise<boolean> {
   try {
-    await retryTask(taskId)
+    if (scheduledDatetime) {
+      await retryTask(taskId, scheduledDatetime)
+    } else {
+      await retryTask(taskId)
+    }
     message.success(t('issue.retrySuccess'))
     await fetchIssue()
+    return true
   } catch (error: any) {
-    const detail = error?.response?.data?.detail
-    message.error(typeof detail === 'string' ? detail : t('issue.retryFailed'))
+    message.error(extractSlotErrorMessage(error, t, 'issue.retryFailed'))
+    return false
+  }
+}
+
+async function handleSubmitRetry() {
+  if (!retryTargetTask.value) return
+
+  let scheduledDatetime: string | undefined
+  if (retryScheduleType.value === 'scheduled') {
+    if (!retryTaskSchedule.value) {
+      message.warning(t('createTask.pleaseSelectScheduledTime'))
+      return
+    }
+    if (retryTaskSchedule.value <= Date.now()) {
+      message.warning(t('createTask.scheduledTimeFuture'))
+      return
+    }
+    scheduledDatetime = new Date(retryTaskSchedule.value).toISOString()
+  }
+
+  retryTaskLoading.value = true
+  try {
+    const success = await handleRetryTask(retryTargetTask.value.id, scheduledDatetime)
+    if (success) {
+      showRetryDrawer.value = false
+    }
+  } finally {
+    retryTaskLoading.value = false
+  }
+}
+
+async function handleSubmitReschedule() {
+  if (!rescheduleTargetTask.value) return
+  if (!rescheduleTaskSchedule.value) {
+    message.warning(t('taskView.selectRescheduleTime'))
+    return
+  }
+  if (rescheduleTaskSchedule.value <= Date.now()) {
+    message.warning(t('taskView.rescheduleTimeFuture'))
+    return
+  }
+
+  rescheduleTaskLoading.value = true
+  try {
+    await rescheduleTask(rescheduleTargetTask.value.id, {
+      scheduled_datetime: new Date(rescheduleTaskSchedule.value).toISOString()
+    })
+    message.success(t('taskView.taskRescheduled'))
+    showRescheduleDrawer.value = false
+    await fetchIssue()
+  } catch (error: any) {
+    message.error(extractSlotErrorMessage(error, t, 'taskView.failedToRescheduleTask'))
+  } finally {
+    rescheduleTaskLoading.value = false
   }
 }
 
@@ -1346,6 +1641,53 @@ onMounted(() => {
   pointer-events: none;
 }
 
+.retry-drawer {
+  display: grid;
+  gap: 16px;
+}
+
+.retry-drawer__summary {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.035);
+}
+
+.retry-drawer__summary-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.76);
+}
+
+.retry-drawer__summary-prompt {
+  max-height: 96px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(15, 23, 42, 0.72);
+}
+
+.retry-drawer__schedule-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.retry-drawer__hint {
+  margin: 0;
+  color: var(--n-text-color-3);
+  font-size: 13px;
+}
+
+.retry-drawer__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .prompt-variable-warning {
   display: flex;
   align-items: center;
@@ -1478,6 +1820,22 @@ onMounted(() => {
 
 .metadata-row > :last-child {
   min-width: 0;
+}
+
+.issue-view :deep(.task-prompt-link) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--n-text-color);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.issue-view :deep(.task-prompt-link__retry-badge) {
+  --n-color: #eef2ff !important;
+  --n-border: 1px solid #c7d2fe !important;
+  --n-text-color: #4338ca !important;
+  flex: 0 0 auto;
 }
 
 .metadata-label-icon {

@@ -469,7 +469,7 @@ const zhCN = {
     retryWithSchedule: '预约重试',
     retryWithScheduleDescription: '选择一个未来时间执行重试，而不是立即入队。',
     scheduleRetry: '预约重试',
-    rescheduleTask: '修改预约时间',
+    rescheduleTask: '修改预约',
     rescheduleTaskDescription: '无需重新创建任务，直接更新一个待执行预约任务的执行时间。',
     actionPermissionHint: '只有管理员或任务发起人才能操作该任务。其他用户可以查看详情，但不能执行这些操作。',
     selectRescheduleTime: '选择新的预约时间',
