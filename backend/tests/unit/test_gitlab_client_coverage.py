@@ -616,12 +616,14 @@ class TestGetProjects(unittest.TestCase):
         mock_p1.name = "project-a"
         mock_p1.path_with_namespace = "group/project-a"
         mock_p1.default_branch = "main"
+        mock_p1.marked_for_deletion_at = None
 
         mock_p2 = MagicMock()
         mock_p2.id = 2
         mock_p2.name = "project-b"
         mock_p2.path_with_namespace = "group/project-b"
         mock_p2.default_branch = None
+        mock_p2.marked_for_deletion_at = None
 
         client.gl.projects.list.return_value = [mock_p1, mock_p2]
 
@@ -632,6 +634,30 @@ class TestGetProjects(unittest.TestCase):
         self.assertEqual(result[0]["name"], "project-a")
         self.assertEqual(result[0]["default_branch"], "main")
         self.assertIsNone(result[1]["default_branch"])
+
+    def test_filters_deletion_pending_projects(self):
+        """Projects with marked_for_deletion_at are excluded from results."""
+        client = _make_client()
+        mock_active = MagicMock()
+        mock_active.id = 1
+        mock_active.name = "active"
+        mock_active.path_with_namespace = "group/active"
+        mock_active.default_branch = "main"
+        mock_active.marked_for_deletion_at = None
+
+        mock_pending = MagicMock()
+        mock_pending.id = 2
+        mock_pending.name = "deleted"
+        mock_pending.path_with_namespace = "group/deleted-deletion_scheduled-1"
+        mock_pending.default_branch = "main"
+        mock_pending.marked_for_deletion_at = "2026-05-15T00:00:00.000Z"
+
+        client.gl.projects.list.return_value = [mock_active, mock_pending]
+
+        result = client.get_projects()
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["id"], 1)
 
     def test_custom_per_page(self):
         """Passes per_page to API — line 367."""

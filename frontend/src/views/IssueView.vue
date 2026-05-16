@@ -138,11 +138,20 @@
                 </span>
                 <span class="metadata-value">
                   <span class="branch-flow">
-                    <span v-if="issue.base_branch" class="branch-item branch-item--base">{{ issue.base_branch }}</span>
+                    <template v-if="issue.base_branch">
+                      <a v-if="issueBranchUrl(issue.base_branch)" :href="issueBranchUrl(issue.base_branch)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--base app-link">{{ issue.base_branch }}</a>
+                      <span v-else class="branch-item branch-item--base">{{ issue.base_branch }}</span>
+                    </template>
                     <span v-if="issue.base_branch && issue.branch_name" class="branch-arrow">➜</span>
-                    <span v-if="issue.branch_name" class="branch-item branch-item--work">{{ issue.branch_name }}</span>
+                    <template v-if="issue.branch_name">
+                      <a v-if="issueBranchUrl(issue.branch_name)" :href="issueBranchUrl(issue.branch_name)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--work app-link">{{ issue.branch_name }}</a>
+                      <span v-else class="branch-item branch-item--work">{{ issue.branch_name }}</span>
+                    </template>
                     <span v-if="issue.branch_name && issue.target_branch" class="branch-arrow">➜</span>
-                    <span v-if="issue.target_branch" class="branch-item branch-item--target">{{ issue.target_branch }}</span>
+                    <template v-if="issue.target_branch">
+                      <a v-if="issueBranchUrl(issue.target_branch)" :href="issueBranchUrl(issue.target_branch)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--target app-link">{{ issue.target_branch }}</a>
+                      <span v-else class="branch-item branch-item--target">{{ issue.target_branch }}</span>
+                    </template>
                     <span v-if="!issue.branch_name && !issue.base_branch && !issue.target_branch">-</span>
                   </span>
                 </span>
@@ -632,6 +641,17 @@ const projectName = computed(() => {
   const project = projects.value.find(p => p.id === issue.value!.project_id)
   return project ? project.path_with_namespace : `Project #${issue.value.project_id}`
 })
+
+const projectUrl = computed(() => {
+  if (!issue.value) return null
+  const project = projects.value.find(p => p.id === issue.value!.project_id)
+  return project?.web_url ?? null
+})
+
+function issueBranchUrl(branchName: string | null | undefined): string | null {
+  if (!branchName || !projectUrl.value) return null
+  return `${projectUrl.value}/-/tree/${encodeURIComponent(branchName)}`
+}
 
 // Create task form
 const showCreateDrawer = ref(false)

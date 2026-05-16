@@ -80,15 +80,20 @@
         </span>
         <span class="metadata-value">
           <span class="branch-flow">
-            <span v-if="task.issue?.base_branch" class="branch-item branch-item--base">{{ task.issue.base_branch }}</span>
+            <template v-if="task.issue?.base_branch">
+              <a v-if="branchUrl(task.issue.base_branch)" :href="branchUrl(task.issue.base_branch)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--base app-link">{{ task.issue.base_branch }}</a>
+              <span v-else class="branch-item branch-item--base">{{ task.issue.base_branch }}</span>
+            </template>
             <span v-if="task.issue?.base_branch && task.issue?.branch_name" class="branch-arrow">➜</span>
-            <span v-if="task.issue?.branch_name" class="branch-item branch-item--work">
-              {{ task.issue.branch_name }}
-            </span>
+            <template v-if="task.issue?.branch_name">
+              <a v-if="branchUrl(task.issue.branch_name)" :href="branchUrl(task.issue.branch_name)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--work app-link">{{ task.issue.branch_name }}</a>
+              <span v-else class="branch-item branch-item--work">{{ task.issue.branch_name }}</span>
+            </template>
             <span v-if="task.issue?.branch_name && task.issue?.target_branch" class="branch-arrow">➜</span>
-            <span v-if="task.issue?.target_branch" class="branch-item branch-item--target">
-              {{ task.issue.target_branch }}
-            </span>
+            <template v-if="task.issue?.target_branch">
+              <a v-if="branchUrl(task.issue.target_branch)" :href="branchUrl(task.issue.target_branch)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--target app-link">{{ task.issue.target_branch }}</a>
+              <span v-else class="branch-item branch-item--target">{{ task.issue.target_branch }}</span>
+            </template>
             <span v-if="!task.issue?.branch_name" class="branch-item branch-item--direct">{{ t('taskView.directPush') }}</span>
           </span>
         </span>
@@ -183,6 +188,11 @@ const projectDisplayName = computed(() => {
     || props.task.project_name
     || `Project #${props.task.project_id}`
 })
+
+function branchUrl(branchName: string): string | null {
+  if (!props.task.project_url || !branchName) return null
+  return `${props.task.project_url}/-/tree/${encodeURIComponent(branchName)}`
+}
 
 function formatDate(dateStr: string): string {
   return formatDateTimeUtc8(dateStr)

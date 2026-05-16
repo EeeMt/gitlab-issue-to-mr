@@ -124,6 +124,7 @@ const activeTab = ref<'events' | 'raw'>('events')
 const collapseRefs = ref<(HTMLElement | null)[]>([])
 const autoScroll = ref(true)
 const elapsedMs = ref(0)
+const expandedRowIndex = ref<number | null>(null)
 
 const {
   expandedPayloads,
@@ -137,6 +138,7 @@ const {
 
 let elapsedTimer: ReturnType<typeof setInterval> | null = null
 let programmaticScrollTimer: ReturnType<typeof setTimeout> | null = null
+let lastRowScrollTimer: ReturnType<typeof setTimeout> | null = null
 let isProgrammaticScroll = false
 
 const processRows = computed(() => normalizeTaskProcessRows(props.taskLogs))
@@ -172,12 +174,28 @@ function hasPayloadLoadError(payloadId: number | null): boolean {
 }
 
 function onCollapseChange(expandedNames: (string | number)[], index: number) {
-  if (expandedNames.length === 0) return
+  const isExpanding = expandedNames.length > 0
+  expandedRowIndex.value = isExpanding ? index : null
+
+  if (!isExpanding) return
+
+  const isLastRow = index === processRows.value.length - 1
 
   nextTick(() => {
-    const collapseEl = collapseRefs.value[index]
-    if (collapseEl && typeof collapseEl.scrollIntoView === 'function') {
-      collapseEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    if (isLastRow) {
+      // Wait for the CSS grid expand animation (220ms) to finish, then scroll to bottom
+      if (lastRowScrollTimer) clearTimeout(lastRowScrollTimer)
+      lastRowScrollTimer = setTimeout(() => {
+        if (eventStreamRef.value) {
+          setProgrammaticScroll()
+          eventStreamRef.value.scrollTo?.({ top: eventStreamRef.value.scrollHeight, behavior: 'smooth' })
+        }
+      }, 260)
+    } else {
+      const collapseEl = collapseRefs.value[index]
+      if (collapseEl && typeof collapseEl.scrollIntoView === 'function') {
+        collapseEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      }
     }
   })
 
@@ -277,6 +295,16 @@ watch(processRows, async () => {
   }
 })
 
+// When payload content loads into an already-expanded last row, scroll to reveal it
+watch(expandedPayloads, async () => {
+  if (expandedRowIndex.value !== processRows.value.length - 1) return
+  await nextTick()
+  if (eventStreamRef.value) {
+    setProgrammaticScroll()
+    eventStreamRef.value.scrollTo?.({ top: eventStreamRef.value.scrollHeight, behavior: 'smooth' })
+  }
+})
+
 watch(() => props.terminalHtml, async () => {
   if (!props.isActive || !autoScroll.value) return
   await nextTick()
@@ -291,6 +319,7 @@ onBeforeUnmount(() => {
   eventStreamRef.value?.removeEventListener('scroll', onEventStreamScroll)
   logContentRef.value?.removeEventListener('scroll', onLogContentScroll)
   if (programmaticScrollTimer) clearTimeout(programmaticScrollTimer)
+  if (lastRowScrollTimer) clearTimeout(lastRowScrollTimer)
 })
 
 defineExpose({ onCollapseChange })

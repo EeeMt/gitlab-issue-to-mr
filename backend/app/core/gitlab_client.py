@@ -432,15 +432,21 @@ class GitLabClient:
         """
         logger.info("Fetching accessible projects")
         projects = self.gl.projects.list(per_page=per_page, membership=True)
-        return [
-            {
-                "id": p.id,
-                "name": p.name,
-                "path_with_namespace": p.path_with_namespace,
-                "default_branch": getattr(p, "default_branch", None),
-            }
-            for p in projects
-        ]
+        result = []
+        for p in projects:
+            if getattr(p, "marked_for_deletion_at", None):
+                logger.debug("Skipping project pending deletion: %s", p.path_with_namespace)
+                continue
+            result.append(
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "path_with_namespace": p.path_with_namespace,
+                    "default_branch": getattr(p, "default_branch", None),
+                    "web_url": getattr(p, "web_url", None),
+                }
+            )
+        return result
 
     def get_branches(self, project_id: int) -> list:
         """Get list of branches for a project.
@@ -649,6 +655,8 @@ async def get_accessible_projects_for_oauth_token(
                 response.raise_for_status()
                 payload = response.json()
                 for project in payload:
+                    if project.get("marked_for_deletion_at"):
+                        continue
                     projects_by_id[int(project["id"])] = {
                         "id": project["id"],
                         "name": project["name"],

@@ -186,6 +186,7 @@ const filterConfig: FilterSortConfig = {
     { key: 'project_id', label: 'issue.field.project', defaultVisible: true },
     { key: 'status', label: 'common.status', defaultVisible: true },
     { key: 'task_count', label: 'issue.field.tasks', defaultVisible: true },
+    { key: 'branch_name', label: 'issue.field.branch', defaultVisible: true },
     { key: 'merge_request', label: 'filter.hasMr', defaultVisible: true },
     { key: 'total_changes', label: 'common.changes', defaultVisible: true },
     { key: 'duration', label: 'dashboard.duration', defaultVisible: true },
@@ -244,6 +245,18 @@ const statusColors: Record<IssueStatus, 'default' | 'info' | 'warning' | 'succes
 function getProjectName(projectId: number): string {
   const project = projects.value.find((p) => p.id === projectId)
   return project ? project.path_with_namespace : `Project #${projectId}`
+}
+
+function getProjectWebUrl(projectId: number): string | null {
+  const project = projects.value.find((p) => p.id === projectId)
+  return project?.web_url ?? null
+}
+
+function issueBranchUrl(projectId: number, branchName: string | null | undefined): string | null {
+  if (!branchName) return null
+  const webUrl = getProjectWebUrl(projectId)
+  if (!webUrl) return null
+  return `${webUrl}/-/tree/${encodeURIComponent(branchName)}`
 }
 
 function formatCompactDateTime(value?: string | null): string {
@@ -305,6 +318,26 @@ const allColumns = computed<DataTableColumns<Issue>>(() => [
     key: 'task_count',
     width: 80,
     render: (row) => String(row.task_count ?? 0),
+  },
+  {
+    title: t('issue.field.branch'),
+    key: 'branch_name',
+    width: 180,
+    ellipsis: { tooltip: true },
+    render: (row) => {
+      if (!row.branch_name) return '—'
+      const url = issueBranchUrl(row.project_id, row.branch_name)
+      if (url) {
+        return h('a', {
+          href: url,
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          class: 'app-link',
+          onClick: (e: MouseEvent) => e.stopPropagation(),
+        }, row.branch_name)
+      }
+      return row.branch_name
+    },
   },
   {
     title: t('filter.hasMr'),
