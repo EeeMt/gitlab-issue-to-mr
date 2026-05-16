@@ -312,6 +312,7 @@ const zhCN = {
     completed: '已完成',
     failedToFetchTasks: '获取任务失败',
     task: '任务',
+    prompt: '提示词',
     id: 'ID',
     project: '项目',
     issue: '议题',

@@ -314,6 +314,7 @@ const en = {
     completed: 'Completed',
     failedToFetchTasks: 'Failed to fetch tasks',
     task: 'Task',
+    prompt: 'Prompt',
     id: 'ID',
     project: 'Project',
     issue: 'Issue',

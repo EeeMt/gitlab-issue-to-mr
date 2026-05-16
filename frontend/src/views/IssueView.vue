@@ -964,6 +964,12 @@ const taskColumns = computed<DataTableColumns<Task>>(() => {
       render: (row) => formatTaskDuration(row)
     },
     {
+      title: t('dashboard.scheduled'),
+      key: 'scheduled_at',
+      width: 140,
+      render: (row) => formatCompactDateTime(row.scheduled_at)
+    },
+    {
       title: t('common.created'),
       key: 'created_at',
       width: 140,

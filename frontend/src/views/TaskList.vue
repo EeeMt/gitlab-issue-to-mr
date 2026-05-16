@@ -60,17 +60,20 @@
         />
 
         <n-card class="dashboard-table-card" :bordered="false" data-testid="tasks-table-card">
-          <n-data-table
-            data-testid="tasks-table"
-            :columns="columns"
-            :data="tasks"
-            :loading="tableLoading"
-            :row-key="(row: Task) => row.id"
-            :row-props="getRowProps"
-            :pagination="pagination"
-            remote
-            :bordered="false"
-          />
+          <div class="dashboard-table-shell">
+            <n-data-table
+              data-testid="tasks-table"
+              :columns="columns"
+              :data="tasks"
+              :loading="tableLoading"
+              :row-key="(row: Task) => row.id"
+              :row-props="getRowProps"
+              :pagination="pagination"
+              :scroll-x="tableScrollX"
+              remote
+              :bordered="false"
+            />
+          </div>
         </n-card>
       </n-space>
     </n-spin>
@@ -198,6 +201,7 @@ const filterConfig: FilterSortConfig = {
   ],
   columns: [
     { key: 'id', label: 'dashboard.id', defaultVisible: true, alwaysVisible: true },
+    { key: 'user_prompt', label: 'dashboard.prompt', defaultVisible: true },
     { key: 'project', label: 'dashboard.project', defaultVisible: true },
     { key: 'initiator_username', label: 'dashboard.initiator', defaultVisible: true },
     { key: 'issue', label: 'dashboard.issue', defaultVisible: false },
@@ -274,6 +278,10 @@ function getInitiatorLabel(task: Task): string {
   return task.initiator_username?.trim() || '-'
 }
 
+function formatPrompt(value?: string | null): string {
+  return value?.trim() || '-'
+}
+
 const secondaryTextStyle = { fontSize: '11px', color: 'rgba(15,23,42,0.45)', marginTop: '2px', lineHeight: '1.4' }
 
 function formatNumber(value: number | null | undefined) {
@@ -324,6 +332,18 @@ const allDesktopColumns = computed<DataTableColumns<Task>>(() => {
       title: t('dashboard.id'),
       key: 'id',
       width: 52
+    },
+    {
+      title: t('dashboard.prompt'),
+      key: 'user_prompt',
+      width: 180,
+      ellipsis: {
+        tooltip: {
+          style: { maxWidth: '420px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any
+      },
+      render: (row) => formatPrompt(row.user_prompt)
     },
     {
       title: t('dashboard.project'),
@@ -504,6 +524,15 @@ const columns = computed<DataTableColumns<Task>>(() => {
   const visible = filterState.visibleColumns.value
   return allDesktopColumns.value.filter((col) => 'key' in col && visible.includes(col.key as string))
 })
+
+const tableScrollX = computed(() => {
+  const width = columns.value.reduce((total, col) => {
+    const columnWidth = 'width' in col && typeof col.width === 'number' ? col.width : 160
+    return total + columnWidth
+  }, 0)
+  return Math.max(width, isMobile.value ? 360 : 960)
+})
+
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 
@@ -583,6 +612,7 @@ onMounted(() => {
 <style scoped>
 .dashboard {
   max-width: var(--app-page-max-width);
+  min-width: 0;
 }
 
 .dashboard__filters {
@@ -599,6 +629,18 @@ onMounted(() => {
 
 .dashboard-table-card {
   border-radius: var(--app-card-radius);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.dashboard-table-card :deep(.n-card__content) {
+  min-width: 0;
+}
+
+.dashboard-table-shell {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 @media (max-width: 768px) {

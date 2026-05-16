@@ -1390,6 +1390,31 @@ describe('IssueView', () => {
       expect(result).toBe('-')
     })
 
+    it('renders scheduled_at column with formatted appointment time', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const scheduledCol = columns.find((c: any) => c.key === 'scheduled_at')
+      expect(scheduledCol).toBeDefined()
+      expect(scheduledCol.title).toBe('dashboard.scheduled')
+
+      const result = scheduledCol.render({ scheduled_at: '2024-01-03T09:30:00Z' })
+      expect(result).toBe('formatted-2024-01-03T09:30:00Z')
+    })
+
+    it('renders scheduled_at column with dash for unscheduled task', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const scheduledCol = columns.find((c: any) => c.key === 'scheduled_at')
+      expect(scheduledCol).toBeDefined()
+
+      const result = scheduledCol.render({ scheduled_at: null })
+      expect(result).toBe('-')
+    })
+
     it('renders duration column from task start and completion time', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()

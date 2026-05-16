@@ -116,12 +116,12 @@ vi.mock('naive-ui', () => ({
   },
   NDataTable: {
     name: 'NDataTable',
-    props: ['columns', 'data', 'loading', 'row-key', 'row-props', 'bordered', 'pagination', 'remote'],
+    props: ['columns', 'data', 'loading', 'row-key', 'row-props', 'bordered', 'pagination', 'remote', 'scrollX'],
     setup(props: any) {
       return () =>
         h(
           'div',
-          { class: 'n-data-table' },
+          { class: 'n-data-table', 'data-scroll-x': props.scrollX },
           props.data?.map((row: any) =>
             h('div', { class: 'n-data-table-row', 'data-id': row.id }),
           ),
@@ -339,6 +339,12 @@ describe('TaskList', () => {
     it('renders data table', async () => {
       await mountComponent()
       expect(wrapper.find('.n-data-table').exists()).toBe(true)
+    })
+
+    it('wraps data table in an internal horizontal scroll container', async () => {
+      await mountComponent()
+      expect(wrapper.find('.dashboard-table-shell').exists()).toBe(true)
+      expect(wrapper.findComponent({ name: 'NDataTable' }).props('scrollX')).toBeGreaterThan(0)
     })
 
     it('renders refresh button in header', async () => {
@@ -844,6 +850,28 @@ describe('TaskList', () => {
       await mountComponent()
       const cols = (wrapper.vm as any).allDesktopColumns
       const col = getColumn(cols, 'initiator_username')
+      expect(col.render(minimalTask, 0)).toBe('-')
+    })
+
+    it('renders prompt column with compact width and wrapping hover tooltip', async () => {
+      await mountComponent()
+      const cols = (wrapper.vm as any).allDesktopColumns
+      const col = getColumn(cols, 'user_prompt')
+      expect(col).toBeDefined()
+      expect(col.title).toBe('dashboard.prompt')
+      expect(col.width).toBeLessThanOrEqual(220)
+      expect(col.ellipsis.tooltip.style).toMatchObject({
+        maxWidth: '420px',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+      })
+      expect(col.render(fullTask, 0)).toBe('Implement feature X')
+    })
+
+    it('renders prompt column with dash when prompt is empty', async () => {
+      await mountComponent()
+      const cols = (wrapper.vm as any).allDesktopColumns
+      const col = getColumn(cols, 'user_prompt')
       expect(col.render(minimalTask, 0)).toBe('-')
     })
 
