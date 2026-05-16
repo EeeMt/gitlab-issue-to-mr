@@ -390,10 +390,10 @@
       <n-drawer-content :title="t('issue.createTask')" closable>
         <n-form label-placement="top" class="issue-view__create-form">
           <!-- Prompt -->
-          <div class="prompt-section">
-            <div class="prompt-section__header">
-              <div class="prompt-section__header-left">
-                <span class="prompt-section__label">{{ t('issue.prompt') }}</span>
+          <n-form-item class="prompt-form-item">
+            <template #label>
+              <div class="prompt-label-left">
+                <span>{{ t('issue.prompt') }}</span>
                 <n-button
                   size="tiny"
                   :disabled="promptTemplatesLoading || promptTemplates.length === 0"
@@ -408,8 +408,8 @@
                   {{ t('createTask.useTemplate') }}
                 </n-button>
               </div>
-              <div class="prompt-section__header-right">
-                <span class="prompt-section__require-label">{{ t('issue.requireChanges') }}</span>
+              <div class="prompt-label-right">
+                <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
                 <n-tooltip trigger="hover" placement="top">
                   <template #trigger>
                     <n-switch v-model:value="requireChanges" size="small" />
@@ -417,17 +417,19 @@
                   {{ t('issue.requireChangesHint') }}
                 </n-tooltip>
               </div>
-            </div>
+            </template>
             <VariableEditor
               v-model="newTaskPrompt"
               :variable-tips="promptVariableTips"
               :placeholder="issue?.description || t('issue.promptPlaceholder')"
             />
-            <div v-if="unreplacedVariables.length > 0" class="prompt-variable-warning">
-              <n-icon :component="WarningOutline" size="14" />
-              <span>{{ t('createTask.unreplacedVariablesHint') }}: {{ unreplacedVariables.join(', ') }}</span>
-            </div>
-          </div>
+            <template #feedback>
+              <div v-if="unreplacedVariables.length > 0" class="prompt-variable-warning">
+                <n-icon :component="WarningOutline" size="14" />
+                <span>{{ t('createTask.unreplacedVariablesHint') }}: {{ unreplacedVariables.join(', ') }}</span>
+              </div>
+            </template>
+          </n-form-item>
 
           <!-- Priority cards -->
           <n-form-item :label="t('common.priority')">
@@ -1567,80 +1569,31 @@ onMounted(() => {
   min-height: 200px;
 }
 
-.issue-view__create-form :deep(.n-form-item:first-child .n-form-item-label) {
-  width: 100%;
+/* Make the n-form-item-label__text span (which wraps #label slot content)
+   a flex container so children can be spread left/right */
+.prompt-form-item :deep(.n-form-item-label__text) {
+  flex: 1;
   display: flex;
-  align-items: center;
-}
-
-.prompt-section {
-  margin-bottom: 16px;
-}
-
-.prompt-section__header {
-  display: flex;
-  align-items: center;
   justify-content: space-between;
-  margin-bottom: 6px;
-  gap: 8px;
+  align-items: center;
+  min-width: 0;
 }
 
-.prompt-section__header-left {
+.prompt-label-left {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.prompt-section__header-right {
+.prompt-label-right {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.prompt-section__label {
-  font-size: var(--n-label-font-size, 14px);
-  font-weight: var(--n-label-font-weight, 400);
-  color: var(--n-label-text-color, inherit);
-}
-
-.prompt-section__require-label {
+.prompt-label-require-text {
   font-size: 12px;
   color: var(--n-label-text-color, #888);
-}
-
-.prompt-label-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  gap: 8px;
-}
-
-.prompt-label-row span {
-  flex-shrink: 0;
-}
-
-.prompt-label-row__left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.prompt-label-row__right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.prompt-label-row__require-label {
-  font-size: 12px;
-  color: var(--n-label-text-color, #666);
-}
-
-.prompt-label-row .n-button {
-  flex-shrink: 0;
 }
 
 .priority-selector {
