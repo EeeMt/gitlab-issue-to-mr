@@ -286,7 +286,9 @@
               </div>
             </template>
             <div class="issue-view__description-wrap">
-              <div class="issue-view__description">{{ issue.description }}</div>
+              <n-scrollbar trigger="hover" style="max-height: 320px">
+                <div class="issue-view__description markdown-content" v-html="renderedDescription"></div>
+              </n-scrollbar>
             </div>
           </n-card>
         </n-gi>
@@ -561,9 +563,7 @@
         <div class="retry-drawer">
           <div v-if="retryTargetTask" class="retry-drawer__summary">
             <div class="retry-drawer__summary-title">Task #{{ retryTargetTask.id }}</div>
-            <div class="retry-drawer__summary-prompt">
-              {{ retryTargetTask.user_prompt || '-' }}
-            </div>
+            <div class="retry-drawer__summary-prompt markdown-content" v-html="renderedRetryPrompt"></div>
           </div>
 
           <n-form label-placement="top">
@@ -632,9 +632,7 @@
         <div class="retry-drawer">
           <div v-if="rescheduleTargetTask" class="retry-drawer__summary">
             <div class="retry-drawer__summary-title">Task #{{ rescheduleTargetTask.id }}</div>
-            <div class="retry-drawer__summary-prompt">
-              {{ rescheduleTargetTask.user_prompt || '-' }}
-            </div>
+            <div class="retry-drawer__summary-prompt markdown-content" v-html="renderedReschedulePrompt"></div>
           </div>
 
           <n-form label-placement="top">
@@ -714,7 +712,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin,
   NIcon, NDataTable, NInput, NDrawer, NDrawerContent, NSelect,
-  NRadio, NRadioGroup, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NAlert, NTooltip, NSwitch,
+  NRadio, NRadioGroup, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NAlert, NTooltip, NSwitch, NScrollbar,
   useMessage, useDialog,
   type DataTableColumns
 } from 'naive-ui'
@@ -746,6 +744,7 @@ import { formatDurationMs, formatDurationSec } from '../utils/format'
 import { extractSlotErrorMessage } from '../utils/slotError'
 import { formatUsageResetAt, isUsageLimitExceededDetail, type UsageLimitExceededDetail } from '../utils/usageLimits'
 import { authState, isAdmin } from '../auth'
+import { renderMarkdown } from '../components/task-process/taskProcessUtils'
 
 const route = useRoute()
 const router = useRouter()
@@ -788,6 +787,10 @@ const loading = ref(false)
 const deletingBranch = ref(false)
 let pollTimer: number | null = null
 const projects = ref<Project[]>([])
+
+const renderedDescription = computed(() => renderMarkdown(issue.value?.description ?? ''))
+const renderedRetryPrompt = computed(() => renderMarkdown(retryTargetTask.value?.user_prompt ?? ''))
+const renderedReschedulePrompt = computed(() => renderMarkdown(rescheduleTargetTask.value?.user_prompt ?? ''))
 
 const projectName = computed(() => {
   if (!issue.value) return '-'
@@ -1498,7 +1501,7 @@ onMounted(() => {
   flex-direction: column;
 }
 
-.issue-card :deep(.n-card__content) {
+.issue-card :deep(.n-card-content) {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -1534,23 +1537,53 @@ onMounted(() => {
 }
 
 .issue-view__description-wrap {
-  flex: 1;
+  background: rgba(15, 23, 42, 0.035);
+  border-radius: 8px;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
 .issue-view__description {
-  white-space: pre-wrap;
+  padding: 12px 14px;
   line-height: 1.6;
   color: rgba(15, 23, 42, 0.82);
-  background: rgba(15, 23, 42, 0.035);
-  border-radius: 8px;
-  padding: 12px 14px;
-  overflow-y: auto;
-  max-height: 320px;
-  flex: 1;
 }
+.issue-view__description :deep(p) { margin: 0 0 0.6em; }
+.issue-view__description :deep(p:last-child) { margin-bottom: 0; }
+.issue-view__description :deep(h1),
+.issue-view__description :deep(h2),
+.issue-view__description :deep(h3),
+.issue-view__description :deep(h4) { margin: 0.8em 0 0.4em; font-weight: 600; line-height: 1.3; }
+.issue-view__description :deep(h1) { font-size: 1.25em; }
+.issue-view__description :deep(h2) { font-size: 1.1em; }
+.issue-view__description :deep(h3) { font-size: 1em; }
+.issue-view__description :deep(ul),
+.issue-view__description :deep(ol) { margin: 0.4em 0; padding-left: 1.5em; }
+.issue-view__description :deep(li) { margin: 0.15em 0; }
+.issue-view__description :deep(blockquote) {
+  margin: 0.5em 0; padding: 0.2em 0.8em;
+  border-left: 3px solid rgba(128,128,128,0.35);
+  color: rgba(15, 23, 42, 0.5);
+}
+.issue-view__description :deep(a) { color: var(--n-primary-color, #18a058); text-decoration: none; }
+.issue-view__description :deep(a:hover) { text-decoration: underline; }
+.issue-view__description :deep(code) {
+  font-family: var(--n-font-family-mono, monospace);
+  font-size: 0.88em; background: rgba(128,128,128,0.12);
+  border-radius: 3px; padding: 0.1em 0.35em;
+}
+.issue-view__description :deep(pre.md-code-block) {
+  margin: 0.5em 0; padding: 10px 12px;
+  background: rgba(0,0,0,0.06); border-radius: 5px;
+  overflow-x: auto; font-family: var(--n-font-family-mono, monospace);
+  font-size: 0.85em; line-height: 1.55; white-space: pre;
+}
+.issue-view__description :deep(pre.md-code-block code) { background: none; padding: 0; border-radius: 0; font-size: inherit; color: inherit; }
+.issue-view__description :deep(table) { width: 100%; border-collapse: collapse; margin: 0.6em 0; font-size: 0.9em; overflow-x: auto; display: block; }
+.issue-view__description :deep(th),
+.issue-view__description :deep(td) { border: 1px solid rgba(128,128,128,0.25); padding: 5px 10px; text-align: left; }
+.issue-view__description :deep(th) { background: rgba(128,128,128,0.08); font-weight: 600; }
+.issue-view__description :deep(tr:nth-child(even) td) { background: rgba(128,128,128,0.04); }
+.issue-view__description :deep(hr) { border: none; border-top: 1px solid rgba(128,128,128,0.2); margin: 0.8em 0; }
 
 .issue-view__code {
   font-family: 'SF Mono', 'Fira Code', 'Fira Mono', Menlo, Consolas, monospace;
@@ -1681,12 +1714,27 @@ onMounted(() => {
 .retry-drawer__summary-prompt {
   max-height: 96px;
   overflow-y: auto;
-  white-space: pre-wrap;
   word-break: break-word;
   font-size: 13px;
   line-height: 1.55;
   color: rgba(15, 23, 42, 0.72);
 }
+.retry-drawer__summary-prompt :deep(p) { margin: 0 0 0.5em; }
+.retry-drawer__summary-prompt :deep(p:last-child) { margin-bottom: 0; }
+.retry-drawer__summary-prompt :deep(ul),
+.retry-drawer__summary-prompt :deep(ol) { margin: 0.3em 0; padding-left: 1.4em; }
+.retry-drawer__summary-prompt :deep(li) { margin: 0.1em 0; }
+.retry-drawer__summary-prompt :deep(code) {
+  font-family: var(--n-font-family-mono, monospace);
+  font-size: 0.88em; background: rgba(128,128,128,0.12);
+  border-radius: 3px; padding: 0.1em 0.3em;
+}
+.retry-drawer__summary-prompt :deep(pre.md-code-block) {
+  margin: 0.4em 0; padding: 8px 10px;
+  background: rgba(0,0,0,0.06); border-radius: 4px;
+  overflow-x: auto; font-size: 0.82em; white-space: pre;
+}
+.retry-drawer__summary-prompt :deep(pre.md-code-block code) { background: none; padding: 0; font-size: inherit; }
 
 .retry-drawer__schedule-preview {
   display: grid;

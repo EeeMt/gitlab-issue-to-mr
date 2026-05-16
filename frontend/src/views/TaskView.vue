@@ -153,7 +153,9 @@
                   </div>
                 </template>
                 <div class="task-prompt-wrap">
-                  <div class="task-prompt-content">{{ task.user_prompt }}</div>
+                  <n-scrollbar trigger="hover" style="max-height: 320px">
+                    <div class="task-prompt-content markdown-content" v-html="renderedUserPrompt"></div>
+                  </n-scrollbar>
                 </div>
               </n-card>
             </n-gi>
@@ -308,10 +310,11 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin, NDatePicker, NDrawer, NDrawerContent, NIcon, useMessage } from 'naive-ui'
+import { NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin, NDatePicker, NDrawer, NDrawerContent, NIcon, NScrollbar, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, streamTaskLogs, getScheduledTasks, getConfig, getIssue, getTaskArchive, downloadTaskArchive, type Task, type TaskLog } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
+import { renderMarkdown } from '../components/task-process/taskProcessUtils'
 import PageHeader from '../components/PageHeader.vue'
 import TaskMetadataPanel from '../components/TaskMetadataPanel.vue'
 import TaskProcessPanel from '../components/TaskProcessPanel.vue'
@@ -339,6 +342,7 @@ const { t } = useI18n()
 const { isMobile } = useBreakpoints()
 
 const taskId = computed(() => Number(route.params.id))
+const renderedUserPrompt = computed(() => renderMarkdown(task.value?.user_prompt ?? ''))
 
 const task = ref<Task | null>(null)
 const logs = ref('')
@@ -958,7 +962,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
 }
 
-.task-card--equal :deep(.n-card__content) {
+.task-card--equal :deep(.n-card-content) {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -966,23 +970,53 @@ onBeforeUnmount(() => {
 }
 
 .task-prompt-wrap {
-  flex: 1;
+  background: rgba(15, 23, 42, 0.035);
+  border-radius: 8px;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
 .task-prompt-content {
-  white-space: pre-wrap;
+  padding: 12px 14px;
   line-height: 1.6;
   color: rgba(15, 23, 42, 0.82);
-  background: rgba(15, 23, 42, 0.035);
-  border-radius: 8px;
-  padding: 12px 14px;
-  overflow-y: auto;
-  max-height: 320px;
-  flex: 1;
 }
+.task-prompt-content :deep(p) { margin: 0 0 0.6em; }
+.task-prompt-content :deep(p:last-child) { margin-bottom: 0; }
+.task-prompt-content :deep(h1),
+.task-prompt-content :deep(h2),
+.task-prompt-content :deep(h3),
+.task-prompt-content :deep(h4) { margin: 0.8em 0 0.4em; font-weight: 600; line-height: 1.3; }
+.task-prompt-content :deep(h1) { font-size: 1.25em; }
+.task-prompt-content :deep(h2) { font-size: 1.1em; }
+.task-prompt-content :deep(h3) { font-size: 1em; }
+.task-prompt-content :deep(ul),
+.task-prompt-content :deep(ol) { margin: 0.4em 0; padding-left: 1.5em; }
+.task-prompt-content :deep(li) { margin: 0.15em 0; }
+.task-prompt-content :deep(blockquote) {
+  margin: 0.5em 0; padding: 0.2em 0.8em;
+  border-left: 3px solid rgba(128,128,128,0.35);
+  color: rgba(15, 23, 42, 0.5);
+}
+.task-prompt-content :deep(a) { color: var(--n-primary-color, #18a058); text-decoration: none; }
+.task-prompt-content :deep(a:hover) { text-decoration: underline; }
+.task-prompt-content :deep(code) {
+  font-family: var(--n-font-family-mono, monospace);
+  font-size: 0.88em; background: rgba(128,128,128,0.12);
+  border-radius: 3px; padding: 0.1em 0.35em;
+}
+.task-prompt-content :deep(pre.md-code-block) {
+  margin: 0.5em 0; padding: 10px 12px;
+  background: rgba(0,0,0,0.06); border-radius: 5px;
+  overflow-x: auto; font-family: var(--n-font-family-mono, monospace);
+  font-size: 0.85em; line-height: 1.55; white-space: pre;
+}
+.task-prompt-content :deep(pre.md-code-block code) { background: none; padding: 0; border-radius: 0; font-size: inherit; color: inherit; }
+.task-prompt-content :deep(table) { width: 100%; border-collapse: collapse; margin: 0.6em 0; font-size: 0.9em; overflow-x: auto; display: block; }
+.task-prompt-content :deep(th),
+.task-prompt-content :deep(td) { border: 1px solid rgba(128,128,128,0.25); padding: 5px 10px; text-align: left; }
+.task-prompt-content :deep(th) { background: rgba(128,128,128,0.08); font-weight: 600; }
+.task-prompt-content :deep(tr:nth-child(even) td) { background: rgba(128,128,128,0.04); }
+.task-prompt-content :deep(hr) { border: none; border-top: 1px solid rgba(128,128,128,0.2); margin: 0.8em 0; }
 
 .task-card--spaced {
   margin-top: 16px;
@@ -1006,7 +1040,7 @@ onBeforeUnmount(() => {
   color: rgba(15, 23, 42, 0.58);
 }
 
-.task-card--actions :deep(.n-card__content) {
+.task-card--actions :deep(.n-card-content) {
   padding-top: 12px;
 }
 
