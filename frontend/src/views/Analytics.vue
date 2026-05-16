@@ -1146,7 +1146,7 @@ const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
           : null
       ])
   },
-  { title: t('analytics.tasks'), key: 'task_count', width: 80, sorter: (a, b) => a.task_count - b.task_count },
+  { title: t('analytics.tasks'), key: 'task_count', width: 90, sorter: (a, b) => a.task_count - b.task_count },
   {
     title: t('analytics.success'),
     key: 'success_rate',
@@ -1155,11 +1155,15 @@ const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
     render: (row) => formatPercentage(row.success_rate)
   },
   {
-    title: t('analytics.avgDuration'),
-    key: 'avg_execution_seconds',
-    width: 120,
-    sorter: (a, b) => (a.avg_execution_seconds ?? -1) - (b.avg_execution_seconds ?? -1),
-    render: (row) => formatDurationSec(row.avg_execution_seconds)
+    title: t('analytics.duration'),
+    key: 'total_execution_seconds',
+    width: 130,
+    sorter: (a, b) => a.total_execution_seconds - b.total_execution_seconds,
+    render: (row) =>
+      h('div', [
+        h('div', formatDurationSec(row.total_execution_seconds)),
+        h('div', { style: secondaryTextStyle }, t('analytics.durationAvgLine', { value: formatDurationSec(row.avg_execution_seconds) }))
+      ])
   },
   {
     title: t('analytics.avgWait'),
@@ -1214,7 +1218,7 @@ const initiatorColumns = computed<DataTableColumns<AnalyticsInitiatorRow>>(() =>
           : null
       ])
   },
-  { title: t('analytics.tasks'), key: 'task_count', width: 80, sorter: (a, b) => a.task_count - b.task_count },
+  { title: t('analytics.tasks'), key: 'task_count', width: 90, sorter: (a, b) => a.task_count - b.task_count },
   {
     title: t('analytics.success'),
     key: 'success_rate',
@@ -1223,11 +1227,15 @@ const initiatorColumns = computed<DataTableColumns<AnalyticsInitiatorRow>>(() =>
     render: (row) => formatPercentage(row.success_rate)
   },
   {
-    title: t('analytics.avgDuration'),
-    key: 'avg_execution_seconds',
-    width: 120,
-    sorter: (a, b) => (a.avg_execution_seconds ?? -1) - (b.avg_execution_seconds ?? -1),
-    render: (row) => formatDurationSec(row.avg_execution_seconds)
+    title: t('analytics.duration'),
+    key: 'total_execution_seconds',
+    width: 130,
+    sorter: (a, b) => a.total_execution_seconds - b.total_execution_seconds,
+    render: (row) =>
+      h('div', [
+        h('div', formatDurationSec(row.total_execution_seconds)),
+        h('div', { style: secondaryTextStyle }, t('analytics.durationAvgLine', { value: formatDurationSec(row.avg_execution_seconds) }))
+      ])
   },
   {
     title: t('analytics.avgWait'),

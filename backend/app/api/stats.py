@@ -459,6 +459,7 @@ async def get_analytics(
                 "total_tokens"
             ),
             func.avg(execution_seconds_expr).label("avg_execution_seconds"),
+            func.coalesce(func.sum(execution_seconds_expr), 0).label("total_execution_seconds"),
             func.avg(queue_wait_seconds_expr).label("avg_queue_wait_seconds"),
             func.max(Task.created_at).label("last_task_at"),
         )
@@ -522,6 +523,7 @@ async def get_analytics(
                 "total_tokens"
             ),
             func.avg(execution_seconds_expr).label("avg_execution_seconds"),
+            func.coalesce(func.sum(execution_seconds_expr), 0).label("total_execution_seconds"),
             func.avg(queue_wait_seconds_expr).label("avg_queue_wait_seconds"),
             func.max(Task.created_at).label("last_task_at"),
         )
@@ -876,6 +878,7 @@ async def get_analytics(
                 "avg_execution_seconds": (
                     float(row.avg_execution_seconds) if row.avg_execution_seconds is not None else None
                 ),
+                "total_execution_seconds": float(row.total_execution_seconds or 0),
                 "avg_queue_wait_seconds": (
                     float(row.avg_queue_wait_seconds) if row.avg_queue_wait_seconds is not None else None
                 ),
@@ -908,6 +911,7 @@ async def get_analytics(
                 "avg_execution_seconds": (
                     float(row.avg_execution_seconds) if row.avg_execution_seconds is not None else None
                 ),
+                "total_execution_seconds": float(row.total_execution_seconds or 0),
                 "avg_queue_wait_seconds": (
                     float(row.avg_queue_wait_seconds) if row.avg_queue_wait_seconds is not None else None
                 ),

@@ -412,6 +412,7 @@ export interface AnalyticsProjectRow {
   output_tokens: number
   total_tokens: number
   avg_execution_seconds: number | null
+  total_execution_seconds: number
   avg_queue_wait_seconds: number | null
   last_task_at: string | null
 }
@@ -431,6 +432,7 @@ export interface AnalyticsInitiatorRow {
   output_tokens: number
   total_tokens: number
   avg_execution_seconds: number | null
+  total_execution_seconds: number
   avg_queue_wait_seconds: number | null
   last_task_at: string | null
 }
