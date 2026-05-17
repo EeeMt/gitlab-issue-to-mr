@@ -263,7 +263,6 @@ function buildTaskCard(task: Task): BoardCardItem {
     fullTitle: task.user_prompt,
     subtitle: `#${task.id}`,
     meta: [
-      task.project_path_with_namespace || t('dashboard.projectFallback', { id: task.project_id }),
       formatPriority(task.priority),
       formatDateTimeUtc8Compact(task.started_at || task.created_at),
     ],
