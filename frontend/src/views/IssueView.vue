@@ -316,14 +316,32 @@
             <div class="issue-card__title">
               {{ t('issue.taskCount', { count: issue.tasks?.length ?? 0 }) }}
             </div>
+            <n-tooltip
+              v-if="isOwner && issue.status !== 'closed' && issue.tasks?.length"
+              trigger="hover"
+              placement="top"
+              :max-width="260"
+            >
+              <template #trigger>
+                <n-button
+                  size="small"
+                  type="primary"
+                  @click="showCreateDrawer = true"
+                  data-testid="issue-toggle-create-task"
+                >
+                  {{ t('issue.appendTask') }}
+                </n-button>
+              </template>
+              {{ t('issue.appendTaskHint') }}
+            </n-tooltip>
             <n-button
-              v-if="isOwner && issue.status !== 'closed'"
+              v-else-if="isOwner && issue.status !== 'closed'"
               size="small"
               type="primary"
               @click="showCreateDrawer = true"
               data-testid="issue-toggle-create-task"
             >
-              {{ issue.tasks?.length ? t('issue.appendTask') : t('issue.createTask') }}
+              {{ t('issue.createTask') }}
             </n-button>
           </div>
         </template>
@@ -427,12 +445,13 @@
               </div>
               <div class="prompt-label-right">
                 <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
-                <n-tooltip trigger="hover" placement="top">
+                <n-tooltip trigger="hover" placement="top" :max-width="260">
                   <template #trigger>
-                    <n-switch v-model:value="requireChanges" size="small" />
+                    <n-icon :component="InformationCircleOutline" size="14" class="require-changes-info-icon" />
                   </template>
                   {{ t('issue.requireChangesHint') }}
                 </n-tooltip>
+                <n-switch v-model:value="requireChanges" size="small" />
               </div>
             </template>
             <VariableEditor
@@ -1642,6 +1661,12 @@ onMounted(() => {
 .prompt-label-require-text {
   font-size: 12px;
   color: var(--n-label-text-color, #888);
+}
+
+.require-changes-info-icon {
+  color: var(--n-label-text-color, #aaa);
+  cursor: help;
+  flex-shrink: 0;
 }
 
 .priority-selector {
