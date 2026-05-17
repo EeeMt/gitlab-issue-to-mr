@@ -318,6 +318,7 @@ export interface ToolCall {
   error: boolean
   /** ISO timestamp present on real-time individual log entries (log_type='tool_call'). */
   timestamp?: string
+  duration_ms?: number
   // Archive payload fields (from event archive system)
   input_payload_id?: number
   input_preview?: string

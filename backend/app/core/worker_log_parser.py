@@ -3,6 +3,7 @@
 import json as _json
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +23,7 @@ class WorkerStdoutMarkerParser:
     """Parses structured CODIFY_* stdout markers into TaskLog rows."""
 
     def __init__(self) -> None:
-        self._pending_tool_uses: dict[str, int] = {}
+        self._pending_tool_uses: dict[str, tuple[int, datetime]] = {}
 
     async def handle_line(self, *, stripped: str, task_id: int, db: AsyncSession) -> bool:
         if stripped.startswith('CODIFY_TOOL_USE_START:'):
@@ -75,6 +76,7 @@ class WorkerStdoutMarkerParser:
         try:
             data = _json.loads(match.group(1))
             tool_use_id = data.get('id', '')
+            start_time = datetime.now(timezone.utc)
             log_entry = TaskLog(
                 task_id=task_id,
                 log_level='INFO',
@@ -90,7 +92,7 @@ class WorkerStdoutMarkerParser:
             db.add(log_entry)
             await db.flush()
             if tool_use_id and log_entry.id:
-                self._pending_tool_uses[tool_use_id] = log_entry.id
+                self._pending_tool_uses[tool_use_id] = (log_entry.id, start_time)
             await db.commit()
         except Exception as exc:  # noqa: BLE001
             logger.debug(f'[Task {task_id}] Failed to parse CODIFY_TOOL_USE_START: {exc}')
@@ -102,15 +104,18 @@ class WorkerStdoutMarkerParser:
         try:
             data = _json.loads(match.group(1))
             tool_use_id = data.get('id', '')
-            log_id = self._pending_tool_uses.pop(tool_use_id, None)
-            if not log_id:
+            pending = self._pending_tool_uses.pop(tool_use_id, None)
+            if pending is None:
                 return
+            log_id, start_time = pending
             log_entry = await db.get(TaskLog, log_id)
             if not log_entry or not log_entry.log_metadata:
                 return
             existing = _json.loads(log_entry.log_metadata)
             existing['output'] = data.get('output', '')
             existing['error'] = data.get('error', False)
+            duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
+            existing['duration_ms'] = duration_ms
             log_entry.log_metadata = _json.dumps(existing)
             await db.commit()
         except Exception as exc:  # noqa: BLE001

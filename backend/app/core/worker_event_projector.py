@@ -6,6 +6,7 @@ import json as _json
 import logging
 import os as _os
 import tarfile as _tarfile
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -72,7 +73,7 @@ class WorkerEventProjector:
         self._active_tool_use: dict | None = None
         self._active_text_block: dict | None = None
         self._active_thinking_block: dict | None = None
-        self._pending_tool_log_by_id: dict = {}
+        self._pending_tool_log_by_id: dict[str, tuple[int, datetime]] = {}
         self._latest_result_record: dict | None = None
         self._run_is_resumed: bool | None = None
         self._timeline_gate_open = True
@@ -272,26 +273,28 @@ class WorkerEventProjector:
             else:
                 output_text = ""
 
-            log_id = self._pending_tool_log_by_id.pop(tool_use_id, None)
-            if log_id is not None:
-                pending_log = await db.get(TaskLog, log_id)
-            else:
-                pending_log = None
-            if pending_log is not None:
-                payload = await self._create_sanitized_text_payload(
-                    db=db,
-                    task_id=task_id,
-                    payload_kind="tool_output",
-                    text=output_text,
-                )
-                sanitized_output_text = self._sanitize_sensitive_data(output_text)
-                _, output_truncated = _build_tool_output_preview(sanitized_output_text)
-                meta = _json.loads(pending_log.log_metadata or "{}")
-                meta["output_payload_id"] = payload.id
-                meta["output_truncated"] = output_truncated
-                meta["output_char_count"] = len(sanitized_output_text)
-                meta["error"] = is_error
-                pending_log.log_metadata = _json.dumps(meta)
+            pending = self._pending_tool_log_by_id.pop(tool_use_id, None)
+            if pending is None:
+                continue
+            log_id, start_time = pending
+            pending_log = await db.get(TaskLog, log_id)
+            if pending_log is None:
+                continue
+            payload = await self._create_sanitized_text_payload(
+                db=db,
+                task_id=task_id,
+                payload_kind="tool_output",
+                text=output_text,
+            )
+            sanitized_output_text = self._sanitize_sensitive_data(output_text)
+            _, output_truncated = _build_tool_output_preview(sanitized_output_text)
+            meta = _json.loads(pending_log.log_metadata or "{}")
+            meta["output_payload_id"] = payload.id
+            meta["output_truncated"] = output_truncated
+            meta["output_char_count"] = len(sanitized_output_text)
+            meta["error"] = is_error
+            meta["duration_ms"] = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
+            pending_log.log_metadata = _json.dumps(meta)
 
     async def _project_assistant_message(self, *, task_id: int, record: dict, db: AsyncSession) -> None:
         """Project a complete assistant message (non-streaming format)."""
@@ -310,7 +313,7 @@ class WorkerEventProjector:
                 input_text = _serialize_tool_input(tool_input)
                 sanitized_input_text = self._sanitize_sensitive_data(input_text)
                 input_preview, input_truncated = _build_preview_from_serialized_tool_input(sanitized_input_text)
-
+                start_time = datetime.now(timezone.utc)
                 payload = await self._create_sanitized_text_payload(
                     db=db,
                     task_id=task_id,
@@ -333,7 +336,7 @@ class WorkerEventProjector:
                 db.add(log)
                 await db.flush()
                 if tool_use_id and log.id:
-                    self._pending_tool_log_by_id[tool_use_id] = log.id
+                    self._pending_tool_log_by_id[tool_use_id] = (log.id, start_time)
 
             elif block_type == "text":
                 text = block.get("text", "")
@@ -395,6 +398,7 @@ class WorkerEventProjector:
         tool_use = self._active_tool_use
         if tool_use is None:
             return
+        start_time = datetime.now(timezone.utc)
         input_text = "".join(tool_use["input_parts"])
         sanitized_input_text = self._sanitize_sensitive_data(input_text)
         payload = await self._create_sanitized_text_payload(
@@ -420,7 +424,7 @@ class WorkerEventProjector:
         db.add(log)
         await db.flush()
         if tool_use["id"] and log.id:
-            self._pending_tool_log_by_id[tool_use["id"]] = log.id
+            self._pending_tool_log_by_id[tool_use["id"]] = (log.id, start_time)
         self._active_tool_use = None
 
     async def _project_stream_event(self, *, task_id: int, event: dict, db: AsyncSession) -> None:

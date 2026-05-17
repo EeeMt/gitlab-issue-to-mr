@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock
 
@@ -51,7 +52,7 @@ class TestWorkerStdoutMarkerParser(IsolatedAsyncioTestCase):
             log_metadata=json.dumps({'name': 'Read', 'input': {'file_path': 'a.py'}, 'output': None, 'error': False}),
         )
         log_entry.id = 55
-        self.parser._pending_tool_uses['tu1'] = 55
+        self.parser._pending_tool_uses['tu1'] = (55, datetime(2026, 1, 1, tzinfo=timezone.utc))
         self.db.get = AsyncMock(return_value=log_entry)
 
         handled = await self.parser.handle_line(
@@ -64,6 +65,8 @@ class TestWorkerStdoutMarkerParser(IsolatedAsyncioTestCase):
         metadata = json.loads(log_entry.log_metadata)
         self.assertEqual(metadata['output'], 'done')
         self.assertTrue(metadata['error'])
+        self.assertIn('duration_ms', metadata)
+        self.assertIsInstance(metadata['duration_ms'], int)
 
     async def test_text_markers_create_logs(self):
         for marker, log_type in [

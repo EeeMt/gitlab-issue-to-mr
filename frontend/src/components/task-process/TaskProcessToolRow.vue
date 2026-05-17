@@ -9,6 +9,11 @@
         <span v-if="summary" class="event-preview">{{ summary }}</span>
       </div>
       <n-tag v-if="row.toolCall.error" type="error" size="small" round>Error</n-tag>
+      <span
+        v-if="row.toolCall.duration_ms !== undefined"
+        class="event-duration"
+        :title="`Tool duration: ${formatDuration(row.toolCall.duration_ms)}`"
+      >{{ formatDuration(row.toolCall.duration_ms) }}</span>
       <span class="event-ts">{{ formatTimestamp(row.event.created_at) }}</span>
     </div>
     <div v-if="hasDetailedToolInput || hasToolEventOutput" class="tool-sections">
@@ -70,6 +75,12 @@ import { NIcon, NTag } from 'naive-ui'
 import { ChevronForward } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { formatInput, formatTimestamp, getInputSummary, getToolColor, getToolIcon, hasDetailedInput, type NormalizedToolEventRow } from './taskProcessUtils'
+
+function formatDuration(ms: number): string {
+  const clamped = Math.max(0, ms)
+  if (clamped < 1000) return `${clamped}ms`
+  return `${(clamped / 1000).toFixed(1)}s`
+}
 
 const props = defineProps<{
   row: NormalizedToolEventRow
@@ -248,6 +259,17 @@ const outputIsPlaceholder = computed(() => {
   flex-shrink: 0;
   font-family: var(--n-font-family-mono, monospace);
   margin-left: auto;
+}
+.event-duration {
+  font-size: 10px;
+  color: #7c3aed;
+  flex-shrink: 0;
+  font-family: var(--n-font-family-mono, monospace);
+  background: rgba(124, 58, 237, 0.08);
+  border: 1px solid rgba(124, 58, 237, 0.3);
+  border-radius: 3px;
+  padding: 0 4px;
+  line-height: 1.6;
 }
 .tool-sections {
   margin: 4px 8px 2px 28px;
