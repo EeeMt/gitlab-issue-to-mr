@@ -72,6 +72,9 @@
         />
       </n-popover>
 
+      <!-- Quick filter slot (e.g. "Mine" button) -->
+      <slot name="quick-filters" />
+
       <div class="filter-toolbar__spacer" />
 
       <!-- Result count -->

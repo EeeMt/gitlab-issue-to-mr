@@ -59,20 +59,37 @@
           @toggle-column="filterState.toggleColumn"
           @reset-columns="filterState.resetColumns"
           @search="onSearch"
-        />
+        >
+          <template v-if="currentUsername" #quick-filters>
+            <n-button
+              size="small"
+              :type="isMyFilterActive ? 'primary' : 'default'"
+              :secondary="!isMyFilterActive"
+              @click="toggleMyFilter"
+            >
+              <template #icon>
+                <n-icon size="14"><PersonOutline /></n-icon>
+              </template>
+              {{ t('filter.mine') }}
+            </n-button>
+          </template>
+        </FilterToolbar>
 
         <n-card class="issue-list__table-card" :bordered="false" data-testid="issue-list-table-card">
-          <n-data-table
-            data-testid="issue-list-table"
-            :columns="columns"
-            :data="issues"
-            :loading="tableLoading"
-            :row-key="(row: Issue) => row.id"
-            :row-props="issueRowProps"
-            :pagination="pagination"
-            remote
-            :bordered="false"
-          />
+          <div class="issue-list__table-shell">
+            <n-data-table
+              data-testid="issue-list-table"
+              :columns="columns"
+              :data="issues"
+              :loading="tableLoading"
+              :row-key="(row: Issue) => row.id"
+              :row-props="issueRowProps"
+              :pagination="pagination"
+              :scroll-x="tableScrollX"
+              remote
+              :bordered="false"
+            />
+          </div>
         </n-card>
       </n-space>
     </n-spin>
@@ -81,10 +98,11 @@
 
 <script setup lang="ts">
 import { ref, onMounted, h, watch, computed } from 'vue'
-import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, type DataTableColumns } from 'naive-ui'
+import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, NIcon, useMessage, type DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getIssues, getProjects, getStats, type Issue, type IssueStatus, type Project } from '../api'
+import { authState } from '../auth'
 import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
 import FilterToolbar from '../components/filter/FilterToolbar.vue'
@@ -199,6 +217,21 @@ const filterConfig: FilterSortConfig = {
 
 const filterState = useFilterSort(filterConfig)
 const searchTerm = ref('')
+
+const currentUsername = computed(() => authState.user?.username ?? null)
+
+const isMyFilterActive = computed(() => {
+  const val = filterState.filters.value['initiator_username']
+  return Array.isArray(val) && val.length === 1 && val[0] === currentUsername.value
+})
+
+function toggleMyFilter() {
+  if (isMyFilterActive.value) {
+    filterState.removeFilter('initiator_username')
+  } else if (currentUsername.value) {
+    filterState.addFilter('initiator_username', [currentUsername.value])
+  }
+}
 
 function onSearch(term: string) {
   searchTerm.value = term
@@ -410,6 +443,14 @@ const columns = computed<DataTableColumns<Issue>>(() => {
   return allColumns.value.filter((col) => 'key' in col && visible.includes(col.key as string))
 })
 
+const tableScrollX = computed(() => {
+  const width = columns.value.reduce((total, col) => {
+    const columnWidth = 'width' in col && typeof col.width === 'number' ? col.width : 160
+    return total + columnWidth
+  }, 0)
+  return Math.max(width, isMobile.value ? 360 : 960)
+})
+
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 
@@ -486,6 +527,18 @@ onMounted(() => {
 
 .issue-list__table-card {
   border-radius: var(--app-card-radius);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.issue-list__table-card :deep(.n-card__content) {
+  min-width: 0;
+}
+
+.issue-list__table-shell {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .issue-summary-card {

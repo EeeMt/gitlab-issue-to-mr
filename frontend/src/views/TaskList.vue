@@ -57,7 +57,21 @@
           @toggle-column="filterState.toggleColumn"
           @reset-columns="filterState.resetColumns"
           @search="onSearch"
-        />
+        >
+          <template v-if="currentUsername" #quick-filters>
+            <n-button
+              size="small"
+              :type="isMyFilterActive ? 'primary' : 'default'"
+              :secondary="!isMyFilterActive"
+              @click="toggleMyFilter"
+            >
+              <template #icon>
+                <n-icon size="14"><PersonOutline /></n-icon>
+              </template>
+              {{ t('filter.mine') }}
+            </n-button>
+          </template>
+        </FilterToolbar>
 
         <n-card class="dashboard-table-card" :bordered="false" data-testid="tasks-table-card">
           <div class="dashboard-table-shell">
@@ -82,10 +96,11 @@
 
 <script setup lang="ts">
 import { ref, onMounted, h, watch, computed } from 'vue'
-import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, DataTableColumns } from 'naive-ui'
+import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, NIcon, useMessage, DataTableColumns } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getProjects, getTasksPaginated, getStats, type Project, type Task } from '../api'
+import { authState } from '../auth'
 import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
 import FilterToolbar from '../components/filter/FilterToolbar.vue'
@@ -220,6 +235,21 @@ const filterConfig: FilterSortConfig = {
 
 const filterState = useFilterSort(filterConfig)
 const searchTerm = ref('')
+
+const currentUsername = computed(() => authState.user?.username ?? null)
+
+const isMyFilterActive = computed(() => {
+  const val = filterState.filters.value['initiator_username']
+  return Array.isArray(val) && val.length === 1 && val[0] === currentUsername.value
+})
+
+function toggleMyFilter() {
+  if (isMyFilterActive.value) {
+    filterState.removeFilter('initiator_username')
+  } else if (currentUsername.value) {
+    filterState.addFilter('initiator_username', [currentUsername.value])
+  }
+}
 
 function onSearch(term: string) {
   searchTerm.value = term

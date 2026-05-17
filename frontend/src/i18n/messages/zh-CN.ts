@@ -169,6 +169,7 @@ const zhCN = {
     sortBy: '排序字段',
     direction: '排序方向',
     resultCount: '{count} 条结果',
+    mine: '我的',
   },
   login: {
     subtitle: '登录以访问控制台。',

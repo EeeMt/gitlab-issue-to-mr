@@ -169,6 +169,7 @@ const en = {
     sortBy: 'Sort by',
     direction: 'Direction',
     resultCount: '{count} results',
+    mine: 'Mine',
   },
   login: {
     subtitle: 'Sign in to access the dashboard.',
