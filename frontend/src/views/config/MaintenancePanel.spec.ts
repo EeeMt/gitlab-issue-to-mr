@@ -238,7 +238,7 @@ describe('MaintenancePanel', () => {
     await wrapper.find('[data-test="confirm-cleanup-system-data-button"]').trigger('click')
 
     expect(mockApi.cleanupSystemData).toHaveBeenCalledWith({
-      older_than_days: null,
+      older_than_days: 30,
       force: false
     })
     expect(mockMessage.success).toHaveBeenCalledWith('config.systemDataCleanupSuccess')

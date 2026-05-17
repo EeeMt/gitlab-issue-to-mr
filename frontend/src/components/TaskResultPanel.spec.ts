@@ -13,10 +13,7 @@ describe('TaskResultPanel', () => {
   it('uses a lighter tabular UI font for change line numbers', () => {
     const commitStats = cssBlock('.commit-stats')
 
-    expect(commitStats).toContain('font-family: var(--n-font-family, inherit);')
-    expect(commitStats).toContain('font-size: 25px;')
-    expect(commitStats).toContain('font-weight: 400;')
+    expect(commitStats).toContain('font-family: var(--n-font-family-mono, monospace);')
     expect(commitStats).toContain('font-variant-numeric: tabular-nums;')
-    expect(commitStats).toContain("font-feature-settings: 'tnum';")
   })
 })

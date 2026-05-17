@@ -379,7 +379,20 @@ vi.mock('naive-ui', () => ({
     setup(props: any) {
       return () => h('div', { class: 'n-empty' }, props.description)
     }
-  }
+  },
+  NScrollbar: {
+    name: 'NScrollbar',
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-scrollbar' }, slots.default?.())
+    }
+  },
+  NModal: {
+    name: 'NModal',
+    props: ['show', 'preset', 'title'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-modal' }, slots.default?.())
+    }
+  },
 }))
 
 // Mock @vicons/ionicons5

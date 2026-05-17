@@ -328,7 +328,7 @@ onBeforeUnmount(() => {
   if (lastRowScrollTimer) clearTimeout(lastRowScrollTimer)
 })
 
-defineExpose({ onCollapseChange })
+defineExpose({ onCollapseChange, activeTab })
 </script>
 
 <style scoped>

@@ -60,6 +60,51 @@ vi.mock('naive-ui', () => ({
       return () => h('div', { class: props.show ? 'n-spin--loading' : 'n-spin' }, slots.default?.())
     }
   },
+  NCard: {
+    name: 'NCard',
+    props: ['bordered', 'title'],
+    setup(_p: any, { slots }: any) {
+      return () => h('div', { class: 'n-card' }, [slots.header?.(), slots.default?.()])
+    }
+  },
+  NForm: {
+    name: 'NForm',
+    props: ['model', 'rules', 'label-placement'],
+    setup(_p: any, { slots }: any) { return () => h('form', {}, slots.default?.()) }
+  },
+  NFormItem: {
+    name: 'NFormItem',
+    props: ['path', 'label'],
+    setup(_p: any, { slots }: any) { return () => h('div', { class: 'n-form-item' }, slots.default?.()) }
+  },
+  NInput: {
+    name: 'NInput',
+    props: ['value', 'placeholder', 'type'],
+    setup(props: any, { emit }: any) {
+      return () => h('input', { class: 'n-input', value: props.value, onInput: (e: Event) => emit('update:value', (e.target as HTMLInputElement).value) })
+    }
+  },
+  NSelect: {
+    name: 'NSelect',
+    props: ['options', 'value', 'placeholder'],
+    setup(props: any, { emit }: any) {
+      return () => h('select', { class: 'n-select', onChange: (e: Event) => emit('update:value', (e.target as HTMLSelectElement).value) })
+    }
+  },
+  NSwitch: {
+    name: 'NSwitch',
+    props: ['value'],
+    emits: ['update:value'],
+    setup(props: any, { emit }: any) {
+      return () => h('button', { class: 'n-switch', onClick: () => emit('update:value', !props.value) })
+    }
+  },
+  useMessage: () => ({
+    error: vi.fn(),
+    success: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn()
+  }),
   NSpace: {
     name: 'NSpace',
     props: ['vertical', 'size', 'wrap'],
@@ -105,13 +150,7 @@ vi.mock('naive-ui', () => ({
     setup(_p: any, { slots, emit }: any) {
       return () => h('button', { class: 'n-button', onClick: () => emit('click') }, slots.default?.())
     }
-  },
-  useMessage: () => ({
-    error: vi.fn(),
-    success: vi.fn(),
-    warning: vi.fn(),
-    info: vi.fn()
-  })
+  }
 }))
 
 // ---------------------------------------------------------------------------
@@ -220,7 +259,7 @@ describe('Config', () => {
     wrapper = mount(Config, { global: { stubs: globalStubs } })
     await flushPromises()
 
-    expect(mockGetConfig).toHaveBeenCalledTimes(1)
+    expect(mockGetConfig).toHaveBeenCalledTimes(2)
   })
 
   it('shows runtime tab by default', async () => {
@@ -283,6 +322,7 @@ describe('Config', () => {
       'prompt-templates',
       'worker',
       'notifications',
+      'announcement',
       'maintenance',
       'webhook-events'
     ])

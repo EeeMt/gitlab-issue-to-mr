@@ -215,7 +215,11 @@ vi.mock('../components/VariableEditor.vue', () => ({
 // Mock @vicons/ionicons5
 vi.mock('@vicons/ionicons5', () => ({
   DocumentTextOutline: { name: 'DocumentTextOutline' },
-  WarningOutline: { name: 'WarningOutline' }
+  WarningOutline: { name: 'WarningOutline' },
+  GitBranchOutline: { name: 'GitBranchOutline' },
+  SparklesOutline: { name: 'SparklesOutline' },
+  GitMergeOutline: { name: 'GitMergeOutline' },
+  CloseOutline: { name: 'CloseOutline' },
 }))
 
 // Router
@@ -907,7 +911,7 @@ describe('CreateIssue', () => {
       await nextTick()
 
       expect(wrapper.find('.n-drawer').exists()).toBe(true)
-      expect(wrapper.find('.n-drawer-content').exists()).toBe(true)
+      expect(wrapper.find('.template-drawer-layout').exists()).toBe(true)
     })
 
     it('should not show template drawer when showTemplateDrawer is false', async () => {

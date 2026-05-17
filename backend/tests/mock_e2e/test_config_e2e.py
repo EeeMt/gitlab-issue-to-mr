@@ -210,6 +210,7 @@ class TestGetRuntimeConfig:
             "worker_environment_variables",
             "worker_workspace_host_path", "worker_workspace_retention_days",
             "worker_failed_workspace_retention_days",
+            "announcement_enabled", "announcement_level", "announcement_text",
         }
         assert expected_keys == set(data.keys())
 

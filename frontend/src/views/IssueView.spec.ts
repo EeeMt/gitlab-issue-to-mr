@@ -343,17 +343,26 @@ vi.mock('naive-ui', () => ({
       })
     },
   },
-  // Simple NTooltip stub that exposes the title via data-tooltip attribute for tests
+  // Simple NTooltip stub that renders both trigger and content slots
   NTooltip: {
     name: 'NTooltip',
     props: ['title'],
     setup(props: any, { slots }: any) {
-      return () => h('span', { class: 'n-tooltip', 'data-tooltip': props.title, 'data-testid': 'n-tooltip' }, slots.default?.())
+      return () => h('span', { class: 'n-tooltip', 'data-tooltip': props.title, 'data-testid': 'n-tooltip' }, [
+        slots.trigger?.(),
+        slots.default?.()
+      ])
     }
   },
   useMessage: () => mockMessage,
   useDialog: () => mockDialog,
   DataTableColumns: {},
+  NScrollbar: {
+    name: 'NScrollbar',
+    setup(_p: any, { slots }: any) {
+      return () => h('div', { class: 'n-scrollbar' }, slots.default?.())
+    },
+  },
 }))
 
 // ---------------------------------------------------------------------------

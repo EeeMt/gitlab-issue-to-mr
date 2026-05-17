@@ -368,6 +368,7 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
                     output_tokens=1600,
                     total_tokens=2400,
                     avg_execution_seconds=600.0,
+                    total_execution_seconds=1800.0,
                     avg_queue_wait_seconds=150.0,
                     last_task_at=datetime(2026, 3, 14, 9, 0, 0),
                 )
@@ -394,6 +395,7 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
                     output_tokens=1000,
                     total_tokens=1500,
                     avg_execution_seconds=420.0,
+                    total_execution_seconds=840.0,
                     avg_queue_wait_seconds=120.0,
                     last_task_at=datetime(2026, 3, 14, 9, 0, 0),
                 )

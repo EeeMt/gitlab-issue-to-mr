@@ -112,6 +112,7 @@ vi.mock('@vicons/ionicons5', () => ({
   CogOutline: cogIconStub,
   ChevronForwardOutline: chevronForwardIconStub,
   OptionsOutline: optionsIconStub,
+  AddCircleOutline: { name: 'AddCircleOutline', setup() { return () => h('svg', { class: 'icon-stub icon-stub--AddCircleOutline' }) } },
 }))
 
 vi.mock('naive-ui', () => ({

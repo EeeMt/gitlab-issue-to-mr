@@ -48,10 +48,12 @@ vi.mock('naive-ui', () => {
     NIcon: makePassthrough('NIcon', 'i'),
     NTabs: makePassthrough('NTabs'),
     NTabPane: makePassthrough('NTabPane'),
+    NTab: makePassthrough('NTab', 'button'),
     NEmpty: makePassthrough('NEmpty'),
     NCollapse: makePassthrough('NCollapse'),
     NCollapseItem,
     NButton: makePassthrough('NButton', 'button'),
+    NBadge: makePassthrough('NBadge', 'span'),
     NSpin: makePassthrough('NSpin'),
     dateEnUS: {},
     dateZhCN: {},
@@ -275,6 +277,10 @@ describe('TaskProcessPanel raw pane wiring', () => {
       },
     })
 
+    await nextTick()
+
+    // Switch to the raw tab to see the terminal html
+    ;(wrapper.vm as any).activeTab = 'raw'
     await nextTick()
 
     expect(wrapper.html()).toContain('hello')
