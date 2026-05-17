@@ -139,18 +139,33 @@
                 <span class="metadata-value">
                   <span class="branch-flow">
                     <template v-if="issue.base_branch">
-                      <a v-if="issueBranchUrl(issue.base_branch)" :href="issueBranchUrl(issue.base_branch)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--base app-link">{{ issue.base_branch }}</a>
-                      <span v-else class="branch-item branch-item--base">{{ issue.base_branch }}</span>
+                      <n-tooltip trigger="hover" placement="top">
+                        <template #trigger>
+                          <a v-if="issueBranchUrl(issue.base_branch)" :href="issueBranchUrl(issue.base_branch)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--base app-link">{{ issue.base_branch }}</a>
+                          <span v-else class="branch-item branch-item--base">{{ issue.base_branch }}</span>
+                        </template>
+                        {{ t('issue.field.baseBranch') }}
+                      </n-tooltip>
                     </template>
                     <span v-if="issue.base_branch && issue.branch_name" class="branch-arrow">➜</span>
                     <template v-if="issue.branch_name">
-                      <a v-if="issueBranchUrl(issue.branch_name)" :href="issueBranchUrl(issue.branch_name)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--work app-link">{{ issue.branch_name }}</a>
-                      <span v-else class="branch-item branch-item--work">{{ issue.branch_name }}</span>
+                      <n-tooltip trigger="hover" placement="top">
+                        <template #trigger>
+                          <a v-if="issueBranchUrl(issue.branch_name)" :href="issueBranchUrl(issue.branch_name)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--work app-link">{{ issue.branch_name }}</a>
+                          <span v-else class="branch-item branch-item--work">{{ issue.branch_name }}</span>
+                        </template>
+                        {{ t('createTask.branchFlowWorkBranch') }}
+                      </n-tooltip>
                     </template>
                     <span v-if="issue.branch_name && issue.target_branch" class="branch-arrow">➜</span>
                     <template v-if="issue.target_branch">
-                      <a v-if="issueBranchUrl(issue.target_branch)" :href="issueBranchUrl(issue.target_branch)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--target app-link">{{ issue.target_branch }}</a>
-                      <span v-else class="branch-item branch-item--target">{{ issue.target_branch }}</span>
+                      <n-tooltip trigger="hover" placement="top">
+                        <template #trigger>
+                          <a v-if="issueBranchUrl(issue.target_branch)" :href="issueBranchUrl(issue.target_branch)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--target app-link">{{ issue.target_branch }}</a>
+                          <span v-else class="branch-item branch-item--target">{{ issue.target_branch }}</span>
+                        </template>
+                        {{ t('issue.field.targetBranch') }}
+                      </n-tooltip>
                     </template>
                     <span v-if="!issue.branch_name && !issue.base_branch && !issue.target_branch">-</span>
                   </span>

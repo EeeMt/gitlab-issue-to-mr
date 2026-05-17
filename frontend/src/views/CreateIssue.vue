@@ -54,7 +54,12 @@
               </n-form-item>
 
               <div class="prompt-label-row">
-                <span class="prompt-label">{{ t('issue.field.description') }}</span>
+                <div>
+                  <span class="prompt-label">{{ t('issue.field.description') }}</span>
+                  <div class="description-hint">
+                    {{ t('issue.field.descriptionHint') }}
+                  </div>
+                </div>
                 <n-button
                   size="small"
                   :disabled="promptTemplatesLoading || promptTemplates.length === 0"
@@ -84,8 +89,42 @@
             </div>
 
             <div class="create-issue-form__section">
-              <div class="create-issue-form__section-title">{{ t('issue.field.baseBranch') }}</div>
-              <n-grid :cols="isMobile ? 1 : 3" :x-gap="16" :y-gap="8">
+              <div class="create-issue-form__section-title">{{ t('issue.field.branchStrategy') }}</div>
+
+              <!-- Branch Strategy Visual Flow -->
+              <div class="branch-flow-viz">
+                <div class="branch-flow-viz__node branch-flow-viz__node--base">
+                  <n-icon :component="GitBranchOutline" size="14" class="branch-flow-viz__node-icon" />
+                  <span class="branch-flow-viz__node-type">{{ t('issue.field.baseBranch') }}</span>
+                  <span class="branch-flow-viz__node-name">{{ formValue.base_branch || '—' }}</span>
+                </div>
+
+                <div class="branch-flow-viz__connector">
+                  <span class="branch-flow-viz__connector-label">{{ t('createTask.branchFlowAiCreates') }}</span>
+                  <div class="branch-flow-viz__connector-arrow" />
+                </div>
+
+                <div class="branch-flow-viz__node branch-flow-viz__node--work">
+                  <n-icon :component="SparklesOutline" size="14" class="branch-flow-viz__node-icon" />
+                  <span class="branch-flow-viz__node-type">{{ t('createTask.branchFlowWorkBranch') }}</span>
+                  <span class="branch-flow-viz__node-name">codify/issue-{id}</span>
+                </div>
+
+                <template v-if="formValue.create_mr">
+                  <div class="branch-flow-viz__connector">
+                    <span class="branch-flow-viz__connector-label">{{ t('createTask.branchFlowMrMerge') }}</span>
+                    <div class="branch-flow-viz__connector-arrow" />
+                  </div>
+                  <div class="branch-flow-viz__node branch-flow-viz__node--target">
+                    <n-icon :component="GitMergeOutline" size="14" class="branch-flow-viz__node-icon" />
+                    <span class="branch-flow-viz__node-type">{{ t('issue.field.targetBranch') }}</span>
+                    <span class="branch-flow-viz__node-name">{{ formValue.target_branch || '—' }}</span>
+                  </div>
+                </template>
+              </div>
+
+              <!-- Row 1: Starting Branch | Create MR | Merge Target -->
+              <n-grid :cols="isMobile ? 1 : 3" :x-gap="16" :y-gap="8" style="margin-top: 16px;">
                 <n-gi>
                   <n-form-item :label="t('issue.field.baseBranch')" path="base_branch">
                     <n-select
@@ -97,6 +136,7 @@
                       filterable
                     />
                   </n-form-item>
+                  <div class="field-hint">{{ t('createTask.baseBranchHint') }}</div>
                 </n-gi>
                 <n-gi>
                   <n-form-item :label="t('issue.createMergeRequest')" path="create_mr">
@@ -104,17 +144,6 @@
                       <n-switch v-model:value="formValue.create_mr" :disabled="!formValue.project_id" />
                       <span style="font-size: 13px; color: var(--n-text-color-2)">
                         {{ formValue.create_mr ? t('issue.mrEnabled') : t('issue.mrDisabled') }}
-                      </span>
-                    </n-space>
-                  </n-form-item>
-                </n-gi>
-
-                <n-gi>
-                  <n-form-item :label="t('issue.deleteBranchOnClose')" path="delete_branch_on_close">
-                    <n-space align="center" :size="8">
-                      <n-switch v-model:value="formValue.delete_branch_on_close" />
-                      <span style="font-size: 13px; color: var(--n-text-color-2)">
-                        {{ formValue.delete_branch_on_close ? t('issue.deleteBranchOnCloseEnabled') : t('issue.deleteBranchOnCloseDisabled') }}
                       </span>
                     </n-space>
                   </n-form-item>
@@ -130,8 +159,21 @@
                       filterable
                     />
                   </n-form-item>
+                  <div class="field-hint">{{ t('createTask.targetBranchHint') }}</div>
                 </n-gi>
               </n-grid>
+
+              <!-- Row 2: Delete working branch on close -->
+              <div class="branch-extra-row">
+                <n-form-item :label="t('issue.deleteBranchOnClose')" path="delete_branch_on_close">
+                  <n-space align="center" :size="8">
+                    <n-switch v-model:value="formValue.delete_branch_on_close" />
+                    <span style="font-size: 13px; color: var(--n-text-color-2)">
+                      {{ formValue.delete_branch_on_close ? t('issue.deleteBranchOnCloseEnabled') : t('issue.deleteBranchOnCloseDisabled') }}
+                    </span>
+                  </n-space>
+                </n-form-item>
+              </div>
             </div>
 
             <div class="create-issue-form__actions">
@@ -217,7 +259,7 @@ import {
   type FormInst,
   type FormRules,
 } from 'naive-ui'
-import { DocumentTextOutline, WarningOutline, CloseOutline } from '@vicons/ionicons5'
+import { DocumentTextOutline, WarningOutline, CloseOutline, GitBranchOutline, SparklesOutline, GitMergeOutline } from '@vicons/ionicons5'
 import PageHeader from '../components/PageHeader.vue'
 import VariableEditor from '../components/VariableEditor.vue'
 import { createIssue, getProjects, getBranches, getPromptTemplates, type Project, type Branch, type CreateIssueRequest, type PromptTemplate } from '../api'
@@ -615,5 +657,125 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.45);
+  margin-top: -6px;
+  margin-bottom: 4px;
+  padding: 0 2px;
+  line-height: 1.5;
+}
+
+.branch-extra-row {
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.description-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.45);
+  margin-top: 3px;
+  line-height: 1.5;
+}
+
+.branch-flow-viz {
+  display: flex;
+  align-items: center;
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: rgba(15, 23, 42, 0.025);
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  border-radius: 10px;
+  overflow-x: auto;
+  gap: 0;
+}
+
+.branch-flow-viz__node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  min-width: 120px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.branch-flow-viz__node--base {
+  background: rgba(32, 128, 240, 0.07);
+  border: 1px solid rgba(32, 128, 240, 0.2);
+}
+
+.branch-flow-viz__node--work {
+  background: rgba(72, 199, 142, 0.07);
+  border: 1px solid rgba(72, 199, 142, 0.25);
+}
+
+.branch-flow-viz__node--target {
+  background: rgba(240, 160, 32, 0.07);
+  border: 1px solid rgba(240, 160, 32, 0.25);
+}
+
+.branch-flow-viz__node-icon {
+  opacity: 0.55;
+}
+
+.branch-flow-viz__node-type {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(15, 23, 42, 0.45);
+}
+
+.branch-flow-viz__node-name {
+  font-size: 12px;
+  font-weight: 500;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: rgba(15, 23, 42, 0.82);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-flow-viz__connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  min-width: 72px;
+  gap: 5px;
+  padding: 0 6px;
+}
+
+.branch-flow-viz__connector-label {
+  font-size: 10px;
+  color: rgba(15, 23, 42, 0.38);
+  white-space: nowrap;
+}
+
+.branch-flow-viz__connector-arrow {
+  width: 100%;
+  height: 2px;
+  background: rgba(15, 23, 42, 0.15);
+  position: relative;
+  border-radius: 1px;
+}
+
+.branch-flow-viz__connector-arrow::after {
+  content: '';
+  position: absolute;
+  right: -1px;
+  top: -4px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 7px solid rgba(15, 23, 42, 0.22);
 }
 </style>
