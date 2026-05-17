@@ -1,8 +1,22 @@
 <template>
-  <n-card class="my-work-board" :bordered="false" data-testid="dashboard-my-work-board">
+  <n-card
+    class="my-work-board"
+    :bordered="false"
+    data-testid="dashboard-my-work-board"
+    :header-style="{ paddingBottom: '6px' }"
+  >
     <template #header>
       <div class="my-work-board__header">
-        <span>{{ t('dashboard.myWorkBoard.title') }}</span>
+        <div class="my-work-board__header-meta">
+          <span class="my-work-board__title">{{ t('dashboard.myWorkBoard.title') }}</span>
+          <span
+            v-if="hasMoreItems"
+            class="my-work-board__header-notice"
+            :data-testid="`my-work-board-notice-${activeTab}`"
+          >
+            {{ t('dashboard.myWorkBoard.limitNotice', { shown: visibleLimit, total: activeTotal }) }}
+          </span>
+        </div>
         <div class="my-work-board__tabs">
           <button
             type="button"
@@ -33,27 +47,28 @@
       :class="{ 'my-work-board__panel--mobile': isMobile }"
       data-testid="my-work-board-panel"
     >
-      <div
-        v-if="hasMoreItems"
-        class="my-work-board__notice"
-        :data-testid="`my-work-board-notice-${activeTab}`"
-      >
-        {{ t('dashboard.myWorkBoard.limitNotice', { shown: visibleLimit, total: activeTotal }) }}
-      </div>
 
       <div
-        v-if="activeColumns.every((column) => column.count === 0)"
+        v-if="activeColumns.every((column) => column.items.length === 0)"
         :data-testid="`my-work-board-empty-${activeTab}`"
         class="my-work-board__empty"
       >
         {{ t('dashboard.myWorkBoard.emptyBoard') }}
       </div>
 
-      <div
-        class="my-work-board__columns"
-        :class="{ 'my-work-board__columns--mobile': isMobile }"
-        :style="boardColumnsStyle"
+      <n-scrollbar
+        v-else
+        :x-scrollable="!isMobile"
+        trigger="hover"
+        class="my-work-board__columns-scrollbar"
+        :class="{ 'my-work-board__columns-scrollbar--mobile': isMobile }"
+        :content-style="!isMobile ? 'height: 100%;' : undefined"
       >
+        <div
+          class="my-work-board__columns"
+          :class="{ 'my-work-board__columns--mobile': isMobile }"
+          :style="boardColumnsStyle"
+        >
         <section
           v-for="column in activeColumns"
           :key="`${activeTab}-${column.status}`"
@@ -94,6 +109,7 @@
           </n-scrollbar>
         </section>
       </div>
+      </n-scrollbar>
     </div>
   </n-card>
 </template>
@@ -172,10 +188,10 @@ const hasMoreItems = computed(() => activeTotal.value > props.visibleLimit)
 const boardColumnsStyle = computed(() => {
   const columnCount = activeColumns.value.length
   const desktopMinWidth = columnCount * 220 + Math.max(columnCount - 1, 0) * 12
-
   return {
     '--my-work-board-column-count': String(columnCount),
     minWidth: props.isMobile ? '100%' : `${desktopMinWidth}px`,
+    ...(props.isMobile ? {} : { height: '100%' }),
   }
 })
 
@@ -194,6 +210,31 @@ function getColumnIcon(status: string) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
+}
+
+.my-work-board__header-meta {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.my-work-board__title {
+  font-size: inherit;
+  font-weight: inherit;
+  white-space: nowrap;
+}
+
+.my-work-board__header-notice {
+  min-width: 0;
+  color: rgba(15, 23, 42, 0.55);
+  font-size: 12px;
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .my-work-board__tabs {
@@ -251,10 +292,6 @@ function getColumnIcon(status: string) {
   overflow: visible;
 }
 
-.my-work-board__notice {
-  margin-bottom: 12px;
-}
-
 .my-work-board__empty {
   flex: 1;
   display: flex;
@@ -263,24 +300,25 @@ function getColumnIcon(status: string) {
   text-align: center;
 }
 
-.my-work-board__columns {
+.my-work-board__columns-scrollbar {
   flex: 1;
+  min-height: 0;
+}
+
+.my-work-board__columns-scrollbar--mobile {
+  flex: none;
+  height: auto;
+}
+
+.my-work-board__columns {
   display: grid;
   grid-template-columns: repeat(var(--my-work-board-column-count), minmax(220px, 1fr));
   gap: 12px;
-  min-height: 0;
-  min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
   align-items: stretch;
-  scrollbar-color: auto;
-  scrollbar-width: auto;
 }
 
 .my-work-board__columns--mobile {
-  flex: none;
   grid-template-columns: 1fr;
-  overflow: visible;
   min-width: 100% !important;
 }
 
@@ -335,17 +373,6 @@ function getColumnIcon(status: string) {
   gap: 8px;
 }
 
-.my-work-board__columns::-webkit-scrollbar {
-  width: auto;
-  height: auto;
-}
-
-.my-work-board__columns::-webkit-scrollbar-track,
-.my-work-board__columns::-webkit-scrollbar-thumb,
-.my-work-board__columns::-webkit-scrollbar-corner {
-  all: revert;
-}
-
 .my-work-board__card {
   display: flex;
   flex-direction: column;
@@ -379,7 +406,6 @@ function getColumnIcon(status: string) {
   color: rgba(15, 23, 42, 0.82);
 }
 
-.my-work-board__notice,
 .my-work-board__card-subtitle,
 .my-work-board__card-meta,
 .my-work-board__column-empty,

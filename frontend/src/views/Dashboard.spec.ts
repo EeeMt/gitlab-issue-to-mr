@@ -324,12 +324,12 @@ describe('Dashboard', () => {
   describe('initial data fetching', () => {
     it('calls getIssues on mount', async () => {
       await mountDashboard()
-      expect(mockApi.getIssues).toHaveBeenCalledWith({ page: 1, page_size: 100 })
+      expect(mockApi.getIssues).toHaveBeenCalledWith({ page: 1, page_size: 20 })
     })
 
     it('calls getTasksPaginated once for board tasks', async () => {
       await mountDashboard()
-      expect(mockApi.getTasksPaginated).toHaveBeenCalledWith({ page: 1, page_size: 100 })
+      expect(mockApi.getTasksPaginated).toHaveBeenCalledWith({ page: 1, page_size: 20 })
       expect(mockApi.getTasksPaginated).toHaveBeenCalledTimes(1)
     })
 
@@ -418,7 +418,7 @@ describe('Dashboard', () => {
       expect(wrapper.find('[data-testid="task-column-pending_queued"]').exists()).toBe(false)
     })
 
-    it('keeps empty columns visible with empty text', async () => {
+    it('shows board-level empty state when all items are empty', async () => {
       setupDefaultMocks()
       mockApi.getIssues.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100 })
       mockApi.getTasksPaginated.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100 })
@@ -427,13 +427,9 @@ describe('Dashboard', () => {
       await flushPromises()
       await nextTick()
 
-      await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
-      await nextTick()
-      await wrapper.find('[data-testid="my-work-board-tab-issues"]').trigger('click')
-      await nextTick()
-
-      expect(wrapper.find('[data-testid="issue-column-open"]').text()).toContain('dashboard.myWorkBoard.emptyColumn')
+      // board-level empty state is shown; columns are NOT rendered (v-if/v-else)
       expect(wrapper.find('[data-testid="my-work-board-empty-issues"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="issue-column-open"]').exists()).toBe(false)
     })
 
     it('renders icons in board lane headers', async () => {

@@ -26,7 +26,7 @@ vi.mock('naive-ui', () => ({
   },
   NScrollbar: {
     name: 'NScrollbar',
-    props: ['trigger'],
+    props: ['trigger', 'xScrollable', 'contentStyle'],
     setup(props: any, { attrs, slots }: any) {
       return () =>
         h(
@@ -35,6 +35,8 @@ vi.mock('naive-ui', () => ({
             ...attrs,
             class: ['n-scrollbar', attrs.class],
             'data-trigger': props.trigger,
+            'data-x-scrollable': props.xScrollable ? 'true' : undefined,
+          'data-content-style': props.contentStyle,
           },
           slots.default?.(),
         )
@@ -101,8 +103,15 @@ describe('MyWorkBoard', () => {
 
     const laneScrollbars = wrapper.findAll('.my-work-board__column-body-scrollbar')
     const laneBodies = wrapper.findAll('.my-work-board__column-body')
+    const outerScrollbar = wrapper.find('.my-work-board__columns-scrollbar')
 
-    expect(wrapper.find('.my-work-board__columns-scrollbar').exists()).toBe(false)
+    // outer horizontal NScrollbar is present on desktop
+    expect(outerScrollbar.exists()).toBe(true)
+    expect(outerScrollbar.classes()).toContain('n-scrollbar')
+    expect(outerScrollbar.attributes('data-x-scrollable')).toBe('true')
+    expect(outerScrollbar.attributes('data-content-style')).toBe('height: 100%;')
+    expect(outerScrollbar.attributes('data-trigger')).toBe('hover')
+    // per-lane scrollbars are still present
     expect(laneScrollbars).toHaveLength(issueColumns.length)
     expect(laneBodies).toHaveLength(issueColumns.length)
     laneScrollbars.forEach((scrollbar) => {
@@ -118,13 +127,58 @@ describe('MyWorkBoard', () => {
     const wrapper = mountBoard(true)
 
     const laneScrollbars = wrapper.findAll('.my-work-board__column-body-scrollbar')
+    const outerScrollbar = wrapper.find('.my-work-board__columns-scrollbar--mobile')
 
-    expect(wrapper.find('.my-work-board__columns-scrollbar--mobile').exists()).toBe(false)
+    // outer NScrollbar is present in mobile mode (not x-scrollable)
+    expect(outerScrollbar.exists()).toBe(true)
+    expect(outerScrollbar.classes()).toContain('n-scrollbar')
+    expect(outerScrollbar.attributes('data-x-scrollable')).toBeUndefined()
+    expect(outerScrollbar.attributes('data-content-style')).toBeUndefined()
     expect(wrapper.find('.my-work-board__columns--mobile').exists()).toBe(true)
     expect(laneScrollbars).toHaveLength(issueColumns.length)
     laneScrollbars.forEach((scrollbar) => {
       expect(scrollbar.classes()).toContain('n-scrollbar')
       expect(scrollbar.attributes('data-trigger')).toBe('hover')
     })
+  })
+
+  it('shows limit notice when total exceeds visibleLimit', async () => {
+    const wrapper = mount(MyWorkBoard, {
+      props: {
+        issueColumns,
+        taskColumns,
+        issueTotal: 25,
+        taskTotal: 1,
+        visibleLimit: 20,
+        isMobile: false,
+      },
+    })
+    const notice = wrapper.find('[data-testid="my-work-board-notice-issues"]')
+    expect(notice.exists()).toBe(true)
+    expect(notice.text()).toContain('dashboard.myWorkBoard.limitNotice')
+  })
+
+  it('hides limit notice when total is within visibleLimit', () => {
+    const wrapper = mountBoard() // issueTotal: 1, visibleLimit: 100
+    expect(wrapper.find('[data-testid="my-work-board-notice-issues"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="my-work-board-notice-tasks"]').exists()).toBe(false)
+  })
+
+  it('notice data-testid matches active tab', async () => {
+    const wrapper = mount(MyWorkBoard, {
+      props: {
+        issueColumns,
+        taskColumns,
+        issueTotal: 1,
+        taskTotal: 25,
+        visibleLimit: 20,
+        isMobile: false,
+      },
+    })
+    expect(wrapper.find('[data-testid="my-work-board-notice-issues"]').exists()).toBe(false)
+
+    await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
+    expect(wrapper.find('[data-testid="my-work-board-notice-tasks"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="my-work-board-notice-issues"]').exists()).toBe(false)
   })
 })
