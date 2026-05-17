@@ -69,21 +69,10 @@
         </n-drawer>
 
         <n-layout :native-scrollbar="false" class="app-shell__main">
-          <div v-if="showUserToolbar && !isMobile" class="app-shell__topbar">
-            <div class="app-shell__topbar-user">
-              <n-avatar round size="small" :src="authState.user?.avatar_url || undefined">
-                {{ userInitial }}
-              </n-avatar>
-              <div class="nav-user-panel__copy">
-                <n-text strong>{{ userDisplayName }}</n-text>
-                <n-text depth="3" class="nav-user-panel__role">
-                  {{ authState.user?.platform_role === 'platform_admin' ? t('shell.admin') : t('shell.signedInWithGitlab') }}
-                </n-text>
-              </div>
-            </div>
+          <div v-if="showUserToolbar && !isMobile" class="app-shell__topbar-wrapper">
             <div
               v-if="announcement?.enabled && announcement?.text"
-              class="app-shell__topbar-announcement"
+              class="app-shell__announcement-banner"
             >
               <div
                 class="app-shell__topbar-announcement-pill"
@@ -97,6 +86,18 @@
                 >
                   <span ref="announcementTextRef" class="app-shell__topbar-announcement-text">{{ announcement.text }}</span>
                 </div>
+              </div>
+            </div>
+            <div class="app-shell__topbar">
+              <div class="app-shell__topbar-user">
+              <n-avatar round size="small" :src="authState.user?.avatar_url || undefined">
+                {{ userInitial }}
+              </n-avatar>
+              <div class="nav-user-panel__copy">
+                <n-text strong>{{ userDisplayName }}</n-text>
+                <n-text depth="3" class="nav-user-panel__role">
+                  {{ authState.user?.platform_role === 'platform_admin' ? t('shell.admin') : t('shell.signedInWithGitlab') }}
+                </n-text>
               </div>
             </div>
             <div class="app-shell__topbar-actions">
@@ -168,6 +169,7 @@
                 {{ t('shell.logout') }}
               </n-button>
             </div>
+          </div>
           </div>
 
           <div v-if="isMobile" class="mobile-header">
@@ -753,13 +755,17 @@ body {
   min-height: calc(100vh - 40px);
 }
 
+.app-shell__topbar-wrapper {
+  width: min(calc(100% - 40px), var(--app-page-max-width));
+  margin: 14px auto 0;
+}
+
 .app-shell__topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  width: min(calc(100% - 40px), var(--app-page-max-width));
-  margin: 14px auto 0;
+  width: 100%;
   box-sizing: border-box;
   padding: 12px 14px;
   border-radius: 18px;
@@ -808,22 +814,20 @@ body {
   gap: 10px;
 }
 
-.app-shell__topbar-announcement {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
-  padding: 0 8px;
+.app-shell__announcement-banner {
+  margin-bottom: 6px;
+  overflow: hidden;
 }
 
 .app-shell__topbar-announcement-pill {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   padding: 4px 12px 4px 10px;
   border-radius: 10px;
-  max-width: 480px;
+  width: 100%;
+  box-sizing: border-box;
   min-width: 0;
   overflow: hidden;
   transition: opacity 0.2s ease;
