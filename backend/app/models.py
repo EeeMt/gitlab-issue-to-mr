@@ -88,7 +88,7 @@ class Issue(Base):
 
     # Creator
     initiator_user_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     initiator_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 

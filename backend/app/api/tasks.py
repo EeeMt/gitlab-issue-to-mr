@@ -250,6 +250,10 @@ async def list_tasks(
         is_unrestricted=access_scope.is_unrestricted,
     )
 
+    # Compute settings once — _serialize_task uses it per-task, so pass it in
+    # to avoid recreating the Settings object for every row in the result set.
+    settings = get_effective_settings()
+
     # Paginated mode: return { items, total, page, page_size }
     if page is not None:
         page = max(1, page)
@@ -266,7 +270,7 @@ async def list_tasks(
 
         return {
             "items": [
-                _serialize_task(task, project_lookup.get(task.project_id))
+                _serialize_task(task, project_lookup.get(task.project_id), settings)
                 for task in tasks
             ],
             "total": total,
@@ -279,7 +283,7 @@ async def list_tasks(
     tasks = result.scalars().all()
 
     return [
-        _serialize_task(task, project_lookup.get(task.project_id))
+        _serialize_task(task, project_lookup.get(task.project_id), settings)
         for task in tasks
     ]
 
@@ -335,9 +339,10 @@ async def list_scheduled_tasks(
     result = await db.execute(query)
     tasks = result.scalars().all()
     project_lookup = await build_project_lookup(is_unrestricted=True)
+    settings = get_effective_settings()
 
     return [
-        _serialize_task(task, project_lookup.get(task.project_id))
+        _serialize_task(task, project_lookup.get(task.project_id), settings)
         for task in tasks
     ]
 

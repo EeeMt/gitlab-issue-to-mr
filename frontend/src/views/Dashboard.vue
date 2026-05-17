@@ -161,7 +161,7 @@ import { authState } from '../auth'
 const issueStatuses = ['open', 'in_progress', 'in_review', 'closed'] as const
 const taskStatuses = ['pending', 'queued', 'running', 'completed', 'failed', 'cancelled'] as const
 
-const boardVisibleLimit = 100
+const boardVisibleLimit = 20
 
 const router = useRouter()
 const message = useMessage()

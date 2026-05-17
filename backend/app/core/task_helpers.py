@@ -13,10 +13,19 @@ from app.models import Issue, IssueStatus, Task, TaskStatus, User
 logger = logging.getLogger(__name__)
 
 
-def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-    """Serialize a task row for API responses."""
+def _serialize_task(
+    task: Task,
+    project_metadata: Optional[dict[str, Any]] = None,
+    settings: Optional[Any] = None,
+) -> dict[str, Any]:
+    """Serialize a task row for API responses.
+
+    Pass ``settings`` from the caller when serializing multiple tasks in a loop
+    to avoid recreating the Settings object for every task.
+    """
     metadata = project_metadata or {}
-    settings = get_effective_settings()
+    if settings is None:
+        settings = get_effective_settings()
     project_path = metadata.get("project_path_with_namespace")
     project_url = f"{settings.gitlab_url.rstrip('/')}/{project_path}" if project_path else None
     data = {
