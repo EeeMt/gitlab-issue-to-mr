@@ -644,7 +644,11 @@ if [ -n "$CHANGES" ]; then
         esac
     done <<< "${STAGED_NAME_STATUS}"
 
-    # Remove trailing commas
+    # Remove trailing commas.
+    # NOTE: files with commas in their names will be split incorrectly when
+    # task-metadata.json is parsed on the backend (split(",")). This is an
+    # inherent limitation of the comma-delimiter approach; such filenames are
+    # extremely rare in practice.
     NEW_FILES="${NEW_FILES%,}"
     MODIFIED_FILES="${MODIFIED_FILES%,}"
     DELETED_FILES="${DELETED_FILES%,}"
@@ -766,6 +770,37 @@ AI-Generated: true"
             commit_message:$commit_message
         }')
     append_runtime_event "${FINALIZATION_EVENT}"
+
+    # Write per-task metadata for MR description aggregation across tasks.
+    # FINAL_SUMMARY_CONTENT is Claude's execution narrative (truncated to 3000 chars).
+    SUMMARY_TRUNCATED="${FINAL_SUMMARY_CONTENT:0:3000}"
+    TASK_METADATA=$(jq -nc \
+        --argjson task_id "${TASK_ID:-0}" \
+        --arg prompt "${USER_PROMPT:-}" \
+        --arg commit_sha "${COMMIT_SHA:-}" \
+        --arg commit_message "${FINAL_COMMIT_MESSAGE:-}" \
+        --arg execution_summary "${SUMMARY_TRUNCATED}" \
+        --arg new_files "${NEW_FILES:-}" \
+        --arg modified_files "${MODIFIED_FILES:-}" \
+        --arg deleted_files "${DELETED_FILES:-}" \
+        --argjson additions "${ADDITIONS:-0}" \
+        --argjson deletions "${DELETIONS:-0}" \
+        --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{
+            task_id: $task_id,
+            prompt: $prompt,
+            commit_sha: $commit_sha,
+            commit_message: $commit_message,
+            execution_summary: $execution_summary,
+            new_files: (if $new_files == "" then [] else ($new_files | split(",")) end),
+            modified_files: (if $modified_files == "" then [] else ($modified_files | split(",")) end),
+            deleted_files: (if $deleted_files == "" then [] else ($deleted_files | split(",")) end),
+            additions: $additions,
+            deletions: $deletions,
+            timestamp: $timestamp
+        }')
+    printf '%s\n' "${TASK_METADATA}" > "${CODIFY_RUNTIME_DIR}/task-metadata.json"
+    echo "Task metadata written to ${CODIFY_RUNTIME_DIR}/task-metadata.json"
 
     create_runtime_archive
 

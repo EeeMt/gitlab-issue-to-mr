@@ -26,6 +26,7 @@ Covers functionality NOT tested by test_worker_new_patterns.py or test_mr_stats.
 
 import asyncio
 import json
+import os
 import re
 import subprocess
 import textwrap
@@ -1229,8 +1230,18 @@ class TestParseMrFromLogs(unittest.TestCase):
 class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
     """Tests for _update_mr_description_for_issue — comprehensive MR description."""
 
+    def _make_issue(self, **kwargs):
+        issue = MagicMock()
+        issue.id = kwargs.get("id", 10)
+        issue.title = kwargs.get("title", "Test Issue")
+        issue.description = kwargs.get("description", "Some description")
+        issue.merge_request_iid = kwargs.get("merge_request_iid", 5)
+        issue.gitlab_issue_iid = None
+        issue.project_id = kwargs.get("project_id", 100)
+        return issue
+
     async def test_builds_description_with_all_tasks(self):
-        """Builds MR description from issue + all tasks."""
+        """Builds MR description from issue + all tasks (no metadata)."""
         mock_mr = MagicMock()
         mock_mr.description = ""
 
@@ -1238,12 +1249,7 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
         mock_gitlab.gl.projects.get.return_value.mergerequests.get.return_value = mock_mr
         worker = _make_worker(mock_gitlab=mock_gitlab)
 
-        issue = MagicMock()
-        issue.id = 10
-        issue.title = "Test Issue"
-        issue.description = "Some description"
-        issue.merge_request_iid = 5
-        issue.gitlab_issue_iid = None
+        issue = self._make_issue()
 
         task1 = _make_task(id=1)
         task1.user_prompt = "Prompt 1"
@@ -1260,15 +1266,103 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
         mock_result.scalars.return_value.all.return_value = [task1, task2]
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        await worker._update_mr_description_for_issue(task1, issue, mock_db)
+        with patch("app.core.worker_gitlab.load_task_metadata_files", return_value={}):
+            with patch("app.core.worker_gitlab._resolve_issue_root", return_value=None):
+                with patch("app.core.worker_gitlab.get_settings") as mock_settings:
+                    mock_settings.return_value = _make_settings(dashboard_url="http://codify.example.com")
+                    await worker._update_mr_description_for_issue(task1, issue, mock_db)
 
         desc = mock_mr.description
-        self.assertIn("Test Issue", desc)
+        self.assertNotIn("## Test Issue", desc)  # title not repeated in description body
         self.assertIn("Some description", desc)
-        self.assertIn("Prompt 1", desc)
-        self.assertIn("Prompt 2", desc)
         self.assertIn("✅", desc)
         self.assertIn("❌", desc)
+        self.assertIn("http://codify.example.com/issues/10", desc)
+        mock_mr.save.assert_called_once()
+
+    async def test_builds_description_with_metadata(self):
+        """Builds enriched MR description when task-metadata.json files are present."""
+        mock_mr = MagicMock()
+        mock_mr.description = ""
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.gl.projects.get.return_value.mergerequests.get.return_value = mock_mr
+        worker = _make_worker(mock_gitlab=mock_gitlab)
+
+        issue = self._make_issue()
+
+        task1 = _make_task(id=1)
+        task1.user_prompt = "Add JWT auth"
+        task1.status = TaskStatus.COMPLETED
+        task1.issue_id = 10
+        task1.additions = 120
+        task1.deletions = 45
+        task1.commit_message = "feat: add JWT auth"
+
+        task2 = _make_task(id=2)
+        task2.user_prompt = "Fix token expiry"
+        task2.status = TaskStatus.COMPLETED
+        task2.issue_id = 10
+        task2.additions = 15
+        task2.deletions = 3
+        task2.commit_message = "fix: token expiry"
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [task1, task2]
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        metadata_map = {
+            1: {
+                "task_id": 1,
+                "prompt": "Add JWT auth",
+                "commit_sha": "abc1234567890",
+                "commit_message": "feat: add JWT auth\n\nAI-Generated: true",
+                "execution_summary": "Implemented JWT authentication using RS256.",
+                "new_files": ["src/auth.py", "tests/test_auth.py"],
+                "modified_files": ["src/main.py"],
+                "deleted_files": [],
+                "additions": 120,
+                "deletions": 45,
+            },
+            2: {
+                "task_id": 2,
+                "prompt": "Fix token expiry",
+                "commit_sha": "def5678901234",
+                "commit_message": "fix: token expiry\n\nAI-Generated: true",
+                "execution_summary": "Fixed token expiry handling.",
+                "new_files": [],
+                "modified_files": ["src/main.py", "src/config.py"],
+                "deleted_files": [],
+                "additions": 15,
+                "deletions": 3,
+            },
+        }
+
+        with patch("app.core.worker_gitlab.load_task_metadata_files", return_value=metadata_map):
+            with patch("app.core.worker_gitlab._resolve_issue_root", return_value="/some/issue/root"):
+                with patch("app.core.worker_gitlab.get_settings") as mock_settings:
+                    mock_settings.return_value = _make_settings(dashboard_url="http://codify.example.com")
+                    await worker._update_mr_description_for_issue(task1, issue, mock_db)
+
+        desc = mock_mr.description
+        # Codify issue link
+        self.assertIn("http://codify.example.com/issues/10", desc)
+        # Aggregated section
+        self.assertIn("📋 整体变更", desc)
+        self.assertIn("+135 -48", desc)  # 120+15, 45+3
+        self.assertIn("新增文件", desc)
+        self.assertIn("src/auth.py", desc)
+        self.assertIn("修改文件", desc)
+        self.assertIn("src/main.py", desc)
+        # Execution record table
+        self.assertIn("🔖 执行记录", desc)
+        self.assertIn("feat: add JWT auth", desc)
+        self.assertIn("fix: token expiry", desc)
+        # Per-task details
+        self.assertIn("<details>", desc)
+        self.assertIn("Implemented JWT authentication", desc)
+        self.assertIn("abc1234567890"[:12], desc)
         mock_mr.save.assert_called_once()
 
     async def test_skips_when_no_mr_iid(self):
@@ -1282,29 +1376,142 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
         mock_db.execute.assert_not_called()
 
     async def test_skips_when_mr_not_found(self):
-        """Does nothing when MR is not found in GitLab."""
+        """Returns early when project.mergerequests.get raises (MR not found in GitLab)."""
+        mock_mr = MagicMock()
+        mock_project = MagicMock()
+        mock_project.mergerequests.get.side_effect = Exception("404 MR not found")
+        mock_project.mergerequests.get.return_value = mock_mr  # never reached
         mock_gitlab = MagicMock()
-        mock_gitlab.get_merge_request.return_value = None
+        mock_gitlab.gl.projects.get.return_value = mock_project
         worker = _make_worker(mock_gitlab=mock_gitlab)
 
-        issue = MagicMock()
-        issue.id = 10
-        issue.title = "Test"
-        issue.description = ""
-        issue.merge_request_iid = 5
-        issue.gitlab_issue_iid = None
+        issue = self._make_issue()
 
         mock_db = AsyncMock()
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = []
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        await worker._update_mr_description_for_issue(_make_task(), issue, mock_db)
+        with patch("app.core.worker_gitlab.load_task_metadata_files", return_value={}):
+            with patch("app.core.worker_gitlab._resolve_issue_root", return_value=None):
+                with patch("app.core.worker_gitlab.get_settings") as mock_settings:
+                    mock_settings.return_value = _make_settings()
+                    await worker._update_mr_description_for_issue(_make_task(), issue, mock_db)
+
+        # Verify get() was invoked (correct code path) but save() was never called
+        mock_project.mergerequests.get.assert_called_once()
+        mock_mr.save.assert_not_called()
 
 
 # ===================================================================
-# _send_failure_alert
+# load_task_metadata_files
 # ===================================================================
+
+class TestLoadTaskMetadataFiles(unittest.TestCase):
+    """Tests for load_task_metadata_files."""
+
+    def test_returns_empty_when_no_files(self):
+        """Returns empty dict when runtime directory does not exist."""
+        from app.core.worker_gitlab import load_task_metadata_files
+        result = load_task_metadata_files("/nonexistent/path", [1, 2, 3])
+        self.assertEqual(result, {})
+
+    def test_reads_existing_metadata_files(self):
+        """Reads and parses task-metadata.json files that exist."""
+        import tempfile
+        from app.core.worker_gitlab import load_task_metadata_files
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            task_dir = os.path.join(tmpdir, "runtime", "task-42")
+            os.makedirs(task_dir)
+            metadata = {
+                "task_id": 42,
+                "prompt": "Add feature",
+                "commit_sha": "abc1234",
+                "new_files": ["src/foo.py"],
+                "modified_files": [],
+                "deleted_files": [],
+                "additions": 10,
+                "deletions": 2,
+            }
+            with open(os.path.join(task_dir, "task-metadata.json"), "w") as f:
+                json.dump(metadata, f)
+
+            result = load_task_metadata_files(tmpdir, [42, 99])
+            self.assertIn(42, result)
+            self.assertNotIn(99, result)
+            self.assertEqual(result[42]["commit_sha"], "abc1234")
+            self.assertEqual(result[42]["new_files"], ["src/foo.py"])
+
+    def test_skips_invalid_json(self):
+        """Silently skips files with invalid JSON."""
+        import tempfile
+        from app.core.worker_gitlab import load_task_metadata_files
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            task_dir = os.path.join(tmpdir, "runtime", "task-7")
+            os.makedirs(task_dir)
+            with open(os.path.join(task_dir, "task-metadata.json"), "w") as f:
+                f.write("not json{{{")
+
+            result = load_task_metadata_files(tmpdir, [7])
+            self.assertEqual(result, {})
+
+
+# ===================================================================
+# build_aggregated_file_summary
+# ===================================================================
+
+class TestBuildAggregatedFileSummary(unittest.TestCase):
+    """Tests for build_aggregated_file_summary."""
+
+    def test_empty_metadata(self):
+        """Returns zero totals and empty file maps for empty input."""
+        from app.core.worker_gitlab import build_aggregated_file_summary
+        result = build_aggregated_file_summary({})
+        self.assertEqual(result["total_additions"], 0)
+        self.assertEqual(result["total_deletions"], 0)
+        self.assertEqual(result["new"], {})
+        self.assertEqual(result["modified"], {})
+        self.assertEqual(result["deleted"], {})
+
+    def test_aggregates_stats_across_tasks(self):
+        """Sums additions and deletions from all tasks."""
+        from app.core.worker_gitlab import build_aggregated_file_summary
+        metadata_map = {
+            1: {"additions": 10, "deletions": 2, "new_files": [], "modified_files": [], "deleted_files": []},
+            2: {"additions": 5, "deletions": 1, "new_files": [], "modified_files": [], "deleted_files": []},
+        }
+        result = build_aggregated_file_summary(metadata_map)
+        self.assertEqual(result["total_additions"], 15)
+        self.assertEqual(result["total_deletions"], 3)
+
+    def test_merges_files_across_tasks(self):
+        """Same file modified in multiple tasks records all task IDs."""
+        from app.core.worker_gitlab import build_aggregated_file_summary
+        metadata_map = {
+            1: {"additions": 0, "deletions": 0, "new_files": ["src/a.py"], "modified_files": [], "deleted_files": []},
+            2: {"additions": 0, "deletions": 0, "new_files": [], "modified_files": ["src/a.py", "src/b.py"], "deleted_files": []},
+        }
+        result = build_aggregated_file_summary(metadata_map)
+        # src/a.py was added in task 1 → new wins over modified (priority: new > modified)
+        self.assertIn("src/a.py", result["new"])
+        self.assertIn(1, result["new"]["src/a.py"])
+        self.assertIn("src/b.py", result["modified"])
+
+    def test_deleted_wins_over_new(self):
+        """If a file is added then deleted, it appears as deleted."""
+        from app.core.worker_gitlab import build_aggregated_file_summary
+        metadata_map = {
+            1: {"additions": 0, "deletions": 0, "new_files": ["src/old.py"], "modified_files": [], "deleted_files": []},
+            2: {"additions": 0, "deletions": 0, "new_files": [], "modified_files": [], "deleted_files": ["src/old.py"]},
+        }
+        result = build_aggregated_file_summary(metadata_map)
+        self.assertIn("src/old.py", result["deleted"])
+        self.assertNotIn("src/old.py", result["new"])
+
+
+
 
 class TestSendFailureAlert(unittest.TestCase):
     """Tests for _send_failure_alert — lines 1097-1136."""
