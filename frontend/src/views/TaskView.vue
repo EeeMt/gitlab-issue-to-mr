@@ -248,7 +248,7 @@
           />
 
           <!-- Result Panel (only for terminal tasks) -->
-          <TaskResultPanel v-if="task && isTerminal" :task="task" />
+          <TaskResultPanel v-if="task && isTerminal" :task="task" @status-overridden="refreshTask" />
         </div>
       </n-spin>
     </n-space>

@@ -22,9 +22,8 @@
               <n-icon size="12"><GitCommitOutline /></n-icon>
               <span>{{ task.commit_sha.slice(0, 8) }}</span>
             </span>
-            <span v-if="hasChanges" class="commit-stats">
+          <span v-if="hasChanges" class="commit-stats">
               <span class="changes-add">+{{ task.additions || 0 }}</span>
-              <span class="changes-sep"> / </span>
               <span class="changes-del">-{{ task.deletions || 0 }}</span>
             </span>
           </div>
@@ -67,23 +66,140 @@
           </div>
         </div>
       </div>
+
+      <!-- Continue Guidance (only for terminal tasks linked to an issue) -->
+      <div v-if="['completed', 'failed'].includes(task.status) && task.issue_id" class="result-card result-card--continue">
+        <div class="result-card__title">
+          <n-icon size="16" class="result-card__icon result-card__icon--continue"><ChatbubbleEllipsesOutline /></n-icon>
+          {{ t('taskView.continueGuideTitle') }}
+        </div>
+        <div class="result-card__content continue-body">
+          <p class="continue-hint">{{ t('taskView.continueGuideHint') }}</p>
+          <n-button
+            type="primary"
+            size="small"
+            secondary
+            strong
+            @click="goToIssue"
+          >
+            <template #icon><n-icon :component="ArrowBackOutline" /></template>
+            {{ t('taskView.backToIssue') }}
+          </n-button>
+        </div>
+      </div>
+
+      <!-- Manual Override Card -->
+      <div v-if="['completed', 'failed'].includes(task.status)" class="result-card result-card--override">
+        <div class="result-card__title">
+          <n-icon size="16" class="result-card__icon result-card__icon--override"><ShieldCheckmarkOutline /></n-icon>
+          {{ t('taskView.manualOverride') }}
+          <n-tag v-if="task.is_manually_overridden" size="tiny" type="warning" :bordered="false" style="margin-left: 6px">
+            {{ t('taskView.manuallyOverridden') }}
+          </n-tag>
+        </div>
+        <div class="result-card__content override-body">
+          <p class="override-hint">{{ task.is_manually_overridden ? t('taskView.overrideHintAlreadyOverridden', { reason: task.override_reason || t('taskView.overrideNoReason') }) : t('taskView.overrideHint') }}</p>
+          <div class="override-actions">
+            <n-button
+              v-if="task.status === 'completed'"
+              size="small"
+              type="error"
+              secondary
+              @click="openOverrideModal('failed')"
+            >
+              <template #icon><n-icon :component="CloseCircleOutline" /></template>
+              {{ t('taskView.markAsFailed') }}
+            </n-button>
+            <n-button
+              v-if="task.status === 'failed'"
+              size="small"
+              type="success"
+              secondary
+              @click="openOverrideModal('completed')"
+            >
+              <template #icon><n-icon :component="CheckmarkCircleOutline" /></template>
+              {{ t('taskView.markAsCompleted') }}
+            </n-button>
+          </div>
+        </div>
+      </div>
     </div>
   </n-card>
+
+  <!-- Override confirmation modal -->
+  <n-modal
+    v-model:show="showOverrideModal"
+    preset="dialog"
+    :title="overrideTargetStatus === 'failed' ? t('taskView.markAsFailed') : t('taskView.markAsCompleted')"
+    :positive-text="t('common.confirm')"
+    :negative-text="t('common.cancel')"
+    :loading="overrideLoading"
+    @positive-click="confirmOverride"
+  >
+    <n-space vertical>
+      <p style="margin: 0; font-size: 14px;">{{ overrideTargetStatus === 'failed' ? t('taskView.markAsFailedConfirm') : t('taskView.markAsCompletedConfirm') }}</p>
+      <n-input
+        v-model:value="overrideReason"
+        type="textarea"
+        :rows="3"
+        :placeholder="t('taskView.overrideReasonPlaceholder')"
+      />
+    </n-space>
+  </n-modal>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { NCard, NIcon } from 'naive-ui'
-import { AlertCircleOutline, TimeOutline, GitCommitOutline, OpenOutline } from '@vicons/ionicons5'
+import { computed, ref } from 'vue'
+import { NCard, NIcon, NButton, NModal, NInput, NSpace, NTag, useMessage } from 'naive-ui'
+import { AlertCircleOutline, TimeOutline, GitCommitOutline, OpenOutline, ChatbubbleEllipsesOutline, ArrowBackOutline, CheckmarkCircleOutline, CloseCircleOutline, ShieldCheckmarkOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { formatLargeNumber } from '../utils/usageLimits'
 import type { Task } from '../api'
+import { overrideTaskStatus } from '../api'
 
 const props = defineProps<{
   task: Task
 }>()
 
+const emit = defineEmits<{
+  (e: 'status-overridden'): void
+}>()
+
 const { t } = useI18n()
+const router = useRouter()
+const message = useMessage()
+
+const showOverrideModal = ref(false)
+const overrideTargetStatus = ref<'completed' | 'failed' | null>(null)
+const overrideReason = ref('')
+const overrideLoading = ref(false)
+
+function openOverrideModal(targetStatus: 'completed' | 'failed') {
+  overrideTargetStatus.value = targetStatus
+  overrideReason.value = ''
+  showOverrideModal.value = true
+}
+
+async function confirmOverride() {
+  if (!overrideTargetStatus.value) return
+  overrideLoading.value = true
+  try {
+    await overrideTaskStatus(props.task.id, overrideTargetStatus.value, overrideReason.value || undefined)
+    showOverrideModal.value = false
+    emit('status-overridden')
+  } catch {
+    message.error(t('taskView.failedToOverrideStatus'))
+  } finally {
+    overrideLoading.value = false
+  }
+}
+
+function goToIssue() {
+  if (props.task.issue_id) {
+    router.push(`/issues/${props.task.issue_id}`)
+  }
+}
 
 const commitUrl = computed(() => {
   if (!props.task.commit_sha || !props.task.project_url) return null
@@ -233,26 +349,30 @@ const totalTokens = computed(() => {
 
 .commit-stats {
   display: inline-flex;
-  align-items: baseline;
-  gap: 2px;
-  font-family: var(--n-font-family, inherit);
-  font-size: 25px;
-  font-weight: 400;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--n-font-family-mono, monospace);
   font-variant-numeric: tabular-nums;
-  font-feature-settings: 'tnum';
-  line-height: 1.3;
 }
 
 .changes-add {
-  color: #18a053;
-}
-
-.changes-sep {
-  color: var(--n-text-color-3, #bbb);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(24, 160, 88, 0.25);
+  font-size: 12px;
+  font-weight: 500;
+  background: rgba(24, 160, 88, 0.08);
+  color: #18a058;
 }
 
 .changes-del {
-  color: #db3b21;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(208, 48, 80, 0.22);
+  font-size: 12px;
+  font-weight: 500;
+  background: rgba(208, 48, 80, 0.07);
+  color: #d03050;
 }
 
 .commit-message {
@@ -306,6 +426,32 @@ const totalTokens = computed(() => {
   margin-top: 2px;
 }
 
+.result-card--continue {
+  border-color: rgba(24, 160, 88, 0.2);
+  background: rgba(24, 160, 88, 0.04);
+}
+
+.result-card__icon--continue {
+  color: #18a058;
+}
+
+.continue-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.continue-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--n-text-color-2, #555);
+  line-height: 1.5;
+  flex: 1;
+  min-width: 0;
+}
+
 .app-link {
   color: var(--n-primary-color, #18a058);
   text-decoration: none;
@@ -314,17 +460,35 @@ const totalTokens = computed(() => {
   text-decoration: underline;
 }
 
-.error-message {
+.result-card--override {
+  border-color: rgba(128, 128, 128, 0.15);
+  background: rgba(128, 128, 128, 0.03);
+}
+
+.result-card__icon--override {
+  color: var(--n-text-color-3, #999);
+}
+
+.override-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.override-hint {
   margin: 0;
-  padding: 10px;
-  font-size: 12px;
-  font-family: var(--n-font-family-mono, monospace);
-  background: rgba(239, 68, 68, 0.06);
-  border-radius: 6px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: #dc2626;
-  max-height: 200px;
-  overflow-y: auto;
+  font-size: 13px;
+  color: var(--n-text-color-2, #555);
+  line-height: 1.5;
+  flex: 1;
+  min-width: 0;
+}
+
+.override-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
 }
 </style>

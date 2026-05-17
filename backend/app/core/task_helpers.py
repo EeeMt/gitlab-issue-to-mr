@@ -57,6 +57,8 @@ def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = Non
         "updated_at": task.updated_at.isoformat(),
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "is_manually_overridden": task.is_manually_overridden,
+        "override_reason": task.override_reason,
     }
     # Safely check if issue relationship is loaded (avoid lazy load / MissingGreenlet)
     issue = None

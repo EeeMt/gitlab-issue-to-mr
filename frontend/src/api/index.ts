@@ -228,6 +228,8 @@ export interface Task {
   updated_at: string
   started_at: string | null
   completed_at: string | null
+  is_manually_overridden?: boolean
+  override_reason?: string | null
   issue?: {
     id: number
     title: string
@@ -1087,6 +1089,10 @@ export async function getTaskStats(id: number): Promise<TaskStats> {
 
 export async function cancelTask(id: number): Promise<void> {
   await api.post(`/tasks/${id}/cancel`)
+}
+
+export async function overrideTaskStatus(id: number, status: 'completed' | 'failed', reason?: string): Promise<void> {
+  await api.post(`/tasks/${id}/override-status`, { status, reason: reason || null })
 }
 
 export async function retryTask(id: number, scheduledDatetime?: string): Promise<Task> {

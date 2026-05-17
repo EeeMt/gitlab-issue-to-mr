@@ -10,6 +10,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import delete, func, or_, select, false
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -711,6 +712,49 @@ async def cancel_task(
         await maybe_update_issue_status(db, task.issue_id)
 
     return {"status": "success", "message": f"Task {task_id} cancelled"}
+
+
+class OverrideStatusRequest(BaseModel):
+    status: str  # "completed" or "failed"
+    reason: Optional[str] = None
+
+
+@router.post("/tasks/{task_id}/override-status")
+async def override_task_status(
+    task_id: int,
+    request: OverrideStatusRequest,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+) -> dict:
+    """Manually override a terminal task's status (completed <-> failed)."""
+    task = await get_task_with_access_check(task_id, db, access_scope, current_user)
+
+    if request.status not in ("completed", "failed"):
+        raise HTTPException(status_code=400, detail="status must be 'completed' or 'failed'")
+
+    new_status = TaskStatus(request.status)
+    if task.status not in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Can only override completed or failed tasks, current: {task.status.value}",
+        )
+    if task.status == new_status:
+        raise HTTPException(status_code=400, detail=f"Task is already {task.status.value}")
+
+    task.status = new_status
+    task.is_manually_overridden = True
+    task.override_reason = request.reason or None
+    task.overridden_by_user_id = current_user.id if current_user else None
+    task.overridden_at = utcnow()
+    await db.commit()
+    await db.refresh(task)
+
+    if task.issue_id:
+        await maybe_update_issue_status(db, task.issue_id)
+
+    logger.info(f"Task {task_id} status manually overridden to {new_status.value}")
+    return {"status": "success", "message": f"Task {task_id} status overridden to {new_status.value}"}
 
 
 @router.post("/tasks/{task_id}/retry")
