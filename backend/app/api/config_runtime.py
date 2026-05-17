@@ -77,6 +77,9 @@ class RuntimeConfigSection(BaseModel):
     maven_settings_host_path: str
     slot_max_tasks: int
     slot_max_tasks_enforce: bool
+    announcement_enabled: bool
+    announcement_text: str
+    announcement_level: str
     worker_environment_variables: list[RuntimeWorkerEnvironmentVariableResponse] = Field(
         default_factory=list
     )
@@ -110,6 +113,9 @@ class RuntimeConfigUpdate(BaseModel):
     maven_settings_host_path: Optional[str] = None
     slot_max_tasks: Optional[int] = None
     slot_max_tasks_enforce: Optional[bool] = None
+    announcement_enabled: Optional[bool] = None
+    announcement_text: Optional[str] = None
+    announcement_level: Optional[str] = None
     worker_environment_variables: Optional[list[RuntimeWorkerEnvironmentVariableRequest]] = None
 
 
@@ -142,6 +148,9 @@ def _serialize_runtime_config(
         maven_settings_host_path=settings.maven_settings_host_path,
         slot_max_tasks=settings.slot_max_tasks,
         slot_max_tasks_enforce=settings.slot_max_tasks_enforce,
+        announcement_enabled=settings.announcement_enabled,
+        announcement_text=settings.announcement_text,
+        announcement_level=settings.announcement_level,
         worker_environment_variables=worker_environment_variables or [],
     )
 
@@ -294,11 +303,36 @@ def _validate_config_value(key: str, value: object) -> object:
         "allow_analytics_for_users",
         "allow_oidc_diagnostics_for_users",
         "slot_max_tasks_enforce",
+        "announcement_enabled",
     }:
         if not isinstance(value, bool):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"{key} must be a boolean",
+            )
+        return value
+
+    if key == "announcement_level":
+        if value not in {"info", "warning", "error", "success"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="announcement_level must be one of: info, warning, error, success",
+            )
+        return value
+
+    if key == "announcement_text":
+        if not isinstance(value, str):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="announcement_text must be a string",
+            )
+        return value
+
+    if key == "announcement_enabled":
+        if not isinstance(value, bool):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="announcement_enabled must be a boolean",
             )
         return value
 

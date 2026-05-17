@@ -565,6 +565,9 @@ export interface RuntimeConfig {
   maven_settings_host_path: string
   slot_max_tasks: number
   slot_max_tasks_enforce: boolean
+  announcement_enabled: boolean
+  announcement_text: string
+  announcement_level: string
 }
 
 export interface WorkerEnvironmentVariable {
@@ -1491,6 +1494,17 @@ export async function getMyUsageSummary(): Promise<CurrentUserUsageSummary> {
 
 export async function deleteIssueBranch(id: number): Promise<Issue> {
   const response = await api.post(`/issues/${id}/delete-branch`)
+  return response.data
+}
+
+export interface AnnouncementInfo {
+  enabled: boolean
+  text: string
+  level: string // 'info' | 'warning' | 'error' | 'success'
+}
+
+export async function getAnnouncement(): Promise<AnnouncementInfo> {
+  const response = await api.get('/announcement')
   return response.data
 }
 

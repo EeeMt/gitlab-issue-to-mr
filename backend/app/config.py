@@ -55,6 +55,9 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "slot_max_tasks": int,  # Max tasks per 1-hour slot (0 = unlimited)
     "slot_max_tasks_enforce": bool,  # Enforce slot limit (True = hard reject, False = soft warning)
     "session_storage_root": str,
+    "announcement_enabled": bool,
+    "announcement_text": str,
+    "announcement_level": str,  # "info" | "warning" | "error" | "success"
 }
 
 SECRET_CONFIG_KEYS = {
@@ -178,6 +181,11 @@ class Settings(BaseSettings):
     # Slot Capacity Configuration
     slot_max_tasks: int = Field(default=0)  # Max tasks per 1-hour slot (0 = unlimited)
     slot_max_tasks_enforce: bool = Field(default=False)  # True = hard reject, False = soft warning
+
+    # Announcement Configuration
+    announcement_enabled: bool = Field(default=False)
+    announcement_text: str = Field(default="")
+    announcement_level: str = Field(default="info")
 
     @property
     def project_root(self) -> Path:

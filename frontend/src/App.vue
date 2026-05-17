@@ -81,6 +81,24 @@
                 </n-text>
               </div>
             </div>
+            <div
+              v-if="announcement?.enabled && announcement?.text"
+              class="app-shell__topbar-announcement"
+            >
+              <div
+                class="app-shell__topbar-announcement-pill"
+                :class="`app-shell__topbar-announcement-pill--${announcement.level}`"
+              >
+                <n-icon :component="announcementIcon" size="13" class="app-shell__topbar-announcement-icon" />
+                <div
+                  ref="announcementMarqueeRef"
+                  class="app-shell__topbar-announcement-marquee"
+                  :class="{ 'app-shell__topbar-announcement-marquee--scrolling': announcementOverflows }"
+                >
+                  <span ref="announcementTextRef" class="app-shell__topbar-announcement-text">{{ announcement.text }}</span>
+                </div>
+              </div>
+            </div>
             <div class="app-shell__topbar-actions">
               <n-tooltip v-if="usageSummary" trigger="hover" :style="usageTooltipStyle">
                 <template #trigger>
@@ -233,7 +251,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   NAvatar,
   NButton,
@@ -267,10 +285,11 @@ import {
   PeopleOutline,
   RocketOutline,
   SettingsOutline,
-  SpeedometerOutline
+  SpeedometerOutline,
+  MegaphoneOutline
 } from '@vicons/ionicons5'
 import { authState, canAccessSharedPage, initializeAuth, isAdmin, logoutAndClearAuth } from './auth'
-import { getMyUsageSummary, type CurrentUserUsageSummary } from './api'
+import { getMyUsageSummary, getAnnouncement, type CurrentUserUsageSummary, type AnnouncementInfo } from './api'
 import LanguageToggle from './components/LanguageToggle.vue'
 import OnboardingModal from './components/OnboardingModal.vue'
 import { useBreakpoints } from './composables/useBreakpoints'
@@ -334,6 +353,28 @@ const manualOnboardingOpen = ref(false)
 const usageSummary = ref<CurrentUserUsageSummary | null>(null)
 const usageRefreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const usageSummaryRequestToken = ref(0)
+const announcement = ref<AnnouncementInfo | null>(null)
+const announcementRefreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
+const announcementMarqueeRef = ref<HTMLElement | null>(null)
+const announcementTextRef = ref<HTMLElement | null>(null)
+const announcementOverflows = ref(false)
+
+function updateAnnouncementOverflow() {
+  const marquee = announcementMarqueeRef.value
+  const text = announcementTextRef.value
+  if (!marquee || !text) {
+    announcementOverflows.value = false
+    return
+  }
+  const overflows = text.scrollWidth > marquee.clientWidth
+  announcementOverflows.value = overflows
+  if (overflows) {
+    const offset = text.scrollWidth - marquee.clientWidth
+    marquee.style.setProperty('--scroll-offset', `-${offset}px`)
+  }
+}
+
+const announcementIcon = computed(() => MegaphoneOutline)
 const showOnboarding = computed(
   () => authState.initialized && authState.authenticated && showShell.value && (!onboardingDismissed.value || manualOnboardingOpen.value)
 )
@@ -558,14 +599,55 @@ function startUsageRefresh() {
   }, 60_000)
 }
 
+async function loadAnnouncement() {
+  if (!showShell.value || !authState.authenticated) {
+    announcement.value = null
+    return
+  }
+  try {
+    announcement.value = await getAnnouncement()
+    await nextTick()
+    updateAnnouncementOverflow()
+  } catch {
+    announcement.value = null
+  }
+}
+
+function stopAnnouncementRefresh() {
+  if (announcementRefreshTimer.value !== null) {
+    clearInterval(announcementRefreshTimer.value)
+    announcementRefreshTimer.value = null
+  }
+}
+
+function startAnnouncementRefresh() {
+  stopAnnouncementRefresh()
+  if (!showShell.value || !authState.authenticated) {
+    return
+  }
+  announcementRefreshTimer.value = setInterval(() => {
+    void loadAnnouncement()
+  }, 300_000) // 5 minutes
+}
+
 watch(
   () => [showShell.value, authState.authenticated, authState.user?.id],
   () => {
     void loadUsageSummary()
     startUsageRefresh()
+    void loadAnnouncement()
+    startAnnouncementRefresh()
   },
   { immediate: true }
 )
+
+watch(announcementMarqueeRef, (el) => {
+  announcementResizeObserver?.disconnect()
+  if (el && announcementResizeObserver) {
+    announcementResizeObserver.observe(el)
+    updateAnnouncementOverflow()
+  }
+})
 
 let scrollTimer: ReturnType<typeof setTimeout>
 
@@ -577,16 +659,24 @@ function onDocumentScroll() {
   }, 600)
 }
 
+let announcementResizeObserver: ResizeObserver | null = null
+
 onMounted(() => {
   initializeAuth()
   document.addEventListener('scroll', onDocumentScroll, { capture: true, passive: true })
+  announcementResizeObserver = new ResizeObserver(() => {
+    updateAnnouncementOverflow()
+  })
 })
 
 onBeforeUnmount(() => {
   stopUsageRefresh()
+  stopAnnouncementRefresh()
   usageSummaryRequestToken.value += 1
   document.removeEventListener('scroll', onDocumentScroll, { capture: true })
   clearTimeout(scrollTimer)
+  announcementResizeObserver?.disconnect()
+  announcementResizeObserver = null
 })
 </script>
 
@@ -716,6 +806,92 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+}
+
+.app-shell__topbar-announcement {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 0 8px;
+}
+
+.app-shell__topbar-announcement-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px 4px 10px;
+  border-radius: 10px;
+  max-width: 480px;
+  min-width: 0;
+  overflow: hidden;
+  transition: opacity 0.2s ease;
+}
+
+.app-shell__topbar-announcement-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+/* Scrolling marquee container */
+.app-shell__topbar-announcement-marquee {
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* Only apply animation when text actually overflows */
+.app-shell__topbar-announcement-text {
+  display: inline-block;
+  font-size: 12.5px;
+  font-weight: 400;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.app-shell__topbar-announcement-marquee--scrolling .app-shell__topbar-announcement-text {
+  animation: announcement-scroll 12s linear 2s infinite;
+}
+
+/* Pause on hover */
+.app-shell__topbar-announcement-marquee--scrolling:hover .app-shell__topbar-announcement-text {
+  animation-play-state: paused;
+}
+
+@keyframes announcement-scroll {
+  0%, 15% {
+    transform: translateX(0);
+  }
+  80%, 95% {
+    transform: translateX(var(--scroll-offset, -60%));
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.app-shell__topbar-announcement-pill--info {
+  background: rgba(32, 128, 240, 0.08);
+  border: 1px solid rgba(32, 128, 240, 0.2);
+  color: #1565c7;
+}
+
+.app-shell__topbar-announcement-pill--warning {
+  background: rgba(240, 160, 32, 0.1);
+  border: 1px solid rgba(240, 160, 32, 0.28);
+  color: #a06800;
+}
+
+.app-shell__topbar-announcement-pill--error {
+  background: rgba(208, 48, 80, 0.08);
+  border: 1px solid rgba(208, 48, 80, 0.22);
+  color: #b81030;
+}
+
+.app-shell__topbar-announcement-pill--success {
+  background: rgba(24, 160, 88, 0.08);
+  border: 1px solid rgba(24, 160, 88, 0.22);
+  color: #0d7a3e;
 }
 
 .app-shell__language-toggle {

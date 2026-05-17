@@ -127,6 +127,9 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const eventStreamRef = ref<ScrollbarInst | null>(null)
+
+// Typed constant to force TypeScript to pick the `{ position }` overload of scrollTo
+const SCROLL_TO_BOTTOM: { position: 'top' | 'bottom'; behavior: ScrollBehavior } = { position: 'bottom', behavior: 'smooth' }
 const rawPaneRef = ref<{ logContentRef: HTMLElement | null } | null>(null)
 const logContentRef = computed(() => rawPaneRef.value?.logContentRef ?? null)
 const activeTab = ref<'events' | 'raw'>('events')
@@ -197,7 +200,7 @@ function onCollapseChange(expandedNames: (string | number)[], index: number) {
       lastRowScrollTimer = setTimeout(() => {
         if (eventStreamRef.value) {
           setProgrammaticScroll()
-          eventStreamRef.value.scrollTo({ position: 'bottom', behavior: 'smooth' })
+          eventStreamRef.value.scrollTo(SCROLL_TO_BOTTOM)
         }
       }, 260)
     } else {
@@ -285,7 +288,7 @@ function scrollToLatest() {
   autoScroll.value = true
   setProgrammaticScroll()
   nextTick(() => {
-    eventStreamRef.value?.scrollTo({ position: 'bottom', behavior: 'smooth' })
+    eventStreamRef.value?.scrollTo(SCROLL_TO_BOTTOM)
     logContentRef.value?.scrollTo?.({ top: logContentRef.value.scrollHeight, behavior: 'smooth' })
   })
 }
@@ -295,7 +298,7 @@ watch(processRows, async () => {
   await nextTick()
   if (eventStreamRef.value) {
     setProgrammaticScroll()
-    eventStreamRef.value.scrollTo({ position: 'bottom', behavior: 'smooth' })
+    eventStreamRef.value.scrollTo(SCROLL_TO_BOTTOM)
   }
 })
 
@@ -305,7 +308,7 @@ watch(expandedPayloads, async () => {
   await nextTick()
   if (eventStreamRef.value) {
     setProgrammaticScroll()
-    eventStreamRef.value.scrollTo({ position: 'bottom', behavior: 'smooth' })
+    eventStreamRef.value.scrollTo(SCROLL_TO_BOTTOM)
   }
 })
 
