@@ -231,7 +231,7 @@ const zhCN = {
       },
       tasks: {
         title: '任务',
-        body: '任务是从该需求派生出的执行单元。同一需求下的所有任务共享同一个 workspace 和 Claude session，追加任务可以在上次停下的位置继续执行。',
+        body: '任务是从该需求派生出的执行单元。同一需求下的所有任务共享同一个 workspace、Claude session 和 Git 分支，追加任务可以在上次停下的位置继续执行。',
       },
       results: {
         title: '结果',
@@ -255,7 +255,7 @@ const zhCN = {
         second: {
           step: '2',
           title: '隔离执行',
-          body: '每个任务独占一个 Docker 容器，但同一需求下的所有任务共享持久化的 workspace 和 Claude session，追加任务可以延续上次的工作进度。',
+          body: '每个任务独占一个 Docker 容器，但同一需求下的所有任务共享持久化的 workspace、Claude session 和同一个 Git 分支，追加任务可以延续上次的工作进度。',
         },
         third: {
           step: '3',
@@ -293,7 +293,7 @@ const zhCN = {
         fourth: {
           step: '4',
           title: '追加后续任务',
-          body: '同一需求下的任务共享 workspace 和 Claude session，追加任务将从上次停下的位置继续执行。',
+          body: '同一需求下的任务共享 workspace、Claude session 和同一个 Git 分支，追加任务将从上次停下的位置继续执行。',
         },
       },
     },
@@ -388,7 +388,7 @@ const zhCN = {
     createFirstTask: '创建首个任务',
     createTask: '创建任务',
     appendTask: '追加任务',
-    appendTaskHint: '追加任务会共享同一工作区与 Claude 会话，可在上一次任务的基础上继续推进',
+    appendTaskHint: '追加任务会共享同一工作区、Claude 会话与 Git 分支，可在上一次任务的基础上继续推进',
     retryTask: '重试',
     noMergeRequest: '无合并请求',
     closedViaLabel: '关闭方式',
@@ -572,7 +572,7 @@ const zhCN = {
     completedAt: '完成时间',
     tokenBreakdown: '输入: {input} · 输出: {output}',
     continueGuideTitle: '在需求详情中继续',
-    continueGuideHint: '你可以在需求详情页追加新任务，接续本次执行继续推进——所有任务共享同一工作区和 Claude 会话。',
+    continueGuideHint: '你可以在需求详情页追加新任务，接续本次执行继续推进——所有任务共享同一工作区、Claude 会话与 Git 分支。',
     backToIssue: '返回需求',
     provider: 'AI 模型服务',
     manualOverride: '手动修正',

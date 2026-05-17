@@ -233,7 +233,7 @@ const en = {
       },
       tasks: {
         title: 'Tasks',
-        body: 'Tasks are the execution units created from the issue. All tasks under the same issue share a persistent workspace and Claude session — follow-up tasks pick up exactly where the previous one left off.',
+        body: 'Tasks are the execution units created from the issue. All tasks under the same issue share a persistent workspace, Claude session, and the same Git branch — follow-up tasks pick up exactly where the previous one left off.',
       },
       results: {
         title: 'Results',
@@ -257,7 +257,7 @@ const en = {
         second: {
           step: '2',
           title: 'Isolated execution',
-          body: 'Each task gets its own Docker container, but all tasks under the same issue share a persistent workspace and Claude session so follow-up tasks can continue from where the previous one stopped.',
+          body: 'Each task gets its own Docker container, but all tasks under the same issue share a persistent workspace, Claude session, and the same Git branch so follow-up tasks can continue from where the previous one stopped.',
         },
         third: {
           step: '3',
@@ -294,7 +294,7 @@ const en = {
         fourth: {
           step: '4',
           title: 'Append follow-up tasks',
-          body: 'All tasks in the same issue share a workspace and Claude session. Follow-up tasks pick up right where the previous one left off.',
+          body: 'All tasks in the same issue share a workspace, Claude session, and the same Git branch. Follow-up tasks pick up right where the previous one left off.',
         },
       },
     },
@@ -390,7 +390,7 @@ const en = {
     createFirstTask: 'Create First Task',
     createTask: 'Create Task',
     appendTask: 'Append Task',
-    appendTaskHint: 'Appended tasks share the same workspace and Claude session, allowing them to continue from where the previous task left off',
+    appendTaskHint: 'Appended tasks share the same workspace, Claude session, and Git branch, allowing them to continue from where the previous task left off',
     retryTask: 'Retry',
     noMergeRequest: 'No MR',
     closedViaLabel: 'Closed Via',
@@ -582,7 +582,7 @@ const en = {
     completedAt: 'Completed At',
     tokenBreakdown: 'Input: {input} · Output: {output}',
     continueGuideTitle: 'Continue on This Issue',
-    continueGuideHint: 'You can append a follow-up task on the issue page to continue where this task left off — all tasks share the same workspace and Claude session.',
+    continueGuideHint: 'You can append a follow-up task on the issue page to continue where this task left off — all tasks share the same workspace, Claude session, and Git branch.',
     backToIssue: 'Back to Issue',
     provider: 'AI Provider',
     manualOverride: 'Manual Override',

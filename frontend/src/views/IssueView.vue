@@ -320,7 +320,7 @@
               v-if="isOwner && issue.status !== 'closed' && issue.tasks?.length"
               trigger="hover"
               placement="top"
-              :style="{ maxWidth: '260px' }"
+              :style="{ maxWidth: '260px', fontSize: '12px' }"
             >
               <template #trigger>
                 <n-button
@@ -445,7 +445,7 @@
               </div>
               <div class="prompt-label-right">
                 <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
-                <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '260px' }">
+                <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '260px', fontSize: '12px' }">
                   <template #trigger>
                     <n-icon :component="InformationCircleOutline" size="14" class="require-changes-info-icon" />
                   </template>
