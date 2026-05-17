@@ -1,13 +1,13 @@
 """Add index on issues.initiator_user_id for dashboard query performance
 
-Revision ID: 040_add_issue_initiator_user_id_index
+Revision ID: 040_ix_issues_initiator_user_id
 Revises: 039_add_task_override_fields
 Create Date: 2026-05-17 00:00:00.000000
 """
 
 from alembic import op
 
-revision = "040_add_issue_initiator_user_id_index"
+revision = "040_ix_issues_initiator_user_id"
 down_revision = "039_add_task_override_fields"
 branch_labels = None
 depends_on = None
