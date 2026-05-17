@@ -129,21 +129,38 @@
   <!-- Override confirmation modal -->
   <n-modal
     v-model:show="showOverrideModal"
-    preset="dialog"
-    :title="overrideTargetStatus === 'failed' ? t('taskView.markAsFailed') : t('taskView.markAsCompleted')"
-    :positive-text="t('common.confirm')"
-    :negative-text="t('common.cancel')"
-    :loading="overrideLoading"
-    @positive-click="confirmOverride"
+    preset="card"
+    class="config-editor-modal"
+    :style="{ width: '480px' }"
+    :closable="!overrideLoading"
+    :mask-closable="!overrideLoading"
   >
-    <n-space vertical>
-      <p style="margin: 0; font-size: 14px;">{{ overrideTargetStatus === 'failed' ? t('taskView.markAsFailedConfirm') : t('taskView.markAsCompletedConfirm') }}</p>
+    <template #header>
+      <span>{{ overrideTargetStatus === 'failed' ? t('taskView.markAsFailed') : t('taskView.markAsCompleted') }}</span>
+    </template>
+    <n-space vertical :size="16">
+      <p style="margin: 0; font-size: 14px; line-height: 1.6; color: var(--n-text-color-2);">
+        {{ overrideTargetStatus === 'failed' ? t('taskView.markAsFailedConfirm') : t('taskView.markAsCompletedConfirm') }}
+      </p>
       <n-input
         v-model:value="overrideReason"
         type="textarea"
         :rows="3"
         :placeholder="t('taskView.overrideReasonPlaceholder')"
+        :disabled="overrideLoading"
       />
+      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+        <n-button secondary :disabled="overrideLoading" @click="showOverrideModal = false">
+          {{ t('common.cancel') }}
+        </n-button>
+        <n-button
+          :type="overrideTargetStatus === 'failed' ? 'error' : 'success'"
+          :loading="overrideLoading"
+          @click="confirmOverride"
+        >
+          {{ t('common.confirm') }}
+        </n-button>
+      </div>
     </n-space>
   </n-modal>
 </template>
