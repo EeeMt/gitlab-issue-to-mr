@@ -1055,7 +1055,7 @@ const en = {
        enabledHint: 'When enabled, the announcement message will be shown to all authenticated users.',
        text: 'Announcement Message',
        textPlaceholder: 'Enter announcement message...',
-       textHint: 'The message to display in the top bar.',
+       textHint: 'The message to display in the top bar. HTML is supported.',
        level: 'Announcement Level',
        levelHint: 'Controls the style and color of the announcement.',
        levelInfo: 'Info',

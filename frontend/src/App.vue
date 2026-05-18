@@ -84,7 +84,7 @@
                   class="app-shell__topbar-announcement-marquee"
                   :class="{ 'app-shell__topbar-announcement-marquee--scrolling': announcementOverflows }"
                 >
-                  <span ref="announcementTextRef" class="app-shell__topbar-announcement-text">{{ announcement.text }}</span>
+                  <span ref="announcementTextRef" class="app-shell__topbar-announcement-text" v-html="announcement.text" />
                 </div>
               </div>
             </div>

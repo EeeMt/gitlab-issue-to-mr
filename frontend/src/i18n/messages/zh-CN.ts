@@ -1035,7 +1035,7 @@ const zhCN = {
       enabledHint: '启用后，公告消息将向所有已登录用户展示。',
       text: '公告内容',
       textPlaceholder: '输入公告内容...',
-      textHint: '将在顶栏显示的公告消息。',
+      textHint: '将在顶栏显示的公告消息，支持 HTML。',
       level: '公告级别',
       levelHint: '控制公告的样式和颜色。',
       levelInfo: '信息',
