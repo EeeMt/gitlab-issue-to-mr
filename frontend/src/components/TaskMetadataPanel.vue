@@ -376,7 +376,7 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
   --task-issue-link-hover-bg: rgba(37, 99, 235, 0.18);
 
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
   max-width: 100%;
   padding: 3px 10px;
