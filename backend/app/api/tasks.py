@@ -505,6 +505,7 @@ async def stream_task_logs(
         # cycle and push an "update" SSE event the moment output_payload_id
         # appears, eliminating the need for a client-side fetchLogs() poll.
         pending_tool_calls: set[int] = set()
+        _BATCH_SIZE = 500
         try:
             while True:
                 # Fetch new log entries since last cursor
@@ -512,7 +513,7 @@ async def stream_task_logs(
                     select(TaskLog)
                     .where(TaskLog.task_id == task_id, TaskLog.id > cursor)
                     .order_by(TaskLog.id.asc())
-                    .limit(100)
+                    .limit(_BATCH_SIZE)
                 )
                 new_logs = log_result.scalars().all()
 
@@ -525,6 +526,11 @@ async def stream_task_logs(
                         meta = event_data["metadata"] or {}
                         if not meta.get("output_payload_id"):
                             pending_tool_calls.add(log.id)
+
+                # If the batch was full there are likely more logs already in DB;
+                # skip the sleep so we flush the backlog immediately.
+                if len(new_logs) == _BATCH_SIZE:
+                    continue
 
                 # Re-check pending tool_call logs for in-place updates.
                 # Use populate_existing=True so SQLAlchemy refreshes cached
