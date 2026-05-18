@@ -644,7 +644,6 @@ async def get_accessible_projects_for_oauth_token(
                     f"{base_url}/api/v4/projects",
                     params={
                         **query,
-                        "simple": "true",
                         "per_page": per_page,
                         "page": page,
                         "order_by": "id",
@@ -661,6 +660,8 @@ async def get_accessible_projects_for_oauth_token(
                         "id": project["id"],
                         "name": project["name"],
                         "path_with_namespace": project["path_with_namespace"],
+                        "default_branch": project.get("default_branch"),
+                        "web_url": project.get("web_url"),
                     }
                 next_page = response.headers.get("X-Next-Page")
                 if not next_page:
