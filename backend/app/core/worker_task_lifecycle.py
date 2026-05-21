@@ -161,9 +161,9 @@ async def create_execute_container(
 
     if not settings.worker_skip_image_pull:
         try:
-            worker.docker.pull_image(settings.worker_image, force=True)
+            worker.docker.pull_image(settings.worker_image, force=False)
         except Exception as e:
-            logger.warning(f"Failed to pull image: {e}, trying to use existing")
+            logger.warning(f"Failed to pull image: {e}, using existing local image if available")
 
     mr_iid = issue.merge_request_iid if issue else None
     mr_web_url = issue.merge_request_url if issue else None
