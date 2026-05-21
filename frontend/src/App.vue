@@ -853,6 +853,23 @@ body {
   line-height: 1.4;
 }
 
+.app-shell__topbar-announcement-text a,
+.app-shell__topbar-announcement-text a:visited {
+  color: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: currentColor;
+  opacity: 0.85;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.app-shell__topbar-announcement-text a:hover {
+  opacity: 1;
+}
+
 .app-shell__topbar-announcement-marquee--scrolling .app-shell__topbar-announcement-text {
   animation: announcement-scroll 12s linear 2s infinite;
 }

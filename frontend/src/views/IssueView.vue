@@ -424,11 +424,13 @@
     >
       <n-drawer-content :title="t('issue.createTask')" closable>
         <n-form label-placement="top" class="issue-view__create-form">
-          <!-- Prompt -->
-          <n-form-item class="prompt-form-item">
-            <template #label>
+          <!-- Prompt (custom div wrapper instead of n-form-item to avoid <label> HTML element:
+               n-switch renders as a <div>, not a native <button>, so clicking it would bubble
+               to the <label> and trigger its activation behavior on the "Use Template" button) -->
+          <div class="prompt-form-section">
+            <div class="prompt-section-header">
               <div class="prompt-label-left">
-                <span>{{ t('issue.prompt') }}</span>
+                <span class="prompt-section-label-text">{{ t('issue.prompt') }}</span>
                 <n-button
                   size="tiny"
                   :disabled="promptTemplatesLoading || promptTemplates.length === 0"
@@ -453,19 +455,17 @@
                 </n-tooltip>
                 <n-switch v-model:value="requireChanges" size="small" />
               </div>
-            </template>
+            </div>
             <VariableEditor
               v-model="newTaskPrompt"
               :variable-tips="promptVariableTips"
               :placeholder="issue?.description || t('issue.promptPlaceholder')"
             />
-            <template #feedback>
-              <div v-if="unreplacedVariables.length > 0" class="prompt-variable-warning">
-                <n-icon :component="WarningOutline" size="14" />
-                <span>{{ t('createTask.unreplacedVariablesHint') }}: {{ unreplacedVariables.join(', ') }}</span>
-              </div>
-            </template>
-          </n-form-item>
+            <div v-if="unreplacedVariables.length > 0" class="prompt-variable-warning">
+              <n-icon :component="WarningOutline" size="14" />
+              <span>{{ t('createTask.unreplacedVariablesHint') }}: {{ unreplacedVariables.join(', ') }}</span>
+            </div>
+          </div>
 
           <!-- Priority cards -->
           <n-form-item :label="t('common.priority')">
@@ -1636,14 +1636,22 @@ onMounted(() => {
   min-height: 200px;
 }
 
-/* Make the n-form-item-label__text span (which wraps #label slot content)
-   a flex container so children can be spread left/right */
-.prompt-form-item :deep(.n-form-item-label__text) {
-  flex: 1;
+/* Custom prompt section replaces n-form-item to avoid <label> HTML element wrapping */
+.prompt-form-section {
+  margin-bottom: 18px;
+}
+
+.prompt-section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   min-width: 0;
+  margin-bottom: 6px;
+}
+
+.prompt-section-label-text {
+  font-size: 14px;
+  color: var(--n-text-color);
 }
 
 .prompt-label-left {
@@ -1799,6 +1807,7 @@ onMounted(() => {
   gap: 4px;
   color: #f0a020;
   font-size: 12px;
+  margin-top: 4px;
 }
 
 .prompt-template-dropdown__empty {
