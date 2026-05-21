@@ -1,7 +1,9 @@
 """Task lifecycle helpers for WorkerExecutor."""
 
 import asyncio
+import json
 import logging
+import os
 from typing import Any, Optional
 
 from gitlab import Gitlab
@@ -14,6 +16,47 @@ from app.database import AsyncSessionLocal
 from app.models import Issue, Task, TaskLog, TaskStatus
 
 logger = logging.getLogger(__name__)
+
+_CONTAINER_METADATA_PATH = "/tmp/codify-runtime/task-metadata.json"
+
+
+def _save_task_metadata_from_container(worker, container: Any, task: Task, issue: Any) -> None:
+    """Extract task-metadata.json from the container via the Docker API and persist it locally.
+
+    Volume mounts are unreliable when the Docker daemon runs on a remote host: the container
+    writes to a path on the *remote* host's filesystem, while the scheduler reads from its
+    *local* filesystem.  Extracting via container.get_archive() always uses the Docker HTTP API,
+    so it works regardless of whether the daemon is local or remote.
+
+    The file is saved to the same path that load_task_metadata_files() expects, so no other
+    code needs to change.
+    """
+    try:
+        from app.config import get_settings
+        from app.core.worker_workspace import build_issue_workspace_paths
+
+        settings = get_settings()
+        paths = build_issue_workspace_paths(settings, issue, task)
+        if paths is None:
+            return
+
+        raw = worker.docker.read_file_from_container(container, _CONTAINER_METADATA_PATH)
+        if not raw:
+            logger.debug(f"[Task {task.id}] task-metadata.json not found in container")
+            return
+
+        # Validate JSON before writing
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return
+
+        dest = os.path.join(paths.runtime_path, "task-metadata.json")
+        os.makedirs(paths.runtime_path, exist_ok=True)
+        with open(dest, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False)
+        logger.info(f"[Task {task.id}] task-metadata.json extracted from container → {dest}")
+    except Exception as exc:
+        logger.debug(f"[Task {task.id}] Could not extract task-metadata.json from container: {exc}")
 
 
 async def load_task_or_fail(db: AsyncSession, task_id: int) -> Task | None:
@@ -548,6 +591,13 @@ async def monitor_container_run(
 
     await worker._try_upsert_usage_ledger(db, task)
     await db.commit()
+
+    # Pull task-metadata.json from the container filesystem via the Docker API before
+    # removing the container.  This ensures the file is available on the scheduler's local
+    # filesystem even when the Docker daemon is running on a remote host (where volume mounts
+    # point to the *remote* host's paths, not the scheduler's paths).
+    if issue:
+        _save_task_metadata_from_container(worker, container, task, issue)
 
     if issue and issue.merge_request_iid:
         await worker._update_mr_description_for_issue(task, issue, db, sudo_gl=sudo_gl)
