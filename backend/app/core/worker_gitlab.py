@@ -59,7 +59,7 @@ def remove_mr_draft_status_for_issue(task: Task, issue: Issue, gitlab_client, *,
         return
 
     updated_title = re.sub(r"^(?:\[Draft\]\s*|Draft:\s*|WIP:\s*)", "", title, count=1, flags=re.IGNORECASE).strip()
-    mr.ready()
+    mr.draft = False
     if updated_title:
         mr.title = updated_title
     mr.save()

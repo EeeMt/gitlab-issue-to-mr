@@ -314,7 +314,7 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
 
         worker._remove_mr_draft_status_for_issue(task, task.issue)
 
-        mock_mr.ready.assert_called_once_with()
+        self.assertFalse(mock_mr.draft)
         self.assertEqual(mock_mr.title, "Add new feature")
         mock_mr.save.assert_called_once()
 
@@ -351,7 +351,7 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
         self.assertEqual(mock_mr.title, "New API endpoint")
 
     def test_marks_ready_without_title_prefix(self):
-        """Should still call ready even when title has no draft prefix."""
+        """Should still set draft=False even when title has no draft prefix."""
         mock_mr = MagicMock()
         mock_mr.title = "Add new feature"
         mock_project = MagicMock()
@@ -364,7 +364,7 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
 
         worker._remove_mr_draft_status_for_issue(task, task.issue)
 
-        mock_mr.ready.assert_called_once_with()
+        self.assertFalse(mock_mr.draft)
         self.assertEqual(mock_mr.title, "Add new feature")
         mock_mr.save.assert_called_once()
 
@@ -397,7 +397,7 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
 
         worker._remove_mr_draft_status_for_issue(task, task.issue)
 
-        mock_mr.ready.assert_called_once_with()
+        self.assertFalse(mock_mr.draft)
         mock_mr.save.assert_called_once()
 
     def test_legacy_method_is_noop(self):

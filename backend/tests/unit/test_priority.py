@@ -362,7 +362,7 @@ def test_draft_removed_on_completion():
     asyncio.run(run_test())
 
     mock_project.mergerequests.get.assert_called_with(42)
-    mock_existing_mr.ready.assert_called_once_with()
+    assert not mock_existing_mr.draft
     assert mock_existing_mr.title == "AI: Complete feature"
     mock_existing_mr.save.assert_called_once()
 

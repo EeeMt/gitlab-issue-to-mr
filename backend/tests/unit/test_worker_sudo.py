@@ -162,7 +162,7 @@ class TestWorkerSudoDraftRemoval(unittest.TestCase):
         worker._remove_mr_draft_status_for_issue(task, issue, sudo_gl=sudo_gl)
 
         sudo_gl.projects.get.assert_called_once_with(10)
-        mock_mr.ready.assert_called_once_with()
+        self.assertFalse(mock_mr.draft)
         self.assertEqual(mock_mr.title, "My Feature")
         mock_mr.save.assert_called_once()
 
@@ -199,5 +199,5 @@ class TestWorkerSudoDraftRemoval(unittest.TestCase):
 
         worker._remove_mr_draft_status_for_issue(task, issue)
 
-        mock_mr.ready.assert_called_once_with()
+        self.assertFalse(mock_mr.draft)
         mock_mr.save.assert_called_once()

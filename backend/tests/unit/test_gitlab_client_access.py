@@ -87,10 +87,10 @@ class GitLabClientAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             projects,
             [
-                {"id": 2, "name": "private-proj", "path_with_namespace": "team/private-proj"},
-                {"id": 3, "name": "shared-proj", "path_with_namespace": "team/shared-proj"},
-                {"id": 1, "name": "public-proj", "path_with_namespace": "oss/public-proj"},
-                {"id": 4, "name": "internal-proj", "path_with_namespace": "corp/internal-proj"},
+                {"id": 2, "name": "private-proj", "path_with_namespace": "team/private-proj", "default_branch": None, "web_url": None},
+                {"id": 3, "name": "shared-proj", "path_with_namespace": "team/shared-proj", "default_branch": None, "web_url": None},
+                {"id": 1, "name": "public-proj", "path_with_namespace": "oss/public-proj", "default_branch": None, "web_url": None},
+                {"id": 4, "name": "internal-proj", "path_with_namespace": "corp/internal-proj", "default_branch": None, "web_url": None},
             ],
         )
 

@@ -644,6 +644,7 @@ async def get_accessible_projects_for_oauth_token(
                     f"{base_url}/api/v4/projects",
                     params={
                         **query,
+                        "simple": "true",
                         "per_page": per_page,
                         "page": page,
                         "order_by": "id",
