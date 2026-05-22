@@ -23,31 +23,36 @@ _CONTAINER_METADATA_PATH = "/tmp/codify-runtime/task-metadata.json"
 def _save_task_metadata_from_container(worker, container: Any, task: Task, issue: Any) -> None:
     """Extract task-metadata.json from the container via the Docker API and persist it locally.
 
-    Volume mounts are unreliable when the Docker daemon runs on a remote host: the container
-    writes to a path on the *remote* host's filesystem, while the scheduler reads from its
-    *local* filesystem.  Extracting via container.get_archive() always uses the Docker HTTP API,
-    so it works regardless of whether the daemon is local or remote.
+    This is a belt-and-suspenders complement to the volume-mount approach:
+    - When the Docker daemon is remote, volume mounts point to the *remote* host's filesystem
+      while the scheduler reads from its *local* filesystem — the volume copy is unreachable.
+    - When the worker image is local but the volume-mounted directory is not accessible for any
+      reason (permissions, path mismatch, etc.), this extraction still works.
 
-    The file is saved to the same path that load_task_metadata_files() expects, so no other
-    code needs to change.
+    container.get_archive() always uses the Docker HTTP API, so it works for both local and
+    remote daemons.  The file is saved to the same path that load_task_metadata_files() expects.
     """
     try:
-        from app.config import get_settings
+        from app.config import get_effective_settings
         from app.core.worker_workspace import build_issue_workspace_paths
 
-        settings = get_settings()
+        settings = get_effective_settings()
         paths = build_issue_workspace_paths(settings, issue, task)
         if paths is None:
+            logger.debug(
+                f"[Task {task.id}] Skipping metadata extraction: worker_workspace_host_path not configured"
+            )
             return
 
         raw = worker.docker.read_file_from_container(container, _CONTAINER_METADATA_PATH)
         if not raw:
-            logger.debug(f"[Task {task.id}] task-metadata.json not found in container")
+            logger.debug(f"[Task {task.id}] task-metadata.json not found in container (worker image may be outdated)")
             return
 
         # Validate JSON before writing
         data = json.loads(raw)
         if not isinstance(data, dict):
+            logger.warning(f"[Task {task.id}] task-metadata.json in container is not a JSON object, skipping")
             return
 
         dest = os.path.join(paths.runtime_path, "task-metadata.json")
@@ -56,7 +61,7 @@ def _save_task_metadata_from_container(worker, container: Any, task: Task, issue
             json.dump(data, fh, ensure_ascii=False)
         logger.info(f"[Task {task.id}] task-metadata.json extracted from container → {dest}")
     except Exception as exc:
-        logger.debug(f"[Task {task.id}] Could not extract task-metadata.json from container: {exc}")
+        logger.warning(f"[Task {task.id}] Could not extract task-metadata.json from container: {exc}")
 
 
 async def load_task_or_fail(db: AsyncSession, task_id: int) -> Task | None:

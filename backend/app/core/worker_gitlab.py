@@ -193,7 +193,11 @@ def _resolve_issue_root(settings, issue: Issue, all_tasks: list) -> Optional[str
         if not all_tasks:
             return None
         paths = build_issue_workspace_paths(settings, issue, all_tasks[0])
-        return paths.issue_root if paths else None
+        if paths is None:
+            logger.debug(f"[Issue {issue.id}] worker_workspace_host_path not configured; metadata unavailable")
+            return None
+        logger.debug(f"[Issue {issue.id}] Resolved workspace root: {paths.issue_root}")
+        return paths.issue_root
     except Exception:
         logger.debug("Could not resolve issue workspace root", exc_info=True)
         return None
@@ -212,8 +216,11 @@ def load_task_metadata_files(issue_root: str, task_ids: list[int]) -> dict[int, 
                 data = json.load(f)
             if isinstance(data, dict):
                 result[task_id] = data
-        except (OSError, json.JSONDecodeError):
-            pass
+                logger.debug(f"[Task {task_id}] Loaded metadata from {path}")
+        except FileNotFoundError:
+            logger.debug(f"[Task {task_id}] task-metadata.json not found at {path} (worker may not have written it)")
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning(f"[Task {task_id}] Failed to read task-metadata.json at {path}: {exc}")
     return result
 
 
