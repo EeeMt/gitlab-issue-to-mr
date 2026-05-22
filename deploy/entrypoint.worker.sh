@@ -461,7 +461,7 @@ ${USER_PROMPT}
 
 上下文:
 - GitLab project id: ${PROJECT_ID}
-- Issue IID: ${ISSUE_IID:-N/A (manual task)}
+- 仓库路径: ${PROJECT_PATH}
 - 当前工作分支: ${BRANCH_NAME}
 - 目标分支: ${TARGET_BRANCH}
 
