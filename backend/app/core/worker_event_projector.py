@@ -535,7 +535,8 @@ class WorkerEventProjector:
                         resume_session = runtime_data.get("resume_session", "")
                         self._run_is_resumed = bool(resume_session)
                         self._timeline_gate_open = not self._run_is_resumed
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[Task {task_id}] Could not backfill event.jsonl from archive: {exc}")
             return
 
         cursor = await get_or_create_cursor(db, task_id=task_id, stream_name="event_jsonl")
@@ -573,7 +574,8 @@ class WorkerEventProjector:
                 if extracted is None:
                     return
                 full_text = extracted.read().decode("utf-8", errors="replace")
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[Task {task_id}] Could not backfill console.log from archive: {exc}")
             return
 
         cursor = await get_or_create_cursor(db, task_id=task_id, stream_name="console_log")

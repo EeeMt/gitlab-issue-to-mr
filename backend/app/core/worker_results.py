@@ -79,8 +79,11 @@ async def parse_mr_from_logs(task: Task, logs: str, gitlab_client) -> None:
 
     if parsed_mr_iid:
         task._parsed_mr_iid = parsed_mr_iid
+        logger.info(f"[Task {task.id}] Parsed MR IID from logs: !{parsed_mr_iid}")
     if parsed_mr_url:
         task._parsed_mr_url = parsed_mr_url
+    if not parsed_mr_iid:
+        logger.debug(f"[Task {task.id}] No MR IID found in container logs")
 
 
 async def update_task_stats_from_logs_or_api(

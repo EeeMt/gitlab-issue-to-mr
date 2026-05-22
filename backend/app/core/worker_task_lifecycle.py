@@ -154,6 +154,7 @@ async def persist_issue_mr_if_changed(
     mr_web_url: Optional[str],
 ) -> None:
     if issue and mr_iid and mr_iid != issue.merge_request_iid:
+        logger.info(f"[Issue {issue.id}] Storing MR IID !{mr_iid} → DB")
         issue.merge_request_iid = mr_iid
         issue.merge_request_url = mr_web_url
         await db.commit()
@@ -536,6 +537,7 @@ async def monitor_container_run(
         parsed_mr_iid = getattr(task, "_parsed_mr_iid", None)
         parsed_mr_url = getattr(task, "_parsed_mr_url", None)
         if parsed_mr_iid and not issue.merge_request_iid:
+            logger.info(f"[Task {task.id}] Captured MR !{parsed_mr_iid} from logs → issue #{issue.id}")
             issue.merge_request_iid = parsed_mr_iid
             issue.merge_request_url = parsed_mr_url
             await db.commit()
