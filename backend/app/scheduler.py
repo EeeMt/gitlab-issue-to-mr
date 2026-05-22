@@ -30,7 +30,7 @@ from app.core.usage_limits import (
 from app.core.worker import WorkerExecutor
 from app.core.worker_workspace import cleanup_expired_workspaces
 from app.database import AsyncSessionLocal
-from app.models import Task, TaskStatus, Issue, IssueStatus
+from app.models import IssueExecutionLock, Task, TaskStatus, Issue, IssueStatus
 from app.core.task_helpers import maybe_update_issue_status
 from app.runtime_config import load_runtime_config_from_db
 
@@ -146,12 +146,15 @@ class Scheduler:
 
         if self._running_tasks:
             result = await db.execute(
-                select(Task.id).where(
+                select(Task.id, Task.issue_id).where(
                     Task.id.in_(list(self._running_tasks)),
                     Task.status == TaskStatus.RUNNING,
                 )
             )
-            active_task_ids = {row[0] for row in result.fetchall()}
+            rows = result.fetchall()
+            active_task_ids = {row[0] for row in rows}
+            active_issue_ids = {row[1] for row in rows if row[1] is not None}
+
             stale_tasks = self._running_tasks - active_task_ids
             for task_id in stale_tasks:
                 self._running_tasks.discard(task_id)
@@ -161,16 +164,26 @@ class Scheduler:
                     task_id,
                 )
 
-        if self._running_issues:
-            result = await db.execute(
-                select(Task.issue_id).where(
-                    Task.issue_id.in_(list(self._running_issues)),
-                    Task.status == TaskStatus.RUNNING,
-                ).distinct()
-            )
-            active_issue_ids = {row[0] for row in result.fetchall() if row[0] is not None}
             stale_issues = self._running_issues - active_issue_ids
             for issue_id in stale_issues:
+                self._running_issues.discard(issue_id)
+                logger.warning(
+                    "Reconciled stale _running_issues entry for issue %s "
+                    "(no RUNNING task found in DB — worker thread may be stuck)",
+                    issue_id,
+                )
+
+        elif self._running_issues:
+            # _running_tasks is empty but _running_issues has entries — possible when a
+            # thread's finally block could not release the issue slot.  Query independently.
+            result = await db.execute(
+                select(Task.issue_id).distinct().where(
+                    Task.issue_id.in_(list(self._running_issues)),
+                    Task.status == TaskStatus.RUNNING,
+                )
+            )
+            active_issue_ids = {row[0] for row in result.fetchall() if row[0] is not None}
+            for issue_id in self._running_issues - active_issue_ids:
                 self._running_issues.discard(issue_id)
                 logger.warning(
                     "Reconciled stale _running_issues entry for issue %s "
@@ -397,11 +410,22 @@ class Scheduler:
                     )
                     task = result.scalar_one_or_none()
                     if task and task.issue_id is not None:
-                        self._running_issues.discard(task.issue_id)
-                        await release_issue_execution_lock(db, issue_id=task.issue_id)
-                        await db.commit()
-                        # Auto-transition issue to COMPLETED if all tasks done
-                        await self._maybe_complete_issue(db, task.issue_id)
+                        # Guard: only release the DB lock and in-memory slot if WE still hold it.
+                        # If _reconcile_running_state already cleared us and a replacement task
+                        # re-acquired the lock for this issue, releasing here would corrupt the
+                        # new task's execution slot.
+                        lock_result = await db.execute(
+                            select(IssueExecutionLock).where(
+                                IssueExecutionLock.issue_id == task.issue_id
+                            )
+                        )
+                        lock = lock_result.scalar_one_or_none()
+                        if lock is None or lock.task_id == task_id:
+                            self._running_issues.discard(task.issue_id)
+                            await release_issue_execution_lock(db, issue_id=task.issue_id)
+                            await db.commit()
+                            # Auto-transition issue to COMPLETED if all tasks done
+                            await self._maybe_complete_issue(db, task.issue_id)
             except Exception:
                 logger.exception("Failed to release lock for task %s", task_id)
 
@@ -535,9 +559,16 @@ class Scheduler:
                     )
                     task = result.scalar_one_or_none()
                     if task and task.issue_id is not None:
-                        self._running_issues.discard(task.issue_id)
-                        await release_issue_execution_lock(db, issue_id=task.issue_id)
-                        await self._maybe_complete_issue(db, task.issue_id)
+                        lock_result = await db.execute(
+                            select(IssueExecutionLock).where(
+                                IssueExecutionLock.issue_id == task.issue_id
+                            )
+                        )
+                        lock = lock_result.scalar_one_or_none()
+                        if lock is None or lock.task_id == task_id:
+                            self._running_issues.discard(task.issue_id)
+                            await release_issue_execution_lock(db, issue_id=task.issue_id)
+                            await self._maybe_complete_issue(db, task.issue_id)
             except Exception:
                 logger.exception("Failed to release lock for resumed task %s", task_id)
 

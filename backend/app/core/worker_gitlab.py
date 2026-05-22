@@ -455,12 +455,6 @@ async def send_failure_alert(task: Task, sanitize_sensitive_data, issue: Optiona
 
 
 async def send_notifications(task: Task, gitlab_client, sanitize_sensitive_data, success: bool, had_existing_mr: bool, issue: Optional[Issue] = None) -> None:
-    notify_target = "mr" if had_existing_mr else "issue"
-    try:
-        await notify_task_completed(task, gitlab_client, sanitize_sensitive_data, success=success, notify_target=notify_target, issue=issue)
-    except Exception as e:
-        logger.warning(f"Failed to send completion notification: {e}")
-
     try:
         await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
     except Exception as e:
@@ -468,12 +462,6 @@ async def send_notifications(task: Task, gitlab_client, sanitize_sensitive_data,
 
 
 async def send_failure_notifications(task: Task, gitlab_client, sanitize_sensitive_data, success: bool, had_existing_mr: bool, issue: Optional[Issue] = None) -> None:
-    notify_target = "mr" if had_existing_mr else "issue"
-    try:
-        await notify_task_completed(task, gitlab_client, sanitize_sensitive_data, success=success, notify_target=notify_target, issue=issue)
-    except Exception as e:
-        logger.warning(f"Failed to send failure notification: {e}")
-
     try:
         await send_failure_alert(task, sanitize_sensitive_data, issue)
     except Exception as e:

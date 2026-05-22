@@ -183,7 +183,7 @@ class TestRunTaskBackground(unittest.IsolatedAsyncioTestCase):
         mock_db.__aexit__ = AsyncMock(return_value=False)
 
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_task
+        mock_result.scalar_one_or_none.side_effect = [mock_task, None]
 
         mock_db.execute = AsyncMock(return_value=mock_result)
 
@@ -260,7 +260,7 @@ class TestRunTaskBackground(unittest.IsolatedAsyncioTestCase):
         mock_db.__aexit__ = AsyncMock(return_value=False)
 
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_task
+        mock_result.scalar_one_or_none.side_effect = [mock_task, None]
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db):
@@ -906,7 +906,7 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
         mock_db.__aexit__ = AsyncMock(return_value=False)
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_task
+        mock_result.scalar_one_or_none.side_effect = [mock_task, None]
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db):
@@ -931,7 +931,7 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
         mock_db.__aexit__ = AsyncMock(return_value=False)
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_task
+        mock_result.scalar_one_or_none.side_effect = [mock_task, None]
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db):
@@ -956,7 +956,7 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
         mock_db.__aexit__ = AsyncMock(return_value=False)
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_task
+        mock_result.scalar_one_or_none.side_effect = [mock_task, None]
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db):
@@ -982,7 +982,7 @@ class TestResumeTaskBackground(unittest.IsolatedAsyncioTestCase):
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
         mock_db.__aexit__ = AsyncMock(return_value=False)
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_task
+        mock_result.scalar_one_or_none.side_effect = [mock_task, None]
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         with patch("app.scheduler.AsyncSessionLocal", return_value=mock_db):

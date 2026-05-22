@@ -998,3 +998,120 @@ class SchedulerRunTaskBackgroundTests(unittest.IsolatedAsyncioTestCase):
                 await scheduler._run_task_background(11)
 
         self.assertNotIn(11, scheduler._running_tasks)
+
+
+class SchedulerReconcileRunningStateTests(unittest.IsolatedAsyncioTestCase):
+    """Direct tests for _reconcile_running_state logic."""
+
+    def _make_scheduler(self):
+        from app.scheduler import Scheduler
+        return Scheduler()
+
+    async def test_early_return_when_both_sets_empty(self):
+        """No DB query when both tracking sets are empty."""
+        scheduler = self._make_scheduler()
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock()
+
+        await scheduler._reconcile_running_state(mock_db)
+
+        mock_db.execute.assert_not_called()
+
+    async def test_all_tasks_running_nothing_discarded(self):
+        """When all tracked tasks are genuinely RUNNING, nothing is removed."""
+        scheduler = self._make_scheduler()
+        scheduler._running_tasks.add(1)
+        scheduler._running_issues.add(10)
+
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = [(1, 10)]
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        await scheduler._reconcile_running_state(mock_db)
+
+        self.assertIn(1, scheduler._running_tasks)
+        self.assertIn(10, scheduler._running_issues)
+
+    async def test_stale_task_and_issue_discarded(self):
+        """A cancelled task's IDs are removed from both tracking sets."""
+        scheduler = self._make_scheduler()
+        scheduler._running_tasks.add(2)
+        scheduler._running_issues.add(20)
+
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = []  # task 2 is no longer RUNNING
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        await scheduler._reconcile_running_state(mock_db)
+
+        self.assertNotIn(2, scheduler._running_tasks)
+        self.assertNotIn(20, scheduler._running_issues)
+
+    async def test_multi_task_issue_one_stale_preserves_issue(self):
+        """If one task for an issue is stale but another is still RUNNING, the issue slot is kept."""
+        scheduler = self._make_scheduler()
+        scheduler._running_tasks.update({3, 4})
+        scheduler._running_issues.add(30)
+
+        # Task 3 still RUNNING; task 4 is not
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = [(3, 30)]
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        await scheduler._reconcile_running_state(mock_db)
+
+        self.assertNotIn(4, scheduler._running_tasks)
+        self.assertIn(3, scheduler._running_tasks)
+        self.assertIn(30, scheduler._running_issues)
+
+    async def test_task_with_null_issue_id_handled(self):
+        """Tasks without an associated issue don't corrupt the running_issues set."""
+        scheduler = self._make_scheduler()
+        scheduler._running_tasks.add(5)
+        # _running_issues is empty (task has no issue)
+
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = [(5, None)]  # task 5 RUNNING, issue_id=None
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        await scheduler._reconcile_running_state(mock_db)
+
+        self.assertIn(5, scheduler._running_tasks)
+        self.assertEqual(len(scheduler._running_issues), 0)
+
+    async def test_orphaned_running_issues_entry_discarded(self):
+        """An issue_id in _running_issues not covered by any task in _running_tasks is removed."""
+        scheduler = self._make_scheduler()
+        scheduler._running_tasks.add(6)      # task 6 → issue 60
+        scheduler._running_issues.update({60, 99})  # 99 is orphaned
+
+        # DB: only task 6 is RUNNING for issue 60; nothing for issue 99
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = [(6, 60)]
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        await scheduler._reconcile_running_state(mock_db)
+
+        self.assertIn(60, scheduler._running_issues)
+        self.assertNotIn(99, scheduler._running_issues)
+
+    async def test_empty_running_tasks_with_orphaned_running_issues(self):
+        """When _running_tasks is empty, orphaned _running_issues are still cleaned via fallback query."""
+        scheduler = self._make_scheduler()
+        # _running_tasks is empty (already discarded by finally block)
+        scheduler._running_issues.add(99)
+
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = []  # no RUNNING task for issue 99
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        await scheduler._reconcile_running_state(mock_db)
+
+        mock_db.execute.assert_called_once()  # fallback query was made
+        self.assertNotIn(99, scheduler._running_issues)
