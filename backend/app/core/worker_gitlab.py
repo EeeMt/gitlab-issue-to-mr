@@ -163,6 +163,18 @@ async def update_mr_description_for_issue(
         issue_root = _resolve_issue_root(settings, issue, all_tasks)
         metadata_map = load_task_metadata_files(issue_root, [t.id for t in all_tasks]) if issue_root else {}
 
+        if issue_root:
+            logger.info(
+                f"[Task {task.id}] Metadata load: {len(metadata_map)}/{len(all_tasks)} task(s) "
+                f"have metadata (workspace: {issue_root})"
+            )
+        else:
+            logger.info(
+                f"[Task {task.id}] Workspace root not resolved — "
+                f"worker_workspace_host_path={getattr(settings, 'worker_workspace_host_path', None)!r}; "
+                f"MR description will omit per-task metadata"
+            )
+
         description = _build_mr_description(issue, all_tasks, metadata_map)
 
         gl = sudo_gl or gitlab_client.gl
@@ -196,10 +208,10 @@ def _resolve_issue_root(settings, issue: Issue, all_tasks: list) -> Optional[str
         if paths is None:
             logger.debug(f"[Issue {issue.id}] worker_workspace_host_path not configured; metadata unavailable")
             return None
-        logger.debug(f"[Issue {issue.id}] Resolved workspace root: {paths.issue_root}")
+        logger.info(f"[Issue {issue.id}] Resolved workspace root: {paths.issue_root}")
         return paths.issue_root
     except Exception:
-        logger.debug("Could not resolve issue workspace root", exc_info=True)
+        logger.warning("Could not resolve issue workspace root", exc_info=True)
         return None
 
 
@@ -216,9 +228,11 @@ def load_task_metadata_files(issue_root: str, task_ids: list[int]) -> dict[int, 
                 data = json.load(f)
             if isinstance(data, dict):
                 result[task_id] = data
-                logger.debug(f"[Task {task_id}] Loaded metadata from {path}")
+                logger.info(f"[Task {task_id}] Loaded metadata from {path}")
+            else:
+                logger.warning(f"[Task {task_id}] task-metadata.json at {path} is not a JSON object, skipping")
         except FileNotFoundError:
-            logger.debug(f"[Task {task_id}] task-metadata.json not found at {path} (worker may not have written it)")
+            logger.info(f"[Task {task_id}] task-metadata.json not found at {path}")
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning(f"[Task {task_id}] Failed to read task-metadata.json at {path}: {exc}")
     return result
