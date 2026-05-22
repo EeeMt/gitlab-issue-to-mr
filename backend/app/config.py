@@ -1,12 +1,15 @@
 """Application configuration management."""
 
 import json
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Union
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 RuntimeConfigValue = Union[int, str, bool]
 
@@ -222,7 +225,7 @@ class Settings(BaseSettings):
                 if isinstance(parsed, list):
                     mounts = parsed
             except json.JSONDecodeError:
-                pass
+                logger.warning("worker_volume_mounts is not valid JSON — ignoring custom mounts")
         if self.worker_ca_cert_host_path:
             mounts = [m for m in mounts if m.get("container_path") != "/etc/ssl/certs/custom-ca.crt"]
             mounts.append(

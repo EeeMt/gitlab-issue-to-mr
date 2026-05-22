@@ -488,7 +488,7 @@ class Scheduler:
                         await release_issue_execution_lock(db, issue_id=task.issue_id)
                         await self._maybe_complete_issue(db, task.issue_id)
             except Exception:
-                pass
+                logger.exception("Failed to release lock for resumed task %s", task_id)
 
 
 # Singleton scheduler instance
