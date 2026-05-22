@@ -606,6 +606,8 @@ async def monitor_container_run(
 
     if issue and issue.merge_request_iid:
         await worker._update_mr_description_for_issue(task, issue, db, sudo_gl=sudo_gl)
+    elif issue:
+        logger.debug(f"[Task {task.id}] Skipping MR description update: no merge_request_iid on issue #{issue.id}")
 
     try:
         worker.docker.remove_container(container, force=True)

@@ -1,5 +1,6 @@
 """Runtime and container setup helpers for worker execution."""
 
+import logging
 import os
 from typing import Any, Optional
 
@@ -11,6 +12,8 @@ from app.config import get_effective_settings as get_settings
 from app.core.worker_environment_variables import validate_worker_environment_variable_key as validate_worker_environment_key
 from app.core.worker_workspace import build_issue_workspace_paths
 from app.models import AIProvider, Issue, Task, User
+
+logger = logging.getLogger(__name__)
 
 _MAVEN_CACHE_CONTAINER_PATH = "/home/codify/.m2/repository"
 _MAVEN_SETTINGS_CONTAINER_PATH = "/home/codify/.m2/settings.xml"
@@ -227,6 +230,11 @@ def build_container_volumes(
         else None
     )
     if workspace_paths is not None:
+        logger.info(
+            f"[Task {task.id}] Mounting workspace — "
+            f"repo: {workspace_paths.repo_path} → {_WORKSPACE_CONTAINER_PATH}, "
+            f"runtime: {workspace_paths.runtime_path} → {_RUNTIME_CONTAINER_PATH}"
+        )
         for path in (
             workspace_paths.repo_path,
             workspace_paths.claude_path,
@@ -234,8 +242,8 @@ def build_container_volumes(
         ):
             try:
                 os.makedirs(path, exist_ok=True)
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.warning(f"[Task {task.id}] Could not create workspace dir {path}: {exc}")
         volumes[workspace_paths.repo_path] = {"bind": _WORKSPACE_CONTAINER_PATH, "mode": "rw"}
         volumes[workspace_paths.claude_path] = {"bind": _CLAUDE_CONTAINER_PATH, "mode": "rw"}
         volumes[workspace_paths.runtime_path] = {"bind": _RUNTIME_CONTAINER_PATH, "mode": "rw"}
@@ -245,6 +253,12 @@ def build_container_volumes(
             "bind": _CLAUDE_CONTAINER_PATH,
             "mode": "rw",
         }
+    else:
+        logger.info(
+            f"[Task {getattr(task, 'id', '?')}] No persistent workspace configured "
+            f"(worker_workspace_host_path={getattr(settings, 'worker_workspace_host_path', None)!r}); "
+            f"runtime data will be lost when container exits"
+        )
 
     return volumes if volumes else {}
 
