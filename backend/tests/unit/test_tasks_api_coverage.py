@@ -581,7 +581,7 @@ class CancelTaskDockerStopTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         # Docker should have tried to get container "codify-40-issue100"
         mock_docker.client.containers.get.assert_called_once_with("codify-40-issue100")
-        mock_container.stop.assert_called_once_with(timeout=5)
+        mock_container.remove.assert_called_once_with(force=True)
 
     def test_cancel_task_with_different_issue_id(self):
         """Cancel task builds container name from issue_id."""

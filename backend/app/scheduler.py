@@ -100,6 +100,12 @@ class Scheduler:
             await self._maybe_cleanup_workspaces(db)
             await self._maybe_cleanup_issue_locks(db)
 
+            # Reconcile in-memory tracking sets against DB to recover from stuck worker threads.
+            # This handles the case where a worker thread blocks indefinitely (e.g., on a
+            # GitLab API call) and never reaches its finally block to clear _running_issues /
+            # _running_tasks — causing the scheduler to incorrectly block new tasks.
+            await self._reconcile_running_state(db)
+
             # Transition eligible PENDING tasks → QUEUED
             await self._mark_eligible_as_queued(db)
 
@@ -126,6 +132,51 @@ class Scheduler:
 
             # Execute task
             await self._execute_task(db, task)
+
+    async def _reconcile_running_state(self, db: AsyncSession) -> None:
+        """Reconcile in-memory running-task sets against the database.
+
+        When a worker thread blocks indefinitely (e.g., on a GitLab API call with no
+        timeout), its finally block never executes, so _running_tasks and _running_issues
+        are never cleared even though the DB task has moved out of RUNNING (e.g., was
+        cancelled by the user).  This method corrects that drift every cycle.
+        """
+        if not self._running_tasks and not self._running_issues:
+            return
+
+        if self._running_tasks:
+            result = await db.execute(
+                select(Task.id).where(
+                    Task.id.in_(list(self._running_tasks)),
+                    Task.status == TaskStatus.RUNNING,
+                )
+            )
+            active_task_ids = {row[0] for row in result.fetchall()}
+            stale_tasks = self._running_tasks - active_task_ids
+            for task_id in stale_tasks:
+                self._running_tasks.discard(task_id)
+                logger.warning(
+                    "Reconciled stale _running_tasks entry for task %s "
+                    "(no longer RUNNING in DB — worker thread may be stuck)",
+                    task_id,
+                )
+
+        if self._running_issues:
+            result = await db.execute(
+                select(Task.issue_id).where(
+                    Task.issue_id.in_(list(self._running_issues)),
+                    Task.status == TaskStatus.RUNNING,
+                ).distinct()
+            )
+            active_issue_ids = {row[0] for row in result.fetchall() if row[0] is not None}
+            stale_issues = self._running_issues - active_issue_ids
+            for issue_id in stale_issues:
+                self._running_issues.discard(issue_id)
+                logger.warning(
+                    "Reconciled stale _running_issues entry for issue %s "
+                    "(no RUNNING task found in DB — worker thread may be stuck)",
+                    issue_id,
+                )
 
     async def _maybe_cleanup_sessions(self, db: AsyncSession) -> None:
         """Periodically delete long-stale dashboard sessions."""

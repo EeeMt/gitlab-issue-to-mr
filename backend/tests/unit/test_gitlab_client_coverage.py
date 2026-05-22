@@ -1011,6 +1011,7 @@ class TestCreateSudoGl(unittest.TestCase):
             private_token="glpat-admin-token",
             ssl_verify=True,
             keep_base_url=True,
+            timeout=30,
         )
         self.assertEqual(mock_instance.headers["Sudo"], "42")
         self.assertEqual(result, mock_instance)

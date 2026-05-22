@@ -660,12 +660,13 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
                 with patch.object(scheduler, "_maybe_cleanup_sessions", new=AsyncMock()):
                     with patch.object(scheduler, "_maybe_cleanup_workspaces", new=AsyncMock()):
                         with patch.object(scheduler, "_maybe_cleanup_issue_locks", new=AsyncMock()):
-                            with patch.object(scheduler, "_mark_eligible_as_queued", new=AsyncMock()):
-                                with patch("app.scheduler.get_settings", return_value=mock_settings):
-                                    with patch.object(scheduler, "_get_running_count", new=AsyncMock(return_value=2)):
-                                        with patch.object(scheduler, "_get_next_task", new=AsyncMock()) as mock_next:
-                                            await scheduler._run_cycle()
-                                            mock_next.assert_not_called()
+                            with patch.object(scheduler, "_reconcile_running_state", new=AsyncMock()):
+                                with patch.object(scheduler, "_mark_eligible_as_queued", new=AsyncMock()):
+                                    with patch("app.scheduler.get_settings", return_value=mock_settings):
+                                        with patch.object(scheduler, "_get_running_count", new=AsyncMock(return_value=2)):
+                                            with patch.object(scheduler, "_get_next_task", new=AsyncMock()) as mock_next:
+                                                await scheduler._run_cycle()
+                                                mock_next.assert_not_called()
 
     async def test_run_cycle_skips_when_no_task_available(self) -> None:
         """_run_cycle should return early when no pending task exists."""
@@ -681,13 +682,14 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
                 with patch.object(scheduler, "_maybe_cleanup_sessions", new=AsyncMock()):
                     with patch.object(scheduler, "_maybe_cleanup_workspaces", new=AsyncMock()):
                         with patch.object(scheduler, "_maybe_cleanup_issue_locks", new=AsyncMock()):
-                            with patch.object(scheduler, "_mark_eligible_as_queued", new=AsyncMock()):
-                                with patch("app.scheduler.get_settings", return_value=mock_settings):
-                                    with patch.object(scheduler, "_get_running_count", new=AsyncMock(return_value=0)):
-                                        with patch.object(scheduler, "_get_next_task", new=AsyncMock(return_value=None)):
-                                            with patch.object(scheduler, "_execute_task", new=AsyncMock()) as mock_exec:
-                                                await scheduler._run_cycle()
-                                                mock_exec.assert_not_called()
+                            with patch.object(scheduler, "_reconcile_running_state", new=AsyncMock()):
+                                with patch.object(scheduler, "_mark_eligible_as_queued", new=AsyncMock()):
+                                    with patch("app.scheduler.get_settings", return_value=mock_settings):
+                                        with patch.object(scheduler, "_get_running_count", new=AsyncMock(return_value=0)):
+                                            with patch.object(scheduler, "_get_next_task", new=AsyncMock(return_value=None)):
+                                                with patch.object(scheduler, "_execute_task", new=AsyncMock()) as mock_exec:
+                                                    await scheduler._run_cycle()
+                                                    mock_exec.assert_not_called()
 
     async def test_run_cycle_skips_when_issue_mutex_active(self) -> None:
         """_run_cycle should skip a task when its issue is already being processed."""
@@ -712,13 +714,14 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
                 with patch.object(scheduler, "_maybe_cleanup_sessions", new=AsyncMock()):
                     with patch.object(scheduler, "_maybe_cleanup_workspaces", new=AsyncMock()):
                         with patch.object(scheduler, "_maybe_cleanup_issue_locks", new=AsyncMock()):
-                            with patch.object(scheduler, "_mark_eligible_as_queued", new=AsyncMock()):
-                                with patch("app.scheduler.get_settings", return_value=mock_settings):
-                                    with patch.object(scheduler, "_get_running_count", new=AsyncMock(return_value=0)):
-                                        with patch.object(scheduler, "_get_next_task", new=AsyncMock(return_value=task)):
-                                            with patch.object(scheduler, "_execute_task", new=AsyncMock()) as mock_exec:
-                                                await scheduler._run_cycle()
-                                                mock_exec.assert_not_called()
+                            with patch.object(scheduler, "_reconcile_running_state", new=AsyncMock()):
+                                with patch.object(scheduler, "_mark_eligible_as_queued", new=AsyncMock()):
+                                    with patch("app.scheduler.get_settings", return_value=mock_settings):
+                                        with patch.object(scheduler, "_get_running_count", new=AsyncMock(return_value=0)):
+                                            with patch.object(scheduler, "_get_next_task", new=AsyncMock(return_value=task)):
+                                                with patch.object(scheduler, "_execute_task", new=AsyncMock()) as mock_exec:
+                                                    await scheduler._run_cycle()
+                                                    mock_exec.assert_not_called()
 
     async def test_run_cycle_executes_task_when_available(self) -> None:
         """_run_cycle should call _execute_task when a task is available and conditions allow."""
@@ -739,13 +742,14 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
                 with patch.object(scheduler, "_maybe_cleanup_sessions", new=AsyncMock()):
                     with patch.object(scheduler, "_maybe_cleanup_workspaces", new=AsyncMock()):
                         with patch.object(scheduler, "_maybe_cleanup_issue_locks", new=AsyncMock()):
-                            with patch.object(scheduler, "_mark_eligible_as_queued", new=AsyncMock()):
-                                with patch("app.scheduler.get_settings", return_value=mock_settings):
-                                    with patch.object(scheduler, "_get_running_count", new=AsyncMock(return_value=0)):
-                                        with patch.object(scheduler, "_get_next_task", new=AsyncMock(return_value=task)):
-                                            with patch.object(scheduler, "_execute_task", new=AsyncMock()) as mock_exec:
-                                                await scheduler._run_cycle()
-                                                mock_exec.assert_called_once_with(mock_db, task)
+                            with patch.object(scheduler, "_reconcile_running_state", new=AsyncMock()):
+                                with patch.object(scheduler, "_mark_eligible_as_queued", new=AsyncMock()):
+                                    with patch("app.scheduler.get_settings", return_value=mock_settings):
+                                        with patch.object(scheduler, "_get_running_count", new=AsyncMock(return_value=0)):
+                                            with patch.object(scheduler, "_get_next_task", new=AsyncMock(return_value=task)):
+                                                with patch.object(scheduler, "_execute_task", new=AsyncMock()) as mock_exec:
+                                                    await scheduler._run_cycle()
+                                                    mock_exec.assert_called_once_with(mock_db, task)
 
 
 # ---------------------------------------------------------------------------

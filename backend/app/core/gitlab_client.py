@@ -42,6 +42,7 @@ class GitLabClient:
             private_token=self.private_token,
             ssl_verify=get_ssl_verify(self.settings),
             keep_base_url=True,
+            timeout=30,
         )
         logger.info(f"GitLab client initialized: {self.base_url}")
 
@@ -65,6 +66,7 @@ class GitLabClient:
             private_token=admin_token,
             ssl_verify=get_ssl_verify(self.settings),
             keep_base_url=True,
+            timeout=30,
         )
         gl.headers["Sudo"] = str(gitlab_user_id)
         return gl

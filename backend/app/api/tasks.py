@@ -705,15 +705,16 @@ async def cancel_task(
     await release_issue_execution_lock(db, issue_id=task.issue_id)
     await db.commit()
 
-    # Kill the running container (if any) to free the thread pool slot immediately
-    container_name = f"codify-{task_id}-issue{task.issue_id}"
+    # Kill and remove the running container (if any) to free the thread pool slot immediately
+    settings = get_effective_settings()
+    container_name = f"{settings.worker_container_prefix}-{task_id}-issue{task.issue_id}"
     try:
         docker = get_docker_client()
         container = await asyncio.to_thread(docker.client.containers.get, container_name)
-        await asyncio.to_thread(container.stop, timeout=5)
-        logger.info(f"Stopped container {container_name} for cancelled task {task_id}")
+        await asyncio.to_thread(container.remove, force=True)
+        logger.info(f"Removed container {container_name} for cancelled task {task_id}")
     except Exception:
-        pass  # Container may not exist or already stopped
+        pass  # Container may not exist or already removed
 
     await notify_task_cancelled(task)
     logger.info(f"Task {task_id} cancelled via API")
