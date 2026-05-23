@@ -30,21 +30,6 @@
                 {{ t('common.cancel') }}
               </n-button>
 
-              <n-button
-                v-if="archiveMetadata"
-                class="task-actions__command task-actions__command--neutral"
-                type="primary"
-                secondary
-                strong
-                :disabled="!archiveMetadata.file_exists"
-                :title="archiveMetadata.file_exists ? t('taskView.runtimeArchiveDescription') : t('taskView.archiveFileExpiredDescription')"
-                @click="handleDownloadArchive"
-                :loading="archiveDownloadLoading"
-              >
-                <template #icon><n-icon :component="DownloadOutline" /></template>
-                {{ t('taskView.downloadRuntimeArchive') }}
-              </n-button>
-
               <div
                 v-if="task && ['failed', 'cancelled'].includes(task.status) && activeRetryTask"
                 class="task-actions__linked-task"
@@ -55,6 +40,7 @@
                   text
                   @click="router.push(`/tasks/${activeRetryTask.id}`)"
                 >
+                  <template #icon><n-icon :component="OpenOutline" /></template>
                   Task #{{ activeRetryTask.id }}
                 </n-button>
               </div>
@@ -77,11 +63,11 @@
               <n-button
                 v-if="task && ['failed', 'cancelled'].includes(task.status) && !activeRetryTask"
                 class="task-actions__command task-actions__command--primary"
-                :class="{ 'task-actions__command--active': showScheduleDrawer && heatmapTarget === 'retry' }"
+                :class="{ 'task-actions__command--active': showScheduleDrawer }"
                 type="info"
                 secondary
                 strong
-                @click="openScheduleDrawer('retry')"
+                @click="openScheduleDrawer()"
                 :title="t('taskView.retryWithScheduleDescription')"
                 :disabled="!canManageTask"
               >
@@ -92,11 +78,10 @@
               <n-button
                 v-if="task && canReschedule"
                 class="task-actions__command task-actions__command--primary"
-                :class="{ 'task-actions__command--active': showRescheduleEditor }"
                 type="info"
                 secondary
                 strong
-                @click="showRescheduleEditor = !showRescheduleEditor"
+                @click="showRescheduleDrawer = true"
                 :title="t('taskView.rescheduleTaskDescription')"
                 :disabled="!canManageTask"
               >
@@ -131,6 +116,21 @@
               >
                 <template #icon><n-icon :component="CreateOutline" /></template>
                 {{ t('taskView.editTask') }}
+              </n-button>
+
+              <n-button
+                v-if="archiveMetadata"
+                class="task-actions__command task-actions__command--neutral"
+                type="primary"
+                secondary
+                strong
+                :disabled="!archiveMetadata.file_exists"
+                :title="archiveMetadata.file_exists ? t('taskView.runtimeArchiveDescription') : t('taskView.archiveFileExpiredDescription')"
+                @click="handleDownloadArchive"
+                :loading="archiveDownloadLoading"
+              >
+                <template #icon><n-icon :component="DownloadOutline" /></template>
+                {{ t('taskView.downloadRuntimeArchive') }}
               </n-button>
 
               <span v-if="task && !hasActions" class="task-actions__empty task-actions__empty--header">
@@ -207,45 +207,6 @@
                 <span>{{ t('taskView.retryExistsDescription') }}</span>
               </div>
 
-              <div
-                v-if="task && canReschedule && showRescheduleEditor"
-                class="task-actions__editor"
-              >
-                <div class="task-actions__editor-copy">
-                  <div class="task-actions__label">{{ t('taskView.rescheduleTask') }}</div>
-                  <div class="task-actions__description">{{ t('taskView.rescheduleTaskDescription') }}</div>
-                </div>
-                <div class="task-actions__editor-controls">
-                  <n-date-picker
-                    v-model:value="rescheduleDatetime"
-                    type="datetime"
-                    class="task-actions__date-picker"
-                    :placeholder="t('taskView.selectRescheduleTime')"
-                    :is-date-disabled="isScheduledDateDisabled"
-                    :disabled="!canManageTask"
-                  />
-                  <n-button
-                    secondary
-                    :loading="scheduledTasksLoading"
-                    @click="openScheduleDrawer('reschedule')"
-                    :disabled="!canManageTask"
-                  >
-                    <template #icon><n-icon :component="CalendarOutline" /></template>
-                    {{ t('taskView.viewScheduleHeatmap') }}
-                  </n-button>
-                  <n-button
-                    type="info"
-                    secondary
-                    strong
-                    @click="handleReschedule"
-                    :loading="actionLoading"
-                    :disabled="!canManageTask || rescheduleDatetime === null"
-                  >
-                    {{ t('taskView.saveScheduledTime') }}
-                  </n-button>
-                </div>
-              </div>
-
             </div>
           </n-card>
 
@@ -268,12 +229,12 @@
     </n-space>
   </div>
 
-  <!-- Schedule Drawer -->
-  <n-drawer v-model:show="showScheduleDrawer" :width="isMobile ? '100%' : (heatmapTarget === 'retry' ? 680 : 580)" placement="right">
-    <n-drawer-content :title="heatmapTarget === 'retry' ? t('taskView.retryWithSchedule') : t('taskView.schedulePreviewTitle')" closable>
+  <!-- Schedule Drawer (retry with schedule) -->
+  <n-drawer v-model:show="showScheduleDrawer" :width="isMobile ? '100%' : 680" placement="right">
+    <n-drawer-content :title="t('taskView.retryWithSchedule')" closable>
       <n-spin v-if="scheduledTasksLoading" />
       <div v-else class="task-schedule-drawer">
-        <div v-if="heatmapTarget === 'retry'" class="task-schedule-drawer__form">
+        <div class="task-schedule-drawer__form">
           <div>
             <div class="task-actions__label">{{ t('taskView.retryWithSchedule') }}</div>
             <div class="task-actions__description">{{ t('taskView.retryWithScheduleDescription') }}</div>
@@ -294,13 +255,13 @@
 
         <HeatmapChart
           :tasks="scheduledTasksForPreview"
-          :selected-ms="heatmapTarget === 'retry' ? retryScheduleDatetime : rescheduleDatetime"
+          :selected-ms="retryScheduleDatetime"
           :max-per-slot="slotMaxTasks"
           :enforce-capacity="slotEnforce"
           @cell-click="handleScheduleHeatmapCellClick"
         />
 
-        <div v-if="heatmapTarget === 'retry'" class="task-schedule-drawer__actions">
+        <div class="task-schedule-drawer__actions">
           <n-button class="task-actions__command task-actions__command--neutral" @click="showScheduleDrawer = false">
             {{ t('common.cancel') }}
           </n-button>
@@ -326,6 +287,12 @@
     :task="task ?? undefined"
     @updated="task = $event"
   />
+
+  <RescheduleDrawer
+    v-model:show="showRescheduleDrawer"
+    :task="task ?? undefined"
+    @rescheduled="task = $event"
+  />
 </template>
 
 <script setup lang="ts">
@@ -333,7 +300,7 @@ import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin, NDatePicker, NDrawer, NDrawerContent, NIcon, NScrollbar, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, rescheduleTask, streamTaskLogs, getScheduledTasks, getConfig, getIssue, getTaskArchive, downloadTaskArchive, type Task, type TaskLog } from '../api'
+import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, streamTaskLogs, getScheduledTasks, getConfig, getIssue, getTaskArchive, downloadTaskArchive, type Task, type TaskLog } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
 import { renderMarkdown } from '../components/task-process/taskProcessUtils'
 import PageHeader from '../components/PageHeader.vue'
@@ -341,19 +308,19 @@ import TaskMetadataPanel from '../components/TaskMetadataPanel.vue'
 import TaskProcessPanel from '../components/TaskProcessPanel.vue'
 import TaskResultPanel from '../components/TaskResultPanel.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
-import { parseUtcDate } from '../utils/datetime'
-import { extractSlotErrorMessage } from '../utils/slotError'
 import {
   CalendarOutline,
   CloseCircleOutline,
   CreateOutline,
   DownloadOutline,
+  OpenOutline,
   PlayOutline,
   RefreshOutline,
   TimeOutline,
 } from '@vicons/ionicons5'
 import HeatmapChart from '../components/HeatmapChart.vue'
 import TaskFormDrawer from '../components/TaskFormDrawer.vue'
+import RescheduleDrawer from '../components/RescheduleDrawer.vue'
 import AnsiToHtml from 'ansi-to-html'
 
 const ansiConverter = new AnsiToHtml({ escapeXML: true })
@@ -376,11 +343,10 @@ const logsLoading = ref(false)
 const containerLogsLoading = ref(false)
 const actionLoading = ref(false)
 const taskRequestInFlight = ref(false)
-const rescheduleDatetime = ref<number | null>(null)
 const retryScheduleDatetime = ref<number | null>(null)
 const showScheduleDrawer = ref(false)
 const showEditDrawer = ref(false)
-const heatmapTarget = ref<'retry' | 'reschedule'>('reschedule')
+const showRescheduleDrawer = ref(false)
 const scheduledTasksForPreview = ref<Task[]>([])
 const scheduledTasksLoading = ref(false)
 const slotMaxTasks = ref(0)
@@ -390,7 +356,6 @@ const activeRetryTask = ref<Task | null>(null)
 const issueTasks = ref<Task[]>([])
 const archiveMetadata = ref<{ archive_name: string; archive_size_bytes: number; created_at: string; file_exists: boolean } | null>(null)
 const archiveDownloadLoading = ref(false)
-const showRescheduleEditor = ref(false)
 let pollTimer: number | null = null
 let logEventSource: EventSource | null = null
 let logStreamContainerId: string | null = null
@@ -433,14 +398,12 @@ const hasActionDetails = computed(() => {
   if (!task.value) return false
 
   const retryHasContext = ['failed', 'cancelled'].includes(task.value.status) && !!activeRetryTask.value
-  const rescheduleEditorOpen = canReschedule.value && showRescheduleEditor.value
 
   return (
     (hasActions.value && !canManageTask.value) ||
     (!!archiveMetadata.value && !archiveMetadata.value.file_exists) ||
     task.value.status === 'queued' ||
-    retryHasContext ||
-    rescheduleEditorOpen
+    retryHasContext
   )
 })
 
@@ -474,9 +437,6 @@ const showFollowupReplayHint = computed(() => {
   return currentIndex > 0
 })
 
-function syncRescheduleDatetime() {
-  rescheduleDatetime.value = task.value?.scheduled_at ? parseUtcDate(task.value.scheduled_at).getTime() : null
-}
 
 function isScheduledDateDisabled(timestamp: number): boolean {
   const candidate = new Date(timestamp)
@@ -660,11 +620,7 @@ async function fetchTask() {
   loading.value = true
   try {
     const previousStatus = task.value?.status
-    const previousScheduledAt = task.value?.scheduled_at
     task.value = await getTask(taskId.value)
-    if (!hasLoadedOnce.value || task.value?.scheduled_at !== previousScheduledAt) {
-      syncRescheduleDatetime()
-    }
 
     if (isActiveTaskStatus(previousStatus) && !isActiveTaskStatus(task.value.status)) {
       await fetchLogs()
@@ -858,34 +814,8 @@ async function handleExecute() {
   }
 }
 
-async function handleReschedule() {
-  if (!rescheduleDatetime.value) {
-    message.error(t('taskView.selectRescheduleTime'))
-    return
-  }
 
-  if (rescheduleDatetime.value <= Date.now()) {
-    message.error(t('taskView.rescheduleTimeFuture'))
-    return
-  }
-
-  actionLoading.value = true
-  try {
-    task.value = await rescheduleTask(taskId.value, {
-      scheduled_datetime: new Date(rescheduleDatetime.value).toISOString()
-    })
-    syncRescheduleDatetime()
-    showRescheduleEditor.value = false
-    message.success(t('taskView.taskRescheduled'))
-  } catch (error: any) {
-    message.error(extractSlotErrorMessage(error, t, 'taskView.failedToRescheduleTask'))
-  } finally {
-    actionLoading.value = false
-  }
-}
-
-async function openScheduleDrawer(target: 'retry' | 'reschedule' = 'reschedule') {
-  heatmapTarget.value = target
+async function openScheduleDrawer() {
   showScheduleDrawer.value = true
   scheduledTasksLoading.value = true
   try {
@@ -903,13 +833,7 @@ async function openScheduleDrawer(target: 'retry' | 'reschedule' = 'reschedule')
 }
 
 function handleScheduleHeatmapCellClick(startMs: number) {
-  if (heatmapTarget.value === 'retry') {
-    retryScheduleDatetime.value = startMs
-    return
-  } else {
-    rescheduleDatetime.value = startMs
-  }
-  showScheduleDrawer.value = false
+  retryScheduleDatetime.value = startMs
 }
 
 onMounted(async () => {
@@ -941,7 +865,7 @@ watch(
       activeRetryTask.value = null
       issueTasks.value = []
       archiveMetadata.value = null
-      showRescheduleEditor.value = false
+      showRescheduleDrawer.value = false
       showScheduleDrawer.value = false
       hasLoadedOnce.value = false
       fetchTask()
@@ -1246,28 +1170,6 @@ onBeforeUnmount(() => {
   color: rgba(163, 94, 12, 0.92);
 }
 
-.task-actions__editor {
-  display: grid;
-  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
-  gap: 12px;
-  align-items: end;
-  padding: 12px;
-  border: 1px solid rgba(32, 128, 240, 0.14);
-  border-radius: 8px;
-  background: rgba(248, 250, 252, 0.74);
-}
-
-.task-actions__editor-copy {
-  min-width: 0;
-}
-
-.task-actions__editor-controls {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto auto;
-  gap: 8px;
-  align-items: center;
-}
-
 .task-actions__label {
   font-size: 15px;
   font-weight: 600;
@@ -1352,18 +1254,6 @@ onBeforeUnmount(() => {
   .task-actions__linked-task {
     flex: 1 1 150px;
     justify-content: center;
-  }
-
-  .task-actions__editor {
-    grid-template-columns: 1fr;
-  }
-
-  .task-actions__editor-controls {
-    grid-template-columns: 1fr;
-  }
-
-  .task-actions__editor-controls :deep(.n-button) {
-    width: 100%;
   }
 
   .task-schedule-drawer__form .task-actions__date-picker {

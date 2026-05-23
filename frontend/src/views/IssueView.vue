@@ -14,59 +14,86 @@
           </n-tag>
         </template>
         <template #actions>
-          <n-button @click="refreshIssue" :loading="loading">
-            {{ t('common.refresh') }}
-          </n-button>
-          <template v-if="isOwner">
-            <n-button data-testid="issue-edit-button" :disabled="issue.status === 'closed'" @click="openEditModal">
-              {{ t('issue.edit') }}
-            </n-button>
-            <n-popconfirm @positive-click="handleClose">
-              <template #trigger>
-                <n-button
-                  type="error"
-                  secondary
-                  :disabled="issue.status === 'closed' || closingIssue"
-                  :loading="closingIssue"
-                  data-testid="issue-close-button"
+          <div class="issue-actions issue-actions--header" data-testid="issue-actions">
+            <div class="issue-actions__toolbar">
+              <template v-if="isOwner">
+                <n-popconfirm @positive-click="handleClose">
+                  <template #trigger>
+                    <n-button
+                      class="issue-actions__command issue-actions__command--danger"
+                      type="error"
+                      secondary
+                      strong
+                      :disabled="issue.status === 'closed' || closingIssue"
+                      :loading="closingIssue"
+                      data-testid="issue-close-button"
+                    >
+                      <template #icon><n-icon :component="CloseCircleOutline" /></template>
+                      {{ t('issue.close') }}
+                    </n-button>
+                  </template>
+                  {{ t('issue.confirmClose') }}
+                </n-popconfirm>
+                <n-tooltip v-if="issue.status === 'closed' && issue.branch_name && issue.branch_deleted" :title="t('issue.branchAlreadyDeleted')">
+                  <n-button
+                    class="issue-actions__command issue-actions__command--danger"
+                    data-testid="issue-delete-branch-button"
+                    type="error"
+                    secondary
+                    strong
+                    :disabled="deletingBranch || issue.branch_deleted"
+                    :loading="deletingBranch"
+                    @click="handleDeleteBranch"
+                  >
+                    <template #icon><n-icon :component="TrashOutline" /></template>
+                    {{ t('issue.deleteBranch') }}
+                  </n-button>
+                </n-tooltip>
+                <n-popconfirm
+                  v-else-if="issue.status === 'closed' && issue.branch_name"
+                  @positive-click="handleDeleteBranch"
                 >
-                  {{ t('issue.close') }}
-                </n-button>
-              </template>
-              {{ t('issue.confirmClose') }}
-            </n-popconfirm>
-            <n-tooltip v-if="issue.status === 'closed' && issue.branch_name && issue.branch_deleted" :title="t('issue.branchAlreadyDeleted')">
-              <n-button
-                data-testid="issue-delete-branch-button"
-                type="error"
-                secondary
-                strong
-                :disabled="deletingBranch || issue.branch_deleted"
-                :loading="deletingBranch"
-                @click="handleDeleteBranch"
-              >
-                {{ t('issue.deleteBranch') }}
-              </n-button>
-            </n-tooltip>
-            <n-popconfirm
-              v-else-if="issue.status === 'closed' && issue.branch_name"
-              @positive-click="handleDeleteBranch"
-            >
-              <template #trigger>
+                  <template #trigger>
+                    <n-button
+                      class="issue-actions__command issue-actions__command--danger"
+                      data-testid="issue-delete-branch-button"
+                      type="error"
+                      secondary
+                      strong
+                      :disabled="deletingBranch"
+                      :loading="deletingBranch"
+                    >
+                      <template #icon><n-icon :component="TrashOutline" /></template>
+                      {{ t('issue.deleteBranch') }}
+                    </n-button>
+                  </template>
+                  {{ t('issue.deleteBranchConfirm', { branch: issue.branch_name }) }}
+                </n-popconfirm>
                 <n-button
-                  data-testid="issue-delete-branch-button"
-                  type="error"
+                  class="issue-actions__command issue-actions__command--neutral"
+                  data-testid="issue-edit-button"
+                  type="default"
                   secondary
                   strong
-                  :disabled="deletingBranch"
-                  :loading="deletingBranch"
+                  :disabled="issue.status === 'closed'"
+                  @click="openEditModal"
                 >
-                  {{ t('issue.deleteBranch') }}
+                  <template #icon><n-icon :component="CreateOutline" /></template>
+                  {{ t('issue.edit') }}
                 </n-button>
               </template>
-              {{ t('issue.deleteBranchConfirm', { branch: issue.branch_name }) }}
-            </n-popconfirm>
-          </template>
+              <n-button
+                class="issue-actions__command issue-actions__command--neutral issue-actions__command--refresh"
+                secondary
+                strong
+                @click="refreshIssue"
+                :loading="loading"
+              >
+                <template #icon><n-icon :component="RefreshOutline" /></template>
+                {{ t('common.refresh') }}
+              </n-button>
+            </div>
+          </div>
         </template>
       </PageHeader>
 
@@ -459,65 +486,12 @@
     </n-drawer>
 
     <!-- Reschedule Task Drawer -->
-    <n-drawer
+    <RescheduleDrawer
       v-model:show="showRescheduleDrawer"
-      :width="isMobile ? '100%' : 680"
-      placement="right"
+      :task="rescheduleTargetTask ?? undefined"
       data-testid="issue-reschedule-task-drawer"
-    >
-      <n-drawer-content :title="t('taskView.rescheduleTask')" closable>
-        <div class="retry-drawer">
-          <div v-if="rescheduleTargetTask" class="retry-drawer__summary">
-            <div class="retry-drawer__summary-title">Task #{{ rescheduleTargetTask.id }}</div>
-            <div class="retry-drawer__summary-prompt markdown-content" v-html="renderedReschedulePrompt"></div>
-          </div>
-
-          <n-form label-placement="top">
-            <n-form-item :label="t('taskView.selectRescheduleTime')">
-              <n-date-picker
-                v-model:value="rescheduleTaskSchedule"
-                type="datetime"
-                clearable
-                style="width: 240px; max-width: 100%"
-                :is-date-disabled="isScheduleDateDisabled"
-              />
-            </n-form-item>
-          </n-form>
-
-          <div class="retry-drawer__schedule-preview">
-            <n-spin v-if="scheduledTasksLoading" :description="t('createTask.schedulePreviewLoading')" />
-            <template v-else>
-              <p class="retry-drawer__hint">
-                {{ t('taskView.schedulePreviewHint') }}
-              </p>
-              <HeatmapChart
-                :tasks="scheduledTasksForPreview"
-                :selected-ms="rescheduleTaskSchedule"
-                :max-per-slot="slotMaxTasks"
-                :enforce-capacity="slotEnforce"
-                @cell-click="handleRescheduleHeatmapCellClick"
-              />
-            </template>
-          </div>
-        </div>
-
-        <template #footer>
-          <div class="retry-drawer__footer">
-            <n-button @click="showRescheduleDrawer = false">
-              {{ t('common.cancel') }}
-            </n-button>
-            <n-button
-              type="primary"
-              :loading="rescheduleTaskLoading"
-              data-testid="issue-submit-reschedule-button"
-              @click="handleSubmitReschedule"
-            >
-              {{ t('taskView.saveScheduledTime') }}
-            </n-button>
-          </div>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
+      @rescheduled="onTaskRescheduled"
+    />
 
   </div>
 
@@ -537,18 +511,23 @@ import {
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
+  CloseCircleOutline,
   FolderOpenOutline,
   GitBranchOutline,
   GitPullRequest,
   CodeOutline,
+  CreateOutline,
   TimeOutline,
   InformationCircleOutline,
   PersonOutline,
+  RefreshOutline,
+  TrashOutline,
 } from '@vicons/ionicons5'
 import HeatmapChart from '../components/HeatmapChart.vue'
 import TaskFormDrawer from '../components/TaskFormDrawer.vue'
+import RescheduleDrawer from '../components/RescheduleDrawer.vue'
 import {
-  getIssue, updateIssue, closeIssue, retryTask, rescheduleTask, deleteIssueBranch,
+  getIssue, updateIssue, closeIssue, retryTask, deleteIssueBranch,
   getScheduledTasks, getConfig, getProjects,
   type Issue, type Task, type Project
 } from '../api'
@@ -605,7 +584,6 @@ const projects = ref<Project[]>([])
 
 const renderedDescription = computed(() => renderMarkdown(issue.value?.description ?? ''))
 const renderedRetryPrompt = computed(() => renderMarkdown(retryTargetTask.value?.user_prompt ?? ''))
-const renderedReschedulePrompt = computed(() => renderMarkdown(rescheduleTargetTask.value?.user_prompt ?? ''))
 
 const projectName = computed(() => {
   if (!issue.value) return '-'
@@ -633,8 +611,6 @@ const retryTaskSchedule = ref<number | null>(null)
 const retryTaskLoading = ref(false)
 const showRescheduleDrawer = ref(false)
 const rescheduleTargetTask = ref<Task | null>(null)
-const rescheduleTaskSchedule = ref<number | null>(null)
-const rescheduleTaskLoading = ref(false)
 
 // Schedule heatmap
 const scheduledTasksForPreview = ref<Task[]>([])
@@ -860,7 +836,6 @@ watch(showRetryDrawer, (val) => {
 watch(showRescheduleDrawer, (val) => {
   if (!val) {
     rescheduleTargetTask.value = null
-    rescheduleTaskSchedule.value = null
   }
 })
 
@@ -893,10 +868,6 @@ function handleRetryHeatmapCellClick(startMs: number) {
   retryTaskSchedule.value = startMs
 }
 
-function handleRescheduleHeatmapCellClick(startMs: number) {
-  rescheduleTaskSchedule.value = startMs
-}
-
 async function openRetryDrawer(task: Task) {
   retryTargetTask.value = task
   retryScheduleType.value = 'now'
@@ -905,11 +876,13 @@ async function openRetryDrawer(task: Task) {
   await loadScheduleContext(true)
 }
 
-async function openRescheduleDrawer(task: Task) {
+function openRescheduleDrawer(task: Task) {
   rescheduleTargetTask.value = task
-  rescheduleTaskSchedule.value = task.scheduled_at ? parseUtcDate(task.scheduled_at).getTime() : null
   showRescheduleDrawer.value = true
-  await loadScheduleContext(true)
+}
+
+function onTaskRescheduled() {
+  fetchIssue()
 }
 
 // --- API Actions ---
@@ -1013,31 +986,6 @@ async function handleSubmitRetry() {
   }
 }
 
-async function handleSubmitReschedule() {
-  if (!rescheduleTargetTask.value) return
-  if (!rescheduleTaskSchedule.value) {
-    message.warning(t('taskView.selectRescheduleTime'))
-    return
-  }
-  if (rescheduleTaskSchedule.value <= Date.now()) {
-    message.warning(t('taskView.rescheduleTimeFuture'))
-    return
-  }
-
-  rescheduleTaskLoading.value = true
-  try {
-    await rescheduleTask(rescheduleTargetTask.value.id, {
-      scheduled_datetime: new Date(rescheduleTaskSchedule.value).toISOString()
-    })
-    message.success(t('taskView.taskRescheduled'))
-    showRescheduleDrawer.value = false
-    await fetchIssue()
-  } catch (error: any) {
-    message.error(extractSlotErrorMessage(error, t, 'taskView.failedToRescheduleTask'))
-  } finally {
-    rescheduleTaskLoading.value = false
-  }
-}
 
 // --- Lifecycle ---
 function openEditModal() {
@@ -1070,6 +1018,75 @@ onMounted(() => {
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+  flex: 1 1 360px;
+}
+
+.issue-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.issue-actions--header {
+  width: 100%;
+}
+
+.issue-actions__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.issue-actions__command {
+  flex: 0 0 auto;
+  --n-height: 34px !important;
+  --n-padding: 0 12px !important;
+  --n-font-weight: 400 !important;
+  --n-border-radius: 10px !important;
+  --n-ripple-color: rgba(37, 99, 235, 0.18) !important;
+}
+
+.issue-actions__command--neutral {
+  --n-color: rgba(255, 255, 255, 0.68) !important;
+  --n-color-hover: rgba(248, 250, 252, 0.96) !important;
+  --n-color-focus: rgba(248, 250, 252, 0.96) !important;
+  --n-color-pressed: rgba(241, 245, 249, 0.96) !important;
+  --n-color-disabled: rgba(248, 250, 252, 0.58) !important;
+  --n-text-color: rgba(51, 65, 85, 0.92) !important;
+  --n-text-color-hover: rgba(30, 41, 59, 0.96) !important;
+  --n-text-color-focus: rgba(30, 41, 59, 0.96) !important;
+  --n-text-color-pressed: rgba(15, 23, 42, 0.98) !important;
+  --n-text-color-disabled: rgba(100, 116, 139, 0.52) !important;
+  --n-border: 1px solid rgba(15, 23, 42, 0.12) !important;
+  --n-border-hover: 1px solid rgba(15, 23, 42, 0.18) !important;
+  --n-border-focus: 1px solid rgba(37, 99, 235, 0.28) !important;
+  --n-border-pressed: 1px solid rgba(15, 23, 42, 0.22) !important;
+  --n-border-disabled: 1px solid rgba(15, 23, 42, 0.08) !important;
+}
+
+.issue-actions__command--danger {
+  --n-color: rgba(208, 48, 80, 0.07) !important;
+  --n-color-hover: rgba(208, 48, 80, 0.1) !important;
+  --n-color-focus: rgba(208, 48, 80, 0.1) !important;
+  --n-color-pressed: rgba(208, 48, 80, 0.14) !important;
+  --n-color-disabled: rgba(208, 48, 80, 0.04) !important;
+  --n-text-color: #b42342 !important;
+  --n-text-color-hover: #9f1d38 !important;
+  --n-text-color-focus: #9f1d38 !important;
+  --n-text-color-pressed: #88172f !important;
+  --n-text-color-disabled: rgba(180, 35, 66, 0.42) !important;
+  --n-border: 1px solid rgba(208, 48, 80, 0.18) !important;
+  --n-border-hover: 1px solid rgba(208, 48, 80, 0.28) !important;
+  --n-border-focus: 1px solid rgba(208, 48, 80, 0.32) !important;
+  --n-border-pressed: 1px solid rgba(208, 48, 80, 0.36) !important;
+  --n-border-disabled: 1px solid rgba(208, 48, 80, 0.1) !important;
+  --n-ripple-color: rgba(208, 48, 80, 0.18) !important;
+}
+
+.issue-actions__command--refresh {
+  margin-left: 2px;
 }
 
 .issue-view__title {
@@ -1402,6 +1419,16 @@ onMounted(() => {
   .issue-view__actions {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .issue-actions__toolbar {
+    align-items: stretch;
+    justify-content: flex-start;
+  }
+
+  .issue-actions__command {
+    flex: 1 1 150px;
+    justify-content: center;
   }
 
   .issue-card__header {
