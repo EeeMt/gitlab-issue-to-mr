@@ -53,25 +53,28 @@
                 <div :ref="(el) => { collapseRefs[index] = el as HTMLElement }">
                   <TaskProcessTextRow
                     v-if="isTextRow(row)"
-                    :row="row"
-                    :expanded-text="getExpandedText(row.textEntry)"
-                    :loading="hasTextPayloadLoading(row.textEntry)"
-                    :show-content="shouldShowTextContent(row.textEntry)"
+                    :row="asTextRow(row)"
+                    :expanded-text="getExpandedText(asTextRow(row).textEntry)"
+                    :loading="hasTextPayloadLoading(asTextRow(row).textEntry)"
+                    :show-content="shouldShowTextContent(asTextRow(row).textEntry)"
                     @collapse-change="(names) => onCollapseChange(names, index)"
                   />
                   <TaskProcessToolRow
                     v-else-if="isToolRow(row)"
-                    :row="row"
-                    :input-loaded="isPayloadLoaded(row.toolCall.input_payload_id ?? null)"
-                    :output-loaded="isPayloadLoaded(row.toolCall.output_payload_id ?? null)"
-                    :input-loading="isPayloadLoading(row.toolCall.input_payload_id ?? null)"
-                    :output-loading="isPayloadLoading(row.toolCall.output_payload_id ?? null)"
-                    :input-failed="hasPayloadLoadError(row.toolCall.input_payload_id ?? null)"
-                    :output-failed="hasPayloadLoadError(row.toolCall.output_payload_id ?? null)"
-                    :input-expanded-text="getExpandedPayloadText(row.toolCall.input_payload_id ?? null)"
-                    :output-expanded-text="getExpandedPayloadText(row.toolCall.output_payload_id ?? null)"
+                    :row="asToolRow(row)"
+                    :input-loaded="isPayloadLoaded(asToolRow(row).toolCall.input_payload_id ?? null)"
+                    :output-loaded="isPayloadLoaded(asToolRow(row).toolCall.output_payload_id ?? null)"
+                    :input-loading="isPayloadLoading(asToolRow(row).toolCall.input_payload_id ?? null)"
+                    :output-loading="isPayloadLoading(asToolRow(row).toolCall.output_payload_id ?? null)"
+                    :input-failed="hasPayloadLoadError(asToolRow(row).toolCall.input_payload_id ?? null)"
+                    :output-failed="hasPayloadLoadError(asToolRow(row).toolCall.output_payload_id ?? null)"
+                    :input-expanded-text="getExpandedPayloadText(asToolRow(row).toolCall.input_payload_id ?? null)"
+                    :output-expanded-text="getExpandedPayloadText(asToolRow(row).toolCall.output_payload_id ?? null)"
                     @collapse-change="(names) => onCollapseChange(names, index)"
                   />
+                  <div v-else-if="isCompactRow(row)" class="context-compact-divider">
+                    <span class="context-compact-label">{{ t('taskView.contextCompacted') }}</span>
+                  </div>
                 </div>
               </template>
             </div>
@@ -104,7 +107,7 @@ import TaskProcessSystemInitBanner from './task-process/TaskProcessSystemInitBan
 import TaskProcessRawPane from './task-process/TaskProcessRawPane.vue'
 import TaskProcessTextRow from './task-process/TaskProcessTextRow.vue'
 import TaskProcessToolRow from './task-process/TaskProcessToolRow.vue'
-import { normalizeTaskProcessRows, parseSystemInitEntry, isTextRow, isToolRow, type ParsedTextEntry } from './task-process/taskProcessUtils'
+import { normalizeTaskProcessRows, parseSystemInitEntry, isTextRow, isToolRow, isCompactRow, type NormalizedTextEventRow, type NormalizedToolEventRow, type NormalizedTaskProcessRow, type ParsedTextEntry } from './task-process/taskProcessUtils'
 import { useTaskPayloadExpansion } from './task-process/useTaskPayloadExpansion'
 import { parseUtcDate } from '../utils/datetime'
 
@@ -154,6 +157,11 @@ let lastRowScrollTimer: ReturnType<typeof setTimeout> | null = null
 let isProgrammaticScroll = false
 
 const processRows = computed(() => normalizeTaskProcessRows(props.taskLogs))
+
+// vue-tsc does not narrow the type inside v-if/v-else-if chains when there are 3+ branches,
+// so we use explicit cast helpers that are safe because rendering is guarded by the matching v-if.
+function asTextRow(row: NormalizedTaskProcessRow): NormalizedTextEventRow { return row as NormalizedTextEventRow }
+function asToolRow(row: NormalizedTaskProcessRow): NormalizedToolEventRow { return row as NormalizedToolEventRow }
 const systemInitEntry = computed(() => parseSystemInitEntry(props.taskLogs))
 const runtimeInfoEntry = computed(() => {
   if (systemInitEntry.value) return systemInitEntry.value
@@ -161,7 +169,7 @@ const runtimeInfoEntry = computed(() => {
   return null
 })
 const hasStructuredContent = computed(() => processRows.value.length > 0)
-const eventStreamCount = computed(() => processRows.value.length)
+const eventStreamCount = computed(() => processRows.value.filter(r => !isCompactRow(r)).length)
 const isRawTabDisabled = computed(() => !props.terminalHtml && !props.task?.container_id)
 const elapsedDisplay = computed(() => (!props.isActive || elapsedMs.value <= 0 ? '' : formatDurationMs(elapsedMs.value)))
 
@@ -223,7 +231,7 @@ function onCollapseChange(expandedNames: (string | number)[], index: number) {
     return
   }
 
-  if (expandedNames.includes('detail') && row.textEntry.payloadId) {
+  if (expandedNames.includes('detail') && isTextRow(row) && row.textEntry.payloadId) {
     loadPayload(taskId, row.textEntry.payloadId)
   }
 }
@@ -542,6 +550,29 @@ defineExpose({ onCollapseChange, activeTab })
   align-items: center;
   justify-content: center;
   padding: 24px 0;
+}
+.context-compact-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  margin: 2px 0;
+  color: var(--n-text-color-3, #94a3b8);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.context-compact-divider::before,
+.context-compact-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--n-border-color, rgba(128, 128, 128, 0.15));
+}
+.context-compact-label {
+  flex-shrink: 0;
+  padding: 0 4px;
 }
 .scroll-to-latest {
   position: absolute;

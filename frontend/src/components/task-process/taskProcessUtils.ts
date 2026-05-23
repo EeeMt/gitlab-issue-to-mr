@@ -84,9 +84,14 @@ export interface NormalizedToolEventRow {
   toolCall: ToolCall
 }
 
-export type NormalizedTaskProcessRow = NormalizedTextEventRow | NormalizedToolEventRow
+export interface NormalizedCompactRow {
+  kind: 'context_compact'
+  event: TaskLog
+}
 
-const STRUCTURED_TYPES = new Set(['thinking', 'assistant_text', 'tool_call'])
+export type NormalizedTaskProcessRow = NormalizedTextEventRow | NormalizedToolEventRow | NormalizedCompactRow
+
+const STRUCTURED_TYPES = new Set(['thinking', 'assistant_text', 'tool_call', 'context_compact'])
 
 function parseJsonMetadata(metadata: unknown): unknown {
   if (typeof metadata !== 'string') return metadata
@@ -103,6 +108,10 @@ export function isTextRow(row: NormalizedTaskProcessRow): row is NormalizedTextE
 
 export function isToolRow(row: NormalizedTaskProcessRow): row is NormalizedToolEventRow {
   return row.kind === 'tool_call'
+}
+
+export function isCompactRow(row: NormalizedTaskProcessRow): row is NormalizedCompactRow {
+  return row.kind === 'context_compact'
 }
 
 export function getToolIcon(name: string): Component {
@@ -284,6 +293,8 @@ export function normalizeTaskProcessRows(taskLogs: TaskLog[]): NormalizedTaskPro
       rows.push({ kind: event.log_type, event, textEntry: parseTextEntry(event.metadata) })
     } else if (event.log_type === 'tool_call') {
       rows.push({ kind: 'tool_call', event, toolCall: parseToolCall(event) })
+    } else if (event.log_type === 'context_compact') {
+      rows.push({ kind: 'context_compact', event })
     }
   }
   return rows

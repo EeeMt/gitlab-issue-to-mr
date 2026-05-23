@@ -169,6 +169,17 @@ class WorkerEventProjector:
                 log_type="system_init",
                 log_metadata=_json.dumps({"model": record.get("model"), "cwd": record.get("cwd")}),
             ))
+        elif record_type == "system" and record.get("subtype") == "compact_boundary":
+            db.add(TaskLog(
+                task_id=task_id,
+                log_level="INFO",
+                message="",
+                log_type="context_compact",
+                log_metadata=_json.dumps({"session_id": record.get("session_id")}),
+            ))
+        elif record_type == "system" and record.get("subtype") == "status":
+            # compacting / compact_result status events are informational; no log row needed
+            pass
         elif record_type == "codify_worker" and record.get("subtype") == "finalization":
             db.add(TaskLog(
                 task_id=task_id,

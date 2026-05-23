@@ -157,20 +157,22 @@ describe('taskProcessUtils', () => {
     })).toBe('/tmp/example.txt')
   })
 
-  it('parses text preview metadata for payload-backed text rows', () => {
-    const rows = normalizeTaskProcessRows([
-      createTaskLog({
-        log_type: 'assistant_text',
-        metadata: JSON.stringify({ payload_id: 22, char_count: 40, preview: 'real summary', truncated: false }),
-      }),
-    ])
-
+  it('normalizes context_compact log into a NormalizedCompactRow', () => {
+    const log = createTaskLog({ id: 42, log_type: 'context_compact', metadata: JSON.stringify({ session_id: 'abc-123' }) })
+    const rows = normalizeTaskProcessRows([log])
     expect(rows).toHaveLength(1)
-    expect(rows[0].kind).toBe('assistant_text')
-    if (rows[0].kind === 'assistant_text') {
-      expect(rows[0].textEntry.preview).toBe('real summary')
-      expect(rows[0].textEntry.payloadId).toBe(22)
-    }
+    expect(rows[0].kind).toBe('context_compact')
+    expect(rows[0].event).toBe(log)
+  })
+
+  it('context_compact rows are interleaved with other rows in timestamp order', () => {
+    const logs: TaskLog[] = [
+      createTaskLog({ id: 1, log_type: 'assistant_text', created_at: '2026-05-04T10:00:00Z', metadata: JSON.stringify({ payload_id: null, preview: 'before', truncated: false }) }),
+      createTaskLog({ id: 2, log_type: 'context_compact', created_at: '2026-05-04T10:00:01Z', metadata: JSON.stringify({ session_id: 'abc' }) }),
+      createTaskLog({ id: 3, log_type: 'assistant_text', created_at: '2026-05-04T10:00:02Z', metadata: JSON.stringify({ payload_id: null, preview: 'after', truncated: false }) }),
+    ]
+    const rows = normalizeTaskProcessRows(logs)
+    expect(rows.map(r => r.kind)).toEqual(['assistant_text', 'context_compact', 'assistant_text'])
   })
 })
 

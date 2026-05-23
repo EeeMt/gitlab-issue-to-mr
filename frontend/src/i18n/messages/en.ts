@@ -579,6 +579,7 @@ const en = {
     taskNotStarted: 'Task not started',
     noProcessYet: 'No events yet',
     scrollToLatest: 'Jump to latest',
+    contextCompacted: 'Context compressed',
     completedAt: 'Completed At',
     tokenBreakdown: 'Input: {input} · Output: {output}',
     continueGuideTitle: 'Continue on This Issue',

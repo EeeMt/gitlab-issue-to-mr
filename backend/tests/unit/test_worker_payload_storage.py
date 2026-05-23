@@ -395,3 +395,42 @@ class EventProjectionTests(unittest.IsolatedAsyncioTestCase):
         assert b"Second thought" in thinking_payloads[1].content
         assert b"Response one" in text_payloads[0].content
         assert b"Response two" in text_payloads[1].content
+
+    async def test_compact_boundary_event_creates_context_compact_log(self):
+        """compact_boundary system events should be recorded as context_compact TaskLog rows."""
+        event_lines = [
+            '{"type":"system","subtype":"init","model":"claude-sonnet","cwd":"/workspace"}',
+            '{"type":"assistant","message":{"content":[{"text":"Starting work.","type":"text"}]}}',
+            '{"type":"system","subtype":"compact_boundary","session_id":"abc-123"}',
+            '{"type":"assistant","message":{"content":[{"text":"Continuing after compaction.","type":"text"}]}}',
+        ]
+        async with self.session_factory() as db:
+            await self._ingest_lines(task_id=1, lines=event_lines, db=db)
+            await db.flush()
+            compact_logs = (
+                await db.execute(select(TaskLog).where(TaskLog.log_type == "context_compact"))
+            ).scalars().all()
+            all_logs = (await db.execute(select(TaskLog).order_by(TaskLog.id))).scalars().all()
+
+        assert len(compact_logs) == 1
+        meta = json.loads(compact_logs[0].log_metadata)
+        assert meta == {"session_id": "abc-123"}
+        log_types = [log.log_type for log in all_logs]
+        assert "context_compact" in log_types
+        # context_compact appears between the two assistant_text entries
+        compact_idx = log_types.index("context_compact")
+        assert log_types[:compact_idx].count("assistant_text") >= 1
+        assert "assistant_text" in log_types[compact_idx + 1:]
+
+    async def test_system_status_compacting_event_is_silently_ignored(self):
+        """system/status events (compacting / compact_result) must not create any TaskLog rows."""
+        event_lines = [
+            '{"type":"system","subtype":"status","status":"compacting","session_id":"abc-123","uuid":"u1"}',
+            '{"type":"system","subtype":"status","status":null,"compact_result":"success","session_id":"abc-123","uuid":"u2"}',
+        ]
+        async with self.session_factory() as db:
+            await self._ingest_lines(task_id=1, lines=event_lines, db=db)
+            await db.flush()
+            logs = (await db.execute(select(TaskLog))).scalars().all()
+
+        assert len(logs) == 0
