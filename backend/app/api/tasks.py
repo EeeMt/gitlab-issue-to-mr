@@ -28,7 +28,7 @@ from app.core.usage_limits import (
     usage_limit_exceeded_detail,
 )
 from app.core.worker_workspace import build_issue_workspace_paths, remove_issue_workspace
-from app.database import get_db
+from app.database import get_db, AsyncSessionLocal
 from app.dependencies.auth import get_optional_current_user, require_page_access
 from app.dependencies.project_access import (
     ProjectAccessScope,
@@ -506,66 +506,148 @@ async def stream_task_logs(
         # appears, eliminating the need for a client-side fetchLogs() poll.
         pending_tool_calls: set[int] = set()
         _BATCH_SIZE = 500
+        _SLOW_QUERY_THRESHOLD_S = 0.5
+        stream_start = time.monotonic()
+        total_events_sent = 0
+        poll_cycle = 0
+        logger.info(f"[Task {task_id}] log-stream opened since_id={since_id}")
         try:
             while True:
-                # Fetch new log entries since last cursor
-                log_result = await db.execute(
-                    select(TaskLog)
-                    .where(TaskLog.task_id == task_id, TaskLog.id > cursor)
-                    .order_by(TaskLog.id.asc())
-                    .limit(_BATCH_SIZE)
-                )
-                new_logs = log_result.scalars().all()
+                poll_cycle += 1
+                cycle_start = time.monotonic()
 
-                for log in new_logs:
-                    event_data = _log_to_event_data(log)
-                    yield f"data: {_json.dumps(event_data)}\n\n"
-                    cursor = log.id
-                    # Queue tool_call logs that don't yet have output_payload_id
-                    if log.log_type == "tool_call":
-                        meta = event_data["metadata"] or {}
-                        if not meta.get("output_payload_id"):
-                            pending_tool_calls.add(log.id)
+                # Collect all SSE payloads while the session is open, then close
+                # the session and yield outside it.  This ensures the DB connection
+                # is returned to the pool before we block on network I/O to the
+                # client (a slow or stalled client must not hold a DB connection).
+                cycle_events: list[str] = []
+                fast_forward = False
+                current_status = None
+                new_log_count = 0
 
-                # If the batch was full there are likely more logs already in DB;
-                # skip the sleep so we flush the backlog immediately.
-                if len(new_logs) == _BATCH_SIZE:
+                async with AsyncSessionLocal() as poll_db:
+                    # Fetch new log entries since last cursor
+                    t0 = time.monotonic()
+                    log_result = await poll_db.execute(
+                        select(TaskLog)
+                        .where(TaskLog.task_id == task_id, TaskLog.id > cursor)
+                        .order_by(TaskLog.id.asc())
+                        .limit(_BATCH_SIZE)
+                    )
+                    new_logs = log_result.scalars().all()
+                    new_log_count = len(new_logs)
+                    log_query_ms = (time.monotonic() - t0) * 1000
+
+                    if log_query_ms > _SLOW_QUERY_THRESHOLD_S * 1000:
+                        logger.warning(
+                            f"[Task {task_id}] log-stream slow log query cycle={poll_cycle} "
+                            f"cursor={cursor} fetched={new_log_count} query_ms={log_query_ms:.1f}"
+                        )
+                    elif new_logs:
+                        logger.debug(
+                            f"[Task {task_id}] log-stream cycle={poll_cycle} "
+                            f"fetched={new_log_count} cursor={cursor} query_ms={log_query_ms:.1f}"
+                        )
+
+                    for log in new_logs:
+                        event_data = _log_to_event_data(log)
+                        cursor = log.id
+                        total_events_sent += 1
+                        # Queue tool_call logs that don't yet have output_payload_id
+                        if log.log_type == "tool_call":
+                            meta = event_data["metadata"] or {}
+                            if not meta.get("output_payload_id"):
+                                pending_tool_calls.add(log.id)
+                        cycle_events.append(f"data: {_json.dumps(event_data)}\n\n")
+
+                    if new_log_count == _BATCH_SIZE:
+                        # Batch was full — more logs likely waiting; skip sleep
+                        fast_forward = True
+                    else:
+                        # Re-check pending tool_call logs for in-place updates.
+                        # Fresh session means no stale identity map; no need for
+                        # populate_existing.
+                        if pending_tool_calls:
+                            t0 = time.monotonic()
+                            updated_result = await poll_db.execute(
+                                select(TaskLog)
+                                .where(TaskLog.id.in_(pending_tool_calls))
+                            )
+                            update_query_ms = (time.monotonic() - t0) * 1000
+                            if update_query_ms > _SLOW_QUERY_THRESHOLD_S * 1000:
+                                logger.warning(
+                                    f"[Task {task_id}] log-stream slow tool_call update query "
+                                    f"cycle={poll_cycle} pending={len(pending_tool_calls)} "
+                                    f"query_ms={update_query_ms:.1f}"
+                                )
+                            for log in updated_result.scalars().all():
+                                meta = _json.loads(log.log_metadata) if log.log_metadata else {}
+                                if meta.get("output_payload_id"):
+                                    cycle_events.append(
+                                        f"event: update\ndata: {_json.dumps(_log_to_event_data(log))}\n\n"
+                                    )
+                                    pending_tool_calls.discard(log.id)
+                                    total_events_sent += 1
+
+                        # Check current task status
+                        t0 = time.monotonic()
+                        task_result = await poll_db.execute(
+                            select(Task.status).where(Task.id == task_id)
+                        )
+                        current_status = task_result.scalar_one_or_none()
+                        status_query_ms = (time.monotonic() - t0) * 1000
+                        if status_query_ms > _SLOW_QUERY_THRESHOLD_S * 1000:
+                            logger.warning(
+                                f"[Task {task_id}] log-stream slow status query cycle={poll_cycle} "
+                                f"status={current_status} query_ms={status_query_ms:.1f}"
+                            )
+                # Session closed here — DB connection returned to pool.
+
+                cycle_ms = (time.monotonic() - cycle_start) * 1000
+                if cycle_ms > 1000:
+                    logger.warning(
+                        f"[Task {task_id}] log-stream slow cycle cycle={poll_cycle} "
+                        f"cycle_ms={cycle_ms:.1f} total_sent={total_events_sent}"
+                    )
+
+                # Yield events with DB connection already released
+                for ev in cycle_events:
+                    yield ev
+
+                if fast_forward:
+                    logger.debug(
+                        f"[Task {task_id}] log-stream fast-forward cycle={poll_cycle} "
+                        f"cursor={cursor} elapsed_s={time.monotonic() - stream_start:.2f}"
+                    )
                     continue
 
-                # Re-check pending tool_call logs for in-place updates.
-                # Use populate_existing=True so SQLAlchemy refreshes cached
-                # ORM objects in the session's identity map from the DB.
-                if pending_tool_calls:
-                    updated_result = await db.execute(
-                        select(TaskLog)
-                        .where(TaskLog.id.in_(pending_tool_calls))
-                        .execution_options(populate_existing=True)
-                    )
-                    for log in updated_result.scalars().all():
-                        meta = _json.loads(log.log_metadata) if log.log_metadata else {}
-                        if meta.get("output_payload_id"):
-                            yield f"event: update\ndata: {_json.dumps(_log_to_event_data(log))}\n\n"
-                            pending_tool_calls.discard(log.id)
-
-                # Check current task status (re-query to get fresh state)
-                task_result = await db.execute(
-                    select(Task.status).where(Task.id == task_id)
-                )
-                current_status = task_result.scalar_one_or_none()
-
-                if current_status in _TERMINAL_STATUSES and not new_logs:
+                if current_status in _TERMINAL_STATUSES and new_log_count == 0:
                     # Task is done and no new logs — signal completion and stop
                     yield "event: done\ndata: {}\n\n"
+                    elapsed_s = time.monotonic() - stream_start
+                    logger.info(
+                        f"[Task {task_id}] log-stream closed reason=done "
+                        f"total_events={total_events_sent} cycles={poll_cycle} "
+                        f"elapsed_s={elapsed_s:.1f}"
+                    )
                     break
 
                 # Wait before polling again
                 await asyncio.sleep(1.5)
 
         except asyncio.CancelledError:
-            # Client disconnected
-            pass
+            elapsed_s = time.monotonic() - stream_start
+            logger.info(
+                f"[Task {task_id}] log-stream closed reason=client_disconnected "
+                f"total_events={total_events_sent} cycles={poll_cycle} "
+                f"elapsed_s={elapsed_s:.1f}"
+            )
         except Exception as exc:
-            logger.error(f"[Task {task_id}] log-stream error: {exc}")
+            elapsed_s = time.monotonic() - stream_start
+            logger.error(
+                f"[Task {task_id}] log-stream error after {elapsed_s:.1f}s "
+                f"cycle={poll_cycle} total_events={total_events_sent}: {exc}"
+            )
             yield f"data: {_json.dumps({'error': str(exc)})}\n\n"
 
     return StreamingResponse(

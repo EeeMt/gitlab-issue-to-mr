@@ -371,6 +371,11 @@ let pollTimer: number | null = null
 let logEventSource: EventSource | null = null
 let logStreamContainerId: string | null = null
 let structuredLogSse: EventSource | null = null
+// Buffer for logs arriving faster than one-per-tick (e.g. during fast-forward
+// catch-up).  Flushed as a single reactive update via queueMicrotask to avoid
+// O(n²) array copies when hundreds of SSE events arrive in rapid succession.
+let _pendingLogBuffer: TaskLog[] = []
+let _logFlushScheduled = false
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
 const terminalLogHtml = computed(() => {
@@ -520,6 +525,9 @@ function closeStructuredLogStream() {
     structuredLogSse.close()
     structuredLogSse = null
   }
+  // Discard any buffered logs that haven't been flushed yet.
+  _pendingLogBuffer.length = 0
+  _logFlushScheduled = false
 }
 
 function connectStructuredLogStream() {
@@ -545,11 +553,24 @@ function connectStructuredLogStream() {
     taskId.value,
     sinceId,
     (log) => {
-      const existingIdx = taskLogs.value.findIndex(l => l.id === log.id)
-      if (existingIdx === -1) {
-        taskLogs.value = [...taskLogs.value, log]
-      } else {
-        mergeLogUpdate(log)
+      // Buffer the incoming log and schedule a single microtask flush to avoid
+      // O(n²) array copies when many SSE events arrive back-to-back.
+      _pendingLogBuffer.push(log)
+      if (!_logFlushScheduled) {
+        _logFlushScheduled = true
+        queueMicrotask(() => {
+          _logFlushScheduled = false
+          if (_pendingLogBuffer.length === 0) return
+          const incoming = _pendingLogBuffer.splice(0)
+          const current = taskLogs.value
+          const idSet = new Set(current.map(l => l.id))
+          const toAdd = incoming.filter(l => !idSet.has(l.id))
+          if (toAdd.length > 0) {
+            taskLogs.value = [...current, ...toAdd]
+          }
+          // Handle duplicates (updates) for any that already exist.
+          incoming.filter(l => idSet.has(l.id)).forEach(mergeLogUpdate)
+        })
       }
     },
     () => {

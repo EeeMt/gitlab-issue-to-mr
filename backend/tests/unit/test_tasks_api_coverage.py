@@ -346,11 +346,11 @@ class StreamTaskLogsTests(unittest.TestCase):
         log1.message = "test message"
         log1.created_at = datetime(2024, 1, 1, 12, 0, 0)
 
-        # First execute: task lookup
+        # First execute: task lookup (via get_db)
         task_result = MagicMock()
         task_result.scalar_one_or_none.return_value = task
 
-        # Second execute (inside generator): log query — return one log
+        # Second execute (inside generator / poll session): log query — return one log
         log_result = MagicMock()
         log_result.scalars.return_value.all.return_value = [log1]
 
@@ -370,10 +370,15 @@ class StreamTaskLogsTests(unittest.TestCase):
         mock_db.execute = AsyncMock(
             side_effect=[task_result, log_result, status_result, empty_log_result, status_result2]
         )
+        # Allow mock_db to act as an async context manager (for AsyncSessionLocal())
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
 
         client, app = _make_app_client_with_db(mock_db)
 
-        with patch("app.api.tasks.asyncio.sleep", new_callable=AsyncMock):
+        mock_session_local = MagicMock(return_value=mock_db)
+        with patch("app.api.tasks.AsyncSessionLocal", mock_session_local), \
+             patch("app.api.tasks.asyncio.sleep", new_callable=AsyncMock):
             response = client.get("/api/tasks/5/log-stream?since_id=0")
 
         app.dependency_overrides.clear()
@@ -420,10 +425,14 @@ class StreamTaskLogsTests(unittest.TestCase):
                 empty_log_result, completed_status,
             ]
         )
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
 
         client, app = _make_app_client_with_db(mock_db)
 
-        with patch("app.api.tasks.asyncio.sleep", new_callable=AsyncMock):
+        mock_session_local = MagicMock(return_value=mock_db)
+        with patch("app.api.tasks.AsyncSessionLocal", mock_session_local), \
+             patch("app.api.tasks.asyncio.sleep", new_callable=AsyncMock):
             response = client.get("/api/tasks/6/log-stream")
 
         app.dependency_overrides.clear()
@@ -444,10 +453,14 @@ class StreamTaskLogsTests(unittest.TestCase):
         mock_db.execute = AsyncMock(
             side_effect=[task_result, RuntimeError("DB connection dropped")]
         )
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
 
         client, app = _make_app_client_with_db(mock_db)
 
-        with patch("app.api.tasks.asyncio.sleep", new_callable=AsyncMock):
+        mock_session_local = MagicMock(return_value=mock_db)
+        with patch("app.api.tasks.AsyncSessionLocal", mock_session_local), \
+             patch("app.api.tasks.asyncio.sleep", new_callable=AsyncMock):
             response = client.get("/api/tasks/7/log-stream")
 
         app.dependency_overrides.clear()
