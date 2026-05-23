@@ -490,9 +490,8 @@ async function handleCreate() {
     if (scheduleType.value === 'scheduled' && scheduledAt.value) {
       req.scheduled_datetime = new Date(scheduledAt.value).toISOString()
     }
-    if (selectedProviderId.value != null) {
-      req.provider_id = selectedProviderId.value
-    }
+    const pid = selectedProviderId.value ?? providers.value.find(p => p.is_default)?.id
+    if (pid != null) req.provider_id = pid
     const created = await createTask(req)
     message.success(t('issue.taskCreated'))
     prompt.value = ''
@@ -532,8 +531,14 @@ async function handleEdit() {
     message.success(t('taskView.taskUpdated'))
     emit('update:show', false)
     emit('updated', updated)
-  } catch {
-    message.error(t('taskView.failedToUpdateTask'))
+  } catch (error: unknown) {
+    const anyError = error as { response?: { data?: { detail?: unknown } } }
+    const detail = anyError?.response?.data?.detail
+    if (typeof detail === 'string') {
+      message.error(detail)
+    } else {
+      message.error(t('taskView.failedToUpdateTask'))
+    }
   } finally {
     submitLoading.value = false
   }

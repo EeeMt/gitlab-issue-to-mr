@@ -781,7 +781,9 @@ async def update_task(
     Only fields present in the request body are applied.  The task must be in
     PENDING or QUEUED status; any other status results in a 409 response.
     """
-    task = await get_task_with_access_check(task_id, db, access_scope, current_user)
+    task = await get_task_with_access_check(
+        task_id, db, access_scope, current_user, with_for_update=True
+    )
 
     if task.status not in (TaskStatus.PENDING, TaskStatus.QUEUED):
         raise HTTPException(
