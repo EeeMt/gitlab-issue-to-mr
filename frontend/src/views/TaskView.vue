@@ -105,20 +105,6 @@
               </n-button>
 
               <n-button
-                v-if="task && ['pending', 'queued'].includes(task.status)"
-                class="task-actions__command task-actions__command--neutral"
-                type="default"
-                secondary
-                strong
-                @click="showEditDrawer = true"
-                :disabled="!canManageTask"
-                :title="t('taskView.editTask')"
-              >
-                <template #icon><n-icon :component="CreateOutline" /></template>
-                {{ t('taskView.editTask') }}
-              </n-button>
-
-              <n-button
                 v-if="task && task.status === 'pending'"
                 class="task-actions__command task-actions__command--primary"
                 type="info"
@@ -131,6 +117,20 @@
               >
                 <template #icon><n-icon :component="PlayOutline" /></template>
                 {{ t('common.execute') }}
+              </n-button>
+
+              <n-button
+                v-if="task && ['pending', 'queued'].includes(task.status)"
+                class="task-actions__command task-actions__command--neutral"
+                type="default"
+                secondary
+                strong
+                @click="showEditDrawer = true"
+                :disabled="!canManageTask"
+                :title="t('taskView.editTask')"
+              >
+                <template #icon><n-icon :component="CreateOutline" /></template>
+                {{ t('taskView.editTask') }}
               </n-button>
 
               <span v-if="task && !hasActions" class="task-actions__empty task-actions__empty--header">

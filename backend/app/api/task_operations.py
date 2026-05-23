@@ -33,6 +33,7 @@ async def get_task_with_access_check(
     access_scope: ProjectAccessScope,
     current_user: Optional["User"] = None,
     require_operator: bool = True,
+    with_for_update: bool = False,
 ) -> Task:
     """Get a task by ID with access control checks.
 
@@ -42,6 +43,7 @@ async def get_task_with_access_check(
         access_scope: Project access scope for authorization
         current_user: Current authenticated user (optional)
         require_operator: Whether to require task operator permission
+        with_for_update: Whether to lock the row with SELECT FOR UPDATE
 
     Returns:
         Task model instance
@@ -51,7 +53,10 @@ async def get_task_with_access_check(
     """
     from sqlalchemy import select
 
-    result = await db.execute(select(Task).where(Task.id == task_id))
+    query = select(Task).where(Task.id == task_id)
+    if with_for_update:
+        query = query.with_for_update()
+    result = await db.execute(query)
     task = result.scalar_one_or_none()
 
     if not task:
