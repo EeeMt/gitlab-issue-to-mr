@@ -2,7 +2,7 @@
   <n-drawer v-model:show="localShow" :width="isMobile ? '100%' : 680" placement="right">
     <n-drawer-content :title="t('taskView.rescheduleTask')" closable>
       <div class="reschedule-drawer">
-        <div v-if="task" class="reschedule-drawer__summary">
+        <div v-if="task && !hideSummary" class="reschedule-drawer__summary">
           <div class="reschedule-drawer__summary-title">Task #{{ task.id }}</div>
           <div class="reschedule-drawer__summary-prompt markdown-content" v-html="renderedPrompt"></div>
         </div>
@@ -62,8 +62,10 @@ import { useBreakpoints } from '../composables/useBreakpoints'
 const props = withDefaults(defineProps<{
   show: boolean
   task?: Task
+  hideSummary?: boolean
 }>(), {
   task: undefined,
+  hideSummary: false,
 })
 
 const emit = defineEmits<{

@@ -212,7 +212,10 @@ vi.mock('naive-ui', () => ({
         class: [attrs.class, 'n-button', `n-button--${props.type || 'default'}`, { loading: props.loading, disabled: props.disabled }],
         disabled: props.disabled || props.loading,
         'data-type': props.type
-      }, slots.default?.())
+      }, [
+        slots.icon?.(),
+        slots.default?.()
+      ])
     },
     template: '<button class="n-button"><slot /></button>'
   },
@@ -270,8 +273,11 @@ vi.mock('naive-ui', () => ({
   NIcon: {
     name: 'NIcon',
     props: ['component', 'size'],
-    setup() {
-      return () => h('i', { class: 'n-icon' })
+    setup(props: any) {
+      return () => h('i', {
+        class: 'n-icon',
+        'data-icon': props.component?.name
+      })
     }
   },
   NSpin: {
@@ -396,31 +402,42 @@ vi.mock('naive-ui', () => ({
 }))
 
 // Mock @vicons/ionicons5
-vi.mock('@vicons/ionicons5', () => ({
-  PersonOutline: { name: 'PersonOutline' },
-  LogoGitlab: { name: 'LogoGitlab' },
-  FolderOpenOutline: { name: 'FolderOpenOutline' },
-  GitMergeOutline: { name: 'GitMergeOutline' },
-  GitBranchOutline: { name: 'GitBranchOutline' },
-  ChatbubbleOutline: { name: 'ChatbubbleOutline' },
-  TimeOutline: { name: 'TimeOutline' },
-  GitPullRequest: { name: 'GitPullRequest' },
-  CubeOutline: { name: 'CubeOutline' },
-  ArrowDownCircleOutline: { name: 'ArrowDownCircleOutline' },
-  AlertCircleOutline: { name: 'AlertCircleOutline' },
-  CodeOutline: { name: 'CodeOutline' },
-  TerminalOutline: { name: 'TerminalOutline' },
-  CheckmarkCircleOutline: { name: 'CheckmarkCircleOutline' },
-  CloseCircleOutline: { name: 'CloseCircleOutline' },
-  DocumentTextOutline: { name: 'DocumentTextOutline' },
-  CreateOutline: { name: 'CreateOutline' },
-  BulbOutline: { name: 'BulbOutline' },
-  SearchOutline: { name: 'SearchOutline' },
-  CalendarOutline: { name: 'CalendarOutline' },
-  DownloadOutline: { name: 'DownloadOutline' },
-  PlayOutline: { name: 'PlayOutline' },
-  RefreshOutline: { name: 'RefreshOutline' }
-}))
+vi.mock('@vicons/ionicons5', () => {
+  const icon = (name: string) => ({ name, render: () => null })
+  return {
+    AlertCircleOutline: icon('AlertCircleOutline'),
+    ArrowDownCircleOutline: icon('ArrowDownCircleOutline'),
+    ArrowBackOutline: icon('ArrowBackOutline'),
+    BulbOutline: icon('BulbOutline'),
+    CalendarOutline: icon('CalendarOutline'),
+    ChatbubbleEllipsesOutline: icon('ChatbubbleEllipsesOutline'),
+    ChatbubbleOutline: icon('ChatbubbleOutline'),
+    CheckmarkCircleOutline: icon('CheckmarkCircleOutline'),
+    CloseCircleOutline: icon('CloseCircleOutline'),
+    CloseOutline: icon('CloseOutline'),
+    CodeOutline: icon('CodeOutline'),
+    CreateOutline: icon('CreateOutline'),
+    CubeOutline: icon('CubeOutline'),
+    DocumentTextOutline: icon('DocumentTextOutline'),
+    DownloadOutline: icon('DownloadOutline'),
+    FolderOpenOutline: icon('FolderOpenOutline'),
+    GitBranchOutline: icon('GitBranchOutline'),
+    GitCommitOutline: icon('GitCommitOutline'),
+    GitMergeOutline: icon('GitMergeOutline'),
+    GitPullRequest: icon('GitPullRequest'),
+    InformationCircleOutline: icon('InformationCircleOutline'),
+    LogoGitlab: icon('LogoGitlab'),
+    OpenOutline: icon('OpenOutline'),
+    PersonOutline: icon('PersonOutline'),
+    PlayOutline: icon('PlayOutline'),
+    RefreshOutline: icon('RefreshOutline'),
+    SearchOutline: icon('SearchOutline'),
+    ShieldCheckmarkOutline: icon('ShieldCheckmarkOutline'),
+    TerminalOutline: icon('TerminalOutline'),
+    TimeOutline: icon('TimeOutline'),
+    WarningOutline: icon('WarningOutline'),
+  }
+})
 
 // Mock ansi-to-html
 vi.mock('ansi-to-html', () => ({
@@ -597,6 +614,43 @@ describe('TaskView', () => {
 
       // hasActions should be true for failed tasks
       expect(wrapper.vm.hasActions).toBe(true)
+    })
+
+    it('shows an icon on the existing retry task header action', async () => {
+      await mountComponent({ status: 'failed' })
+      wrapper.vm.activeRetryTask = createMockTask({ id: 2, retry_source_task_id: 1 })
+      await nextTick()
+
+      const retryLink = wrapper
+        .findAll('.task-actions__linked-task button')
+        .find((button) => button.text().includes('Task #2'))
+
+      expect(retryLink).toBeTruthy()
+      expect(retryLink!.find('.n-icon').exists()).toBe(true)
+      expect(retryLink!.find('.n-icon').attributes('data-icon')).toBe('OpenOutline')
+    })
+
+    it('orders retry actions before runtime archive and refresh actions', async () => {
+      await mountComponent({ status: 'failed' })
+      wrapper.vm.archiveMetadata = {
+        archive_name: 'task-1-runtime-archive.tar.gz',
+        archive_size_bytes: 1024,
+        created_at: '2026-04-01T10:00:00Z',
+        file_exists: true,
+      }
+      await nextTick()
+
+      const actionLabels = wrapper
+        .find('.task-actions__toolbar')
+        .findAll('button.n-button')
+        .map(button => button.text())
+
+      expect(actionLabels).toEqual([
+        'common.retry',
+        'taskView.retryWithSchedule',
+        'taskView.downloadRuntimeArchive',
+        'common.refresh',
+      ])
     })
 
     it('should open scheduled retry drawer from the header action', async () => {

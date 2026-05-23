@@ -55,7 +55,7 @@
   </n-drawer>
 
   <!-- Main Drawer -->
-  <n-drawer v-model:show="showProxy" :width="isMobile ? '100%' : 640" placement="right" data-testid="task-form-drawer">
+  <n-drawer v-model:show="showProxy" :width="isMobile ? '100%' : 640" placement="right" :data-testid="drawerTestId">
     <n-drawer-content
       :title="mode === 'edit' ? t('taskView.editTask') : t('issue.createTask')"
       closable
@@ -190,6 +190,7 @@
         v-if="mode === 'create' && usageLimitDetail"
         type="warning"
         style="margin-bottom: 16px;"
+        data-testid="issue-create-task-usage-alert"
       >
         <div class="task-form-drawer__usage-limit-alert">
           <div class="task-form-drawer__usage-limit-title">{{ t('createTask.usageLimitExceededTitle') }}</div>
@@ -223,7 +224,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, useAttrs } from 'vue'
 import {
   NButton, NDrawer, NDrawerContent, NForm, NFormItem, NRadio, NRadioGroup,
   NDatePicker, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon,
@@ -248,6 +249,8 @@ import { formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
 import { extractSlotErrorMessage } from '../utils/slotError'
 import { formatUsageResetAt, isUsageLimitExceededDetail, type UsageLimitExceededDetail } from '../utils/usageLimits'
 
+defineOptions({ inheritAttrs: false })
+
 const props = withDefaults(defineProps<{
   show: boolean
   mode?: 'create' | 'edit'
@@ -267,10 +270,16 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const message = useMessage()
 const { isMobile } = useBreakpoints()
+const attrs = useAttrs()
 
 const showProxy = computed({
   get: () => props.show,
   set: (val) => emit('update:show', val)
+})
+
+const drawerTestId = computed(() => {
+  const testId = attrs['data-testid']
+  return typeof testId === 'string' ? testId : 'task-form-drawer'
 })
 
 // Form state

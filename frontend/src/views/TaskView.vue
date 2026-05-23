@@ -291,6 +291,7 @@
   <RescheduleDrawer
     v-model:show="showRescheduleDrawer"
     :task="task ?? undefined"
+    hide-summary
     @rescheduled="task = $event"
   />
 </template>

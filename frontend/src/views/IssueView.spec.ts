@@ -169,7 +169,10 @@ vi.mock('naive-ui', () => ({
         class: 'n-button',
         disabled: props.disabled,
         onClick: props.onClick,
-      }, slots.default?.())
+      }, [
+        slots.icon?.(),
+        slots.default?.(),
+      ])
     },
   },
   NCard: {
@@ -222,8 +225,11 @@ vi.mock('naive-ui', () => ({
   NIcon: {
     name: 'NIcon',
     props: ['size', 'component'],
-    setup(_p: any, { slots }: any) {
-      return () => h('i', { class: 'n-icon' }, slots.default?.())
+    setup(props: any) {
+      return () => h('i', {
+        class: 'n-icon',
+        'data-icon': props.component?.name,
+      })
     },
   },
   NDataTable: {
@@ -263,9 +269,9 @@ vi.mock('naive-ui', () => ({
   NDrawer: {
     name: 'NDrawer',
     props: ['show', 'width', 'placement'],
-    setup(props: any, { slots }: any) {
+    setup(props: any, { attrs, slots }: any) {
       return () => props.show
-        ? h('div', { class: 'n-drawer' }, slots.default?.())
+        ? h('div', { ...attrs, class: ['n-drawer', attrs.class] }, slots.default?.())
         : null
     },
   },
@@ -364,6 +370,28 @@ vi.mock('naive-ui', () => ({
     },
   },
 }))
+
+vi.mock('@vicons/ionicons5', () => {
+  const icon = (name: string) => ({ name, render: () => null })
+  return {
+    AddCircleOutline: icon('AddCircleOutline'),
+    CalendarOutline: icon('CalendarOutline'),
+    CloseCircleOutline: icon('CloseCircleOutline'),
+    CloseOutline: icon('CloseOutline'),
+    CodeOutline: icon('CodeOutline'),
+    CreateOutline: icon('CreateOutline'),
+    DocumentTextOutline: icon('DocumentTextOutline'),
+    FolderOpenOutline: icon('FolderOpenOutline'),
+    GitBranchOutline: icon('GitBranchOutline'),
+    GitPullRequest: icon('GitPullRequest'),
+    InformationCircleOutline: icon('InformationCircleOutline'),
+    PersonOutline: icon('PersonOutline'),
+    RefreshOutline: icon('RefreshOutline'),
+    TrashOutline: icon('TrashOutline'),
+    TimeOutline: icon('TimeOutline'),
+    WarningOutline: icon('WarningOutline'),
+  }
+})
 
 // ---------------------------------------------------------------------------
 // Router
@@ -559,6 +587,34 @@ describe('IssueView', () => {
       wrapper = await mountComponent()
       const link = wrapper.find('a[href="https://gitlab.example.com/mr/42"]')
       expect(link.exists()).toBe(true)
+    })
+
+    it('renders header actions with icons in semantic order', async () => {
+      setupDefaultMocks({ status: 'closed', branch_name: 'codify/issue-1' })
+      wrapper = await mountComponent()
+
+      const actionButtons = wrapper.find('[data-testid="page-header-actions"]').findAll('button.n-button')
+      const labels = actionButtons.map(button => button.text())
+
+      expect(labels).toEqual([
+        'issue.close',
+        'issue.deleteBranch',
+        'issue.edit',
+        'common.refresh',
+      ])
+      expect(actionButtons.every(button => button.find('.n-icon').exists())).toBe(true)
+      expect(actionButtons.map(button => button.find('.n-icon').attributes('data-icon'))).toEqual([
+        'CloseCircleOutline',
+        'TrashOutline',
+        'CreateOutline',
+        'RefreshOutline',
+      ])
+    })
+
+    it('matches task header mobile action sizing', () => {
+      expect(issueViewSource).toContain('.issue-actions__toolbar {\n    align-items: stretch;')
+      expect(issueViewSource).toContain('.issue-actions__command {\n    flex: 1 1 150px;')
+      expect(issueViewSource).toContain('justify-content: center;')
     })
 
     it('shows no MR text when merge_request_url is null', async () => {
@@ -918,6 +974,7 @@ describe('IssueView', () => {
 
       // Drawer is visible (rendered via NDrawer v-if show)
       expect(wrapper.findAll('.n-drawer').length).toBeGreaterThanOrEqual(1)
+      expect(wrapper.find('[data-testid="issue-create-task-drawer"]').exists()).toBe(true)
     })
 
     it('pre-fills task prompt with issue description when drawer opens', async () => {
@@ -929,35 +986,6 @@ describe('IssueView', () => {
 
       const editor = wrapper.find('.variable-editor-mock')
       expect(editor.exists()).toBe(true)
-    })
-
-    it('refreshes schedule preview data after creating another task', async () => {
-      setupDefaultMocks()
-      mockApi.createTask.mockResolvedValue({ id: 3 })
-      mockApi.getScheduledTasks
-        .mockResolvedValueOnce([{ id: 1 }])
-        .mockResolvedValueOnce([{ id: 1 }, { id: 2 }])
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await vm.openScheduleDrawer()
-      await flushPromises()
-      expect(mockApi.getScheduledTasks).toHaveBeenCalledTimes(1)
-      expect(vm.scheduledTasksForPreview).toEqual([{ id: 1 }])
-
-      vm.showScheduleDrawer = false
-      await nextTick()
-
-      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
-      await nextTick()
-      await wrapper.find('[data-testid="issue-create-task-button"]').trigger('click')
-      await flushPromises()
-
-      await vm.openScheduleDrawer()
-      await flushPromises()
-
-      expect(mockApi.getScheduledTasks).toHaveBeenCalledTimes(2)
-      expect(vm.scheduledTasksForPreview).toEqual([{ id: 1 }, { id: 2 }])
     })
 
     it('calls createTask with correct payload (execute now)', async () => {
@@ -1054,6 +1082,17 @@ describe('IssueView', () => {
       await flushPromises()
 
       // Second call from re-fetch after task creation
+      expect(mockApi.getIssue).toHaveBeenCalledTimes(2)
+    })
+
+    it('refreshes issue data when TaskFormDrawer emits created', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+
+      const drawer = wrapper.findComponent({ name: 'TaskFormDrawer' })
+      drawer.vm.$emit('created', { id: 3 })
+      await flushPromises()
+
       expect(mockApi.getIssue).toHaveBeenCalledTimes(2)
     })
   })
@@ -1882,417 +1921,4 @@ describe('IssueView', () => {
     })
   })
 
-  // =========================================================================
-  // handleCreateTask with schedule validation
-  // =========================================================================
-  describe('handleCreateTask with schedule', () => {
-    it('warns when scheduleType is scheduled but no time selected', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      // Open drawer so prompt gets pre-filled
-      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
-      await nextTick()
-
-      vm.scheduleType = 'scheduled'
-      vm.newTaskSchedule = null
-
-      await vm.handleCreateTask()
-      await flushPromises()
-
-      expect(mockMessage.warning).toHaveBeenCalledWith('createTask.pleaseSelectScheduledTime')
-      expect(mockApi.createTask).not.toHaveBeenCalled()
-    })
-
-    it('warns when scheduled time is in the past', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
-      await nextTick()
-
-      vm.scheduleType = 'scheduled'
-      vm.newTaskSchedule = Date.now() - 60000 // 1 minute in the past
-
-      await vm.handleCreateTask()
-      await flushPromises()
-
-      expect(mockMessage.warning).toHaveBeenCalledWith('createTask.scheduledTimeFuture')
-      expect(mockApi.createTask).not.toHaveBeenCalled()
-    })
-
-    it('sends scheduled_datetime when scheduleType is scheduled with future time', async () => {
-      setupDefaultMocks()
-      mockApi.createTask.mockResolvedValue({ id: 10 })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
-      await nextTick()
-
-      const futureMs = Date.now() + 3600000 // 1 hour in the future
-      vm.scheduleType = 'scheduled'
-      vm.newTaskSchedule = futureMs
-
-      await vm.handleCreateTask()
-      await flushPromises()
-
-      expect(mockApi.createTask).toHaveBeenCalledWith(
-        expect.objectContaining({
-          issue_id: 1,
-          scheduled_datetime: new Date(futureMs).toISOString(),
-        }),
-      )
-      expect(mockMessage.success).toHaveBeenCalledWith('issue.taskCreated')
-    })
-
-    it('does not include scheduled_datetime when scheduleType is now', async () => {
-      setupDefaultMocks()
-      mockApi.createTask.mockResolvedValue({ id: 11 })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
-      await nextTick()
-
-      vm.scheduleType = 'now'
-      vm.newTaskSchedule = null
-
-      await vm.handleCreateTask()
-      await flushPromises()
-
-      const callArg = mockApi.createTask.mock.calls[0][0]
-      expect(callArg.scheduled_datetime).toBeUndefined()
-    })
-
-    it('resets form state after successful scheduled task creation', async () => {
-      setupDefaultMocks()
-      mockApi.createTask.mockResolvedValue({ id: 12 })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
-      await nextTick()
-
-      vm.scheduleType = 'scheduled'
-      vm.newTaskSchedule = Date.now() + 3600000
-      vm.newTaskPrompt = 'test prompt'
-
-      await vm.handleCreateTask()
-      await flushPromises()
-
-      expect(vm.newTaskPrompt).toBe('')
-      expect(vm.newTaskSchedule).toBeNull()
-      expect(vm.scheduleType).toBe('now')
-      expect(vm.showCreateDrawer).toBe(false)
-    })
-
-    it('includes user_prompt when prompt is non-empty', async () => {
-      setupDefaultMocks()
-      mockApi.createTask.mockResolvedValue({ id: 13 })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
-      await nextTick()
-
-      vm.newTaskPrompt = '  Custom prompt text  '
-
-      await vm.handleCreateTask()
-      await flushPromises()
-
-      expect(mockApi.createTask).toHaveBeenCalledWith(
-        expect.objectContaining({
-          user_prompt: 'Custom prompt text',
-        }),
-      )
-    })
-  })
-
-  // =========================================================================
-  // Template handling
-  // =========================================================================
-  describe('template handling (direct calls)', () => {
-    it('applyPromptTemplate sets content and variable_tips', async () => {
-      setupDefaultMocks({ description: '' })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      const tmpl = {
-        id: 1,
-        name: 'Test',
-        content: 'Fix the {{issue_type}}',
-        variable_tips: { issue_type: 'Bug type' },
-      }
-      vm.applyPromptTemplate(tmpl)
-
-      expect(vm.newTaskPrompt).toBe('Fix the {{issue_type}}')
-      expect(vm.promptVariableTips).toEqual({ issue_type: 'Bug type' })
-    })
-
-    it('applyPromptTemplate works without variable_tips', async () => {
-      setupDefaultMocks({ description: '' })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.promptVariableTips = { old: 'tip' }
-      vm.applyPromptTemplate({ id: 2, name: 'Simple', content: 'Do something' })
-
-      expect(vm.newTaskPrompt).toBe('Do something')
-      // variable_tips not set, so old value remains
-      expect(vm.promptVariableTips).toEqual({ old: 'tip' })
-    })
-
-    it('handleTemplateClick applies directly when prompt is empty', async () => {
-      setupDefaultMocks({ description: '' })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.newTaskPrompt = ''
-      const tmpl = { id: 1, name: 'T', content: 'New content', variable_tips: null }
-      vm.handleTemplateClick(tmpl)
-
-      expect(vm.newTaskPrompt).toBe('New content')
-      expect(vm.showTemplateDrawer).toBe(false)
-      expect(mockDialog.warning).not.toHaveBeenCalled()
-    })
-
-    it('handleTemplateClick shows confirmation when prompt has content', async () => {
-      setupDefaultMocks({ description: '' })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.newTaskPrompt = 'Existing prompt'
-      const tmpl = { id: 1, name: 'T', content: 'Override content', variable_tips: null }
-
-      mockDialog.warning.mockImplementation(() => {})
-      vm.handleTemplateClick(tmpl)
-
-      expect(mockDialog.warning).toHaveBeenCalledWith(
-        expect.objectContaining({
-          title: 'common.confirm',
-          content: 'createTask.templateOverwriteConfirm',
-          positiveText: 'common.confirm',
-          negativeText: 'common.cancel',
-        }),
-      )
-      // Prompt should NOT have changed yet (waiting for confirmation)
-      expect(vm.newTaskPrompt).toBe('Existing prompt')
-    })
-
-    it('handleTemplateClick confirmation callback applies template and closes drawer', async () => {
-      setupDefaultMocks({ description: '' })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.newTaskPrompt = 'Old content'
-      vm.showTemplateDrawer = true
-      const tmpl = { id: 1, name: 'T', content: 'New overridden', variable_tips: { x: 'tip' } }
-
-      mockDialog.warning.mockImplementation(({ onPositiveClick }: any) => {
-        onPositiveClick?.()
-      })
-      vm.handleTemplateClick(tmpl)
-
-      expect(vm.newTaskPrompt).toBe('New overridden')
-      expect(vm.promptVariableTips).toEqual({ x: 'tip' })
-      expect(vm.showTemplateDrawer).toBe(false)
-    })
-  })
-
-  // =========================================================================
-  // Schedule drawer & slot capacity
-  // =========================================================================
-  describe('schedule drawer and slot capacity', () => {
-    it('openScheduleDrawer opens drawer and fetches scheduled tasks', async () => {
-      setupDefaultMocks()
-      mockApi.getScheduledTasks.mockResolvedValue([{ id: 1 }])
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await vm.openScheduleDrawer()
-      await flushPromises()
-
-      expect(vm.showScheduleDrawer).toBe(true)
-      expect(mockApi.getScheduledTasks).toHaveBeenCalled()
-      expect(mockApi.getConfig).toHaveBeenCalled()
-    })
-
-    it('openScheduleDrawer handles getScheduledTasks error', async () => {
-      setupDefaultMocks()
-      mockApi.getScheduledTasks.mockRejectedValue(new Error('fail'))
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await vm.openScheduleDrawer()
-      await flushPromises()
-
-      expect(vm.showScheduleDrawer).toBe(true)
-      expect(vm.scheduledTasksForPreview).toEqual([])
-    })
-
-    it('openScheduleDrawer does not re-fetch if tasks already loaded', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      // Pre-populate
-      vm.scheduledTasksForPreview = [{ id: 1 }]
-      mockApi.getScheduledTasks.mockClear()
-
-      await vm.openScheduleDrawer()
-      await flushPromises()
-
-      expect(mockApi.getScheduledTasks).not.toHaveBeenCalled()
-    })
-
-    it('openScheduleDrawer sets slotMaxTasks and slotEnforce from config', async () => {
-      setupDefaultMocks()
-      mockApi.getConfig.mockResolvedValue({
-        runtime: { slot_max_tasks: 10, slot_max_tasks_enforce: true },
-      })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await vm.openScheduleDrawer()
-      await flushPromises()
-
-      expect(vm.slotMaxTasks).toBe(10)
-      expect(vm.slotEnforce).toBe(true)
-    })
-
-    it('openScheduleDrawer handles getConfig error silently', async () => {
-      setupDefaultMocks()
-      mockApi.getConfig.mockRejectedValue(new Error('config fail'))
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await vm.openScheduleDrawer()
-      await flushPromises()
-
-      // Should not throw, drawer is still open
-      expect(vm.showScheduleDrawer).toBe(true)
-    })
-
-    it('handleScheduleHeatmapCellClick sets time and closes drawer', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.showScheduleDrawer = true
-      const ts = Date.now() + 3600000
-      vm.handleScheduleHeatmapCellClick(ts)
-
-      expect(vm.newTaskSchedule).toBe(ts)
-      expect(vm.showScheduleDrawer).toBe(false)
-    })
-
-    it('watch(scheduleType) clears schedule when set to now', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.newTaskSchedule = Date.now() + 3600000
-      vm.scheduleType = 'scheduled'
-      await nextTick()
-
-      // Now switch back to 'now' — this should clear newTaskSchedule
-      vm.scheduleType = 'now'
-      await nextTick()
-
-      expect(vm.newTaskSchedule).toBeNull()
-    })
-
-    it('watch(showCreateDrawer) pre-fills prompt from issue description', async () => {
-      setupDefaultMocks({ description: 'Auto-filled description' })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      // Ensure prompt is empty
-      vm.newTaskPrompt = ''
-      vm.showCreateDrawer = true
-      await nextTick()
-
-      expect(vm.newTaskPrompt).toBe('Auto-filled description')
-    })
-
-    it('watch(showCreateDrawer) does not overwrite existing prompt', async () => {
-      setupDefaultMocks({ description: 'Issue desc' })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.newTaskPrompt = 'Existing prompt'
-      vm.showCreateDrawer = false
-      await nextTick()
-      vm.showCreateDrawer = true
-      await nextTick()
-
-      expect(vm.newTaskPrompt).toBe('Existing prompt')
-    })
-
-    it('checkSlotCapacity calls getSlotCapacity after debounce', async () => {
-      vi.useFakeTimers()
-      setupDefaultMocks()
-      mockApi.getSlotCapacity.mockResolvedValue({ available: 3 })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.newTaskSchedule = Date.now() + 3600000
-      await nextTick() // trigger the watch on heatmapSelectedMs
-
-      // Advance past debounce timeout (300ms)
-      vi.advanceTimersByTime(350)
-      await flushPromises()
-
-      expect(mockApi.getSlotCapacity).toHaveBeenCalled()
-      expect(vm.slotCapacity).toEqual({ available: 3 })
-
-      vi.useRealTimers()
-    })
-
-    it('checkSlotCapacity clears capacity when no time selected', async () => {
-      vi.useFakeTimers()
-      setupDefaultMocks()
-      mockApi.getSlotCapacity.mockResolvedValue({ available: 5 })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      // First set a time so capacity is fetched
-      vm.newTaskSchedule = Date.now() + 3600000
-      await nextTick()
-      vi.advanceTimersByTime(350)
-      await flushPromises()
-      expect(vm.slotCapacity).toEqual({ available: 5 })
-
-      // Now clear the selection
-      vm.newTaskSchedule = null
-      await nextTick()
-
-      // checkSlotCapacity immediately sets slotCapacity = null and returns
-      expect(vm.slotCapacity).toBeNull()
-
-      vi.useRealTimers()
-    })
-
-    it('checkSlotCapacity handles API error gracefully', async () => {
-      vi.useFakeTimers()
-      setupDefaultMocks()
-      mockApi.getSlotCapacity.mockRejectedValue(new Error('fail'))
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.newTaskSchedule = Date.now() + 3600000
-      await nextTick()
-
-      vi.advanceTimersByTime(350)
-      await flushPromises()
-
-      expect(vm.slotCapacity).toBeNull()
-      expect(vm.slotCapacityLoading).toBe(false)
-
-      vi.useRealTimers()
-    })
-  })
 })
