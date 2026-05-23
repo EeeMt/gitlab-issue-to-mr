@@ -327,9 +327,12 @@ class StreamTaskLogsTests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
 
         client, app = _make_app_client_with_db(mock_db)
-        response = client.get("/api/tasks/9999/log-stream")
+        with patch("app.api.tasks.AsyncSessionLocal", MagicMock(return_value=mock_db)):
+            response = client.get("/api/tasks/9999/log-stream")
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 404)

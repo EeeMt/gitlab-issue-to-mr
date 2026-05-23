@@ -568,6 +568,7 @@ class Scheduler:
                         if lock is None or lock.task_id == task_id:
                             self._running_issues.discard(task.issue_id)
                             await release_issue_execution_lock(db, issue_id=task.issue_id)
+                            await db.commit()
                             await self._maybe_complete_issue(db, task.issue_id)
             except Exception:
                 logger.exception("Failed to release lock for resumed task %s", task_id)

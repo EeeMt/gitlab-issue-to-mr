@@ -458,7 +458,6 @@ async def get_task_logs(
 async def stream_task_logs(
     task_id: int,
     since_id: int = 0,
-    db: AsyncSession = Depends(get_db),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Stream task log entries as Server-Sent Events.
@@ -470,15 +469,17 @@ async def stream_task_logs(
     Args:
         task_id: Task ID to stream logs for
         since_id: Only return log entries with id > since_id (for resuming)
-        db: Database session
         access_scope: Project access scope for authorization
 
     Returns:
         StreamingResponse with text/event-stream media type
     """
-    # Validate task exists and user has access before starting the stream
-    result = await db.execute(select(Task).where(Task.id == task_id))
-    task = result.scalar_one_or_none()
+    # Validate task exists and user has access before starting the stream.
+    # Use a short-lived session that closes immediately — this endpoint must not
+    # hold a DB connection for the full stream duration (up to 30 min).
+    async with AsyncSessionLocal() as init_db:
+        result = await init_db.execute(select(Task).where(Task.id == task_id))
+        task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

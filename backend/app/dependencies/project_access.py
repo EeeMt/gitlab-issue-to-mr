@@ -11,14 +11,13 @@ from typing import Any, Optional
 
 import httpx
 from fastapi import Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings
 from app.core.gitlab_client import get_accessible_projects_for_oauth_token
 from app.core.oidc import exchange_refresh_token
 from app.core.session import update_session_gitlab_tokens
 from app.core.utcnow import utcnow
-from app.database import get_db
+from app.database import AsyncSessionLocal
 from app.dependencies.auth import AuthContext, require_authenticated_context
 
 _ACCESS_CACHE_TTL_SECONDS = 300
@@ -60,13 +59,17 @@ async def _fetch_and_cache_projects(
 
 async def require_project_access_scope(
     auth_context: Optional[AuthContext] = Depends(require_authenticated_context),
-    db: AsyncSession = Depends(get_db),
 ) -> ProjectAccessScope:
     """Resolve the set of GitLab projects the current user may access.
 
     Uses stale-while-revalidate: returns cached data immediately on cache
     expiry and refreshes in the background, so polling endpoints never block
     on a GitLab API round-trip.
+
+    Does NOT depend on get_db — any required DB writes (token refresh/revocation)
+    are performed in short-lived sessions created internally.  This makes it safe
+    to use on long-lived streaming endpoints without holding a DB connection for
+    the entire response duration.
     """
     t_start = time.time()
     settings = get_effective_settings()
@@ -77,7 +80,7 @@ async def require_project_access_scope(
         return ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
     if not auth_context.gitlab_access_token:
-        await _refresh_auth_context_tokens(auth_context, db)
+        await _refresh_auth_context_tokens(auth_context)
         if not auth_context.gitlab_access_token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -118,7 +121,7 @@ async def require_project_access_scope(
             )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code in {401, 403}:
-                refreshed = await _refresh_auth_context_tokens(auth_context, db)
+                refreshed = await _refresh_auth_context_tokens(auth_context)
                 if refreshed:
                     try:
                         projects = await _fetch_and_cache_projects(
@@ -178,8 +181,12 @@ def require_project_access(project_id: int, scope: ProjectAccessScope) -> None:
     )
 
 
-async def _refresh_auth_context_tokens(auth_context: AuthContext, db: AsyncSession) -> bool:
-    """Refresh an expired GitLab access token for the current session when possible."""
+async def _refresh_auth_context_tokens(auth_context: AuthContext) -> bool:
+    """Refresh an expired GitLab access token for the current session when possible.
+
+    Creates a short-lived DB session internally so callers (including streaming
+    endpoints) are not required to hold an open session for this rare path.
+    """
     if not auth_context.gitlab_refresh_token:
         logger.info(
             "GitLab token refresh skipped because no refresh token is stored for session %s (user_id=%s)",
@@ -198,8 +205,10 @@ async def _refresh_auth_context_tokens(auth_context: AuthContext, db: AsyncSessi
                 auth_context.user.id,
                 exc.response.status_code,
             )
-            auth_context.session.revoked_at = utcnow()
-            await db.flush()
+            async with AsyncSessionLocal() as db:
+                auth_context.session.revoked_at = utcnow()
+                db.add(auth_context.session)
+                await db.commit()
             _project_access_cache.pop(auth_context.session.id, None)
             return False
         logger.exception(
@@ -224,8 +233,10 @@ async def _refresh_auth_context_tokens(auth_context: AuthContext, db: AsyncSessi
             auth_context.session.id,
             auth_context.user.id,
         )
-        auth_context.session.revoked_at = utcnow()
-        await db.flush()
+        async with AsyncSessionLocal() as db:
+            auth_context.session.revoked_at = utcnow()
+            db.add(auth_context.session)
+            await db.commit()
         _project_access_cache.pop(auth_context.session.id, None)
         return False
 
@@ -235,13 +246,15 @@ async def _refresh_auth_context_tokens(auth_context: AuthContext, db: AsyncSessi
         if tokens.get("expires_in")
         else None
     )
-    await update_session_gitlab_tokens(
-        db,
-        auth_context.session,
-        gitlab_access_token=access_token,
-        gitlab_refresh_token=refresh_token,
-        max_expires_at=max_expires_at,
-    )
+    async with AsyncSessionLocal() as db:
+        await update_session_gitlab_tokens(
+            db,
+            auth_context.session,
+            gitlab_access_token=access_token,
+            gitlab_refresh_token=refresh_token,
+            max_expires_at=max_expires_at,
+        )
+        await db.commit()
     auth_context.gitlab_access_token = access_token
     auth_context.gitlab_refresh_token = refresh_token
     _project_access_cache.pop(auth_context.session.id, None)
