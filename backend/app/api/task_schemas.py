@@ -32,6 +32,27 @@ class RescheduleTaskRequest(BaseModel):
         return self
 
 
+class UpdateTaskRequest(BaseModel):
+    """Request model for updating a pending/queued task's editable fields.
+
+    Only fields explicitly included in the request body are applied.
+    Use ``model_fields_set`` to distinguish "not provided" from "explicitly null".
+
+    Fields:
+        user_prompt: New prompt text. Must be non-empty if provided.
+        priority: Task priority (0 = low, 1 = normal, 2 = high).
+        provider_id: AI provider ID. Pass ``null`` / ``None`` to clear the
+            provider (revert to system default).  Omit the key entirely to
+            leave the current value unchanged.
+        require_changes: Whether the task must produce file changes.
+    """
+
+    user_prompt: Optional[str] = None
+    priority: Optional[int] = None
+    provider_id: Optional[int] = None  # None = system default / clear
+    require_changes: Optional[bool] = None
+
+
 class CreateTaskRequest(BaseModel):
     """Request model for creating a task under an Issue."""
 

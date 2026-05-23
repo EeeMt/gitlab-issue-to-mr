@@ -1389,6 +1389,18 @@ export async function rescheduleTask(taskId: number, request: RescheduleTaskRequ
   return response.data
 }
 
+export interface UpdateTaskRequest {
+  user_prompt?: string
+  priority?: number
+  provider_id?: number | null
+  require_changes?: boolean
+}
+
+export async function updateTask(taskId: number, request: UpdateTaskRequest): Promise<Task> {
+  const response = await api.patch(`/tasks/${taskId}`, request)
+  return response.data
+}
+
 // Prompt Template APIs
 export interface PromptTemplate {
   id: number

@@ -105,6 +105,20 @@
               </n-button>
 
               <n-button
+                v-if="task && ['pending', 'queued'].includes(task.status)"
+                class="task-actions__command task-actions__command--neutral"
+                type="default"
+                secondary
+                strong
+                @click="showEditDrawer = true"
+                :disabled="!canManageTask"
+                :title="t('taskView.editTask')"
+              >
+                <template #icon><n-icon :component="CreateOutline" /></template>
+                {{ t('taskView.editTask') }}
+              </n-button>
+
+              <n-button
                 v-if="task && task.status === 'pending'"
                 class="task-actions__command task-actions__command--primary"
                 type="info"
@@ -305,6 +319,13 @@
       </div>
     </n-drawer-content>
   </n-drawer>
+
+  <TaskFormDrawer
+    v-model:show="showEditDrawer"
+    mode="edit"
+    :task="task ?? undefined"
+    @updated="task = $event"
+  />
 </template>
 
 <script setup lang="ts">
@@ -325,12 +346,14 @@ import { extractSlotErrorMessage } from '../utils/slotError'
 import {
   CalendarOutline,
   CloseCircleOutline,
+  CreateOutline,
   DownloadOutline,
   PlayOutline,
   RefreshOutline,
   TimeOutline,
 } from '@vicons/ionicons5'
 import HeatmapChart from '../components/HeatmapChart.vue'
+import TaskFormDrawer from '../components/TaskFormDrawer.vue'
 import AnsiToHtml from 'ansi-to-html'
 
 const ansiConverter = new AnsiToHtml({ escapeXML: true })
@@ -356,6 +379,7 @@ const taskRequestInFlight = ref(false)
 const rescheduleDatetime = ref<number | null>(null)
 const retryScheduleDatetime = ref<number | null>(null)
 const showScheduleDrawer = ref(false)
+const showEditDrawer = ref(false)
 const heatmapTarget = ref<'retry' | 'reschedule'>('reschedule')
 const scheduledTasksForPreview = ref<Task[]>([])
 const scheduledTasksLoading = ref(false)

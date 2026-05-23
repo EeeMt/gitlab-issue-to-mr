@@ -599,6 +599,9 @@ const en = {
     overrideNoReason: 'No reason provided',
     overrideReasonPlaceholder: 'Reason for override (optional)',
     failedToOverrideStatus: 'Failed to override task status',
+    editTask: 'Edit Task',
+    taskUpdated: 'Task updated',
+    failedToUpdateTask: 'Failed to update task',
   },
   createTask: {
     title: 'Create Manual Task',

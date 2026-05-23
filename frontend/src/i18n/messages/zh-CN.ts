@@ -589,6 +589,9 @@ const zhCN = {
     overrideNoReason: '未填写原因',
     overrideReasonPlaceholder: '修正原因（选填）',
     failedToOverrideStatus: '修正任务状态失败',
+    editTask: '编辑任务',
+    taskUpdated: '任务已更新',
+    failedToUpdateTask: '更新任务失败',
   },
   createTask: {
     title: '创建手动任务',

@@ -35,9 +35,9 @@ from app.dependencies.project_access import (
     require_project_access,
     require_project_access_scope,
 )
-from app.models import Issue, Task, TaskLog, TaskStatus, User
+from app.models import AIProvider, Issue, Task, TaskLog, TaskStatus, User
 
-from app.api.task_schemas import CreateTaskRequest, RescheduleTaskRequest, RetryTaskRequest
+from app.api.task_schemas import CreateTaskRequest, RescheduleTaskRequest, RetryTaskRequest, UpdateTaskRequest
 from app.api.task_operations import (
     get_task_with_access_check,
     notify_task_cancelled,
@@ -766,6 +766,77 @@ async def update_task_stats(
         "deletions": deletions,
         "total": total,
     }
+
+
+@router.patch("/tasks/{task_id}")
+async def update_task(
+    task_id: int,
+    request: UpdateTaskRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Update editable fields of a task that has not yet started.
+
+    Only fields present in the request body are applied.  The task must be in
+    PENDING or QUEUED status; any other status results in a 409 response.
+    """
+    task = await get_task_with_access_check(task_id, db, access_scope, current_user)
+
+    if task.status not in (TaskStatus.PENDING, TaskStatus.QUEUED):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Task {task_id} cannot be edited because its status is "
+                f"'{task.status.value}'. Only PENDING or QUEUED tasks can be updated."
+            ),
+        )
+
+    updated_fields = request.model_fields_set
+
+    if "user_prompt" in updated_fields:
+        if not request.user_prompt or not request.user_prompt.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="user_prompt must be a non-empty string",
+            )
+        task.user_prompt = request.user_prompt.strip()
+
+    if "priority" in updated_fields:
+        if request.priority not in (0, 1, 2):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="priority must be 0 (low), 1 (normal), or 2 (high)",
+            )
+        task.priority = request.priority
+
+    if "provider_id" in updated_fields:
+        # None means "clear to system default"; an integer must reference an existing provider
+        if request.provider_id is not None:
+            provider = await db.get(AIProvider, request.provider_id)
+            if not provider:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Provider not found",
+                )
+        task.provider_id = request.provider_id
+
+    if "require_changes" in updated_fields:
+        if request.require_changes is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="require_changes must be a boolean",
+            )
+        task.require_changes = request.require_changes
+
+    await db.commit()
+    await db.refresh(task)
+
+    logger.info(
+        "Task %s updated via PATCH: fields=%s", task_id, sorted(updated_fields)
+    )
+
+    return _serialize_task(task, await get_project_metadata(task.project_id))
 
 
 @router.post("/tasks/{task_id}/cancel")
