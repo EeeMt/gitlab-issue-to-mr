@@ -1,13 +1,13 @@
 """Add composite index on task_logs(task_id, id) for log-stream poll performance
 
-Revision ID: 041_add_task_logs_composite_index
+Revision ID: 041_ix_task_logs_task_id_id
 Revises: 040_ix_issues_initiator_user_id
 Create Date: 2026-05-23 00:00:00.000000
 """
 
 from alembic import op
 
-revision = "041_add_task_logs_composite_index"
+revision = "041_ix_task_logs_task_id_id"
 down_revision = "040_ix_issues_initiator_user_id"
 branch_labels = None
 depends_on = None
