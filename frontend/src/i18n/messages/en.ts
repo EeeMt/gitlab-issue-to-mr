@@ -59,6 +59,8 @@ const en = {
     productTour: 'Product tour',
     reopenOnboarding: 'Open product tour again',
     logout: 'Logout',
+    createIssue: 'New Issue',
+    createIssueTooltip: 'Create a new issue',
     usageNormal: 'Usage within limits',
     usageNearLimit: 'Usage nearing limits',
     usageOverLimit: 'Usage over limits',
@@ -1037,6 +1039,7 @@ const en = {
     subtitle:
       'Manage scheduler behavior and GitLab OIDC login from one place. Saved values override env configuration and survive restarts.',
     unsavedChanges: 'Unsaved changes',
+    saved: 'Settings saved',
     inSync: 'In sync',
     dbOverride: 'DB override',
     envFallback: 'env fallback',

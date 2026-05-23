@@ -144,6 +144,23 @@
                   </div>
                 </div>
               </n-tooltip>
+              <n-tooltip trigger="hover" :style="onboardingTooltipStyle">
+                <template #trigger>
+                  <n-button
+                    type="primary"
+                    tertiary
+                    circle
+                    class="app-shell__create-issue-button"
+                    :title="t('shell.createIssueTooltip')"
+                    @click="navigateToCreateIssue"
+                  >
+                    <template #icon>
+                      <n-icon :component="AddCircleOutline" />
+                    </template>
+                  </n-button>
+                </template>
+                {{ t('shell.createIssueTooltip') }}
+              </n-tooltip>
               <LanguageToggle size="small" class="app-shell__language-toggle" />
               <n-tooltip trigger="hover" :style="onboardingTooltipStyle">
                 <template #trigger>
@@ -192,6 +209,19 @@
                 <span class="mobile-header__user-name">{{ userDisplayName }}</span>
               </div>
               <LanguageToggle size="small" class="mobile-header__language-toggle" />
+              <n-button
+                v-if="showUserToolbar"
+                type="primary"
+                tertiary
+                circle
+                class="mobile-header__create-issue-button"
+                :title="t('shell.createIssueTooltip')"
+                @click="navigateToCreateIssue"
+              >
+                <template #icon>
+                  <n-icon :component="AddCircleOutline" />
+                </template>
+              </n-button>
               <n-button
                 v-if="showUserToolbar"
                 quaternary
@@ -274,6 +304,7 @@ import type { MenuOption } from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
+  AddCircleOutline,
   BarChartOutline,
   DocumentTextOutline,
   FingerPrintOutline,
@@ -783,6 +814,10 @@ body {
 
 .app-shell__onboarding-button,
 .app-shell__logout-button {
+  flex-shrink: 0;
+}
+
+.app-shell__create-issue-button {
   flex-shrink: 0;
 }
 

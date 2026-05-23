@@ -26,7 +26,8 @@
                 <n-button
                   type="error"
                   secondary
-                  :disabled="issue.status === 'closed'"
+                  :disabled="issue.status === 'closed' || closingIssue"
+                  :loading="closingIssue"
                   data-testid="issue-close-button"
                 >
                   {{ t('issue.close') }}
@@ -819,6 +820,7 @@ function canManageIssueTask(task: Pick<Task, 'initiator_user_id' | 'initiator_gi
 const issue = ref<Issue | null>(null)
 const loading = ref(false)
 const deletingBranch = ref(false)
+const closingIssue = ref(false)
 let pollTimer: number | null = null
 const projects = ref<Project[]>([])
 
@@ -1249,11 +1251,14 @@ async function refreshIssue() {
 }
 
 async function handleClose() {
+  closingIssue.value = true
   try {
     issue.value = await closeIssue(issueId.value)
     message.success(t('issue.closeSuccess'))
   } catch {
     message.error(t('issue.closeFailed'))
+  } finally {
+    closingIssue.value = false
   }
 }
 
