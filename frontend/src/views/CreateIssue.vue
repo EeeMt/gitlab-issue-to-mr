@@ -933,12 +933,16 @@ onMounted(() => {
   overflow-y: auto;
   overflow-x: hidden;
   border-radius: 8px;
+  /* bleed to the right edge of .project-picker so the scrollbar
+     sits flush against the container border, not indented by padding */
+  margin-right: -12px;
 }
 
 .project-picker__grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
+  padding-right: 12px; /* compensate for scroll-wrap's -12px margin */
 }
 
 @media (max-width: 900px) {
