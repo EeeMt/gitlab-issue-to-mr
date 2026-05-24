@@ -62,7 +62,7 @@
         trigger="hover"
         class="my-work-board__columns-scrollbar"
         :class="{ 'my-work-board__columns-scrollbar--mobile': isMobile }"
-        :content-style="!isMobile ? 'height: 100%;' : undefined"
+        :content-style="!isMobile ? 'height: 100%; padding-bottom: 8px;' : 'padding-bottom: 8px;'"
       >
         <div
           class="my-work-board__columns"
@@ -85,20 +85,22 @@
             <span>{{ column.count }}</span>
           </header>
 
-          <n-scrollbar class="my-work-board__column-body-scrollbar" trigger="hover">
+          <n-scrollbar class="my-work-board__column-body-scrollbar" trigger="hover" content-style="padding-right: 12px; padding-bottom: 2px;">
             <div class="my-work-board__column-body">
               <button
                 v-for="item in column.items"
                 :key="item.id"
                 type="button"
                 class="my-work-board__card"
-                :class="{ 'my-work-board__card--task': activeTab === 'tasks' }"
                 :data-testid="`${activeTab === 'issues' ? 'issue' : 'task'}-card-${item.id}`"
                 :title="item.fullTitle || item.title"
                 @click="emit('select', item.route)"
               >
                 <div class="my-work-board__card-title">{{ item.title }}</div>
-                <div class="my-work-board__card-subtitle">{{ item.subtitle }}</div>
+                <div class="my-work-board__card-subtitle">
+                  {{ item.subtitle }}
+                  <span v-if="item.badge" class="my-work-board__card-badge">{{ item.badge }}</span>
+                </div>
                 <div class="my-work-board__card-meta">{{ item.meta.join(' · ') }}</div>
               </button>
 
@@ -136,6 +138,7 @@ export interface BoardCardItem {
   title: string
   fullTitle?: string
   subtitle: string
+  badge?: string
   meta: string[]
   route: string
 }
@@ -325,7 +328,7 @@ function getColumnIcon(status: string) {
 .my-work-board__column {
   border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 12px;
-  padding: 12px;
+  padding: 12px 0 12px 12px;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -343,6 +346,7 @@ function getColumnIcon(status: string) {
   align-items: center;
   margin-bottom: 12px;
   font-weight: 600;
+  padding-right: 12px;
 }
 
 .my-work-board__column-title {
@@ -365,6 +369,10 @@ function getColumnIcon(status: string) {
 .my-work-board__column-body-scrollbar {
   flex: 1;
   min-height: 0;
+}
+
+.my-work-board__column-body-scrollbar :deep(.n-scrollbar-rail.n-scrollbar-rail--vertical) {
+  right: 1px;
 }
 
 .my-work-board__column-body {
@@ -401,17 +409,32 @@ function getColumnIcon(status: string) {
   overflow: hidden;
 }
 
-.my-work-board__card--task .my-work-board__card-title {
-  font-weight: 500;
-  color: rgba(15, 23, 42, 0.82);
-}
-
 .my-work-board__card-subtitle,
 .my-work-board__card-meta,
 .my-work-board__column-empty,
 .my-work-board__empty {
   color: rgba(15, 23, 42, 0.6);
   font-size: 12px;
+}
+
+.my-work-board__card-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.my-work-board__card-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(14, 165, 233, 0.1);
+  color: #0ea5e9;
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  white-space: nowrap;
+  line-height: 1.4;
 }
 
 @media (max-width: 768px) {

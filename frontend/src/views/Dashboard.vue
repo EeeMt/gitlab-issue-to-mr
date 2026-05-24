@@ -159,7 +159,6 @@ import { formatPriority } from '../utils/format'
 import { authState } from '../auth'
 
 const issueStatuses = ['open', 'in_progress', 'in_review', 'closed'] as const
-const taskStatuses = ['pending', 'queued', 'running', 'completed', 'failed', 'cancelled'] as const
 
 const boardVisibleLimit = 20
 
@@ -256,12 +255,13 @@ function buildIssueCard(issue: Issue): BoardCardItem {
   }
 }
 
-function buildTaskCard(task: Task): BoardCardItem {
+function buildTaskCard(task: Task, badge?: string): BoardCardItem {
   return {
     id: task.id,
     title: task.user_prompt,
     fullTitle: task.user_prompt,
     subtitle: `#${task.id}`,
+    badge,
     meta: [
       formatPriority(task.priority),
       formatDateTimeUtc8Compact(task.started_at || task.created_at),
@@ -303,17 +303,27 @@ const issueBoardColumns = computed<BoardColumn[]>(() =>
   }),
 )
 
-const taskBoardColumns = computed<BoardColumn[]>(() =>
-  taskStatuses.map((status) => {
-    const items = boardTasks.value.filter((task) => task.status === status).map(buildTaskCard)
-    return {
-      status,
-      label: t(`status.${status}`),
-      count: items.length,
-      items,
-    }
-  }),
-)
+const taskBoardColumns = computed<BoardColumn[]>(() => {
+  const tasks = boardTasks.value
+  const queuedBadge = t('status.queued')
+  const cancelledBadge = t('status.cancelled')
+  const pendingItems = [
+    ...tasks.filter(task => task.status === 'pending').map(task => buildTaskCard(task)),
+    ...tasks.filter(task => task.status === 'queued').map(task => buildTaskCard(task, queuedBadge)),
+  ]
+  const runningItems = tasks.filter(task => task.status === 'running').map(task => buildTaskCard(task))
+  const completedItems = tasks.filter(task => task.status === 'completed').map(task => buildTaskCard(task))
+  const failedItems = [
+    ...tasks.filter(task => task.status === 'failed').map(task => buildTaskCard(task)),
+    ...tasks.filter(task => task.status === 'cancelled').map(task => buildTaskCard(task, cancelledBadge)),
+  ]
+  return [
+    { status: 'pending', label: t('status.pending'), count: pendingItems.length, items: pendingItems },
+    { status: 'running', label: t('status.running'), count: runningItems.length, items: runningItems },
+    { status: 'completed', label: t('status.completed'), count: completedItems.length, items: completedItems },
+    { status: 'failed', label: `${t('status.failed')} / ${t('status.cancelled')}`, count: failedItems.length, items: failedItems },
+  ]
+})
 
 async function fetchData() {
   if (loading.value) return

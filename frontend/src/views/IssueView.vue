@@ -141,9 +141,10 @@
                   {{ t('issue.field.project') }}
                 </span>
                 <span class="metadata-value">
-                  <router-link :to="{ path: '/issues', query: { project_id: issue.project_id } }" class="app-link">
+                  <a v-if="projectUrl" :href="projectUrl" target="_blank" rel="noopener noreferrer" class="app-link">
                     {{ projectName }}
-                  </router-link>
+                  </a>
+                  <span v-else>{{ projectName }}</span>
                 </span>
               </div>
 
