@@ -909,8 +909,8 @@ onMounted(() => {
   flex-direction: column;
   gap: 14px;
   padding: 12px;
-  background: rgba(15, 23, 42, 0.06);
-  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(15, 23, 42, 0.02);
+  border: 1px solid rgba(15, 23, 42, 0.06);
   border-radius: 12px;
 }
 
