@@ -933,8 +933,10 @@ onMounted(() => {
   overflow-y: auto;
   overflow-x: hidden;
   border-radius: 8px;
-  /* bleed to the right edge of .project-picker so the scrollbar
-     sits flush against the container border, not indented by padding */
+  /* padding gives cards room to lift on hover without being clipped
+     by the overflow container; compensate margin so visual gap stays same */
+  padding: 3px 0;
+  margin-top: -3px;
   margin-right: -12px;
 }
 
