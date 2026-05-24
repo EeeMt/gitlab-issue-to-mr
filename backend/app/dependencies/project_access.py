@@ -33,6 +33,11 @@ def invalidate_project_access_cache() -> None:
 
     Call this after the global GitLab project list cache is invalidated so that
     OIDC users also see freshly created/modified projects on their next request.
+
+    Note: task.cancel() is fire-and-forget (this function is synchronous).
+    There is a narrow window where a racing background refresh task may
+    re-populate the cache immediately after the clear. In practice this is
+    harmless — the stale data would expire within its normal TTL anyway.
     """
     cleared = len(_project_access_cache)
     _project_access_cache.clear()

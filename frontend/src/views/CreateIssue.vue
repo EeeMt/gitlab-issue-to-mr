@@ -55,7 +55,7 @@
                   </div>
 
                   <!-- Cards grid (scrollable) -->
-                  <div v-else class="project-picker__scroll-wrap">
+                  <div v-else ref="scrollWrapRef" class="project-picker__scroll-wrap">
                     <div class="project-picker__grid">
                       <div
                         v-for="project in filteredProjects"
@@ -64,12 +64,17 @@
                         :class="{
                           'project-card--selected': formValue.project_id === project.id,
                         }"
+                        role="option"
+                        tabindex="0"
+                        :aria-selected="formValue.project_id === project.id"
                         @click="selectProject(project)"
+                        @keydown.enter.prevent="selectProject(project)"
+                        @keydown.space.prevent="selectProject(project)"
                       >
                         <div
                           class="project-card__avatar"
                           :style="{ background: getAvatarColor(project.name) }"
-                        >{{ project.name[0].toUpperCase() }}</div>
+                        >{{ (project.name?.[0] ?? '?').toUpperCase() }}</div>
 
                         <div class="project-card__body">
                           <div class="project-card__top">
@@ -78,7 +83,7 @@
                               <n-icon :component="CheckmarkOutline" size="11" />
                             </div>
                             <span
-                              v-else-if="recentProjectIds.slice(0, 3).includes(project.id)"
+                              v-else-if="recentProjectIds.slice(0, MAX_RECENT_SHOWN).includes(project.id)"
                               class="project-card__recent-pill"
                             >{{ t('createTask.recentProjects') }}</span>
                           </div>
@@ -322,7 +327,7 @@ const { isMobile } = useBreakpoints()
 
 // Loading states
 const loading = ref(false)
-const projectsLoading = ref(false)
+const projectsLoading = ref(true)   // start true so we show skeleton, not empty state
 const branchesLoading = ref(false)
 const submitting = ref(false)
 const promptTemplatesLoading = ref(false)
@@ -405,15 +410,16 @@ const branchOptions = computed(() =>
 const RECENT_PROJECTS_KEY = 'codify:recent_projects'
 
 const projectSearch = ref('')
+const scrollWrapRef = ref<HTMLElement | null>(null)
 
-const recentProjectIds = computed<number[]>(() => {
-  try {
-    const raw = localStorage.getItem(RECENT_PROJECTS_KEY)
-    return raw ? (JSON.parse(raw) as number[]) : []
-  } catch {
-    return []
-  }
-})
+function loadRecentIds(): number[] {
+  try { return JSON.parse(localStorage.getItem(RECENT_PROJECTS_KEY) ?? '[]') as number[] }
+  catch { return [] }
+}
+const recentProjectIds = ref<number[]>(loadRecentIds())
+
+const MAX_RECENT_STORED = 5
+const MAX_RECENT_SHOWN  = 3
 
 function getNamespace(project: Project): string {
   const ns = project.path_with_namespace
@@ -427,7 +433,8 @@ const AVATAR_COLORS = [
   '#14b8a6', '#84cc16',
 ]
 function getAvatarColor(name: string): string {
-  return AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length]
+  const hash = [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) & 0xffff, 0)
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length]
 }
 
 const sortedProjects = computed(() => {
@@ -453,21 +460,18 @@ const filteredProjects = computed(() => {
   )
 })
 
-// --- no longer needed stubs removed ---
-
+// use a template ref to avoid fragile global DOM query
 watch(projectSearch, () => {
-  // scroll the picker back to top when the filter changes
-  const el = document.querySelector('.project-picker__scroll-wrap')
-  if (el) el.scrollTop = 0
+  scrollWrapRef.value && (scrollWrapRef.value.scrollTop = 0)
 })
 
 function saveRecentProject(projectId: number) {
   try {
-    const existing = recentProjectIds.value.filter(id => id !== projectId)
-    const updated = [projectId, ...existing].slice(0, 5)
+    const updated = [projectId, ...recentProjectIds.value.filter(id => id !== projectId)].slice(0, MAX_RECENT_STORED)
+    recentProjectIds.value = updated    // triggers reactivity
     localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(updated))
   } catch {
-    // ignore
+    // ignore quota / private-mode errors
   }
 }
 

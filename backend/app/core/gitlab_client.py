@@ -445,7 +445,7 @@ class GitLabClient:
             {"visibility": "public"},
         ]:
             try:
-                page_results = self.gl.projects.list(per_page=per_page, **query_kwargs)
+                page_results = self.gl.projects.list(per_page=per_page, all=True, **query_kwargs)
                 for p in page_results:
                     if getattr(p, "marked_for_deletion_at", None):
                         logger.debug("Skipping project pending deletion: %s", p.path_with_namespace)

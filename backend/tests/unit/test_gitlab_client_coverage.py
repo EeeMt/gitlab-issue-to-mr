@@ -668,9 +668,9 @@ class TestGetProjects(unittest.TestCase):
 
         self.assertEqual(client.gl.projects.list.call_count, 3)
         calls = client.gl.projects.list.call_args_list
-        self.assertIn({"per_page": 50, "membership": True}, [c.kwargs for c in calls])
-        self.assertIn({"per_page": 50, "visibility": "internal"}, [c.kwargs for c in calls])
-        self.assertIn({"per_page": 50, "visibility": "public"}, [c.kwargs for c in calls])
+        self.assertIn({"per_page": 50, "all": True, "membership": True}, [c.kwargs for c in calls])
+        self.assertIn({"per_page": 50, "all": True, "visibility": "internal"}, [c.kwargs for c in calls])
+        self.assertIn({"per_page": 50, "all": True, "visibility": "public"}, [c.kwargs for c in calls])
 
 
 # ===================================================================
