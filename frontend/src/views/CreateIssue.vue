@@ -102,9 +102,11 @@
             <div class="create-issue-form__section">
               <div class="create-issue-form__section-title">{{ t('issue.field.title') }}</div>
               <n-form-item :label="t('issue.field.title')" path="title">
-                <n-input
+                <n-auto-complete
                   v-model:value="formValue.title"
+                  :options="recentTitleOptions"
                   :placeholder="t('issue.field.title')"
+                  :get-show="() => true"
                 />
               </n-form-item>
 
@@ -408,6 +410,8 @@ const branchOptions = computed(() =>
 
 // Project card picker state
 const RECENT_PROJECTS_KEY = 'codify:recent_projects'
+const RECENT_TITLES_KEY   = 'codify:recent_titles'
+const MAX_RECENT_TITLES   = 10
 
 const projectSearch = ref('')
 const scrollWrapRef = ref<HTMLElement | null>(null)
@@ -417,6 +421,20 @@ function loadRecentIds(): number[] {
   catch { return [] }
 }
 const recentProjectIds = ref<number[]>(loadRecentIds())
+
+function loadRecentTitles(): string[] {
+  try { return JSON.parse(localStorage.getItem(RECENT_TITLES_KEY) ?? '[]') as string[] }
+  catch { return [] }
+}
+const recentTitles = ref<string[]>(loadRecentTitles())
+
+const recentTitleOptions = computed(() => {
+  const q = formValue.value.title.trim().toLowerCase()
+  const list = q
+    ? recentTitles.value.filter(t => t.toLowerCase().includes(q))
+    : recentTitles.value
+  return list.map(t => ({ label: t, value: t }))
+})
 
 const MAX_RECENT_STORED = 5
 const MAX_RECENT_SHOWN  = 3
@@ -470,6 +488,17 @@ function saveRecentProject(projectId: number) {
     const updated = [projectId, ...recentProjectIds.value.filter(id => id !== projectId)].slice(0, MAX_RECENT_STORED)
     recentProjectIds.value = updated    // triggers reactivity
     localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(updated))
+  } catch {
+    // ignore quota / private-mode errors
+  }
+}
+
+function saveRecentTitle(title: string) {
+  if (!title.trim()) return
+  try {
+    const updated = [title, ...recentTitles.value.filter(t => t !== title)].slice(0, MAX_RECENT_TITLES)
+    recentTitles.value = updated
+    localStorage.setItem(RECENT_TITLES_KEY, JSON.stringify(updated))
   } catch {
     // ignore quota / private-mode errors
   }
@@ -616,6 +645,7 @@ async function handleSubmit() {
 
     const issue = await createIssue(request)
     saveRecentProject(formValue.value.project_id!)
+    saveRecentTitle(formValue.value.title)
     message.success(t('issue.create'))
     router.push(`/issues/${issue.id}`)
   } catch (error: any) {
