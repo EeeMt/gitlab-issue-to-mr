@@ -1627,7 +1627,6 @@ describe('IssueView', () => {
       expect(mockEvent.stopPropagation).toHaveBeenCalled()
       expect(vm.showRescheduleDrawer).toBe(true)
       expect(vm.rescheduleTargetTask?.id).toBe(8)
-      expect(vm.rescheduleTaskSchedule).toBe(new Date('2024-01-01T12:00:00Z').getTime())
     })
 
     it('renders reschedule action for task initiator even when issue is owned by another user', async () => {
@@ -1864,60 +1863,38 @@ describe('IssueView', () => {
   // reschedule drawer
   // =========================================================================
   describe('reschedule drawer', () => {
-    it('opens reschedule drawer and preloads schedule context', async () => {
+    it('opens reschedule drawer and passes the selected task to RescheduleDrawer', async () => {
       setupDefaultMocks()
-      mockApi.getScheduledTasks.mockResolvedValue([{ id: 41 }])
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
 
-      await vm.openRescheduleDrawer({
+      vm.openRescheduleDrawer({
         id: 8,
         user_prompt: 'Scheduled task',
         scheduled_at: '2024-01-01T12:00:00Z',
       })
-      await flushPromises()
+      await nextTick()
 
+      const drawer = wrapper.findComponent({ name: 'RescheduleDrawer' })
       expect(vm.showRescheduleDrawer).toBe(true)
       expect(vm.rescheduleTargetTask.id).toBe(8)
-      expect(vm.rescheduleTaskSchedule).toBe(new Date('2024-01-01T12:00:00Z').getTime())
-      expect(mockApi.getScheduledTasks).toHaveBeenCalled()
-      expect(mockApi.getConfig).toHaveBeenCalled()
+      expect(drawer.props('show')).toBe(true)
+      expect(drawer.props('task').id).toBe(8)
     })
 
-    it('submits reschedule with selected future time', async () => {
-      setupDefaultMocks()
-      mockApi.rescheduleTask.mockResolvedValue({ id: 8 })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-      const futureMs = Date.now() + 7200000
-
-      await vm.openRescheduleDrawer({ id: 8, user_prompt: 'Scheduled task', scheduled_at: null })
-      vm.rescheduleTaskSchedule = futureMs
-
-      await vm.handleSubmitReschedule()
-      await flushPromises()
-
-      expect(mockApi.rescheduleTask).toHaveBeenCalledWith(8, {
-        scheduled_datetime: new Date(futureMs).toISOString(),
-      })
-      expect(mockMessage.success).toHaveBeenCalledWith('taskView.taskRescheduled')
-      expect(vm.showRescheduleDrawer).toBe(false)
-      expect(vm.rescheduleTargetTask).toBeNull()
-    })
-
-    it('warns when reschedule drawer has no selected time', async () => {
+    it('refreshes issue data when RescheduleDrawer emits rescheduled', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
 
-      await vm.openRescheduleDrawer({ id: 8, user_prompt: 'Scheduled task', scheduled_at: null })
-      vm.rescheduleTaskSchedule = null
+      vm.openRescheduleDrawer({ id: 8, user_prompt: 'Scheduled task', scheduled_at: null })
+      await nextTick()
 
-      await vm.handleSubmitReschedule()
+      const drawer = wrapper.findComponent({ name: 'RescheduleDrawer' })
+      drawer.vm.$emit('rescheduled', { id: 8 })
       await flushPromises()
 
-      expect(mockMessage.warning).toHaveBeenCalledWith('taskView.selectRescheduleTime')
-      expect(mockApi.rescheduleTask).not.toHaveBeenCalled()
+      expect(mockApi.getIssue).toHaveBeenCalledTimes(2)
     })
   })
 

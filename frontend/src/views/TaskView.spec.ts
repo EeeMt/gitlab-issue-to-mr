@@ -368,8 +368,10 @@ vi.mock('naive-ui', () => ({
   NDrawer: {
     name: 'NDrawer',
     props: ['show', 'width', 'placement'],
-    setup(_props: any, { slots }: any) {
-      return () => h('div', { class: 'n-drawer' }, slots.default?.())
+    setup(props: any, { attrs, slots }: any) {
+      return () => props.show
+        ? h('div', { ...attrs, class: ['n-drawer', attrs.class] }, slots.default?.())
+        : null
     }
   },
   NDrawerContent: {
@@ -669,7 +671,6 @@ describe('TaskView', () => {
       await flushPromises()
 
       expect(wrapper.vm.showScheduleDrawer).toBe(true)
-      expect(wrapper.vm.heatmapTarget).toBe('retry')
       expect(wrapper.find('[data-testid="task-actions-card"]').exists()).toBe(false)
       expect(wrapper.find('.n-date-picker').exists()).toBe(true)
       expect(wrapper.text()).toContain('taskView.scheduleRetry')
@@ -872,7 +873,7 @@ describe('TaskView', () => {
       expect(mockApi.executeTask).toHaveBeenCalledWith(1)
     })
 
-    it('should call rescheduleTask API on reschedule', async () => {
+    it('should open reschedule drawer with the current task', async () => {
       await mountComponent({
         status: 'pending',
         scheduled_at: new Date(Date.now() + 60 * 60 * 1000).toISOString()
@@ -882,23 +883,32 @@ describe('TaskView', () => {
         return (mockApi.getTask as Mock).mock.calls.length > 0
       })
 
-      const futureTimestamp = Date.now() + 24 * 60 * 60 * 1000
-      const futureIso = new Date(futureTimestamp).toISOString()
-      ;(mockApi.rescheduleTask as Mock).mockResolvedValue(
-        createMockTaskWithStatus('pending', { scheduled_at: futureIso })
-      )
+      const rescheduleButton = wrapper
+        .findAll('button')
+        .find((button) => button.text().includes('taskView.rescheduleTask'))
+      expect(rescheduleButton).toBeTruthy()
 
-      // Set the reschedule datetime
-      wrapper.vm.rescheduleDatetime = futureTimestamp
+      await rescheduleButton!.trigger('click')
+      await nextTick()
 
-      // Call handleReschedule directly
-      await wrapper.vm.handleReschedule()
+      const drawer = wrapper.findComponent({ name: 'RescheduleDrawer' })
+      expect(wrapper.vm.showRescheduleDrawer).toBe(true)
+      expect(drawer.props('show')).toBe(true)
+      expect(drawer.props('task').id).toBe(1)
+    })
 
-      await vi.waitFor(() => {
-        return (mockApi.rescheduleTask as Mock).mock.calls.length > 0
+    it('should update task when reschedule drawer emits rescheduled', async () => {
+      const scheduledAt = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+      await mountComponent({ status: 'pending', scheduled_at: scheduledAt })
+      const updatedTask = createMockTaskWithStatus('pending', {
+        scheduled_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
       })
 
-      expect(mockApi.rescheduleTask).toHaveBeenCalled()
+      const drawer = wrapper.findComponent({ name: 'RescheduleDrawer' })
+      drawer.vm.$emit('rescheduled', updatedTask)
+      await nextTick()
+
+      expect(wrapper.vm.task).toEqual(updatedTask)
     })
 
     it('should call retryTask API with schedule on retry with schedule', async () => {
@@ -1374,39 +1384,6 @@ describe('TaskView', () => {
     })
   })
 
-  describe('handleReschedule validation', () => {
-    it('should not call API when no datetime is selected', async () => {
-      await mountComponent({ status: 'pending', scheduled_at: '2026-04-01T10:00:00Z' })
-
-      wrapper.vm.rescheduleDatetime = null
-
-      await wrapper.vm.handleReschedule()
-
-      expect(mockApi.rescheduleTask).not.toHaveBeenCalled()
-    })
-
-    it('should not call API when datetime is in the past', async () => {
-      await mountComponent({ status: 'pending', scheduled_at: '2026-04-01T10:00:00Z' })
-
-      wrapper.vm.rescheduleDatetime = Date.now() - 1000
-
-      await wrapper.vm.handleReschedule()
-
-      expect(mockApi.rescheduleTask).not.toHaveBeenCalled()
-    })
-
-    it('should handle rescheduleTask API error with slot error extraction', async () => {
-      await mountComponent({ status: 'pending', scheduled_at: '2026-04-01T10:00:00Z' })
-      ;(mockApi.rescheduleTask as Mock).mockRejectedValue(new Error('Slot full'))
-
-      wrapper.vm.rescheduleDatetime = Date.now() + 86400000
-
-      await wrapper.vm.handleReschedule()
-
-      expect(wrapper.vm.actionLoading).toBe(false)
-    })
-  })
-
   describe('onRawTabOpen and onRawTabClose', () => {
     it('should fetch container logs for completed tasks via onRawTabOpen using source=db', async () => {
       await mountComponent({ status: 'completed', container_id: 'container-123' })
@@ -1492,23 +1469,10 @@ describe('TaskView', () => {
   })
 
   describe('handleScheduleHeatmapCellClick', () => {
-    it('should set rescheduleDatetime and close drawer', async () => {
-      await mountComponent({ status: 'pending', scheduled_at: '2026-04-01T10:00:00Z' })
-
-      wrapper.vm.showScheduleDrawer = true
-      const clickTime = Date.now() + 3600000
-
-      wrapper.vm.handleScheduleHeatmapCellClick(clickTime)
-
-      expect(wrapper.vm.rescheduleDatetime).toBe(clickTime)
-      expect(wrapper.vm.showScheduleDrawer).toBe(false)
-    })
-
     it('should set retryScheduleDatetime and keep retry drawer open', async () => {
       await mountComponent({ status: 'failed' })
 
       wrapper.vm.showScheduleDrawer = true
-      wrapper.vm.heatmapTarget = 'retry'
       const clickTime = Date.now() + 3600000
 
       wrapper.vm.handleScheduleHeatmapCellClick(clickTime)
@@ -1607,22 +1571,6 @@ describe('TaskView', () => {
       expect(wrapper.vm.logs).toBe('')
       expect(wrapper.vm.containerLogs).toBe('')
       expect(mockEventSourceInstance.close).toHaveBeenCalled()
-    })
-  })
-
-  describe('syncRescheduleDatetime', () => {
-    it('should sync rescheduleDatetime from task scheduled_at', async () => {
-      const scheduledAt = '2026-04-01T10:00:00Z'
-      await mountComponent({ status: 'pending', scheduled_at: scheduledAt })
-
-      // After mount, syncRescheduleDatetime should have been called
-      expect(wrapper.vm.rescheduleDatetime).toBe(new Date(scheduledAt).getTime())
-    })
-
-    it('should set null when task has no scheduled_at', async () => {
-      await mountComponent({ status: 'pending', scheduled_at: null })
-
-      expect(wrapper.vm.rescheduleDatetime).toBeNull()
     })
   })
 
