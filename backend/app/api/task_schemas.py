@@ -1,9 +1,9 @@
 """Pydantic schemas for Task API request/response models."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from app.core.scheduling import normalize_scheduled_datetime
 from app.core.utcnow import utcnow
@@ -40,17 +40,33 @@ class UpdateTaskRequest(BaseModel):
 
     Fields:
         user_prompt: New prompt text. Must be non-empty if provided.
+            Cannot be null — omit the key to leave unchanged.
         priority: Task priority (0 = low, 1 = normal, 2 = high).
         provider_id: AI provider ID. Pass ``null`` / ``None`` to clear the
             provider (revert to system default).  Omit the key entirely to
             leave the current value unchanged.
         require_changes: Whether the task must produce file changes.
+            Cannot be null — omit the key to leave unchanged.
     """
 
     user_prompt: Optional[str] = None
     priority: Optional[int] = None
     provider_id: Optional[int] = None  # None = system default / clear
     require_changes: Optional[bool] = None
+
+    @field_validator("user_prompt", mode="before")
+    @classmethod
+    def user_prompt_not_null(cls, v: Any) -> Any:
+        if v is None:
+            raise ValueError("user_prompt cannot be null; omit the key to leave it unchanged")
+        return v
+
+    @field_validator("require_changes", mode="before")
+    @classmethod
+    def require_changes_not_null(cls, v: Any) -> Any:
+        if v is None:
+            raise ValueError("require_changes cannot be null; omit the key to leave it unchanged")
+        return v
 
 
 class CreateTaskRequest(BaseModel):

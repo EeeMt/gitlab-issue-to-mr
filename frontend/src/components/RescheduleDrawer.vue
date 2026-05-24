@@ -116,7 +116,9 @@ watch(() => props.show, async (val) => {
     const config = await getConfig()
     slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
     slotEnforce.value = config.runtime?.slot_max_tasks_enforce ?? false
-  } catch { /* ignore */ }
+  } catch {
+    console.warn('[RescheduleDrawer] Failed to load slot config; heatmap capacity limits may be inaccurate')
+  }
 })
 
 async function handleSubmit() {

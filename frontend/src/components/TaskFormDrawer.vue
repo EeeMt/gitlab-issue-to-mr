@@ -525,18 +525,28 @@ async function handleCreate() {
 
 async function handleEdit() {
   if (!props.task) return
-  if (!prompt.value.trim()) {
+  const trimmedPrompt = prompt.value.trim()
+  if (!trimmedPrompt) {
     message.warning(t('createTask.pleaseEnterPrompt'))
+    return
+  }
+  // Build a partial payload: only include fields that actually changed.
+  const orig = props.task
+  const payload: UpdateTaskRequest = {}
+  if (trimmedPrompt !== orig.user_prompt) payload.user_prompt = trimmedPrompt
+  if (priority.value !== orig.priority) payload.priority = priority.value
+  if ((selectedProviderId.value ?? null) !== (orig.provider_id ?? null)) {
+    payload.provider_id = selectedProviderId.value
+  }
+  if (requireChanges.value !== orig.require_changes) payload.require_changes = requireChanges.value
+
+  if (Object.keys(payload).length === 0) {
+    emit('update:show', false)
     return
   }
   submitLoading.value = true
   try {
-    const updated = await updateTask(props.task.id, {
-      user_prompt: prompt.value.trim(),
-      priority: priority.value,
-      provider_id: selectedProviderId.value,
-      require_changes: requireChanges.value
-    })
+    const updated = await updateTask(orig.id, payload)
     message.success(t('taskView.taskUpdated'))
     emit('update:show', false)
     emit('updated', updated)

@@ -619,4 +619,132 @@ describe('TaskFormDrawer', () => {
       expect(wrapper.vm.slotCapacityLoading).toBe(false)
     })
   })
+
+  describe('edit mode', () => {
+    const existingTask = {
+      id: 42,
+      user_prompt: 'Original prompt',
+      priority: 1,
+      require_changes: true,
+      provider_id: 7,
+    }
+
+    async function mountEditDrawer(taskOverrides: Record<string, any> = {}) {
+      wrapper = mount(TaskFormDrawer, {
+        props: {
+          show: false,
+          mode: 'edit',
+          task: { ...existingTask, ...taskOverrides },
+        },
+      })
+      await flushPromises()
+      return wrapper
+    }
+
+    it('pre-fills form from task when drawer opens', async () => {
+      await mountEditDrawer()
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      expect(wrapper.vm.prompt).toBe('Original prompt')
+      expect(wrapper.vm.priority).toBe(1)
+      expect(wrapper.vm.requireChanges).toBe(true)
+      expect(wrapper.vm.selectedProviderId).toBe(7)
+    })
+
+    it('re-populates form from updated task on each open', async () => {
+      await mountEditDrawer()
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      await wrapper.setProps({ show: false })
+      await wrapper.setProps({ task: { ...existingTask, user_prompt: 'Updated prompt', provider_id: null } })
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      expect(wrapper.vm.prompt).toBe('Updated prompt')
+      expect(wrapper.vm.selectedProviderId).toBeNull()
+    })
+
+    it('calls updateTask with only changed fields', async () => {
+      await mountEditDrawer()
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      wrapper.vm.prompt = 'New prompt'
+      await wrapper.find('[data-testid="task-form-save-button"]').trigger('click')
+      await flushPromises()
+
+      expect(mockApi.updateTask).toHaveBeenCalledWith(42, { user_prompt: 'New prompt' })
+    })
+
+    it('sends no request and closes when nothing changed', async () => {
+      await mountEditDrawer()
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      await wrapper.find('[data-testid="task-form-save-button"]').trigger('click')
+      await flushPromises()
+
+      expect(mockApi.updateTask).not.toHaveBeenCalled()
+      expect(wrapper.emitted('update:show')?.at(-1)).toEqual([false])
+    })
+
+    it('emits updated event with server response on success', async () => {
+      const updatedTask = { ...existingTask, user_prompt: 'New prompt' }
+      mockApi.updateTask.mockResolvedValue(updatedTask)
+      await mountEditDrawer()
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      wrapper.vm.prompt = 'New prompt'
+      await wrapper.find('[data-testid="task-form-save-button"]').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.emitted('updated')?.[0]).toEqual([updatedTask])
+      expect(wrapper.emitted('update:show')?.at(-1)).toEqual([false])
+      expect(mockMessage.success).toHaveBeenCalledWith('taskView.taskUpdated')
+    })
+
+    it('warns and does not call API when prompt is cleared', async () => {
+      await mountEditDrawer()
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      wrapper.vm.prompt = '   '
+      await wrapper.find('[data-testid="task-form-save-button"]').trigger('click')
+      await flushPromises()
+
+      expect(mockMessage.warning).toHaveBeenCalledWith('createTask.pleaseEnterPrompt')
+      expect(mockApi.updateTask).not.toHaveBeenCalled()
+    })
+
+    it('shows string detail from 409 response as error toast', async () => {
+      mockApi.updateTask.mockRejectedValue({
+        response: { data: { detail: 'Task is already running' } },
+      })
+      await mountEditDrawer()
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      wrapper.vm.prompt = 'Changed'
+      await wrapper.find('[data-testid="task-form-save-button"]').trigger('click')
+      await flushPromises()
+
+      expect(mockMessage.error).toHaveBeenCalledWith('Task is already running')
+    })
+
+    it('shows generic fallback toast on non-string error detail', async () => {
+      mockApi.updateTask.mockRejectedValue({ response: { data: {} } })
+      await mountEditDrawer()
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      wrapper.vm.priority = 0
+      await wrapper.find('[data-testid="task-form-save-button"]').trigger('click')
+      await flushPromises()
+
+      expect(mockMessage.error).toHaveBeenCalledWith('taskView.failedToUpdateTask')
+    })
+  })
 })

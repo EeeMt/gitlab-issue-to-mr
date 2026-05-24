@@ -824,12 +824,23 @@ async def update_task(
         task.provider_id = request.provider_id
 
     if "require_changes" in updated_fields:
-        if request.require_changes is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="require_changes must be a boolean",
-            )
-        task.require_changes = request.require_changes
+        task.require_changes = request.require_changes  # type: ignore[assignment]  # null rejected by schema
+
+    # Re-read the row inside the same transaction before committing.
+    # Under READ COMMITTED, this sees any status changes that were committed by a
+    # concurrent worker *before* this transaction acquired its FOR UPDATE lock.
+    # This prevents a successful PATCH on a task whose status was already advanced
+    # to RUNNING (or beyond) by the time we are ready to write.
+    await db.refresh(task)
+    if task.status not in (TaskStatus.PENDING, TaskStatus.QUEUED):
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Task {task_id} can no longer be edited: "
+                f"status changed to '{task.status.value}' while processing the request."
+            ),
+        )
 
     await db.commit()
     await db.refresh(task)
