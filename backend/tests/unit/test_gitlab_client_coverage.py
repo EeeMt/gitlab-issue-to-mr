@@ -660,13 +660,17 @@ class TestGetProjects(unittest.TestCase):
         self.assertEqual(result[0]["id"], 1)
 
     def test_custom_per_page(self):
-        """Passes per_page to API — line 367."""
+        """Passes per_page to all three queries — membership, internal, public."""
         client = _make_client()
         client.gl.projects.list.return_value = []
 
         client.get_projects(per_page=50)
 
-        client.gl.projects.list.assert_called_once_with(per_page=50, membership=True)
+        self.assertEqual(client.gl.projects.list.call_count, 3)
+        calls = client.gl.projects.list.call_args_list
+        self.assertIn({"per_page": 50, "membership": True}, [c.kwargs for c in calls])
+        self.assertIn({"per_page": 50, "visibility": "internal"}, [c.kwargs for c in calls])
+        self.assertIn({"per_page": 50, "visibility": "public"}, [c.kwargs for c in calls])
 
 
 # ===================================================================

@@ -248,6 +248,7 @@ export interface Project {
   path_with_namespace: string
   default_branch?: string
   web_url?: string | null
+  description?: string | null
 }
 
 export interface Branch {

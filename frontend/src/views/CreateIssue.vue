@@ -28,20 +28,70 @@
           >
             <div class="create-issue-form__section">
               <div class="create-issue-form__section-title">{{ t('issue.field.project') }}</div>
-              <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-                <n-gi>
-                  <n-form-item :label="t('issue.field.project')" path="project_id">
-                    <n-select
-                      v-model:value="formValue.project_id"
-                      :options="projectOptions"
-                      :loading="projectsLoading"
-                      :placeholder="t('createTask.selectProject')"
-                      filterable
-                      @update:value="handleProjectChange"
-                    />
-                  </n-form-item>
-                </n-gi>
-              </n-grid>
+              <n-form-item path="project_id" :show-label="false">
+                <!-- Search box -->
+                <div class="project-picker">
+                  <n-input
+                    v-model:value="projectSearch"
+                    :placeholder="t('createTask.searchProjects')"
+                    clearable
+                    class="project-picker__search"
+                  >
+                    <template #prefix>
+                      <n-icon :component="SearchOutline" size="15" style="opacity: 0.45" />
+                    </template>
+                  </n-input>
+
+                  <!-- Loading skeleton -->
+                  <div v-if="projectsLoading" class="project-picker__scroll-wrap">
+                    <div class="project-picker__grid">
+                      <div v-for="i in 6" :key="i" class="project-card project-card--skeleton" />
+                    </div>
+                  </div>
+
+                  <!-- Empty state -->
+                  <div v-else-if="filteredProjects.length === 0" class="project-picker__empty">
+                    {{ t('createTask.noProjectsFound') }}
+                  </div>
+
+                  <!-- Cards grid (scrollable) -->
+                  <div v-else class="project-picker__scroll-wrap">
+                    <div class="project-picker__grid">
+                      <div
+                        v-for="project in filteredProjects"
+                        :key="project.id"
+                        class="project-card"
+                        :class="{
+                          'project-card--selected': formValue.project_id === project.id,
+                        }"
+                        @click="selectProject(project)"
+                      >
+                        <div
+                          class="project-card__avatar"
+                          :style="{ background: getAvatarColor(project.name) }"
+                        >{{ project.name[0].toUpperCase() }}</div>
+
+                        <div class="project-card__body">
+                          <div class="project-card__top">
+                            <span class="project-card__name">{{ project.name }}</span>
+                            <div v-if="formValue.project_id === project.id" class="project-card__check-badge">
+                              <n-icon :component="CheckmarkOutline" size="11" />
+                            </div>
+                            <span
+                              v-else-if="recentProjectIds.slice(0, 3).includes(project.id)"
+                              class="project-card__recent-pill"
+                            >{{ t('createTask.recentProjects') }}</span>
+                          </div>
+                          <div class="project-card__namespace">{{ getNamespace(project) }}</div>
+                          <div v-if="project.description" class="project-card__description">
+                            {{ project.description }}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </n-form-item>
             </div>
 
             <div class="create-issue-form__section">
@@ -259,7 +309,7 @@ import {
   type FormInst,
   type FormRules,
 } from 'naive-ui'
-import { DocumentTextOutline, WarningOutline, CloseOutline, GitBranchOutline, SparklesOutline, GitMergeOutline } from '@vicons/ionicons5'
+import { DocumentTextOutline, WarningOutline, CloseOutline, GitBranchOutline, SparklesOutline, GitMergeOutline, SearchOutline, CheckmarkOutline } from '@vicons/ionicons5'
 import PageHeader from '../components/PageHeader.vue'
 import VariableEditor from '../components/VariableEditor.vue'
 import { createIssue, getProjects, getBranches, getPromptTemplates, type Project, type Branch, type CreateIssueRequest, type PromptTemplate } from '../api'
@@ -344,20 +394,88 @@ const rules: FormRules = {
   },
 }
 
-// Options
-const projectOptions = computed(() =>
-  projects.value.map(p => ({
-    label: p.path_with_namespace,
-    value: p.id,
-  }))
-)
-
 const branchOptions = computed(() =>
   branches.value.map(b => ({
     label: b.name,
     value: b.name,
   }))
 )
+
+// Project card picker state
+const RECENT_PROJECTS_KEY = 'codify:recent_projects'
+
+const projectSearch = ref('')
+
+const recentProjectIds = computed<number[]>(() => {
+  try {
+    const raw = localStorage.getItem(RECENT_PROJECTS_KEY)
+    return raw ? (JSON.parse(raw) as number[]) : []
+  } catch {
+    return []
+  }
+})
+
+function getNamespace(project: Project): string {
+  const ns = project.path_with_namespace
+  const suffix = '/' + project.name
+  return ns.endsWith(suffix) ? ns.slice(0, -suffix.length) : ns
+}
+
+const AVATAR_COLORS = [
+  '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b',
+  '#10b981', '#06b6d4', '#f97316', '#6366f1',
+  '#14b8a6', '#84cc16',
+]
+function getAvatarColor(name: string): string {
+  return AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length]
+}
+
+const sortedProjects = computed(() => {
+  const recentIds = recentProjectIds.value
+  return [...projects.value].sort((a, b) => {
+    const ai = recentIds.indexOf(a.id)
+    const bi = recentIds.indexOf(b.id)
+    if (ai !== -1 && bi !== -1) return ai - bi
+    if (ai !== -1) return -1
+    if (bi !== -1) return 1
+    return a.path_with_namespace.localeCompare(b.path_with_namespace)
+  })
+})
+
+const filteredProjects = computed(() => {
+  const q = projectSearch.value.trim().toLowerCase()
+  if (!q) return sortedProjects.value
+  return sortedProjects.value.filter(
+    p =>
+      p.name.toLowerCase().includes(q) ||
+      p.path_with_namespace.toLowerCase().includes(q) ||
+      (p.description || '').toLowerCase().includes(q)
+  )
+})
+
+// --- no longer needed stubs removed ---
+
+watch(projectSearch, () => {
+  // scroll the picker back to top when the filter changes
+  const el = document.querySelector('.project-picker__scroll-wrap')
+  if (el) el.scrollTop = 0
+})
+
+function saveRecentProject(projectId: number) {
+  try {
+    const existing = recentProjectIds.value.filter(id => id !== projectId)
+    const updated = [projectId, ...existing].slice(0, 5)
+    localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(updated))
+  } catch {
+    // ignore
+  }
+}
+
+function selectProject(project: Project) {
+  formValue.value.project_id = project.id
+  saveRecentProject(project.id)
+  handleProjectChange(project.id)
+}
 
 // Fetch projects
 async function fetchProjects() {
@@ -462,6 +580,7 @@ function cancelTemplateOverwrite() {
 
 async function handleReset() {
   branches.value = []
+  projectSearch.value = ''
   Object.assign(formValue.value, createInitialFormValue())
   formRef.value?.restoreValidation()
 }
@@ -777,5 +896,219 @@ onMounted(() => {
   border-top: 5px solid transparent;
   border-bottom: 5px solid transparent;
   border-left: 7px solid rgba(15, 23, 42, 0.22);
+}
+
+/* ── Project picker ──────────────────────────────────── */
+.project-picker {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.project-picker__search {
+  width: 100%;
+}
+
+.project-picker__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 36px 0;
+  color: rgba(15, 23, 42, 0.38);
+  font-size: 13px;
+}
+
+.project-picker__scroll-wrap {
+  max-height: 290px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
+  border-radius: 8px;
+}
+
+.project-picker__scroll-wrap::-webkit-scrollbar {
+  width: 5px;
+}
+.project-picker__scroll-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+.project-picker__scroll-wrap::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.18);
+  border-radius: 10px;
+}
+
+.project-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  padding-right: 2px; /* prevent cards from clipping under scrollbar */
+}
+
+@media (max-width: 900px) {
+  .project-picker__grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 560px) {
+  .project-picker__grid { grid-template-columns: 1fr; }
+}
+
+/* ── Project card ───────────────────────────────────── */
+.project-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 12px 13px;
+  border: 1.5px solid rgba(15, 23, 42, 0.09);
+  border-radius: 12px;
+  cursor: pointer;
+  background: #fff;
+  transition: transform 0.18s cubic-bezier(0.34, 1.4, 0.64, 1),
+              box-shadow 0.18s ease,
+              border-color 0.18s ease;
+  min-height: 68px;
+  overflow: hidden;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .project-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(32, 128, 240, 0.35);
+    box-shadow: 0 6px 20px rgba(32, 128, 240, 0.1);
+  }
+}
+
+.project-card--selected {
+  border-color: #2080f0;
+  background: linear-gradient(135deg, rgba(32, 128, 240, 0.04) 0%, rgba(32, 128, 240, 0.02) 100%);
+  box-shadow: 0 0 0 3px rgba(32, 128, 240, 0.12), 0 4px 16px rgba(32, 128, 240, 0.1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .project-card--selected:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 0 3px rgba(32, 128, 240, 0.18), 0 8px 24px rgba(32, 128, 240, 0.14);
+  }
+}
+
+/* Skeleton */
+.project-card--skeleton {
+  background: rgba(15, 23, 42, 0.03);
+  border-color: rgba(15, 23, 42, 0.05);
+  cursor: default;
+  overflow: hidden;
+  min-height: 74px;
+}
+
+.project-card--skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.7) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Avatar */
+.project-card__avatar {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.02em;
+  margin-top: 1px;
+  user-select: none;
+}
+
+/* Card body */
+.project-card__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-card__top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.project-card__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.project-card__check-badge {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #2080f0;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.project-card__recent-pill {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 20px;
+  background: rgba(32, 128, 240, 0.1);
+  color: #2080f0;
+  letter-spacing: 0.01em;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.project-card__namespace {
+  font-size: 11px;
+  color: rgba(15, 23, 42, 0.4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  line-height: 1.5;
+}
+
+.project-card__description {
+  font-size: 11.5px;
+  color: rgba(15, 23, 42, 0.5);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.55;
+  margin-top: 3px;
 }
 </style>

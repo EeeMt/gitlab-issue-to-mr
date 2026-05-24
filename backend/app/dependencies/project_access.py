@@ -28,6 +28,21 @@ _project_access_refresh_tasks: dict[str, asyncio.Task] = {}
 logger = logging.getLogger(__name__)
 
 
+def invalidate_project_access_cache() -> None:
+    """Clear all per-user project access caches.
+
+    Call this after the global GitLab project list cache is invalidated so that
+    OIDC users also see freshly created/modified projects on their next request.
+    """
+    cleared = len(_project_access_cache)
+    _project_access_cache.clear()
+    for task in list(_project_access_refresh_tasks.values()):
+        if not task.done():
+            task.cancel()
+    _project_access_refresh_tasks.clear()
+    logger.info("Per-user project access cache cleared (%d entries removed)", cleared)
+
+
 @dataclass
 class ProjectAccessScope:
     """Resolved project access scope for the current request."""

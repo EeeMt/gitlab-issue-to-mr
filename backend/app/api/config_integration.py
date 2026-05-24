@@ -159,6 +159,8 @@ async def invalidate_project_cache(
     Forces the next request to fetch a fresh project list from GitLab.
     """
     from app.core.gitlab_client import invalidate_project_list_cache
+    from app.dependencies.project_access import invalidate_project_access_cache
 
     invalidate_project_list_cache()
+    invalidate_project_access_cache()
     return {"status": "success", "message": "Project cache invalidated"}

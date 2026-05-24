@@ -426,19 +426,36 @@ class GitLabClient:
     def get_projects(self, per_page: int = 100) -> list:
         """Get list of accessible projects.
 
+        Fetches member projects plus public/internal projects visible to the bot
+        user, mirroring the behaviour of the OAuth user path.  Results are
+        deduplicated by project ID.
+
         Args:
-            per_page: Number of projects per page
+            per_page: Number of projects per page for each query
 
         Returns:
             List of project dicts with id, name, path_with_namespace
         """
         logger.info("Fetching accessible projects")
-        projects = self.gl.projects.list(per_page=per_page, membership=True)
+        projects_by_id: dict[int, Any] = {}
+
+        for query_kwargs in [
+            {"membership": True},
+            {"visibility": "internal"},
+            {"visibility": "public"},
+        ]:
+            try:
+                page_results = self.gl.projects.list(per_page=per_page, **query_kwargs)
+                for p in page_results:
+                    if getattr(p, "marked_for_deletion_at", None):
+                        logger.debug("Skipping project pending deletion: %s", p.path_with_namespace)
+                        continue
+                    projects_by_id[p.id] = p
+            except Exception as exc:
+                logger.warning("Failed to fetch projects with kwargs %s: %s", query_kwargs, exc)
+
         result = []
-        for p in projects:
-            if getattr(p, "marked_for_deletion_at", None):
-                logger.debug("Skipping project pending deletion: %s", p.path_with_namespace)
-                continue
+        for p in projects_by_id.values():
             result.append(
                 {
                     "id": p.id,
@@ -446,6 +463,7 @@ class GitLabClient:
                     "path_with_namespace": p.path_with_namespace,
                     "default_branch": getattr(p, "default_branch", None),
                     "web_url": getattr(p, "web_url", None),
+                    "description": getattr(p, "description", None) or "",
                 }
             )
         return result
@@ -665,6 +683,7 @@ async def get_accessible_projects_for_oauth_token(
                         "path_with_namespace": project["path_with_namespace"],
                         "default_branch": project.get("default_branch"),
                         "web_url": project.get("web_url"),
+                        "description": project.get("description") or "",
                     }
                 next_page = response.headers.get("X-Next-Page")
                 if not next_page:
