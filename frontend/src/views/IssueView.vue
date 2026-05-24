@@ -600,7 +600,7 @@ const projectUrl = computed(() => {
 
 function issueBranchUrl(branchName: string | null | undefined): string | null {
   if (!branchName || !projectUrl.value) return null
-  return `${projectUrl.value}/-/tree/${encodeURIComponent(branchName)}`
+  return `${projectUrl.value}/-/tree/${branchName.split('/').map(encodeURIComponent).join('/')}`
 }
 
 // Create task form
@@ -900,7 +900,9 @@ async function fetchIssue() {
 
 async function refreshIssue() {
   await fetchIssue()
-  getProjects().then(p => { projects.value = p }).catch(() => {})
+  getProjects().then(p => { projects.value = p }).catch((err) => {
+    console.warn('Failed to load projects for issue view:', err)
+  })
 }
 
 async function handleClose() {
@@ -998,7 +1000,9 @@ function openEditModal() {
 
 onMounted(() => {
   fetchIssue()
-  getProjects().then(p => { projects.value = p }).catch(() => {})
+  getProjects().then(p => { projects.value = p }).catch((err) => {
+    console.warn('Failed to load projects for issue view:', err)
+  })
   pollTimer = window.setInterval(() => {
     if (document.visibilityState !== 'visible') return
     if (issue.value?.status !== 'closed') {

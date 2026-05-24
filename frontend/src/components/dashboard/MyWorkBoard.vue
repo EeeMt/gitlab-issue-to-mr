@@ -126,9 +126,7 @@ import {
   EllipseOutline,
   PauseCircleOutline,
   PlayCircleOutline,
-  RadioButtonOffOutline,
   SearchOutline,
-  TimeOutline,
 } from '@vicons/ionicons5'
 
 export type BoardKind = 'issues' | 'tasks'
@@ -172,11 +170,9 @@ const columnIcons = {
   in_review: SearchOutline,
   closed: CheckmarkCircleOutline,
   pending: PauseCircleOutline,
-  queued: TimeOutline,
   running: PlayCircleOutline,
   completed: CheckmarkCircleOutline,
   failed: CloseCircleOutline,
-  cancelled: RadioButtonOffOutline,
 } as const
 
 const activeColumns = computed(() =>

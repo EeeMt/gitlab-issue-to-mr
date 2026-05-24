@@ -310,18 +310,18 @@ const taskBoardColumns = computed<BoardColumn[]>(() => {
   const pendingItems = [
     ...tasks.filter(task => task.status === 'pending').map(task => buildTaskCard(task)),
     ...tasks.filter(task => task.status === 'queued').map(task => buildTaskCard(task, queuedBadge)),
-  ]
+  ].sort((a, b) => b.id - a.id)
   const runningItems = tasks.filter(task => task.status === 'running').map(task => buildTaskCard(task))
   const completedItems = tasks.filter(task => task.status === 'completed').map(task => buildTaskCard(task))
   const failedItems = [
     ...tasks.filter(task => task.status === 'failed').map(task => buildTaskCard(task)),
     ...tasks.filter(task => task.status === 'cancelled').map(task => buildTaskCard(task, cancelledBadge)),
-  ]
+  ].sort((a, b) => b.id - a.id)
   return [
-    { status: 'pending', label: t('status.pending'), count: pendingItems.length, items: pendingItems },
-    { status: 'running', label: t('status.running'), count: runningItems.length, items: runningItems },
-    { status: 'completed', label: t('status.completed'), count: completedItems.length, items: completedItems },
-    { status: 'failed', label: `${t('status.failed')} / ${t('status.cancelled')}`, count: failedItems.length, items: failedItems },
+    { status: 'pending', label: t('status.pending'), count: statsPending.value + statsQueued.value, items: pendingItems },
+    { status: 'running', label: t('status.running'), count: statsRunning.value, items: runningItems },
+    { status: 'completed', label: t('status.completed'), count: statsCompleted.value, items: completedItems },
+    { status: 'failed', label: `${t('status.failed')} / ${t('status.cancelled')}`, count: statsFailed.value + statsCancelled.value, items: failedItems },
   ]
 })
 
