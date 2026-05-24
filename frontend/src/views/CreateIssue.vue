@@ -477,7 +477,6 @@ function saveRecentProject(projectId: number) {
 
 function selectProject(project: Project) {
   formValue.value.project_id = project.id
-  saveRecentProject(project.id)
   handleProjectChange(project.id)
 }
 
@@ -616,6 +615,7 @@ async function handleSubmit() {
     }
 
     const issue = await createIssue(request)
+    saveRecentProject(formValue.value.project_id!)
     message.success(t('issue.create'))
     router.push(`/issues/${issue.id}`)
   } catch (error: any) {
@@ -908,6 +908,10 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  padding: 12px;
+  background: rgba(15, 23, 42, 0.03);
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  border-radius: 12px;
 }
 
 .project-picker__search {
@@ -928,27 +932,13 @@ onMounted(() => {
   max-height: 290px;
   overflow-y: auto;
   overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
   border-radius: 8px;
-}
-
-.project-picker__scroll-wrap::-webkit-scrollbar {
-  width: 5px;
-}
-.project-picker__scroll-wrap::-webkit-scrollbar-track {
-  background: transparent;
-}
-.project-picker__scroll-wrap::-webkit-scrollbar-thumb {
-  background: rgba(15, 23, 42, 0.18);
-  border-radius: 10px;
 }
 
 .project-picker__grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
-  padding-right: 2px; /* prevent cards from clipping under scrollbar */
 }
 
 @media (max-width: 900px) {
