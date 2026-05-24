@@ -186,6 +186,20 @@ vi.mock('naive-ui', () => ({
       return () => h('i', { class: 'n-icon' })
     }
   },
+  NAutoComplete: {
+    name: 'NAutoComplete',
+    props: ['value', 'options', 'placeholder', 'getShow'],
+    emits: ['update:value'],
+    setup(props: any, { emit }: any) {
+      return () => h('input', {
+        class: 'n-auto-complete',
+        type: 'text',
+        placeholder: props.placeholder,
+        value: props.value,
+        onInput: (e: Event) => emit('update:value', (e.target as HTMLInputElement).value)
+      })
+    }
+  },
   useMessage: () => mockMessage,
 }))
 
@@ -220,6 +234,8 @@ vi.mock('@vicons/ionicons5', () => ({
   SparklesOutline: { name: 'SparklesOutline' },
   GitMergeOutline: { name: 'GitMergeOutline' },
   CloseOutline: { name: 'CloseOutline' },
+  SearchOutline: { name: 'SearchOutline' },
+  CheckmarkOutline: { name: 'CheckmarkOutline' },
 }))
 
 // Router
@@ -374,8 +390,8 @@ describe('CreateIssue', () => {
       await mountComponent()
 
       const selects = wrapper.findAll('select.n-select')
-      // project select + base branch select + target branch select
-      expect(selects.length).toBeGreaterThanOrEqual(3)
+      // base branch select + target branch select (project is now card picker, not select)
+      expect(selects.length).toBeGreaterThanOrEqual(2)
     })
   })
 
@@ -394,13 +410,13 @@ describe('CreateIssue', () => {
       expect(mockApi.getPromptTemplates).toHaveBeenCalledTimes(1)
     })
 
-    it('should populate project options from fetched projects', async () => {
+    it('should populate projects from fetched data', async () => {
       await mountComponent()
 
-      const options = wrapper.vm.projectOptions
-      expect(options).toHaveLength(2)
-      expect(options[0]).toEqual({ label: 'group/project-1', value: 1 })
-      expect(options[1]).toEqual({ label: 'group/project-2', value: 2 })
+      // Project list is now card-based; verify underlying data is populated
+      expect(wrapper.vm.projects).toHaveLength(2)
+      expect(wrapper.vm.projects[0].name).toBe('Project 1')
+      expect(wrapper.vm.projects[1].name).toBe('Project 2')
     })
   })
 
@@ -485,7 +501,8 @@ describe('CreateIssue', () => {
 
       expect(wrapper.vm.formValue.create_mr).toBe(true)
       const selects = wrapper.findAll('select.n-select')
-      expect(selects.length).toBeGreaterThanOrEqual(3)
+      // base branch select + target branch select (project is card picker)
+      expect(selects.length).toBeGreaterThanOrEqual(2)
     })
 
     it('should show target branch select when create_mr is true', async () => {
@@ -496,8 +513,8 @@ describe('CreateIssue', () => {
 
       // The target branch section should now render
       const selects = wrapper.findAll('select.n-select')
-      // project select + base branch select + target branch select
-      expect(selects.length).toBeGreaterThanOrEqual(3)
+      // base branch select + target branch select (project is card picker)
+      expect(selects.length).toBeGreaterThanOrEqual(2)
     })
 
     it('should auto-fill target_branch with default branch when MR toggled on', async () => {
@@ -1029,9 +1046,9 @@ describe('CreateIssue', () => {
       await flushPromises()
 
       expect(mockMessage.error).toHaveBeenCalledWith('createTask.failedToFetchProjects')
-      // Component should not crash
+      // Component should not crash; project list is empty
       expect(wrapper.find('.create-issue-page').exists()).toBe(true)
-      expect(wrapper.vm.projectOptions).toEqual([])
+      expect(wrapper.vm.projects).toEqual([])
     })
 
     it('should show error message when fetchBranches fails', async () => {
@@ -1216,6 +1233,112 @@ describe('CreateIssue', () => {
 
       const call = (mockApi.createIssue as Mock).mock.calls[0][0]
       expect(call.delete_branch_on_close).toBe(true)
+    })
+  })
+
+  // ── Recent Titles Autocomplete ────────────────────────────────
+  describe('recent titles autocomplete', () => {
+    const RECENT_TITLES_KEY = 'codify:recent_titles'
+
+    beforeEach(() => {
+      localStorage.clear()
+    })
+
+    it('should save title to localStorage after successful issue creation', async () => {
+      await mountComponent()
+
+      wrapper.vm.formValue.title = 'Fix login bug'
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+
+      await wrapper.vm.handleSubmit()
+      await flushPromises()
+
+      const stored = JSON.parse(localStorage.getItem(RECENT_TITLES_KEY) ?? '[]')
+      expect(stored).toContain('Fix login bug')
+    })
+
+    it('should not save title when issue creation fails', async () => {
+      mockApi.createIssue.mockRejectedValueOnce(new Error('server error'))
+      await mountComponent()
+
+      wrapper.vm.formValue.title = 'Should not be saved'
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+
+      await wrapper.vm.handleSubmit()
+      await flushPromises()
+
+      const stored = JSON.parse(localStorage.getItem(RECENT_TITLES_KEY) ?? '[]')
+      expect(stored).not.toContain('Should not be saved')
+    })
+
+    it('should prepend new title and deduplicate', async () => {
+      localStorage.setItem(RECENT_TITLES_KEY, JSON.stringify(['Old Title', 'Fix login bug']))
+      await mountComponent()
+
+      wrapper.vm.formValue.title = 'Fix login bug'
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+
+      await wrapper.vm.handleSubmit()
+      await flushPromises()
+
+      const stored: string[] = JSON.parse(localStorage.getItem(RECENT_TITLES_KEY) ?? '[]')
+      expect(stored[0]).toBe('Fix login bug')
+      expect(stored.filter(t => t === 'Fix login bug').length).toBe(1)
+    })
+
+    it('should cap stored titles at 10', async () => {
+      const existing = Array.from({ length: 10 }, (_, i) => `Title ${i}`)
+      localStorage.setItem(RECENT_TITLES_KEY, JSON.stringify(existing))
+      await mountComponent()
+
+      wrapper.vm.formValue.title = 'Brand new title'
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+
+      await wrapper.vm.handleSubmit()
+      await flushPromises()
+
+      const stored: string[] = JSON.parse(localStorage.getItem(RECENT_TITLES_KEY) ?? '[]')
+      expect(stored.length).toBe(10)
+      expect(stored[0]).toBe('Brand new title')
+    })
+
+    it('recentTitleOptions should include all stored titles when input is empty', async () => {
+      localStorage.setItem(RECENT_TITLES_KEY, JSON.stringify(['Alpha', 'Beta', 'Gamma']))
+      await mountComponent()
+
+      wrapper.vm.formValue.title = ''
+
+      const options = wrapper.vm.recentTitleOptions
+      expect(options.map((o: any) => o.value)).toEqual(['Alpha', 'Beta', 'Gamma'])
+    })
+
+    it('recentTitleOptions should filter by current input value', async () => {
+      localStorage.setItem(RECENT_TITLES_KEY, JSON.stringify(['Fix login bug', 'Add feature', 'Fix typo']))
+      await mountComponent()
+
+      wrapper.vm.formValue.title = 'fix'
+
+      const options = wrapper.vm.recentTitleOptions
+      expect(options.map((o: any) => o.value)).toEqual(['Fix login bug', 'Fix typo'])
+    })
+
+    it('recentTitles ref should be reactive after save', async () => {
+      await mountComponent()
+
+      expect(wrapper.vm.recentTitles).toEqual([])
+
+      wrapper.vm.formValue.title = 'Reactive test'
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+
+      await wrapper.vm.handleSubmit()
+      await flushPromises()
+
+      expect(wrapper.vm.recentTitles[0]).toBe('Reactive test')
     })
   })
 
