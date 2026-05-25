@@ -391,7 +391,23 @@ class StreamTaskLogsTests(unittest.TestCase):
 
         # Parse SSE events from the response
         body = response.text
-        self.assertIn('"log_type": "assistant_text"', body)
+        # Logs are now delivered as a single named "batch" event with a JSON array.
+        self.assertIn("event: batch\n", body)
+        import re, json as _json_mod
+        match = re.search(r'event: batch\ndata: (.+)\n', body)
+        self.assertIsNotNone(match, "batch event data line not found")
+        batch_payload = _json_mod.loads(match.group(1))
+        self.assertIsInstance(batch_payload, list, "batch event data must be a JSON array")
+        self.assertTrue(any(e.get("log_type") == "assistant_text" for e in batch_payload))
+        # Regular log entries must NOT appear as unnamed data: events
+        for line in body.splitlines():
+            if line.startswith("data:") and '"log_type"' in line:
+                try:
+                    obj = _json_mod.loads(line[len("data:"):].strip())
+                    if isinstance(obj, dict) and not obj.get("error"):
+                        self.fail(f"log entry leaked into unnamed data: event: {line[:120]}")
+                except _json_mod.JSONDecodeError:
+                    pass
         self.assertIn("event: done", body)
 
     def test_stream_task_logs_running_task_emits_logs(self):
@@ -442,6 +458,9 @@ class StreamTaskLogsTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.text
+        # Logs are delivered as a named "batch" event — the message text
+        # appears inside the JSON array, not as an unnamed data: event.
+        self.assertIn("event: batch\n", body)
         self.assertIn("Step 1 done", body)
         self.assertIn("event: done", body)
 

@@ -1022,17 +1022,37 @@ export function streamTaskLogs(
   const source = new EventSource(url)
 
   source.onmessage = (event) => {
+    // Unnamed events carry only server-side error payloads:
+    //   data: {"error": "..."}
+    // Regular log entries are delivered via the named "batch" event.
+    // NOTE: backend and frontend must be deployed together — old server
+    // versions emit individual unnamed events that this handler no longer
+    // forwards to onLog.
     try {
       const data = JSON.parse(event.data)
       if (data.error) {
         console.error(`[streamTaskLogs] server error: ${data.error}`)
-      } else {
-        onLog(data as TaskLog)
       }
+      // No else: non-error unnamed events are unexpected with current server.
     } catch (e) {
       console.warn('[streamTaskLogs] failed to parse SSE message', e)
     }
   }
+
+  // "batch" events deliver all log entries from a single poll cycle as a JSON
+  // array in ONE SSE message.  This lets the browser handle them in a single
+  // macrotask so the queueMicrotask gate in TaskView can coalesce them into one
+  // Vue reactive update instead of triggering O(n²) updates for n log entries.
+  source.addEventListener('batch', (event) => {
+    try {
+      const logs = JSON.parse((event as MessageEvent).data) as TaskLog[]
+      for (const data of logs) {
+        onLog(data)
+      }
+    } catch (e) {
+      console.warn('[streamTaskLogs] failed to parse SSE batch event', e)
+    }
+  })
 
   source.addEventListener('done', () => {
     source.close()

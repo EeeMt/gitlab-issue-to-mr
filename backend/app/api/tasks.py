@@ -521,7 +521,14 @@ async def stream_task_logs(
                 # the session and yield outside it.  This ensures the DB connection
                 # is returned to the pool before we block on network I/O to the
                 # client (a slow or stalled client must not hold a DB connection).
-                cycle_events: list[str] = []
+                #
+                # Regular log entries are batched into a single "batch" SSE event
+                # (a JSON array) so the browser processes them in ONE macrotask.
+                # Without batching, each individual SSE message fires a separate
+                # macrotask; queueMicrotask() cannot coalesce across macrotasks, so
+                # 100 events produce 100 Vue reactive updates and O(n²) total work.
+                cycle_log_data: list[dict] = []    # payload for the "batch" event
+                cycle_update_events: list[str] = []  # "update" events stay individual
                 fast_forward = False
                 current_status = None
                 new_log_count = 0
@@ -559,7 +566,7 @@ async def stream_task_logs(
                             meta = event_data["metadata"] or {}
                             if not meta.get("output_payload_id"):
                                 pending_tool_calls.add(log.id)
-                        cycle_events.append(f"data: {_json.dumps(event_data)}\n\n")
+                        cycle_log_data.append(event_data)
 
                     if new_log_count == _BATCH_SIZE:
                         # Batch was full — more logs likely waiting; skip sleep
@@ -584,7 +591,7 @@ async def stream_task_logs(
                             for log in updated_result.scalars().all():
                                 meta = _json.loads(log.log_metadata) if log.log_metadata else {}
                                 if meta.get("output_payload_id"):
-                                    cycle_events.append(
+                                    cycle_update_events.append(
                                         f"event: update\ndata: {_json.dumps(_log_to_event_data(log))}\n\n"
                                     )
                                     pending_tool_calls.discard(log.id)
@@ -611,8 +618,12 @@ async def stream_task_logs(
                         f"cycle_ms={cycle_ms:.1f} total_sent={total_events_sent}"
                     )
 
-                # Yield events with DB connection already released
-                for ev in cycle_events:
+                # Yield events with DB connection already released.
+                # All log entries are batched into a single SSE event so the
+                # browser processes the entire cycle in one macrotask.
+                if cycle_log_data:
+                    yield f"event: batch\ndata: {_json.dumps(cycle_log_data)}\n\n"
+                for ev in cycle_update_events:
                     yield ev
 
                 if fast_forward:
@@ -623,7 +634,9 @@ async def stream_task_logs(
                     continue
 
                 if current_status in _TERMINAL_STATUSES and new_log_count == 0:
-                    # Task is done and no new logs — signal completion and stop
+                    # new_log_count == 0 means cycle_log_data was also empty —
+                    # no "batch" event was yielded this cycle, so no pending
+                    # microtask flush exists on the client when "done" arrives.
                     yield "event: done\ndata: {}\n\n"
                     elapsed_s = time.monotonic() - stream_start
                     logger.info(
