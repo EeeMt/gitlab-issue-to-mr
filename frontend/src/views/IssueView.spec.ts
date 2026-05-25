@@ -1170,11 +1170,13 @@ describe('IssueView', () => {
     })
 
     it('handles getProjects failure silently', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
       setupDefaultMocks()
       mockApi.getProjects.mockRejectedValue(new Error('fail'))
       wrapper = await mountComponent()
       // Should NOT show error for projects
       expect(mockMessage.error).not.toHaveBeenCalled()
+      warnSpy.mockRestore()
     })
 
     it('shows loading spinner when issue is null due to error', async () => {
