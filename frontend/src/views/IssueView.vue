@@ -6,6 +6,7 @@
         data-testid="issue-view-header"
         root-class="issue-view__hero"
         actions-class="issue-view__actions"
+        :subtitle="t('issue.detailSubtitle')"
       >
         <template #title>
           <h2 class="issue-view__title">#{{ issue.id }} {{ issue.title }}</h2>
@@ -330,7 +331,7 @@
               </div>
             </template>
             <div class="issue-view__description-wrap">
-              <n-scrollbar trigger="hover" style="max-height: 320px">
+              <n-scrollbar trigger="hover" style="position: absolute; top: 0; right: 0; bottom: 0; left: 0;">
                 <div class="issue-view__description markdown-content" v-html="renderedDescription"></div>
               </n-scrollbar>
             </div>
@@ -1146,6 +1147,9 @@ onMounted(() => {
   background: rgba(15, 23, 42, 0.035);
   border-radius: 8px;
   overflow: hidden;
+  flex: 1;
+  position: relative;
+  min-height: 0;
 }
 
 .issue-view__description {

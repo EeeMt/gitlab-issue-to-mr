@@ -167,7 +167,7 @@
                   </div>
                 </template>
                 <div class="task-prompt-wrap">
-                  <n-scrollbar trigger="hover" style="max-height: 320px">
+                  <n-scrollbar trigger="hover" style="position: absolute; top: 0; right: 0; bottom: 0; left: 0;">
                     <div class="task-prompt-content markdown-content" v-html="renderedUserPrompt"></div>
                   </n-scrollbar>
                 </div>
@@ -943,6 +943,9 @@ onBeforeUnmount(() => {
   background: rgba(15, 23, 42, 0.035);
   border-radius: 8px;
   overflow: hidden;
+  flex: 1;
+  position: relative;
+  min-height: 0;
 }
 
 .task-prompt-content {

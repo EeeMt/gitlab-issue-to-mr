@@ -380,6 +380,7 @@ const en = {
   issue: {
     title: 'Issues',
     subtitle: 'Manage your development issues',
+    detailSubtitle: 'View issue details, track associated tasks, and launch new runs — all from this page.',
     create: 'Create Issue',
     detail: 'Issue Detail',
     metadata: 'Issue Metadata',
@@ -465,7 +466,7 @@ const en = {
   },
   taskView: {
     title: 'Task #{id}',
-    subtitle: 'Inspect execution metadata, logs, and task control actions in one place.',
+    subtitle: 'Track live execution, inspect logs, and control the task — all from this page.',
     taskDetails: 'Task Details',
     taskDetailsSubtitle: 'Project, branch, timing, and merge request metadata',
     manualTask: 'Manual task',

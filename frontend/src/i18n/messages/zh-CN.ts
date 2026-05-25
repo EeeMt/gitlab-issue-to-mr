@@ -378,6 +378,7 @@ const zhCN = {
   issue: {
     title: '需求',
     subtitle: '管理你的开发需求',
+    detailSubtitle: '查看需求详情，追踪关联任务进度，并在此页面发起新的执行。',
     create: '创建需求',
     detail: '需求详情',
     metadata: '需求元数据',
@@ -463,7 +464,7 @@ const zhCN = {
   },
   taskView: {
     title: '任务 #{id}',
-    subtitle: '在一个页面中查看执行元数据、日志和任务控制操作。',
+    subtitle: '实时追踪任务执行，查看运行日志，并在此页面完成所有控制操作。',
     taskDetails: '任务详情',
     taskDetailsSubtitle: '项目、分支、时间信息与合并请求元数据',
     manualTask: '手动任务',
