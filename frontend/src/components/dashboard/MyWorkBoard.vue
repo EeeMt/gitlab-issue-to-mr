@@ -92,7 +92,8 @@
                 :key="item.id"
                 type="button"
                 class="my-work-board__card"
-                :data-testid="`${activeTab === 'issues' ? 'issue' : 'task'}-card-${item.id}`"
+              :class="{ 'my-work-board__card--task': activeTab === 'tasks' }"
+              :data-testid="`${activeTab === 'issues' ? 'issue' : 'task'}-card-${item.id}`"
                 :title="item.fullTitle || item.title"
                 @click="emit('select', item.route)"
               >

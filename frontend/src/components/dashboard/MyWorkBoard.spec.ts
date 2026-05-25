@@ -109,7 +109,7 @@ describe('MyWorkBoard', () => {
     expect(outerScrollbar.exists()).toBe(true)
     expect(outerScrollbar.classes()).toContain('n-scrollbar')
     expect(outerScrollbar.attributes('data-x-scrollable')).toBe('true')
-    expect(outerScrollbar.attributes('data-content-style')).toBe('height: 100%;')
+    expect(outerScrollbar.attributes('data-content-style')).toBe('height: 100%; padding-bottom: 8px;')
     expect(outerScrollbar.attributes('data-trigger')).toBe('hover')
     // per-lane scrollbars are still present
     expect(laneScrollbars).toHaveLength(issueColumns.length)
@@ -133,7 +133,7 @@ describe('MyWorkBoard', () => {
     expect(outerScrollbar.exists()).toBe(true)
     expect(outerScrollbar.classes()).toContain('n-scrollbar')
     expect(outerScrollbar.attributes('data-x-scrollable')).toBeUndefined()
-    expect(outerScrollbar.attributes('data-content-style')).toBeUndefined()
+    expect(outerScrollbar.attributes('data-content-style')).toBe('padding-bottom: 8px;')
     expect(wrapper.find('.my-work-board__columns--mobile').exists()).toBe(true)
     expect(laneScrollbars).toHaveLength(issueColumns.length)
     laneScrollbars.forEach((scrollbar) => {

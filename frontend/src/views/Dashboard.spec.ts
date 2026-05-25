@@ -410,11 +410,12 @@ describe('Dashboard', () => {
       await nextTick()
 
       expect(wrapper.find('[data-testid="task-column-running"]').exists()).toBe(true)
-      expect(wrapper.find('[data-testid="task-column-queued"]').exists()).toBe(true)
       expect(wrapper.find('[data-testid="task-column-pending"]').exists()).toBe(true)
       expect(wrapper.find('[data-testid="task-column-completed"]').exists()).toBe(true)
       expect(wrapper.find('[data-testid="task-column-failed"]').exists()).toBe(true)
-      expect(wrapper.find('[data-testid="task-column-cancelled"]').exists()).toBe(true)
+      // queued and cancelled are merged into pending and failed respectively
+      expect(wrapper.find('[data-testid="task-column-queued"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="task-column-cancelled"]').exists()).toBe(false)
       expect(wrapper.find('[data-testid="task-column-pending_queued"]').exists()).toBe(false)
     })
 
