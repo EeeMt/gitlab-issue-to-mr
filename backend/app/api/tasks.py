@@ -511,7 +511,13 @@ async def stream_task_logs(
         stream_start = time.monotonic()
         total_events_sent = 0
         poll_cycle = 0
-        logger.info(f"[Task {task_id}] log-stream opened since_id={since_id}")
+        first_batch_sent = False   # tracks whether the first "batch" event was yielded
+        ff_streak = 0              # consecutive fast-forward cycles currently running
+        ff_streak_logs = 0         # total log entries delivered across the streak
+        logger.info(
+            f"[Task {task_id}] log-stream opened since_id={since_id} "
+            f"resume={'yes' if since_id > 0 else 'no'}"
+        )
         try:
             while True:
                 poll_cycle += 1
@@ -622,16 +628,61 @@ async def stream_task_logs(
                 # All log entries are batched into a single SSE event so the
                 # browser processes the entire cycle in one macrotask.
                 if cycle_log_data:
-                    yield f"event: batch\ndata: {_json.dumps(cycle_log_data)}\n\n"
+                    _batch_payload = f"event: batch\ndata: {_json.dumps(cycle_log_data)}\n\n"
+                    _yield_t0 = time.monotonic()
+                    yield _batch_payload
+                    _yield_ms = (time.monotonic() - _yield_t0) * 1000
+                    if not first_batch_sent:
+                        first_batch_sent = True
+                        logger.info(
+                            f"[Task {task_id}] log-stream first-batch "
+                            f"cycle={poll_cycle} count={len(cycle_log_data)} "
+                            f"time_to_first_ms={((_yield_t0 - stream_start) * 1000):.1f} "
+                            f"yield_ms={_yield_ms:.1f}"
+                        )
+                    elif _yield_ms > 500:
+                        logger.warning(
+                            f"[Task {task_id}] log-stream slow-yield "
+                            f"cycle={poll_cycle} count={len(cycle_log_data)} "
+                            f"yield_ms={_yield_ms:.1f}"
+                        )
                 for ev in cycle_update_events:
                     yield ev
 
+                if len(pending_tool_calls) > 20:
+                    logger.warning(
+                        f"[Task {task_id}] log-stream large-pending-tool-calls "
+                        f"size={len(pending_tool_calls)} cycle={poll_cycle}"
+                    )
+
                 if fast_forward:
+                    ff_streak += 1
+                    ff_streak_logs += len(cycle_log_data)
                     logger.debug(
                         f"[Task {task_id}] log-stream fast-forward cycle={poll_cycle} "
-                        f"cursor={cursor} elapsed_s={time.monotonic() - stream_start:.2f}"
+                        f"streak={ff_streak} cursor={cursor} "
+                        f"elapsed_s={time.monotonic() - stream_start:.2f}"
                     )
                     continue
+
+                if ff_streak > 0:
+                    # Streak just ended — summarise how much catch-up was done
+                    logger.info(
+                        f"[Task {task_id}] log-stream fast-forward-done "
+                        f"cycles={ff_streak} logs={ff_streak_logs} cursor={cursor}"
+                    )
+                    ff_streak = 0
+                    ff_streak_logs = 0
+
+                if current_status not in _TERMINAL_STATUSES and not new_log_count:
+                    # Periodic heartbeat so we can confirm the stream is alive in logs
+                    if poll_cycle % 20 == 0:
+                        logger.debug(
+                            f"[Task {task_id}] log-stream alive "
+                            f"cycle={poll_cycle} cursor={cursor} status={current_status} "
+                            f"pending={len(pending_tool_calls)} "
+                            f"elapsed_s={time.monotonic() - stream_start:.0f}"
+                        )
 
                 if current_status in _TERMINAL_STATUSES and new_log_count == 0:
                     # new_log_count == 0 means cycle_log_data was also empty —

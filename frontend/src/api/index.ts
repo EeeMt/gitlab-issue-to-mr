@@ -1020,6 +1020,10 @@ export function streamTaskLogs(
 ): EventSource {
   const url = `/api/tasks/${id}/log-stream?since_id=${sinceId}`
   const source = new EventSource(url)
+  const _openTime = Date.now()
+  let _firstBatch = true
+  let _totalBatches = 0
+  let _totalLogs = 0
 
   source.onmessage = (event) => {
     // Unnamed events carry only server-side error payloads:
@@ -1046,6 +1050,19 @@ export function streamTaskLogs(
   source.addEventListener('batch', (event) => {
     try {
       const logs = JSON.parse((event as MessageEvent).data) as TaskLog[]
+      _totalBatches++
+      _totalLogs += logs.length
+      if (_firstBatch) {
+        _firstBatch = false
+        console.debug(
+          `[streamTaskLogs] task=${id} first-batch count=${logs.length} ` +
+          `time_to_first_ms=${Date.now() - _openTime}`
+        )
+      } else {
+        console.debug(
+          `[streamTaskLogs] task=${id} batch #${_totalBatches} count=${logs.length} total=${_totalLogs}`
+        )
+      }
       for (const data of logs) {
         onLog(data)
       }
@@ -1055,6 +1072,10 @@ export function streamTaskLogs(
   })
 
   source.addEventListener('done', () => {
+    console.debug(
+      `[streamTaskLogs] task=${id} done ` +
+      `batches=${_totalBatches} total_logs=${_totalLogs} elapsed_ms=${Date.now() - _openTime}`
+    )
     source.close()
     onDone?.()
   })
