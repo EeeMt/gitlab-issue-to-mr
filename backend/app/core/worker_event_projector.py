@@ -33,13 +33,17 @@ _THINKING_CLOSE = '</think>'
 _PREVIEW_LIMIT = 120
 
 
+def _dumps(obj: Any) -> str:
+    return _json.dumps(obj, ensure_ascii=False)
+
+
 def _build_preview(text: str, limit: int = _PREVIEW_LIMIT) -> tuple[str, bool]:
     preview = text[:limit]
     return preview, len(text) > limit
 
 
 def _serialize_tool_input(tool_input: Any) -> str:
-    return _json.dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input)
+    return _dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input)
 
 
 def _normalize_preview_text(text: str) -> str:
@@ -167,7 +171,7 @@ class WorkerEventProjector:
                 log_level="INFO",
                 message="",
                 log_type="system_init",
-                log_metadata=_json.dumps({"model": record.get("model"), "cwd": record.get("cwd")}),
+                log_metadata=_dumps({"model": record.get("model"), "cwd": record.get("cwd")}),
             ))
         elif record_type == "system" and record.get("subtype") == "compact_boundary":
             db.add(TaskLog(
@@ -175,7 +179,7 @@ class WorkerEventProjector:
                 log_level="INFO",
                 message="",
                 log_type="context_compact",
-                log_metadata=_json.dumps({"session_id": record.get("session_id")}),
+                log_metadata=_dumps({"session_id": record.get("session_id")}),
             ))
         elif record_type == "system" and record.get("subtype") == "status":
             # compacting / compact_result status events are informational; no log row needed
@@ -186,7 +190,7 @@ class WorkerEventProjector:
                 log_level="INFO",
                 message="",
                 log_type="worker_finalization",
-                log_metadata=_json.dumps({
+                log_metadata=_dumps({
                     "commit_sha": record.get("commit_sha") or "",
                     "diff": record.get("diff") or {},
                     "commit_message": record.get("commit_message") or "",
@@ -208,7 +212,7 @@ class WorkerEventProjector:
                 log_level="INFO",
                 message="",
                 log_type="run_result",
-                log_metadata=_json.dumps({
+                log_metadata=_dumps({
                     "subtype": record.get("subtype"),
                     "session_id": record.get("session_id"),
                     "usage": record.get("usage") or {},
@@ -255,7 +259,7 @@ class WorkerEventProjector:
             log_level="INFO",
             message="",
             log_type=log_type,
-            log_metadata=_json.dumps({
+            log_metadata=_dumps({
                 "payload_id": payload.id,
                 "char_count": len(sanitized_text),
                 "preview": preview,
@@ -305,7 +309,7 @@ class WorkerEventProjector:
             meta["output_char_count"] = len(sanitized_output_text)
             meta["error"] = is_error
             meta["duration_ms"] = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
-            pending_log.log_metadata = _json.dumps(meta)
+            pending_log.log_metadata = _dumps(meta)
 
     async def _project_assistant_message(self, *, task_id: int, record: dict, db: AsyncSession) -> None:
         """Project a complete assistant message (non-streaming format)."""
@@ -336,7 +340,7 @@ class WorkerEventProjector:
                     log_level="INFO",
                     message=f"Tool call: {tool_name}",
                     log_type="tool_call",
-                    log_metadata=_json.dumps({
+                    log_metadata=_dumps({
                         "tool_use_id": tool_use_id,
                         "name": tool_name,
                         "input_payload_id": payload.id,
@@ -424,7 +428,7 @@ class WorkerEventProjector:
             log_level="INFO",
             message=f"Tool call: {tool_use['name']}",
             log_type="tool_call",
-            log_metadata=_json.dumps({
+            log_metadata=_dumps({
                 "tool_use_id": tool_use["id"],
                 "name": tool_use["name"],
                 "input_payload_id": payload.id,
