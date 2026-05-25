@@ -812,7 +812,7 @@ async def update_task(
     if "user_prompt" in updated_fields:
         if not request.user_prompt or not request.user_prompt.strip():
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="user_prompt must be a non-empty string",
             )
         task.user_prompt = request.user_prompt.strip()
@@ -820,7 +820,7 @@ async def update_task(
     if "priority" in updated_fields:
         if request.priority not in (0, 1, 2):
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="priority must be 0 (low), 1 (normal), or 2 (high)",
             )
         task.priority = request.priority

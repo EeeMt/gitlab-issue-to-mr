@@ -1,6 +1,7 @@
 """Database models for the application."""
 
 from datetime import date, datetime
+from app.core.utcnow import utcnow
 from enum import Enum
 from typing import Optional, List
 
@@ -94,10 +95,10 @@ class Issue(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utcnow
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
 
     # Relationships
@@ -124,10 +125,10 @@ class AIProvider(Base):
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utcnow
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
 
     tasks: Mapped[List["Task"]] = relationship("Task", back_populates="provider")
@@ -211,10 +212,10 @@ class Task(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utcnow
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -255,7 +256,7 @@ class IssueExecutionLock(Base):
     acquired_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
+        default=utcnow,
     )
     heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
@@ -283,7 +284,7 @@ class TaskLog(Base):
 
     # Timestamp
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utcnow
     )
 
 
@@ -306,10 +307,10 @@ class UsageLimitPolicy(Base):
     weekly_tasks_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="custom")
     weekly_tasks_value: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utcnow
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
 
     __table_args__ = (
@@ -345,10 +346,10 @@ class TaskUsageLedger(Base):
     total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     task_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utcnow
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
 
     __table_args__ = (
@@ -369,7 +370,7 @@ class SystemConfig(Base):
     value: Mapped[str] = mapped_column(Text, nullable=False)
     value_type: Mapped[str] = mapped_column(String(20), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
 
 
@@ -383,10 +384,10 @@ class WorkerEnvironmentVariable(Base):
     value: Mapped[str] = mapped_column(Text, nullable=False)
     is_secret: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utcnow
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
 
     __table_args__ = (
@@ -405,10 +406,10 @@ class PromptTemplate(Base):
     variable_tips: Mapped[Optional[dict[str, str]]] = mapped_column(JSON, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utcnow
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
 
 
@@ -420,10 +421,10 @@ class ProjectWebhookConfig(Base):
     project_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     secret_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utcnow
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
 
 
@@ -441,10 +442,10 @@ class MattermostNotificationProfile(Base):
     event_types_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     field_keys_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utcnow
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
 
 
@@ -464,10 +465,10 @@ class MattermostUserMapping(Base):
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="username")
     last_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utcnow
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
 
 
@@ -491,7 +492,7 @@ class MattermostNotificationDelivery(Base):
     target_summary: Mapped[str] = mapped_column(String(255), nullable=False)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utcnow
     )
 
 
@@ -522,10 +523,10 @@ class User(Base):
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utcnow
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
 
 
@@ -547,7 +548,7 @@ class UserSession(Base):
     user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utcnow
     )
 
 
@@ -567,7 +568,7 @@ class AuthAuditLog(Base):
     ip_address: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, index=True
+        DateTime, nullable=False, default=utcnow, index=True
     )
 
 
@@ -583,7 +584,7 @@ class SystemBootstrap(Base):
     )
     initialized_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utcnow
     )
 
 
@@ -605,7 +606,7 @@ class WebhookEvent(Base):
     result_detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     payload_summary: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utcnow
     )
 
     issue: Mapped[Optional["Issue"]] = relationship("Issue")
@@ -627,7 +628,7 @@ class TaskRunArchive(Base):
     archive_name: Mapped[str] = mapped_column(String(255), nullable=False)
     archive_path: Mapped[str] = mapped_column(Text, nullable=False)
     archive_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 
 class TaskIngestCursor(Base):
@@ -643,7 +644,7 @@ class TaskIngestCursor(Base):
     last_offset: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_sequence_no: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
 
     __table_args__ = (
@@ -685,4 +686,4 @@ class TaskPayload(Base):
     content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     char_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     byte_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)

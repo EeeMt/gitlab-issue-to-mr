@@ -204,7 +204,7 @@ async def _resolve_channel_target_by_id(channel_id: str) -> MattermostChannelTar
     normalized_channel_id = channel_id.strip()
     if not normalized_channel_id:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="channel_id cannot be empty",
         )
 

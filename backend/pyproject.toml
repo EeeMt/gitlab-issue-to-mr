@@ -29,10 +29,7 @@ testpaths = ["tests"]
 markers = [
     "slow: marks tests as slow-running (use -m 'not slow' to skip)",
 ]
-filterwarnings = [
-    "ignore:datetime.datetime.utcnow:DeprecationWarning:sqlalchemy",
-    "ignore:'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated:DeprecationWarning:fastapi",
-]
+filterwarnings = []
 
 [tool.ruff]
 line-length = 100
