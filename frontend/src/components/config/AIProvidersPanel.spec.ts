@@ -6,12 +6,18 @@ vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (k: string) => k })
 }))
 
-// Mock naive-ui's useMessage but keep actual components so stubs in mount work
+// Mock naive-ui: stub NDataTable (internal name 'DataTable') to avoid n-config-provider injection
 vi.mock('naive-ui', async () => {
+  const { h } = await import('vue')
   const actual = await vi.importActual<any>('naive-ui')
   return {
     ...actual,
-    useMessage: () => ({ success: () => {}, error: () => {} })
+    useMessage: () => ({ success: () => {}, error: () => {} }),
+    NDataTable: {
+      name: 'NDataTable',
+      props: ['columns', 'data', 'loading', 'bordered', 'size', 'scroll-x'],
+      setup: () => () => h('div', { class: 'n-data-table' })
+    }
   }
 })
 

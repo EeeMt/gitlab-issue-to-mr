@@ -101,7 +101,7 @@ vi.mock('naive-ui', () => ({
   },
   NInput: {
     name: 'NInput',
-    props: ['value', 'placeholder'],
+    props: ['value', 'placeholder', 'size'],
     emits: ['update:value'],
     setup(props: any, { emit }: any) {
       return () =>
@@ -114,7 +114,7 @@ vi.mock('naive-ui', () => ({
   },
   NInputNumber: {
     name: 'NInputNumber',
-    props: ['value', 'min', 'disabled'],
+    props: ['value', 'min', 'disabled', 'size'],
     emits: ['update:value'],
     setup(props: any, { emit }: any) {
       return () =>
