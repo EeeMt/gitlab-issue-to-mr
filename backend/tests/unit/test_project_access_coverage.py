@@ -541,7 +541,7 @@ class TestRefreshAuthContextTokens(unittest.IsolatedAsyncioTestCase):
         call_kwargs = mock_update.call_args
         self.assertEqual(call_kwargs.kwargs["gitlab_access_token"], "new-at")
         self.assertEqual(call_kwargs.kwargs["gitlab_refresh_token"], "new-rt")
-        self.assertIsNotNone(call_kwargs.kwargs["max_expires_at"])
+        self.assertNotIn("max_expires_at", call_kwargs.kwargs)
 
     async def test_successful_refresh_without_new_refresh_token_keeps_old(self) -> None:
         """Line 230: When exchange doesn't return refresh_token, keep old one."""
@@ -565,8 +565,8 @@ class TestRefreshAuthContextTokens(unittest.IsolatedAsyncioTestCase):
         mock_update.assert_awaited_once()
         self.assertEqual(mock_update.call_args.kwargs["gitlab_refresh_token"], "old-rt")
 
-    async def test_successful_refresh_without_expires_in_passes_none(self) -> None:
-        """Lines 231-235: When expires_in is missing, max_expires_at should be None."""
+    async def test_successful_refresh_without_expires_in(self) -> None:
+        """Successful token refresh without expires_in should still update tokens."""
         ctx = _make_auth_context(session_id="sess-no-exp", refresh_token="rt")
         mock_asl, mock_db = _make_mock_db_session()
 
@@ -581,7 +581,8 @@ class TestRefreshAuthContextTokens(unittest.IsolatedAsyncioTestCase):
             result = await _refresh_auth_context_tokens(ctx)
 
         self.assertTrue(result)
-        self.assertIsNone(mock_update.call_args.kwargs["max_expires_at"])
+        mock_update.assert_awaited_once()
+        self.assertNotIn("max_expires_at", mock_update.call_args.kwargs)
 
     async def test_refresh_on_400_revokes_session(self) -> None:
         """Lines 191-201: HTTPStatusError with 400 status revokes session."""

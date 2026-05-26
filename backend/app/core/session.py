@@ -7,7 +7,7 @@ import secrets
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 from hashlib import sha256
 
 from sqlalchemy import delete, func, select
@@ -56,14 +56,11 @@ async def create_user_session(
     user_agent: str | None = None,
     gitlab_access_token: str | None = None,
     gitlab_refresh_token: str | None = None,
-    max_expires_at: datetime | None = None,
 ) -> str:
     """Create a new session row and return the raw session token."""
     settings = get_effective_settings()
     raw_token = generate_session_token()
     expires_at = utcnow() + timedelta(seconds=settings.session_ttl_seconds)
-    if max_expires_at is not None and max_expires_at < expires_at:
-        expires_at = max_expires_at
     session = UserSession(
         id=str(uuid.uuid4()),
         user_id=user.id,
@@ -175,9 +172,8 @@ async def update_session_gitlab_tokens(
     *,
     gitlab_access_token: str | None,
     gitlab_refresh_token: str | None = None,
-    max_expires_at: datetime | None = None,
 ) -> None:
-    """Update encrypted GitLab tokens and optional session expiry."""
+    """Update encrypted GitLab tokens stored for a session."""
     session.gitlab_access_token_encrypted = (
         encrypt_config_secret(gitlab_access_token) if gitlab_access_token else None
     )
@@ -185,8 +181,6 @@ async def update_session_gitlab_tokens(
         session.gitlab_refresh_token_encrypted = (
             encrypt_config_secret(gitlab_refresh_token) if gitlab_refresh_token else None
         )
-    if max_expires_at is not None and max_expires_at < session.expires_at:
-        session.expires_at = max_expires_at
     session.last_seen_at = utcnow()
     await db.flush()
 

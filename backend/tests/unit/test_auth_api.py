@@ -1348,8 +1348,6 @@ class OIDCCallbackTokenExpiryTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        call_kwargs = session_mock.call_args
-        self.assertIsNone(call_kwargs.kwargs.get("max_expires_at"))
 
     def test_callback_with_jwt_error_returns_401(self) -> None:
         """Should return 401 when JWT validation fails."""

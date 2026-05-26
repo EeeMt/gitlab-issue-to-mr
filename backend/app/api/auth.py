@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Optional
 
 import httpx
@@ -695,11 +695,6 @@ async def callback(
         user_agent=request.headers.get("user-agent"),
         gitlab_access_token=tokens.get("access_token"),
         gitlab_refresh_token=tokens.get("refresh_token"),
-        max_expires_at=(
-            utcnow() + timedelta(seconds=int(tokens["expires_in"]))
-            if tokens.get("expires_in")
-            else None
-        ),
     )
 
     redirect_html = _build_redirect_html(next_path, username=user.display_name or user.username)

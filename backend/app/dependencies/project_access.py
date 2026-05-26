@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timedelta
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -261,18 +260,12 @@ async def _refresh_auth_context_tokens(auth_context: AuthContext) -> bool:
         return False
 
     refresh_token = tokens.get("refresh_token") or auth_context.gitlab_refresh_token
-    max_expires_at = (
-        utcnow() + timedelta(seconds=int(tokens["expires_in"]))
-        if tokens.get("expires_in")
-        else None
-    )
     async with AsyncSessionLocal() as db:
         await update_session_gitlab_tokens(
             db,
             auth_context.session,
             gitlab_access_token=access_token,
             gitlab_refresh_token=refresh_token,
-            max_expires_at=max_expires_at,
         )
         await db.commit()
     auth_context.gitlab_access_token = access_token
