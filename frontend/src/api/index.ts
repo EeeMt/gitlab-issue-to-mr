@@ -1058,7 +1058,8 @@ export function streamTaskLogs(
           `[streamTaskLogs] task=${id} first-batch count=${logs.length} ` +
           `time_to_first_ms=${Date.now() - _openTime}`
         )
-      } else {
+      } else if (_totalBatches % 10 === 0) {
+        // Sampled log — avoids flooding DevTools for tasks with many poll cycles
         console.debug(
           `[streamTaskLogs] task=${id} batch #${_totalBatches} count=${logs.length} total=${_totalLogs}`
         )

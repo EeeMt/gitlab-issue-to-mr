@@ -631,6 +631,9 @@ async def stream_task_logs(
                     _batch_payload = f"event: batch\ndata: {_json.dumps(cycle_log_data)}\n\n"
                     _yield_t0 = time.monotonic()
                     yield _batch_payload
+                    # NOTE: measures time for the ASGI send() call to return, i.e. the
+                    # time to copy the payload into the kernel TCP send buffer.  Spikes
+                    # (> 500 ms) indicate client-side TCP backpressure, not network RTT.
                     _yield_ms = (time.monotonic() - _yield_t0) * 1000
                     if not first_batch_sent:
                         first_batch_sent = True
@@ -638,6 +641,7 @@ async def stream_task_logs(
                             f"[Task {task_id}] log-stream first-batch "
                             f"cycle={poll_cycle} count={len(cycle_log_data)} "
                             f"time_to_first_ms={((_yield_t0 - stream_start) * 1000):.1f} "
+                            f"idle_cycles_before={poll_cycle - 1} "
                             f"yield_ms={_yield_ms:.1f}"
                         )
                     elif _yield_ms > 500:
@@ -650,19 +654,18 @@ async def stream_task_logs(
                     yield ev
 
                 if len(pending_tool_calls) > 20:
-                    logger.warning(
-                        f"[Task {task_id}] log-stream large-pending-tool-calls "
-                        f"size={len(pending_tool_calls)} cycle={poll_cycle}"
-                    )
+                    # Rate-limited: log on first detection and every 10th cycle
+                    # thereafter to avoid spamming when the condition persists.
+                    if poll_cycle % 10 == 1:
+                        logger.warning(
+                            f"[Task {task_id}] log-stream large-pending-tool-calls "
+                            f"size={len(pending_tool_calls)} cycle={poll_cycle}"
+                        )
 
                 if fast_forward:
                     ff_streak += 1
                     ff_streak_logs += len(cycle_log_data)
-                    logger.debug(
-                        f"[Task {task_id}] log-stream fast-forward cycle={poll_cycle} "
-                        f"streak={ff_streak} cursor={cursor} "
-                        f"elapsed_s={time.monotonic() - stream_start:.2f}"
-                    )
+                    # Per-cycle detail suppressed; streak summary fires when burst ends.
                     continue
 
                 if ff_streak > 0:
@@ -706,12 +709,18 @@ async def stream_task_logs(
                 f"[Task {task_id}] log-stream closed reason=client_disconnected "
                 f"total_events={total_events_sent} cycles={poll_cycle} "
                 f"elapsed_s={elapsed_s:.1f}"
+                + (
+                    f" ff_streak_aborted={ff_streak} ff_streak_logs={ff_streak_logs}"
+                    if ff_streak > 0 else ""
+                )
             )
         except Exception as exc:
             elapsed_s = time.monotonic() - stream_start
             logger.error(
                 f"[Task {task_id}] log-stream error after {elapsed_s:.1f}s "
-                f"cycle={poll_cycle} total_events={total_events_sent}: {exc}"
+                f"cycle={poll_cycle} total_events={total_events_sent}"
+                + (f" ff_streak={ff_streak}" if ff_streak > 0 else "")
+                + f": {exc}"
             )
             yield f"data: {_json.dumps({'error': str(exc)})}\n\n"
 
