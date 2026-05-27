@@ -46,7 +46,11 @@ def _save_task_metadata_from_container(worker, container: Any, task: Task, issue
 
         raw = worker.docker.read_file_from_container(container, _CONTAINER_METADATA_PATH)
         if not raw:
-            logger.debug(f"[Task {task.id}] task-metadata.json not found in container (worker image may be outdated)")
+            logger.info(
+                f"[Task {task.id}] task-metadata.json could not be read from container at "
+                f"{_CONTAINER_METADATA_PATH!r} — file may not exist yet or container may be "
+                f"in an inaccessible state; metadata will be omitted from MR description"
+            )
             return
 
         # Validate JSON before writing

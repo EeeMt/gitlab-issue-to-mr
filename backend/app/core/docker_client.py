@@ -203,7 +203,7 @@ class DockerClientWrapper:
                     return None
                 return extracted.read()
         except Exception as exc:
-            logger.debug(f"Could not read {container_path!r} from container {container.id}: {exc}")
+            logger.info(f"Could not read {container_path!r} from container {container.id}: {exc}")
             return None
 
     def remove_container(self, container: Any, force: bool = False) -> None:
