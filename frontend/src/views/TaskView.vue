@@ -223,7 +223,7 @@
           />
 
           <!-- Result Panel (only for terminal tasks) -->
-          <TaskResultPanel v-if="task && isTerminal" :task="task" :context-compact-count="contextCompactCount" @status-overridden="refreshTask" />
+          <TaskResultPanel v-if="task && isTerminal" :task="task" :context-compact-count="contextCompactCount" :last-assistant-log="lastAssistantLog" @status-overridden="refreshTask" />
         </div>
       </n-spin>
     </n-space>
@@ -382,6 +382,10 @@ const isTerminal = computed(() =>
 
 const contextCompactCount = computed(() =>
   taskLogs.value.filter(l => l.log_type === 'context_compact').length
+)
+
+const lastAssistantLog = computed(() =>
+  [...taskLogs.value].reverse().find(l => l.log_type === 'assistant_text') ?? null
 )
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {

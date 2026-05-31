@@ -5,6 +5,38 @@
     </template>
 
     <div class="result-body">
+      <!-- Execution Summary (last assistant text event, collapsed by default) -->
+      <div v-if="lastAssistantLog" class="result-card result-card--summary-text">
+        <div class="result-card__title">
+          <n-icon size="16" class="result-card__icon result-card__icon--summary"><ChatboxOutline /></n-icon>
+          {{ t('taskView.executionSummary') }}
+          <span v-if="summaryPreview && !summaryExpanded" class="summary-preview">{{ summaryPreview }}</span>
+          <button
+            class="summary-toggle"
+            :class="{ 'summary-toggle--active': summaryExpanded, 'summary-toggle--loading': summaryPayloadLoading }"
+            :disabled="summaryPayloadLoading"
+            @click="toggleSummary"
+          >
+            <span v-if="summaryPayloadLoading" class="badge-spin-ring"></span>
+            <n-icon v-else size="11" class="badge-chevron" :class="{ 'badge-chevron--open': summaryExpanded }">
+              <ChevronForward />
+            </n-icon>
+          </button>
+        </div>
+        <div class="summary-expand-track" :class="{ 'summary-expand-track--open': summaryExpanded }">
+          <div class="summary-expand-body">
+            <div
+              v-if="summaryExpanded && summaryRenderedHtml"
+              class="summary-content markdown-content"
+              v-html="summaryRenderedHtml"
+            ></div>
+            <div v-else-if="summaryExpanded && !summaryPayloadLoading && !summaryRenderedHtml" class="summary-content summary-content--empty">
+              {{ t('taskView.emptyContent') }}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Commit Record Card -->
       <div v-if="task.commit_sha || task.commit_message || hasChanges" class="result-card result-card--commit">
         <div class="result-card__title">
@@ -172,16 +204,18 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { NCard, NIcon, NButton, NModal, NInput, NSpace, NTag, useMessage } from 'naive-ui'
-import { AlertCircleOutline, TimeOutline, GitCommitOutline, OpenOutline, ChatbubbleEllipsesOutline, ArrowBackOutline, CheckmarkCircleOutline, CloseCircleOutline, ShieldCheckmarkOutline } from '@vicons/ionicons5'
+import { AlertCircleOutline, TimeOutline, GitCommitOutline, OpenOutline, ChatbubbleEllipsesOutline, ArrowBackOutline, CheckmarkCircleOutline, CloseCircleOutline, ShieldCheckmarkOutline, ChevronForward, ChatboxOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { formatLargeNumber } from '../utils/usageLimits'
-import type { Task } from '../api'
-import { overrideTaskStatus } from '../api'
+import type { Task, TaskLog } from '../api'
+import { overrideTaskStatus, getTaskPayload } from '../api'
+import { parseTextEntry, renderMarkdown } from './task-process/taskProcessUtils'
 
 const props = defineProps<{
   task: Task
   contextCompactCount?: number
+  lastAssistantLog?: TaskLog | null
 }>()
 
 const emit = defineEmits<{
@@ -196,6 +230,62 @@ const showOverrideModal = ref(false)
 const overrideTargetStatus = ref<'completed' | 'failed' | null>(null)
 const overrideReason = ref('')
 const overrideLoading = ref(false)
+
+// Execution summary (last assistant text event)
+const summaryExpanded = ref(false)
+const summaryPayloadText = ref('')
+const summaryPayloadLoading = ref(false)
+const summaryPayloadLoaded = ref(false)
+const summaryRenderedHtml = ref('')
+const summaryRenderedSource = ref('')
+
+const summaryEntry = computed(() =>
+  props.lastAssistantLog ? parseTextEntry(props.lastAssistantLog.metadata) : null
+)
+
+const summaryText = computed(() =>
+  summaryPayloadLoaded.value ? summaryPayloadText.value : (summaryEntry.value?.text ?? '')
+)
+
+const summaryPreview = computed(() => {
+  const entry = summaryEntry.value
+  if (!entry) return ''
+  if (entry.preview) return entry.truncated ? entry.preview + '…' : entry.preview
+  return entry.text.slice(0, 120) || ''
+})
+
+function syncSummaryRender() {
+  const text = summaryText.value.trim()
+  if (!text || summaryRenderedSource.value === text) return
+  summaryRenderedHtml.value = renderMarkdown(text)
+  summaryRenderedSource.value = text
+}
+
+async function toggleSummary() {
+  summaryExpanded.value = !summaryExpanded.value
+  if (!summaryExpanded.value) return
+
+  const entry = summaryEntry.value
+  if (!entry) return
+
+  if (entry.text) {
+    syncSummaryRender()
+    return
+  }
+  if (entry.payloadId && !summaryPayloadLoaded.value && !summaryPayloadLoading.value) {
+    summaryPayloadLoading.value = true
+    try {
+      const payload = await getTaskPayload(props.task.id, entry.payloadId)
+      summaryPayloadText.value = payload.content
+      summaryPayloadLoaded.value = true
+      syncSummaryRender()
+    } catch {
+      // silently fail; empty state shown
+    } finally {
+      summaryPayloadLoading.value = false
+    }
+  }
+}
 
 function openOverrideModal(targetStatus: 'completed' | 'failed') {
   overrideTargetStatus.value = targetStatus
@@ -512,5 +602,149 @@ const totalTokens = computed(() => {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+}
+
+/* Execution summary card */
+.result-card--summary-text {
+  border-color: rgba(2, 132, 199, 0.18);
+  background: rgba(2, 132, 199, 0.03);
+}
+
+.result-card__icon--summary {
+  color: #0284c7;
+}
+
+.summary-preview {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--n-text-color-3, #999);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: 4px;
+}
+
+.summary-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin-left: auto;
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--n-border-color, rgba(128, 128, 128, 0.2));
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--n-text-color-3, #999);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  font-family: inherit;
+}
+
+.summary-toggle:hover {
+  color: var(--n-text-color, inherit);
+  border-color: rgba(128, 128, 128, 0.4);
+}
+
+.summary-toggle--active {
+  color: #0284c7;
+  border-color: #0284c7;
+  background: rgba(2, 132, 199, 0.06);
+}
+
+.summary-toggle:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.badge-chevron {
+  transition: transform 0.15s ease;
+}
+
+.badge-chevron--open {
+  transform: rotate(90deg);
+}
+
+.badge-spin-ring {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  animation: badge-rotate 0.7s linear infinite;
+}
+
+@keyframes badge-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.summary-expand-track {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.22s ease;
+}
+
+.summary-expand-track--open {
+  grid-template-rows: 1fr;
+}
+
+.summary-expand-body {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.summary-content {
+  margin-top: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--n-text-color-2);
+  background: rgba(2, 132, 199, 0.04);
+  border-radius: 6px;
+  overflow-wrap: break-word;
+}
+
+.summary-content--empty {
+  font-style: italic;
+  opacity: 0.4;
+}
+
+/* reuse markdown styles for summary content */
+.summary-content :deep(p) { margin: 0 0 0.6em; }
+.summary-content :deep(p:last-child) { margin-bottom: 0; }
+.summary-content :deep(h1), .summary-content :deep(h2),
+.summary-content :deep(h3), .summary-content :deep(h4) {
+  margin: 0.8em 0 0.4em; font-weight: 600; line-height: 1.3;
+}
+.summary-content :deep(h1) { font-size: 1.25em; }
+.summary-content :deep(h2) { font-size: 1.1em; }
+.summary-content :deep(h3) { font-size: 1em; }
+.summary-content :deep(ul), .summary-content :deep(ol) { margin: 0.4em 0; padding-left: 1.5em; }
+.summary-content :deep(li) { margin: 0.15em 0; }
+.summary-content :deep(code) {
+  font-family: var(--n-font-family-mono, monospace);
+  font-size: 0.88em;
+  background: rgba(128, 128, 128, 0.12);
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+}
+.summary-content :deep(pre.md-code-block) {
+  margin: 0.5em 0; padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.06); border-radius: 5px;
+  overflow-x: auto; font-family: var(--n-font-family-mono, monospace);
+  font-size: 0.85em; line-height: 1.55; white-space: pre;
+}
+.summary-content :deep(pre.md-code-block code) { background: none; padding: 0; border-radius: 0; font-size: inherit; color: inherit; }
+.summary-content :deep(a) { color: var(--n-primary-color, #18a058); text-decoration: none; }
+.summary-content :deep(a:hover) { text-decoration: underline; }
+.summary-content :deep(blockquote) {
+  margin: 0.5em 0; padding: 0.2em 0.8em;
+  border-left: 3px solid var(--n-border-color, rgba(128,128,128,0.35));
+  color: var(--n-text-color-3, #888);
 }
 </style>
