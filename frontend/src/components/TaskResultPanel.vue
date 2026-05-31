@@ -64,7 +64,7 @@
             <span class="summary-label">{{ t('taskView.duration') }}</span>
             <span class="summary-value">{{ executionDuration }}</span>
           </div>
-          <div v-if="contextCompactCount != null && contextCompactCount > 0" class="summary-item">
+          <div v-if="contextCompactCount != null" class="summary-item">
             <span class="summary-label">{{ t('taskView.contextCompactCount') }}</span>
             <span class="summary-value">{{ contextCompactCount }}</span>
           </div>
