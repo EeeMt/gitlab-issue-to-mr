@@ -26,11 +26,11 @@
         <div class="summary-expand-track" :class="{ 'summary-expand-track--open': summaryExpanded }">
           <div class="summary-expand-body">
             <div
-              v-if="summaryExpanded && summaryRenderedHtml"
+              v-if="summaryRenderedHtml"
               class="summary-content markdown-content"
               v-html="summaryRenderedHtml"
             ></div>
-            <div v-else-if="summaryExpanded && !summaryPayloadLoading && !summaryRenderedHtml" class="summary-content summary-content--empty">
+            <div v-else-if="!summaryPayloadLoading && summaryPayloadLoaded && !summaryRenderedHtml" class="summary-content summary-content--empty">
               {{ t('taskView.emptyContent') }}
             </div>
           </div>

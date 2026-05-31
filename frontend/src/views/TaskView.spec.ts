@@ -1231,6 +1231,37 @@ describe('TaskView', () => {
       await mountComponent({ status: 'completed' })
       expect(wrapper.vm.hasActions).toBe(false)
     })
+
+    it('contextCompactCount returns 0 when there are no context_compact logs', async () => {
+      ;(mockApi.getTaskLogs as Mock).mockResolvedValue([
+        createMockTaskLog({ log_type: 'assistant_text', message: 'summary' })
+      ])
+      await mountComponent({ status: 'completed' })
+      await vi.waitFor(() => mockApi.getTaskLogs.mock.calls.length > 0)
+      await nextTick()
+
+      expect(wrapper.vm.contextCompactCount).toBe(0)
+    })
+
+    it('contextCompactCount returns correct count and lastAssistantLog is the last assistant_text log', async () => {
+      await mountComponent({ status: 'completed' })
+
+      // Override logs after mounting so mountComponent's default setup doesn't win
+      ;(mockApi.getTaskLogs as Mock).mockResolvedValue([
+        createMockTaskLog({ log_type: 'assistant_text', message: 'First summary' }),
+        createMockTaskLog({ log_type: 'context_compact' }),
+        createMockTaskLog({ log_type: 'context_compact' }),
+        createMockTaskLog({ log_type: 'assistant_text', message: 'Last summary' })
+      ])
+
+      await wrapper.vm.refreshTask()
+      await flushPromises()
+      await nextTick()
+
+      expect(wrapper.vm.contextCompactCount).toBe(2)
+      expect(wrapper.vm.lastAssistantLog).not.toBeNull()
+      expect(wrapper.vm.lastAssistantLog.message).toBe('Last summary')
+    })
   })
 
   describe('refreshTask', () => {
