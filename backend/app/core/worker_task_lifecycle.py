@@ -292,6 +292,7 @@ async def prepare_resume_task_context(
 
 
 async def fail_missing_parent_issue(db: AsyncSession, task: Task) -> bool:
+    logger.error(f"[Task {task.id}] Parent issue {task.issue_id} not found; marking task FAILED")
     task.status = TaskStatus.FAILED
     task.error_message = f"Parent issue {task.issue_id} not found"
     task.completed_at = utcnow()
@@ -309,6 +310,7 @@ async def fail_execute_task(
     issue: Optional[Issue] = None,
     container: Any = None,
 ) -> bool:
+    logger.error(f"[Task {task.id}] Task failed: {error}")
     had_completed_at = task.completed_at is not None
     task.status = TaskStatus.FAILED
     if task.completed_at is None:
@@ -338,6 +340,7 @@ async def fail_execute_task(
 
 
 async def fail_resume_missing_container(db: AsyncSession, task: Task, error: Exception) -> bool:
+    logger.error(f"[Task {task.id}] Container disappeared during resume; marking task FAILED: {error}")
     task.status = TaskStatus.FAILED
     task.error_message = f"Container disappeared during resume: {error}"
     task.completed_at = utcnow()
@@ -503,6 +506,7 @@ async def monitor_container_run(
 
     stop_event = asyncio.Event()
     poll_task = asyncio.create_task(_poll_artifacts(stop_event))
+    logger.info(f"[Task {task.id}] Streaming container logs (timeout={settings.task_timeout}s){resume_prefix}")
     try:
         exit_code, logs, log_chunks_saved, timed_out = await worker._stream_logs_to_db(
             container,
@@ -514,6 +518,11 @@ async def monitor_container_run(
         stop_event.set()
         await poll_task
 
+    logger.info(
+        f"[Task {task.id}] Log stream finished{resume_prefix}: "
+        f"exit_code={exit_code}, timed_out={timed_out}, chunks={log_chunks_saved}"
+    )
+
     try:
         await _flush_artifacts_once()
     except Exception as exc:  # noqa: BLE001
@@ -521,6 +530,7 @@ async def monitor_container_run(
 
     await db.refresh(task)
     if task.status == TaskStatus.CANCELLED:
+        logger.info(f"[Task {task.id}] Task was cancelled during execution; removing container")
         try:
             worker.docker.remove_container(container, force=True)
         except Exception:

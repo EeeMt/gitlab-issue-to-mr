@@ -59,7 +59,7 @@ class WorkerLogStreamer:
                 for chunk in container.logs(stdout=True, stderr=True, follow=True, stream=True):
                     loop.call_soon_threadsafe(log_queue.put_nowait, chunk)
             except Exception as exc:  # noqa: BLE001
-                logger.debug(f"[Task {task_id}] Log stream thread error: {exc}")
+                logger.warning(f"[Task {task_id}] Log stream thread error: {exc}")
             finally:
                 try:
                     loop.call_soon_threadsafe(log_queue.put_nowait, _STREAM_END)
@@ -84,7 +84,7 @@ class WorkerLogStreamer:
                 code = result.get("StatusCode", -1) if isinstance(result, dict) else -1
                 _container_exit_code.append(code)
             except Exception as exc:  # noqa: BLE001
-                logger.debug(f"[Task {task_id}] Container exit-watcher thread error: {exc}")
+                logger.warning(f"[Task {task_id}] Container exit-watcher thread error: {exc}")
             finally:
                 try:
                     loop.call_soon_threadsafe(log_queue.put_nowait, _CONTAINER_EXITED)
@@ -146,6 +146,10 @@ class WorkerLogStreamer:
                 drain_deadline = time.monotonic() + _POST_EXIT_DRAIN_SECONDS
                 if drain_deadline < deadline:
                     deadline = drain_deadline
+                    logger.info(
+                        f"[Task {task_id}] Container exited (exit_code={_container_exit_code[0] if _container_exit_code else '?'}); "
+                        f"draining log stream for up to {_POST_EXIT_DRAIN_SECONDS}s"
+                    )
                 continue
 
             # Normal bytes chunk from the container log stream.
@@ -197,6 +201,7 @@ class WorkerLogStreamer:
             try:
                 result = await asyncio.to_thread(container.wait, timeout=30)
                 exit_code = result.get("StatusCode", 1)
+                logger.info(f"[Task {task_id}] Got exit_code={exit_code} from fallback container.wait()")
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[Task {task_id}] container.wait() error: {exc}")
                 exit_code = -1
