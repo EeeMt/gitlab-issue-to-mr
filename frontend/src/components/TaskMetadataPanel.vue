@@ -39,13 +39,20 @@
               <span class="task-issue-link__id">#{{ task.issue.id }}</span>
               <span class="task-issue-link__title">{{ task.issue.title }}</span>
             </router-link>
-            <span v-if="task.initiator_username" class="metadata-initiator"> · {{ task.initiator_username }}</span>
           </template>
           <template v-else>
             <span class="metadata-manual">{{ t('taskView.manualCreation') }}</span>
-            <span v-if="task.initiator_username" class="metadata-initiator"> · {{ task.initiator_username }}</span>
           </template>
         </span>
+      </div>
+
+      <!-- Initiator -->
+      <div v-if="task.initiator_username" class="metadata-row">
+        <span class="metadata-label">
+          <n-icon size="14" class="metadata-label-icon"><PersonOutline /></n-icon>
+          {{ t('common.initiator') }}
+        </span>
+        <span class="metadata-value">{{ task.initiator_username }}</span>
       </div>
 
       <!-- Retry Source -->
@@ -265,11 +272,6 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 
 .metadata-manual {
   color: var(--n-text-color-2, #666);
-}
-
-.metadata-initiator {
-  color: var(--n-text-color-3, #999);
-  font-size: 13px;
 }
 
 .branch-flow {
