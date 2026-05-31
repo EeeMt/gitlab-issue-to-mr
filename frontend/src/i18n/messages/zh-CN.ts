@@ -573,6 +573,7 @@ const zhCN = {
     noProcessYet: '暂无进程',
     scrollToLatest: '跳转到最新',
     contextCompacted: '上下文已压缩',
+    contextCompactCount: '上下文压缩次数',
     completedAt: '完成时间',
     tokenBreakdown: '输入: {input} · 输出: {output}',
     continueGuideTitle: '在需求详情中继续',

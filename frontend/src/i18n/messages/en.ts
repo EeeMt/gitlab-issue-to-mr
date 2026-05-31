@@ -583,6 +583,7 @@ const en = {
     noProcessYet: 'No events yet',
     scrollToLatest: 'Jump to latest',
     contextCompacted: 'Context compressed',
+    contextCompactCount: 'Context Compactions',
     completedAt: 'Completed At',
     tokenBreakdown: 'Input: {input} · Output: {output}',
     continueGuideTitle: 'Continue on This Issue',

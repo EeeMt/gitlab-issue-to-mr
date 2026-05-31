@@ -64,6 +64,10 @@
             <span class="summary-label">{{ t('taskView.duration') }}</span>
             <span class="summary-value">{{ executionDuration }}</span>
           </div>
+          <div v-if="contextCompactCount != null && contextCompactCount > 0" class="summary-item">
+            <span class="summary-label">{{ t('taskView.contextCompactCount') }}</span>
+            <span class="summary-value">{{ contextCompactCount }}</span>
+          </div>
         </div>
       </div>
 
@@ -177,6 +181,7 @@ import { overrideTaskStatus } from '../api'
 
 const props = defineProps<{
   task: Task
+  contextCompactCount?: number
 }>()
 
 const emit = defineEmits<{

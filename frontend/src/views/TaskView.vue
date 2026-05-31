@@ -223,7 +223,7 @@
           />
 
           <!-- Result Panel (only for terminal tasks) -->
-          <TaskResultPanel v-if="task && isTerminal" :task="task" @status-overridden="refreshTask" />
+          <TaskResultPanel v-if="task && isTerminal" :task="task" :context-compact-count="contextCompactCount" @status-overridden="refreshTask" />
         </div>
       </n-spin>
     </n-space>
@@ -378,6 +378,10 @@ const terminalLogHtml = computed(() => {
 
 const isTerminal = computed(() =>
   task.value?.status === 'completed' || task.value?.status === 'failed'
+)
+
+const contextCompactCount = computed(() =>
+  taskLogs.value.filter(l => l.log_type === 'context_compact').length
 )
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
