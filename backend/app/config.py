@@ -116,6 +116,7 @@ class Settings(BaseSettings):
     session_secret: str = Field(default="change-me-in-production")
     config_encryption_key: str = Field(default="")
     log_level: str = Field(default="INFO")
+    sqlalchemy_echo: bool = Field(default=False)  # Set True to log all SQL queries (noisy in prod)
     backend_url: str = Field(default="http://localhost:8000")  # Backend API URL (used for webhook endpoint)
     frontend_url: str = Field(default="")  # Dashboard URL for task links; falls back to backend_url if empty
 
