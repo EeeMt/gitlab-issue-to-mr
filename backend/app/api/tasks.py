@@ -901,8 +901,11 @@ async def update_task(
 
     if "task_mode" in updated_fields:
         task.task_mode = request.task_mode  # type: ignore[assignment]  # null rejected by schema
-        if request.task_mode == "plan":
-            task.require_changes = False
+
+    # Enforce invariant: plan tasks must never have require_changes=True,
+    # regardless of whether task_mode or require_changes was the field being updated.
+    if task.task_mode == "plan":
+        task.require_changes = False
 
     # Re-read the row inside the same transaction before committing.
     # Under READ COMMITTED, this sees any status changes that were committed by a

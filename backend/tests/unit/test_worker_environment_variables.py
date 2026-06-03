@@ -130,6 +130,7 @@ class WorkerEnvironmentVariableHelperTests(unittest.TestCase):
             initiator_display_name="Alice Zhang",
             initiator_email="alice@example.com",
             initiator_username="alice",
+            task_mode="execute",
         )
         issue = SimpleNamespace(
             branch_name="task-123",

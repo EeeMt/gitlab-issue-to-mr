@@ -273,6 +273,7 @@ class Scheduler:
                 select(Task.issue_id).where(
                     Task.status == TaskStatus.QUEUED,
                     Task.issue_id != None,
+                    Task.task_mode != "plan",
                 ).distinct()
             )
             issue_ids = [row[0] for row in queued_issue_result]
