@@ -96,31 +96,39 @@
 
         <!-- Task mode + require changes -->
         <n-form-item :label="t('issue.taskMode')">
-          <div class="task-mode-row">
-            <n-radio-group v-model:value="taskMode" size="small" class="task-mode-selector">
-              <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '240px', fontSize: '12px' }">
-                <template #trigger>
-                  <n-radio-button value="execute">{{ t('issue.taskModeExecute') }}</n-radio-button>
-                </template>
-                {{ t('issue.taskModeExecuteDesc') }}
-              </n-tooltip>
-              <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '240px', fontSize: '12px' }">
-                <template #trigger>
-                  <n-radio-button value="plan">{{ t('issue.taskModePlan') }}</n-radio-button>
-                </template>
-                {{ t('issue.taskModePlanDesc') }}
-              </n-tooltip>
-            </n-radio-group>
-            <template v-if="taskMode === 'execute'">
-              <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
-              <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '260px', fontSize: '12px' }">
-                <template #trigger>
-                  <n-icon :component="InformationCircleOutline" size="14" class="require-changes-info-icon" />
-                </template>
-                {{ t('issue.requireChangesHint') }}
-              </n-tooltip>
-              <n-switch v-model:value="requireChanges" size="small" />
-            </template>
+          <div class="task-mode-selector">
+            <div
+              class="task-mode-card"
+              :class="{ 'task-mode-card--active': taskMode === 'execute' }"
+              @click="taskMode = 'execute'"
+            >
+              <n-icon :component="CodeSlashOutline" size="18" class="task-mode-card__icon" />
+              <div class="task-mode-card__body">
+                <div class="task-mode-card__label">{{ t('issue.taskModeExecute') }}</div>
+                <div class="task-mode-card__desc">{{ t('issue.taskModeExecuteDesc') }}</div>
+                <div v-if="taskMode === 'execute'" class="task-mode-card__extra" @click.stop>
+                  <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
+                  <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '260px', fontSize: '12px' }">
+                    <template #trigger>
+                      <n-icon :component="InformationCircleOutline" size="13" class="require-changes-info-icon" />
+                    </template>
+                    {{ t('issue.requireChangesHint') }}
+                  </n-tooltip>
+                  <n-switch v-model:value="requireChanges" size="small" />
+                </div>
+              </div>
+            </div>
+            <div
+              class="task-mode-card"
+              :class="{ 'task-mode-card--active': taskMode === 'plan' }"
+              @click="taskMode = 'plan'"
+            >
+              <n-icon :component="BulbOutline" size="18" class="task-mode-card__icon" />
+              <div class="task-mode-card__body">
+                <div class="task-mode-card__label">{{ t('issue.taskModePlan') }}</div>
+                <div class="task-mode-card__desc">{{ t('issue.taskModePlanDesc') }}</div>
+              </div>
+            </div>
           </div>
         </n-form-item>
 
@@ -248,7 +256,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, useAttrs } from 'vue'
 import {
-  NButton, NDrawer, NDrawerContent, NForm, NFormItem, NRadio, NRadioGroup, NRadioButton,
+  NButton, NDrawer, NDrawerContent, NForm, NFormItem, NRadio, NRadioGroup,
   NDatePicker, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon,
   useMessage
 } from 'naive-ui'
@@ -258,7 +266,9 @@ import {
   WarningOutline,
   CalendarOutline,
   CloseOutline,
-  InformationCircleOutline
+  InformationCircleOutline,
+  CodeSlashOutline,
+  BulbOutline
 } from '@vicons/ionicons5'
 import VariableEditor from './VariableEditor.vue'
 import HeatmapChart from './HeatmapChart.vue'
@@ -653,11 +663,66 @@ onUnmounted(() => {
   gap: 6px;
 }
 
-.task-mode-row {
+.task-mode-selector {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.task-mode-card {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.task-mode-card:hover {
+  border-color: var(--n-primary-color);
+}
+
+.task-mode-card--active {
+  border-color: var(--n-primary-color);
+  background: rgba(99, 226, 183, 0.06);
+}
+
+.task-mode-card__icon {
+  margin-top: 2px;
+  flex-shrink: 0;
+  color: var(--n-text-color-3);
+}
+
+.task-mode-card--active .task-mode-card__icon {
+  color: var(--n-primary-color);
+}
+
+.task-mode-card__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.task-mode-card__label {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.task-mode-card__desc {
+  font-size: 11px;
+  color: var(--n-text-color-3);
+  margin-top: 2px;
+}
+
+.task-mode-card__extra {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--n-border-color);
 }
 
 .prompt-label-require-text {
