@@ -60,6 +60,7 @@ def _serialize_task(
         "model_name": task.model_name,
         "commit_message": task.commit_message,
         "require_changes": task.require_changes,
+        "task_mode": task.task_mode if task.task_mode else "execute",
         "provider_id": task.provider_id,
         "provider_name": None,
         "created_at": task.created_at.isoformat(),
@@ -192,6 +193,7 @@ async def maybe_update_issue_status(db: AsyncSession, issue_id: int) -> None:
             select(func.count(Task.id)).where(
                 Task.issue_id == issue_id,
                 Task.status == TaskStatus.COMPLETED,
+                Task.task_mode != "plan",  # plan tasks do not constitute code delivery
             )
         )
         if completed_count_result.scalar() > 0:

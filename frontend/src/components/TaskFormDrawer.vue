@@ -81,14 +81,30 @@
               </n-button>
             </div>
             <div class="prompt-label-right">
-              <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
-              <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '260px', fontSize: '12px' }">
-                <template #trigger>
-                  <n-icon :component="InformationCircleOutline" size="14" class="require-changes-info-icon" />
-                </template>
-                {{ t('issue.requireChangesHint') }}
-              </n-tooltip>
-              <n-switch v-model:value="requireChanges" size="small" />
+              <n-radio-group v-model:value="taskMode" size="small" class="task-mode-selector">
+                <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '240px', fontSize: '12px' }">
+                  <template #trigger>
+                    <n-radio-button value="execute">{{ t('issue.taskModeExecute') }}</n-radio-button>
+                  </template>
+                  {{ t('issue.taskModeExecuteDesc') }}
+                </n-tooltip>
+                <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '240px', fontSize: '12px' }">
+                  <template #trigger>
+                    <n-radio-button value="plan">{{ t('issue.taskModePlan') }}</n-radio-button>
+                  </template>
+                  {{ t('issue.taskModePlanDesc') }}
+                </n-tooltip>
+              </n-radio-group>
+              <template v-if="taskMode === 'execute'">
+                <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
+                <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '260px', fontSize: '12px' }">
+                  <template #trigger>
+                    <n-icon :component="InformationCircleOutline" size="14" class="require-changes-info-icon" />
+                  </template>
+                  {{ t('issue.requireChangesHint') }}
+                </n-tooltip>
+                <n-switch v-model:value="requireChanges" size="small" />
+              </template>
             </div>
           </div>
           <VariableEditor
@@ -226,7 +242,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, useAttrs } from 'vue'
 import {
-  NButton, NDrawer, NDrawerContent, NForm, NFormItem, NRadio, NRadioGroup,
+  NButton, NDrawer, NDrawerContent, NForm, NFormItem, NRadio, NRadioGroup, NRadioButton,
   NDatePicker, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon,
   useMessage
 } from 'naive-ui'
@@ -242,7 +258,7 @@ import VariableEditor from './VariableEditor.vue'
 import HeatmapChart from './HeatmapChart.vue'
 import {
   createTask, updateTask, getPromptTemplates, getProviders, getScheduledTasks, getSlotCapacity, getConfig,
-  type Task, type PromptTemplate, type SlotCapacityInfo, type AIProvider
+  type Task, type PromptTemplate, type SlotCapacityInfo, type AIProvider, type UpdateTaskRequest
 } from '../api'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
@@ -286,6 +302,7 @@ const drawerTestId = computed(() => {
 const prompt = ref('')
 const priority = ref(1)
 const requireChanges = ref(true)
+const taskMode = ref<'execute' | 'plan'>('execute')
 const selectedProviderId = ref<number | null>(null)
 const scheduleType = ref<'now' | 'scheduled'>('now')
 const scheduledAt = ref<number | null>(null)
@@ -358,6 +375,7 @@ watch(() => props.show, (val) => {
       prompt.value = props.task.user_prompt ?? ''
       priority.value = props.task.priority ?? 1
       requireChanges.value = props.task.require_changes ?? true
+      taskMode.value = (props.task.task_mode as 'execute' | 'plan') ?? 'execute'
       selectedProviderId.value = props.task.provider_id ?? null
     } else if (props.mode === 'create') {
       if (!prompt.value && props.issueDescription) {
@@ -493,7 +511,8 @@ async function handleCreate() {
     const req: Parameters<typeof createTask>[0] = {
       issue_id: props.issueId!,
       priority: priority.value,
-      require_changes: requireChanges.value
+      task_mode: taskMode.value,
+      require_changes: taskMode.value === 'plan' ? false : requireChanges.value
     }
     if (prompt.value.trim()) req.user_prompt = prompt.value.trim()
     if (scheduleType.value === 'scheduled' && scheduledAt.value) {
@@ -539,6 +558,14 @@ async function handleEdit() {
     payload.provider_id = selectedProviderId.value
   }
   if (requireChanges.value !== orig.require_changes) payload.require_changes = requireChanges.value
+  if (taskMode.value !== (orig.task_mode ?? 'execute')) {
+    payload.task_mode = taskMode.value
+    // Switching to plan forces require_changes=false; switching back to execute
+    // restores whatever the toggle says (already captured above if changed).
+    if (taskMode.value === 'plan' && orig.require_changes !== false) {
+      payload.require_changes = false
+    }
+  }
 
   if (Object.keys(payload).length === 0) {
     emit('update:show', false)

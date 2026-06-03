@@ -37,6 +37,7 @@ RESERVED_WORKER_ENVIRONMENT_KEYS = frozenset(
         "RESUME_SESSION",
         "TARGET_BRANCH",
         "TASK_ID",
+        "TASK_MODE",
         "TASK_TIMEOUT",
         "USER_PROMPT",
     }

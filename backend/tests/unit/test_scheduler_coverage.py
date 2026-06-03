@@ -1089,5 +1089,117 @@ class TestRunWorkerResumeTask(unittest.TestCase):
         mock_engine.dispose.assert_called_once()
 
 
+# ---------------------------------------------------------------------------
+# _mark_eligible_as_queued — issue in_review → in_progress transition
+# ---------------------------------------------------------------------------
+
+class TestMarkEligibleAsQueuedIssueTransition(unittest.IsolatedAsyncioTestCase):
+    """Tests that _mark_eligible_as_queued also transitions linked issues to in_progress.
+
+    Regression: an issue could stay in 'in_review' if all prior tasks completed but a
+    new task was still in QUEUED state. The scheduler must update issue status when
+    tasks are marked QUEUED.
+    """
+
+    async def test_in_review_issue_transitions_to_in_progress_when_task_queued(self) -> None:
+        """Issue in 'in_review' → 'in_progress' after tasks are marked QUEUED."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        mock_db = AsyncMock()
+
+        # First execute: bulk update PENDING → QUEUED (2 tasks affected)
+        task_update_result = MagicMock()
+        task_update_result.rowcount = 2
+
+        # Second execute: query QUEUED tasks → returns issue_id=5
+        issue_query_result = [(5,)]
+
+        # Third execute: bulk update issues → status transition (return value not checked)
+        issue_update_result = MagicMock()
+
+        mock_db.execute = AsyncMock(side_effect=[
+            task_update_result,
+            issue_query_result,
+            issue_update_result,
+        ])
+
+        with patch("app.scheduler.utcnow"):
+            await scheduler._mark_eligible_as_queued(mock_db)
+
+        # execute called 3 times: task update, issue id query, issue update
+        self.assertEqual(mock_db.execute.await_count, 3)
+        # commit called twice: once after task update, once after issue update
+        self.assertEqual(mock_db.commit.await_count, 2)
+
+    async def test_no_issue_transition_when_no_tasks_marked_queued(self) -> None:
+        """When rowcount == 0 no issue query or update is performed."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        mock_db = AsyncMock()
+
+        task_update_result = MagicMock()
+        task_update_result.rowcount = 0
+
+        mock_db.execute = AsyncMock(return_value=task_update_result)
+
+        with patch("app.scheduler.utcnow"):
+            await scheduler._mark_eligible_as_queued(mock_db)
+
+        # Only the task-update execute, no commit
+        self.assertEqual(mock_db.execute.await_count, 1)
+        mock_db.commit.assert_not_called()
+
+    async def test_no_issue_update_when_queued_tasks_have_no_issue(self) -> None:
+        """When all newly queued tasks have issue_id=None, no issue update is executed."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        mock_db = AsyncMock()
+
+        task_update_result = MagicMock()
+        task_update_result.rowcount = 1
+
+        # No issue IDs linked — empty result
+        issue_query_result = []
+
+        mock_db.execute = AsyncMock(side_effect=[task_update_result, issue_query_result])
+
+        with patch("app.scheduler.utcnow"):
+            await scheduler._mark_eligible_as_queued(mock_db)
+
+        # execute called twice (task update + issue id query), no third call for issue update
+        self.assertEqual(mock_db.execute.await_count, 2)
+        # commit called once (only for task update)
+        self.assertEqual(mock_db.commit.await_count, 1)
+
+    async def test_multiple_issues_all_transitioned(self) -> None:
+        """Multiple issues linked to queued tasks all get transitioned."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        mock_db = AsyncMock()
+
+        task_update_result = MagicMock()
+        task_update_result.rowcount = 3
+
+        # Three distinct issues
+        issue_query_result = [(1,), (7,), (42,)]
+        issue_update_result = MagicMock()
+
+        mock_db.execute = AsyncMock(side_effect=[
+            task_update_result,
+            issue_query_result,
+            issue_update_result,
+        ])
+
+        with patch("app.scheduler.utcnow"):
+            await scheduler._mark_eligible_as_queued(mock_db)
+
+        self.assertEqual(mock_db.execute.await_count, 3)
+        self.assertEqual(mock_db.commit.await_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

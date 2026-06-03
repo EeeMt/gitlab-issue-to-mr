@@ -222,6 +222,7 @@ export interface Task {
   model_name?: string | null
   commit_message?: string | null
   require_changes: boolean
+  task_mode: 'execute' | 'plan'
   provider_id: number | null
   provider_name?: string | null
   created_at: string
@@ -298,6 +299,7 @@ export interface CreateTaskRequest {
   scheduled_datetime?: string
   provider_id?: number | null
   require_changes?: boolean
+  task_mode?: 'execute' | 'plan'
 }
 
 export interface RescheduleTaskRequest {
@@ -1437,6 +1439,7 @@ export interface UpdateTaskRequest {
   priority?: number
   provider_id?: number | null
   require_changes?: boolean
+  task_mode?: 'execute' | 'plan'
 }
 
 export async function updateTask(taskId: number, request: UpdateTaskRequest): Promise<Task> {

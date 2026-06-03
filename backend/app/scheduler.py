@@ -268,6 +268,25 @@ class Scheduler:
         if result.rowcount > 0:
             await db.commit()
             logger.debug(f"Marked {result.rowcount} eligible task(s) as QUEUED")
+            # Transition issues to in_progress for all newly queued tasks
+            queued_issue_result = await db.execute(
+                select(Task.issue_id).where(
+                    Task.status == TaskStatus.QUEUED,
+                    Task.issue_id != None,
+                ).distinct()
+            )
+            issue_ids = [row[0] for row in queued_issue_result]
+            if issue_ids:
+                await db.execute(
+                    update(Issue)
+                    .where(
+                        Issue.id.in_(issue_ids),
+                        Issue.status.in_([IssueStatus.OPEN.value, IssueStatus.IN_REVIEW.value]),
+                    )
+                    .values(status=IssueStatus.IN_PROGRESS.value)
+                )
+                await db.commit()
+                logger.debug(f"Transitioned {len(issue_ids)} issue(s) to IN_PROGRESS for queued tasks")
 
     async def _get_running_count(self, db: AsyncSession) -> int:
         """Get count of currently running tasks."""

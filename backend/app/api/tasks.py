@@ -899,6 +899,11 @@ async def update_task(
     if "require_changes" in updated_fields:
         task.require_changes = request.require_changes  # type: ignore[assignment]  # null rejected by schema
 
+    if "task_mode" in updated_fields:
+        task.task_mode = request.task_mode  # type: ignore[assignment]  # null rejected by schema
+        if request.task_mode == "plan":
+            task.require_changes = False
+
     # Re-read the row inside the same transaction before committing.
     # Under READ COMMITTED, this sees any status changes that were committed by a
     # concurrent worker *before* this transaction acquired its FOR UPDATE lock.
@@ -1093,6 +1098,8 @@ async def retry_task(
         initiator_username=current_user.username if current_user is not None else None,
         initiator_display_name=current_user.display_name if current_user is not None else None,
         initiator_email=current_user.email if current_user is not None else None,
+        task_mode=original_task.task_mode if original_task.task_mode else "execute",
+        require_changes=original_task.require_changes,
     )
     db.add(new_task)
     await db.commit()
@@ -1253,9 +1260,8 @@ async def create_task(
         priority=request.priority,
         scheduled_at=scheduled_at,
         provider_id=request.provider_id,
-        require_changes=request.require_changes
-        if request.require_changes is not None
-        else True,
+        task_mode=request.task_mode,
+        require_changes=request.effective_require_changes,
     )
     db.add(task)
     await db.commit()

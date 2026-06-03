@@ -1,12 +1,14 @@
 """Pydantic schemas for Task API request/response models."""
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, field_validator, model_validator
 
 from app.core.scheduling import normalize_scheduled_datetime
 from app.core.utcnow import utcnow
+
+_VALID_TASK_MODES = ("execute", "plan")
 
 
 class RetryTaskRequest(BaseModel):
@@ -47,12 +49,16 @@ class UpdateTaskRequest(BaseModel):
             leave the current value unchanged.
         require_changes: Whether the task must produce file changes.
             Cannot be null — omit the key to leave unchanged.
+        task_mode: Execution mode — 'execute' (default) or 'plan'.
+            Cannot be null — omit the key to leave unchanged.
+            Setting task_mode='plan' automatically forces require_changes=False.
     """
 
     user_prompt: Optional[str] = None
     priority: Optional[int] = None
     provider_id: Optional[int] = None  # None = system default / clear
     require_changes: Optional[bool] = None
+    task_mode: Optional[Literal["execute", "plan"]] = None
 
     @field_validator("user_prompt", mode="before")
     @classmethod
@@ -68,6 +74,13 @@ class UpdateTaskRequest(BaseModel):
             raise ValueError("require_changes cannot be null; omit the key to leave it unchanged")
         return v
 
+    @field_validator("task_mode", mode="before")
+    @classmethod
+    def task_mode_not_null(cls, v: Any) -> Any:
+        if v is None:
+            raise ValueError("task_mode cannot be null; omit the key to leave it unchanged")
+        return v
+
 
 class CreateTaskRequest(BaseModel):
     """Request model for creating a task under an Issue."""
@@ -79,6 +92,7 @@ class CreateTaskRequest(BaseModel):
     scheduled_datetime: Optional[datetime] = None
     provider_id: int
     require_changes: Optional[bool] = True
+    task_mode: Literal["execute", "plan"] = "execute"
 
     @model_validator(mode="after")
     def validate_schedule_is_future(self) -> "CreateTaskRequest":
@@ -94,3 +108,10 @@ class CreateTaskRequest(BaseModel):
             raise ValueError("Scheduled datetime must be in the future")
 
         return self
+
+    @property
+    def effective_require_changes(self) -> bool:
+        """Plan mode never requires code changes."""
+        if self.task_mode == "plan":
+            return False
+        return self.require_changes if self.require_changes is not None else True

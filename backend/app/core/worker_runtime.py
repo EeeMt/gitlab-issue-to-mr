@@ -115,7 +115,10 @@ def build_container_env(
     if provider and provider.system_prompt:
         environment["APPEND_SYSTEM_PROMPT"] = provider.system_prompt
 
-    if issue.claude_session_id:
+    task_mode = task.task_mode if task.task_mode else "execute"
+    environment["TASK_MODE"] = task_mode
+    # Plan mode: skip session resume to avoid polluting execute sessions with plan context
+    if task_mode != "plan" and issue.claude_session_id:
         environment["RESUME_SESSION"] = issue.claude_session_id
 
     if issue.base_branch:
@@ -178,7 +181,9 @@ def build_legacy_container_env(
 
     if provider and getattr(provider, "system_prompt", None):
         environment["APPEND_SYSTEM_PROMPT"] = provider.system_prompt
-    if issue.claude_session_id:
+    task_mode = task.task_mode if task.task_mode else "execute"
+    environment["TASK_MODE"] = task_mode
+    if task_mode != "plan" and issue.claude_session_id:
         environment["RESUME_SESSION"] = issue.claude_session_id
     if issue.base_branch:
         environment["BASE_BRANCH"] = issue.base_branch

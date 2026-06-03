@@ -453,6 +453,28 @@ normalize_model_commit_message() {
     printf '%s' "${raw_message}" | python3 -c 'import re, sys; text = sys.stdin.read(); text = re.sub(r"\r$", "", text, flags=re.MULTILINE); text = re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL); text = re.sub(r"</?think\b[^>]*>", "", text, flags=re.IGNORECASE); print(text.strip(), end="")'
 }
 
+TASK_MODE="${TASK_MODE:-execute}"
+
+if [ "${TASK_MODE}" = "plan" ]; then
+cat > /tmp/claude_prompt.txt <<EOF
+请分析下面的需求，给出详细的实施方案。不要修改任何文件，不要执行任何写操作（包括 git commit、git push、创建 MR）。
+
+需求:
+${USER_PROMPT}
+
+上下文:
+- 仓库路径: ${PROJECT_PATH}
+
+要求:
+1. 检查代码库，理解现有结构和约束。
+2. 给出清晰、可操作的实施方案，包含：
+    - 需要新增或修改哪些文件，以及具体的改动思路
+    - 为什么这么设计
+    - 潜在风险或需要注意的地方
+3. 不要修改任何文件，不要执行任何写操作。
+4. 不要要求人工确认。
+EOF
+else
 cat > /tmp/claude_prompt.txt <<EOF
 请直接完成下面的需求，不要先输出规划或步骤清单。
 
@@ -472,6 +494,7 @@ ${USER_PROMPT}
 5. 不要描述"未跟踪文件""待提交""可按需提交"这类提交前状态，默认以已经完成并准备提交的口吻总结结果。
 6. 不要要求人工确认，除非你真的被阻塞。
 EOF
+fi
 
 CLAUDE_SYSTEM_PROMPT_FILE="/tmp/claude_system_prompt.txt"
 if [ -n "${APPEND_SYSTEM_PROMPT}" ]; then
@@ -571,6 +594,18 @@ if [ $RESULT -ne 0 ]; then
     echo "Claude execution failed with exit code: ${RESULT}"
     create_runtime_archive
     exit $RESULT
+fi
+
+# Plan mode: discard any accidental workspace changes and exit successfully
+if [ "${TASK_MODE}" = "plan" ]; then
+    echo "Plan mode: discarding any workspace changes..."
+    git checkout -- . 2>/dev/null || true
+    git clean -fd 2>/dev/null || true
+    create_runtime_archive
+    echo "========================================"
+    echo "Plan task completed successfully!"
+    echo "========================================"
+    exit 0
 fi
 
 # Now commit and push the changes
