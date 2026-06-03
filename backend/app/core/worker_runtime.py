@@ -203,9 +203,15 @@ def build_container_volumes(
     *,
     task: Optional[Task] = None,
 ) -> dict:
-    """Build volume mounts for the worker container."""
+    """Build volume mounts for the worker container.
+
+    Mount order matters: parent directories must be mounted before child directories so that
+    user-specified mounts (added last) can override any subdirectory of a system mount.
+    Order: system fixed mounts → workspace mounts → user-defined worker_volume_mounts.
+    """
     volumes: dict = {}
 
+    # --- System fixed mounts (first) ---
     if settings.maven_cache_host_path:
         volumes[settings.maven_cache_host_path] = {
             "bind": _MAVEN_CACHE_CONTAINER_PATH,
@@ -217,13 +223,7 @@ def build_container_volumes(
             "mode": "ro",
         }
 
-    for mount in settings.worker_volume_mounts_parsed:
-        host_path = mount.get("host_path")
-        container_path = mount.get("container_path")
-        mode = mount.get("mode", "ro")
-        if host_path and container_path:
-            volumes[host_path] = {"bind": container_path, "mode": mode}
-
+    # --- Workspace mounts (second) ---
     workspace_paths = (
         build_issue_workspace_paths(settings, issue, task)
         if issue is not None and task is not None
@@ -259,6 +259,14 @@ def build_container_volumes(
             f"(worker_workspace_host_path={getattr(settings, 'worker_workspace_host_path', None)!r}); "
             f"runtime data will be lost when container exits"
         )
+
+    # --- User-defined mounts (last) — may override subdirectories of any system mount above ---
+    for mount in settings.worker_volume_mounts_parsed:
+        host_path = mount.get("host_path")
+        container_path = mount.get("container_path")
+        mode = mount.get("mode", "ro")
+        if host_path and container_path:
+            volumes[host_path] = {"bind": container_path, "mode": mode}
 
     return volumes if volumes else {}
 
