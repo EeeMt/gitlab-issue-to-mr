@@ -1200,6 +1200,71 @@ class TestMarkEligibleAsQueuedIssueTransition(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_db.execute.await_count, 3)
         self.assertEqual(mock_db.commit.await_count, 2)
 
+    async def test_plan_tasks_excluded_from_issue_in_progress_transition(self) -> None:
+        """Plan-mode tasks must NOT transition their linked issue to IN_PROGRESS.
 
-if __name__ == "__main__":
+        Regression guard: before the fix, queued plan tasks caused issues to flip
+        from IN_REVIEW → IN_PROGRESS, hiding completed-code status from users.
+        The issue-ID query now filters Task.task_mode != 'plan', so plan tasks
+        return an empty result and no issue update is executed.
+        """
+        from app.scheduler import Scheduler
+        import sqlalchemy
+
+        scheduler = Scheduler()
+        mock_db = AsyncMock()
+
+        task_update_result = MagicMock()
+        task_update_result.rowcount = 1  # one task marked QUEUED
+
+        # The issue-ID query returns empty because the queued task is plan-mode
+        issue_query_result = []  # filtered out by task_mode != 'plan'
+
+        mock_db.execute = AsyncMock(side_effect=[task_update_result, issue_query_result])
+
+        with patch("app.scheduler.utcnow"):
+            await scheduler._mark_eligible_as_queued(mock_db)
+
+        # execute called twice (task update + issue id query), no third call for issue update
+        self.assertEqual(mock_db.execute.await_count, 2)
+        # commit called once only (task update); no issue update commit
+        self.assertEqual(mock_db.commit.await_count, 1)
+
+    async def test_issue_query_contains_task_mode_filter(self) -> None:
+        """The SQL issued by _mark_eligible_as_queued must filter task_mode != 'plan'.
+
+        Checks the actual compiled SQL clause so that a future refactor that
+        accidentally drops the filter is caught immediately.
+        """
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        mock_db = AsyncMock()
+
+        task_update_result = MagicMock()
+        task_update_result.rowcount = 1
+
+        captured_stmts = []
+
+        async def capture_execute(stmt, *args, **kwargs):
+            captured_stmts.append(stmt)
+            if len(captured_stmts) == 1:
+                return task_update_result
+            return []  # issue query returns empty → no third execute
+
+        mock_db.execute = capture_execute
+
+        with patch("app.scheduler.utcnow"):
+            await scheduler._mark_eligible_as_queued(mock_db)
+
+        # The second statement is the issue-ID SELECT; compile and inspect it.
+        self.assertGreaterEqual(len(captured_stmts), 2)
+        from sqlalchemy.dialects import postgresql
+        compiled = captured_stmts[1].compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+        sql_text = str(compiled).lower()
+        self.assertIn("task_mode", sql_text, "Issue-ID query must filter on task_mode")
+        self.assertIn("plan", sql_text, "Issue-ID query must exclude 'plan' mode tasks")
+if __name__ == '__main__':
     unittest.main()

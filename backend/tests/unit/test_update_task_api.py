@@ -334,5 +334,70 @@ class UpdateTaskPartialSemanticsTests(unittest.TestCase):
         self.assertEqual(task.priority, 2)
 
 
+# ---------------------------------------------------------------------------
+# Plan mode invariant: require_changes must always be False for plan tasks
+# ---------------------------------------------------------------------------
+
+class UpdateTaskPlanModeTests(unittest.TestCase):
+    """PATCH /tasks/{id} enforces the plan-mode / require_changes invariant."""
+
+    def tearDown(self):
+        from app.main import app
+        app.dependency_overrides.clear()
+
+    def _patch(self, payload, task=None):
+        t = task or _make_task()
+        mock_db = _mock_db_for_task(t)
+        client, app = _make_client(mock_db)
+        with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
+            resp = client.patch("/api/tasks/1", json=payload)
+        app.dependency_overrides.clear()
+        return resp, t
+
+    def test_switching_to_plan_forces_require_changes_false(self):
+        """PATCH task_mode='plan' on an execute task sets require_changes=False."""
+        task = _make_task()
+        task.task_mode = "execute"
+        task.require_changes = True
+        resp, t = self._patch({"task_mode": "plan"}, task=task)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(t.task_mode, "plan")
+        self.assertFalse(t.require_changes)
+
+    def test_patching_require_changes_true_on_plan_task_is_forced_false(self):
+        """PATCH require_changes=True on an already-plan task stays False (invariant guard)."""
+        task = _make_task()
+        task.task_mode = "plan"
+        task.require_changes = False
+        resp, t = self._patch({"require_changes": True}, task=task)
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(t.require_changes)
+
+    def test_patching_both_plan_and_require_changes_true_forces_false(self):
+        """PATCH task_mode='plan' + require_changes=True together: require_changes ends up False."""
+        task = _make_task()
+        task.task_mode = "execute"
+        task.require_changes = True
+        resp, t = self._patch({"task_mode": "plan", "require_changes": True}, task=task)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(t.task_mode, "plan")
+        self.assertFalse(t.require_changes)
+
+    def test_switching_to_execute_does_not_force_require_changes(self):
+        """Switching from plan back to execute leaves require_changes as-is."""
+        task = _make_task()
+        task.task_mode = "plan"
+        task.require_changes = False
+        resp, t = self._patch({"task_mode": "execute", "require_changes": True}, task=task)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(t.task_mode, "execute")
+        self.assertTrue(t.require_changes)
+
+    def test_invalid_task_mode_returns_422(self):
+        """PATCH task_mode with an unknown value returns 422."""
+        resp, _ = self._patch({"task_mode": "review"})
+        self.assertEqual(resp.status_code, 422)
+
+
 if __name__ == "__main__":
     unittest.main()
