@@ -95,7 +95,7 @@
                   {{ t('issue.taskModePlanDesc') }}
                 </n-tooltip>
               </n-radio-group>
-              <template v-if="taskMode === 'execute'">
+              <template v-if="taskMode !== 'plan'">
                 <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
                 <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '260px', fontSize: '12px' }">
                   <template #trigger>
@@ -302,7 +302,7 @@ const drawerTestId = computed(() => {
 const prompt = ref('')
 const priority = ref(1)
 const requireChanges = ref(true)
-const taskMode = ref<'execute' | 'plan'>('execute')
+const taskMode = ref<'execute' | 'plan' | null>(null)
 const selectedProviderId = ref<number | null>(null)
 const scheduleType = ref<'now' | 'scheduled'>('now')
 const scheduledAt = ref<number | null>(null)
@@ -381,7 +381,7 @@ watch(() => props.show, (val) => {
       if (!prompt.value && props.issueDescription) {
         prompt.value = props.issueDescription
       }
-      taskMode.value = 'execute'
+      taskMode.value = null
       requireChanges.value = true
       scheduleType.value = 'now'
       scheduledAt.value = null
@@ -513,9 +513,9 @@ async function handleCreate() {
     const req: Parameters<typeof createTask>[0] = {
       issue_id: props.issueId!,
       priority: priority.value,
-      task_mode: taskMode.value,
       require_changes: taskMode.value === 'plan' ? false : requireChanges.value
     }
+    if (taskMode.value !== null) req.task_mode = taskMode.value
     if (prompt.value.trim()) req.user_prompt = prompt.value.trim()
     if (scheduleType.value === 'scheduled' && scheduledAt.value) {
       req.scheduled_datetime = new Date(scheduledAt.value).toISOString()
@@ -560,7 +560,7 @@ async function handleEdit() {
     payload.provider_id = selectedProviderId.value
   }
   if (requireChanges.value !== orig.require_changes) payload.require_changes = requireChanges.value
-  if (taskMode.value !== (orig.task_mode ?? 'execute')) {
+  if (taskMode.value !== null && taskMode.value !== (orig.task_mode ?? 'execute')) {
     payload.task_mode = taskMode.value
     // Switching to plan forces require_changes=false; switching back to execute
     // restores whatever the toggle says (already captured above if changed).
