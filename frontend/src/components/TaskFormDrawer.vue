@@ -496,6 +496,10 @@ function cancelTemplateOverwrite() {
 
 // --- Submit actions ---
 async function handleCreate() {
+  if (taskMode.value === null) {
+    message.warning(t('issue.pleaseSelectTaskMode'))
+    return
+  }
   if (scheduleType.value === 'scheduled') {
     if (!scheduledAt.value) {
       message.warning(t('createTask.pleaseSelectScheduledTime'))

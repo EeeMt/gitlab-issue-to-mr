@@ -424,6 +424,7 @@ const en = {
     taskModeExecuteDesc: 'Claude implements code changes and commits them',
     taskModePlan: 'Plan',
     taskModePlanDesc: 'Claude analyses the requirement and outputs a proposal only — no files are modified',
+    pleaseSelectTaskMode: 'Please select a task mode',
     totalTaskDuration: 'Total Duration',
     totalIssues: 'Total Issues',
     openCount: 'Open',

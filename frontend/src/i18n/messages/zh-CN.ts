@@ -422,6 +422,7 @@ const zhCN = {
     taskModeExecuteDesc: 'Claude 直接实施代码修改并提交',
     taskModePlan: '计划模式',
     taskModePlanDesc: 'Claude 只分析需求并输出实施方案，不修改任何文件',
+    pleaseSelectTaskMode: '请选择任务模式',
     totalTaskDuration: '总耗时',
     totalIssues: '需求总数',
     openCount: '待处理',
