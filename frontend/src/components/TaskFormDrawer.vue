@@ -96,38 +96,40 @@
 
         <!-- Task mode + require changes -->
         <n-form-item :label="t('issue.taskMode')">
-          <div class="task-mode-selector">
-            <div
-              class="task-mode-card"
-              :class="{ 'task-mode-card--active': taskMode === 'execute' }"
-              @click="taskMode = 'execute'"
-            >
-              <n-icon :component="CodeSlashOutline" size="18" class="task-mode-card__icon" />
-              <div class="task-mode-card__body">
-                <div class="task-mode-card__label">{{ t('issue.taskModeExecute') }}</div>
-                <div class="task-mode-card__desc">{{ t('issue.taskModeExecuteDesc') }}</div>
-                <div v-if="taskMode === 'execute'" class="task-mode-card__extra" @click.stop>
-                  <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
-                  <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '260px', fontSize: '12px' }">
-                    <template #trigger>
-                      <n-icon :component="InformationCircleOutline" size="13" class="require-changes-info-icon" />
-                    </template>
-                    {{ t('issue.requireChangesHint') }}
-                  </n-tooltip>
-                  <n-switch v-model:value="requireChanges" size="small" />
+          <div class="task-mode-section">
+            <div class="task-mode-selector">
+              <div
+                class="task-mode-card"
+                :class="{ 'task-mode-card--active': taskMode === 'execute' }"
+                @click="taskMode = 'execute'"
+              >
+                <n-icon :component="CodeSlashOutline" size="18" class="task-mode-card__icon" />
+                <div class="task-mode-card__body">
+                  <div class="task-mode-card__label">{{ t('issue.taskModeExecute') }}</div>
+                  <div class="task-mode-card__desc">{{ t('issue.taskModeExecuteDesc') }}</div>
+                </div>
+              </div>
+              <div
+                class="task-mode-card"
+                :class="{ 'task-mode-card--active': taskMode === 'plan' }"
+                @click="taskMode = 'plan'"
+              >
+                <n-icon :component="BulbOutline" size="18" class="task-mode-card__icon" />
+                <div class="task-mode-card__body">
+                  <div class="task-mode-card__label">{{ t('issue.taskModePlan') }}</div>
+                  <div class="task-mode-card__desc">{{ t('issue.taskModePlanDesc') }}</div>
                 </div>
               </div>
             </div>
-            <div
-              class="task-mode-card"
-              :class="{ 'task-mode-card--active': taskMode === 'plan' }"
-              @click="taskMode = 'plan'"
-            >
-              <n-icon :component="BulbOutline" size="18" class="task-mode-card__icon" />
-              <div class="task-mode-card__body">
-                <div class="task-mode-card__label">{{ t('issue.taskModePlan') }}</div>
-                <div class="task-mode-card__desc">{{ t('issue.taskModePlanDesc') }}</div>
-              </div>
+            <div v-if="taskMode === 'execute'" class="require-changes-row">
+              <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
+              <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '260px', fontSize: '12px' }">
+                <template #trigger>
+                  <n-icon :component="InformationCircleOutline" size="13" class="require-changes-info-icon" />
+                </template>
+                {{ t('issue.requireChangesHint') }}
+              </n-tooltip>
+              <n-switch v-model:value="requireChanges" size="small" />
             </div>
           </div>
         </n-form-item>
@@ -663,10 +665,22 @@ onUnmounted(() => {
   gap: 6px;
 }
 
+.task-mode-section {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 0;
+}
+
 .task-mode-selector {
   display: flex;
   gap: 8px;
   width: 100%;
+}
+
+:deep(.n-form-item-blank) {
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .task-mode-card {
@@ -716,13 +730,11 @@ onUnmounted(() => {
   margin-top: 2px;
 }
 
-.task-mode-card__extra {
+.require-changes-row {
   display: flex;
   align-items: center;
   gap: 6px;
   margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--n-border-color);
 }
 
 .prompt-label-require-text {
