@@ -55,6 +55,7 @@ def _make_task(task_id=1, project_id=1, status=TaskStatus.PENDING):
     task.is_manual = False
     task.is_manually_overridden = False
     task.override_reason = None
+    task.task_mode = "execute"
     now = datetime(2024, 1, 1, 12, 0, 0)
     task.created_at = now
     task.updated_at = now
@@ -120,6 +121,8 @@ class UpdateTaskHappyPathTests(unittest.TestCase):
         resp, task = self._patch(1, {"user_prompt": "New prompt"})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(task.user_prompt, "New prompt")
+        # Response JSON must include task_mode as a proper string, not a serialized MagicMock
+        self.assertEqual(resp.json()["task_mode"], "execute")
 
     def test_update_priority(self):
         resp, task = self._patch(1, {"priority": 2})

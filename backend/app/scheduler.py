@@ -366,8 +366,8 @@ class Scheduler:
             task.started_at = utcnow()
             await db.commit()
 
-            # Auto-transition issue to IN_PROGRESS
-            if task.issue_id is not None:
+            # Auto-transition issue to IN_PROGRESS (skip for plan tasks)
+            if task.issue_id is not None and task.task_mode != "plan":
                 await self._transition_issue_to_in_progress(db, task.issue_id)
 
             # Execute via worker in a thread pool WITHOUT waiting

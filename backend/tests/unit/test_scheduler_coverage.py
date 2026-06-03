@@ -29,6 +29,7 @@ def _make_mock_task(
     project_id: int = 100,
     issue_id: int | None = 10,
     status: str = "pending",
+    task_mode: str = "execute",
 ) -> MagicMock:
     """Return a lightweight mock Task object."""
     task = MagicMock()
@@ -36,6 +37,7 @@ def _make_mock_task(
     task.project_id = project_id
     task.issue_id = issue_id
     task.status = status
+    task.task_mode = task_mode
     task.started_at = None
     task.error_message = None
     task.completed_at = None
@@ -776,6 +778,49 @@ class TestExecuteTask(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(task.error_message)
         self.assertNotIn(77, scheduler._running_tasks)
         self.assertNotIn(10, scheduler._running_issues)
+
+    async def test_plan_task_does_not_transition_issue_to_in_progress(self) -> None:
+        """Plan tasks must NOT call _transition_issue_to_in_progress when they start running.
+
+        Regression guard: before the fix, _execute_task always called
+        _transition_issue_to_in_progress for any task with an issue_id, causing
+        IN_REVIEW issues to flip to IN_PROGRESS during plan task execution.
+        """
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        task = _make_mock_task(task_id=99, issue_id=5, task_mode="plan")
+
+        mock_db = MagicMock()
+        mock_db.commit = AsyncMock()
+
+        with patch.object(
+            scheduler, "_transition_issue_to_in_progress", new_callable=AsyncMock
+        ) as mock_transition, patch.object(
+            scheduler, "_run_task_background", new_callable=AsyncMock
+        ):
+            await scheduler._execute_task(mock_db, task)
+
+        mock_transition.assert_not_called()
+
+    async def test_execute_task_does_transition_issue_for_execute_mode(self) -> None:
+        """Execute-mode tasks still call _transition_issue_to_in_progress normally."""
+        from app.scheduler import Scheduler
+
+        scheduler = Scheduler()
+        task = _make_mock_task(task_id=100, issue_id=7, task_mode="execute")
+
+        mock_db = MagicMock()
+        mock_db.commit = AsyncMock()
+
+        with patch.object(
+            scheduler, "_transition_issue_to_in_progress", new_callable=AsyncMock
+        ) as mock_transition, patch.object(
+            scheduler, "_run_task_background", new_callable=AsyncMock
+        ):
+            await scheduler._execute_task(mock_db, task)
+
+        mock_transition.assert_called_once_with(mock_db, 7)
 
 
 # ---------------------------------------------------------------------------
