@@ -111,7 +111,7 @@
                 {{ t('issue.taskModePlanDesc') }}
               </n-tooltip>
             </n-radio-group>
-            <template v-if="taskMode !== 'plan'">
+            <template v-if="taskMode === 'execute'">
               <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
               <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '260px', fontSize: '12px' }">
                 <template #trigger>
