@@ -88,8 +88,10 @@
             :variable-tips="promptVariableTips"
             :placeholder="placeholderText"
           />
-          <div class="task-mode-row">
-            <n-radio-group v-model:value="taskMode" size="small" class="task-mode-selector">
+          <div class="task-mode-section">
+            <span class="task-mode-label">{{ t('issue.taskMode') }}</span>
+            <div class="task-mode-row">
+              <n-radio-group v-model:value="taskMode" size="small" class="task-mode-selector">
               <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '240px', fontSize: '12px' }">
                 <template #trigger>
                   <n-radio-button value="execute">{{ t('issue.taskModeExecute') }}</n-radio-button>
@@ -113,6 +115,7 @@
               </n-tooltip>
               <n-switch v-model:value="requireChanges" size="small" />
             </template>
+            </div>
           </div>
           <div v-if="unreplacedVariables.length > 0" class="prompt-variable-warning">
             <n-icon :component="WarningOutline" size="14" />
@@ -649,11 +652,21 @@ onUnmounted(() => {
   gap: 6px;
 }
 
+.task-mode-section {
+  margin-top: 12px;
+}
+
+.task-mode-label {
+  display: block;
+  font-size: 13px;
+  color: var(--n-label-text-color, #666);
+  margin-bottom: 6px;
+}
+
 .task-mode-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 8px;
   flex-wrap: wrap;
 }
 

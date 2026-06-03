@@ -417,7 +417,7 @@ const zhCN = {
     prompt: '提示词',
     requireChanges: '要求代码变更',
     requireChangesHint: '开启后，若任务没有产生代码提交，则视为失败',
-    taskMode: '执行模式',
+    taskMode: '任务模式',
     taskModeExecute: '执行模式',
     taskModeExecuteDesc: 'Claude 直接实施代码修改并提交',
     taskModePlan: '计划模式',

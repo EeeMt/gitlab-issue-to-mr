@@ -419,7 +419,7 @@ const en = {
     prompt: 'Prompt',
     requireChanges: 'Require Changes',
     requireChangesHint: 'When enabled, the task is considered failed if no code commits are produced',
-    taskMode: 'Execution Mode',
+    taskMode: 'Task Mode',
     taskModeExecute: 'Execute',
     taskModeExecuteDesc: 'Claude implements code changes and commits them',
     taskModePlan: 'Plan',
