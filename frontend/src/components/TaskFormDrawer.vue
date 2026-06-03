@@ -381,6 +381,8 @@ watch(() => props.show, (val) => {
       if (!prompt.value && props.issueDescription) {
         prompt.value = props.issueDescription
       }
+      taskMode.value = 'execute'
+      requireChanges.value = true
       scheduleType.value = 'now'
       scheduledAt.value = null
       void loadScheduleContext()
