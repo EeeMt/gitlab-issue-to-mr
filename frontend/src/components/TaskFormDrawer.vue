@@ -81,30 +81,6 @@
               </n-button>
             </div>
             <div class="prompt-label-right">
-              <n-radio-group v-model:value="taskMode" size="small" class="task-mode-selector">
-                <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '240px', fontSize: '12px' }">
-                  <template #trigger>
-                    <n-radio-button value="execute">{{ t('issue.taskModeExecute') }}</n-radio-button>
-                  </template>
-                  {{ t('issue.taskModeExecuteDesc') }}
-                </n-tooltip>
-                <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '240px', fontSize: '12px' }">
-                  <template #trigger>
-                    <n-radio-button value="plan">{{ t('issue.taskModePlan') }}</n-radio-button>
-                  </template>
-                  {{ t('issue.taskModePlanDesc') }}
-                </n-tooltip>
-              </n-radio-group>
-              <template v-if="taskMode !== 'plan'">
-                <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
-                <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '260px', fontSize: '12px' }">
-                  <template #trigger>
-                    <n-icon :component="InformationCircleOutline" size="14" class="require-changes-info-icon" />
-                  </template>
-                  {{ t('issue.requireChangesHint') }}
-                </n-tooltip>
-                <n-switch v-model:value="requireChanges" size="small" />
-              </template>
             </div>
           </div>
           <VariableEditor
@@ -112,6 +88,32 @@
             :variable-tips="promptVariableTips"
             :placeholder="placeholderText"
           />
+          <div class="task-mode-row">
+            <n-radio-group v-model:value="taskMode" size="small" class="task-mode-selector">
+              <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '240px', fontSize: '12px' }">
+                <template #trigger>
+                  <n-radio-button value="execute">{{ t('issue.taskModeExecute') }}</n-radio-button>
+                </template>
+                {{ t('issue.taskModeExecuteDesc') }}
+              </n-tooltip>
+              <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '240px', fontSize: '12px' }">
+                <template #trigger>
+                  <n-radio-button value="plan">{{ t('issue.taskModePlan') }}</n-radio-button>
+                </template>
+                {{ t('issue.taskModePlanDesc') }}
+              </n-tooltip>
+            </n-radio-group>
+            <template v-if="taskMode !== 'plan'">
+              <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
+              <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '260px', fontSize: '12px' }">
+                <template #trigger>
+                  <n-icon :component="InformationCircleOutline" size="14" class="require-changes-info-icon" />
+                </template>
+                {{ t('issue.requireChangesHint') }}
+              </n-tooltip>
+              <n-switch v-model:value="requireChanges" size="small" />
+            </template>
+          </div>
           <div v-if="unreplacedVariables.length > 0" class="prompt-variable-warning">
             <n-icon :component="WarningOutline" size="14" />
             <span>{{ t('createTask.unreplacedVariablesHint') }}: {{ unreplacedVariables.join(', ') }}</span>
@@ -645,6 +647,14 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.task-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
 }
 
 .prompt-label-require-text {
