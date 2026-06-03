@@ -735,6 +735,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   margin-top: 8px;
+  padding-left: 12px;
 }
 
 .prompt-label-require-text {
