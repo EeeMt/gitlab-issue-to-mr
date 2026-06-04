@@ -182,8 +182,13 @@ export interface CreateIssueRequest {
   project_id: number
   base_branch?: string
   target_branch?: string
-  // Option to delete branch on issue close
+  // Option to delete branch when a webhook auto-closes the issue
   delete_branch_on_close?: boolean
+}
+
+export interface CloseIssueRequest {
+  branch_action: 'keep' | 'delete'
+  delete_branch: boolean
 }
 
 export interface IssueListResponse {
@@ -1513,8 +1518,11 @@ export async function updateIssue(id: number, data: Partial<{
   return response.data
 }
 
-export async function closeIssue(id: number): Promise<Issue> {
-  const response = await api.post(`/issues/${id}/close`)
+export async function closeIssue(
+  id: number,
+  request: CloseIssueRequest = { branch_action: 'keep', delete_branch: false }
+): Promise<Issue> {
+  const response = await api.post(`/issues/${id}/close`, request)
   return response.data
 }
 

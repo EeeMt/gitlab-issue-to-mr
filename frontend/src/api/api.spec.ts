@@ -489,4 +489,48 @@ describe('API functions', () => {
       expect(result).toEqual(mockIssue)
     })
   })
+
+  describe('closeIssue', () => {
+    it('should POST close choice to /issues/123/close and return issue', async () => {
+      const mockIssue = {
+        id: 123,
+        project_id: 1,
+        title: 'Test issue',
+        status: 'closed',
+        branch_deleted: true
+      }
+      mockAxiosPost.mockResolvedValue({ data: mockIssue })
+
+      const fn = (apiModule as unknown as Record<string, any>).closeIssue
+      expect(typeof fn).toBe('function')
+
+      const result = await fn(123, { branch_action: 'delete', delete_branch: true })
+
+      expect(mockAxiosPost).toHaveBeenCalledWith('/issues/123/close', {
+        branch_action: 'delete',
+        delete_branch: true,
+      })
+      expect(result).toEqual(mockIssue)
+    })
+
+    it('should keep branch when closeIssue is called without options', async () => {
+      const mockIssue = {
+        id: 123,
+        project_id: 1,
+        title: 'Test issue',
+        status: 'closed',
+        branch_deleted: false
+      }
+      mockAxiosPost.mockResolvedValue({ data: mockIssue })
+
+      const fn = (apiModule as unknown as Record<string, any>).closeIssue
+      const result = await fn(123)
+
+      expect(mockAxiosPost).toHaveBeenCalledWith('/issues/123/close', {
+        branch_action: 'keep',
+        delete_branch: false,
+      })
+      expect(result).toEqual(mockIssue)
+    })
+  })
 })

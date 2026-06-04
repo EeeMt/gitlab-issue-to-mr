@@ -18,23 +18,19 @@
           <div class="issue-actions issue-actions--header" data-testid="issue-actions">
             <div class="issue-actions__toolbar">
               <template v-if="isOwner">
-                <n-popconfirm @positive-click="handleClose">
-                  <template #trigger>
-                    <n-button
-                      class="issue-actions__command issue-actions__command--danger"
-                      type="error"
-                      secondary
-                      strong
-                      :disabled="issue.status === 'closed' || closingIssue"
-                      :loading="closingIssue"
-                      data-testid="issue-close-button"
-                    >
-                      <template #icon><n-icon :component="CloseCircleOutline" /></template>
-                      {{ t('issue.close') }}
-                    </n-button>
-                  </template>
-                  {{ t('issue.confirmClose') }}
-                </n-popconfirm>
+                <n-button
+                  class="issue-actions__command issue-actions__command--danger"
+                  type="error"
+                  secondary
+                  strong
+                  :disabled="issue.status === 'closed' || closingIssue"
+                  :loading="closingIssue"
+                  data-testid="issue-close-button"
+                  @click="showCloseModal = true"
+                >
+                  <template #icon><n-icon :component="CloseCircleOutline" /></template>
+                  {{ t('issue.close') }}
+                </n-button>
                 <n-tooltip v-if="issue.status === 'closed' && issue.branch_name && issue.branch_deleted" :title="t('issue.branchAlreadyDeleted')">
                   <n-button
                     class="issue-actions__command issue-actions__command--danger"
@@ -385,6 +381,47 @@
       </n-card>
     </n-space>
 
+    <!-- Close Modal -->
+    <n-modal
+      v-model:show="showCloseModal"
+      preset="card"
+      :title="t('issue.close')"
+      class="config-editor-modal issue-close-confirm-modal"
+      style="width: 520px; max-width: 90vw;"
+      data-testid="issue-close-modal"
+    >
+      <div class="close-issue-modal">
+        <p class="close-issue-modal__message">{{ t('issue.confirmClose') }}</p>
+        <p v-if="issue.branch_name && !issue.branch_deleted" class="close-issue-modal__branch">
+          {{ t('issue.closeBranchChoiceHint', { branch: issue.branch_name }) }}
+        </p>
+      </div>
+      <template #action>
+        <n-space justify="end">
+          <n-button @click="showCloseModal = false">{{ t('common.cancel') }}</n-button>
+          <n-button
+            type="primary"
+            :disabled="closingIssue"
+            :loading="closingIssue"
+            data-testid="issue-close-keep-branch-button"
+            @click="handleClose(false)"
+          >
+            {{ t('issue.closeKeepBranch') }}
+          </n-button>
+          <n-button
+            v-if="issue.branch_name && !issue.branch_deleted"
+            type="error"
+            :disabled="closingIssue"
+            :loading="closingIssue"
+            data-testid="issue-close-delete-branch-button"
+            @click="handleClose(true)"
+          >
+            {{ t('issue.closeDeleteBranch') }}
+          </n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
     <!-- Edit Modal -->
     <n-modal v-model:show="showEditModal" preset="card" :title="t('issue.edit')" style="width: 600px; max-width: 90vw;">
       <n-form label-placement="top">
@@ -581,6 +618,7 @@ const issue = ref<Issue | null>(null)
 const loading = ref(false)
 const deletingBranch = ref(false)
 const closingIssue = ref(false)
+const showCloseModal = ref(false)
 let pollTimer: number | null = null
 const projects = ref<Project[]>([])
 
@@ -906,10 +944,15 @@ async function refreshIssue() {
   })
 }
 
-async function handleClose() {
+async function handleClose(deleteBranch: boolean) {
+  if (closingIssue.value) return
   closingIssue.value = true
   try {
-    issue.value = await closeIssue(issueId.value)
+    issue.value = await closeIssue(issueId.value, {
+      branch_action: deleteBranch ? 'delete' : 'keep',
+      delete_branch: deleteBranch,
+    })
+    showCloseModal.value = false
     message.success(t('issue.closeSuccess'))
   } catch {
     message.error(t('issue.closeFailed'))
@@ -1346,6 +1389,30 @@ onMounted(() => {
 
 .metadata-muted {
   color: var(--n-text-color-3, #999);
+}
+
+:global(.issue-close-confirm-modal) {
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: var(--app-card-radius);
+  box-shadow: var(--app-card-shadow-soft);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
+}
+
+.close-issue-modal {
+  display: grid;
+  gap: 8px;
+}
+
+.close-issue-modal__message,
+.close-issue-modal__branch {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.close-issue-modal__branch {
+  color: var(--n-text-color-2);
+  word-break: break-word;
 }
 
 .branch-flow {

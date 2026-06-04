@@ -12,7 +12,7 @@ const { mockApi, resetMockApi, mockMessage, mockDialog } = vi.hoisted(() => {
   const mock = {
     getIssue: vi.fn<() => Promise<any>>(),
     updateIssue: vi.fn<() => Promise<any>>(),
-    closeIssue: vi.fn<() => Promise<any>>(),
+    closeIssue: vi.fn<(...args: any[]) => Promise<any>>(),
     createTask: vi.fn<() => Promise<any>>(),
     retryTask: vi.fn<() => Promise<any>>(),
     rescheduleTask: vi.fn<() => Promise<any>>(),
@@ -856,18 +856,46 @@ describe('IssueView', () => {
   // Close issue
   // =========================================================================
   describe('close issue', () => {
-    it('calls closeIssue and shows success message', async () => {
+    it('opens close choices and keeps branch by default when selected', async () => {
       const closedIssue = createMockIssue({ status: 'closed' })
       setupDefaultMocks()
       mockApi.closeIssue.mockResolvedValue(closedIssue)
       wrapper = await mountComponent()
 
-      const confirmBtn = wrapper.find('.popconfirm-confirm-btn')
-      expect(confirmBtn.exists()).toBe(true)
-      await confirmBtn.trigger('click')
+      await wrapper.find('[data-testid="issue-close-button"]').trigger('click')
+      await nextTick()
+
+      expect(wrapper.text()).toContain('issue.closeBranchChoiceHint')
+      const keepBranchBtn = wrapper.find('[data-testid="issue-close-keep-branch-button"]')
+      expect(keepBranchBtn.exists()).toBe(true)
+      await keepBranchBtn.trigger('click')
       await flushPromises()
 
-      expect(mockApi.closeIssue).toHaveBeenCalledWith(1)
+      expect(mockApi.closeIssue).toHaveBeenCalledWith(1, {
+        branch_action: 'keep',
+        delete_branch: false,
+      })
+      expect(mockMessage.success).toHaveBeenCalledWith('issue.closeSuccess')
+    })
+
+    it('deletes branch when the close delete option is selected', async () => {
+      const closedIssue = createMockIssue({ status: 'closed', branch_deleted: true })
+      setupDefaultMocks({ branch_name: 'codify/issue-1', branch_deleted: false })
+      mockApi.closeIssue.mockResolvedValue(closedIssue)
+      wrapper = await mountComponent()
+
+      await wrapper.find('[data-testid="issue-close-button"]').trigger('click')
+      await nextTick()
+
+      const deleteBranchBtn = wrapper.find('[data-testid="issue-close-delete-branch-button"]')
+      expect(deleteBranchBtn.exists()).toBe(true)
+      await deleteBranchBtn.trigger('click')
+      await flushPromises()
+
+      expect(mockApi.closeIssue).toHaveBeenCalledWith(1, {
+        branch_action: 'delete',
+        delete_branch: true,
+      })
       expect(mockMessage.success).toHaveBeenCalledWith('issue.closeSuccess')
     })
 
@@ -876,8 +904,9 @@ describe('IssueView', () => {
       mockApi.closeIssue.mockRejectedValue(new Error('fail'))
       wrapper = await mountComponent()
 
-      const confirmBtn = wrapper.find('.popconfirm-confirm-btn')
-      await confirmBtn.trigger('click')
+      await wrapper.find('[data-testid="issue-close-button"]').trigger('click')
+      await nextTick()
+      await wrapper.find('[data-testid="issue-close-keep-branch-button"]').trigger('click')
       await flushPromises()
 
       expect(mockMessage.error).toHaveBeenCalledWith('issue.closeFailed')

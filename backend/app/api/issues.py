@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -46,6 +46,20 @@ class UpdateIssueRequest(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = None
+
+
+class CloseIssueRequest(BaseModel):
+    """Request body for manually closing an issue."""
+
+    branch_action: Optional[Literal["keep", "delete"]] = None
+    delete_branch: bool = False
+
+    @property
+    def should_delete_branch(self) -> bool:
+        """Return whether a manual close explicitly requested branch deletion."""
+        if self.branch_action is not None:
+            return self.branch_action == "delete"
+        return self.delete_branch is True
 
 
 # ---------------------------------------------------------------------------
@@ -135,9 +149,16 @@ def _serialize_issue_detail(issue: Issue) -> dict:
     return data
 
 
-async def _try_delete_issue_branch(issue: Issue, db: AsyncSession) -> None:
+async def _try_delete_issue_branch(
+    issue: Issue,
+    db: AsyncSession,
+    *,
+    ignore_close_policy: bool = False,
+) -> None:
     """Attempt to delete the issue's GitLab branch. Silently handles all failures."""
-    if not issue.branch_name or not issue.delete_branch_on_close:
+    if not issue.branch_name:
+        return
+    if not ignore_close_policy and not issue.delete_branch_on_close:
         return
     try:
         client = get_gitlab_client()
@@ -491,6 +512,7 @@ async def update_issue(
 @router.post("/{issue_id}/close")
 async def close_issue(
     issue_id: int,
+    body: Optional[CloseIssueRequest] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_authenticated_user),
 ):
@@ -510,7 +532,8 @@ async def close_issue(
 
     issue.status = IssueStatus.CLOSED.value
     issue.closed_via = "manual"
-    await _try_delete_issue_branch(issue, db)
+    if body and body.should_delete_branch:
+        await _try_delete_issue_branch(issue, db, ignore_close_policy=True)
     await db.commit()
     await db.refresh(issue, attribute_names=["tasks"])
     return _serialize_issue_detail(issue)

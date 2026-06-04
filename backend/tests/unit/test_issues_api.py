@@ -469,6 +469,7 @@ class CloseIssueTests(unittest.IsolatedAsyncioTestCase):
         result = await close_issue(issue_id=1, db=mock_db, current_user=mock_user)
 
         self.assertEqual(issue.status, IssueStatus.CLOSED.value)
+        self.assertEqual(issue.closed_via, "manual")
         mock_db.commit.assert_awaited_once()
 
     async def test_close_issue_not_found(self):
@@ -700,8 +701,8 @@ class IssueOwnershipTests(unittest.IsolatedAsyncioTestCase):
 class CloseIssueWithBranchDeletionTests(unittest.IsolatedAsyncioTestCase):
     """Tests for close_issue with branch deletion integration."""
 
-    async def test_close_issue_calls_branch_deletion(self):
-        """close_issue should call _try_delete_issue_branch when branch_name is set."""
+    async def test_close_issue_keeps_branch_by_default(self):
+        """Manual close should keep the branch unless the request explicitly deletes it."""
         from app.api.issues import close_issue
         from app.models import IssueStatus
 
@@ -725,11 +726,67 @@ class CloseIssueWithBranchDeletionTests(unittest.IsolatedAsyncioTestCase):
             mock_helper.side_effect = AsyncMock(return_value=None)
             await close_issue(issue_id=1, db=mock_db, current_user=mock_user)
 
-        mock_helper.assert_awaited_once_with(issue, mock_db)
+        mock_helper.assert_not_awaited()
+
+    async def test_close_issue_deletes_branch_when_requested(self):
+        """Manual close should delete the branch when delete_branch=True."""
+        from app.api.issues import CloseIssueRequest, close_issue
+        from app.models import IssueStatus
+
+        issue = _make_issue(
+            id=1,
+            status=IssueStatus.OPEN.value,
+            branch_name="codify/issue-1",
+            delete_branch_on_close=False,
+            branch_deleted=False,
+        )
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        mock_user = MagicMock()
+
+        body = CloseIssueRequest(delete_branch=True)
+        with patch("app.api.issues._try_delete_issue_branch") as mock_helper:
+            mock_helper.side_effect = AsyncMock(return_value=None)
+            await close_issue(issue_id=1, body=body, db=mock_db, current_user=mock_user)
+
+        mock_helper.assert_awaited_once_with(issue, mock_db, ignore_close_policy=True)
+
+    async def test_close_issue_keep_action_overrides_legacy_delete_branch_true(self):
+        """Explicit keep action should never delete the branch."""
+        from app.api.issues import CloseIssueRequest, close_issue
+        from app.models import IssueStatus
+
+        issue = _make_issue(
+            id=1,
+            status=IssueStatus.OPEN.value,
+            branch_name="codify/issue-1",
+            delete_branch_on_close=True,
+            branch_deleted=False,
+        )
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        mock_user = MagicMock()
+
+        body = CloseIssueRequest(branch_action="keep", delete_branch=True)
+        with patch("app.api.issues._try_delete_issue_branch") as mock_helper:
+            mock_helper.side_effect = AsyncMock(return_value=None)
+            await close_issue(issue_id=1, body=body, db=mock_db, current_user=mock_user)
+
+        mock_helper.assert_not_awaited()
 
     async def test_close_issue_commits_even_when_branch_deletion_helper_is_skipped(self):
         """close_issue should commit even if _try_delete_issue_branch does nothing."""
-        from app.api.issues import close_issue
+        from app.api.issues import CloseIssueRequest, close_issue
         from app.models import IssueStatus
 
         issue = _make_issue(id=1, status=IssueStatus.OPEN.value, delete_branch_on_close=False)
@@ -744,7 +801,12 @@ class CloseIssueWithBranchDeletionTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("app.api.issues._try_delete_issue_branch") as mock_helper:
             mock_helper.side_effect = AsyncMock(return_value=None)
-            await close_issue(issue_id=1, db=mock_db, current_user=mock_user)
+            await close_issue(
+                issue_id=1,
+                body=CloseIssueRequest(delete_branch=True),
+                db=mock_db,
+                current_user=mock_user,
+            )
 
         mock_db.commit.assert_awaited_once()
 
@@ -779,6 +841,22 @@ class TryDeleteIssueBranchTests(unittest.IsolatedAsyncioTestCase):
             await _try_delete_issue_branch(issue, mock_db)
         mock_gc.assert_not_called()
         self.assertFalse(issue.branch_deleted)
+
+    async def test_deletes_when_close_policy_is_ignored(self):
+        """Should delete when manual close explicitly bypasses the auto-close policy."""
+        from app.api.issues import _try_delete_issue_branch
+        issue = _make_issue(branch_name="codify/issue-1", project_id=42)
+        issue.delete_branch_on_close = False
+        issue.branch_deleted = False
+        mock_db = MagicMock()
+        mock_db.flush = AsyncMock()
+        mock_client = MagicMock()
+        mock_client.delete_branch.return_value = True
+        with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
+            await _try_delete_issue_branch(issue, mock_db, ignore_close_policy=True)
+        mock_client.delete_branch.assert_called_once_with(42, "codify/issue-1")
+        self.assertTrue(issue.branch_deleted)
+        mock_db.flush.assert_awaited_once()
 
     async def test_sets_branch_deleted_true_on_success(self):
         """Should set branch_deleted=True when GitLab client returns True."""
