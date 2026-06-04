@@ -70,7 +70,7 @@
                   </div>
                 </template>
 
-                <n-empty v-if="!tableLoading && activeTasks.length === 0" :description="t('monitor.noActiveTasks')" />
+                <div v-if="!tableLoading && activeTasks.length === 0" class="queue-empty"><n-empty :description="t('monitor.noActiveTasks')" /></div>
 
                 <!-- Kanban View -->
                 <div v-else-if="queueViewMode === 'kanban'" class="queue-kanban">
@@ -1893,6 +1893,13 @@ onBeforeUnmount(() => {
 
 .queue-kanban__relative-time {
   opacity: 0.8;
+}
+
+.queue-empty {
+  height: 340px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .queue-table-wrapper {
