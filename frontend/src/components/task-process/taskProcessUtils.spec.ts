@@ -4,7 +4,7 @@ import { mount } from '@vue/test-utils'
 import type { TaskLog } from '../../api'
 import TaskProcessPanel from '../TaskProcessPanel.vue'
 import TaskProcessToolRow from './TaskProcessToolRow.vue'
-import { formatInput, getInputSummary, normalizeTaskProcessRows } from './taskProcessUtils'
+import { formatInput, getInputSummary, normalizeTaskProcessRows, summarizeSkillUsage } from './taskProcessUtils'
 
 vi.mock('vue-i18n', () => ({
   createI18n: () => ({ global: { locale: { value: 'zh-CN' } } }),
@@ -106,7 +106,7 @@ function createTaskLog(overrides: Partial<TaskLog>): TaskLog {
 }
 
 describe('taskProcessUtils', () => {
-  it('keeps both individual and batched tool calls when both formats are present', () => {
+  it('ignores legacy tool_calls_json batches in the normalized event stream', () => {
     const logs: TaskLog[] = [
       createTaskLog({
         id: 10,
@@ -124,9 +124,9 @@ describe('taskProcessUtils', () => {
 
     const rows = normalizeTaskProcessRows(logs)
 
-    expect(rows).toHaveLength(2)
-    expect(rows.map((row) => row.kind)).toEqual(['tool_call', 'tool_call'])
-    expect(rows.map((row) => row.toolCall.name).sort()).toEqual(['Bash', 'Read'])
+    expect(rows).toHaveLength(1)
+    expect(rows.map((row) => row.kind)).toEqual(['tool_call'])
+    expect(rows[0].toolCall.name).toBe('Bash')
   })
 
   it('formats Edit input using old_string and new_string keys', () => {
@@ -173,6 +173,85 @@ describe('taskProcessUtils', () => {
     ]
     const rows = normalizeTaskProcessRows(logs)
     expect(rows.map(r => r.kind)).toEqual(['assistant_text', 'context_compact', 'assistant_text'])
+  })
+
+  it('summarizes skill usage from the same tool events rendered in task process', () => {
+    const logs: TaskLog[] = [
+      createTaskLog({
+        id: 1,
+        log_type: 'tool_call',
+        metadata: JSON.stringify({ name: 'Skill', input: { skill_name: 'playwright-cli' } }),
+      }),
+      createTaskLog({
+        id: 2,
+        log_type: 'tool_call',
+        metadata: JSON.stringify({ name: 'Skill', input: { path: '/workspace/.agents/skills/playwright-cli/SKILL.md' } }),
+      }),
+      createTaskLog({
+        id: 3,
+        log_type: 'tool_call',
+        metadata: JSON.stringify({ name: 'Skill', input: { skills: [{ name: 'openai-docs', count: 3 }, 'imagegen'] }, output: null, error: false }),
+      }),
+    ]
+
+    expect(summarizeSkillUsage(logs)).toEqual([
+      { name: 'openai-docs', count: 3 },
+      { name: 'playwright-cli', count: 2 },
+      { name: 'imagegen', count: 1 },
+    ])
+  })
+
+  it('counts Agent subagent_type as skill usage', () => {
+    const agentInput = {
+      description: 'Explore scheduled task feature',
+      prompt: 'Explore the codebase',
+      subagent_type: 'Explore',
+    }
+    const logs: TaskLog[] = [
+      createTaskLog({
+        id: 1,
+        log_type: 'tool_call',
+        metadata: JSON.stringify({ name: 'Agent', input: agentInput, output: null, error: false }),
+      }),
+    ]
+
+    expect(summarizeSkillUsage(logs)).toEqual([
+      { name: 'Explore', count: 1 },
+    ])
+  })
+
+  it('does not deduplicate repeated direct Agent calls with the same input', () => {
+    const agentInput = {
+      description: 'Explore scheduled task feature',
+      prompt: 'Explore the codebase',
+      subagent_type: 'Explore',
+    }
+    const logs: TaskLog[] = [
+      createTaskLog({
+        id: 1,
+        log_type: 'tool_call',
+        metadata: JSON.stringify({ name: 'Agent', input: agentInput, output: null, error: false }),
+      }),
+      createTaskLog({
+        id: 2,
+        log_type: 'tool_call',
+        created_at: '2026-05-04T10:00:01Z',
+        metadata: JSON.stringify({ name: 'Agent', input: agentInput, output: null, error: false }),
+      }),
+    ]
+
+    expect(summarizeSkillUsage(logs)).toEqual([
+      { name: 'Explore', count: 2 },
+    ])
+  })
+
+  it('returns an empty list when no skill usage metadata exists', () => {
+    const logs: TaskLog[] = [
+      createTaskLog({ id: 1, log_type: 'system_init', metadata: JSON.stringify({ skills: ['available-only'] }) }),
+      createTaskLog({ id: 2, log_type: 'tool_call', metadata: JSON.stringify({ name: 'Bash', input: { command: 'pwd' } }) }),
+    ]
+
+    expect(summarizeSkillUsage(logs)).toEqual([])
   })
 })
 

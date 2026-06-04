@@ -91,6 +91,11 @@ export interface NormalizedCompactRow {
 
 export type NormalizedTaskProcessRow = NormalizedTextEventRow | NormalizedToolEventRow | NormalizedCompactRow
 
+export interface SkillUsageStat {
+  name: string
+  count: number
+}
+
 const STRUCTURED_TYPES = new Set(['thinking', 'assistant_text', 'tool_call', 'context_compact'])
 
 function parseJsonMetadata(metadata: unknown): unknown {
@@ -100,6 +105,126 @@ function parseJsonMetadata(metadata: unknown): unknown {
   } catch {
     return metadata
   }
+}
+
+function normalizeSkillName(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    const pathParts = trimmed.split(/[\\/]/).filter(Boolean)
+    if (pathParts[pathParts.length - 1]?.toLowerCase() === 'skill.md' && pathParts.length >= 2) {
+      return pathParts[pathParts.length - 2]
+    }
+    return pathParts[pathParts.length - 1] || trimmed
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const obj = value as Record<string, unknown>
+  return normalizeSkillName(
+    obj.name ?? obj.skill_name ?? obj.skillName ?? obj.skill ?? obj.id ?? obj.path,
+  )
+}
+
+function normalizeSkillCount(value: unknown): number {
+  const count = Number(value)
+  return Number.isFinite(count) && count > 0 ? count : 1
+}
+
+function addSkillUsage(
+  usage: Map<string, number>,
+  nameValue: unknown,
+  countValue: unknown = 1,
+) {
+  const name = normalizeSkillName(nameValue)
+  if (!name) return
+  usage.set(name, (usage.get(name) ?? 0) + normalizeSkillCount(countValue))
+}
+
+function collectSkillUsageValue(
+  usage: Map<string, number>,
+  value: unknown,
+  countValue: unknown = 1,
+) {
+  if (!value) return
+
+  if (typeof value === 'string') {
+    addSkillUsage(usage, value, countValue)
+    return
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (item && typeof item === 'object' && !Array.isArray(item)) {
+        const obj = item as Record<string, unknown>
+        addSkillUsage(usage, obj.name ?? obj.skill_name ?? obj.skillName ?? obj.skill ?? obj.id ?? obj.path, obj.count ?? obj.times ?? obj.uses)
+      } else {
+        addSkillUsage(usage, item)
+      }
+    }
+    return
+  }
+
+  if (typeof value === 'object') {
+    for (const [name, countOrMeta] of Object.entries(value as Record<string, unknown>)) {
+      if (countOrMeta && typeof countOrMeta === 'object' && !Array.isArray(countOrMeta)) {
+        const obj = countOrMeta as Record<string, unknown>
+        addSkillUsage(usage, obj.name ?? obj.skill_name ?? obj.skillName ?? obj.skill ?? obj.id ?? obj.path ?? name, obj.count ?? obj.times ?? obj.uses)
+      } else {
+        addSkillUsage(usage, name, countOrMeta)
+      }
+    }
+  }
+}
+
+function collectSkillUsageFromToolCall(usage: Map<string, number>, call: ToolCall) {
+  const toolName = normalizeSkillName(call.name)?.toLowerCase()
+  if (!toolName) return
+
+  if (toolName === 'agent') {
+    addSkillUsage(usage, call.input?.subagent_type ?? call.input?.agent_type ?? call.input?.type)
+    return
+  }
+
+  if (!['skill', 'skill_use', 'skill_used', 'use_skill', 'useskill'].includes(toolName)) {
+    return
+  }
+
+  const callObj = call as unknown as Record<string, unknown>
+  addSkillUsage(
+    usage,
+    callObj.skill_name ?? callObj.skillName ?? callObj.skill ?? callObj.id ?? callObj.path,
+    callObj.count ?? callObj.times ?? callObj.uses,
+  )
+
+  const input = call.input
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    collectSkillUsageValue(usage, input)
+    return
+  }
+
+  const inputObj = input as Record<string, unknown>
+  collectSkillUsageValue(usage, inputObj.skills)
+  collectSkillUsageValue(usage, inputObj.skill_usage ?? inputObj.skillUsage)
+  collectSkillUsageValue(usage, inputObj.used_skills ?? inputObj.usedSkills)
+  collectSkillUsageValue(usage, inputObj.skills_used ?? inputObj.skillsUsed)
+  addSkillUsage(
+    usage,
+    inputObj.skill_name ?? inputObj.skillName ?? inputObj.skill ?? inputObj.name ?? inputObj.id ?? inputObj.path,
+    inputObj.count ?? inputObj.times ?? inputObj.uses,
+  )
+}
+
+export function summarizeSkillUsage(taskLogs: TaskLog[]): SkillUsageStat[] {
+  const usage = new Map<string, number>()
+
+  for (const row of normalizeTaskProcessRows(taskLogs)) {
+    if (row.kind === 'tool_call') {
+      collectSkillUsageFromToolCall(usage, row.toolCall)
+    }
+  }
+
+  return Array.from(usage.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
 }
 
 export function isTextRow(row: NormalizedTaskProcessRow): row is NormalizedTextEventRow {
@@ -257,36 +382,8 @@ export function parseSystemInitEntry(taskLogs: TaskLog[]) {
 
 export function normalizeTaskProcessRows(taskLogs: TaskLog[]): NormalizedTaskProcessRow[] {
   const directEvents = taskLogs.filter((l) => STRUCTURED_TYPES.has(l.log_type ?? ''))
-  const batchEvents: TaskLog[] = []
 
-  for (const batch of taskLogs.filter((l) => l.log_type === 'tool_calls_json')) {
-    const metadata = parseJsonMetadata(batch.metadata)
-    if (!metadata || !Array.isArray(metadata)) continue
-    const calls = metadata as ToolCall[]
-    calls.forEach((call, i) => {
-      batchEvents.push({
-        id: -(batch.id * 1000 + i + 1),
-        task_id: batch.task_id,
-        log_level: 'info',
-        log_type: 'tool_call',
-        metadata: call,
-        message: '',
-        created_at: batch.created_at,
-      })
-    })
-  }
-
-  const individualToolCallKeys = new Set(
-    directEvents
-      .filter((event) => event.log_type === 'tool_call')
-      .map((event) => `${event.created_at}:${JSON.stringify(event.metadata)}`),
-  )
-
-  const dedupedBatchEvents = batchEvents.filter(
-    (event) => !individualToolCallKeys.has(`${event.created_at}:${JSON.stringify(event.metadata)}`),
-  )
-
-  const sortedEvents = [...directEvents, ...dedupedBatchEvents].sort((a, b) => a.created_at.localeCompare(b.created_at))
+  const sortedEvents = [...directEvents].sort((a, b) => a.created_at.localeCompare(b.created_at))
   const rows: NormalizedTaskProcessRow[] = []
   for (const event of sortedEvents) {
     if (event.log_type === 'thinking' || event.log_type === 'assistant_text') {

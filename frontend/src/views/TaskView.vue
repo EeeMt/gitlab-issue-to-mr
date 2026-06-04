@@ -223,7 +223,14 @@
           />
 
           <!-- Result Panel (only for terminal tasks) -->
-          <TaskResultPanel v-if="task && isTerminal" :task="task" :context-compact-count="contextCompactCount" :last-assistant-log="lastAssistantLog" @status-overridden="refreshTask" />
+          <TaskResultPanel
+            v-if="task && isTerminal"
+            :task="task"
+            :context-compact-count="contextCompactCount"
+            :skill-usage-stats="skillUsageStats"
+            :last-assistant-log="lastAssistantLog"
+            @status-overridden="refreshTask"
+          />
         </div>
       </n-spin>
     </n-space>
@@ -303,7 +310,7 @@ import { NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin, NDatePicker, NDrawer, 
 import { useI18n } from 'vue-i18n'
 import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, streamTaskLogs, getScheduledTasks, getConfig, getIssue, getTaskArchive, downloadTaskArchive, type Task, type TaskLog } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
-import { renderMarkdown } from '../components/task-process/taskProcessUtils'
+import { renderMarkdown, summarizeSkillUsage } from '../components/task-process/taskProcessUtils'
 import PageHeader from '../components/PageHeader.vue'
 import TaskMetadataPanel from '../components/TaskMetadataPanel.vue'
 import TaskProcessPanel from '../components/TaskProcessPanel.vue'
@@ -382,6 +389,10 @@ const isTerminal = computed(() =>
 
 const contextCompactCount = computed(() =>
   taskLogs.value.filter(l => l.log_type === 'context_compact').length
+)
+
+const skillUsageStats = computed(() =>
+  summarizeSkillUsage(taskLogs.value)
 )
 
 const lastAssistantLog = computed(() =>

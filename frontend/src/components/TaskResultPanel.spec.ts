@@ -33,4 +33,10 @@ describe('TaskResultPanel', () => {
   it('context compact count item is guarded by v-if="contextCompactCount != null"', () => {
     expect(taskResultPanelSource).toContain('v-if="contextCompactCount != null"')
   })
+
+  it('renders skill usage stats in the run statistics card', () => {
+    expect(taskResultPanelSource).toContain('skillUsageStats?: SkillUsageStat[]')
+    expect(taskResultPanelSource).toContain('taskView.skillUsage')
+    expect(taskResultPanelSource).toContain('skillUsageStats.length > 0')
+  })
 })

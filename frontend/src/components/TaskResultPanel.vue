@@ -98,7 +98,14 @@
           </div>
           <div v-if="contextCompactCount != null" class="summary-item">
             <span class="summary-label">{{ t('taskView.contextCompactCount') }}</span>
-            <span class="summary-value">{{ contextCompactCount }}</span>
+            <span class="summary-value">{{ t('taskView.contextCompactMetric', { count: contextCompactCount }) }}</span>
+          </div>
+          <div class="summary-item summary-item--skills">
+            <span class="summary-label">{{ t('taskView.skillUsage') }}</span>
+            <span class="summary-value">{{ skillUsageTotal > 0 ? t('taskView.skillUsageCount', { count: skillUsageTotal }) : '-' }}</span>
+            <span v-if="skillUsageStats.length > 0" class="summary-item__sub skill-usage-list">
+              {{ skillUsageBreakdown }}
+            </span>
           </div>
         </div>
       </div>
@@ -211,10 +218,12 @@ import { formatLargeNumber } from '../utils/usageLimits'
 import type { Task, TaskLog } from '../api'
 import { overrideTaskStatus, getTaskPayload } from '../api'
 import { parseTextEntry, renderMarkdown } from './task-process/taskProcessUtils'
+import type { SkillUsageStat } from './task-process/taskProcessUtils'
 
 const props = defineProps<{
   task: Task
   contextCompactCount?: number
+  skillUsageStats?: SkillUsageStat[]
   lastAssistantLog?: TaskLog | null
 }>()
 
@@ -343,6 +352,18 @@ const totalTokens = computed(() => {
   if (i == null && o == null) return null
   return (i ?? 0) + (o ?? 0)
 })
+
+const skillUsageStats = computed(() => props.skillUsageStats ?? [])
+
+const skillUsageTotal = computed(() =>
+  skillUsageStats.value.reduce((total, skill) => total + skill.count, 0)
+)
+
+const skillUsageBreakdown = computed(() =>
+  skillUsageStats.value
+    .map(skill => `${skill.name}: ${t('taskView.skillUsageCount', { count: skill.count })}`)
+    .join(' · ')
+)
 </script>
 
 <style scoped>
@@ -536,6 +557,15 @@ const totalTokens = computed(() => {
   font-size: 12px;
   color: var(--n-text-color-3, #999);
   margin-top: 2px;
+}
+
+.summary-item--skills {
+  min-width: 0;
+}
+
+.skill-usage-list {
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .result-card--continue {
