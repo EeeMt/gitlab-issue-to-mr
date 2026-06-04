@@ -63,6 +63,7 @@ temporary/*.png
 
 # Local agent skills/config
 .agents/
+.codex/
 
 # Logs
 logs/
