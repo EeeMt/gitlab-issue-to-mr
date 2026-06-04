@@ -190,8 +190,10 @@ vi.mock('naive-ui', () => ({
 vi.mock('@vicons/ionicons5', () => {
   const icon = (name: string) => ({ name, render: () => null })
   return {
+    BulbOutline: icon('BulbOutline'),
     CalendarOutline: icon('CalendarOutline'),
     CloseOutline: icon('CloseOutline'),
+    CodeSlashOutline: icon('CodeSlashOutline'),
     DocumentTextOutline: icon('DocumentTextOutline'),
     InformationCircleOutline: icon('InformationCircleOutline'),
     WarningOutline: icon('WarningOutline'),
@@ -307,6 +309,7 @@ describe('TaskFormDrawer', () => {
       await mountDrawer()
       await openDrawer()
 
+      wrapper.vm.taskMode = 'execute'
       wrapper.vm.scheduleType = 'scheduled'
       wrapper.vm.scheduledAt = null
       await submitCreate()
@@ -319,6 +322,7 @@ describe('TaskFormDrawer', () => {
       await mountDrawer()
       await openDrawer()
 
+      wrapper.vm.taskMode = 'execute'
       wrapper.vm.scheduleType = 'scheduled'
       wrapper.vm.scheduledAt = Date.now() - 60000
       await submitCreate()
@@ -332,6 +336,7 @@ describe('TaskFormDrawer', () => {
       await openDrawer()
       const futureMs = Date.now() + 3600000
 
+      wrapper.vm.taskMode = 'execute'
       wrapper.vm.scheduleType = 'scheduled'
       wrapper.vm.scheduledAt = futureMs
       await submitCreate()
@@ -349,6 +354,7 @@ describe('TaskFormDrawer', () => {
       await mountDrawer()
       await openDrawer()
 
+      wrapper.vm.taskMode = 'execute'
       wrapper.vm.scheduleType = 'now'
       wrapper.vm.scheduledAt = null
       await submitCreate()
@@ -360,6 +366,7 @@ describe('TaskFormDrawer', () => {
       await mountDrawer()
       await openDrawer()
 
+      wrapper.vm.taskMode = 'execute'
       wrapper.vm.scheduleType = 'scheduled'
       wrapper.vm.scheduledAt = Date.now() + 3600000
       wrapper.vm.prompt = 'test prompt'
@@ -376,6 +383,7 @@ describe('TaskFormDrawer', () => {
       await mountDrawer({ issueDescription: '' })
       await openDrawer()
 
+      wrapper.vm.taskMode = 'execute'
       wrapper.vm.prompt = '  Custom prompt text  '
       await submitCreate()
 
@@ -410,6 +418,7 @@ describe('TaskFormDrawer', () => {
       await mountDrawer()
       await openDrawer()
 
+      wrapper.vm.taskMode = 'execute'
       await submitCreate()
 
       const quotaAlert = wrapper.find('[data-testid="issue-create-task-usage-alert"]')

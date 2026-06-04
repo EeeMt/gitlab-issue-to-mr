@@ -375,10 +375,12 @@ vi.mock('@vicons/ionicons5', () => {
   const icon = (name: string) => ({ name, render: () => null })
   return {
     AddCircleOutline: icon('AddCircleOutline'),
+    BulbOutline: icon('BulbOutline'),
     CalendarOutline: icon('CalendarOutline'),
     CloseCircleOutline: icon('CloseCircleOutline'),
     CloseOutline: icon('CloseOutline'),
     CodeOutline: icon('CodeOutline'),
+    CodeSlashOutline: icon('CodeSlashOutline'),
     CreateOutline: icon('CreateOutline'),
     DocumentTextOutline: icon('DocumentTextOutline'),
     FolderOpenOutline: icon('FolderOpenOutline'),
@@ -999,6 +1001,10 @@ describe('IssueView', () => {
       await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
       await nextTick()
 
+      // Set task mode (required before creation)
+      const drawer = wrapper.findComponent({ name: 'TaskFormDrawer' })
+      drawer.vm.taskMode = 'execute'
+
       // Click create task button
       const createBtn = wrapper.find('[data-testid="issue-create-task-button"]')
       await createBtn.trigger('click')
@@ -1020,6 +1026,9 @@ describe('IssueView', () => {
 
       await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
       await nextTick()
+
+      const drawer = wrapper.findComponent({ name: 'TaskFormDrawer' })
+      drawer.vm.taskMode = 'execute'
 
       const createBtn = wrapper.find('[data-testid="issue-create-task-button"]')
       await createBtn.trigger('click')
@@ -1055,6 +1064,9 @@ describe('IssueView', () => {
       await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
       await nextTick()
 
+      const drawer = wrapper.findComponent({ name: 'TaskFormDrawer' })
+      drawer.vm.taskMode = 'execute'
+
       const createBtn = wrapper.find('[data-testid="issue-create-task-button"]')
       await createBtn.trigger('click')
       await flushPromises()
@@ -1077,6 +1089,9 @@ describe('IssueView', () => {
 
       await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
       await nextTick()
+
+      const drawer = wrapper.findComponent({ name: 'TaskFormDrawer' })
+      drawer.vm.taskMode = 'execute'
 
       await wrapper.find('[data-testid="issue-create-task-button"]').trigger('click')
       await flushPromises()
