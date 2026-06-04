@@ -280,7 +280,7 @@ function getColumnIcon(status: string) {
 }
 
 .my-work-board__panel {
-  height: clamp(280px, 45vh, 360px);
+  height: clamp(340px, 45vh, 430px);
   display: flex;
   flex-direction: column;
   min-height: 0;
