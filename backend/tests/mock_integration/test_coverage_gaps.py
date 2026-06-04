@@ -201,7 +201,7 @@ class TestTaskStatsAPI:
 class TestMalformedMarkers:
     """Verify worker handles broken CODIFY markers gracefully."""
 
-    async def test_task_with_custom_tool_calls_json(
+    async def test_task_handles_markers_gracefully(
         self,
         http_client: httpx.AsyncClient,
         backend_url: str,

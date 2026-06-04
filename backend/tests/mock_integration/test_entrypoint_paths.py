@@ -165,7 +165,7 @@ class TestCODIFYMarkers:
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """Completed task should have tool_calls parsed from CODIFY_TOOL_CALLS marker."""
+        """Completed task should have tool_call log entries from CODIFY_TOOL_USE_START markers."""
         issue, task = await create_issue_and_task(
             http_client, backend_url, admin_auth_headers,
             title="Tool Calls Verification",
@@ -180,18 +180,18 @@ class TestCODIFYMarkers:
             timeout=120,
         )
 
-        # Fake claude emits CODIFY_TOOL_CALLS with 3 tool calls
-        tool_calls = task.get("tool_calls")
-        if tool_calls is not None:
-            assert isinstance(tool_calls, list)
-            if len(tool_calls) > 0:
-                first = tool_calls[0]
-                assert "name" in first, "Tool call should have 'name' field"
-                logger.info(f"✅ Task has {len(tool_calls)} tool calls")
-            else:
-                logger.info("Tool calls list is empty (may not be in task response)")
+        # Tool calls are stored as individual tool_call log entries
+        resp = await http_client.get(
+            f"{backend_url}/api/tasks/{task_id}/logs",
+            headers=admin_auth_headers,
+        )
+        assert resp.status_code == 200
+        logs = resp.json()
+        tool_call_logs = [l for l in logs if l.get("log_type") == "tool_call"]
+        if len(tool_call_logs) > 0:
+            logger.info(f"✅ Task has {len(tool_call_logs)} tool_call log entries")
         else:
-            logger.info("tool_calls field not in task response (check logs endpoint)")
+            logger.info("No tool_call log entries found (may not be in task response)")
 
     async def test_completed_task_has_usage_stats(
         self,

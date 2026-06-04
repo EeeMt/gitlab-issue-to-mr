@@ -1128,28 +1128,6 @@ class TestParseTaskResult(unittest.TestCase):
 
         self.assertIsNone(task.commit_sha)
 
-    def test_ignores_codify_tool_calls_marker(self):
-        """Legacy CODIFY_TOOL_CALLS marker no longer stores a batch TaskLog."""
-        worker = _make_worker()
-        task = _make_task()
-        db = _make_db()
-        tool_calls = json.dumps([{"name": "read_file", "input": {"path": "main.py"}}])
-        logs = f'CODIFY_TOOL_CALLS:{tool_calls}\n'
-
-        asyncio.run(worker._parse_task_result(task, logs, db, exit_code=0))
-
-        db.add.assert_not_called()
-
-    def test_invalid_codify_tool_calls_marker_is_ignored(self):
-        """Invalid legacy CODIFY_TOOL_CALLS marker should not crash."""
-        worker = _make_worker()
-        task = _make_task()
-        db = _make_db()
-        logs = 'CODIFY_TOOL_CALLS:{{bad json\n'
-
-        asyncio.run(worker._parse_task_result(task, logs, db, exit_code=0))
-        # Should not raise; no log entry added
-
     def test_exit_code_zero_sets_completed(self):
         """exit_code=0 → status=COMPLETED — lines 637-641."""
         worker = _make_worker()

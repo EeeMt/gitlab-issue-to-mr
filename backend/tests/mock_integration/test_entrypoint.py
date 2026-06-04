@@ -370,7 +370,7 @@ class TestClaudeOutputTypes:
 
         # Extract typed log entries (exclude raw log chunks)
         typed_logs = [l for l in logs if l.get("log_type") in (
-            "system_init", "thinking", "assistant_text", "tool_call", "tool_calls_json"
+            "system_init", "thinking", "assistant_text", "tool_call"
         )]
 
         # Extract sequence of types

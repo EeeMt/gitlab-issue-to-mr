@@ -281,7 +281,7 @@ class TaskLog(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
 
     # Structured log support: log_type distinguishes plain output from structured entries.
-    # 'tool_calls_json' entries store a JSON array of {name, input, output, error} in log_metadata.
+    # Supported types: 'thinking', 'assistant_text', 'tool_call', 'context_compact', 'system_init'.
     log_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     log_metadata: Mapped[str | None] = mapped_column(Text, nullable=True)
 
