@@ -160,6 +160,13 @@ vi.mock('naive-ui', () => ({
       return () => h('div', { class: 'n-empty' }, props.description)
     },
   },
+  NScrollbar: {
+    name: 'NScrollbar',
+    props: ['trigger', 'xScrollable'],
+    setup(_: any, { slots }: any) {
+      return () => h('div', { class: 'n-scrollbar' }, slots.default?.())
+    },
+  },
   NAlert: {
     name: 'NAlert',
     props: ['type', 'showIcon'],

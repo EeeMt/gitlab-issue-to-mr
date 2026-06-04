@@ -80,7 +80,7 @@
                       <span>{{ t('monitor.kanbanRunning') }}</span>
                       <n-tag size="tiny" round :bordered="false">{{ runningTasks.length }}</n-tag>
                     </div>
-                    <div class="queue-kanban__column-cards">
+                    <n-scrollbar class="queue-kanban__column-cards" trigger="hover">
                     <div
                       v-for="task in runningTasks"
                       :key="task.id"
@@ -112,7 +112,7 @@
                       size="small"
                       style="padding: 16px 0"
                     />
-                    </div>
+                    </n-scrollbar>
                   </div>
 
                   <!-- Ready Column -->
@@ -121,7 +121,7 @@
                       <span>{{ t('monitor.kanbanReady') }}</span>
                       <n-tag size="tiny" round :bordered="false">{{ readyTasks.length }}</n-tag>
                     </div>
-                    <div class="queue-kanban__column-cards">
+                    <n-scrollbar class="queue-kanban__column-cards" trigger="hover">
                     <div
                       v-for="task in readyTasks"
                       :key="task.id"
@@ -158,7 +158,7 @@
                       size="small"
                       style="padding: 16px 0"
                     />
-                    </div>
+                    </n-scrollbar>
                   </div>
 
                   <!-- Waiting Column -->
@@ -167,7 +167,7 @@
                       <span>{{ t('monitor.kanbanWaiting') }}</span>
                       <n-tag size="tiny" round :bordered="false">{{ waitingTasks.length }}</n-tag>
                     </div>
-                    <div class="queue-kanban__column-cards">
+                    <n-scrollbar class="queue-kanban__column-cards" trigger="hover">
                     <div
                       v-for="task in waitingTasks"
                       :key="task.id"
@@ -200,7 +200,7 @@
                       size="small"
                       style="padding: 16px 0"
                     />
-                    </div>
+                    </n-scrollbar>
                   </div>
                 </div>
 
@@ -234,7 +234,7 @@
                   </div>
 
                   <!-- Scrollable area -->
-                  <div ref="timelineScrollRef" class="queue-timeline__scroll">
+                  <n-scrollbar ref="timelineScrollRef" class="queue-timeline__scroll" x-scrollable trigger="hover">
                     <div class="queue-timeline__container" :style="{ minWidth: timelineContainerMinWidth }">
                       <!-- Time axis -->
                       <div class="queue-timeline__axis">
@@ -369,7 +369,7 @@
                         </div>
                       </div>
                     </div>
-                  </div>
+                  </n-scrollbar>
 
                   <!-- Dynamic tooltip element -->
                   <div
@@ -379,18 +379,19 @@
                   >{{ tooltipText }}</div>
                 </div>
 
-                <!-- Table View (existing) -->
-                <n-data-table
-                  v-else
-                  :columns="activeTaskColumns"
-                  :data="activeTasks"
-                  :loading="tableLoading"
-                  :pagination="false"
-                  :row-props="activeTaskRowProps"
-                  size="small"
-                  scroll-x="1040"
-                  :max-height="400"
-                />
+                <!-- Table View -->
+                <div v-else class="queue-table-wrapper">
+                  <n-data-table
+                    :columns="activeTaskColumns"
+                    :data="activeTasks"
+                    :loading="tableLoading"
+                    :pagination="false"
+                    :row-props="activeTaskRowProps"
+                    size="small"
+                    scroll-x="1040"
+                    :max-height="340"
+                  />
+                </div>
               </n-card>
 
               <n-card class="monitor-card">
@@ -412,7 +413,7 @@
                   :pagination="false"
                   :row-props="recentActivityRowProps"
                   size="small"
-                  scroll-x="980"
+                  scroll-x="1080"
                 />
               </n-card>
             </n-space>
@@ -576,6 +577,7 @@ import {
   NTabPane,
   NTabs,
   NTag,
+  NScrollbar,
   NTooltip,
   type DataTableColumns,
   useMessage
@@ -651,16 +653,17 @@ const timelineZoomOptions = [
   { label: '24h', value: '24h' as const },
 ]
 
-const timelineScrollRef = ref<HTMLElement | null>(null)
+const timelineScrollRef = ref<InstanceType<typeof NScrollbar> | null>(null)
 
 function scrollTimelineToNow() {
-  const el = timelineScrollRef.value
+  const el = timelineScrollRef.value?.$el as HTMLElement | undefined
   if (!el) return
-  const containerWidth = el.scrollWidth
-  const viewportWidth = el.clientWidth
+  const scrollEl = (el.querySelector('.n-scrollbar-container') as HTMLElement) || el
+  const containerWidth = scrollEl.scrollWidth
+  const viewportWidth = scrollEl.clientWidth
   const nowPct = timelinePct(nowMs.value) / 100
   const nowPx = nowPct * containerWidth
-  el.scrollLeft = nowPx - viewportWidth / 2
+  scrollEl.scrollLeft = nowPx - viewportWidth / 2
 }
 
 watch(timelineZoom, () => {
@@ -1079,6 +1082,12 @@ const recentActivityColumns = computed<DataTableColumns<Task>>(() => [
     key: 'status',
     width: 110,
     render: (task) => renderStatusTag(task.status)
+  },
+  {
+    title: t('common.initiator'),
+    key: 'initiator_username',
+    width: 100,
+    render: (task) => task.initiator_username || '—'
   },
   {
     title: t('monitor.duration'),
@@ -1755,15 +1764,15 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 16px;
-  min-height: 200px;
+  height: 340px;
 }
 
 .queue-kanban__column {
   background: rgba(248, 250, 252, 0.72);
   border-radius: 8px;
   padding: 12px;
-  min-height: 180px;
-  max-height: 320px;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
@@ -1781,7 +1790,6 @@ onBeforeUnmount(() => {
 
 .queue-kanban__column-cards {
   flex: 1;
-  overflow-y: auto;
   min-height: 0;
 }
 
@@ -1887,10 +1895,17 @@ onBeforeUnmount(() => {
   opacity: 0.8;
 }
 
+.queue-table-wrapper {
+  height: 340px;
+}
+
 /* ----- Timeline View ----- */
 /* ===== Timeline — redesigned ===== */
 .queue-timeline {
   position: relative;
+  height: 340px;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ─── Toolbar (legend + zoom) ─── */
@@ -1928,13 +1943,16 @@ onBeforeUnmount(() => {
 
 /* ─── Scroll wrapper ─── */
 .queue-timeline__scroll {
-  overflow-x: auto;
   padding: 0;
+  flex: 1;
 }
 
 .queue-timeline__container {
   position: relative;
   padding: 0 24px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
 }
 
 /* ─── Time axis ─── */
@@ -1970,6 +1988,7 @@ onBeforeUnmount(() => {
 /* ─── Content area (positions gridlines + now marker) ─── */
 .queue-timeline__content {
   position: relative;
+  flex: 1;
   min-height: 80px;
   padding-bottom: 8px;
 }
