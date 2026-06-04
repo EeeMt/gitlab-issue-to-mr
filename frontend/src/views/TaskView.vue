@@ -1022,7 +1022,7 @@ onBeforeUnmount(() => {
 }
 
 .task-card--actions :deep(.n-card-content) {
-  padding-top: 12px;
+  padding: 12px 24px;
 }
 
 .task-card--actions {
@@ -1169,7 +1169,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 8px 10px;
+  padding: 10px 16px;
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.035);
   color: rgba(15, 23, 42, 0.66);
