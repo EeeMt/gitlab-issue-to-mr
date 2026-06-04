@@ -5,11 +5,11 @@
     </template>
 
     <div class="result-body">
-      <!-- Execution Summary (last assistant text event, collapsed by default) -->
+      <!-- AI delivery summary (last assistant text event, collapsed by default) -->
       <div v-if="lastAssistantLog" class="result-card result-card--summary-text">
         <div class="result-card__title">
           <n-icon size="16" class="result-card__icon result-card__icon--summary"><ChatboxOutline /></n-icon>
-          {{ t('taskView.executionSummary') }}
+          {{ t('taskView.aiDeliverySummary') }}
           <span v-if="summaryPreview && !summaryExpanded" class="summary-preview">{{ summaryPreview }}</span>
           <button
             class="summary-toggle"
@@ -74,11 +74,11 @@
         </div>
       </div>
 
-      <!-- Execution Summary -->
+      <!-- Run statistics -->
       <div class="result-card result-card--summary">
         <div class="result-card__title">
           <n-icon size="16" class="result-card__icon"><TimeOutline /></n-icon>
-          {{ t('taskView.executionSummary') }}
+          {{ t('taskView.runStatistics') }}
         </div>
         <div class="result-card__content summary-grid">
           <div class="summary-item">
@@ -608,6 +608,12 @@ const totalTokens = computed(() => {
 .result-card--summary-text {
   border-color: rgba(2, 132, 199, 0.18);
   background: rgba(2, 132, 199, 0.03);
+  overflow-anchor: none;
+}
+
+.result-card--summary-text .result-card__title {
+  min-height: 22px;
+  margin-bottom: 0;
 }
 
 .result-card__icon--summary {
@@ -618,6 +624,7 @@ const totalTokens = computed(() => {
   flex: 1;
   min-width: 0;
   font-size: 12px;
+  line-height: 22px;
   font-weight: 400;
   color: var(--n-text-color-3, #999);
   overflow: hidden;
