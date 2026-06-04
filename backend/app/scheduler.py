@@ -62,6 +62,7 @@ class Scheduler:
         self.running = False
         self._running_tasks: Set[int] = set()  # task_ids currently running
         self._running_issues: Set[int] = set()  # issue_ids with running tasks
+        self._active_worker_threads: int = 0   # thread pool tasks in-flight (submitted but not done)
         self._last_session_cleanup_at = 0.0
         self._last_workspace_cleanup_at = 0.0
         self._last_lock_cleanup_at = 0.0
@@ -331,10 +332,6 @@ class Scheduler:
             logger.debug("Issue %s locked; task %s remains queued", task.issue_id, task.id)
             return
 
-        self._running_tasks.add(task.id)
-        if task.issue_id is not None:
-            self._running_issues.add(task.issue_id)
-
         try:
             initiator_user_id = getattr(task, "initiator_user_id", None)
             if isinstance(initiator_user_id, int):
@@ -355,16 +352,20 @@ class Scheduler:
                     await db.commit()
                     if task.issue_id is not None:
                         await release_issue_execution_lock(db, issue_id=task.issue_id)
+                        await db.commit()
                         await maybe_update_issue_status(db, task.issue_id)
-                    self._running_tasks.discard(task.id)
-                    if task.issue_id is not None:
-                        self._running_issues.discard(task.issue_id)
                     return
 
             # Update status to RUNNING
             task.status = TaskStatus.RUNNING
             task.started_at = utcnow()
             await db.commit()
+
+            # Track in memory AFTER the DB commit so _reconcile_running_state
+            # (which queries for RUNNING tasks) doesn't race with the update.
+            self._running_tasks.add(task.id)
+            if task.issue_id is not None:
+                self._running_issues.add(task.issue_id)
 
             # Auto-transition issue to IN_PROGRESS (skip for plan tasks)
             if task.issue_id is not None and task.task_mode != "plan":
@@ -385,7 +386,7 @@ class Scheduler:
             except Exception:
                 logger.exception("Failed to persist failure state for task %s", task.id)
 
-            # Clean up tracking
+            # Clean up tracking (may not have been added yet, discard is idempotent)
             self._running_tasks.discard(task.id)
             if task.issue_id is not None:
                 self._running_issues.discard(task.issue_id)
@@ -404,6 +405,13 @@ class Scheduler:
     async def _run_task_background(self, task_id: int) -> None:
         """Run task in background thread pool."""
         issue_key = None
+        self._active_worker_threads += 1
+        t_submit = time.time()
+        logger.info(
+            f"Task {task_id} submitted to thread pool "
+            f"(active_threads={self._active_worker_threads}, "
+            f"max_workers={_worker_executor._max_workers})"
+        )
         try:
             loop = asyncio.get_event_loop()
             success = await loop.run_in_executor(
@@ -411,16 +419,23 @@ class Scheduler:
                 _run_worker_task,
                 task_id,
             )
-
+            elapsed = time.time() - t_submit
             if success:
-                logger.info(f"Task {task_id} completed successfully")
+                logger.info(
+                    f"Task {task_id} completed successfully (total={elapsed:.0f}s, "
+                    f"active_threads={self._active_worker_threads})"
+                )
             else:
-                logger.error(f"Task {task_id} failed")
+                logger.error(
+                    f"Task {task_id} failed (total={elapsed:.0f}s, "
+                    f"active_threads={self._active_worker_threads})"
+                )
 
         except Exception as e:
             logger.exception(f"Task {task_id} failed with exception in background")
 
         finally:
+            self._active_worker_threads -= 1
             # Clean up tracking
             self._running_tasks.discard(task_id)
             try:
@@ -556,6 +571,13 @@ class Scheduler:
 
     async def _resume_task_background(self, task_id: int, container_name: str) -> None:
         """Resume monitoring a task in the background thread pool."""
+        self._active_worker_threads += 1
+        t_submit = time.time()
+        logger.info(
+            f"Task {task_id} resume submitted to thread pool "
+            f"(active_threads={self._active_worker_threads}, "
+            f"max_workers={_worker_executor._max_workers})"
+        )
         try:
             loop = asyncio.get_event_loop()
             success = await loop.run_in_executor(
@@ -564,13 +586,19 @@ class Scheduler:
                 task_id,
                 container_name,
             )
+            elapsed = time.time() - t_submit
             if success:
-                logger.info(f"Resumed task {task_id} completed successfully")
+                logger.info(
+                    f"Resumed task {task_id} completed successfully (total={elapsed:.0f}s)"
+                )
             else:
-                logger.error(f"Resumed task {task_id} failed")
+                logger.error(
+                    f"Resumed task {task_id} failed (total={elapsed:.0f}s)"
+                )
         except Exception as e:
             logger.exception(f"Resumed task {task_id} failed with exception: {e}")
         finally:
+            self._active_worker_threads -= 1
             self._running_tasks.discard(task_id)
             try:
                 async with AsyncSessionLocal() as db:

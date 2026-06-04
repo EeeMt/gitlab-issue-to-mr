@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from typing import Any, Optional
 
 from gitlab import Gitlab
@@ -558,10 +559,20 @@ async def monitor_container_run(
 
     if exit_code == 0:
         if issue and issue.merge_request_iid:
+            t_mr_draft = time.monotonic()
+            logger.info(
+                f"[Task {task.id}] Removing MR draft status for !{issue.merge_request_iid}"
+            )
             try:
                 worker._remove_mr_draft_status_for_issue(task, issue, sudo_gl=sudo_gl)
+                logger.info(
+                    f"[Task {task.id}] MR draft status removed in {time.monotonic() - t_mr_draft:.1f}s"
+                )
             except Exception as e:
-                logger.warning(f"[Task {task.id}] Failed to update MR draft status{resume_prefix}: {e}")
+                logger.warning(
+                    f"[Task {task.id}] Failed to update MR draft status after "
+                    f"{time.monotonic() - t_mr_draft:.1f}s{resume_prefix}: {e}"
+                )
         await worker._send_notifications(
             task,
             success=True,

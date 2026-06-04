@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Optional
 
 import httpx
@@ -50,8 +51,15 @@ def build_initial_mr_description(task: Task) -> str:
 
 def remove_mr_draft_status_for_issue(task: Task, issue: Issue, gitlab_client, *, sudo_gl: Optional[Gitlab] = None) -> None:
     gl = sudo_gl or gitlab_client.gl
+    t0 = time.monotonic()
     project = gl.projects.get(task.project_id)
+    t1 = time.monotonic()
     mr = project.mergerequests.get(issue.merge_request_iid)
+    t2 = time.monotonic()
+    logger.info(
+        f"[Task {task.id}] GitLab: get project ({t1 - t0:.2f}s), "
+        f"get MR !{issue.merge_request_iid} ({t2 - t1:.2f}s)"
+    )
 
     title = getattr(mr, "title", "")
     if not isinstance(title, str):
@@ -63,7 +71,11 @@ def remove_mr_draft_status_for_issue(task: Task, issue: Issue, gitlab_client, *,
     if updated_title:
         mr.title = updated_title
     mr.save()
-    logger.info(f"[Task {task.id}] Marked MR !{issue.merge_request_iid} ready")
+    t3 = time.monotonic()
+    logger.info(
+        f"[Task {task.id}] Marked MR !{issue.merge_request_iid} ready "
+        f"(save: {t3 - t2:.2f}s, total: {t3 - t0:.2f}s)"
+    )
 
 
 def create_mr_if_needed(
@@ -177,6 +189,7 @@ async def update_mr_description_for_issue(
 
         description = _build_mr_description(issue, all_tasks, metadata_map)
 
+        t0 = time.monotonic()
         gl = sudo_gl or gitlab_client.gl
         project = gl.projects.get(task.project_id)
         try:
@@ -189,9 +202,10 @@ async def update_mr_description_for_issue(
         if issue.title:
             mr.title = issue.title
         mr.save()
+        elapsed = time.monotonic() - t0
         logger.info(
             f"[Task {task.id}] Updated MR !{mr_iid} title+description with issue #{issue.id} context "
-            f"({len(all_tasks)} tasks, {len(metadata_map)} with metadata)"
+            f"({len(all_tasks)} tasks, {len(metadata_map)} with metadata) — GitLab API: {elapsed:.2f}s"
         )
 
     except Exception as e:
