@@ -21,21 +21,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from app.models import User
 
-# BreakGlassLoginRequestBody is referenced in auth.py but never defined.
-# Inject it into the module namespace before anything tries to resolve it,
-# so FastAPI can resolve the type annotation for the break-glass endpoint.
-import app.api.auth as _auth_module
-if not hasattr(_auth_module, "BreakGlassLoginRequestBody"):
-    from pydantic import BaseModel as _BaseModel
-    from typing import Optional as _Opt
-
-    class _BreakGlassLoginRequestBody(_BaseModel):
-        username: str
-        password: str
-        next: _Opt[str] = None
-
-    _auth_module.BreakGlassLoginRequestBody = _BreakGlassLoginRequestBody
-
 from app.api.auth import (
     _build_cookie_kwargs,
     _get_or_create_break_glass_user,

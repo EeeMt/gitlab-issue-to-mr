@@ -24,7 +24,6 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import timedelta
-from typing import Optional
 
 import pytest
 from unittest.mock import MagicMock
@@ -45,21 +44,6 @@ from sqlalchemy.pool import StaticPool
 
 # Ensure a usable encryption key is available for secret config persistence.
 os.environ.setdefault("CONFIG_ENCRYPTION_KEY", "test-auth-e2e-key-32chars!!!!!!")
-
-# ---------------------------------------------------------------------------
-# Inject the missing BreakGlassLoginRequestBody before FastAPI resolves it.
-# ---------------------------------------------------------------------------
-import app.api.auth as _auth_module  # noqa: E402
-
-if not hasattr(_auth_module, "BreakGlassLoginRequestBody"):
-    from pydantic import BaseModel as _BaseModel
-
-    class _BreakGlassLoginRequestBody(_BaseModel):
-        username: str
-        password: str
-        next: Optional[str] = None
-
-    _auth_module.BreakGlassLoginRequestBody = _BreakGlassLoginRequestBody
 
 from app.database import get_db  # noqa: E402
 from app.dependencies.auth import (  # noqa: E402

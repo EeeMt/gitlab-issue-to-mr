@@ -58,6 +58,14 @@ class LocalLoginRequestBody(BaseModel):
     next: Optional[str] = None
 
 
+class BreakGlassLoginRequestBody(BaseModel):
+    """Request body for emergency admin login."""
+
+    username: str
+    password: str
+    next: Optional[str] = None
+
+
 class LocalRegisterRequestBody(BaseModel):
     """Request body for initial admin registration."""
 

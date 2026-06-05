@@ -106,6 +106,13 @@ setup-npm: $(NODE_MODULES)/.installed ## Install frontend npm dependencies
 .PHONY: setup
 setup: setup-venv setup-npm ## Install all dependencies (backend venv + frontend npm)
 
+.PHONY: lint-backend
+lint-backend: $(VENV)/.installed ## Run backend Ruff checks
+	cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m ruff check app tests
+
+.PHONY: lint
+lint: lint-backend ## Run all lint checks
+
 # Video recording option: set RECORD_VIDEO=1 to record .webm videos for each test
 # Example: make test-e2e-parallel RECORD_VIDEO=1
 RECORD_VIDEO ?= 0
@@ -532,6 +539,10 @@ help:
 	@echo "  make test-backend      Run backend unit tests"
 	@echo "  make test-frontend     Run frontend unit tests"
 	@echo "  make test-mock-e2e     Run mock E2E tests"
+	@echo ""
+	@echo "Lint:"
+	@echo "  make lint              Run all lint checks"
+	@echo "  make lint-backend      Run backend Ruff checks"
 	@echo ""
 	@echo "Mock Integration Tests (Docker):"
 	@echo "  make test-mock-integration            Run mock integration tests (build + start + test)"

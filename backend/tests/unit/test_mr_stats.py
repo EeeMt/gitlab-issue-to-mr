@@ -234,8 +234,6 @@ if __name__ == "__main__":
     print("Running MR Change Stats Tests")
     print("=" * 60)
 
-    test_gitlab_get_mr_stats_with_changes_count()
-    test_gitlab_get_mr_stats_from_diff()
     test_worker_saves_mr_stats_after_completion()
     test_worker_handles_missing_mr_stats()
 
