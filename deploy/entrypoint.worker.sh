@@ -458,6 +458,7 @@ build_overall_summary_prompt() {
     local current_summary_text="$2"
     local commit_message_text="$3"
     local diff_stats_text="$4"
+    local current_user_prompt="$5"
     local previous_summary_text="暂无前序任务摘要。"
 
     if [ -f "${previous_summary_file}" ]; then
@@ -478,7 +479,7 @@ build_overall_summary_prompt() {
 ${previous_summary_text}
 
 当前任务需求：
-${USER_PROMPT}
+${current_user_prompt}
 
 当前任务提交说明：
 ${commit_message_text}
@@ -780,7 +781,7 @@ AI-Generated: true"
     else
         echo "Previous task summaries not found at ${PREVIOUS_SUMMARY_FILE}; using empty history"
     fi
-    OVERALL_SUMMARY_PROMPT=$(build_overall_summary_prompt "${PREVIOUS_SUMMARY_FILE}" "${FINAL_SUMMARY_CONTENT}" "${FINAL_COMMIT_MESSAGE}" "${COMMIT_DIFF_STATS}")
+    OVERALL_SUMMARY_PROMPT=$(build_overall_summary_prompt "${PREVIOUS_SUMMARY_FILE}" "${FINAL_SUMMARY_CONTENT}" "${FINAL_COMMIT_MESSAGE}" "${COMMIT_DIFF_STATS}" "${USER_PROMPT}")
     printf '%s\n' "${OVERALL_SUMMARY_PROMPT}" > /tmp/overall_summary_prompt.txt
     chmod 644 /tmp/overall_summary_prompt.txt
     chown codify:codify /tmp/overall_summary_prompt.txt

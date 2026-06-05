@@ -286,7 +286,7 @@ async def write_previous_task_summaries_file(
         paths = build_issue_workspace_paths(settings, issue, task)
         if paths is None:
             logger.debug(
-                f"[Task {task.id}] Workspace root not configured; previous summaries unavailable"
+                f"[Task {task.id}] Issue workspace paths unavailable; previous summaries unavailable"
             )
             return None
 
@@ -375,7 +375,7 @@ def _build_previous_task_summaries_content(
 
 def _latest_overall_summary(all_tasks: list, metadata_map: dict[int, dict]) -> str | None:
     """Return the newest worker-generated overall summary in task metadata."""
-    for task in reversed(list(all_tasks)):
+    for task in reversed(all_tasks):
         meta = metadata_map.get(task.id)
         if not meta:
             continue
