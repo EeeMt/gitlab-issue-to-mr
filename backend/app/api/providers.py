@@ -34,6 +34,7 @@ class ProviderResponse(BaseModel):
     max_turns: int
     system_prompt: str | None
     is_default: bool
+    is_disabled: bool
     created_at: str
     updated_at: str
 
@@ -45,6 +46,7 @@ class CreateProviderRequest(BaseModel):
     model: str
     max_turns: int = 20
     system_prompt: str | None = None
+    is_disabled: bool = False
 
     @field_validator("name")
     @classmethod
@@ -94,6 +96,7 @@ class UpdateProviderRequest(BaseModel):
     max_turns: int | None = None
     system_prompt: str | None = None
     clear_system_prompt: bool = False
+    is_disabled: bool | None = None
 
     @field_validator("name")
     @classmethod
@@ -146,6 +149,7 @@ def _serialize_provider(provider: AIProvider) -> dict:
         "max_turns": provider.max_turns,
         "system_prompt": provider.system_prompt,
         "is_default": provider.is_default,
+        "is_disabled": provider.is_disabled,
         "created_at": provider.created_at.isoformat(),
         "updated_at": provider.updated_at.isoformat(),
     }
@@ -203,6 +207,11 @@ async def create_provider(
     # Determine if this should be the default (first provider)
     count_result = await db.execute(select(func.count(AIProvider.id)))
     is_first = count_result.scalar() == 0
+    if is_first and request.is_disabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Default provider cannot be disabled",
+        )
 
     # Encrypt API key if provided
     encrypted_key = None
@@ -223,6 +232,7 @@ async def create_provider(
         max_turns=request.max_turns,
         system_prompt=request.system_prompt,
         is_default=is_first,
+        is_disabled=request.is_disabled,
     )
     db.add(provider)
     await db.commit()
@@ -264,6 +274,15 @@ async def update_provider(
 
     if request.max_turns is not None:
         provider.max_turns = request.max_turns
+
+    if request.is_disabled is True and provider.is_default:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Default provider cannot be disabled",
+        )
+
+    if request.is_disabled is not None:
+        provider.is_disabled = request.is_disabled
 
     # Handle API key update/clear
     if request.clear_api_key:
@@ -325,17 +344,27 @@ async def delete_provider(
         )
 
     was_default = provider.is_default
-    await db.delete(provider)
-
-    # If we deleted the default, promote the lowest-ID remaining provider
+    new_default = None
     if was_default:
         result = await db.execute(
-            select(AIProvider).order_by(AIProvider.id).limit(1)
+            select(AIProvider)
+            .where(AIProvider.id != provider_id, AIProvider.is_disabled == False)
+            .order_by(AIProvider.id)
+            .limit(1)
         )
         new_default = result.scalar_one_or_none()
-        if new_default:
-            new_default.is_default = True
-            logger.info(f"Promoted provider '{new_default.name}' to default after deletion")
+        if not new_default:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot delete default provider — no enabled provider remains",
+            )
+
+    await db.delete(provider)
+
+    # If we deleted the default, promote the lowest-ID enabled provider.
+    if new_default:
+        new_default.is_default = True
+        logger.info(f"Promoted provider '{new_default.name}' to default after deletion")
 
     await db.commit()
     logger.info(f"Deleted AI provider id={provider_id}")
@@ -351,6 +380,12 @@ async def set_default_provider(
     provider = await db.get(AIProvider, provider_id)
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
+
+    if provider.is_disabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Disabled provider cannot be set as default",
+        )
 
     if provider.is_default:
         return _serialize_provider(provider)

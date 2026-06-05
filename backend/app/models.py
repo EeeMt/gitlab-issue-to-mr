@@ -126,6 +126,7 @@ class AIProvider(Base):
     max_turns: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
     system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow

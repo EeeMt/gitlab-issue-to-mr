@@ -156,7 +156,7 @@ vi.mock('naive-ui', () => ({
         class: 'n-select',
         value: props.value ?? '',
         onChange: (event: Event) => emit('update:value', Number((event.target as HTMLSelectElement).value) || null),
-      }, props.options?.map((option: any) => h('option', { value: option.value }, option.label)))
+      }, props.options?.map((option: any) => h('option', { value: option.value, disabled: option.disabled }, option.label)))
     },
   },
   NSpin: {
@@ -236,7 +236,7 @@ const mockTemplates = [
 ]
 
 const mockProviders = [
-  { id: 7, name: 'Default Provider', model: 'model-a', is_default: true },
+  { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: false },
 ]
 
 describe('TaskFormDrawer', () => {
@@ -360,6 +360,33 @@ describe('TaskFormDrawer', () => {
       await submitCreate()
 
       expect(mockApi.createTask.mock.calls[0][0].scheduled_datetime).toBeUndefined()
+    })
+
+    it('filters disabled providers from create options', async () => {
+      mockApi.getProviders.mockResolvedValue([
+        { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: false },
+        { id: 8, name: 'Disabled Provider', model: 'model-b', is_default: false, is_disabled: true },
+      ])
+      await mountDrawer()
+      await openDrawer()
+
+      expect(wrapper.vm.providerOptions).toEqual([
+        { label: 'Default Provider (model-a) ★', value: 7, disabled: false },
+      ])
+    })
+
+    it('warns when no enabled provider is available', async () => {
+      mockApi.getProviders.mockResolvedValue([
+        { id: 7, name: 'Default Provider', model: 'model-a', is_default: true, is_disabled: true },
+      ])
+      await mountDrawer()
+      await openDrawer()
+
+      wrapper.vm.taskMode = 'execute'
+      await submitCreate()
+
+      expect(mockMessage.warning).toHaveBeenCalledWith('config.providers.noEnabledProvider')
+      expect(mockApi.createTask).not.toHaveBeenCalled()
     })
 
     it('resets create state and emits close after successful creation', async () => {

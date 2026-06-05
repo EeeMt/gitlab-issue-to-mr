@@ -271,6 +271,7 @@ export interface AIProvider {
   max_turns: number
   system_prompt: string | null
   is_default: boolean
+  is_disabled: boolean
   created_at: string
   updated_at: string
 }
@@ -282,6 +283,7 @@ export interface CreateProviderRequest {
   model: string
   max_turns?: number
   system_prompt?: string
+  is_disabled?: boolean
 }
 
 export interface UpdateProviderRequest {
@@ -293,6 +295,7 @@ export interface UpdateProviderRequest {
   max_turns?: number
   system_prompt?: string | null
   clear_system_prompt?: boolean
+  is_disabled?: boolean
 }
 
 // Request types

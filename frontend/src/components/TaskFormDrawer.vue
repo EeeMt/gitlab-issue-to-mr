@@ -367,10 +367,18 @@ const unreplacedVariables = computed(() => {
 
 const hasExistingPrompt = computed(() => Boolean(prompt.value && prompt.value.trim()))
 
+const selectableProviders = computed(() =>
+  providers.value.filter((provider) => {
+    if (!provider.is_disabled) return true
+    return props.mode === 'edit' && provider.id === props.task?.provider_id
+  })
+)
+
 const providerOptions = computed(() =>
-  providers.value.map(p => ({
-    label: `${p.name} (${p.model})${p.is_default ? ' ★' : ''}`,
+  selectableProviders.value.map(p => ({
+    label: `${p.name} (${p.model})${p.is_default ? ' ★' : ''}${p.is_disabled ? ` - ${t('config.providers.disabled')}` : ''}`,
     value: p.id,
+    disabled: p.is_disabled,
   }))
 )
 
@@ -542,8 +550,12 @@ async function handleCreate() {
     if (scheduleType.value === 'scheduled' && scheduledAt.value) {
       req.scheduled_datetime = new Date(scheduledAt.value).toISOString()
     }
-    const pid = selectedProviderId.value ?? providers.value.find(p => p.is_default)?.id
-    if (pid != null) req.provider_id = pid
+    const pid = selectedProviderId.value ?? providers.value.find(p => p.is_default && !p.is_disabled)?.id
+    if (pid == null) {
+      message.warning(t('config.providers.noEnabledProvider'))
+      return
+    }
+    req.provider_id = pid
     const created = await createTask(req)
     message.success(t('issue.taskCreated'))
     prompt.value = ''

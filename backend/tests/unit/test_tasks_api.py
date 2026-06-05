@@ -432,6 +432,7 @@ def _make_mock_provider(id=1):
     provider.name = "Test Provider"
     provider.model = "test-model"
     provider.is_default = True
+    provider.is_disabled = False
     return provider
 
 
@@ -844,6 +845,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
+        mock_db.get = AsyncMock(return_value=_make_mock_provider(id=23))
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
@@ -860,6 +862,69 @@ class RetryTaskAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         created_task = mock_db.add.call_args.args[0]
         self.assertEqual(created_task.provider_id, 23)
+
+    def test_retry_task_rejects_disabled_original_provider(self):
+        """POST /api/tasks/{id}/retry should reject an explicitly disabled provider."""
+        task = _make_serializable_task(task_status=TaskStatus.FAILED)
+        task.id = 71
+        task.project_id = 1
+        task.provider_id = 23
+
+        mock_result_task = MagicMock()
+        mock_result_task.scalar_one_or_none.return_value = task
+        mock_result_no_retry = MagicMock()
+        mock_result_no_retry.scalar_one_or_none.return_value = None
+        disabled_provider = _make_mock_provider(id=23)
+        disabled_provider.is_disabled = True
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry])
+        mock_db.get = AsyncMock(return_value=disabled_provider)
+        mock_db.add = MagicMock()
+
+        client, app = _make_app_client_with_db(mock_db)
+
+        with patch("app.core.task_helpers._require_task_operator", return_value=None):
+            response = client.post("/api/tasks/71/retry")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "Provider is disabled")
+        mock_db.add.assert_not_called()
+
+    def test_retry_task_rejects_disabled_default_provider(self):
+        """POST /api/tasks/{id}/retry should reject a disabled default provider fallback."""
+        task = _make_serializable_task(task_status=TaskStatus.FAILED)
+        task.id = 72
+        task.project_id = 1
+        task.provider_id = None
+
+        mock_result_task = MagicMock()
+        mock_result_task.scalar_one_or_none.return_value = task
+        mock_result_no_retry = MagicMock()
+        mock_result_no_retry.scalar_one_or_none.return_value = None
+        disabled_default = _make_mock_provider(id=1)
+        disabled_default.is_disabled = True
+        mock_result_default_provider = MagicMock()
+        mock_result_default_provider.scalar_one_or_none.return_value = disabled_default
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_default_provider]
+        )
+        mock_db.add = MagicMock()
+
+        client, app = _make_app_client_with_db(mock_db)
+
+        with patch("app.core.task_helpers._require_task_operator", return_value=None):
+            response = client.post("/api/tasks/72/retry")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "Provider is disabled")
+        mock_db.add.assert_not_called()
 
     def test_retry_task_returns_409_when_usage_limit_exceeded(self):
         """POST /api/tasks/{id}/retry should enforce create quota limits."""

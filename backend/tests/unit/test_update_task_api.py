@@ -146,6 +146,7 @@ class UpdateTaskHappyPathTests(unittest.TestCase):
         task = _make_task()
         mock_db = _mock_db_for_task(task)
         mock_provider = MagicMock()
+        mock_provider.is_disabled = False
         mock_db.get = AsyncMock(return_value=mock_provider)   # provider found
 
         client, app = _make_client(mock_db)
@@ -268,6 +269,20 @@ class UpdateTaskProviderValidationTests(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 404)
         self.assertIn("Provider not found", resp.json()["detail"])
+
+    def test_disabled_provider_returns_409(self):
+        task = _make_task()
+        mock_db = _mock_db_for_task(task)
+        mock_provider = MagicMock()
+        mock_provider.is_disabled = True
+        mock_db.get = AsyncMock(return_value=mock_provider)
+
+        client, app = _make_client(mock_db)
+        resp = client.patch("/api/tasks/1", json={"provider_id": 9999})
+        app.dependency_overrides.clear()
+
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn("Provider is disabled", resp.json()["detail"])
 
     def test_null_provider_id_skips_existence_check(self):
         """provider_id: null means 'clear provider' — no DB lookup needed."""

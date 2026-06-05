@@ -57,7 +57,7 @@ describe('AIProvidersPanel', () => {
     const wrapper = mount(AIProvidersPanel, {
       props: { isMobile: false },
       global: {
-        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NTag']
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NSwitch', 'NTag']
       }
     })
 
@@ -86,13 +86,14 @@ describe('AIProvidersPanel', () => {
       max_turns: 50,
       api_key_configured: true,
       system_prompt: 'hello',
-      is_default: false
+      is_default: false,
+      is_disabled: false
     }
 
     const wrapper = mount(AIProvidersPanel, {
       props: { isMobile: false },
       global: {
-        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NTag']
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NSwitch', 'NTag']
       }
     })
 
@@ -123,7 +124,8 @@ describe('AIProvidersPanel', () => {
       max_turns: 50,
       api_key_configured: true,
       system_prompt: 'hello',
-      is_default: false
+      is_default: false,
+      is_disabled: true
     }
 
     mockApi.getProviders.mockResolvedValue([provider])
@@ -131,7 +133,7 @@ describe('AIProvidersPanel', () => {
     const wrapper = mount(AIProvidersPanel, {
       props: { isMobile: false },
       global: {
-        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NTag']
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NSwitch', 'NTag']
       }
     })
 
@@ -150,13 +152,15 @@ describe('AIProvidersPanel', () => {
     expect(wrapper.vm.formValue.max_turns).toBe(50)
     // @ts-ignore
     expect(wrapper.vm.editingProvider.id).toBe('p1')
+    // @ts-ignore
+    expect(wrapper.vm.formValue.is_disabled).toBe(true)
   })
 
   it('closes after successful save', async () => {
     const wrapper = mount(AIProvidersPanel, {
       props: { isMobile: false },
       global: {
-        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NTag']
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NSwitch', 'NTag']
       }
     })
 
@@ -190,5 +194,49 @@ describe('AIProvidersPanel', () => {
     expect(wrapper.vm.editingProvider).toBe(null)
     // @ts-ignore
     expect(wrapper.vm.formValue.name).toBe('')
+  })
+
+  it('disables actions that would violate provider status rules', async () => {
+    const wrapper = mount(AIProvidersPanel, {
+      props: { isMobile: false },
+      global: {
+        stubs: ['NCard', 'NButton', 'NDataTable', 'NModal', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NPopconfirm', 'NSpace', 'NSwitch', 'NTag']
+      }
+    })
+
+    // @ts-ignore
+    const actionColumn = wrapper.vm.columns.find((column: any) => column.key === 'actions')
+    const renderActions = (provider: any) => {
+      const vnode = actionColumn.render(provider)
+      return vnode.children.default()
+    }
+
+    const defaultProviderActions = renderActions({
+      id: 1,
+      name: 'default',
+      base_url: 'https://api.example',
+      model: 'model-a',
+      max_turns: 20,
+      api_key_configured: true,
+      system_prompt: null,
+      is_default: true,
+      is_disabled: false
+    })
+    expect(defaultProviderActions[1].props.disabled).toBe(true)
+    expect(defaultProviderActions[2].props.disabled).toBe(true)
+
+    const disabledProviderActions = renderActions({
+      id: 2,
+      name: 'disabled',
+      base_url: 'https://api.example',
+      model: 'model-b',
+      max_turns: 20,
+      api_key_configured: true,
+      system_prompt: null,
+      is_default: false,
+      is_disabled: true
+    })
+    expect(disabledProviderActions[1].props.disabled).toBe(false)
+    expect(disabledProviderActions[2].props.disabled).toBe(true)
   })
 })

@@ -336,6 +336,29 @@ class TestCreateTask:
         assert data["issue_id"] == issue_id
         assert data["priority"] == 2
 
+    async def test_create_task_rejects_disabled_provider(self, client, session_factory):
+        """Create task rejects providers disabled in AI provider configuration."""
+        async with session_factory() as session:
+            provider = await session.get(AIProvider, 1)
+            provider.is_disabled = True
+            await session.commit()
+
+        issue_resp = await client.post("/api/issues", json={
+            "project_id": 1,
+            "title": "Disabled provider issue",
+            "target_branch": "main",
+        })
+        assert issue_resp.status_code == 200
+        issue_id = issue_resp.json()["id"]
+
+        resp = await client.post("/api/tasks", json={
+            "issue_id": issue_id,
+            "provider_id": 1,
+            "user_prompt": "Should not start",
+        })
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "Provider is disabled"
+
     async def test_create_task_with_delay_seconds(self, client):
         """Create a task with delay_seconds → scheduled_at is set in the future."""
         # First create an issue

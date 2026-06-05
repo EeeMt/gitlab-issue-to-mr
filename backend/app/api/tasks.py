@@ -897,6 +897,11 @@ async def update_task(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Provider not found",
                 )
+            if provider.is_disabled is True:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Provider is disabled",
+                )
         task.provider_id = request.provider_id
 
     if "require_changes" in updated_fields:
@@ -1078,17 +1083,24 @@ async def retry_task(
 
     provider_id = original_task.provider_id
     if provider_id is None:
-        from app.models import AIProvider
         default_result = await db.execute(
             select(AIProvider).where(AIProvider.is_default == True)
         )
-        default_provider = default_result.scalar_one_or_none()
-        if not default_provider:
+        provider = default_result.scalar_one_or_none()
+        if not provider:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No default provider configured. Please set a default AI provider.",
             )
-        provider_id = default_provider.id
+        provider_id = provider.id
+    else:
+        provider = await db.get(AIProvider, provider_id)
+
+    if provider and provider.is_disabled is True:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Provider is disabled",
+        )
 
     new_task = Task(
         issue_id=original_task.issue_id,
@@ -1222,6 +1234,11 @@ async def create_task(
     provider = await db.get(AIProvider, request.provider_id)
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
+    if provider.is_disabled is True:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Provider is disabled",
+        )
 
     scheduled_at = resolve_scheduled_at(
         request.scheduled_datetime,
