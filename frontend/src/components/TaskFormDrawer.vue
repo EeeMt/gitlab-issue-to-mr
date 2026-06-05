@@ -98,12 +98,14 @@
         <n-form-item
           class="task-mode-form-item"
           :validation-status="taskModeErrorVisible ? 'error' : undefined"
-          :feedback="taskModeErrorVisible ? t('issue.taskModeRequiredFeedback') : undefined"
         >
           <template #label>
             <div class="task-mode-label-row">
               <span>{{ t('issue.taskMode') }}</span>
-              <span class="task-mode-label-hint">{{ t('issue.taskModeManualHint') }}</span>
+              <span
+                class="task-mode-label-hint"
+                :class="{ 'task-mode-label-hint--error': taskModeErrorVisible }"
+              >{{ t('issue.taskModeManualHint') }}</span>
             </div>
           </template>
           <div class="task-mode-section">
@@ -739,12 +741,8 @@ onUnmounted(() => {
   font-weight: 400;
 }
 
-.task-mode-form-item :deep(.n-form-item-feedback-wrapper:not(:empty)) {
-  margin-bottom: 8px;
-}
-
-.task-mode-form-item :deep(.n-form-item-feedback) {
-  margin-bottom: 8px;
+.task-mode-label-hint--error {
+  color: var(--n-feedback-text-color-error, #d03050);
 }
 
 .task-mode-section {

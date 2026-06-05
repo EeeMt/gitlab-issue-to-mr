@@ -324,7 +324,7 @@ describe('TaskFormDrawer', () => {
       expect(wrapper.vm.taskModeErrorVisible).toBe(true)
       expect(wrapper.find('.task-mode-label-row').text()).toContain('issue.taskMode')
       expect(wrapper.find('.task-mode-label-hint').text()).toBe('issue.taskModeManualHint')
-      expect(wrapper.find('.n-form-item-feedback').text()).toBe('issue.taskModeRequiredFeedback')
+      expect(wrapper.find('.task-mode-label-hint').classes()).toContain('task-mode-label-hint--error')
       expect(wrapper.findAll('.task-mode-card--error')).toHaveLength(2)
 
       await wrapper.find('.task-mode-card').trigger('click')
