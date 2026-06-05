@@ -343,6 +343,7 @@ class WorkerEventProjector:
                     log_metadata=_dumps({
                         "tool_use_id": tool_use_id,
                         "name": tool_name,
+                        "input": tool_input,
                         "input_payload_id": payload.id,
                         "input_preview": input_preview,
                         "input_truncated": input_truncated,
@@ -415,6 +416,10 @@ class WorkerEventProjector:
             return
         start_time = datetime.now(timezone.utc)
         input_text = "".join(tool_use["input_parts"])
+        try:
+            tool_input = _json.loads(input_text)
+        except Exception:
+            tool_input = {}
         sanitized_input_text = self._sanitize_sensitive_data(input_text)
         payload = await self._create_sanitized_text_payload(
             db=db,
@@ -431,6 +436,7 @@ class WorkerEventProjector:
             log_metadata=_dumps({
                 "tool_use_id": tool_use["id"],
                 "name": tool_use["name"],
+                "input": tool_input,
                 "input_payload_id": payload.id,
                 "input_preview": input_preview,
                 "input_truncated": input_truncated,

@@ -6,7 +6,6 @@ Covers functionality NOT tested by test_worker_new_patterns.py or test_mr_stats.
 - _build_initial_mr_title       (lines 127-144)
 - _build_initial_mr_description (lines 146-159)
 - _remove_mr_draft_status       (lines 161-178)
-- _flush_log_chunk              (lines 180-195: empty skip, truncation)
 - _stream_logs_to_db timeout    (lines 242-247)
 - _create_mr_if_needed          (lines 384-410: reuse existing MR)
 - _find_existing_mr             (lines 412-438: not found, exception)
@@ -409,42 +408,6 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
         worker._remove_mr_draft_status(task)
 
         mock_gitlab.gl.projects.get.assert_not_called()
-
-
-# ===================================================================
-# _flush_log_chunk
-# ===================================================================
-
-class TestFlushLogChunk(unittest.TestCase):
-    """Tests for _flush_log_chunk — no longer writes to DB; raw logs stored via TaskRawLogChunk."""
-
-    def test_completes_without_error(self):
-        """Normal chunk should complete without any DB interaction."""
-        worker = _make_worker()
-        db = _make_db()
-
-        asyncio.run(worker._flush_log_chunk(1, ["line1\n", "line2\n"], 0))
-
-        db.add.assert_not_called()
-
-    def test_skips_empty_content(self):
-        """Empty or whitespace-only content should not crash."""
-        worker = _make_worker()
-
-        asyncio.run(worker._flush_log_chunk(1, ["   \n", "  \n"], 0))
-
-    def test_handles_large_content(self):
-        """Large content should not crash."""
-        worker = _make_worker()
-        long_line = "x" * 9000 + "\n"
-
-        asyncio.run(worker._flush_log_chunk(1, [long_line], 0))
-
-    def test_handles_sensitive_data(self):
-        """Method should complete without crashing even for sensitive-looking data."""
-        worker = _make_worker()
-
-        asyncio.run(worker._flush_log_chunk(1, ["token=glpat-abcdef1234567890\n"], 0))
 
 
 # ===================================================================
@@ -1319,20 +1282,25 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
 
         with patch("app.core.worker_gitlab.load_task_metadata_files", return_value=metadata_map):
             with patch("app.core.worker_gitlab._resolve_issue_root", return_value="/some/issue/root"):
-                with patch("app.core.worker_gitlab.get_settings") as mock_settings:
-                    mock_settings.return_value = _make_settings(dashboard_url="http://codify.example.com")
-                    await worker._update_mr_description_for_issue(task1, issue, mock_db)
+                with patch("app.core.worker_gitlab.generate_overall_mr_summary", new=AsyncMock(
+                    return_value="- 认证能力已完成并覆盖令牌过期处理。\n- 相关验证已补充。"
+                )) as mock_summary:
+                    with patch("app.core.worker_gitlab.get_settings") as mock_settings:
+                        mock_settings.return_value = _make_settings(dashboard_url="http://codify.example.com")
+                        await worker._update_mr_description_for_issue(task1, issue, mock_db)
 
         desc = mock_mr.description
         # Codify issue link
         self.assertIn("http://codify.example.com/issues/10", desc)
-        # Aggregated section
-        self.assertIn("📋 整体变更", desc)
-        self.assertIn("+135 -48", desc)  # 120+15, 45+3
-        self.assertIn("新增文件", desc)
-        self.assertIn("src/auth.py", desc)
-        self.assertIn("修改文件", desc)
-        self.assertIn("src/main.py", desc)
+        # AI-generated cross-task summary section
+        self.assertIn("📋 总体总结", desc)
+        self.assertIn("认证能力已完成并覆盖令牌过期处理", desc)
+        self.assertIn("相关验证已补充", desc)
+        self.assertNotIn("Task #1 - feat: add JWT auth", desc)
+        mock_summary.assert_awaited_once()
+        self.assertNotIn("整体变更", desc)
+        self.assertNotIn("新增文件", desc)
+        self.assertNotIn("修改文件", desc)
         # Execution record table
         self.assertIn("🔖 执行记录", desc)
         self.assertIn("feat: add JWT auth", desc)
@@ -1379,6 +1347,57 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
         # Verify get() was invoked (correct code path) but save() was never called
         mock_project.mergerequests.get.assert_called_once()
         mock_mr.save.assert_not_called()
+
+    async def test_preserves_existing_overall_summary_when_generation_fails(self):
+        """Keeps the previous overall summary if the model summary call fails."""
+        mock_mr = MagicMock()
+        mock_mr.description = """Some description
+
+---
+
+## 📋 总体总结
+
+- 旧的总体总结
+
+---
+
+## 🔖 执行记录
+"""
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.gl.projects.get.return_value.mergerequests.get.return_value = mock_mr
+        worker = _make_worker(mock_gitlab=mock_gitlab)
+
+        issue = self._make_issue()
+        task1 = _make_task(id=1)
+        task1.user_prompt = "Add JWT auth"
+        task1.status = TaskStatus.COMPLETED
+        task1.issue_id = 10
+        task1.commit_message = "feat: add JWT auth"
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [task1]
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        metadata_map = {
+            1: {
+                "task_id": 1,
+                "prompt": "Add JWT auth",
+                "commit_message": "feat: add JWT auth",
+                "execution_summary": "Implemented JWT authentication.",
+            },
+        }
+
+        with patch("app.core.worker_gitlab.load_task_metadata_files", return_value=metadata_map):
+            with patch("app.core.worker_gitlab._resolve_issue_root", return_value="/some/issue/root"):
+                with patch("app.core.worker_gitlab.generate_overall_mr_summary", new=AsyncMock(return_value=None)):
+                    with patch("app.core.worker_gitlab.get_settings") as mock_settings:
+                        mock_settings.return_value = _make_settings(dashboard_url="http://codify.example.com")
+                        await worker._update_mr_description_for_issue(task1, issue, mock_db)
+
+        self.assertIn("📋 总体总结", mock_mr.description)
+        self.assertIn("旧的总体总结", mock_mr.description)
 
 
 # ===================================================================
@@ -1437,56 +1456,94 @@ class TestLoadTaskMetadataFiles(unittest.TestCase):
 
 
 # ===================================================================
-# build_aggregated_file_summary
+# overall MR summary prompt/response helpers
 # ===================================================================
 
-class TestBuildAggregatedFileSummary(unittest.TestCase):
-    """Tests for build_aggregated_file_summary."""
+class TestOverallMrSummaryHelpers(unittest.TestCase):
+    """Tests for overall MR summary prompt/response helpers."""
 
-    def test_empty_metadata(self):
-        """Returns zero totals and empty file maps for empty input."""
-        from app.core.worker_gitlab import build_aggregated_file_summary
-        result = build_aggregated_file_summary({})
-        self.assertEqual(result["total_additions"], 0)
-        self.assertEqual(result["total_deletions"], 0)
-        self.assertEqual(result["new"], {})
-        self.assertEqual(result["modified"], {})
-        self.assertEqual(result["deleted"], {})
+    def test_prompt_returns_none_when_no_metadata_summaries(self):
+        """No prompt is built when there is no per-task summary input."""
+        from app.core.worker_gitlab import _build_overall_summary_prompt
 
-    def test_aggregates_stats_across_tasks(self):
-        """Sums additions and deletions from all tasks."""
-        from app.core.worker_gitlab import build_aggregated_file_summary
+        issue = MagicMock()
+        issue.title = "Issue title"
+        issue.description = "Issue description"
+
+        result = _build_overall_summary_prompt(issue, [_make_task(id=1)], {})
+
+        self.assertIsNone(result)
+
+    def test_prompt_includes_task_summaries_and_anti_duplication_instruction(self):
+        """Prompt asks the model for a real cross-task summary."""
+        from app.core.worker_gitlab import _build_overall_summary_prompt
+
+        issue = MagicMock()
+        issue.title = "Auth Issue"
+        issue.description = "Implement authentication"
+        task1 = _make_task(id=1)
+        task1.commit_message = "feat: add auth"
+        task2 = _make_task(id=2)
+        task2.commit_message = "fix: token expiry"
         metadata_map = {
-            1: {"additions": 10, "deletions": 2, "new_files": [], "modified_files": [], "deleted_files": []},
-            2: {"additions": 5, "deletions": 1, "new_files": [], "modified_files": [], "deleted_files": []},
+            1: {
+                "commit_message": "feat: add auth",
+                "execution_summary": "Implemented JWT authentication.\nAdded tests.",
+            },
+            2: {
+                "commit_message": "fix: token expiry",
+                "execution_summary": "Fixed token expiry handling.",
+            },
         }
-        result = build_aggregated_file_summary(metadata_map)
-        self.assertEqual(result["total_additions"], 15)
-        self.assertEqual(result["total_deletions"], 3)
 
-    def test_merges_files_across_tasks(self):
-        """Same file modified in multiple tasks records all task IDs."""
-        from app.core.worker_gitlab import build_aggregated_file_summary
-        metadata_map = {
-            1: {"additions": 0, "deletions": 0, "new_files": ["src/a.py"], "modified_files": [], "deleted_files": []},
-            2: {"additions": 0, "deletions": 0, "new_files": [], "modified_files": ["src/a.py", "src/b.py"], "deleted_files": []},
-        }
-        result = build_aggregated_file_summary(metadata_map)
-        # src/a.py was added in task 1 → new wins over modified (priority: new > modified)
-        self.assertIn("src/a.py", result["new"])
-        self.assertIn(1, result["new"]["src/a.py"])
-        self.assertIn("src/b.py", result["modified"])
+        result = _build_overall_summary_prompt(issue, [task1, task2], metadata_map)
 
-    def test_deleted_wins_over_new(self):
-        """If a file is added then deleted, it appears as deleted."""
-        from app.core.worker_gitlab import build_aggregated_file_summary
-        metadata_map = {
-            1: {"additions": 0, "deletions": 0, "new_files": ["src/old.py"], "modified_files": [], "deleted_files": []},
-            2: {"additions": 0, "deletions": 0, "new_files": [], "modified_files": [], "deleted_files": ["src/old.py"]},
-        }
-        result = build_aggregated_file_summary(metadata_map)
-        self.assertIn("src/old.py", result["deleted"])
-        self.assertNotIn("src/old.py", result["new"])
+        self.assertIsNotNone(result)
+        self.assertIn("真正的总体总结", result)
+        self.assertIn("不要逐个复述每个 Task", result)
+        self.assertIn("Implemented JWT authentication. Added tests.", result)
+        self.assertIn("Fixed token expiry handling.", result)
+
+    def test_extracts_anthropic_text_response(self):
+        """Extracts text from Anthropic Messages API content blocks."""
+        from app.core.worker_gitlab import _extract_model_text
+
+        result = _extract_model_text({
+            "content": [
+                {"type": "text", "text": "- 总结一"},
+                {"type": "text", "text": "- 总结二"},
+            ]
+        })
+
+        self.assertEqual(result, "- 总结一\n- 总结二")
+
+    def test_extracts_openai_compatible_text_response(self):
+        """Extracts text from OpenAI-compatible chat responses for local proxies."""
+        from app.core.worker_gitlab import _extract_model_text
+
+        result = _extract_model_text({
+            "choices": [{"message": {"content": "- 总体总结"}}]
+        })
+
+        self.assertEqual(result, "- 总体总结")
+
+    def test_extracts_existing_overall_summary(self):
+        """Extracts the existing overall summary block from an MR description."""
+        from app.core.worker_gitlab import _extract_existing_overall_summary
+
+        result = _extract_existing_overall_summary("""Intro
+
+## 📋 总体总结
+
+- 已完成主要能力
+- 验证通过
+
+---
+
+## 🔖 执行记录
+""")
+
+        self.assertEqual(result, "- 已完成主要能力\n- 验证通过")
 
 
 

@@ -4,7 +4,7 @@ Tests that verify entrypoint.sh and worker.py code paths using the
 Issue → Task → MR flow:
 - MR description updates (running → completed)
 - Existing MR detection and reuse
-- CODIFY markers in task output (stats, tool calls)
+- Event projection in task output (stats, tool calls)
 - Log sanitization (token redaction)
 - No-changes detection behavior
 - MR creation flow via mock call verification
@@ -156,8 +156,8 @@ class TestExistingMRDetection:
             logger.info("MR search not called (MR_IID may be pre-set by worker)")
 
 
-class TestCODIFYMarkers:
-    """Verify CODIFY markers are parsed from worker output."""
+class TestEventProjection:
+    """Verify event.jsonl records are projected to task logs."""
 
     async def test_completed_task_has_tool_calls(
         self,
@@ -165,7 +165,7 @@ class TestCODIFYMarkers:
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """Completed task should have tool_call log entries from CODIFY_TOOL_USE_START markers."""
+        """Completed task should have tool_call log entries from event projection."""
         issue, task = await create_issue_and_task(
             http_client, backend_url, admin_auth_headers,
             title="Tool Calls Verification",
@@ -199,7 +199,7 @@ class TestCODIFYMarkers:
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """Completed task should have usage stats from CODIFY_STATS marker."""
+        """Completed task should have usage stats from run result event."""
         issue, task = await create_issue_and_task(
             http_client, backend_url, admin_auth_headers,
             title="Usage Stats Verification",

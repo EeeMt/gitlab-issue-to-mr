@@ -18,11 +18,7 @@ _POST_EXIT_DRAIN_SECONDS = 30
 
 
 class WorkerLogStreamer:
-    """Streams container logs into TaskLog rows while parsing structured markers."""
-
-    def __init__(self, *, scrub_sensitive_data, stdout_marker_parser) -> None:
-        self._scrub_sensitive_data = scrub_sensitive_data
-        self._stdout_marker_parser = stdout_marker_parser
+    """Streams container logs into a line buffer for archival."""
 
     async def flush_log_chunk(
         self,
@@ -226,16 +222,8 @@ class WorkerLogStreamer:
             text = item.decode("utf-8", errors="replace")
             lines = text.splitlines(keepends=True)
 
-            for line in lines:
-                stripped = line.rstrip('\n\r')
-                if not stripped:
-                    buffer.append(line)
-                    all_lines.append(line)
-                    continue
-
-                await self._stdout_marker_parser.handle_line(stripped=stripped, task_id=task_id, db=db)
-                buffer.append(line)
-                all_lines.append(line)
+            buffer.extend(lines)
+            all_lines.extend(lines)
 
             now = time.monotonic()
             if len(buffer) >= max_buffer_lines or (now - last_flush) >= flush_interval:

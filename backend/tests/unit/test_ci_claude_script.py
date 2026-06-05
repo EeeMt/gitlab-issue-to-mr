@@ -423,7 +423,7 @@ def test_ci_claude_accepts_prompt_file_and_pipes_prompt_to_claude():
             tmpdir_path,
             "#!/usr/bin/env bash\n"
             "stdin_content=$(cat)\n"
-            "printf '{\"type\":\"result\",\"subtype\":\"success\",\"result\":%s,\"session_id\":\"session-123\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}\\n' \"$(printf '%s' \"$stdin_content\" | python -c 'import json,sys; print(json.dumps(sys.stdin.read()))')\"\n",
+            "printf '{\"type\":\"result\",\"subtype\":\"success\",\"result\":%s,\"session_id\":\"session-123\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}\\n' \"$(printf '%s' \"$stdin_content\" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')\"\n",
         )
 
         result = subprocess.run(

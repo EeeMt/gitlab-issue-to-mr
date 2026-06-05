@@ -31,7 +31,6 @@ from app.core.worker_gitlab import (
     remove_mr_draft_status_for_issue,
     update_mr_description_for_issue,
 )
-from app.core.worker_log_parser import WorkerStdoutMarkerParser
 from app.core.worker_log_stream import WorkerLogStreamer
 from app.core.worker_results import finalize_archive, parse_mr_from_logs, parse_task_result, update_task_stats_from_logs_or_api
 from app.core.worker_runtime import (
@@ -135,11 +134,7 @@ class WorkerExecutor:
         self._reset_stdout_helpers()
 
     def _reset_stdout_helpers(self) -> None:
-        self._stdout_marker_parser = WorkerStdoutMarkerParser()
-        self._log_streamer = WorkerLogStreamer(
-            scrub_sensitive_data=scrub_sensitive_data,
-            stdout_marker_parser=self._stdout_marker_parser,
-        )
+        self._log_streamer = WorkerLogStreamer()
 
     def __getattr__(self, name: str):
         projector_methods = {
@@ -359,14 +354,6 @@ class WorkerExecutor:
 
     async def _finalize_archive(self, *, task_id: int, container: Any, db: AsyncSession) -> None:
         await finalize_archive(task_id=task_id, container=container, db=db)
-
-    async def _flush_log_chunk(
-        self,
-        task_id: int,
-        lines: list[str],
-        chunk_index: int,
-    ) -> None:
-        await self._log_streamer.flush_log_chunk(task_id, lines, chunk_index)
 
     async def _stream_logs_to_db(
         self,
