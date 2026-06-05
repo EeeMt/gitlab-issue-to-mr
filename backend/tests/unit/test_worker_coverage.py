@@ -620,6 +620,27 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('commit_message:$commit_message', content)
         self.assertIn('--arg commit_message "${FINAL_COMMIT_MESSAGE:-}"', content)
 
+    def test_entrypoint_generates_overall_summary_with_claude_cli(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('FINAL_OVERALL_SUMMARY=""', content)
+        self.assertIn('PREVIOUS_SUMMARY_FILE="${CODIFY_RUNTIME_DIR}/previous-task-summaries.md"', content)
+        self.assertIn(
+            'build_overall_summary_prompt "${PREVIOUS_SUMMARY_FILE}"',
+            content,
+        )
+        self.assertIn('echo "Previous task summaries found:', content)
+        self.assertIn('echo "Previous task summaries not found at', content)
+        self.assertIn("< /tmp/overall_summary_prompt.txt", content)
+        self.assertIn('echo "Claude overall summary generation succeeded"', content)
+        self.assertIn('echo "Overall MR summary generated (${#FINAL_OVERALL_SUMMARY} chars)"', content)
+        self.assertIn('echo "Claude overall summary normalized to empty; keeping previous MR summary"', content)
+        self.assertIn('overall_summary_chars=${#FINAL_OVERALL_SUMMARY}', content)
+        self.assertIn('--arg overall_summary "${FINAL_OVERALL_SUMMARY:-}"', content)
+        self.assertIn('overall_summary: $overall_summary', content)
+        self.assertNotIn("/messages", content)
+
     def test_entrypoint_sanitizes_generated_commit_message(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = script.read_text()
@@ -1271,6 +1292,10 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
                 "prompt": "Fix token expiry",
                 "commit_sha": "def5678901234",
                 "commit_message": "fix: token expiry\n\nAI-Generated: true",
+                "overall_summary": (
+                    "- 认证能力已完成并覆盖令牌过期处理。\n"
+                    "- 相关验证已补充。"
+                ),
                 "execution_summary": "Fixed token expiry handling.",
                 "new_files": [],
                 "modified_files": ["src/main.py", "src/config.py"],
@@ -1282,12 +1307,9 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
 
         with patch("app.core.worker_gitlab.load_task_metadata_files", return_value=metadata_map):
             with patch("app.core.worker_gitlab._resolve_issue_root", return_value="/some/issue/root"):
-                with patch("app.core.worker_gitlab.generate_overall_mr_summary", new=AsyncMock(
-                    return_value="- 认证能力已完成并覆盖令牌过期处理。\n- 相关验证已补充。"
-                )) as mock_summary:
-                    with patch("app.core.worker_gitlab.get_settings") as mock_settings:
-                        mock_settings.return_value = _make_settings(dashboard_url="http://codify.example.com")
-                        await worker._update_mr_description_for_issue(task1, issue, mock_db)
+                with patch("app.core.worker_gitlab.get_settings") as mock_settings:
+                    mock_settings.return_value = _make_settings(dashboard_url="http://codify.example.com")
+                    await worker._update_mr_description_for_issue(task1, issue, mock_db)
 
         desc = mock_mr.description
         # Codify issue link
@@ -1297,7 +1319,6 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
         self.assertIn("认证能力已完成并覆盖令牌过期处理", desc)
         self.assertIn("相关验证已补充", desc)
         self.assertNotIn("Task #1 - feat: add JWT auth", desc)
-        mock_summary.assert_awaited_once()
         self.assertNotIn("整体变更", desc)
         self.assertNotIn("新增文件", desc)
         self.assertNotIn("修改文件", desc)
@@ -1348,8 +1369,8 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
         mock_project.mergerequests.get.assert_called_once()
         mock_mr.save.assert_not_called()
 
-    async def test_preserves_existing_overall_summary_when_generation_fails(self):
-        """Keeps the previous overall summary if the model summary call fails."""
+    async def test_preserves_existing_overall_summary_when_metadata_has_no_summary(self):
+        """Keeps the previous overall summary if task metadata has no new summary."""
         mock_mr = MagicMock()
         mock_mr.description = """Some description
 
@@ -1391,10 +1412,9 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
 
         with patch("app.core.worker_gitlab.load_task_metadata_files", return_value=metadata_map):
             with patch("app.core.worker_gitlab._resolve_issue_root", return_value="/some/issue/root"):
-                with patch("app.core.worker_gitlab.generate_overall_mr_summary", new=AsyncMock(return_value=None)):
-                    with patch("app.core.worker_gitlab.get_settings") as mock_settings:
-                        mock_settings.return_value = _make_settings(dashboard_url="http://codify.example.com")
-                        await worker._update_mr_description_for_issue(task1, issue, mock_db)
+                with patch("app.core.worker_gitlab.get_settings") as mock_settings:
+                    mock_settings.return_value = _make_settings(dashboard_url="http://codify.example.com")
+                    await worker._update_mr_description_for_issue(task1, issue, mock_db)
 
         self.assertIn("📋 总体总结", mock_mr.description)
         self.assertIn("旧的总体总结", mock_mr.description)
@@ -1456,76 +1476,36 @@ class TestLoadTaskMetadataFiles(unittest.TestCase):
 
 
 # ===================================================================
-# overall MR summary prompt/response helpers
+# overall MR summary helpers
 # ===================================================================
 
 class TestOverallMrSummaryHelpers(unittest.TestCase):
-    """Tests for overall MR summary prompt/response helpers."""
+    """Tests for overall MR summary helpers."""
 
-    def test_prompt_returns_none_when_no_metadata_summaries(self):
-        """No prompt is built when there is no per-task summary input."""
-        from app.core.worker_gitlab import _build_overall_summary_prompt
+    def test_latest_overall_summary_uses_newest_metadata(self):
+        from app.core.worker_gitlab import _latest_overall_summary
 
-        issue = MagicMock()
-        issue.title = "Issue title"
-        issue.description = "Issue description"
+        task1 = _make_task(id=1)
+        task2 = _make_task(id=2)
+        result = _latest_overall_summary(
+            [task1, task2],
+            {
+                1: {"overall_summary": "- 旧总结"},
+                2: {"overall_summary": "- 新总结</details>"},
+            },
+        )
 
-        result = _build_overall_summary_prompt(issue, [_make_task(id=1)], {})
+        self.assertEqual(result, "- 新总结&lt;/details&gt;")
+
+    def test_latest_overall_summary_returns_none_without_metadata_summary(self):
+        from app.core.worker_gitlab import _latest_overall_summary
+
+        result = _latest_overall_summary(
+            [_make_task(id=1)],
+            {1: {"execution_summary": "任务摘要"}},
+        )
 
         self.assertIsNone(result)
-
-    def test_prompt_includes_task_summaries_and_anti_duplication_instruction(self):
-        """Prompt asks the model for a real cross-task summary."""
-        from app.core.worker_gitlab import _build_overall_summary_prompt
-
-        issue = MagicMock()
-        issue.title = "Auth Issue"
-        issue.description = "Implement authentication"
-        task1 = _make_task(id=1)
-        task1.commit_message = "feat: add auth"
-        task2 = _make_task(id=2)
-        task2.commit_message = "fix: token expiry"
-        metadata_map = {
-            1: {
-                "commit_message": "feat: add auth",
-                "execution_summary": "Implemented JWT authentication.\nAdded tests.",
-            },
-            2: {
-                "commit_message": "fix: token expiry",
-                "execution_summary": "Fixed token expiry handling.",
-            },
-        }
-
-        result = _build_overall_summary_prompt(issue, [task1, task2], metadata_map)
-
-        self.assertIsNotNone(result)
-        self.assertIn("真正的总体总结", result)
-        self.assertIn("不要逐个复述每个 Task", result)
-        self.assertIn("Implemented JWT authentication. Added tests.", result)
-        self.assertIn("Fixed token expiry handling.", result)
-
-    def test_extracts_anthropic_text_response(self):
-        """Extracts text from Anthropic Messages API content blocks."""
-        from app.core.worker_gitlab import _extract_model_text
-
-        result = _extract_model_text({
-            "content": [
-                {"type": "text", "text": "- 总结一"},
-                {"type": "text", "text": "- 总结二"},
-            ]
-        })
-
-        self.assertEqual(result, "- 总结一\n- 总结二")
-
-    def test_extracts_openai_compatible_text_response(self):
-        """Extracts text from OpenAI-compatible chat responses for local proxies."""
-        from app.core.worker_gitlab import _extract_model_text
-
-        result = _extract_model_text({
-            "choices": [{"message": {"content": "- 总体总结"}}]
-        })
-
-        self.assertEqual(result, "- 总体总结")
 
     def test_extracts_existing_overall_summary(self):
         """Extracts the existing overall summary block from an MR description."""
@@ -1544,6 +1524,105 @@ class TestOverallMrSummaryHelpers(unittest.TestCase):
 """)
 
         self.assertEqual(result, "- 已完成主要能力\n- 验证通过")
+
+    def test_builds_previous_task_summaries_content(self):
+        from app.core.worker_gitlab import _build_previous_task_summaries_content
+
+        issue = MagicMock()
+        issue.title = "Auth Issue"
+        issue.description = "Implement authentication"
+        task1 = _make_task(id=1)
+        task1.status = TaskStatus.COMPLETED
+        task2 = _make_task(id=2)
+        task2.status = TaskStatus.FAILED
+        metadata_map = {
+            1: {
+                "prompt": "Add JWT auth",
+                "commit_message": "feat: add auth",
+                "execution_summary": "Implemented JWT authentication.\nAdded tests.",
+            },
+            2: {
+                "prompt": "Fix token expiry",
+                "commit_message": "fix: token expiry",
+                "execution_summary": "Fixed token expiry handling.</details>",
+            },
+        }
+
+        result = _build_previous_task_summaries_content(issue, [task1, task2], metadata_map)
+
+        self.assertIn("# Previous Task Summaries", result)
+        self.assertIn("Task #1", result)
+        self.assertIn("Implemented JWT authentication. Added tests.", result)
+        self.assertIn("Fixed token expiry handling.&lt;/details&gt;", result)
+
+    def test_builds_empty_previous_task_summaries_content(self):
+        from app.core.worker_gitlab import _build_previous_task_summaries_content
+
+        issue = MagicMock()
+        issue.title = "Issue title"
+        issue.description = ""
+
+        result = _build_previous_task_summaries_content(issue, [], {})
+
+        self.assertIn("暂无前序任务摘要。", result)
+
+
+class TestWritePreviousTaskSummariesFile(IsolatedAsyncioTestCase):
+    """Tests for writing previous task summaries into the current runtime dir."""
+
+    async def test_skips_when_workspace_path_is_not_string(self):
+        from app.core.worker_gitlab import write_previous_task_summaries_file
+
+        settings = _make_settings(worker_workspace_host_path=MagicMock())
+        issue = MagicMock()
+        issue.id = 10
+        issue.project_id = 100
+        current_task = _make_task(id=3, issue_id=10, project_id=100)
+        mock_db = AsyncMock()
+
+        path = await write_previous_task_summaries_file(mock_db, settings, issue, current_task)
+
+        self.assertIsNone(path)
+        mock_db.execute.assert_not_called()
+
+    async def test_writes_previous_task_summaries_file(self):
+        import tempfile
+        from app.core.worker_gitlab import write_previous_task_summaries_file
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings = _make_settings(worker_workspace_host_path=tmpdir)
+            issue = MagicMock()
+            issue.id = 10
+            issue.project_id = 100
+            issue.title = "Auth Issue"
+            issue.description = "Implement auth"
+            current_task = _make_task(id=3, issue_id=10, project_id=100)
+            previous_task = _make_task(id=2, issue_id=10, project_id=100)
+            previous_task.status = TaskStatus.COMPLETED
+
+            previous_runtime = os.path.join(tmpdir, "project-100", "issue-10", "runtime", "task-2")
+            os.makedirs(previous_runtime)
+            with open(os.path.join(previous_runtime, "task-metadata.json"), "w") as f:
+                json.dump({
+                    "task_id": 2,
+                    "prompt": "Add JWT auth",
+                    "commit_message": "feat: add auth",
+                    "execution_summary": "Implemented JWT authentication.",
+                }, f)
+
+            mock_db = AsyncMock()
+            mock_result = MagicMock()
+            mock_result.scalars.return_value.all.return_value = [previous_task]
+            mock_db.execute = AsyncMock(return_value=mock_result)
+
+            path = await write_previous_task_summaries_file(mock_db, settings, issue, current_task)
+
+            self.assertIsNotNone(path)
+            self.assertTrue(os.path.exists(path))
+            content = Path(path).read_text()
+            self.assertIn("Task #2", content)
+            self.assertIn("Implemented JWT authentication.", content)
+            self.assertIn("Auth Issue", content)
 
 
 

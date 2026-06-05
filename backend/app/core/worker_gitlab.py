@@ -12,7 +12,6 @@ from gitlab import Gitlab
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.providers import _decrypt_provider_api_key
 from app.config import get_effective_settings as get_settings
 from app.core.mattermost_notifications import (
     MATTERMOST_EVENT_TASK_COMPLETED,
@@ -21,7 +20,6 @@ from app.core.mattermost_notifications import (
     notify_task_event,
 )
 from app.core.ssl_utils import get_ssl_verify
-from app.core.worker_runtime import resolve_provider
 from app.models import Issue, Task, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -198,9 +196,16 @@ async def update_mr_description_for_issue(
             logger.warning(f"Could not find MR !{mr_iid} to update description")
             return
 
-        overall_summary = await generate_overall_mr_summary(issue, all_tasks, metadata_map, db)
+        overall_summary = _latest_overall_summary(all_tasks, metadata_map)
+        overall_summary_source = "task_metadata" if overall_summary else "none"
         if not overall_summary:
             overall_summary = _extract_existing_overall_summary(getattr(mr, "description", "") or "")
+            if overall_summary:
+                overall_summary_source = "existing_mr_description"
+        logger.info(
+            f"[Task {task.id}] Overall MR summary source: {overall_summary_source} "
+            f"(chars={len(overall_summary or '')})"
+        )
         description = _build_mr_description(
             issue,
             all_tasks,
@@ -262,6 +267,58 @@ def load_task_metadata_files(issue_root: str, task_ids: list[int]) -> dict[int, 
     return result
 
 
+async def write_previous_task_summaries_file(
+    db: AsyncSession,
+    settings,
+    issue: Issue,
+    task: Task,
+) -> Optional[str]:
+    """Write previous task summaries for the worker-side overall MR summary prompt."""
+    try:
+        from app.core.worker_workspace import build_issue_workspace_paths
+
+        workspace_root = getattr(settings, "worker_workspace_host_path", "") or ""
+        if not isinstance(workspace_root, str) or not workspace_root.strip():
+            logger.debug(
+                f"[Task {task.id}] Workspace root not configured; previous summaries unavailable"
+            )
+            return None
+
+        paths = build_issue_workspace_paths(settings, issue, task)
+        if paths is None:
+            logger.debug(
+                f"[Task {task.id}] Workspace root not configured; previous summaries unavailable"
+            )
+            return None
+
+        previous_tasks = (await db.execute(
+            select(Task)
+            .where(Task.issue_id == issue.id, Task.id < task.id)
+            .order_by(Task.id)
+        )).scalars().all()
+        metadata_map = load_task_metadata_files(paths.issue_root, [t.id for t in previous_tasks])
+        previous_task_ids = [t.id for t in previous_tasks]
+        logger.info(
+            f"[Task {task.id}] Preparing previous task summaries "
+            f"(previous_task_ids={previous_task_ids}, metadata_task_ids={sorted(metadata_map)})"
+        )
+        content = _build_previous_task_summaries_content(issue, previous_tasks, metadata_map)
+
+        os.makedirs(paths.runtime_path, exist_ok=True)
+        path = os.path.join(paths.runtime_path, "previous-task-summaries.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        logger.info(
+            f"[Task {task.id}] Wrote previous task summaries to {path} "
+            f"({len(previous_tasks)} previous task(s), {len(metadata_map)} with metadata)"
+        )
+        return path
+    except Exception as exc:
+        logger.warning(f"[Task {task.id}] Failed to write previous task summaries: {exc}")
+        return None
+
+
 def _compact_summary_text(value: str, max_chars: int = 500) -> str:
     """Collapse task summary text into a compact one-line MR description snippet."""
     text = re.sub(r"\s+", " ", (value or "").strip())
@@ -271,95 +328,62 @@ def _compact_summary_text(value: str, max_chars: int = 500) -> str:
     return text
 
 
-def _build_overall_summary_prompt(issue: Issue, all_tasks: list, metadata_map: dict[int, dict]) -> Optional[str]:
-    """Build the prompt used to synthesize a cross-task MR summary."""
-    task_sections: list[str] = []
+def _build_previous_task_summaries_content(
+    issue: Issue,
+    previous_tasks: list,
+    metadata_map: dict[int, dict],
+) -> str:
+    """Build the markdown file mounted into the worker for cross-task summarization."""
+    lines = [
+        "# Previous Task Summaries",
+        "",
+        f"Issue: {issue.title or '无'}",
+    ]
+    issue_description = _compact_summary_text(str(issue.description or ""), 1000)
+    if issue_description:
+        lines.extend([f"Issue description: {issue_description}", ""])
+    else:
+        lines.append("")
 
-    for task in all_tasks:
-        meta = metadata_map.get(task.id)
-        if meta is None:
-            continue
+    if not previous_tasks:
+        lines.append("暂无前序任务摘要。")
+        lines.append("")
+        return "\n".join(lines)
 
-        summary = _compact_summary_text(str(meta.get("execution_summary") or ""), 1200)
-        if not summary:
-            fallback_summary = (
-                meta.get("commit_message")
-                or task.commit_message
-                or meta.get("prompt")
-                or task.user_prompt
-                or ""
-            )
-            summary = _compact_summary_text(str(fallback_summary))
-        if not summary:
-            continue
-
-        status_label = task.status.value if task.status else "unknown"
-        commit_msg = _compact_summary_text(str(meta.get("commit_message") or task.commit_message or ""), 120)
-        prompt = _compact_summary_text(str(meta.get("prompt") or task.user_prompt or ""), 300)
-        task_sections.append(
-            "\n".join([
-                f"Task #{task.id}",
-                f"- 状态: {status_label}",
-                f"- 提交说明: {commit_msg or '无'}",
-                f"- 目标: {prompt or '无'}",
-                f"- 执行摘要: {summary}",
-            ])
+    for previous_task in previous_tasks:
+        meta = metadata_map.get(previous_task.id, {})
+        status_label = previous_task.status.value if previous_task.status else "unknown"
+        prompt = _compact_summary_text(str(meta.get("prompt") or previous_task.user_prompt or ""), 300)
+        commit_msg = _compact_summary_text(
+            str(meta.get("commit_message") or previous_task.commit_message or ""),
+            200,
         )
+        summary = _compact_summary_text(
+            str(meta.get("execution_summary") or commit_msg or prompt or ""),
+            1500,
+        )
+        lines.extend([
+            f"## Task #{previous_task.id}",
+            f"- 状态: {status_label}",
+            f"- 目标: {prompt or '无'}",
+            f"- 提交说明: {commit_msg or '无'}",
+            f"- 执行摘要: {summary or '无'}",
+            "",
+        ])
 
-    if not task_sections:
-        return None
-
-    issue_description = _compact_summary_text(str(issue.description or ""), 1200)
-    task_text = "\n\n".join(task_sections)
-    return f"""请基于下面同一个 GitLab MR 下多个 Codify 任务的执行摘要，生成一个真正的总体总结。
-
-要求：
-1. 使用中文。
-2. 只总结整体目标、最终完成的核心结果、当前状态和验证情况。
-3. 不要逐个复述每个 Task，不要输出文件清单，不要重复 MR Changes 页可看到的 diff 信息。
-4. 控制在 3-6 条要点，使用 Markdown bullet list。
-5. 不要添加标题、前言、结束语或代码块。
-
-Issue 标题：
-{issue.title or "无"}
-
-Issue 描述：
-{issue_description or "无"}
-
-任务执行摘要：
-{task_text}
-"""
+    return "\n".join(lines)
 
 
-def _extract_model_text(response_data: dict) -> str:
-    """Extract text from Anthropic-compatible or OpenAI-compatible chat responses."""
-    content = response_data.get("content")
-    if isinstance(content, list):
-        parts = [
-            item.get("text", "")
-            for item in content
-            if isinstance(item, dict) and isinstance(item.get("text"), str)
-        ]
-        text = "\n".join(part for part in parts if part.strip()).strip()
-        if text:
-            return text
-
-    choices = response_data.get("choices")
-    if isinstance(choices, list) and choices:
-        first = choices[0]
-        if isinstance(first, dict):
-            message = first.get("message")
-            if isinstance(message, dict):
-                message_content = message.get("content")
-                if isinstance(message_content, str):
-                    return message_content.strip()
-            if isinstance(first.get("text"), str):
-                return first["text"].strip()
-
-    if isinstance(response_data.get("text"), str):
-        return response_data["text"].strip()
-
-    return ""
+def _latest_overall_summary(all_tasks: list, metadata_map: dict[int, dict]) -> Optional[str]:
+    """Return the newest worker-generated overall summary in task metadata."""
+    for task in reversed(list(all_tasks)):
+        meta = metadata_map.get(task.id)
+        if not meta:
+            continue
+        summary = str(meta.get("overall_summary") or "").strip()
+        if summary:
+            return summary.replace("</details>", "&lt;/details&gt;")
+    return None
 
 
 def _extract_existing_overall_summary(description: str) -> Optional[str]:
@@ -382,62 +406,6 @@ def _extract_existing_overall_summary(description: str) -> Optional[str]:
 
     summary = remaining.strip()
     return summary or None
-
-
-async def generate_overall_mr_summary(
-    issue: Issue,
-    all_tasks: list,
-    metadata_map: dict[int, dict],
-    db: AsyncSession,
-) -> Optional[str]:
-    """Use the task's AI provider to synthesize an overall summary for the MR."""
-    prompt = _build_overall_summary_prompt(issue, all_tasks, metadata_map)
-    if not prompt:
-        return None
-
-    try:
-        latest_task = max(all_tasks, key=lambda task: task.id)
-        provider = await resolve_provider(db, latest_task)
-        api_key = _decrypt_provider_api_key(provider) if getattr(provider, "id", None) else (provider.api_key or "")
-        base_url = (provider.base_url or "").rstrip("/")
-        model = provider.model
-        if not base_url or not model:
-            logger.warning(f"[Issue {issue.id}] Skipping overall MR summary: provider base_url/model missing")
-            return None
-
-        headers = {
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-        }
-        if api_key:
-            headers["x-api-key"] = api_key
-            headers["Authorization"] = f"Bearer {api_key}"
-
-        payload = {
-            "model": model,
-            "max_tokens": 900,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        if getattr(provider, "system_prompt", None):
-            payload["system"] = provider.system_prompt
-
-        timeout = httpx.Timeout(45.0, connect=10.0)
-        async with httpx.AsyncClient(timeout=timeout, verify=get_ssl_verify(get_settings())) as client:
-            response = await client.post(f"{base_url}/messages", headers=headers, json=payload)
-            response.raise_for_status()
-            text = _extract_model_text(response.json())
-
-        text = text.strip()
-        text = re.sub(r"^```(?:markdown)?\s*", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\s*```$", "", text).strip()
-        text = text.replace("</details>", "&lt;/details&gt;")
-        if len(text) > 2000:
-            text = text[:2000].rstrip() + "..."
-        return text or None
-
-    except Exception as exc:
-        logger.warning(f"[Issue {issue.id}] Failed to generate overall MR summary: {exc}")
-        return None
 
 
 def _build_mr_description(
@@ -475,7 +443,7 @@ def _build_mr_description(
     lines.append("---")
     lines.append("")
 
-    # Cross-task summary generated by the configured AI provider.
+    # Cross-task summary generated by the worker and stored in task metadata.
     if overall_summary:
         lines.append("## 📋 总体总结")
         lines.append("")

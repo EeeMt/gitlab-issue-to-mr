@@ -453,6 +453,50 @@ normalize_model_commit_message() {
     printf '%s' "${raw_message}" | python3 -c 'import re, sys; text = sys.stdin.read(); text = re.sub(r"\r$", "", text, flags=re.MULTILINE); text = re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL); text = re.sub(r"</?think\b[^>]*>", "", text, flags=re.IGNORECASE); print(text.strip(), end="")'
 }
 
+build_overall_summary_prompt() {
+    local previous_summary_file="$1"
+    local current_summary_text="$2"
+    local commit_message_text="$3"
+    local diff_stats_text="$4"
+    local previous_summary_text="暂无前序任务摘要。"
+
+    if [ -f "${previous_summary_file}" ]; then
+        previous_summary_text="$(cat "${previous_summary_file}")"
+    fi
+
+    cat <<EOF
+请基于同一个 GitLab MR 下的前序任务摘要和当前任务执行结果，生成一个真正的跨任务总体总结。
+
+要求：
+1. 使用中文。
+2. 只总结整体目标、最终完成的核心结果、当前状态和验证情况。
+3. 不要逐个复述每个 Task，不要输出文件清单，不要重复 MR Changes 页可看到的 diff 信息。
+4. 控制在 3-6 条要点，使用 Markdown bullet list。
+5. 不要添加标题、前言、结束语或代码块。
+
+前序任务摘要：
+${previous_summary_text}
+
+当前任务需求：
+${USER_PROMPT}
+
+当前任务提交说明：
+${commit_message_text}
+
+当前任务 Diff 统计：
+${diff_stats_text}
+
+当前任务执行摘要：
+${current_summary_text}
+EOF
+}
+
+normalize_model_overall_summary() {
+    local raw_summary="$1"
+
+    printf '%s' "${raw_summary}" | python3 -c 'import re, sys; text = sys.stdin.read(); text = re.sub(r"\r$", "", text, flags=re.MULTILINE); text = re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL); text = re.sub(r"</?think\b[^>]*>", "", text, flags=re.IGNORECASE); text = re.sub(r"^```(?:markdown)?\s*", "", text.strip(), flags=re.IGNORECASE); text = re.sub(r"\s*```$", "", text).strip(); text = text.replace("</details>", "&lt;/details&gt;"); print((text[:2000].rstrip() + "...") if len(text) > 2000 else text, end="")'
+}
+
 TASK_MODE="${TASK_MODE:-execute}"
 
 if [ "${TASK_MODE}" = "plan" ]; then
@@ -536,6 +580,7 @@ export APPEND_SYSTEM_PROMPT
 FINAL_SUMMARY_CONTENT=""
 FINAL_CHANGED_FILES_TEXT=""
 FINAL_COMMIT_MESSAGE=""
+FINAL_OVERALL_SUMMARY=""
 RUNTIME_ARCHIVE_CREATED=0
 
 create_runtime_archive() {
@@ -727,6 +772,37 @@ AI-Generated: true"
 AI-Generated: true"
     fi
 
+    echo "Generating overall MR summary with Claude..."
+    PREVIOUS_SUMMARY_FILE="${CODIFY_RUNTIME_DIR}/previous-task-summaries.md"
+    if [ -f "${PREVIOUS_SUMMARY_FILE}" ]; then
+        PREVIOUS_SUMMARY_BYTES=$(wc -c < "${PREVIOUS_SUMMARY_FILE}" | tr -d ' ')
+        echo "Previous task summaries found: ${PREVIOUS_SUMMARY_FILE} (${PREVIOUS_SUMMARY_BYTES} bytes)"
+    else
+        echo "Previous task summaries not found at ${PREVIOUS_SUMMARY_FILE}; using empty history"
+    fi
+    OVERALL_SUMMARY_PROMPT=$(build_overall_summary_prompt "${PREVIOUS_SUMMARY_FILE}" "${FINAL_SUMMARY_CONTENT}" "${FINAL_COMMIT_MESSAGE}" "${COMMIT_DIFF_STATS}")
+    printf '%s\n' "${OVERALL_SUMMARY_PROMPT}" > /tmp/overall_summary_prompt.txt
+    chmod 644 /tmp/overall_summary_prompt.txt
+    chown codify:codify /tmp/overall_summary_prompt.txt
+    echo "Overall summary prompt written to /tmp/overall_summary_prompt.txt (${#OVERALL_SUMMARY_PROMPT} chars)"
+
+    set +e
+    GENERATED_OVERALL_SUMMARY=$(env HOME=/home/codify timeout 60 su -m -s /bin/bash codify -c 'cd /workspace && /usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" < /tmp/overall_summary_prompt.txt' 2>/dev/null)
+    OVERALL_SUMMARY_RESULT=$?
+    set -e
+
+    if [ ${OVERALL_SUMMARY_RESULT} -eq 0 ]; then
+        echo "Claude overall summary generation succeeded"
+        FINAL_OVERALL_SUMMARY=$(normalize_model_overall_summary "${GENERATED_OVERALL_SUMMARY}")
+        if [ -n "${FINAL_OVERALL_SUMMARY}" ]; then
+            echo "Overall MR summary generated (${#FINAL_OVERALL_SUMMARY} chars)"
+        else
+            echo "Claude overall summary normalized to empty; keeping previous MR summary"
+        fi
+    else
+        echo "Claude overall summary generation failed with exit code ${OVERALL_SUMMARY_RESULT}; keeping previous MR summary"
+    fi
+
     {
         printf '%s\n' "${FINAL_COMMIT_MESSAGE}"
         printf '\nCo-authored-by: %s <%s>\n' "${CODIFY_COAUTHOR_NAME_VALUE}" "${CODIFY_COAUTHOR_EMAIL_VALUE}"
@@ -810,6 +886,7 @@ AI-Generated: true"
         --arg prompt "${USER_PROMPT:-}" \
         --arg commit_sha "${COMMIT_SHA:-}" \
         --arg commit_message "${FINAL_COMMIT_MESSAGE:-}" \
+        --arg overall_summary "${FINAL_OVERALL_SUMMARY:-}" \
         --arg execution_summary "${SUMMARY_TRUNCATED}" \
         --arg new_files "${NEW_FILES:-}" \
         --arg modified_files "${MODIFIED_FILES:-}" \
@@ -822,6 +899,7 @@ AI-Generated: true"
             prompt: $prompt,
             commit_sha: $commit_sha,
             commit_message: $commit_message,
+            overall_summary: $overall_summary,
             execution_summary: $execution_summary,
             new_files: (if $new_files == "" then [] else ($new_files | split(",")) end),
             modified_files: (if $modified_files == "" then [] else ($modified_files | split(",")) end),
@@ -831,7 +909,7 @@ AI-Generated: true"
             timestamp: $timestamp
         }')
     printf '%s\n' "${TASK_METADATA}" > "${CODIFY_RUNTIME_DIR}/task-metadata.json"
-    echo "Task metadata written to ${CODIFY_RUNTIME_DIR}/task-metadata.json"
+    echo "Task metadata written to ${CODIFY_RUNTIME_DIR}/task-metadata.json (overall_summary_chars=${#FINAL_OVERALL_SUMMARY})"
 
     create_runtime_archive
 

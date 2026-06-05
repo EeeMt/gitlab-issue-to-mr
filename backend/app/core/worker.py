@@ -30,6 +30,7 @@ from app.core.worker_gitlab import (
     find_existing_mr,
     remove_mr_draft_status_for_issue,
     update_mr_description_for_issue,
+    write_previous_task_summaries_file,
 )
 from app.core.worker_log_stream import WorkerLogStreamer
 from app.core.worker_results import finalize_archive, parse_mr_from_logs, parse_task_result, update_task_stats_from_logs_or_api
@@ -216,7 +217,17 @@ class WorkerExecutor:
 
             return _update_mr_description_wrapper
 
+        if name == '_write_previous_task_summaries_file':
 
+            async def _write_previous_task_summaries_wrapper(
+                db: AsyncSession,
+                settings,
+                issue: Issue,
+                task: Task,
+            ) -> Optional[str]:
+                return await write_previous_task_summaries_file(db, settings, issue, task)
+
+            return _write_previous_task_summaries_wrapper
 
         raise AttributeError(name)
 
