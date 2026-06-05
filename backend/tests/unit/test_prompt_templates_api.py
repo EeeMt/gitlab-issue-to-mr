@@ -13,11 +13,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from app.api.prompt_templates import (
     PromptTemplateCreate,
+    PromptTemplateReorder,
     PromptTemplateUpdate,
     create_prompt_template,
     delete_prompt_template,
     get_prompt_template,
     list_prompt_templates,
+    reorder_prompt_templates,
     update_prompt_template,
 )
 from app.models import PromptTemplate
@@ -30,6 +32,7 @@ def _make_template(template_id: int, name: str, content: str, is_active: bool = 
         name=name,
         content=content,
         is_active=is_active,
+        sort_order=template_id,
         created_at=now,
         updated_at=now,
     )
@@ -53,13 +56,16 @@ async def test_list_prompt_templates_returns_all_templates():
     assert result[0].name == "Code Review"
     assert result[0].content == "Please review {{project_name}}"
     assert result[0].is_active is True
+    assert result[0].sort_order == 1
     assert result[1].name == "Generate Tests"
     assert result[1].is_active is False
+    assert result[1].sort_order == 2
 
 
 @pytest.mark.asyncio
 async def test_create_prompt_template_adds_new_template():
     db = MagicMock()
+    db.execute = AsyncMock(return_value=SimpleNamespace(scalar=lambda: 3))
     db.commit = AsyncMock()
 
     # Mock refresh to set id and timestamps on the object
@@ -77,7 +83,31 @@ async def test_create_prompt_template_adds_new_template():
     assert result.name == "Bug Fix"
     assert result.content == "Fix the bug in {{component}}"
     assert result.is_active is True
+    assert result.sort_order == 4
     db.add.assert_called_once()
+    db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_reorder_prompt_templates_updates_sort_order():
+    template1 = _make_template(1, "First", "First content")
+    template2 = _make_template(2, "Second", "Second content")
+
+    db = AsyncMock()
+    db.execute.return_value = SimpleNamespace(
+        scalars=lambda: SimpleNamespace(all=lambda: [template1, template2])
+    )
+    db.commit = AsyncMock()
+
+    with _mock_admin_user():
+        result = await reorder_prompt_templates(
+            reorder=PromptTemplateReorder(template_ids=[2, 1]),
+            db=db,
+        )
+
+    assert [template.id for template in result] == [2, 1]
+    assert template2.sort_order == 1
+    assert template1.sort_order == 2
     db.commit.assert_called_once()
 
 

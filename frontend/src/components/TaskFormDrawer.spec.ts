@@ -231,8 +231,8 @@ vi.mock('./HeatmapChart.vue', () => ({
 }))
 
 const mockTemplates = [
-  { id: 1, name: 'Bug Fix', content: 'Fix {{issue_type}}', variable_tips: { issue_type: 'Bug type' } },
-  { id: 2, name: 'Simple', content: 'Do something' },
+  { id: 1, name: 'Bug Fix', content: 'Fix {{issue_type}}', variable_tips: { issue_type: 'Bug type' }, is_active: true, sort_order: 1, created_at: '2026-03-31T10:00:00Z', updated_at: '2026-03-31T10:00:00Z' },
+  { id: 2, name: 'Simple', content: 'Do something', is_active: true, sort_order: 2, created_at: '2026-03-30T10:00:00Z', updated_at: '2026-03-30T10:00:00Z' },
 ]
 
 const mockProviders = [

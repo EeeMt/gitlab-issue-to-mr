@@ -19,6 +19,7 @@ const mockApi = {
   getPromptTemplates: vi.fn(),
   createPromptTemplate: vi.fn(),
   updatePromptTemplate: vi.fn(),
+  reorderPromptTemplates: vi.fn(),
   deletePromptTemplate: vi.fn()
 }
 
@@ -26,7 +27,25 @@ vi.mock('../../api', () => ({
   getPromptTemplates: (...args: any[]) => mockApi.getPromptTemplates(...args),
   createPromptTemplate: (...args: any[]) => mockApi.createPromptTemplate(...args),
   updatePromptTemplate: (...args: any[]) => mockApi.updatePromptTemplate(...args),
+  reorderPromptTemplates: (...args: any[]) => mockApi.reorderPromptTemplates(...args),
   deletePromptTemplate: (...args: any[]) => mockApi.deletePromptTemplate(...args)
+}))
+
+vi.mock('vuedraggable', () => ({
+  default: {
+    name: 'Draggable',
+    props: ['modelValue', 'itemKey', 'tag', 'handle', 'disabled'],
+    emits: ['update:modelValue', 'start', 'end'],
+    setup(props: any, { slots }: any) {
+      return () => h(
+        props.tag || 'div',
+        { class: 'draggable' },
+        props.modelValue?.map((item: any, index: number) =>
+          slots.item?.({ element: item, index })
+        )
+      )
+    }
+  }
 }))
 
 // Mock naive-ui components
@@ -47,15 +66,6 @@ vi.mock('naive-ui', () => ({
     setup(props: any, { slots, attrs }: any) {
       // Render modal container only when show is truthy and pass attrs through so data-testid is available
       return () => props.show ? h('div', { class: 'n-modal', ...attrs }, slots.default?.()) : null
-    }
-  },
-  NDataTable: {
-    name: 'NDataTable',
-    props: ['columns', 'data', 'loading', 'rowKey', 'pagination', 'bordered'],
-    setup(props: any, { attrs }: any) {
-      return () => h('div', { class: 'n-data-table', ...attrs },
-        props.data?.map((row: any) => h('div', { class: 'n-data-table-row', key: row.id }))
-      )
     }
   },
   NForm: {
@@ -98,6 +108,13 @@ vi.mock('naive-ui', () => ({
         ...attrs,
         onInput: (e: Event) => emit('update:value', (e.target as HTMLInputElement).value)
       })
+    }
+  },
+  NIcon: {
+    name: 'NIcon',
+    props: ['component'],
+    setup(_props: any, { slots }: any) {
+      return () => h('span', { class: 'n-icon' }, slots.default?.())
     }
   },
   NSwitch: {
@@ -177,6 +194,7 @@ const mockTemplates = [
     content: 'Fix the {{issue_type}} in {{file_path}}',
     variable_tips: { issue_type: 'Type of issue', file_path: 'Path to file' },
     is_active: true,
+    sort_order: 1,
     created_at: '2026-03-31T10:00:00Z',
     updated_at: '2026-03-31T10:00:00Z'
   },
@@ -186,6 +204,7 @@ const mockTemplates = [
     content: 'Add {{feature_name}} feature',
     variable_tips: {},
     is_active: false,
+    sort_order: 2,
     created_at: '2026-03-30T10:00:00Z',
     updated_at: '2026-03-30T10:00:00Z'
   }
@@ -197,6 +216,12 @@ describe('PromptTemplatesPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockApi.getPromptTemplates.mockResolvedValue(mockTemplates)
+    mockApi.reorderPromptTemplates.mockImplementation((ids: number[]) =>
+      Promise.resolve(ids.map((id, index) => ({
+        ...mockTemplates.find(template => template.id === id)!,
+        sort_order: index + 1
+      })))
+    )
   })
 
   const mountComponent = () => {
@@ -232,10 +257,10 @@ describe('PromptTemplatesPanel', () => {
       })
     })
 
-    it('should show data table after loading', async () => {
+    it('should show sortable table after loading', async () => {
       const wrapper = mountComponent()
       await vi.waitFor(() => {
-        expect(wrapper.find('.n-data-table').exists()).toBe(true)
+        expect(wrapper.find('.prompt-template-table').exists()).toBe(true)
       })
     })
   })
@@ -348,6 +373,33 @@ describe('PromptTemplatesPanel', () => {
 
       expect(mockApi.deletePromptTemplate).toHaveBeenCalledWith(1)
       expect(mockApi.getPromptTemplates).toHaveBeenCalledTimes(1) // Refresh call after delete
+    })
+  })
+
+  describe('drag sorting', () => {
+    it('should persist reordered template ids after drag end', async () => {
+      const wrapper = mountComponent()
+      await vi.waitFor(() => {})
+      wrapper.vm.promptTemplates = mockTemplates
+
+      wrapper.vm.handlePromptTemplateDragStart()
+      wrapper.vm.promptTemplates = [mockTemplates[1], mockTemplates[0]]
+      await wrapper.vm.handlePromptTemplateDragEnd()
+
+      expect(mockApi.reorderPromptTemplates).toHaveBeenCalledWith([2, 1])
+      expect(wrapper.vm.promptTemplates.map((template: any) => template.id)).toEqual([2, 1])
+    })
+
+    it('should ignore unchanged drag order', async () => {
+      const wrapper = mountComponent()
+      await vi.waitFor(() => {})
+      wrapper.vm.promptTemplates = mockTemplates
+
+      wrapper.vm.handlePromptTemplateDragStart()
+      await wrapper.vm.handlePromptTemplateDragEnd()
+
+      expect(mockApi.reorderPromptTemplates).not.toHaveBeenCalled()
+      expect(wrapper.vm.promptTemplates.map((template: any) => template.id)).toEqual([1, 2])
     })
   })
 

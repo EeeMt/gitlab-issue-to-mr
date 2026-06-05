@@ -458,7 +458,7 @@ const mockProjects = [
 ]
 
 const mockPromptTemplates = [
-  { id: 1, name: 'Bug Fix', content: 'Fix the {{issue_type}} in {{file_path}}', variable_tips: { issue_type: 'Type', file_path: 'Path' }, is_active: true, created_at: '2024-01-01T10:00:00Z', updated_at: '2024-01-01T10:00:00Z' },
+  { id: 1, name: 'Bug Fix', content: 'Fix the {{issue_type}} in {{file_path}}', variable_tips: { issue_type: 'Type', file_path: 'Path' }, is_active: true, sort_order: 1, created_at: '2024-01-01T10:00:00Z', updated_at: '2024-01-01T10:00:00Z' },
 ]
 
 // ---------------------------------------------------------------------------

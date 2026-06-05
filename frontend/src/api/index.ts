@@ -1462,6 +1462,7 @@ export interface PromptTemplate {
   content: string
   variable_tips?: Record<string, string>
   is_active: boolean
+  sort_order: number
   created_at: string
   updated_at: string
 }
@@ -1478,6 +1479,11 @@ export async function createPromptTemplate(template: { name: string; content: st
 
 export async function updatePromptTemplate(templateId: number, template: { name?: string; content?: string; variable_tips?: Record<string, string>; is_active?: boolean }): Promise<PromptTemplate> {
   const response = await api.put(`/prompt-templates/${templateId}`, template)
+  return response.data
+}
+
+export async function reorderPromptTemplates(templateIds: number[]): Promise<PromptTemplate[]> {
+  const response = await api.put('/prompt-templates/reorder', { template_ids: templateIds })
   return response.data
 }
 

@@ -27,7 +27,8 @@
     "vue-i18n": "^11.3.0",
     "vue-mark-text": "^1.4.14",
     "vue-router": "^4.5.0",
-    "vue3-highlight-text": "^1.0.7"
+    "vue3-highlight-text": "^1.0.7",
+    "vuedraggable": "^4.1.0"
   },
   "devDependencies": {
     "@testing-library/vue": "^8.1.0",
