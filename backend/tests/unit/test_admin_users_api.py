@@ -12,13 +12,12 @@ Tests cover:
 import os
 import sys
 import unittest
-from datetime import UTC, datetime
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from fastapi.testclient import TestClient
-
 
 # ---------------------------------------------------------------------------
 # Shared test helpers
@@ -71,9 +70,9 @@ def _make_db_override():
 
 def _get_test_client(current_user=None):
     """Build TestClient with dependency overrides for admin auth and DB."""
-    from app.main import app
     from app.database import get_db
     from app.dependencies.auth import require_admin_user, require_authenticated_user
+    from app.main import app
 
     override_db, mock_db = _make_db_override()
 

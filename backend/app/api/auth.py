@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import secrets
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 import jwt
@@ -19,7 +19,6 @@ from app.config import get_effective_settings
 from app.core.bootstrap import get_bootstrap_state, initialize_system
 from app.core.break_glass import get_break_glass_identity, verify_break_glass_password
 from app.core.local_auth import hash_password, verify_password
-from app.core.utcnow import utcnow
 from app.core.oidc import (
     OIDCConfigurationError,
     build_authorization_url,
@@ -33,13 +32,14 @@ from app.core.session import (
     revoke_session_token,
 )
 from app.core.user_roles import ROLE_SOURCE_BREAK_GLASS, apply_platform_access_policy
+from app.core.utcnow import utcnow
 from app.database import get_db
 from app.dependencies.auth import (
     AuthContext,
     get_optional_current_user,
     require_authenticated_context,
 )
-from app.models import AuthAuditLog, SystemBootstrap, User, UserSession
+from app.models import AuthAuditLog, User, UserSession
 from app.page_permissions import get_page_permissions
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ class LocalLoginRequestBody(BaseModel):
 
     username: str
     password: str
-    next: Optional[str] = None
+    next: str | None = None
 
 
 class BreakGlassLoginRequestBody(BaseModel):
@@ -63,7 +63,7 @@ class BreakGlassLoginRequestBody(BaseModel):
 
     username: str
     password: str
-    next: Optional[str] = None
+    next: str | None = None
 
 
 class LocalRegisterRequestBody(BaseModel):
@@ -71,8 +71,8 @@ class LocalRegisterRequestBody(BaseModel):
 
     username: str
     password: str
-    display_name: Optional[str] = None
-    email: Optional[str] = None
+    display_name: str | None = None
+    email: str | None = None
 
 
 class BootstrapStatusResponse(BaseModel):
@@ -94,11 +94,11 @@ class LocalLoginResponse(BaseModel):
 class SessionInfoResponse(BaseModel):
     id: str
     created_at: datetime
-    last_seen_at: Optional[datetime]
+    last_seen_at: datetime | None
     expires_at: datetime
-    revoked_at: Optional[datetime]
-    ip_address: Optional[str]
-    user_agent: Optional[str]
+    revoked_at: datetime | None
+    ip_address: str | None
+    user_agent: str | None
     status: str
     current: bool
     has_gitlab_access_token: bool
@@ -121,7 +121,7 @@ def _build_cookie_kwargs() -> dict[str, Any]:
     }
 
 
-def _sanitize_next_path(next_path: Optional[str]) -> str:
+def _sanitize_next_path(next_path: str | None) -> str:
     if not next_path or not next_path.startswith("/") or next_path.startswith("//"):
         return "/dashboard"
     return next_path
@@ -193,10 +193,10 @@ async def _record_auth_audit(
     db: AsyncSession,
     *,
     event_type: str,
-    username: Optional[str],
-    user_id: Optional[int],
+    username: str | None,
+    user_id: int | None,
     success: bool,
-    detail: Optional[str],
+    detail: str | None,
     request: Request,
 ) -> None:
     db.add(
@@ -339,12 +339,12 @@ async def _upsert_user(db: AsyncSession, claims: dict[str, Any], userinfo: dict[
 async def get_bootstrap_status(db: AsyncSession = Depends(get_db)):
     """Check if the system has been initialized."""
     state = await get_bootstrap_state(db)
-    
+
     result = await db.execute(select(User))
     users = result.scalars().all()
-    
+
     settings = get_effective_settings()
-    
+
     return BootstrapStatusResponse(
         initialized=state.initialized,
         oidc_configured=settings.oidc_enabled,
@@ -375,14 +375,14 @@ async def local_register(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="System already initialized. Cannot register new users via this endpoint.",
         )
-    
+
     username = payload.username.strip()
     if not username:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username is required",
         )
-    
+
     result = await db.execute(select(User).where(User.username == username))
     if result.scalar_one_or_none():
         await _record_auth_audit(
@@ -399,9 +399,9 @@ async def local_register(
             status_code=status.HTTP_409_CONFLICT,
             detail="Username already exists",
         )
-    
+
     password_hash = hash_password(payload.password)
-    
+
     user = User(
         username=username,
         display_name=payload.display_name or username,
@@ -423,7 +423,7 @@ async def local_register(
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
-    
+
     await _record_auth_audit(
         db,
         event_type="local_register",
@@ -434,7 +434,7 @@ async def local_register(
         request=request,
     )
     await db.commit()
-    
+
     response = JSONResponse({
         "status": "success",
         "next_path": "/dashboard",
@@ -465,10 +465,10 @@ async def local_login(
     """Authenticate with local username/password."""
     username = payload.username.strip()
     next_path = _sanitize_next_path(payload.next)
-    
+
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
-    
+
     if not user or not user.local_password_hash:
         await _record_auth_audit(
             db,
@@ -484,7 +484,7 @@ async def local_login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
         )
-    
+
     if not verify_password(payload.password, user.local_password_hash):
         await _record_auth_audit(
             db,
@@ -500,7 +500,7 @@ async def local_login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
         )
-    
+
     if user.state != "active":
         await _record_auth_audit(
             db,
@@ -516,14 +516,14 @@ async def local_login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is disabled",
         )
-    
+
     session_token = await create_user_session(
         db,
         user,
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
-    
+
     await _record_auth_audit(
         db,
         event_type="local_login",
@@ -534,7 +534,7 @@ async def local_login(
         request=request,
     )
     await db.commit()
-    
+
     response = JSONResponse({
         "status": "success",
         "next_path": next_path,
@@ -558,7 +558,7 @@ async def local_login(
 
 
 @router.get("/auth/login")
-async def login(next: Optional[str] = Query(default=None)):
+async def login(next: str | None = Query(default=None)):
     """Redirect the browser to the GitLab OIDC authorize endpoint."""
     settings = get_effective_settings()
     if not settings.oidc_enabled:
@@ -654,8 +654,8 @@ async def break_glass_login(
 @router.get("/auth/callback")
 async def callback(
     request: Request,
-    code: Optional[str] = Query(default=None),
-    state: Optional[str] = Query(default=None),
+    code: str | None = Query(default=None),
+    state: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """Handle the GitLab OIDC callback."""
@@ -804,15 +804,15 @@ async def revoke_session(
 
 @router.get("/auth/me")
 async def me(
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Return current auth state for frontend bootstrapping."""
     settings = get_effective_settings()
-    
+
     # Get bootstrap state
     state = await get_bootstrap_state(db)
-    
+
     if current_user is None:
         return {
             "oidc_enabled": settings.oidc_enabled,

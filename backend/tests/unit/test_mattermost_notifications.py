@@ -748,17 +748,28 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
 # Pure-function tests (no async, no DB)
 # =======================================================================
 
+from datetime import UTC, datetime
+
 import pytest
-from datetime import datetime, timezone
 
 from app.core.mattermost_notifications import (
+    MATTERMOST_EVENT_TASK_CANCELLED,
+    MATTERMOST_EVENT_TASK_EXECUTE_NOW,
+    MATTERMOST_EVENT_TASK_RESCHEDULED,
+    MATTERMOST_EVENT_TASK_RETRY_SCHEDULED,
+    MATTERMOST_FIELD_BRANCH,
+    MATTERMOST_FIELD_ERROR,
+    MATTERMOST_FIELD_INITIATOR,
+    MATTERMOST_FIELD_ISSUE,
+    MATTERMOST_FIELD_MERGE_REQUEST,
+    MATTERMOST_FIELD_PROJECT,
+    MATTERMOST_FIELD_SCHEDULE_CHANGE,
+    MATTERMOST_FIELD_STATUS,
+    MATTERMOST_FIELD_TARGET_BRANCH,
+    MATTERMOST_FIELD_TASK_ID,
+    MATTERMOST_FIELD_TASK_LINK,
     MattermostClient,
     MattermostNotificationError,
-    deserialize_string_list,
-    normalize_string_list,
-    serialize_profile,
-    serialize_string_list,
-    test_mattermost_connection as _fn_test_mattermost_connection,
     _build_attachment_fields,
     _build_card_markdown,
     _event_color,
@@ -766,25 +777,14 @@ from app.core.mattermost_notifications import (
     _event_label,
     _format_datetime,
     _resolve_mattermost_user_id,
-    MATTERMOST_EVENT_TASK_FAILED,
-    MATTERMOST_EVENT_TASK_RESCHEDULED,
-    MATTERMOST_EVENT_TASK_EXECUTE_NOW,
-    MATTERMOST_EVENT_TASK_RETRY_SCHEDULED,
-    MATTERMOST_EVENT_TASK_CANCELLED,
-    MATTERMOST_FIELD_TASK_ID,
-    MATTERMOST_FIELD_PROJECT,
-    MATTERMOST_FIELD_ISSUE,
-    MATTERMOST_FIELD_STATUS,
-    MATTERMOST_FIELD_BRANCH,
-    MATTERMOST_FIELD_INITIATOR,
-    MATTERMOST_FIELD_MERGE_REQUEST,
-    MATTERMOST_FIELD_TARGET_BRANCH,
-    MATTERMOST_FIELD_SCHEDULED_AT,
-    MATTERMOST_FIELD_SCHEDULE_CHANGE,
-    MATTERMOST_FIELD_ERROR,
-    MATTERMOST_FIELD_TASK_LINK,
+    deserialize_string_list,
+    normalize_string_list,
+    serialize_profile,
+    serialize_string_list,
 )
-
+from app.core.mattermost_notifications import (
+    test_mattermost_connection as _fn_test_mattermost_connection,
+)
 
 # ---- deserialize_string_list ----
 
@@ -869,8 +869,8 @@ class TestSerializeProfile:
         p.mention_in_channel = False
         p.event_types_json = '["task_completed"]'
         p.field_keys_json = '["task_id", "status"]'
-        p.created_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
-        p.updated_at = datetime(2024, 1, 2, tzinfo=timezone.utc)
+        p.created_at = datetime(2024, 1, 1, tzinfo=UTC)
+        p.updated_at = datetime(2024, 1, 2, tzinfo=UTC)
 
         result = serialize_profile(p)
 
@@ -890,7 +890,7 @@ class TestFormatDatetime:
 
     def test_datetime_returns_iso(self):
         """A datetime is formatted as ISO with seconds precision (line 147)."""
-        dt = datetime(2024, 6, 15, 10, 30, 45, tzinfo=timezone.utc)
+        dt = datetime(2024, 6, 15, 10, 30, 45, tzinfo=UTC)
         assert _format_datetime(dt) == "2024-06-15T10:30:45+00:00"
 
 
@@ -1385,8 +1385,8 @@ class TestBuildAttachmentFields:
             target_branch=None,
         )
         ctx = {
-            "previous_scheduled_at": datetime(2024, 1, 1, tzinfo=timezone.utc),
-            "scheduled_at": datetime(2024, 1, 2, tzinfo=timezone.utc),
+            "previous_scheduled_at": datetime(2024, 1, 1, tzinfo=UTC),
+            "scheduled_at": datetime(2024, 1, 2, tzinfo=UTC),
         }
         with self._settings_patch():
             fields = _build_attachment_fields(
@@ -1484,7 +1484,7 @@ class TestBuildCardMarkdown:
             id=2, project_id=10, user_prompt="x",
             status=TaskStatus.FAILED,
             initiator_username="bob",
-            scheduled_at=datetime(2024, 6, 1, tzinfo=timezone.utc),
+            scheduled_at=datetime(2024, 6, 1, tzinfo=UTC),
             error_message="Out of memory",
         )
         task.issue_id = 20
@@ -1495,8 +1495,8 @@ class TestBuildCardMarkdown:
             target_branch=None,
         )
         ctx = {
-            "previous_scheduled_at": datetime(2024, 5, 1, tzinfo=timezone.utc),
-            "scheduled_at": datetime(2024, 6, 1, tzinfo=timezone.utc),
+            "previous_scheduled_at": datetime(2024, 5, 1, tzinfo=UTC),
+            "scheduled_at": datetime(2024, 6, 1, tzinfo=UTC),
         }
         with self._settings_patch():
             md = _build_card_markdown(task, MATTERMOST_EVENT_TASK_FAILED, ctx)

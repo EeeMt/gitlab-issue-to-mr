@@ -24,9 +24,9 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import timedelta
+from unittest.mock import MagicMock
 
 import pytest
-from unittest.mock import MagicMock
 
 # Suppress httpx per-request cookies deprecation (auth tests need per-request cookies)
 pytestmark = pytest.mark.filterwarnings(
@@ -37,14 +37,17 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
-    create_async_engine,
     async_sessionmaker,
+    create_async_engine,
 )
 from sqlalchemy.pool import StaticPool
 
 # Ensure a usable encryption key is available for secret config persistence.
 os.environ.setdefault("CONFIG_ENCRYPTION_KEY", "test-auth-e2e-key-32chars!!!!!!")
 
+from app.core.local_auth import hash_password  # noqa: E402
+from app.core.session import hash_session_token  # noqa: E402
+from app.core.utcnow import utcnow  # noqa: E402
 from app.database import get_db  # noqa: E402
 from app.dependencies.auth import (  # noqa: E402
     get_optional_current_user,
@@ -57,16 +60,12 @@ from app.dependencies.project_access import (  # noqa: E402
 )
 from app.main import app  # noqa: E402
 from app.models import (  # noqa: E402
+    AuthAuditLog,
     Base,
+    SystemBootstrap,
     User,
     UserSession,
-    SystemBootstrap,
-    AuthAuditLog,
 )
-from app.core.session import hash_session_token  # noqa: E402
-from app.core.local_auth import hash_password  # noqa: E402
-from app.core.utcnow import utcnow  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -75,7 +74,7 @@ from app.core.utcnow import utcnow  # noqa: E402
 MOCK_ADMIN_ID = 9999  # Avoids collision with auto-incremented user IDs.
 
 
-@pytest.fixture()
+@pytest.fixture
 async def _test_engine():
     """In-memory SQLite async engine with all tables created."""
     engine = create_async_engine(
@@ -94,14 +93,14 @@ async def _test_engine():
     await engine.dispose()
 
 
-@pytest.fixture()
+@pytest.fixture
 async def session_factory(_test_engine):
     return async_sessionmaker(
         _test_engine, class_=AsyncSession, expire_on_commit=False
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 async def db_session(session_factory):
     """Direct database session for test setup / assertions."""
     async with session_factory() as session:
@@ -125,7 +124,7 @@ def _override_get_db_factory(session_factory):
 
 # ---- raw_client: NO auth overrides → tests register / login / bootstrap ----
 
-@pytest.fixture()
+@pytest.fixture
 async def raw_client(session_factory):
     app.dependency_overrides[get_db] = _override_get_db_factory(session_factory)
 
@@ -138,7 +137,7 @@ async def raw_client(session_factory):
 
 # ---- admin_client: auth fully mocked → tests admin-user management ----
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_admin_user():
     user = MagicMock()
     user.id = MOCK_ADMIN_ID
@@ -148,7 +147,7 @@ def _mock_admin_user():
     return user
 
 
-@pytest.fixture()
+@pytest.fixture
 async def admin_client(session_factory, _mock_admin_user):
     access_scope = ProjectAccessScope(
         is_unrestricted=True, accessible_projects=[]

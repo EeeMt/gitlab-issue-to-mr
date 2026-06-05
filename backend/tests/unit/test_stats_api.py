@@ -7,15 +7,17 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+
 from starlette.requests import Request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from fastapi.testclient import TestClient
-from app.main import app
+
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_context
-from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+from app.main import app
 
 
 class StatsAPIValidationTests(unittest.TestCase):

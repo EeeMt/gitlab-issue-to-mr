@@ -7,10 +7,8 @@ import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
-from typing import Set
 
-from sqlalchemy import case, select, func, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings as get_settings
@@ -21,17 +19,16 @@ from app.core.issue_execution_locks import (
     release_issue_execution_lock,
 )
 from app.core.session import cleanup_stale_sessions
-from app.core.utcnow import utcnow
+from app.core.task_helpers import maybe_update_issue_status
 from app.core.usage_limits import (
     UsageLimitExceeded,
     get_usage_quota_service,
     usage_limit_exceeded_detail,
 )
-from app.core.worker import WorkerExecutor
+from app.core.utcnow import utcnow
 from app.core.worker_workspace import cleanup_expired_workspaces
 from app.database import AsyncSessionLocal
-from app.models import IssueExecutionLock, Task, TaskStatus, Issue, IssueStatus
-from app.core.task_helpers import maybe_update_issue_status
+from app.models import Issue, IssueExecutionLock, IssueStatus, Task, TaskStatus
 from app.runtime_config import load_runtime_config_from_db
 
 logger = logging.getLogger(__name__)
@@ -60,8 +57,8 @@ class Scheduler:
 
     def __init__(self) -> None:
         self.running = False
-        self._running_tasks: Set[int] = set()  # task_ids currently running
-        self._running_issues: Set[int] = set()  # issue_ids with running tasks
+        self._running_tasks: set[int] = set()  # task_ids currently running
+        self._running_issues: set[int] = set()  # issue_ids with running tasks
         self._active_worker_threads: int = 0   # thread pool tasks in-flight (submitted but not done)
         self._last_session_cleanup_at = 0.0
         self._last_workspace_cleanup_at = 0.0
@@ -81,7 +78,7 @@ class Scheduler:
         while self.running:
             try:
                 await self._run_cycle()
-            except Exception as e:
+            except Exception:
                 logger.exception("Scheduler cycle failed")
             settings = get_settings()
             await asyncio.sleep(settings.scheduler_interval)
@@ -404,7 +401,6 @@ class Scheduler:
 
     async def _run_task_background(self, task_id: int) -> None:
         """Run task in background thread pool."""
-        issue_key = None
         self._active_worker_threads += 1
         t_submit = time.time()
         logger.info(
@@ -431,7 +427,7 @@ class Scheduler:
                     f"active_threads={self._active_worker_threads})"
                 )
 
-        except Exception as e:
+        except Exception:
             logger.exception(f"Task {task_id} failed with exception in background")
 
         finally:
@@ -658,7 +654,8 @@ def _run_worker_task(task_id: int) -> bool:
         True if successful, False otherwise
     """
     import asyncio
-    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from app.database import _database_url
 
@@ -704,7 +701,8 @@ def _run_worker_resume_task(task_id: int, container_name: str) -> bool:
     which attaches to an existing container instead of creating a new one.
     """
     import asyncio
-    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from app.database import _database_url
 

@@ -12,9 +12,8 @@ Tests for the Issue List page (/issues) including:
 """
 
 import pytest
+from conftest import _get_cookies, api_create_issue, api_get_first_project
 from playwright.sync_api import Page, expect
-from conftest import api_create_issue, api_get_first_project, _get_cookies
-
 
 # ---------------------------------------------------------------------------
 # 1. Page layout (read-only, class_page)
@@ -177,7 +176,7 @@ class TestIssueListRefactoredFeatures:
         """Summary section should have multiple summary cards."""
         class_page.goto("/issues")
         class_page.wait_for_load_state("domcontentloaded")
-        
+
         summary = class_page.get_by_test_id("issue-summary")
         if summary.count() > 0:
             cards = class_page.get_by_test_id("issue-summary-card")

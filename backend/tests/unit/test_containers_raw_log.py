@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 os.environ.setdefault("CONFIG_ENCRYPTION_KEY", "unit-test-key")
 
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 
@@ -26,8 +26,9 @@ class ContainersRawLogTests(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
 
     async def test_fetch_db_chunks_uses_task_raw_log_chunk_when_available(self):
-        from app.models import TaskRawLogChunk
         from sqlalchemy import select
+
+        from app.models import TaskRawLogChunk
         async with self.session_factory() as db:
             db.add(TaskRawLogChunk(
                 task_id=1, sequence_no=1, encoding="identity",
@@ -50,8 +51,9 @@ class ContainersRawLogTests(unittest.IsolatedAsyncioTestCase):
             assert text == "line1\nline2\n"
 
     async def test_fetch_db_chunks_falls_back_to_task_log_when_no_raw_chunks(self):
-        from app.models import TaskLog, TaskRawLogChunk
         from sqlalchemy import select
+
+        from app.models import TaskLog, TaskRawLogChunk
         async with self.session_factory() as db:
             db.add(TaskLog(task_id=1, log_level="INFO", message="legacy output\n", log_type=None))
             await db.commit()
@@ -76,8 +78,9 @@ class ContainersRawLogTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_raw_chunks_take_priority_over_task_log(self):
         """When both TaskRawLogChunk and TaskLog exist, use TaskRawLogChunk."""
-        from app.models import TaskLog, TaskRawLogChunk
         from sqlalchemy import select
+
+        from app.models import TaskLog, TaskRawLogChunk
         async with self.session_factory() as db:
             db.add(TaskLog(task_id=2, log_level="INFO", message="old log\n", log_type=None))
             db.add(TaskRawLogChunk(

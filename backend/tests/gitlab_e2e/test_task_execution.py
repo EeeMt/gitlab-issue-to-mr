@@ -20,12 +20,11 @@ Run with:
 All tests skip when the backend, GitLab, or required configuration is missing.
 """
 
+import logging
 import os
 import time
 import uuid
-import logging
-from datetime import datetime, timedelta, UTC
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import requests
@@ -101,7 +100,7 @@ skip_if_unavailable = pytest.mark.skipif(
 
 # ─── Low-level helpers ─────────────────────────────────────────────────────────
 
-_be_session: Optional[requests.Session] = None
+_be_session: requests.Session | None = None
 
 
 def _get_be_session() -> requests.Session:
@@ -186,8 +185,8 @@ def _create_task(
     project_id: int,
     branch_name: str,
     user_prompt: str,
-    target_branch: Optional[str] = "main",
-    base_branch: Optional[str] = None,
+    target_branch: str | None = "main",
+    base_branch: str | None = None,
     priority: int = 0,
 ) -> dict:
     """Create a manual task via the backend API and return the task dict."""
@@ -430,7 +429,7 @@ class TestManualTaskExecution:
             assert result["status"] == "completed", (
                 f"Task did not complete after retry: {result.get('error_message', '')[:500]}"
             )
-            log.info(f"✅ cancel/retry test passed")
+            log.info("✅ cancel/retry test passed")
         finally:
             _delete_mr(TEST_PROJECT_ID, result.get("merge_request_iid") if "result" in dir() else 0)
             _delete_branch(TEST_PROJECT_ID, branch)
@@ -478,7 +477,7 @@ class TestScheduledTaskExecution:
             assert result["status"] == "completed", (
                 f"Delayed task did not complete: {result.get('error_message', '')[:500]}"
             )
-            log.info(f"✅ delayed task test passed")
+            log.info("✅ delayed task test passed")
         finally:
             _delete_mr(TEST_PROJECT_ID, result.get("merge_request_iid") if "result" in dir() else 0)
             _delete_branch(TEST_PROJECT_ID, branch)
@@ -515,7 +514,7 @@ class TestScheduledTaskExecution:
         try:
             result = _wait_for_terminal(task_id, timeout=20 + TASK_EXECUTION_TIMEOUT)
             assert result["status"] == "completed"
-            log.info(f"✅ scheduled datetime task test passed")
+            log.info("✅ scheduled datetime task test passed")
         finally:
             _delete_mr(TEST_PROJECT_ID, result.get("merge_request_iid") if "result" in dir() else 0)
             _delete_branch(TEST_PROJECT_ID, branch)

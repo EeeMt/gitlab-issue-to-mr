@@ -26,15 +26,15 @@ Functions under test:
 from __future__ import annotations
 
 import os
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
-    create_async_engine,
     async_sessionmaker,
+    create_async_engine,
 )
 from sqlalchemy.pool import StaticPool
 
@@ -83,7 +83,7 @@ VALID_DM_PROFILE = {
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 async def _test_engine():
     """In-memory SQLite async engine with all tables created."""
     engine = create_async_engine(
@@ -102,20 +102,20 @@ async def _test_engine():
     await engine.dispose()
 
 
-@pytest.fixture()
+@pytest.fixture
 async def session_factory(_test_engine):
     return async_sessionmaker(
         _test_engine, class_=AsyncSession, expire_on_commit=False
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 async def db_session(session_factory):
     async with session_factory() as session:
         yield session
 
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_admin_user():
     user = MagicMock()
     user.id = 1
@@ -125,7 +125,7 @@ def _mock_admin_user():
     return user
 
 
-@pytest.fixture()
+@pytest.fixture
 async def client(session_factory, _mock_admin_user):
     """httpx.AsyncClient wired to the FastAPI app with auth overrides."""
 
@@ -972,6 +972,8 @@ class TestIntegrationAndProfilesCombined:
 
 from types import SimpleNamespace
 
+from sqlalchemy import select
+
 from app.core.mattermost_notifications import (
     MATTERMOST_EVENT_TASK_CANCELLED,
     MATTERMOST_EVENT_TASK_COMPLETED,
@@ -988,7 +990,6 @@ from app.models import (
     Task,
     TaskStatus,
 )
-from sqlalchemy import select
 
 
 def _mock_settings(**overrides):
@@ -1002,7 +1003,7 @@ def _mock_settings(**overrides):
     return SimpleNamespace(**defaults)
 
 
-@pytest.fixture()
+@pytest.fixture
 async def notify_engine():
     """Dedicated in-memory SQLite engine for notify_task_event tests."""
     engine = create_async_engine(
@@ -1021,14 +1022,14 @@ async def notify_engine():
     await engine.dispose()
 
 
-@pytest.fixture()
+@pytest.fixture
 async def notify_sf(notify_engine):
     return async_sessionmaker(
         notify_engine, class_=AsyncSession, expire_on_commit=False
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 async def notify_session(notify_sf):
     async with notify_sf() as session:
         yield session
@@ -1081,7 +1082,7 @@ async def _seed_task(session, *, task_id=None, status=TaskStatus.COMPLETED,
     """Insert a Task into the test DB."""
     if issue is None:
         issue = await _seed_issue(session, project_id=project_id)
-    
+
     defaults = dict(
         project_id=project_id,
         issue_id=issue.id,
@@ -1241,7 +1242,7 @@ class TestNotifyChannelNotification:
 
     async def test_channel_api_failure_records_failed_delivery(self, notify_sf, notify_session):
         """If Mattermost API fails, a 'failed' delivery record is created."""
-        profile = await _seed_profile(notify_session, events=["task_completed"])
+        await _seed_profile(notify_session, events=["task_completed"])
         task = await _seed_task(notify_session)
 
         mock_client = AsyncMock()
@@ -1522,9 +1523,9 @@ class TestNotifyMultipleProfiles:
 
     async def test_channel_and_dm_profiles_together(self, notify_sf, notify_session):
         """Both channel and DM profiles can fire for the same event."""
-        p_ch = await _seed_profile(notify_session, name="Channel",
+        await _seed_profile(notify_session, name="Channel",
                                    target_type="channel", events=["task_completed"])
-        p_dm = await _seed_profile(notify_session, name="DM",
+        await _seed_profile(notify_session, name="DM",
                                    target_type="initiator_dm", events=["task_completed"])
         task = await _seed_task(notify_session, initiator_username="alice")
         await _seed_user_mapping(notify_session, gitlab_username="alice",

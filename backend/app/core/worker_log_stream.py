@@ -175,7 +175,7 @@ class WorkerLogStreamer:
 
             try:
                 item = await asyncio.wait_for(log_queue.get(), timeout=min(remaining, 2.0))
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 now = time.monotonic()
                 if buffer and (now - last_flush) >= flush_interval:
                     await self.flush_log_chunk(task_id, buffer, chunk_index)

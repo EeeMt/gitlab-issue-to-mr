@@ -4,7 +4,7 @@ import json
 import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional, Union
+from typing import Union
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -101,15 +101,15 @@ class Settings(BaseSettings):
 
     # Docker Engine HTTP API Configuration
     docker_host: str = Field(default="tcp://localhost:2376")
-    docker_tls_ca: Optional[str] = Field(default=None)
-    docker_tls_cert: Optional[str] = Field(default=None)
-    docker_tls_key: Optional[str] = Field(default=None)
+    docker_tls_ca: str | None = Field(default=None)
+    docker_tls_cert: str | None = Field(default=None)
+    docker_tls_key: str | None = Field(default=None)
 
     # SSL/TLS Configuration
     # Path to a PEM-format CA certificate bundle for verifying HTTPS connections
     # to GitLab, Mattermost, Anthropic API, etc. Leave empty to use the system
     # CA store. In Docker deployments, mount the cert file and set the path here.
-    custom_ca_bundle: Optional[str] = Field(default=None)
+    custom_ca_bundle: str | None = Field(default=None)
 
     # Application Configuration
     secret_key: str = Field(default="change-me-in-production")
@@ -173,7 +173,7 @@ class Settings(BaseSettings):
     allow_oidc_diagnostics_for_users: bool = Field(default=False)
 
     # Alert Configuration
-    alert_webhook_url: Optional[str] = Field(default=None)  # Slack/Discord webhook URL
+    alert_webhook_url: str | None = Field(default=None)  # Slack/Discord webhook URL
     alert_on_failure: bool = Field(default=False)  # Send alert when task fails
     mattermost_server_url: str = Field(default="")
     mattermost_bot_token: str = Field(default="")
@@ -277,7 +277,7 @@ def update_runtime_config(key: str, value: RuntimeConfigValue) -> None:
     _runtime_config[key] = value
 
 
-def reset_runtime_config(key: Optional[str] = None) -> None:
+def reset_runtime_config(key: str | None = None) -> None:
     """Reset one or all runtime configuration overrides."""
     if key is None:
         _runtime_config.clear()

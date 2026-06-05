@@ -12,11 +12,8 @@ Tests for the Issue View page (/issues/:id) including:
 """
 
 import pytest
+from conftest import _get_cookies, api_create_issue, api_create_task, api_get_first_project
 from playwright.sync_api import Page, expect
-from conftest import (
-    api_create_issue, api_create_task, api_get_first_project, _get_cookies
-)
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -296,13 +293,13 @@ class TestIssueViewCreateTaskDrawer:
         logged_in_page.wait_for_load_state("networkidle")
 
         toggle_btn = logged_in_page.get_by_test_id("issue-toggle-create-task")
-        
+
         # Open drawer
         toggle_btn.click()
         logged_in_page.wait_for_timeout(800)
         drawer = logged_in_page.get_by_test_id("issue-create-task-drawer")
         expect(drawer).to_be_visible()
-        
+
         # Close drawer by pressing Escape key
         logged_in_page.keyboard.press("Escape")
         logged_in_page.wait_for_timeout(500)

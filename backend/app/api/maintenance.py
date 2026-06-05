@@ -12,7 +12,6 @@ from app.database import get_db
 from app.dependencies.auth import require_admin_user
 from app.models import User
 
-
 router = APIRouter()
 
 

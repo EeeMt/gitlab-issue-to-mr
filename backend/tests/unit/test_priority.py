@@ -5,12 +5,11 @@ Test P0.1: Initial MR creation and MR_IID passing to worker.
 
 import os
 import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
-from unittest.mock import MagicMock, patch, AsyncMock
-from datetime import datetime
-
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # Mock config before importing worker
 mock_settings = MagicMock()
@@ -35,7 +34,7 @@ mock_settings.worker_extra_volumes = ""
 
 with patch('app.core.worker.get_settings', return_value=mock_settings):
     from app.core.worker import WorkerExecutor
-    from app.models import Task, TaskStatus, Issue
+    from app.models import Issue, Task, TaskStatus
 
 
 class MockContainer:
@@ -143,7 +142,7 @@ def test_create_initial_mr():
                 result = await worker.execute_task(mock_db, task.id)
                 return result
 
-    result = asyncio.run(run_test())
+    asyncio.run(run_test())
 
     # Verify MR was created
     mock_project.mergerequests.create.assert_called_once()
@@ -294,7 +293,7 @@ def test_mr_creation_failure_handled():
                 result = await worker.execute_task(mock_db, task.id)
                 return result
 
-    result = asyncio.run(run_test())
+    asyncio.run(run_test())
 
     # Verify container was still created (worker continues without MR)
     mock_docker.create_container.assert_called_once()

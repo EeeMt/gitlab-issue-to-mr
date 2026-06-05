@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import hmac
 import logging
-from typing import Any, Optional
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.issues import _try_delete_issue_branch
@@ -29,21 +29,21 @@ events_router = APIRouter()
 
 class WebhookResponse(BaseModel):
     result: str
-    detail: Optional[str] = None
-    results: Optional[list[dict[str, Any]]] = None
+    detail: str | None = None
+    results: list[dict[str, Any]] | None = None
 
 
 class WebhookEventOut(BaseModel):
     id: int
     event_type: str
-    event_action: Optional[str]
+    event_action: str | None
     project_id: int
-    merge_request_iid: Optional[int]
-    issue_id: Optional[int]
-    source_ip: Optional[str]
+    merge_request_iid: int | None
+    issue_id: int | None
+    source_ip: str | None
     result: str
-    result_detail: Optional[str]
-    payload_summary: Optional[dict[str, Any]]
+    result_detail: str | None
+    payload_summary: dict[str, Any] | None
     created_at: str
 
 
@@ -76,14 +76,14 @@ async def _log_event(
     db: AsyncSession,
     *,
     event_type: str,
-    event_action: Optional[str],
+    event_action: str | None,
     project_id: int,
-    merge_request_iid: Optional[int],
-    issue_id: Optional[int],
-    source_ip: Optional[str],
+    merge_request_iid: int | None,
+    issue_id: int | None,
+    source_ip: str | None,
     result: str,
-    result_detail: Optional[str] = None,
-    payload_summary: Optional[dict[str, Any]] = None,
+    result_detail: str | None = None,
+    payload_summary: dict[str, Any] | None = None,
 ) -> None:
     """Persist a webhook event record."""
     event = WebhookEvent(
@@ -277,9 +277,9 @@ async def receive_gitlab_webhook(
 async def list_webhook_events(
     page: int = 1,
     page_size: int = 20,
-    event_type: Optional[str] = None,
-    result: Optional[str] = None,
-    project_id: Optional[int] = None,
+    event_type: str | None = None,
+    result: str | None = None,
+    project_id: int | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """Query paginated webhook event log."""

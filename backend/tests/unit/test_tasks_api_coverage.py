@@ -11,12 +11,10 @@ Targets missed lines:
 - 502-504: cancel_task docker container stop
 """
 
-import asyncio
-import json
 import os
 import sys
 import unittest
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -24,7 +22,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from fastapi.testclient import TestClient
 
 from app.models import TaskStatus
-
 
 # ---------------------------------------------------------------------------
 # Helpers (reused patterns from test_tasks_api.py)
@@ -71,10 +68,10 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
 
 def _make_app_client_with_db(mock_db, extra_overrides=None):
     """Build a TestClient with DB, access scope, and auth overridden."""
-    from app.main import app
     from app.database import get_db
     from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-    from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+    from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+    from app.main import app
 
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
@@ -178,14 +175,14 @@ class ListScheduledTasksTests(unittest.TestCase):
 
     def _setup_scheduled_client(self, tasks_list, access_scope=None):
         """Build a TestClient with auth + page access overrides for scheduled endpoint."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import (
             get_optional_current_user,
-            require_authenticated_user,
             require_authenticated_context,
+            require_authenticated_user,
         )
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         if access_scope is None:
             access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -284,8 +281,6 @@ class GetTaskSlowPathTests(unittest.TestCase):
         client, app = _make_app_client_with_db(mock_db)
 
         # Make time.time() artificially return values that create > 1s gap
-        import time as time_mod
-        original_time = time_mod.time
         call_count = 0
 
         def slow_time():
@@ -393,7 +388,8 @@ class StreamTaskLogsTests(unittest.TestCase):
         body = response.text
         # Logs are now delivered as a single named "batch" event with a JSON array.
         self.assertIn("event: batch\n", body)
-        import re, json as _json_mod
+        import json as _json_mod
+        import re
         match = re.search(r'event: batch\ndata: (.+)\n', body)
         self.assertIsNotNone(match, "batch event data line not found")
         batch_payload = _json_mod.loads(match.group(1))

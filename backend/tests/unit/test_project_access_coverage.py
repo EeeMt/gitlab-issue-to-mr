@@ -22,7 +22,6 @@ from fastapi import HTTPException
 from app.dependencies.auth import AuthContext
 from app.dependencies.project_access import (
     ProjectAccessScope,
-    _ACCESS_CACHE_TTL_SECONDS,
     _fetch_and_cache_projects,
     _project_access_cache,
     _project_access_refresh_tasks,
@@ -236,7 +235,7 @@ class TestRequireProjectAccessScopeCachePaths(unittest.IsolatedAsyncioTestCase):
         _project_access_refresh_tasks["sess-dedup"] = existing_task
 
         with patch(_PATCH_SETTINGS, return_value=_settings()), \
-             patch(_PATCH_FETCH_PROJECTS, AsyncMock(return_value=[])) as mock_fetch:
+             patch(_PATCH_FETCH_PROJECTS, AsyncMock(return_value=[])):
             scope = await require_project_access_scope(ctx)
 
         # Should return stale data and NOT replace the in-flight task
@@ -255,7 +254,7 @@ class TestRequireProjectAccessScopeCachePaths(unittest.IsolatedAsyncioTestCase):
 
         with patch(_PATCH_SETTINGS, return_value=_settings()), \
              patch(_PATCH_FETCH_PROJECTS, AsyncMock(return_value=[])):
-            scope = await require_project_access_scope(ctx)
+            await require_project_access_scope(ctx)
             await asyncio.sleep(0.05)
 
         # A new task should have been created (replacing the done one)
@@ -438,7 +437,6 @@ class TestRequireProjectAccessScopeSlowLogging(unittest.IsolatedAsyncioTestCase)
         ctx = _make_auth_context(session_id="sess-slow")
         projects = [{"id": 1}]
 
-        original_time = time.time
 
         call_count = 0
 

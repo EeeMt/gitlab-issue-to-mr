@@ -16,8 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 os.environ.setdefault("CONFIG_ENCRYPTION_KEY", "unit-test-key")
 
 from app.config import get_settings  # noqa: E402
-from app.models import Base, TaskLog, TaskPayload, TaskIngestCursor  # noqa: E402
 from app.core.worker import WorkerExecutor  # noqa: E402
+from app.models import Base, TaskIngestCursor, TaskLog, TaskPayload  # noqa: E402
 
 
 class EventProjectionTests(unittest.IsolatedAsyncioTestCase):

@@ -4,7 +4,7 @@
 import os
 import sys
 import unittest
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -45,7 +45,7 @@ class GetBootstrapStateTests(unittest.IsolatedAsyncioTestCase):
         """When no record exists, a new SystemBootstrap should be created and added."""
         db = _make_db(scalar_value=None)
 
-        result = await get_bootstrap_state(db)
+        await get_bootstrap_state(db)
 
         db.add.assert_called_once()
         added = db.add.call_args.args[0]

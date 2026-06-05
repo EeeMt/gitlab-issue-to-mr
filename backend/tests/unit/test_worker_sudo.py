@@ -1,9 +1,7 @@
 """Unit tests for MR sudo impersonation in WorkerExecutor."""
 
 import unittest
-from unittest.mock import MagicMock, patch, AsyncMock
-
-from gitlab import Gitlab
+from unittest.mock import MagicMock, patch
 
 
 class TestWorkerSudoMrCreation(unittest.TestCase):

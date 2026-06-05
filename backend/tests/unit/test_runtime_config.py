@@ -9,7 +9,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from app.config import get_effective_settings, get_settings, reset_runtime_config, set_runtime_config
+from app.config import (
+    get_effective_settings,
+    get_settings,
+    reset_runtime_config,
+    set_runtime_config,
+)
 from app.models import SystemConfig
 from app.runtime_config import (
     _deserialize_runtime_value,

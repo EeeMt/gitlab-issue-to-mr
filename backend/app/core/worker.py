@@ -1,10 +1,10 @@
 """Worker executor for running tasks in Docker containers."""
 
-import httpx
 import logging
 import re
-from typing import Any, Optional
+from typing import Any
 
+import httpx
 from gitlab import Gitlab
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -20,7 +20,10 @@ from app.core.mattermost_notifications import (
 )
 from app.core.ssl_utils import get_ssl_verify
 from app.core.usage_limits import upsert_task_usage_ledger
-from app.core.worker_environment_variables import build_worker_environment_map, list_worker_environment_variables
+from app.core.worker_environment_variables import (
+    build_worker_environment_map,
+    list_worker_environment_variables,
+)
 from app.core.worker_event_projector import WorkerEventProjector
 from app.core.worker_gitlab import (
     build_initial_mr_description,
@@ -33,7 +36,12 @@ from app.core.worker_gitlab import (
     write_previous_task_summaries_file,
 )
 from app.core.worker_log_stream import WorkerLogStreamer
-from app.core.worker_results import finalize_archive, parse_mr_from_logs, parse_task_result, update_task_stats_from_logs_or_api
+from app.core.worker_results import (
+    finalize_archive,
+    parse_mr_from_logs,
+    parse_task_result,
+    update_task_stats_from_logs_or_api,
+)
 from app.core.worker_runtime import (
     build_container_env,
     build_container_volumes,
@@ -50,8 +58,14 @@ from app.core.worker_task_lifecycle import (
     monitor_container_run,
     prepare_execute_task_context,
     prepare_resume_task_context,
+)
+from app.core.worker_task_lifecycle import (
     send_failure_alert as lifecycle_send_failure_alert,
+)
+from app.core.worker_task_lifecycle import (
     send_failure_notifications as lifecycle_send_failure_notifications,
+)
+from app.core.worker_task_lifecycle import (
     send_success_notifications as lifecycle_send_success_notifications,
 )
 from app.models import Issue, Task, TaskStatus
@@ -71,8 +85,8 @@ async def prepare_container_inputs(
     worker,
     db: AsyncSession,
     task: Task,
-    issue: Optional[Issue],
-    mr_iid: Optional[int],
+    issue: Issue | None,
+    mr_iid: int | None,
 ):
     target_branch = issue.target_branch if issue else None
     provider = await worker._resolve_provider(db, task)
@@ -120,9 +134,9 @@ class WorkerExecutor:
 
     def __init__(
         self,
-        docker_client: Optional[DockerClientWrapper] = None,
-        gitlab_client: Optional[GitLabClient] = None,
-        session_factory: Optional[async_sessionmaker[AsyncSession]] = None,
+        docker_client: DockerClientWrapper | None = None,
+        gitlab_client: GitLabClient | None = None,
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
     ):
         self.docker = docker_client or get_docker_client()
         self.gitlab = gitlab_client or get_gitlab_client()
@@ -191,8 +205,8 @@ class WorkerExecutor:
             async def _update_task_stats_wrapper(
                 task: Task,
                 logs: str,
-                issue: Optional[Issue] = None,
-                structured_diff: Optional[dict[str, Any]] = None,
+                issue: Issue | None = None,
+                structured_diff: dict[str, Any] | None = None,
             ) -> None:
                 await update_task_stats_from_logs_or_api(
                     task,
@@ -211,7 +225,7 @@ class WorkerExecutor:
                 issue: Issue,
                 db: AsyncSession,
                 *,
-                sudo_gl: Optional[Gitlab] = None,
+                sudo_gl: Gitlab | None = None,
             ) -> None:
                 await update_mr_description_for_issue(task, issue, db, self.gitlab, sudo_gl=sudo_gl)
 
@@ -224,7 +238,7 @@ class WorkerExecutor:
                 settings,
                 issue: Issue,
                 task: Task,
-            ) -> Optional[str]:
+            ) -> str | None:
                 return await write_previous_task_summaries_file(db, settings, issue, task)
 
             return _write_previous_task_summaries_wrapper
@@ -252,19 +266,21 @@ class WorkerExecutor:
         self,
         task: Task,
         issue: Issue,
-        mr_iid: Optional[int],
-        target_branch: Optional[str],
+        mr_iid: int | None,
+        target_branch: str | None,
         provider=None,
         *,
-        author_name: Optional[str] = None,
-        author_email: Optional[str] = None,
-        custom_environment: Optional[dict[str, str]] = None,
+        author_name: str | None = None,
+        author_email: str | None = None,
+        custom_environment: dict[str, str] | None = None,
     ) -> dict[str, str]:
         settings = get_settings()
 
         if provider and getattr(provider, 'id', None):
             if custom_environment:
-                from app.core.worker_environment_variables import validate_worker_environment_variable_key
+                from app.core.worker_environment_variables import (
+                    validate_worker_environment_variable_key,
+                )
 
                 for key in custom_environment:
                     validate_worker_environment_variable_key(key)
@@ -295,8 +311,8 @@ class WorkerExecutor:
         self,
         db: AsyncSession,
         task: Task,
-        issue: Optional[Issue],
-        mr_iid: Optional[int],
+        issue: Issue | None,
+        mr_iid: int | None,
     ):
         return await prepare_container_inputs(self, db, task, issue, mr_iid)
 
@@ -306,7 +322,7 @@ class WorkerExecutor:
         logs: str,
         db: AsyncSession,
         exit_code: int,
-        issue: Optional[Issue] = None,
+        issue: Issue | None = None,
     ) -> None:
         await parse_task_result(task, logs, db, exit_code, sanitize_sensitive_data, self.gitlab, issue)
 
@@ -317,7 +333,7 @@ class WorkerExecutor:
         success: bool,
         had_existing_mr: bool,
         logs: str,
-        issue: Optional[Issue] = None,
+        issue: Issue | None = None,
     ) -> None:
         await lifecycle_send_success_notifications(
             self,
@@ -334,7 +350,7 @@ class WorkerExecutor:
         task: Task,
         success: bool,
         had_existing_mr: bool,
-        issue: Optional[Issue] = None,
+        issue: Issue | None = None,
     ) -> None:
         await lifecycle_send_failure_notifications(
             self,
@@ -353,7 +369,7 @@ class WorkerExecutor:
         except Exception as ledger_error:
             logger.warning(f'[Task {task.id}] Failed to upsert usage ledger: {ledger_error}')
 
-    async def _send_failure_alert(self, task: Task, issue: Optional[Issue] = None) -> None:
+    async def _send_failure_alert(self, task: Task, issue: Issue | None = None) -> None:
         await lifecycle_send_failure_alert(
             self,
             task,
@@ -380,11 +396,11 @@ class WorkerExecutor:
         *,
         db: AsyncSession,
         task: Task,
-        issue: Optional[Issue],
+        issue: Issue | None,
         container: Any,
         settings: Any,
         had_existing_mr: bool,
-        sudo_gl: Optional[Gitlab],
+        sudo_gl: Gitlab | None,
         resume_prefix: str = '',
     ) -> bool:
         return await monitor_container_run(
@@ -406,7 +422,7 @@ class WorkerExecutor:
         error: Exception,
         *,
         had_existing_mr: bool,
-        issue: Optional[Issue] = None,
+        issue: Issue | None = None,
         container: Any = None,
     ) -> bool:
         return await fail_execute_task(
@@ -428,7 +444,7 @@ class WorkerExecutor:
         error: Exception,
         *,
         had_existing_mr: bool,
-        issue: Optional[Issue] = None,
+        issue: Issue | None = None,
     ) -> bool:
         return await fail_resume_task(
             self,

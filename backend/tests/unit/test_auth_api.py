@@ -19,8 +19,6 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from app.models import User
-
 from app.api.auth import (
     _build_cookie_kwargs,
     _get_or_create_break_glass_user,
@@ -28,7 +26,7 @@ from app.api.auth import (
     _sanitize_next_path,
     _upsert_user,
 )
-
+from app.models import User
 
 # ---------------------------------------------------------------------------
 # Helpers shared by multiple test classes

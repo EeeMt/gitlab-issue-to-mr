@@ -37,15 +37,13 @@ E. Misc:
 """
 
 import asyncio
-import json
 import time
 import unittest
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.core.worker import WorkerExecutor, scrub_sensitive_data, sanitize_sensitive_data
+from app.core.worker import WorkerExecutor
 from app.models import Task, TaskStatus
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers (same patterns as existing test_worker_coverage.py)
@@ -87,6 +85,7 @@ def _make_worker(mock_gitlab=None, mock_docker=None):
 def _make_task(**kwargs):
     """Create a Task object with defaults and attach a mock issue."""
     from unittest.mock import MagicMock
+
     from app.models import AIProvider
 
     # Separate issue-level kwargs
@@ -129,12 +128,12 @@ def _make_task(**kwargs):
         mock_issue = MagicMock()
         mock_issue.id = defaults['issue_id']
         mock_issue.branch_name = issue_overrides.get('branch_name', f"codify-{defaults['id']}-p{defaults['project_id']}-i{defaults.get('issue_id', 1)}")
-        mock_issue.base_branch = issue_overrides.get('base_branch', None)
+        mock_issue.base_branch = issue_overrides.get('base_branch')
         mock_issue.target_branch = issue_overrides.get('target_branch', 'main')
-        mock_issue.merge_request_iid = issue_overrides.get('merge_request_iid', None)
-        mock_issue.merge_request_url = issue_overrides.get('merge_request_url', None)
-        mock_issue.title = issue_overrides.get('title', None)
-        mock_issue.description = issue_overrides.get('description', None)
+        mock_issue.merge_request_iid = issue_overrides.get('merge_request_iid')
+        mock_issue.merge_request_url = issue_overrides.get('merge_request_url')
+        mock_issue.title = issue_overrides.get('title')
+        mock_issue.description = issue_overrides.get('description')
         mock_issue.claude_session_id = None
         mock_issue.session_storage_path = None
         mock_issue.project_id = defaults['project_id']

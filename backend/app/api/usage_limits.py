@@ -22,7 +22,7 @@ class DefaultUsageLimitItemInput(BaseModel):
     value: int | None = None
 
     @model_validator(mode="after")
-    def validate_value(self) -> "DefaultUsageLimitItemInput":
+    def validate_value(self) -> DefaultUsageLimitItemInput:
         self.value = _normalize_policy_value(self.mode, self.value, allow_inherit=False)
         return self
 
@@ -32,7 +32,7 @@ class UserUsageLimitItemInput(BaseModel):
     value: int | None = None
 
     @model_validator(mode="after")
-    def validate_value(self) -> "UserUsageLimitItemInput":
+    def validate_value(self) -> UserUsageLimitItemInput:
         self.value = _normalize_policy_value(self.mode, self.value, allow_inherit=True)
         return self
 

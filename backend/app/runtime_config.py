@@ -5,15 +5,14 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import (
     RuntimeConfigValue,
-    get_secret_config_keys,
     get_runtime_config_types,
+    get_secret_config_keys,
     reset_runtime_config,
     set_runtime_config,
     update_runtime_config,
@@ -74,7 +73,7 @@ def _deserialize_runtime_value(key: str, raw_value: str, value_type: str) -> Run
     return raw_value
 
 
-async def load_runtime_config_from_db(db: Optional[AsyncSession] = None) -> dict[str, RuntimeConfigValue]:
+async def load_runtime_config_from_db(db: AsyncSession | None = None) -> dict[str, RuntimeConfigValue]:
     """Load runtime configuration overrides from the database into process memory."""
     owns_session = db is None
     if owns_session:
@@ -102,7 +101,7 @@ async def load_runtime_config_from_db(db: Optional[AsyncSession] = None) -> dict
 
 
 async def refresh_runtime_config_if_stale(
-    db: Optional[AsyncSession] = None,
+    db: AsyncSession | None = None,
     *,
     min_check_interval: float = 1.0,
 ) -> bool:

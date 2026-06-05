@@ -178,7 +178,7 @@ class GitLabClientErrorHandlingTests(unittest.IsolatedAsyncioTestCase):
         """get_issue should return None when GitLab API raises error."""
         from gitlab.exceptions import GitlabGetError
 
-        with patch("app.core.gitlab_client.gitlab.Gitlab", return_value=MagicMock()) as mock_gitlab:
+        with patch("app.core.gitlab_client.gitlab.Gitlab", return_value=MagicMock()):
             client = GitLabClient(private_token="test-token")
 
         # Simulate API error

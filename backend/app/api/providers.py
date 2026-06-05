@@ -2,15 +2,17 @@
 
 import logging
 import re
-from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config_crypto import decrypt_config_secret, encrypt_config_secret, ConfigEncryptionError
+from app.core.config_crypto import (
+    ConfigEncryptionError,
+    decrypt_config_secret,
+    encrypt_config_secret,
+)
 from app.database import get_db
 from app.dependencies.auth import require_admin_user
 from app.models import AIProvider, Task, TaskStatus, User
@@ -30,7 +32,7 @@ class ProviderResponse(BaseModel):
     api_key_configured: bool
     model: str
     max_turns: int
-    system_prompt: Optional[str]
+    system_prompt: str | None
     is_default: bool
     created_at: str
     updated_at: str
@@ -39,10 +41,10 @@ class ProviderResponse(BaseModel):
 class CreateProviderRequest(BaseModel):
     name: str
     base_url: str
-    api_key: Optional[str] = None
+    api_key: str | None = None
     model: str
     max_turns: int = 20
-    system_prompt: Optional[str] = None
+    system_prompt: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -77,25 +79,25 @@ class CreateProviderRequest(BaseModel):
 
     @field_validator("system_prompt")
     @classmethod
-    def validate_system_prompt(cls, v: Optional[str]) -> Optional[str]:
+    def validate_system_prompt(cls, v: str | None) -> str | None:
         if v is not None and len(v) > 10000:
             raise ValueError("System prompt must be 10000 characters or fewer")
         return v
 
 
 class UpdateProviderRequest(BaseModel):
-    name: Optional[str] = None
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
+    name: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
     clear_api_key: bool = False
-    model: Optional[str] = None
-    max_turns: Optional[int] = None
-    system_prompt: Optional[str] = None
+    model: str | None = None
+    max_turns: int | None = None
+    system_prompt: str | None = None
     clear_system_prompt: bool = False
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, v: Optional[str]) -> Optional[str]:
+    def validate_name(cls, v: str | None) -> str | None:
         if v is not None and not _NAME_RE.match(v):
             raise ValueError(
                 "Name must be 1-100 characters, alphanumeric/hyphens/underscores, "
@@ -105,28 +107,28 @@ class UpdateProviderRequest(BaseModel):
 
     @field_validator("base_url")
     @classmethod
-    def validate_base_url(cls, v: Optional[str]) -> Optional[str]:
+    def validate_base_url(cls, v: str | None) -> str | None:
         if v is not None and not v.startswith(("http://", "https://")):
             raise ValueError("Base URL must start with http:// or https://")
         return v
 
     @field_validator("model")
     @classmethod
-    def validate_model(cls, v: Optional[str]) -> Optional[str]:
+    def validate_model(cls, v: str | None) -> str | None:
         if v is not None and not v.strip():
             raise ValueError("Model name cannot be empty")
         return v.strip() if v else v
 
     @field_validator("max_turns")
     @classmethod
-    def validate_max_turns(cls, v: Optional[int]) -> Optional[int]:
+    def validate_max_turns(cls, v: int | None) -> int | None:
         if v is not None and (v < 1 or v > 1000):
             raise ValueError("Max turns must be between 1 and 1000")
         return v
 
     @field_validator("system_prompt")
     @classmethod
-    def validate_system_prompt(cls, v: Optional[str]) -> Optional[str]:
+    def validate_system_prompt(cls, v: str | None) -> str | None:
         if v is not None and len(v) > 10000:
             raise ValueError("System prompt must be 10000 characters or fewer")
         return v

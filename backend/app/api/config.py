@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -15,7 +14,6 @@ from app.dependencies.auth import require_admin_user
 from app.runtime_config import (
     load_runtime_config_from_db,
     reset_all_runtime_config_overrides,
-    reset_runtime_config_override,
 )
 
 logger = logging.getLogger(__name__)
@@ -23,10 +21,10 @@ router = APIRouter()
 
 # Import config submodules
 from app.api import config_integration, config_runtime
+from app.api.config_integration import IntegrationConfigSection, IntegrationConfigUpdate
 
 # Import section models for Pydantic model definitions
 from app.api.config_runtime import RuntimeConfigSection, RuntimeConfigUpdate
-from app.api.config_integration import IntegrationConfigSection, IntegrationConfigUpdate
 
 
 class AuthConfigSection(BaseModel):
@@ -47,33 +45,33 @@ class AuthConfigSection(BaseModel):
 
 class AuthConfigUpdate(BaseModel):
     """Request model for updating auth settings."""
-    oidc_enabled: Optional[bool] = None
-    oidc_issuer_url: Optional[str] = None
-    oidc_client_id: Optional[str] = None
-    oidc_client_secret: Optional[str] = None
+    oidc_enabled: bool | None = None
+    oidc_issuer_url: str | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret: str | None = None
     clear_oidc_client_secret: bool = False
-    oidc_redirect_uri: Optional[str] = None
-    session_cookie_name: Optional[str] = None
-    session_ttl_seconds: Optional[int] = None
-    session_retention_days: Optional[int] = None
-    cookie_secure: Optional[bool] = None
-    cookie_samesite: Optional[str] = None
-    auth_admin_usernames: Optional[str] = None
-    auth_admin_gitlab_groups: Optional[str] = None
+    oidc_redirect_uri: str | None = None
+    session_cookie_name: str | None = None
+    session_ttl_seconds: int | None = None
+    session_retention_days: int | None = None
+    cookie_secure: bool | None = None
+    cookie_samesite: str | None = None
+    auth_admin_usernames: str | None = None
+    auth_admin_gitlab_groups: str | None = None
 
 
 class ConfigResponse(BaseModel):
     """Full configuration response combining all config sections."""
-    runtime: "RuntimeConfigSection"
+    runtime: RuntimeConfigSection
     auth: AuthConfigSection
-    integration: "IntegrationConfigSection"
+    integration: IntegrationConfigSection
 
 
 class ConfigUpdate(BaseModel):
     """Request model for updating all config sections."""
-    runtime: Optional[RuntimeConfigUpdate] = None
-    auth: Optional[AuthConfigUpdate] = None
-    integration: Optional[IntegrationConfigUpdate] = None
+    runtime: RuntimeConfigUpdate | None = None
+    auth: AuthConfigUpdate | None = None
+    integration: IntegrationConfigUpdate | None = None
 
 
 def _serialize_auth_config(settings: Settings) -> AuthConfigSection:
@@ -169,7 +167,10 @@ async def update_config(
         if auth_updates or clear_secret:
             from app.api.oidc import _build_preview_settings as _build_auth_preview
             from app.core.config_crypto import ConfigEncryptionError
-            from app.runtime_config import save_runtime_config_override, reset_runtime_config_override
+            from app.runtime_config import (
+                reset_runtime_config_override,
+                save_runtime_config_override,
+            )
             preview_settings = _build_auth_preview(auth_updates)
             if preview_settings.oidc_enabled:
                 _validate_oidc_ready(preview_settings)
@@ -198,7 +199,10 @@ async def update_config(
 
         if integration_updates or clear_gitlab_bot_token or clear_gitlab_admin_token or clear_gitlab_webhook_secret:
             from app.core.config_crypto import ConfigEncryptionError
-            from app.runtime_config import save_runtime_config_override, reset_runtime_config_override
+            from app.runtime_config import (
+                reset_runtime_config_override,
+                save_runtime_config_override,
+            )
             try:
                 for key, value in integration_updates.items():
                     await save_runtime_config_override(db, key, value)

@@ -96,8 +96,8 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         )
         self.mock_get_secret = self.secret_patcher.start()
 
-        from app.main import app
         from app.database import get_db
+        from app.main import app
 
         app.dependency_overrides[get_db] = override_db
         self.client = TestClient(app)
@@ -106,8 +106,8 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         self.settings_patcher.stop()
         self.runtime_patcher.stop()
         self.secret_patcher.stop()
-        from app.main import app
         from app.database import get_db
+        from app.main import app
         app.dependency_overrides.pop(get_db, None)
 
     def test_missing_token_returns_401(self):
@@ -315,24 +315,23 @@ class TestWebhookEventsEndpoint(unittest.IsolatedAsyncioTestCase):
         async def override_db():
             yield self.mock_db
 
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_user
+        from app.main import app
 
         app.dependency_overrides[get_db] = override_db
         app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
         self.client = TestClient(app)
 
     def tearDown(self):
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_user
+        from app.main import app
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(require_authenticated_user, None)
 
     def _mock_db_results(self, events, total):
         """Set up mock DB to return the given events and total count."""
-        from datetime import datetime
 
         count_result = MagicMock()
         count_result.scalar.return_value = total

@@ -5,17 +5,15 @@ import sys
 import unittest
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import app.api.tasks as tasks_api
-from app.core.projects import build_project_lookup
-from app.api.tasks import list_tasks
 from app.api.projects import list_projects
+from app.api.tasks import list_tasks
+from app.core.projects import build_project_lookup
 from app.dependencies.project_access import ProjectAccessScope
 from app.models import Task, TaskStatus
 
@@ -24,7 +22,7 @@ def _make_task(
     task_id: int,
     project_id: int,
     status: TaskStatus,
-    initiator_username: Optional[str] = None,
+    initiator_username: str | None = None,
 ) -> Task:
     now = datetime.now(UTC)
     return Task(
@@ -159,8 +157,6 @@ async def test_list_projects_uses_ttl_cache_for_unrestricted_scope():
     gitlab_client._project_list_refresh_task = None
 
     # Use a real time.time function to avoid issues with logging and other calls
-    import time
-    real_time = time.time
 
     with patch("app.core.gitlab_client.get_gitlab_client", return_value=SimpleNamespace(get_projects=object())), patch(
         "app.core.gitlab_client.asyncio.to_thread",

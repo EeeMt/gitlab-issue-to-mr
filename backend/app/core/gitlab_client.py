@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import time
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import gitlab
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 _PROJECT_LIST_CACHE_TTL_SECONDS = 300  # 5-minute freshness window
 _project_list_cache: list[dict[str, Any]] = []
 _project_list_cache_expires_at = 0.0
-_project_list_refresh_task: Optional[asyncio.Task] = None
+_project_list_refresh_task: asyncio.Task | None = None
 
 
 class GitLabClient:
@@ -29,9 +29,9 @@ class GitLabClient:
 
     def __init__(
         self,
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
         *,
-        private_token: Optional[str] = None,
+        private_token: str | None = None,
     ) -> None:
         """Initialize GitLab client."""
         self.settings = settings or get_effective_settings()
@@ -168,7 +168,7 @@ class GitLabClient:
         target_branch: str,
         title: str,
         description: str,
-        issue_iid: Optional[int] = None,
+        issue_iid: int | None = None,
     ) -> MergeRequest:
         """Create a merge request.
 
@@ -203,7 +203,7 @@ class GitLabClient:
 
         return mr
 
-    def normalize_web_url(self, url: Optional[str]) -> Optional[str]:
+    def normalize_web_url(self, url: str | None) -> str | None:
         """Normalize GitLab web URLs to the configured GitLab base URL."""
         if not url:
             return url
@@ -224,7 +224,7 @@ class GitLabClient:
 
     def get_merge_request(
         self, project_id: int, mr_iid: int
-    ) -> Optional[MergeRequest]:
+    ) -> MergeRequest | None:
         """Get a merge request by IID.
 
         Args:
@@ -243,7 +243,7 @@ class GitLabClient:
             logger.warning(f"MR not found: {project_id}/{mr_iid}")
             return None
 
-    def get_mr_by_iid(self, project_id: int, mr_iid: int) -> Optional[dict]:
+    def get_mr_by_iid(self, project_id: int, mr_iid: int) -> dict | None:
         """Get MR details by IID.
 
         Args:
@@ -268,7 +268,7 @@ class GitLabClient:
 
     async def get_merge_request_stats(
         self, project_id: int, mr_iid: int
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Get merge request change statistics.
 
         Args:
@@ -402,7 +402,7 @@ class GitLabClient:
             logger.warning(f"File not found: {file_path}@{ref}")
             return ""
 
-    def get_issue(self, project_id: int, issue_iid: int) -> Optional[dict]:
+    def get_issue(self, project_id: int, issue_iid: int) -> dict | None:
         """Get issue details.
 
         Args:
@@ -550,11 +550,11 @@ class GitLabClient:
 
 
 # Singleton instance
-_gitlab_client: Optional[GitLabClient] = None
-_gitlab_client_config: Optional[tuple[str, str, str]] = None
+_gitlab_client: GitLabClient | None = None
+_gitlab_client_config: tuple[str, str, str] | None = None
 
 
-def _build_gitlab_client_config_snapshot(settings: Optional[Settings] = None) -> tuple[str, str, str]:
+def _build_gitlab_client_config_snapshot(settings: Settings | None = None) -> tuple[str, str, str]:
     active_settings = settings or get_effective_settings()
     return (
         active_settings.gitlab_url.strip(),

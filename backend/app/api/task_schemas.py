@@ -1,7 +1,7 @@
 """Pydantic schemas for Task API request/response models."""
 
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator, model_validator
 
@@ -18,7 +18,7 @@ class RetryTaskRequest(BaseModel):
     instead of being queued immediately.
     """
 
-    scheduled_datetime: Optional[datetime] = None
+    scheduled_datetime: datetime | None = None
 
 
 class RescheduleTaskRequest(BaseModel):
@@ -54,11 +54,11 @@ class UpdateTaskRequest(BaseModel):
             Setting task_mode='plan' automatically forces require_changes=False.
     """
 
-    user_prompt: Optional[str] = None
-    priority: Optional[int] = None
-    provider_id: Optional[int] = None  # None = system default / clear
-    require_changes: Optional[bool] = None
-    task_mode: Optional[Literal["execute", "plan"]] = None
+    user_prompt: str | None = None
+    priority: int | None = None
+    provider_id: int | None = None  # None = system default / clear
+    require_changes: bool | None = None
+    task_mode: Literal["execute", "plan"] | None = None
 
     @field_validator("user_prompt", mode="before")
     @classmethod
@@ -86,12 +86,12 @@ class CreateTaskRequest(BaseModel):
     """Request model for creating a task under an Issue."""
 
     issue_id: int
-    user_prompt: Optional[str] = None  # If None, uses Issue.description
+    user_prompt: str | None = None  # If None, uses Issue.description
     priority: int = 0
-    delay_seconds: Optional[int] = None
-    scheduled_datetime: Optional[datetime] = None
+    delay_seconds: int | None = None
+    scheduled_datetime: datetime | None = None
     provider_id: int
-    require_changes: Optional[bool] = True
+    require_changes: bool | None = True
     task_mode: Literal["execute", "plan"] = "execute"
 
     @model_validator(mode="after")

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 import inspect
-from typing import Optional
+import logging
 
 from sqlalchemy import delete, insert, select
 from sqlalchemy.exc import IntegrityError
@@ -54,7 +53,7 @@ async def acquire_issue_execution_lock(db: AsyncSession, task: Task) -> bool:
 async def release_issue_execution_lock(
     db: AsyncSession,
     *,
-    issue_id: Optional[int],
+    issue_id: int | None,
 ) -> None:
     """Release the issue-level execution lock if the task has an issue."""
     if issue_id is None:

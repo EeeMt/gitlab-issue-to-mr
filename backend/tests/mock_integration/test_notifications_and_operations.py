@@ -5,17 +5,16 @@ and advanced task operations (slot capacity, reschedule, execute-now edge cases)
 """
 
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
 
 from .conftest import (
     BACKEND_URL,
-    MOCK_SERVICES_URL,
     create_issue,
-    create_task,
     create_issue_and_task,
+    create_task,
     wait_for_task_status,
 )
 
@@ -183,7 +182,7 @@ class TestSlotCapacity:
     async def test_slot_capacity_endpoint(self, admin_headers):
         """GET /tasks/slot-capacity returns capacity info for a time slot."""
         async with httpx.AsyncClient(timeout=10) as client:
-            future = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+            future = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
             resp = await client.get(
                 f"{BACKEND_URL}/api/tasks/slot-capacity",
                 params={"scheduled_at": future},
@@ -203,7 +202,7 @@ class TestSlotCapacity:
     async def test_slot_capacity_past_time(self, admin_headers):
         """Slot capacity for past time should still return valid data."""
         async with httpx.AsyncClient(timeout=10) as client:
-            past = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+            past = (datetime.now(UTC) - timedelta(hours=5)).isoformat()
             resp = await client.get(
                 f"{BACKEND_URL}/api/tasks/slot-capacity",
                 params={"scheduled_at": past},
@@ -226,7 +225,7 @@ class TestTaskRescheduleOperations:
         """Create a scheduled task, then reschedule it to a different time."""
         async with httpx.AsyncClient(timeout=10) as client:
             # Create issue, then a scheduled task under it
-            future1 = (datetime.now(timezone.utc) + timedelta(hours=10)).isoformat()
+            future1 = (datetime.now(UTC) + timedelta(hours=10)).isoformat()
             issue = await create_issue(
                 client, BACKEND_URL, admin_headers,
                 title="Reschedule test issue",
@@ -240,7 +239,7 @@ class TestTaskRescheduleOperations:
             task_id = task_data["id"]
 
             # Reschedule to a different time
-            future2 = (datetime.now(timezone.utc) + timedelta(hours=20)).isoformat()
+            future2 = (datetime.now(UTC) + timedelta(hours=20)).isoformat()
             resched_resp = await client.patch(
                 f"{BACKEND_URL}/api/tasks/{task_id}/schedule",
                 headers=admin_headers,
@@ -261,7 +260,7 @@ class TestTaskRescheduleOperations:
     async def test_execute_now_clears_schedule(self, admin_headers):
         """Execute-now on a scheduled task clears scheduled_at."""
         async with httpx.AsyncClient(timeout=10) as client:
-            future = (datetime.now(timezone.utc) + timedelta(hours=10)).isoformat()
+            future = (datetime.now(UTC) + timedelta(hours=10)).isoformat()
             issue = await create_issue(
                 client, BACKEND_URL, admin_headers,
                 title="Execute now test issue",
@@ -302,7 +301,7 @@ class TestTaskRescheduleOperations:
             )
             task_id = task_data["id"]
 
-            task = await wait_for_task_status(
+            await wait_for_task_status(
                 client, BACKEND_URL, task_id,
                 target_statuses=["completed", "failed"],
                 auth_headers=admin_headers,
@@ -310,7 +309,7 @@ class TestTaskRescheduleOperations:
             )
 
             # Try to reschedule — should fail
-            future = (datetime.now(timezone.utc) + timedelta(hours=5)).isoformat()
+            future = (datetime.now(UTC) + timedelta(hours=5)).isoformat()
             resched_resp = await client.patch(
                 f"{BACKEND_URL}/api/tasks/{task_id}/schedule",
                 headers=admin_headers,

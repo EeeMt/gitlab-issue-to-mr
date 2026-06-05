@@ -2,14 +2,16 @@
 
 import logging
 import os
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.providers import _decrypt_provider_api_key
 from app.config import get_effective_settings as get_settings
-from app.core.worker_environment_variables import validate_worker_environment_variable_key as validate_worker_environment_key
+from app.core.worker_environment_variables import (
+    validate_worker_environment_variable_key as validate_worker_environment_key,
+)
 from app.core.worker_workspace import build_issue_workspace_paths
 from app.models import AIProvider, Issue, Task, User
 
@@ -69,13 +71,13 @@ async def resolve_commit_author(db: AsyncSession, task: Task) -> tuple[str, str]
 def build_container_env(
     task: Task,
     issue: Issue,
-    mr_iid: Optional[int],
-    target_branch: Optional[str],
+    mr_iid: int | None,
+    target_branch: str | None,
     provider: AIProvider = None,
     *,
-    author_name: Optional[str] = None,
-    author_email: Optional[str] = None,
-    custom_environment: Optional[dict[str, str]] = None,
+    author_name: str | None = None,
+    author_email: str | None = None,
+    custom_environment: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Build environment variables for the worker container."""
     settings = get_settings()
@@ -144,13 +146,13 @@ def build_legacy_container_env(
     settings: Any,
     task: Task,
     issue: Issue,
-    mr_iid: Optional[int],
-    target_branch: Optional[str],
+    mr_iid: int | None,
+    target_branch: str | None,
     provider: AIProvider = None,
     *,
-    author_name: Optional[str] = None,
-    author_email: Optional[str] = None,
-    custom_environment: Optional[dict[str, str]] = None,
+    author_name: str | None = None,
+    author_email: str | None = None,
+    custom_environment: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Build the legacy worker environment while preserving validation order."""
     api_key = provider.api_key if provider else settings.anthropic_api_key
@@ -204,9 +206,9 @@ def build_legacy_container_env(
 
 def build_container_volumes(
     settings: Any,
-    issue: Optional[Issue] = None,
+    issue: Issue | None = None,
     *,
-    task: Optional[Task] = None,
+    task: Task | None = None,
 ) -> dict:
     """Build volume mounts for the worker container.
 

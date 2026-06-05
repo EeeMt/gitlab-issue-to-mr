@@ -5,7 +5,6 @@ import logging
 import os
 import re
 import time
-from typing import Optional
 
 import httpx
 from gitlab import Gitlab
@@ -49,7 +48,7 @@ def build_initial_mr_description(task: Task) -> str:
 *AI 正在直接实施变更...*"""
 
 
-def remove_mr_draft_status_for_issue(task: Task, issue: Issue, gitlab_client, *, sudo_gl: Optional[Gitlab] = None) -> None:
+def remove_mr_draft_status_for_issue(task: Task, issue: Issue, gitlab_client, *, sudo_gl: Gitlab | None = None) -> None:
     gl = sudo_gl or gitlab_client.gl
     t0 = time.monotonic()
     project = gl.projects.get(task.project_id)
@@ -81,12 +80,12 @@ def remove_mr_draft_status_for_issue(task: Task, issue: Issue, gitlab_client, *,
 def create_mr_if_needed(
     task: Task,
     issue: Issue,
-    mr_iid: Optional[int],
-    mr_web_url: Optional[str],
+    mr_iid: int | None,
+    mr_web_url: str | None,
     gitlab_client,
     *,
-    sudo_gl: Optional[Gitlab] = None,
-) -> tuple[Optional[int], Optional[str]]:
+    sudo_gl: Gitlab | None = None,
+) -> tuple[int | None, str | None]:
     if mr_iid:
         return mr_iid, mr_web_url
 
@@ -97,7 +96,7 @@ def create_mr_if_needed(
     return create_new_mr(task, issue, gitlab_client, sudo_gl=sudo_gl)
 
 
-def find_existing_mr(task: Task, issue: Issue, gitlab_client) -> tuple[Optional[int], Optional[str]] | None:
+def find_existing_mr(task: Task, issue: Issue, gitlab_client) -> tuple[int | None, str | None] | None:
     try:
         existing_mrs = gitlab_client.gl.projects.get(task.project_id).mergerequests.list(
             source_branch=issue.branch_name,
@@ -115,7 +114,7 @@ def find_existing_mr(task: Task, issue: Issue, gitlab_client) -> tuple[Optional[
     return None
 
 
-def create_new_mr(task: Task, issue: Issue, gitlab_client, *, sudo_gl: Optional[Gitlab] = None) -> tuple[Optional[int], Optional[str]]:
+def create_new_mr(task: Task, issue: Issue, gitlab_client, *, sudo_gl: Gitlab | None = None) -> tuple[int | None, str | None]:
     settings = get_settings()
     target_branch = issue.target_branch or settings.default_target_branch
     mr_title = build_initial_mr_title(task)
@@ -157,7 +156,7 @@ async def update_mr_description_for_issue(
     db: AsyncSession,
     gitlab_client,
     *,
-    sudo_gl: Optional[Gitlab] = None,
+    sudo_gl: Gitlab | None = None,
 ) -> None:
     mr_iid = issue.merge_request_iid
     if not mr_iid:
@@ -227,7 +226,7 @@ async def update_mr_description_for_issue(
         logger.warning(f"[Task {task.id}] Failed to update MR description: {e}")
 
 
-def _resolve_issue_root(settings, issue: Issue, all_tasks: list) -> Optional[str]:
+def _resolve_issue_root(settings, issue: Issue, all_tasks: list) -> str | None:
     """Return the issue workspace root path, or None if workspace is not configured."""
     try:
         from app.core.worker_workspace import build_issue_workspace_paths
@@ -272,7 +271,7 @@ async def write_previous_task_summaries_file(
     settings,
     issue: Issue,
     task: Task,
-) -> Optional[str]:
+) -> str | None:
     """Write previous task summaries for the worker-side overall MR summary prompt."""
     try:
         from app.core.worker_workspace import build_issue_workspace_paths
@@ -374,7 +373,7 @@ def _build_previous_task_summaries_content(
     return "\n".join(lines)
 
 
-def _latest_overall_summary(all_tasks: list, metadata_map: dict[int, dict]) -> Optional[str]:
+def _latest_overall_summary(all_tasks: list, metadata_map: dict[int, dict]) -> str | None:
     """Return the newest worker-generated overall summary in task metadata."""
     for task in reversed(list(all_tasks)):
         meta = metadata_map.get(task.id)
@@ -386,7 +385,7 @@ def _latest_overall_summary(all_tasks: list, metadata_map: dict[int, dict]) -> O
     return None
 
 
-def _extract_existing_overall_summary(description: str) -> Optional[str]:
+def _extract_existing_overall_summary(description: str) -> str | None:
     """Return the existing overall summary block from a GitLab MR description."""
     if not description:
         return None
@@ -413,7 +412,7 @@ def _build_mr_description(
     all_tasks: list,
     metadata_map: dict[int, dict],
     *,
-    overall_summary: Optional[str] = None,
+    overall_summary: str | None = None,
 ) -> str:
     """Build the full MR description string."""
     settings = get_settings()
@@ -516,7 +515,7 @@ def _build_mr_description(
     return "\n".join(lines)
 
 
-async def send_failure_alert(task: Task, sanitize_sensitive_data, issue: Optional[Issue] = None) -> None:
+async def send_failure_alert(task: Task, sanitize_sensitive_data, issue: Issue | None = None) -> None:
     settings = get_settings()
     if not settings.alert_on_failure or not settings.alert_webhook_url:
         return
@@ -547,14 +546,14 @@ async def send_failure_alert(task: Task, sanitize_sensitive_data, issue: Optiona
         logger.warning(f"Failed to send failure alert: {e}")
 
 
-async def send_notifications(task: Task, gitlab_client, sanitize_sensitive_data, success: bool, had_existing_mr: bool, issue: Optional[Issue] = None) -> None:
+async def send_notifications(task: Task, gitlab_client, sanitize_sensitive_data, success: bool, had_existing_mr: bool, issue: Issue | None = None) -> None:
     try:
         await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
     except Exception as e:
         logger.warning(f"Failed to send Mattermost completion notification: {e}")
 
 
-async def send_failure_notifications(task: Task, gitlab_client, sanitize_sensitive_data, success: bool, had_existing_mr: bool, issue: Optional[Issue] = None) -> None:
+async def send_failure_notifications(task: Task, gitlab_client, sanitize_sensitive_data, success: bool, had_existing_mr: bool, issue: Issue | None = None) -> None:
     try:
         await send_failure_alert(task, sanitize_sensitive_data, issue)
     except Exception as e:

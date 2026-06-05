@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from app.config import Settings
 
 
-def get_ssl_verify(settings: "Settings | None" = None) -> Union[str, bool]:
+def get_ssl_verify(settings: Settings | None = None) -> Union[str, bool]:
     """Return the SSL verification parameter for httpx/requests.
 
     Returns the path to the custom CA bundle when ``CUSTOM_CA_BUNDLE`` is

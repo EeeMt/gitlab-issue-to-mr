@@ -2,23 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import case, select, func, false, literal_column
+from sqlalchemy import case, false, func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings
+from app.core.projects import build_project_lookup
+from app.core.utcnow import utcnow
 from app.database import get_db
 from app.dependencies.auth import get_optional_current_user, require_page_access
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
-from app.models import Task, TaskStatus, Issue, IssueStatus, User, AIProvider
-from app.core.projects import build_project_lookup
-from app.core.utcnow import utcnow
+from app.models import AIProvider, Issue, IssueStatus, Task, TaskStatus, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -49,7 +47,7 @@ ERROR_CATEGORY_PATTERNS = (
 async def get_stats(
     my: bool = Query(False, description="When true, scope to the current user's data only"),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Get task statistics.
@@ -180,8 +178,8 @@ def _apply_project_scope(query, access_scope: ProjectAccessScope):
 def _apply_analytics_filters(
     query,
     access_scope: ProjectAccessScope,
-    project_id: Optional[int] = None,
-    initiator_username: Optional[str] = None,
+    project_id: int | None = None,
+    initiator_username: str | None = None,
 ):
     query = _apply_project_scope(query, access_scope)
     if project_id is not None:
@@ -194,8 +192,8 @@ def _apply_analytics_filters(
 def _apply_issue_analytics_filters(
     query,
     access_scope: ProjectAccessScope,
-    project_id: Optional[int] = None,
-    initiator_username: Optional[str] = None,
+    project_id: int | None = None,
+    initiator_username: str | None = None,
 ):
     query = _apply_project_column_scope(query, Issue.project_id, access_scope)
     if project_id is not None:
@@ -315,8 +313,8 @@ def _summarize_error_message(error_message: str | None) -> str | None:
 @router.get("/stats/analytics")
 async def get_analytics(
     days: int = Query(default=30, ge=7, le=90),
-    project_id: Optional[int] = Query(default=None),
-    initiator_username: Optional[str] = Query(default=None),
+    project_id: int | None = Query(default=None),
+    initiator_username: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     _current_user=Depends(require_page_access("analytics")),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
@@ -947,7 +945,7 @@ async def get_activity_heatmap(
     days: int = Query(default=365, ge=1, le=730),
     my: bool = Query(False, description="When true, scope to the current user's data only"),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Return daily completed-task counts for the heatmap."""
@@ -982,7 +980,7 @@ async def get_activity_heatmap(
 
 @router.get("/stats/scheduled")
 async def get_scheduled_stats(
-    project_id: Optional[int] = None,
+    project_id: int | None = None,
     my: bool = Query(False, description="When true, restrict to tasks initiated by the current user"),
     db: AsyncSession = Depends(get_db),
     _current_user=Depends(require_page_access("schedule_overview")),

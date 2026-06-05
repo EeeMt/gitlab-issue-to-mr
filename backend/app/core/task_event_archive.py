@@ -34,8 +34,9 @@ def iter_complete_jsonl_records(buffer: str) -> tuple[list[str], str]:
     return [line.rstrip("\n") for line in complete], remainder
 
 
-from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 from sqlalchemy import select as _sa_select  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
+
 from app.models import TaskIngestCursor  # noqa: E402
 
 

@@ -11,14 +11,17 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.task_operations import get_task_with_access_check
 from app.config import get_settings
+from app.core.docker_client import get_docker_client
 from app.database import get_db
-from app.dependencies.auth import require_admin_user, require_authenticated_user, require_page_access
-from app.dependencies.auth import get_optional_current_user
+from app.dependencies.auth import (
+    get_optional_current_user,
+    require_authenticated_user,
+    require_page_access,
+)
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
 from app.models import Issue, Task, TaskLog, TaskRawLogChunk, User
-from app.core.docker_client import get_docker_client
-from app.api.task_operations import get_task_with_access_check
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

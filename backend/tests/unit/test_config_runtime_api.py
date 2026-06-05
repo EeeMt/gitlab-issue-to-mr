@@ -12,10 +12,11 @@ from starlette.requests import Request
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from fastapi.testclient import TestClient
-from app.main import app
-from app.database import get_db
+
 from app.config import get_settings, reset_runtime_config, set_runtime_config
+from app.database import get_db
 from app.dependencies.auth import require_authenticated_context
+from app.main import app
 from app.runtime_config import reset_runtime_config_sync_state
 
 
@@ -111,6 +112,7 @@ class ConfigRuntimeAPITests(unittest.TestCase):
 
     def test_validate_worker_workspace_retention_days_bounds(self):
         from fastapi import HTTPException
+
         from app.api.config_runtime import _validate_config_value
 
         self.assertEqual(_validate_config_value("worker_workspace_retention_days", 14), 14)
@@ -120,6 +122,7 @@ class ConfigRuntimeAPITests(unittest.TestCase):
 
     def test_validate_worker_workspace_host_path_allows_empty_or_absolute(self):
         from fastapi import HTTPException
+
         from app.api.config_runtime import _validate_config_value
 
         self.assertEqual(_validate_config_value("worker_workspace_host_path", ""), "")

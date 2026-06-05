@@ -3,12 +3,12 @@
 Targets missed lines: 29, 36, 51-52, 59-66, 95-100, 188-189, 201.
 """
 
+from unittest.mock import MagicMock, patch
+
 import docker
 import docker.errors
 import docker.tls
 import pytest
-from unittest.mock import MagicMock, patch, call
-
 
 # ---------------------------------------------------------------------------
 # Helpers

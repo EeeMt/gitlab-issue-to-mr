@@ -5,7 +5,6 @@ External services (GitLab, Claude) are mocked by the mock-services container.
 """
 
 import asyncio
-import json
 import logging
 import os
 import subprocess
@@ -100,7 +99,7 @@ async def reset_mock_state(mock_url: str):
         assert resp.status_code == 200, f"Failed to reset mock config: {resp.status_code}"
         resp = await client.post(f"{mock_url}/mock/reset-git")
         assert resp.status_code == 200, f"Failed to reset git repos: {resp.status_code}"
-    yield
+    return
 
 
 @pytest.fixture

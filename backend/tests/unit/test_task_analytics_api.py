@@ -4,7 +4,7 @@
 import os
 import sys
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,7 +20,6 @@ from app.models import TaskStatus
 
 @pytest.mark.asyncio
 async def test_create_task_persists_manual_initiator_metadata():
-    from app.models import Issue
     request = CreateTaskRequest(
         provider_id=1,
         issue_id=1,
@@ -59,7 +58,7 @@ async def test_create_task_persists_manual_initiator_metadata():
              "app.api.tasks.get_usage_quota_service",
              return_value=MagicMock(raise_if_over_limit=AsyncMock()),
          ):
-        result = await create_task(request=request, db=db, current_user=current_user, access_scope=access_scope)
+        await create_task(request=request, db=db, current_user=current_user, access_scope=access_scope)
 
     task = db.add.call_args.args[0]
     assert task.initiator_user_id == 7

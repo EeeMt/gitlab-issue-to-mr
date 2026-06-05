@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api._validators import _is_valid_http_url, _sanitize_string_list
+from app.api._validators import _is_valid_http_url
 from app.config import Settings, get_effective_settings, get_runtime_config_types, get_settings
 from app.core.config_crypto import ConfigEncryptionError
 from app.core.worker_environment_variables import (
@@ -22,7 +22,6 @@ from app.database import get_db
 from app.dependencies.auth import require_admin_user
 from app.runtime_config import (
     load_runtime_config_from_db,
-    reset_all_runtime_config_overrides,
     reset_runtime_config_override,
     save_runtime_config_override,
 )
@@ -35,7 +34,7 @@ class RuntimeWorkerEnvironmentVariableRequest(BaseModel):
     """One worker environment variable submitted via runtime config APIs."""
 
     # Round-tripped for UI identity; persisted rows are still matched by key during replace.
-    id: Optional[int] = None
+    id: int | None = None
     key: str
     value: str
     is_secret: bool = False
@@ -87,36 +86,36 @@ class RuntimeConfigSection(BaseModel):
 
 class RuntimeConfigUpdate(BaseModel):
     """Request model for updating runtime settings."""
-    max_concurrency: Optional[int] = None
-    task_timeout: Optional[int] = None
-    scheduler_interval: Optional[int] = None
-    default_target_branch: Optional[str] = None
-    max_retries: Optional[int] = None
-    retry_delay: Optional[int] = None
-    alert_on_failure: Optional[bool] = None
-    alert_webhook_url: Optional[str] = None
+    max_concurrency: int | None = None
+    task_timeout: int | None = None
+    scheduler_interval: int | None = None
+    default_target_branch: str | None = None
+    max_retries: int | None = None
+    retry_delay: int | None = None
+    alert_on_failure: bool | None = None
+    alert_webhook_url: str | None = None
     clear_alert_webhook_url: bool = False
-    anthropic_base_url: Optional[str] = None
-    anthropic_api_key: Optional[str] = None
+    anthropic_base_url: str | None = None
+    anthropic_api_key: str | None = None
     clear_anthropic_api_key: bool = False
-    anthropic_model: Optional[str] = None
-    claude_max_turns: Optional[int] = None
-    allow_monitor_for_users: Optional[bool] = None
-    allow_schedule_overview_for_users: Optional[bool] = None
-    allow_analytics_for_users: Optional[bool] = None
-    allow_oidc_diagnostics_for_users: Optional[bool] = None
-    worker_volume_mounts: Optional[str] = None
-    worker_workspace_host_path: Optional[str] = None
-    worker_workspace_retention_days: Optional[int] = None
-    worker_failed_workspace_retention_days: Optional[int] = None
-    maven_cache_host_path: Optional[str] = None
-    maven_settings_host_path: Optional[str] = None
-    slot_max_tasks: Optional[int] = None
-    slot_max_tasks_enforce: Optional[bool] = None
-    announcement_enabled: Optional[bool] = None
-    announcement_text: Optional[str] = None
-    announcement_level: Optional[str] = None
-    worker_environment_variables: Optional[list[RuntimeWorkerEnvironmentVariableRequest]] = None
+    anthropic_model: str | None = None
+    claude_max_turns: int | None = None
+    allow_monitor_for_users: bool | None = None
+    allow_schedule_overview_for_users: bool | None = None
+    allow_analytics_for_users: bool | None = None
+    allow_oidc_diagnostics_for_users: bool | None = None
+    worker_volume_mounts: str | None = None
+    worker_workspace_host_path: str | None = None
+    worker_workspace_retention_days: int | None = None
+    worker_failed_workspace_retention_days: int | None = None
+    maven_cache_host_path: str | None = None
+    maven_settings_host_path: str | None = None
+    slot_max_tasks: int | None = None
+    slot_max_tasks_enforce: bool | None = None
+    announcement_enabled: bool | None = None
+    announcement_text: str | None = None
+    announcement_level: str | None = None
+    worker_environment_variables: list[RuntimeWorkerEnvironmentVariableRequest] | None = None
 
 
 def _serialize_runtime_config(

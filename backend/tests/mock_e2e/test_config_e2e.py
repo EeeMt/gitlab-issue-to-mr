@@ -19,15 +19,15 @@ Endpoints under test:
 from __future__ import annotations
 
 import os
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
-    create_async_engine,
     async_sessionmaker,
+    create_async_engine,
 )
 from sqlalchemy.pool import StaticPool
 
@@ -52,7 +52,7 @@ from app.models import Base
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 async def _test_engine():
     """In-memory SQLite async engine with all tables created."""
     engine = create_async_engine(
@@ -71,20 +71,20 @@ async def _test_engine():
     await engine.dispose()
 
 
-@pytest.fixture()
+@pytest.fixture
 async def session_factory(_test_engine):
     return async_sessionmaker(
         _test_engine, class_=AsyncSession, expire_on_commit=False
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 async def db_session(session_factory):
     async with session_factory() as session:
         yield session
 
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_admin_user():
     user = MagicMock()
     user.id = 1
@@ -94,7 +94,7 @@ def _mock_admin_user():
     return user
 
 
-@pytest.fixture()
+@pytest.fixture
 async def client(session_factory, _mock_admin_user):
     """httpx.AsyncClient wired to the FastAPI app with auth overrides."""
 

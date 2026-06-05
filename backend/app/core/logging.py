@@ -1,11 +1,12 @@
 """
 日志配置模块
 """
+import datetime
 import os
 import sys
 from pathlib import Path
+
 from loguru import logger
-import datetime
 
 # 日志目录
 LOG_DIR = Path("logs")

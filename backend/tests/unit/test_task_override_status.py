@@ -13,7 +13,6 @@ from fastapi.testclient import TestClient
 
 from app.models import TaskStatus
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -37,10 +36,10 @@ def _make_task(status: TaskStatus, task_id: int = 1, issue_id: int | None = 100)
 
 def _make_client_with_task(task: MagicMock):
     """Set up a TestClient with mocked DB returning the given task."""
-    from app.main import app
     from app.database import get_db
     from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-    from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+    from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+    from app.main import app
 
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
@@ -210,10 +209,10 @@ class OverrideTaskStatusTests(unittest.TestCase):
 
     def test_missing_task_returns_404(self):
         """Requesting override for a non-existent task returns 404."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 

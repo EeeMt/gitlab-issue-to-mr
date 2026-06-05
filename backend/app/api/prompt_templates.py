@@ -2,11 +2,10 @@
 
 import logging
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -21,22 +20,22 @@ router = APIRouter()
 class PromptTemplateCreate(BaseModel):
     name: str
     content: str
-    variable_tips: Optional[dict[str, str]] = None
+    variable_tips: dict[str, str] | None = None
     is_active: bool = True
 
 
 class PromptTemplateUpdate(BaseModel):
-    name: Optional[str] = None
-    content: Optional[str] = None
-    variable_tips: Optional[dict[str, str]] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    content: str | None = None
+    variable_tips: dict[str, str] | None = None
+    is_active: bool | None = None
 
 
 class PromptTemplateResponse(BaseModel):
     id: int
     name: str
     content: str
-    variable_tips: Optional[dict[str, str]] = None
+    variable_tips: dict[str, str] | None = None
     is_active: bool
     created_at: datetime
     updated_at: datetime

@@ -102,7 +102,7 @@ class TestNavigation:
 
         # On mobile, drawer should be available
         # The drawer content should exist in DOM
-        drawer_header = class_page.locator(".mobile-drawer-header")
+        class_page.locator(".mobile-drawer-header")
         # Note: drawer might not be visible until triggered
 
         # Reset viewport to default to avoid leaking state to subsequent tests in the module

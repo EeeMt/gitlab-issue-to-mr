@@ -255,7 +255,7 @@ class TestSessionManagement:
                 f"{BACKEND_URL}/api/auth/local/login",
                 json={"username": "admin", "password": "admin123"},
             )
-            headers2 = _extract_auth(login2)
+            _extract_auth(login2)
 
             # List sessions from session1
             sessions_resp = await client.get(

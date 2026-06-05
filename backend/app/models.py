@@ -1,27 +1,30 @@
 """Database models for the application."""
 
 from datetime import date, datetime
-from app.core.utcnow import utcnow
 from enum import Enum
-from typing import Optional, List
+from typing import Optional
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     Date,
     DateTime,
-    Enum as SQLEnum,
     ForeignKey,
     Index,
     Integer,
-    JSON,
     LargeBinary,
     String,
     Text,
     UniqueConstraint,
     text,
 )
+from sqlalchemy import (
+    Enum as SQLEnum,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+from app.core.utcnow import utcnow
 
 
 class Base(DeclarativeBase):
@@ -64,15 +67,15 @@ class Issue(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String(512), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(20), default=IssueStatus.OPEN.value, nullable=False)
-    closed_via: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    closed_via: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
     # Branch & MR (promoted from Task)
-    branch_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    base_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    target_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    branch_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    base_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    target_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Branch deletion policy
     delete_branch_on_close: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default=text("true"), nullable=False
@@ -80,18 +83,18 @@ class Issue(Base):
     branch_deleted: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false"), nullable=False
     )
-    merge_request_iid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
-    merge_request_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    merge_request_iid: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    merge_request_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     # Claude session persistence
-    claude_session_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    session_storage_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    claude_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    session_storage_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     # Creator
-    initiator_user_id: Mapped[Optional[int]] = mapped_column(
+    initiator_user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    initiator_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    initiator_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -102,7 +105,7 @@ class Issue(Base):
     )
 
     # Relationships
-    tasks: Mapped[List["Task"]] = relationship("Task", back_populates="issue", order_by="Task.created_at")
+    tasks: Mapped[list["Task"]] = relationship("Task", back_populates="issue", order_by="Task.created_at")
 
     __table_args__ = (
         Index("ix_issues_status_created", "status", "created_at"),
@@ -118,10 +121,10 @@ class AIProvider(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     base_url: Mapped[str] = mapped_column(Text, nullable=False)
-    api_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str] = mapped_column(String(200), nullable=False)
     max_turns: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
-    system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -131,7 +134,7 @@ class AIProvider(Base):
         DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
 
-    tasks: Mapped[List["Task"]] = relationship("Task", back_populates="provider")
+    tasks: Mapped[list["Task"]] = relationship("Task", back_populates="provider")
 
 
 class Task(Base):
@@ -142,29 +145,29 @@ class Task(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     # Parent issue
-    issue_id: Mapped[Optional[int]] = mapped_column(
+    issue_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("issues.id", ondelete="SET NULL"), nullable=True, index=True
     )
     project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
 
     # AI Provider
-    provider_id: Mapped[Optional[int]] = mapped_column(
+    provider_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("ai_providers.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
     # Task details
     user_prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    initiator_user_id: Mapped[Optional[int]] = mapped_column(
+    initiator_user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    initiator_gitlab_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
-    initiator_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
-    initiator_display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    initiator_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    initiator_gitlab_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    initiator_username: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    initiator_display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    initiator_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Retry tracking
     is_retry: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    retry_source_task_id: Mapped[Optional[int]] = mapped_column(
+    retry_source_task_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("tasks.id"), nullable=True
     )
 
@@ -177,14 +180,14 @@ class Task(Base):
 
     # Scheduling
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    scheduled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
 
     # Container tracking
-    container_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    container_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Results
-    commit_sha: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    commit_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Change statistics
     additions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -192,8 +195,8 @@ class Task(Base):
     total_changes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # Token usage (populated from Claude CLI output)
-    input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Require code changes for success (relevant when issue has target_branch)
     require_changes: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -202,16 +205,16 @@ class Task(Base):
     task_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="execute")
 
     # AI model used for this task (populated from structured system_init events)
-    model_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     # MR title generated by AI post-execution (populated from structured finalization events)
-    commit_message: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    commit_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     # Manual status override
     is_manually_overridden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    override_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    overridden_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    overridden_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    override_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    overridden_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    overridden_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -220,8 +223,8 @@ class Task(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     issue: Mapped[Optional["Issue"]] = relationship("Issue", back_populates="tasks")
@@ -261,7 +264,7 @@ class IssueExecutionLock(Base):
         nullable=False,
         default=utcnow,
     )
-    heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class TaskLog(Base):
@@ -298,17 +301,17 @@ class UsageLimitPolicy(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     scope_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    user_id: Mapped[Optional[int]] = mapped_column(
+    user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True
     )
     daily_tokens_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="custom")
-    daily_tokens_value: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    daily_tokens_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
     weekly_tokens_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="custom")
-    weekly_tokens_value: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    weekly_tokens_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
     daily_tasks_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="custom")
-    daily_tasks_value: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    daily_tasks_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
     weekly_tasks_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="custom")
-    weekly_tasks_value: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    weekly_tasks_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow
     )
@@ -406,7 +409,7 @@ class PromptTemplate(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    variable_tips: Mapped[Optional[dict[str, str]]] = mapped_column(JSON, nullable=True)
+    variable_tips: Mapped[dict[str, str] | None] = mapped_column(JSON, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow
@@ -440,7 +443,7 @@ class MattermostNotificationProfile(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     target_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    channel_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    channel_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     mention_in_channel: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     event_types_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     field_keys_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
@@ -458,15 +461,15 @@ class MattermostUserMapping(Base):
     __tablename__ = "mattermost_user_mappings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[Optional[int]] = mapped_column(
+    user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    gitlab_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
-    gitlab_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    gitlab_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    gitlab_username: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     mattermost_user_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     mattermost_username: Mapped[str] = mapped_column(String(255), nullable=False)
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="username")
-    last_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow
     )
@@ -493,7 +496,7 @@ class MattermostNotificationDelivery(Base):
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     target_summary: Mapped[str] = mapped_column(String(255), nullable=False)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow
     )
@@ -505,26 +508,26 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    oidc_sub: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, unique=True)
-    gitlab_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, unique=True, index=True)
+    oidc_sub: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
+    gitlab_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
     username: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    avatar_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
-    
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+
     # Authentication provider: 'local' or 'gitlab_oidc'
     auth_provider: Mapped[str] = mapped_column(
         String(32), nullable=False, default="local", index=True
     )
     # Hashed password for local authentication (NULL for OIDC-only users)
-    local_password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    
+    local_password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     platform_role: Mapped[str] = mapped_column(String(32), nullable=False, default="platform_user")
     platform_role_source: Mapped[str] = mapped_column(
         String(32), nullable=False, default="bootstrap"
     )
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
-    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow
     )
@@ -543,13 +546,13 @@ class UserSession(Base):
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     session_token_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
-    gitlab_access_token_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    gitlab_refresh_token_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    gitlab_access_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gitlab_refresh_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
-    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    ip_address: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow
     )
@@ -562,14 +565,14 @@ class AuthAuditLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    user_id: Mapped[Optional[int]] = mapped_column(
+    username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    ip_address: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow, index=True
     )
@@ -582,10 +585,10 @@ class SystemBootstrap(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     initialized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    initial_admin_user_id: Mapped[Optional[int]] = mapped_column(
+    initial_admin_user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    initialized_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    initialized_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow
     )
@@ -598,16 +601,16 @@ class WebhookEvent(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    event_action: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    event_action: Mapped[str | None] = mapped_column(String(50), nullable=True)
     project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    merge_request_iid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    issue_id: Mapped[Optional[int]] = mapped_column(
+    merge_request_iid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    issue_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("issues.id", ondelete="SET NULL"), nullable=True
     )
-    source_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    source_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     result: Mapped[str] = mapped_column(String(50), nullable=False)
-    result_detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    payload_summary: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    result_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow
     )

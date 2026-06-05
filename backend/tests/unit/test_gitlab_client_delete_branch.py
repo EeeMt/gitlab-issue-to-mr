@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
-from gitlab.exceptions import GitlabGetError, GitlabDeleteError
+
+from gitlab.exceptions import GitlabDeleteError, GitlabGetError
 
 
 class DeleteBranchTests(unittest.TestCase):

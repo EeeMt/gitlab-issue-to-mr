@@ -18,10 +18,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.database import get_db
-from app.dependencies.auth import require_authenticated_user, require_admin_user
-
+from app.dependencies.auth import require_admin_user, require_authenticated_user
+from app.main import app
 
 # ---------------------------------------------------------------------------
 # Helpers

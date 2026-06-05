@@ -1,7 +1,6 @@
 """FastAPI application entry point."""
 
 import asyncio
-import logging
 import time
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -11,11 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.core.logging import setup_logging, get_logger
+from app.core.logging import get_logger, setup_logging
 from app.database import AsyncSessionLocal, close_db, get_db, init_db
 from app.dependencies.auth import require_admin_user, require_authenticated_user
-from app.migrations import run_migrations
 from app.middleware.trace import TraceMiddleware, get_trace_id
+from app.migrations import run_migrations
 from app.runtime_config import load_runtime_config_from_db, refresh_runtime_config_if_stale
 
 settings = get_settings()
@@ -173,8 +172,9 @@ async def health(request: Request) -> dict:
 
     # Check database connection
     try:
-        from app.database import engine
         from sqlalchemy import text
+
+        from app.database import engine
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         health_status["checks"]["database"] = "ok"
@@ -199,7 +199,27 @@ async def health(request: Request) -> dict:
 
 
 # Import and include routers
-from app.api import admin_users, announcement, auth, issues, tasks, containers, stats, config, config_integration, config_runtime, maintenance, mattermost, oidc, project_webhooks, prompt_templates, projects, providers, usage_limits, webhook_handler
+from app.api import (
+    admin_users,
+    announcement,
+    auth,
+    config,
+    config_integration,
+    config_runtime,
+    containers,
+    issues,
+    maintenance,
+    mattermost,
+    oidc,
+    project_webhooks,
+    projects,
+    prompt_templates,
+    providers,
+    stats,
+    tasks,
+    usage_limits,
+    webhook_handler,
+)
 
 app.include_router(auth.router, prefix="/api", tags=["auth"])
 app.include_router(

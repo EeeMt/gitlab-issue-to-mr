@@ -11,11 +11,8 @@ Tests for the Task List page (/tasks) including:
 """
 
 import pytest
+from conftest import _get_cookies, api_create_issue, api_create_task, api_get_first_project
 from playwright.sync_api import Page, expect
-from conftest import (
-    api_create_issue, api_create_task, api_get_first_project, _get_cookies
-)
-
 
 # ---------------------------------------------------------------------------
 # 1. Page layout (read-only, class_page)
@@ -211,7 +208,7 @@ class TestTaskListRefactoredFeatures:
         """Summary cards should have metric-title labels."""
         class_page.goto("/tasks")
         class_page.wait_for_selector("[data-testid='tasks-summary']", timeout=10000)
-        
+
         # Check for metric-title elements (new structure)
         labels = class_page.locator(".metric-title")
         if labels.count() > 0:
@@ -221,6 +218,6 @@ class TestTaskListRefactoredFeatures:
         """Summary section should have multiple summary cards."""
         class_page.goto("/tasks")
         class_page.wait_for_selector("[data-testid='tasks-summary']", timeout=10000)
-        
+
         cards = class_page.get_by_test_id("tasks-summary-card")
         assert cards.count() >= 1, "Summary section should have at least one card"

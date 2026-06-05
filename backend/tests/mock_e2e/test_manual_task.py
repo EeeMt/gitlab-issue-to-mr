@@ -10,18 +10,16 @@ This test uses mock GitLab API and verifies:
 
 import os
 import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-import pytest
-import asyncio
-import json
-import time
-import threading
 import http.server
+import json
 import socketserver
+import threading
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock, AsyncMock, patch
-from typing import Optional
+
+import pytest
 
 # Test configuration
 TEST_PROJECT_ID = 1
@@ -48,7 +46,7 @@ class MockGitLabHandler(http.server.BaseHTTPRequestHandler):
         path = self.path
 
         # Get projects
-        if "/api/v4/projects" == path:
+        if path == "/api/v4/projects":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -78,7 +76,7 @@ class MockGitLabHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             response = json.dumps({
                 "iid": 1,
-                "web_url": f"http://gitlab/test-project/merge_requests/1",
+                "web_url": "http://gitlab/test-project/merge_requests/1",
                 "state": "opened",
                 "source_branch": TEST_BRANCH,
                 "target_branch": TEST_TARGET_BRANCH,
@@ -206,17 +204,17 @@ class TestManualTaskNotification:
 
     def test_task_has_issue_id(self):
         """Test that tasks now always have an issue_id."""
-        from app.models import Task, TaskStatus, Issue
+        from app.models import Issue, Task
 
         # All tasks must have an associated issue
-        issue = Issue(
+        Issue(
             project_id=TEST_PROJECT_ID,
             title="Test issue",
             branch_name=TEST_BRANCH,
             target_branch=TEST_TARGET_BRANCH,
             status="open",
         )
-        
+
         task = Task(
             project_id=TEST_PROJECT_ID,
             issue_id=1,  # Always has an issue

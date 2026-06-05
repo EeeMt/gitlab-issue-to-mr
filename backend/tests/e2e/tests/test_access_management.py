@@ -15,7 +15,6 @@ import pytest
 from playwright.sync_api import Page, expect
 
 
-
 @pytest.mark.access
 @pytest.mark.serial  # Modifies shared user/role state; requires serial execution.
 class TestAccessManagement:
@@ -40,7 +39,7 @@ class TestAccessManagement:
             """,
             (password_hash,),
         )
-        yield
+        return
 
     def _change_viewer_role(self, page: Page) -> None:
         """Helper: find the test_viewer card, change role to trigger dirty state."""
@@ -392,7 +391,7 @@ class TestAccessManagementInteractions:
         logged_in_page.goto("/access-management")
         logged_in_page.wait_for_load_state("networkidle")
 
-        user_cards = logged_in_page.get_by_test_id("access-management-user-card")
+        logged_in_page.get_by_test_id("access-management-user-card")
         logged_in_page.wait_for_selector(
             "[data-testid='access-management-user-card']", timeout=10000
         )

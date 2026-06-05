@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ.setdefault("CONFIG_ENCRYPTION_KEY", "unit-test-key")
 
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 
@@ -78,10 +78,11 @@ class TestConsoleLogBackfill(unittest.IsolatedAsyncioTestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     async def test_backfill_adds_missing_chunks_when_cursor_behind(self):
-        from app.core.worker_event_projector import WorkerEventProjector
-        from app.core.task_log_payloads import append_raw_log_chunk
-        from app.models import TaskIngestCursor, TaskRawLogChunk
         from sqlalchemy import select
+
+        from app.core.task_log_payloads import append_raw_log_chunk
+        from app.core.worker_event_projector import WorkerEventProjector
+        from app.models import TaskIngestCursor, TaskRawLogChunk
 
         task_id = 42
         console_content = (
@@ -92,7 +93,7 @@ class TestConsoleLogBackfill(unittest.IsolatedAsyncioTestCase):
             "line 5: task completed\n"
         )
 
-        archive_path = _create_archive(self.temp_dir, task_id, console_content)
+        _create_archive(self.temp_dir, task_id, console_content)
 
         projector = WorkerEventProjector(sanitize_sensitive_data=lambda x: x)
 
@@ -112,7 +113,6 @@ class TestConsoleLogBackfill(unittest.IsolatedAsyncioTestCase):
             await db.commit()
 
         # Patch archive path
-        original_finalize_path = None
         with unittest.mock.patch(
             "app.core.worker_event_projector._ARCHIVE_STORE", self.temp_dir
         ):
@@ -134,15 +134,16 @@ class TestConsoleLogBackfill(unittest.IsolatedAsyncioTestCase):
             assert text == console_content
 
     async def test_backfill_skips_when_cursor_already_caught_up(self):
-        from app.core.worker_event_projector import WorkerEventProjector
-        from app.core.task_log_payloads import append_raw_log_chunk
-        from app.models import TaskIngestCursor, TaskRawLogChunk
         from sqlalchemy import select
+
+        from app.core.task_log_payloads import append_raw_log_chunk
+        from app.core.worker_event_projector import WorkerEventProjector
+        from app.models import TaskIngestCursor, TaskRawLogChunk
 
         task_id = 43
         console_content = "complete log\n"
 
-        archive_path = _create_archive(self.temp_dir, task_id, console_content)
+        _create_archive(self.temp_dir, task_id, console_content)
 
         projector = WorkerEventProjector(sanitize_sensitive_data=lambda x: x)
 
@@ -178,9 +179,10 @@ class TestConsoleLogBackfill(unittest.IsolatedAsyncioTestCase):
             assert len(chunks) == 1  # no new chunks added
 
     async def test_backfill_noop_when_archive_missing(self):
+        from sqlalchemy import select
+
         from app.core.worker_event_projector import WorkerEventProjector
         from app.models import TaskIngestCursor, TaskRawLogChunk
-        from sqlalchemy import select
 
         task_id = 44
         projector = WorkerEventProjector(sanitize_sensitive_data=lambda x: x)
@@ -232,9 +234,10 @@ class TestEventJsonlBackfill(unittest.IsolatedAsyncioTestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     async def test_backfill_projects_missing_event_records(self):
+        from sqlalchemy import select
+
         from app.core.worker_event_projector import WorkerEventProjector
         from app.models import TaskIngestCursor, TaskLog
-        from sqlalchemy import select
 
         task_id = 50
         event_lines = [
@@ -242,7 +245,7 @@ class TestEventJsonlBackfill(unittest.IsolatedAsyncioTestCase):
             json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "changes applied"}]}}),
             json.dumps({"type": "result", "subtype": "success", "is_error": False}),
         ]
-        full_text = "".join(line + "\n" for line in event_lines)
+        "".join(line + "\n" for line in event_lines)
         first_line = event_lines[0] + "\n"
 
         _create_archive_with_event_jsonl(self.temp_dir, task_id, event_lines)
@@ -279,9 +282,10 @@ class TestEventJsonlBackfill(unittest.IsolatedAsyncioTestCase):
             assert metadata["payload_id"] is not None
 
     async def test_backfill_event_jsonl_noop_when_cursor_caught_up(self):
+        from sqlalchemy import select
+
         from app.core.worker_event_projector import WorkerEventProjector
         from app.models import TaskIngestCursor, TaskLog
-        from sqlalchemy import select
 
         task_id = 51
         event_lines = [
@@ -324,9 +328,10 @@ class TestEventJsonlBackfill(unittest.IsolatedAsyncioTestCase):
 
     async def test_backfill_projects_resumed_session_events_past_cursor(self):
         """When system/init was already ingested, resumed-session events still get projected."""
+        from sqlalchemy import select
+
         from app.core.worker_event_projector import WorkerEventProjector
         from app.models import TaskIngestCursor, TaskLog
-        from sqlalchemy import select
 
         task_id = 53
         event_lines = [
@@ -375,9 +380,10 @@ class TestEventJsonlBackfill(unittest.IsolatedAsyncioTestCase):
             assert len(text_logs) == 1
 
     async def test_backfill_event_jsonl_noop_when_archive_missing(self):
+        from sqlalchemy import select
+
         from app.core.worker_event_projector import WorkerEventProjector
         from app.models import TaskIngestCursor, TaskLog
-        from sqlalchemy import select
 
         task_id = 52
         projector = WorkerEventProjector(sanitize_sensitive_data=lambda x: x)

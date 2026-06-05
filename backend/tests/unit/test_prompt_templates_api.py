@@ -12,13 +12,13 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app.api.prompt_templates import (
+    PromptTemplateCreate,
+    PromptTemplateUpdate,
     create_prompt_template,
     delete_prompt_template,
     get_prompt_template,
     list_prompt_templates,
     update_prompt_template,
-    PromptTemplateCreate,
-    PromptTemplateUpdate,
 )
 from app.models import PromptTemplate
 

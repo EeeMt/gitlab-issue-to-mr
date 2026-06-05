@@ -1,11 +1,9 @@
 """Docker Engine HTTP API client with TLS support."""
 
-import base64
 import logging
-from typing import Any, BinaryIO, Optional
+from typing import Any, BinaryIO
 
 import docker
-from docker.client import DockerClient
 from docker.models.containers import Container
 
 from app.config import get_settings
@@ -56,7 +54,7 @@ class DockerClientWrapper:
         try:
             self.client.images.pull(image)
             logger.info(f"Image pulled: {image}")
-        except Exception as e:
+        except Exception:
             # If pull fails (e.g., local image, no registry), try to use existing
             try:
                 self.client.images.get(image)
@@ -69,11 +67,11 @@ class DockerClientWrapper:
         self,
         image: str,
         command: str,
-        environment: Optional[dict[str, str]] = None,
-        volumes: Optional[dict[str, dict[str, str]]] = None,
-        working_dir: Optional[str] = None,
-        network: Optional[str] = None,
-        name: Optional[str] = None,
+        environment: dict[str, str] | None = None,
+        volumes: dict[str, dict[str, str]] | None = None,
+        working_dir: str | None = None,
+        network: str | None = None,
+        name: str | None = None,
     ) -> Container:
         """Create and start a Docker container.
 
@@ -172,7 +170,7 @@ class DockerClientWrapper:
         """
         return container.logs(stdout=True, stderr=True, follow=follow)
 
-    def read_file_from_container(self, container: Any, container_path: str) -> Optional[bytes]:
+    def read_file_from_container(self, container: Any, container_path: str) -> bytes | None:
         """Read a single file from a (possibly stopped) container via the Docker API.
 
         Uses container.get_archive() which works with both local and remote Docker daemons,
@@ -224,7 +222,7 @@ class DockerClientWrapper:
 
 
 # Singleton instance
-_docker_client: Optional[DockerClientWrapper] = None
+_docker_client: DockerClientWrapper | None = None
 
 
 def get_docker_client() -> DockerClientWrapper:

@@ -12,6 +12,8 @@ from sqlalchemy.pool import StaticPool
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from app.config import get_settings  # noqa: E402
+from app.core.config_crypto import encrypt_config_secret  # noqa: E402
 from app.core.worker import WorkerExecutor  # noqa: E402
 from app.core.worker_environment_variables import (  # noqa: E402
     RESERVED_WORKER_ENVIRONMENT_KEYS,
@@ -19,13 +21,11 @@ from app.core.worker_environment_variables import (  # noqa: E402
     deserialize_worker_environment_variable_value,
     list_worker_environment_variables,
     replace_worker_environment_variables,
+    serialize_worker_environment_variable_for_api,
     serialize_worker_environment_variable_for_runtime,
     serialize_worker_environment_variable_value,
-    serialize_worker_environment_variable_for_api,
     validate_worker_environment_variable_key,
 )
-from app.core.config_crypto import encrypt_config_secret  # noqa: E402
-from app.config import get_settings  # noqa: E402
 from app.models import WorkerEnvironmentVariable  # noqa: E402
 
 

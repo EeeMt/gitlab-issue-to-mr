@@ -9,8 +9,8 @@ from fastapi import HTTPException
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from app.api._validators import _normalize_updates, _validate_config_value
 from app.api.config import _serialize_effective_config
-from app.api._validators import _validate_config_value, _normalize_updates
 from app.api.mattermost import MattermostNotificationProfileInput
 from app.api.project_webhooks import (
     _build_gitlab_project_webhook_status_response,
@@ -332,14 +332,15 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 
 from unittest.mock import AsyncMock, MagicMock, patch
+
 from fastapi.testclient import TestClient
 
 
 def _make_config_admin_client():
     """Build a TestClient with admin auth and DB overridden for config endpoints."""
-    from app.main import app
     from app.database import get_db
     from app.dependencies.auth import require_admin_user, require_authenticated_user
+    from app.main import app
 
     mock_db = MagicMock()
     mock_result = MagicMock()
@@ -384,7 +385,7 @@ class GetConfigEndpointTests(unittest.TestCase):
 
     def test_get_config_returns_200_and_config_structure(self):
         """GET /api/config should return 200 with the full config response."""
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock, patch
         client, app, mock_db = _make_config_admin_client()
 
         with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
@@ -419,7 +420,7 @@ class ResetConfigEndpointTests(unittest.TestCase):
 
     def test_reset_config_returns_200(self):
         """POST /api/config/reset should return 200 and the reset config."""
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock, patch
         client, app, mock_db = _make_config_admin_client()
 
         with patch("app.api.config.reset_all_runtime_config_overrides", new=AsyncMock()):
@@ -453,7 +454,7 @@ class UpdateConfigEndpointTests(unittest.TestCase):
 
     def test_update_config_with_empty_payload_returns_200(self):
         """PATCH /api/config with empty payload should return 200."""
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock, patch
         client, app, mock_db = _make_config_admin_client()
 
         with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
@@ -465,7 +466,7 @@ class UpdateConfigEndpointTests(unittest.TestCase):
 
     def test_update_config_with_runtime_update(self):
         """PATCH /api/config with runtime changes should save overrides and return config."""
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock, patch
         client, app, mock_db = _make_config_admin_client()
 
         with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
@@ -524,7 +525,7 @@ class UpdateConfigEndpointTests(unittest.TestCase):
 
     def test_update_config_with_auth_update(self):
         """PATCH /api/config with auth changes should save overrides and return config."""
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock, patch
         client, app, mock_db = _make_config_admin_client()
 
         with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):

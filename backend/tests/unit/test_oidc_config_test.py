@@ -4,17 +4,18 @@
 import os
 import sys
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from fastapi.testclient import TestClient
 from starlette.requests import Request
-from app.main import app
-from app.models import User
+
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_context
+from app.main import app
+from app.models import User
 
 
 def create_mock_user():

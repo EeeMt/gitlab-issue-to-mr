@@ -6,38 +6,14 @@ import logging
 import os
 import time
 from datetime import datetime, timedelta
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import delete, func, or_, select, false
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.config import get_effective_settings
-from app.core.docker_client import get_docker_client
-from app.core.issue_execution_locks import release_issue_execution_lock
-from app.core.projects import build_project_lookup, get_project_metadata
-from app.core.scheduling import resolve_scheduled_at
-from app.core.task_helpers import _serialize_task, maybe_update_issue_status
-from app.core.utcnow import utcnow
-from app.core.usage_limits import (
-    UsageLimitExceeded,
-    get_usage_quota_service,
-    usage_limit_exceeded_detail,
-)
-from app.core.worker_workspace import build_issue_workspace_paths, remove_issue_workspace
-from app.database import get_db, AsyncSessionLocal
-from app.dependencies.auth import get_optional_current_user, require_page_access
-from app.dependencies.project_access import (
-    ProjectAccessScope,
-    require_project_access,
-    require_project_access_scope,
-)
-from app.models import AIProvider, Issue, Task, TaskLog, TaskStatus, User
-
-from app.api.task_schemas import CreateTaskRequest, RescheduleTaskRequest, RetryTaskRequest, UpdateTaskRequest
 from app.api.task_operations import (
     get_task_with_access_check,
     notify_task_cancelled,
@@ -47,9 +23,36 @@ from app.api.task_operations import (
     validate_scheduled_datetime_in_future,
     validate_task_status_for_cancel,
     validate_task_status_for_execute,
-    validate_task_status_for_retry,
     validate_task_status_for_reschedule,
+    validate_task_status_for_retry,
 )
+from app.api.task_schemas import (
+    CreateTaskRequest,
+    RescheduleTaskRequest,
+    RetryTaskRequest,
+    UpdateTaskRequest,
+)
+from app.config import get_effective_settings
+from app.core.docker_client import get_docker_client
+from app.core.issue_execution_locks import release_issue_execution_lock
+from app.core.projects import build_project_lookup, get_project_metadata
+from app.core.scheduling import resolve_scheduled_at
+from app.core.task_helpers import _serialize_task, maybe_update_issue_status
+from app.core.usage_limits import (
+    UsageLimitExceeded,
+    get_usage_quota_service,
+    usage_limit_exceeded_detail,
+)
+from app.core.utcnow import utcnow
+from app.core.worker_workspace import build_issue_workspace_paths, remove_issue_workspace
+from app.database import AsyncSessionLocal, get_db
+from app.dependencies.auth import get_optional_current_user, require_page_access
+from app.dependencies.project_access import (
+    ProjectAccessScope,
+    require_project_access,
+    require_project_access_scope,
+)
+from app.models import AIProvider, Issue, Task, TaskLog, TaskStatus, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -61,20 +64,20 @@ SORT_ORDERS = {"asc", "desc"}
 
 @router.get("/tasks")
 async def list_tasks(
-    status: Optional[str] = None,
-    project_id: Optional[str] = None,
-    issue_id: Optional[int] = None,
-    initiator_username: Optional[str] = None,
-    priority: Optional[str] = None,
-    has_mr: Optional[bool] = None,
-    search: Optional[str] = None,
-    created_after: Optional[str] = None,
-    created_before: Optional[str] = None,
-    scheduled_after: Optional[str] = None,
-    scheduled_before: Optional[str] = None,
-    sort_by: Optional[str] = None,
-    sort_order: Optional[str] = None,
-    page: Optional[int] = None,
+    status: str | None = None,
+    project_id: str | None = None,
+    issue_id: int | None = None,
+    initiator_username: str | None = None,
+    priority: str | None = None,
+    has_mr: bool | None = None,
+    search: str | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
+    scheduled_after: str | None = None,
+    scheduled_before: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str | None = None,
+    page: int | None = None,
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
@@ -290,8 +293,8 @@ async def list_tasks(
 
 @router.get("/tasks/scheduled")
 async def list_scheduled_tasks(
-    project_id: Optional[int] = None,
-    hour_start: Optional[str] = Query(None, description="ISO datetime; filter tasks in this 1-hour window"),
+    project_id: int | None = None,
+    hour_start: str | None = Query(None, description="ISO datetime; filter tasks in this 1-hour window"),
     my: bool = Query(False, description="When true, restrict to tasks initiated by the current user"),
     db: AsyncSession = Depends(get_db),
     _current_user=Depends(require_page_access("schedule_overview")),
@@ -846,7 +849,7 @@ async def update_task(
     task_id: int,
     request: UpdateTaskRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Update editable fields of a task that has not yet started.
@@ -937,7 +940,7 @@ async def update_task(
 async def cancel_task(
     task_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Cancel a task."""
@@ -976,7 +979,7 @@ async def cancel_task(
 
 class OverrideStatusRequest(BaseModel):
     status: str  # "completed" or "failed"
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 @router.post("/tasks/{task_id}/override-status")
@@ -985,7 +988,7 @@ async def override_task_status(
     request: OverrideStatusRequest,
     db: AsyncSession = Depends(get_db),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
 ) -> dict:
     """Manually override a terminal task's status (completed <-> failed)."""
     task = await get_task_with_access_check(task_id, db, access_scope, current_user)
@@ -1020,9 +1023,9 @@ async def override_task_status(
 @router.post("/tasks/{task_id}/retry")
 async def retry_task(
     task_id: int,
-    request: Optional[RetryTaskRequest] = None,
+    request: RetryTaskRequest | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Retry a failed or cancelled task by creating a new task with the same prompt.
@@ -1046,7 +1049,7 @@ async def retry_task(
             detail=f"An active retry task (#{existing_retry.id}) already exists for task #{task_id}",
         )
 
-    scheduled_at: Optional[datetime] = None
+    scheduled_at: datetime | None = None
     if request and request.scheduled_datetime is not None:
         scheduled_at = validate_scheduled_datetime_in_future(request.scheduled_datetime)
 
@@ -1122,7 +1125,7 @@ async def retry_task(
 async def execute_task(
     task_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Trigger immediate execution of a pending task."""
@@ -1145,7 +1148,7 @@ async def reschedule_task(
     task_id: int,
     request: RescheduleTaskRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Update the scheduled execution time for an existing pending scheduled task."""
@@ -1181,7 +1184,7 @@ async def reschedule_task(
 async def create_task(
     request: CreateTaskRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Create a new task under an Issue.
@@ -1286,7 +1289,7 @@ async def create_task(
 async def get_task_workspace_status(
     task_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     task = await get_task_with_access_check(task_id, db, access_scope, current_user)
@@ -1315,7 +1318,7 @@ async def get_task_workspace_status(
 async def delete_task_workspace(
     task_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     task = await get_task_with_access_check(task_id, db, access_scope, current_user)

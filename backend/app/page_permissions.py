@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from app.config import Settings, get_effective_settings
 from app.models import User
 
@@ -16,19 +14,19 @@ PAGE_PERMISSION_CONFIG_KEYS: dict[str, str] = {
 
 
 def get_page_permissions(
-    user: Optional[User],
-    settings: Optional[Settings] = None,
+    user: User | None,
+    settings: Settings | None = None,
 ) -> dict[str, bool]:
     """Resolve page permissions for the current user."""
     settings = settings or get_effective_settings()
     if not settings.oidc_enabled:
-        return {page_key: True for page_key in PAGE_PERMISSION_CONFIG_KEYS}
+        return dict.fromkeys(PAGE_PERMISSION_CONFIG_KEYS, True)
 
     if user is None:
-        return {page_key: False for page_key in PAGE_PERMISSION_CONFIG_KEYS}
+        return dict.fromkeys(PAGE_PERMISSION_CONFIG_KEYS, False)
 
     if user.platform_role == "platform_admin":
-        return {page_key: True for page_key in PAGE_PERMISSION_CONFIG_KEYS}
+        return dict.fromkeys(PAGE_PERMISSION_CONFIG_KEYS, True)
 
     permissions: dict[str, bool] = {}
     for page_key, config_key in PAGE_PERMISSION_CONFIG_KEYS.items():
@@ -38,8 +36,8 @@ def get_page_permissions(
 
 def can_access_page(
     page_key: str,
-    user: Optional[User],
-    settings: Optional[Settings] = None,
+    user: User | None,
+    settings: Settings | None = None,
 ) -> bool:
     """Check whether the user can access a page."""
     permissions = get_page_permissions(user, settings)

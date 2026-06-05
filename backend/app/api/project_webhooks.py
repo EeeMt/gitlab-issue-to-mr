@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -49,13 +49,13 @@ class GitLabProjectWebhookStatusResponse(BaseModel):
     project_path_with_namespace: str
     target_webhook_url: str
     status: str
-    status_detail: Optional[str] = None
+    status_detail: str | None = None
     hook_found: bool
-    hook_id: Optional[int] = None
-    hook_url: Optional[str] = None
-    note_events: Optional[bool] = None
-    merge_requests_events: Optional[bool] = None
-    enable_ssl_verification: Optional[bool] = None
+    hook_id: int | None = None
+    hook_url: str | None = None
+    note_events: bool | None = None
+    merge_requests_events: bool | None = None
+    enable_ssl_verification: bool | None = None
     managed_secret_configured: bool
     global_secret_fallback_configured: bool
     secret_mode: str
@@ -93,8 +93,8 @@ def _build_gitlab_project_webhook_status_response(
     target_webhook_url: str,
     managed_secret_configured: bool,
     global_secret_fallback_configured: bool,
-    matched_hook: Optional[dict[str, Any]] = None,
-    inspection_error: Optional[str] = None,
+    matched_hook: dict[str, Any] | None = None,
+    inspection_error: str | None = None,
 ) -> GitLabProjectWebhookStatusResponse:
     secret_mode = "project" if managed_secret_configured else "global_fallback" if global_secret_fallback_configured else "none"
     hook_found = matched_hook is not None
@@ -247,8 +247,8 @@ async def list_gitlab_project_webhook_statuses(
 
         for project in projects:
             project_id = int(project["id"])
-            inspection_error: Optional[str] = None
-            matched_hook: Optional[dict[str, Any]] = None
+            inspection_error: str | None = None
+            matched_hook: dict[str, Any] | None = None
 
             try:
                 hooks = client.get_project_hooks(project_id)

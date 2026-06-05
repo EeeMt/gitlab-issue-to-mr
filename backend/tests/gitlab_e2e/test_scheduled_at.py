@@ -26,14 +26,14 @@ if os.path.exists(env_file):
                 key, value = line.split("=", 1)
                 os.environ.setdefault(key, value)
 
-import time
+import argparse
 import logging
 import subprocess
-import requests
-import argparse
-import pytest
+import time
 from datetime import UTC, datetime, timedelta
-from typing import Optional
+
+import pytest
+import requests
 
 # Configuration
 GITLAB_URL = os.getenv("GITLAB_URL", "http://192.168.50.129:8080")
@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 
 # ─── Authenticated backend session ─────────────────────────────────────────────
 
-_be_session: Optional[requests.Session] = None
+_be_session: requests.Session | None = None
 
 
 def _get_be_session() -> requests.Session:
@@ -185,7 +185,7 @@ def trigger_webhook(note_id: int, comment_body: str, issue_iid: int, issue_id: i
     return response
 
 
-def get_task_by_issue_iid(issue_iid: int) -> Optional[dict]:
+def get_task_by_issue_iid(issue_iid: int) -> dict | None:
     """Get task from backend by issue_iid."""
     response = _be("GET", "/api/tasks", params={"project_id": TEST_PROJECT_ID})
     if response.status_code != 200:
@@ -198,7 +198,7 @@ def get_task_by_issue_iid(issue_iid: int) -> Optional[dict]:
     return None
 
 
-def get_task(task_id: int) -> Optional[dict]:
+def get_task(task_id: int) -> dict | None:
     """Get task by ID."""
     response = _be("GET", f"/api/tasks/{task_id}")
     if response.status_code != 200:
@@ -226,7 +226,7 @@ def execute_task_now(task_id: int) -> bool:
     return True
 
 
-def wait_for_mr(issue_iid: int, timeout: int = 300) -> Optional[dict]:
+def wait_for_mr(issue_iid: int, timeout: int = 300) -> dict | None:
     """Wait for MR to be created."""
     start_time = time.time()
     while time.time() - start_time < timeout:
@@ -359,7 +359,7 @@ def test_scheduled_at():
             has_scheduled = task.get("scheduled_at") is not None
 
             if tc["expected_scheduled"] and not has_scheduled:
-                logger.error(f"FAIL: Expected scheduled_at to be set, but got None")
+                logger.error("FAIL: Expected scheduled_at to be set, but got None")
                 failed += 1
             elif tc.get("use_delay"):
                 # For delay test, verify delay is working
@@ -405,7 +405,7 @@ def test_scheduled_at():
                     logger.info(f"✅ PASS: {test_name}")
                     passed += 1
                 else:
-                    logger.error(f"FAIL: scheduled_at not set")
+                    logger.error("FAIL: scheduled_at not set")
                     failed += 1
 
                 # Execute immediately for cleanup

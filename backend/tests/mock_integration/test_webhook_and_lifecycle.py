@@ -11,11 +11,9 @@ import pytest
 
 from .conftest import (
     BACKEND_URL,
-    MOCK_SERVICES_URL,
     create_issue_and_task,
     wait_for_task_status,
 )
-
 
 # ── Runtime Config API ───────────────────────────────────────────────
 

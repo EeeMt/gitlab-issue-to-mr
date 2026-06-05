@@ -5,11 +5,11 @@ Test: MR Change Stats - Get and save MR change statistics after commit.
 
 import os
 import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
-from unittest.mock import MagicMock, patch, AsyncMock
-from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class MockContainer:

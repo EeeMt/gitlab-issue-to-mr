@@ -9,12 +9,11 @@ Tests for the TaskView page functionality including:
 """
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
 from playwright.sync_api import Page, expect
-
 
 
 @pytest.mark.task_view
@@ -231,7 +230,7 @@ def test_task_id(logged_in_page, backend_url):
     one GitLab project to be configured. Skips the test gracefully if no
     projects are available or task creation fails.
     """
-    from conftest import api_get_first_project, api_create_issue
+    from conftest import api_create_issue, api_get_first_project
 
     cookies = {c["name"]: c["value"] for c in logged_in_page.context.cookies()}
     project = api_get_first_project(backend_url, cookies)
@@ -239,7 +238,7 @@ def test_task_id(logged_in_page, backend_url):
 
     # Create a pending task scheduled far in future so the scheduler
     # won't pick it up — keeps task in PENDING for button-click tests.
-    future_dt = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    future_dt = (datetime.now(UTC) + timedelta(hours=24)).isoformat()
     with httpx.Client(base_url=backend_url, timeout=15, cookies=cookies) as client:
         resp = client.post(
             "/api/tasks",

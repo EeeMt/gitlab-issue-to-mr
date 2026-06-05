@@ -18,14 +18,13 @@ Usage:
     pytest tests/gitlab_e2e/test_slot_capacity_e2e.py -v
 """
 
-import os
-import sys
-import time
 import logging
-import requests
-import pytest
+import os
+import time
 from datetime import UTC, datetime, timedelta
-from typing import Optional
+
+import pytest
+import requests
 
 # ---------------------------------------------------------------------------
 # Load .env file (same pattern as test_scheduled_at.py)
@@ -117,7 +116,7 @@ skip_if_unavailable = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 # Authenticated backend session (singleton)
 # ---------------------------------------------------------------------------
-_be_session: Optional[requests.Session] = None
+_be_session: requests.Session | None = None
 
 
 def _get_be_session() -> requests.Session:

@@ -8,6 +8,7 @@ Tests for the application shell components including:
 """
 
 import re
+
 import pytest
 from playwright.sync_api import Page, expect
 

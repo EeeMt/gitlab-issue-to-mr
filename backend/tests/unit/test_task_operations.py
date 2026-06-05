@@ -10,7 +10,7 @@ Covers uncovered lines in app/api/task_operations.py:
 import os
 import sys
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -70,8 +70,8 @@ class TestNotifyTaskRetried(unittest.IsolatedAsyncioTestCase):
         from app.api.task_operations import notify_task_retried
 
         task = _make_task(status=TaskStatus.PENDING)
-        prev_dt = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
-        new_dt = datetime(2025, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+        prev_dt = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        new_dt = datetime(2025, 1, 2, 12, 0, 0, tzinfo=UTC)
         await notify_task_retried(task, previous_scheduled_at=prev_dt, scheduled_at=new_dt)
         mock_notify.assert_awaited_once()
 
@@ -97,7 +97,7 @@ class TestNotifyTaskExecuteNow(unittest.IsolatedAsyncioTestCase):
         from app.api.task_operations import notify_task_execute_now
 
         task = _make_task(status=TaskStatus.QUEUED)
-        prev_dt = datetime(2025, 6, 1, 8, 0, 0, tzinfo=timezone.utc)
+        prev_dt = datetime(2025, 6, 1, 8, 0, 0, tzinfo=UTC)
         await notify_task_execute_now(task, previous_scheduled_at=prev_dt)
         mock_notify.assert_awaited_once()
 
@@ -123,8 +123,8 @@ class TestNotifyTaskRescheduled(unittest.IsolatedAsyncioTestCase):
         from app.api.task_operations import notify_task_rescheduled
 
         task = _make_task(status=TaskStatus.PENDING)
-        prev_dt = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
-        new_dt = datetime(2025, 1, 3, 14, 0, 0, tzinfo=timezone.utc)
+        prev_dt = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        new_dt = datetime(2025, 1, 3, 14, 0, 0, tzinfo=UTC)
         await notify_task_rescheduled(task, previous_scheduled_at=prev_dt, scheduled_at=new_dt)
         mock_notify.assert_awaited_once()
 
@@ -135,7 +135,7 @@ class TestNotifyTaskRescheduled(unittest.IsolatedAsyncioTestCase):
 
         mock_notify.side_effect = ConnectionError("Network failure")
         task = _make_task(task_id=88, status=TaskStatus.PENDING)
-        new_dt = datetime(2025, 2, 1, 10, 0, 0, tzinfo=timezone.utc)
+        new_dt = datetime(2025, 2, 1, 10, 0, 0, tzinfo=UTC)
 
         # Should NOT raise
         await notify_task_rescheduled(task, previous_scheduled_at=None, scheduled_at=new_dt)

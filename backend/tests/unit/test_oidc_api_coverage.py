@@ -25,17 +25,17 @@ sys.path.insert(
 
 from fastapi.testclient import TestClient
 
-from app.main import app
-from app.models import User
+from app.api.oidc import _build_preview_settings, _normalize_updates
+from app.core.config_crypto import ConfigEncryptionError
+from app.core.oidc import OIDCConfigurationError
 from app.database import get_db
 from app.dependencies.auth import (
     require_admin_user,
     require_authenticated_context,
     require_authenticated_user,
 )
-from app.api.oidc import _normalize_updates, _build_preview_settings
-from app.core.oidc import OIDCConfigurationError
-from app.core.config_crypto import ConfigEncryptionError
+from app.main import app
+from app.models import User
 
 # ---------------------------------------------------------------------------
 # Test helpers

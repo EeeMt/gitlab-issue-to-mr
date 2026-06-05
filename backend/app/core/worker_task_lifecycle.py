@@ -5,14 +5,17 @@ import json
 import logging
 import os
 import time
-from typing import Any, Optional
+from typing import Any
 
 from gitlab import Gitlab
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utcnow import utcnow
-from app.core.worker_environment_variables import build_worker_environment_map, list_worker_environment_variables
+from app.core.worker_environment_variables import (
+    build_worker_environment_map,
+    list_worker_environment_variables,
+)
 from app.database import AsyncSessionLocal
 from app.models import Issue, Task, TaskLog, TaskStatus
 
@@ -97,8 +100,8 @@ async def prepare_container_inputs(
     worker,
     db: AsyncSession,
     task: Task,
-    issue: Optional[Issue],
-    mr_iid: Optional[int],
+    issue: Issue | None,
+    mr_iid: int | None,
 ):
     target_branch = issue.target_branch if issue else None
     provider = await worker._resolve_provider(db, task)
@@ -131,7 +134,7 @@ async def mark_task_running_and_commit(db: AsyncSession, task: Task) -> None:
     await db.commit()
 
 
-def resolve_had_existing_mr(issue: Optional[Issue]) -> bool:
+def resolve_had_existing_mr(issue: Issue | None) -> bool:
     return (issue.merge_request_iid is not None) if issue else False
 
 
@@ -141,7 +144,7 @@ def resolve_sudo_gitlab(
     task_id: int,
     *,
     resume: bool = False,
-) -> Optional[Gitlab]:
+) -> Gitlab | None:
     if not task.initiator_gitlab_user_id or not gitlab_client.settings.gitlab_admin_token:
         return None
     try:
@@ -154,9 +157,9 @@ def resolve_sudo_gitlab(
 
 async def persist_issue_mr_if_changed(
     db: AsyncSession,
-    issue: Optional[Issue],
-    mr_iid: Optional[int],
-    mr_web_url: Optional[str],
+    issue: Issue | None,
+    mr_iid: int | None,
+    mr_web_url: str | None,
 ) -> None:
     if issue and mr_iid and mr_iid != issue.merge_request_iid:
         logger.info(f"[Issue {issue.id}] Storing MR IID !{mr_iid} → DB")
@@ -208,8 +211,8 @@ async def create_execute_container(
     *,
     settings: Any,
     task: Task,
-    issue: Optional[Issue],
-    sudo_gl: Optional[Gitlab],
+    issue: Issue | None,
+    sudo_gl: Gitlab | None,
 ):
     task_id = task.id
 
@@ -311,7 +314,7 @@ async def fail_execute_task(
     error: Exception,
     *,
     had_existing_mr: bool,
-    issue: Optional[Issue] = None,
+    issue: Issue | None = None,
     container: Any = None,
 ) -> bool:
     logger.error(f"[Task {task.id}] Task failed: {error}")
@@ -361,7 +364,7 @@ async def fail_resume_task(
     error: Exception,
     *,
     had_existing_mr: bool,
-    issue: Optional[Issue] = None,
+    issue: Issue | None = None,
 ) -> bool:
     logger.exception(f"[Task {task_id}] Resume failed with exception: {error}")
     had_completed_at = task.completed_at is not None
@@ -389,7 +392,7 @@ async def fail_resume_task(
 async def send_failure_alert(
     worker,
     task: Task,
-    issue: Optional[Issue] = None,
+    issue: Issue | None = None,
     *,
     get_settings_fn,
     get_ssl_verify_fn,
@@ -432,7 +435,7 @@ async def send_success_notifications(
     task: Task,
     *,
     had_existing_mr: bool,
-    issue: Optional[Issue] = None,
+    issue: Issue | None = None,
     notify_task_event_fn=None,
     completion_event=None,
     session_factory=None,
@@ -448,7 +451,7 @@ async def send_failure_notifications(
     task: Task,
     *,
     had_existing_mr: bool,
-    issue: Optional[Issue] = None,
+    issue: Issue | None = None,
     notify_task_event_fn=None,
     retry_scheduled_event=None,
     failed_event=None,
@@ -481,11 +484,11 @@ async def monitor_container_run(
     *,
     db: AsyncSession,
     task: Task,
-    issue: Optional[Issue],
+    issue: Issue | None,
     container: Any,
     settings: Any,
     had_existing_mr: bool,
-    sudo_gl: Optional[Gitlab],
+    sudo_gl: Gitlab | None,
     resume_prefix: str = "",
 ) -> bool:
     session_factory = getattr(worker, "_session_factory", None) or AsyncSessionLocal

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -11,14 +10,14 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.session import revoke_user_sessions
-from app.core.utcnow import utcnow
 from app.core.user_roles import (
     PLATFORM_ROLE_ADMIN,
     ROLE_SOURCE_MANUAL,
+    USER_STATE_DISABLED,
     VALID_PLATFORM_ROLES,
     VALID_USER_STATES,
-    USER_STATE_DISABLED,
 )
+from app.core.utcnow import utcnow
 from app.database import get_db
 from app.dependencies.auth import require_admin_user
 from app.models import User, UserSession
@@ -28,24 +27,24 @@ router = APIRouter()
 
 class AdminUserSummary(BaseModel):
     id: int
-    gitlab_user_id: Optional[int]
+    gitlab_user_id: int | None
     username: str
-    display_name: Optional[str]
-    email: Optional[str]
-    avatar_url: Optional[str]
+    display_name: str | None
+    email: str | None
+    avatar_url: str | None
     platform_role: str
     platform_role_source: str
     state: str
-    last_login_at: Optional[datetime]
+    last_login_at: datetime | None
     created_at: datetime
     active_session_count: int
-    last_session_seen_at: Optional[datetime]
+    last_session_seen_at: datetime | None
     is_current_user: bool
 
 
 class AdminUserUpdateRequest(BaseModel):
-    platform_role: Optional[str] = None
-    state: Optional[str] = None
+    platform_role: str | None = None
+    state: str | None = None
 
 
 class RevokeUserSessionsResponse(BaseModel):
@@ -57,7 +56,7 @@ def _serialize_admin_user(
     user: User,
     *,
     active_session_count: int,
-    last_session_seen_at: Optional[datetime],
+    last_session_seen_at: datetime | None,
     current_user_id: int,
 ) -> AdminUserSummary:
     return AdminUserSummary(

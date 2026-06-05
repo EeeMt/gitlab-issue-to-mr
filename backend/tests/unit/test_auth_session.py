@@ -4,9 +4,8 @@
 import os
 import sys
 import unittest
-from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
-from unittest.mock import patch
+from datetime import timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -14,11 +13,11 @@ from app.core.session import (
     _utcnow,
     cleanup_stale_sessions,
     create_user_session,
-    get_user_from_session_token,
     get_gitlab_refresh_token_from_session,
+    get_user_from_session_token,
     hash_session_token,
-    revoke_user_sessions,
     resolve_session_authentication,
+    revoke_user_sessions,
     update_session_gitlab_tokens,
 )
 from app.models import User, UserSession
@@ -234,7 +233,7 @@ class AuthSessionTests(unittest.IsolatedAsyncioTestCase):
         with patch("app.core.session.get_effective_settings", return_value=mock_settings):
             await cleanup_stale_sessions(mock_db)
 
-        compiled_sql = str(
+        str(
             mock_db.execute.await_args.args[0].compile(compile_kwargs={"literal_binds": True})
         )
         # With 7-day retention the cutoff should be within the last 7-8 days

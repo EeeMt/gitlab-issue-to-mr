@@ -13,7 +13,6 @@ from fastapi.testclient import TestClient
 
 from app.models import TaskStatus
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -66,10 +65,10 @@ def _make_task(task_id=1, project_id=1, status=TaskStatus.PENDING):
 
 def _make_client(mock_db):
     """Build a TestClient with all auth and DB dependencies overridden."""
-    from app.main import app
     from app.database import get_db
     from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-    from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+    from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+    from app.main import app
 
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 

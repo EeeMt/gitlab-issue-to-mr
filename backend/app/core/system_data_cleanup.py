@@ -29,7 +29,6 @@ from app.models import (
     WebhookEvent,
 )
 
-
 ACTIVE_TASK_STATUS_VALUES = {
     TaskStatus.PENDING.value,
     TaskStatus.QUEUED.value,

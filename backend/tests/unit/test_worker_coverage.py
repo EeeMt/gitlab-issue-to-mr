@@ -30,14 +30,12 @@ import re
 import subprocess
 import textwrap
 import unittest
-from datetime import datetime
 from pathlib import Path
 from unittest import IsolatedAsyncioTestCase
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
-from app.core.worker import WorkerExecutor, scrub_sensitive_data, sanitize_sensitive_data
-from app.models import Task, TaskStatus, TaskLog
-
+from app.core.worker import WorkerExecutor
+from app.models import Task, TaskLog, TaskStatus
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -80,6 +78,7 @@ def _make_worker(mock_gitlab=None, mock_docker=None):
 def _make_task(**kwargs):
     """Create a Task object with defaults."""
     from unittest.mock import MagicMock
+
     from app.models import AIProvider
 
     # Separate issue-level kwargs
@@ -121,12 +120,12 @@ def _make_task(**kwargs):
             'branch_name',
             f"codify-{defaults['id']}-p{defaults['project_id']}-i{defaults.get('issue_id', 1)}",
         )
-        mock_issue.base_branch = issue_overrides.get('base_branch', None)
+        mock_issue.base_branch = issue_overrides.get('base_branch')
         mock_issue.target_branch = issue_overrides.get('target_branch', 'main')
-        mock_issue.merge_request_iid = issue_overrides.get('merge_request_iid', None)
-        mock_issue.merge_request_url = issue_overrides.get('merge_request_url', None)
-        mock_issue.title = issue_overrides.get('title', None)
-        mock_issue.description = issue_overrides.get('description', None)
+        mock_issue.merge_request_iid = issue_overrides.get('merge_request_iid')
+        mock_issue.merge_request_url = issue_overrides.get('merge_request_url')
+        mock_issue.title = issue_overrides.get('title')
+        mock_issue.description = issue_overrides.get('description')
         mock_issue.claude_session_id = None
         mock_issue.session_storage_path = None
         mock_issue.project_id = defaults['project_id']
@@ -722,14 +721,6 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('CLAUDE_SYSTEM_PROMPT_FILE="/tmp/claude_system_prompt.txt"', content)
         self.assertIn('printf \'%s\' "${APPEND_SYSTEM_PROMPT}" > "${CLAUDE_SYSTEM_PROMPT_FILE}"', content)
         self.assertIn('APPEND_SYSTEM_PROMPT_FILE="${CLAUDE_SYSTEM_PROMPT_FILE}"', content)
-
-    def test_entrypoint_logs_commit_message_generation_steps(self):
-        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
-        content = script.read_text()
-
-        self.assertIn('echo "Generating commit message with Claude..."', content)
-        self.assertIn('echo "Claude commit message generation succeeded"', content)
-        self.assertIn('echo "Claude raw commit message response:"', content)
 
     def test_entrypoint_keeps_runtime_artifacts_outside_worktree_until_after_commit(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
@@ -1436,6 +1427,7 @@ class TestLoadTaskMetadataFiles(unittest.TestCase):
     def test_reads_existing_metadata_files(self):
         """Reads and parses task-metadata.json files that exist."""
         import tempfile
+
         from app.core.worker_gitlab import load_task_metadata_files
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1463,6 +1455,7 @@ class TestLoadTaskMetadataFiles(unittest.TestCase):
     def test_skips_invalid_json(self):
         """Silently skips files with invalid JSON."""
         import tempfile
+
         from app.core.worker_gitlab import load_task_metadata_files
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1587,6 +1580,7 @@ class TestWritePreviousTaskSummariesFile(IsolatedAsyncioTestCase):
 
     async def test_writes_previous_task_summaries_file(self):
         import tempfile
+
         from app.core.worker_gitlab import write_previous_task_summaries_file
 
         with tempfile.TemporaryDirectory() as tmpdir:

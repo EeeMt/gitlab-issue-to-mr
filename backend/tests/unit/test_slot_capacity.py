@@ -15,7 +15,7 @@ import asyncio
 import os
 import sys
 import unittest
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -29,7 +29,6 @@ from app.core.slot_capacity import (
     format_slot_rejection_message,
 )
 from app.models import TaskStatus
-
 
 # ---------------------------------------------------------------------------
 # Helpers (matching project conventions from test_tasks_api.py)
@@ -71,10 +70,10 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
 
 def _make_app_client_with_db(mock_db, extra_overrides=None):
     """Build a TestClient with DB, access scope, and auth overridden."""
-    from app.main import app
     from app.database import get_db
     from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-    from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+    from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+    from app.main import app
 
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
@@ -511,7 +510,7 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        future_dt = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
         with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
             response = client.post("/api/tasks", json=self._make_create_payload(scheduled_datetime=future_dt))
         app.dependency_overrides.clear()
@@ -549,7 +548,7 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        future_dt = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
         with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
             response = client.post("/api/tasks", json=self._make_create_payload(scheduled_datetime=future_dt))
         app.dependency_overrides.clear()
@@ -586,7 +585,7 @@ class CreateTaskSlotCapacityTests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        future_dt = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
         with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
             response = client.post("/api/tasks", json=self._make_create_payload(scheduled_datetime=future_dt))
         app.dependency_overrides.clear()
@@ -663,7 +662,7 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        future_dt = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
 
         with patch("app.core.task_helpers._require_task_operator", return_value=None):
             response = client.post("/api/tasks/80/retry", json={
@@ -711,7 +710,7 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        future_dt = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
 
         with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
@@ -788,11 +787,11 @@ class RetryTaskSlotCapacityTests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        future_dt = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
 
         with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
-                response = client.post("/api/tasks/83/retry", json={
+                client.post("/api/tasks/83/retry", json={
                     "scheduled_datetime": future_dt
                 })
 
@@ -834,7 +833,7 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        future_dt = (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+        future_dt = (datetime.now(UTC) + timedelta(hours=3)).isoformat()
 
         with patch("app.core.task_helpers._require_task_operator", return_value=None):
             response = client.patch("/api/tasks/90/schedule", json={
@@ -866,7 +865,7 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        future_dt = (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+        future_dt = (datetime.now(UTC) + timedelta(hours=3)).isoformat()
 
         with patch("app.api.task_operations.notify_task_rescheduled", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
@@ -898,12 +897,12 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        future_dt = (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+        future_dt = (datetime.now(UTC) + timedelta(hours=3)).isoformat()
 
         with patch("app.api.task_operations.notify_task_rescheduled", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
                 with patch("app.core.projects.get_project_metadata", new_callable=AsyncMock, return_value={}):
-                    response = client.patch("/api/tasks/92/schedule", json={
+                    client.patch("/api/tasks/92/schedule", json={
                         "scheduled_datetime": future_dt
                     })
 
@@ -933,7 +932,7 @@ class RescheduleTaskSlotCapacityTests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        future_dt = (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+        future_dt = (datetime.now(UTC) + timedelta(hours=3)).isoformat()
 
         with patch("app.api.task_operations.notify_task_rescheduled", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):

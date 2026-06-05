@@ -7,7 +7,6 @@ Tests:
 3. Concurrency limiting - respects max_concurrency setting
 """
 
-import asyncio
 import json
 import os
 import sys
@@ -176,7 +175,6 @@ class SchedulerConcurrencyLimitingTests(unittest.IsolatedAsyncioTestCase):
     async def test_get_running_count_returns_correct_count(self) -> None:
         """_get_running_count should query database for RUNNING tasks."""
         from app.scheduler import Scheduler
-        from app.models import TaskStatus
 
         scheduler = Scheduler()
 
@@ -195,7 +193,7 @@ class SchedulerConcurrencyLimitingTests(unittest.IsolatedAsyncioTestCase):
         """Scheduler should check running count before selecting next task."""
         from app.scheduler import Scheduler
 
-        scheduler = Scheduler()
+        Scheduler()
 
         # Simulate max concurrency reached
         running_count = 3
@@ -208,43 +206,6 @@ class SchedulerConcurrencyLimitingTests(unittest.IsolatedAsyncioTestCase):
         running_count = 2
         should_select_task = running_count < max_concurrency
         self.assertTrue(should_select_task)
-
-
-class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
-    """Tests for scheduler crash recovery."""
-
-    async def test_crash_recovery_marks_stuck_tasks_failed(self) -> None:
-        """Crash recovery should mark stuck RUNNING tasks as failed."""
-        from app.scheduler import Scheduler
-        from app.models import TaskStatus
-
-        # This test verifies the logic that stuck tasks should be marked as failed
-        # We test the status transition directly without DB access
-
-        stuck_task = MagicMock()
-        stuck_task.id = 1
-        stuck_task.status = TaskStatus.RUNNING
-
-        # Simulate what crash recovery does (container not found scenario)
-        stuck_task.status = TaskStatus.FAILED
-        stuck_task.error_message = "Task was running when scheduler restarted (container not found)"
-        stuck_task.completed_at = datetime.now(UTC)
-
-        self.assertEqual(stuck_task.status, TaskStatus.FAILED)
-        self.assertIn("container not found", stuck_task.error_message.lower())
-
-    async def test_worker_container_pattern_matching(self) -> None:
-        """Worker containers should match the naming pattern."""
-        from app.scheduler import WORKER_CONTAINER_PATTERN
-
-        # Valid worker container names
-        self.assertTrue(WORKER_CONTAINER_PATTERN.match("codify-1-issue10"))
-        self.assertTrue(WORKER_CONTAINER_PATTERN.match("codify-123-issue789"))
-
-        # Non-worker containers should not match
-        self.assertFalse(WORKER_CONTAINER_PATTERN.match("codify-backend"))
-        self.assertFalse(WORKER_CONTAINER_PATTERN.match("codify-postgres"))
-        self.assertFalse(WORKER_CONTAINER_PATTERN.match("random-container"))
 
 
 class SchedulerTaskExecutionTests(unittest.IsolatedAsyncioTestCase):
@@ -277,10 +238,10 @@ class SchedulerTaskExecutionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_execute_task_updates_task_status(self) -> None:
         """_execute_task should update task status to RUNNING."""
-        from app.scheduler import Scheduler
         from app.models import TaskStatus
+        from app.scheduler import Scheduler
 
-        scheduler = Scheduler()
+        Scheduler()
 
         task = MagicMock()
         task.id = 1
@@ -431,6 +392,7 @@ class SchedulerMaybeCleanupTests(unittest.IsolatedAsyncioTestCase):
     async def test_cleanup_skipped_when_not_enough_time_elapsed(self) -> None:
         """If last cleanup was recent, cleanup_stale_sessions should NOT be called."""
         import time
+
         from app.scheduler import Scheduler
 
         scheduler = Scheduler()
@@ -512,8 +474,8 @@ class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_crash_recovery_marks_stuck_tasks_as_failed(self) -> None:
         """_crash_recovery should mark any RUNNING task as FAILED."""
-        from app.scheduler import Scheduler
         from app.models import TaskStatus
+        from app.scheduler import Scheduler
 
         scheduler = Scheduler()
 
@@ -545,8 +507,8 @@ class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_crash_recovery_handles_docker_error_gracefully(self) -> None:
         """_crash_recovery should continue even if docker client raises."""
-        from app.scheduler import Scheduler
         from app.models import TaskStatus
+        from app.scheduler import Scheduler
 
         scheduler = Scheduler()
 
@@ -629,6 +591,16 @@ class SchedulerCrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         mock_cleanup.assert_awaited_once_with(mock_db)
         mock_db.commit.assert_awaited_once()
 
+    async def test_worker_container_pattern_matching(self) -> None:
+        """Worker containers should match the naming pattern."""
+        from app.scheduler import WORKER_CONTAINER_PATTERN
+
+        self.assertTrue(WORKER_CONTAINER_PATTERN.match("codify-1-issue10"))
+        self.assertTrue(WORKER_CONTAINER_PATTERN.match("codify-123-issue789"))
+        self.assertFalse(WORKER_CONTAINER_PATTERN.match("codify-backend"))
+        self.assertFalse(WORKER_CONTAINER_PATTERN.match("codify-postgres"))
+        self.assertFalse(WORKER_CONTAINER_PATTERN.match("random-container"))
+
 
 # ---------------------------------------------------------------------------
 # _run_cycle
@@ -648,8 +620,9 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_cycle_skips_when_max_concurrency_reached(self) -> None:
         """_run_cycle should return early when running count >= max_concurrency."""
-        from app.scheduler import Scheduler
         from types import SimpleNamespace
+
+        from app.scheduler import Scheduler
 
         scheduler = Scheduler()
         mock_context, mock_db = self._make_mock_db_context()
@@ -670,8 +643,9 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_cycle_skips_when_no_task_available(self) -> None:
         """_run_cycle should return early when no pending task exists."""
-        from app.scheduler import Scheduler
         from types import SimpleNamespace
+
+        from app.scheduler import Scheduler
 
         scheduler = Scheduler()
         mock_context, mock_db = self._make_mock_db_context()
@@ -693,9 +667,9 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_cycle_skips_when_issue_mutex_active(self) -> None:
         """_run_cycle should skip a task when its issue is already being processed."""
-        from app.scheduler import Scheduler
-        from app.models import TaskStatus
         from types import SimpleNamespace
+
+        from app.scheduler import Scheduler
 
         scheduler = Scheduler()
         mock_context, mock_db = self._make_mock_db_context()
@@ -725,8 +699,9 @@ class SchedulerRunCycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_cycle_executes_task_when_available(self) -> None:
         """_run_cycle should call _execute_task when a task is available and conditions allow."""
-        from app.scheduler import Scheduler
         from types import SimpleNamespace
+
+        from app.scheduler import Scheduler
 
         scheduler = Scheduler()
         mock_context, mock_db = self._make_mock_db_context()
@@ -791,8 +766,9 @@ class SchedulerCleanupWithDeletesTests(unittest.IsolatedAsyncioTestCase):
         mock_db.commit.assert_not_called()
 
     async def test_maybe_cleanup_workspaces_invokes_helper_when_configured(self) -> None:
-        from app.scheduler import Scheduler
         from types import SimpleNamespace
+
+        from app.scheduler import Scheduler
 
         scheduler = Scheduler()
         scheduler._last_workspace_cleanup_at = 0.0
@@ -819,8 +795,8 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_execute_task_marks_task_running_and_submits_background(self) -> None:
         """_execute_task should set status=RUNNING, commit, and create a background task."""
-        from app.scheduler import Scheduler
         from app.models import TaskStatus
+        from app.scheduler import Scheduler
 
         scheduler = Scheduler()
 
@@ -834,7 +810,7 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
         mock_db.commit = AsyncMock()
 
         with patch("app.scheduler.acquire_issue_execution_lock", new=AsyncMock(return_value=True)):
-            with patch.object(scheduler, "_run_task_background", new=MagicMock()) as mock_bg:
+            with patch.object(scheduler, "_run_task_background", new=MagicMock()):
                 with patch("app.scheduler.asyncio.create_task") as mock_create_task:
                     await scheduler._execute_task(mock_db, task)
 
@@ -847,8 +823,8 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_execute_task_handles_exception_and_marks_failed(self) -> None:
         """_execute_task should mark task FAILED when commit raises an exception."""
-        from app.scheduler import Scheduler
         from app.models import TaskStatus
+        from app.scheduler import Scheduler
 
         scheduler = Scheduler()
 
@@ -873,8 +849,8 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_execute_task_skips_when_issue_db_lock_is_held(self) -> None:
         """_execute_task should leave queued task untouched when DB issue lock is held."""
-        from app.scheduler import Scheduler
         from app.models import TaskStatus
+        from app.scheduler import Scheduler
 
         scheduler = Scheduler()
 
@@ -898,8 +874,8 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_execute_task_releases_db_lock_when_commit_fails_after_acquire(self) -> None:
         """_execute_task should release DB issue lock if marking RUNNING fails."""
-        from app.scheduler import Scheduler
         from app.models import TaskStatus
+        from app.scheduler import Scheduler
 
         scheduler = Scheduler()
 
@@ -929,7 +905,6 @@ class SchedulerRunTaskBackgroundTests(unittest.IsolatedAsyncioTestCase):
     async def test_run_task_background_success_removes_from_tracking(self) -> None:
         """_run_task_background should remove task from tracking sets after completion."""
         from app.scheduler import Scheduler
-        from app.models import TaskStatus
 
         scheduler = Scheduler()
         scheduler._running_tasks.add(10)

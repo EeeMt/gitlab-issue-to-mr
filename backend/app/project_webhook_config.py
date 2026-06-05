@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config_crypto import decrypt_config_secret, encrypt_config_secret
 from app.models import ProjectWebhookConfig
 
 
-async def get_project_webhook_secret(db: AsyncSession, project_id: int) -> Optional[str]:
+async def get_project_webhook_secret(db: AsyncSession, project_id: int) -> str | None:
     """Return the decrypted webhook secret for one project, if managed locally."""
     record = await db.get(ProjectWebhookConfig, project_id)
     if record is None:

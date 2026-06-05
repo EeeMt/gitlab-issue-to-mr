@@ -4,18 +4,17 @@
 import os
 import sys
 import unittest
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
-from starlette.requests import Request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from fastapi.testclient import TestClient
-from app.main import app
+
+from app.api.containers import _compact_raw_log_noise, _get_container_pattern
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_context
-from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
-from app.api.containers import _compact_raw_log_noise, _get_container_pattern
+from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+from app.main import app
 
 
 class ContainerPatternTests(unittest.TestCase):
@@ -156,6 +155,7 @@ class TaskContainerLogsAPIHelperTests(unittest.TestCase):
 def _make_auth_override():
     """Create an async function that returns a mock admin auth context."""
     from types import SimpleNamespace
+
     from starlette.requests import Request
 
     async def mock_auth_context(request: Request):
@@ -177,10 +177,10 @@ class ListContainersEndpointTests(unittest.TestCase):
 
     def test_list_containers_returns_500_on_docker_error(self):
         """If docker_client raises, endpoint should return 500."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
         mock_db = MagicMock()
@@ -200,10 +200,10 @@ class ListContainersEndpointTests(unittest.TestCase):
 
     def test_list_containers_filters_non_worker_containers(self):
         """Only containers matching the worker pattern should appear in the response."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
@@ -262,10 +262,10 @@ class GetContainerLogsEndpointTests(unittest.TestCase):
 
     def test_get_task_container_logs_returns_404_for_missing_task(self):
         """Should return 404 when task does not exist in DB."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
         mock_result = MagicMock()
@@ -287,10 +287,10 @@ class GetContainerLogsEndpointTests(unittest.TestCase):
 
     def test_get_task_container_logs_returns_empty_when_no_container_id(self):
         """Should return empty logs when task exists but has no container_id."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
         from app.models import TaskStatus
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -333,10 +333,10 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
 
     def test_get_task_container_logs_returns_logs_when_container_exists(self):
         """Should return logs when task has a container_id and docker returns logs."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
         from app.models import TaskStatus
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -376,10 +376,10 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
 
     def test_get_task_container_logs_returns_error_when_docker_fails(self):
         """When Docker fails, falls back to DB-stored log chunks (returns 200 with available data)."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
         from app.models import TaskStatus
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -426,10 +426,10 @@ class ListContainersAccessScopeFilterTests(unittest.TestCase):
 
     def test_list_containers_includes_all_worker_containers_for_unrestricted_scope(self):
         """All worker containers appear when access scope is unrestricted."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context, require_authenticated_user
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         # Unrestricted scope: all containers visible
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -751,7 +751,7 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
     def test_source_db_returns_db_chunks_directly(self):
         """When source=db, should fetch logs from DB without trying Docker."""
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
         from app.models import TaskStatus
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -794,7 +794,7 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
     def test_source_db_returns_empty_when_no_chunks(self):
         """When source=db and no log chunks exist, should return empty logs."""
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
         from app.models import TaskStatus
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -834,7 +834,7 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
     def test_source_db_multiple_chunks_concatenated(self):
         """Multiple DB log chunks should be concatenated."""
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
         from app.models import TaskStatus
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -891,7 +891,7 @@ class TaskContainerLogsDockerFailDbFallbackTests(unittest.TestCase):
     def test_docker_fail_with_db_chunks_returns_db_data(self):
         """When Docker fails but DB has log chunks, should return DB data with source=db."""
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
         from app.models import TaskStatus
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])

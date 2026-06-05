@@ -7,13 +7,13 @@ import logging
 import os as _os
 import re
 import tarfile as _tarfile
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.task_event_archive import archive_bundle_name
-from app.core.utcnow import utcnow
 from app.core.usage_limits import upsert_task_usage_ledger
+from app.core.utcnow import utcnow
 from app.models import Issue, Task, TaskLog, TaskRunArchive, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -90,8 +90,8 @@ async def update_task_stats_from_logs_or_api(
     task: Task,
     logs: str,
     gitlab_client,
-    issue: Optional[Issue] = None,
-    structured_diff: Optional[dict[str, Any]] = None,
+    issue: Issue | None = None,
+    structured_diff: dict[str, Any] | None = None,
 ) -> None:
     """Update task with change statistics from logs or GitLab API."""
     if structured_diff:
@@ -166,7 +166,7 @@ async def parse_task_result(
     exit_code: int,
     sanitize_sensitive_data,
     gitlab_client,
-    issue: Optional[Issue] = None,
+    issue: Issue | None = None,
 ) -> None:
     """Parse task execution logs and update task with results."""
     run_result_meta = await _load_latest_log_metadata(db, task.id, "run_result")

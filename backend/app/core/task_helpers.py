@@ -1,10 +1,11 @@
 """Task and Issue helper utilities for API responses and authorization."""
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import inspect as sa_inspect, select, func
+from sqlalchemy import func, select
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings
@@ -15,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 def _serialize_task(
     task: Task,
-    project_metadata: Optional[dict[str, Any]] = None,
-    settings: Optional[Any] = None,
+    project_metadata: dict[str, Any] | None = None,
+    settings: Any | None = None,
 ) -> dict[str, Any]:
     """Serialize a task row for API responses.
 
@@ -101,7 +102,7 @@ def _serialize_task(
     return data
 
 
-def _can_manage_task(task: Task, current_user: Optional[User]) -> bool:
+def _can_manage_task(task: Task, current_user: User | None) -> bool:
     """Return whether the current user may operate on a task."""
     settings = get_effective_settings()
     if not settings.oidc_enabled:
@@ -125,7 +126,7 @@ def _can_manage_task(task: Task, current_user: Optional[User]) -> bool:
     return False
 
 
-def _require_task_operator(task: Task, current_user: Optional[User]) -> None:
+def _require_task_operator(task: Task, current_user: User | None) -> None:
     """Ensure the current user may operate on a task."""
     if _can_manage_task(task, current_user):
         return
@@ -136,7 +137,7 @@ def _require_task_operator(task: Task, current_user: Optional[User]) -> None:
     )
 
 
-def _can_manage_issue(issue: Issue, current_user: Optional[User]) -> bool:
+def _can_manage_issue(issue: Issue, current_user: User | None) -> bool:
     """Return whether the current user may operate on an issue."""
     settings = get_effective_settings()
     if not settings.oidc_enabled:
@@ -154,7 +155,7 @@ def _can_manage_issue(issue: Issue, current_user: Optional[User]) -> bool:
     return False
 
 
-def _require_issue_operator(issue: Issue, current_user: Optional[User]) -> None:
+def _require_issue_operator(issue: Issue, current_user: User | None) -> None:
     """Ensure the current user may operate on an issue."""
     if _can_manage_issue(issue, current_user):
         return

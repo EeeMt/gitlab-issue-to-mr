@@ -1,12 +1,11 @@
 """Event/archive projection helpers for worker execution."""
 
 import asyncio
-import io
 import json as _json
 import logging
 import os as _os
 import tarfile as _tarfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -308,7 +307,7 @@ class WorkerEventProjector:
             meta["output_truncated"] = output_truncated
             meta["output_char_count"] = len(sanitized_output_text)
             meta["error"] = is_error
-            meta["duration_ms"] = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
+            meta["duration_ms"] = int((datetime.now(UTC) - start_time).total_seconds() * 1000)
             pending_log.log_metadata = _dumps(meta)
 
     async def _project_assistant_message(self, *, task_id: int, record: dict, db: AsyncSession) -> None:
@@ -328,7 +327,7 @@ class WorkerEventProjector:
                 input_text = _serialize_tool_input(tool_input)
                 sanitized_input_text = self._sanitize_sensitive_data(input_text)
                 input_preview, input_truncated = _build_preview_from_serialized_tool_input(sanitized_input_text)
-                start_time = datetime.now(timezone.utc)
+                start_time = datetime.now(UTC)
                 payload = await self._create_sanitized_text_payload(
                     db=db,
                     task_id=task_id,
@@ -414,7 +413,7 @@ class WorkerEventProjector:
         tool_use = self._active_tool_use
         if tool_use is None:
             return
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
         input_text = "".join(tool_use["input_parts"])
         try:
             tool_input = _json.loads(input_text)

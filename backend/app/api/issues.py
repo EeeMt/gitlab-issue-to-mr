@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -17,7 +17,11 @@ from app.core.utcnow import utcnow
 from app.core.worker_workspace import build_issue_workspace_paths
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_user
-from app.dependencies.project_access import ProjectAccessScope, require_project_access, require_project_access_scope
+from app.dependencies.project_access import (
+    ProjectAccessScope,
+    require_project_access,
+    require_project_access_scope,
+)
 from app.models import Issue, IssueStatus, Task, TaskStatus, User
 
 logger = logging.getLogger(__name__)
@@ -33,25 +37,25 @@ class CreateIssueRequest(BaseModel):
     """Request body for creating an issue."""
 
     title: str
-    description: Optional[str] = None
+    description: str | None = None
     project_id: int
-    base_branch: Optional[str] = None
-    target_branch: Optional[str] = None
+    base_branch: str | None = None
+    target_branch: str | None = None
     delete_branch_on_close: bool = True
 
 
 class UpdateIssueRequest(BaseModel):
     """Request body for updating an issue."""
 
-    title: Optional[str] = None
-    description: Optional[str] = None
-    status: Optional[str] = None
+    title: str | None = None
+    description: str | None = None
+    status: str | None = None
 
 
 class CloseIssueRequest(BaseModel):
     """Request body for manually closing an issue."""
 
-    branch_action: Optional[Literal["keep", "delete"]] = None
+    branch_action: Literal["keep", "delete"] | None = None
     delete_branch: bool = False
 
     @property
@@ -67,7 +71,7 @@ class CloseIssueRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _serialize_issue(issue: Issue, task_count: Optional[int] = None) -> dict:
+def _serialize_issue(issue: Issue, task_count: int | None = None) -> dict:
     """Serialize an Issue row for API responses."""
     data = {
         "id": issue.id,
@@ -95,7 +99,7 @@ def _serialize_issue(issue: Issue, task_count: Optional[int] = None) -> dict:
     return data
 
 
-def _task_duration_seconds(task: Task, now: Optional[datetime] = None) -> float:
+def _task_duration_seconds(task: Task, now: datetime | None = None) -> float:
     """Return runtime seconds for one task, including currently running tasks."""
     if not task.started_at:
         return 0.0
@@ -234,16 +238,16 @@ SORT_ORDERS = {"asc", "desc"}
 
 @router.get("")
 async def list_issues(
-    status: Optional[str] = None,
-    project_id: Optional[str] = None,
-    initiator_user_id: Optional[int] = None,
-    initiator_username: Optional[str] = None,
-    has_mr: Optional[bool] = None,
-    search: Optional[str] = None,
-    created_after: Optional[str] = None,
-    created_before: Optional[str] = None,
-    sort_by: Optional[str] = None,
-    sort_order: Optional[str] = None,
+    status: str | None = None,
+    project_id: str | None = None,
+    initiator_user_id: int | None = None,
+    initiator_username: str | None = None,
+    has_mr: bool | None = None,
+    search: str | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str | None = None,
     page: int = 1,
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
@@ -512,7 +516,7 @@ async def update_issue(
 @router.post("/{issue_id}/close")
 async def close_issue(
     issue_id: int,
-    body: Optional[CloseIssueRequest] = None,
+    body: CloseIssueRequest | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_authenticated_user),
 ):

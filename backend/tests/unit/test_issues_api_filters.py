@@ -113,6 +113,7 @@ class TestListIssuesMultiStatus(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_status_returns_400(self):
         """Passing a completely invalid status should return 400."""
         from fastapi import HTTPException
+
         from app.api.issues import list_issues
         from app.dependencies.project_access import ProjectAccessScope
 
@@ -141,6 +142,7 @@ class TestListIssuesMultiStatus(unittest.IsolatedAsyncioTestCase):
     async def test_mixed_valid_invalid_status_returns_400(self):
         """Passing status='open,bogus' should return 400 due to invalid part."""
         from fastapi import HTTPException
+
         from app.api.issues import list_issues
         from app.dependencies.project_access import ProjectAccessScope
 
@@ -202,6 +204,7 @@ class TestListIssuesSortParams(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_sort_by_returns_400(self):
         from fastapi import HTTPException
+
         from app.api.issues import list_issues
         from app.dependencies.project_access import ProjectAccessScope
 
@@ -228,6 +231,7 @@ class TestListIssuesSortParams(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_sort_order_returns_400(self):
         from fastapi import HTTPException
+
         from app.api.issues import list_issues
         from app.dependencies.project_access import ProjectAccessScope
 
@@ -369,6 +373,7 @@ class TestListIssuesDateRange(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_created_after_returns_400(self):
         from fastapi import HTTPException
+
         from app.api.issues import list_issues
         from app.dependencies.project_access import ProjectAccessScope
 
@@ -395,6 +400,7 @@ class TestListIssuesDateRange(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_created_before_returns_400(self):
         from fastapi import HTTPException
+
         from app.api.issues import list_issues
         from app.dependencies.project_access import ProjectAccessScope
 
@@ -724,6 +730,7 @@ class TestListIssuesSearchTooLong(unittest.IsolatedAsyncioTestCase):
     async def test_search_too_long_returns_400(self):
         """Search > 200 chars should return 400."""
         from fastapi import HTTPException
+
         from app.api.issues import list_issues
         from app.dependencies.project_access import ProjectAccessScope
 
@@ -830,7 +837,8 @@ class TestUpdateIssueEdgeCases(unittest.IsolatedAsyncioTestCase):
     async def test_update_issue_not_found_returns_404(self):
         """PATCH on non-existent issue should return 404."""
         from fastapi import HTTPException
-        from app.api.issues import update_issue, UpdateIssueRequest
+
+        from app.api.issues import UpdateIssueRequest, update_issue
 
         result_mock = MagicMock()
         result_mock.scalar_one_or_none.return_value = None
@@ -845,7 +853,7 @@ class TestUpdateIssueEdgeCases(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_issue_description(self):
         """Updating description field should persist."""
-        from app.api.issues import update_issue, UpdateIssueRequest
+        from app.api.issues import UpdateIssueRequest, update_issue
 
         issue = _make_issue(id=1, title="Title", description="Old desc")
 
@@ -865,7 +873,7 @@ class TestUpdateIssueEdgeCases(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_issue_valid_status(self):
         """Updating to a valid status should persist."""
-        from app.api.issues import update_issue, UpdateIssueRequest
+        from app.api.issues import UpdateIssueRequest, update_issue
 
         issue = _make_issue(id=1, status="open")
 

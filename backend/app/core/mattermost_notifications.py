@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 from sqlalchemy import inspect, or_, select
@@ -141,7 +141,7 @@ def serialize_profile(profile: MattermostNotificationProfile) -> dict[str, Any]:
     }
 
 
-def _format_datetime(value: Optional[datetime]) -> str:
+def _format_datetime(value: datetime | None) -> str:
     if value is None:
         return "-"
     return value.isoformat(timespec="seconds")
@@ -195,7 +195,7 @@ class MattermostClient:
             timeout=10,
             verify=get_ssl_verify(),
         )
-        self._me: Optional[dict[str, Any]] = None
+        self._me: dict[str, Any] | None = None
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -243,8 +243,8 @@ class MattermostClient:
 
 async def test_mattermost_connection(
     *,
-    server_url: Optional[str] = None,
-    bot_token: Optional[str] = None,
+    server_url: str | None = None,
+    bot_token: str | None = None,
 ) -> dict[str, str]:
     """Validate Mattermost connectivity using stored or preview integration values."""
     settings = get_effective_settings()
@@ -270,7 +270,7 @@ async def _resolve_mattermost_user_id(
     session,
     client: MattermostClient,
     task: Task,
-) -> Optional[str]:
+) -> str | None:
     filters = []
     if task.initiator_user_id is not None:
         filters.append(MattermostUserMapping.user_id == task.initiator_user_id)
@@ -339,7 +339,7 @@ def _build_attachment_fields(
             f"{_format_datetime(context.get('scheduled_at'))}"
         )
 
-    field_map: dict[str, Optional[tuple[str, str, bool]]] = {
+    field_map: dict[str, tuple[str, str, bool] | None] = {
         MATTERMOST_FIELD_TASK_ID: ("任务 ID", str(task.id), True),
         MATTERMOST_FIELD_PROJECT: ("项目", f"#{task.project_id}", True),
         MATTERMOST_FIELD_ISSUE: (
@@ -418,7 +418,7 @@ async def notify_task_event(
     task: Task,
     event_type: str,
     *,
-    context: Optional[dict[str, Any]] = None,
+    context: dict[str, Any] | None = None,
     session_factory: Any = None,
 ) -> None:
     """Send Mattermost notifications for one task lifecycle event.

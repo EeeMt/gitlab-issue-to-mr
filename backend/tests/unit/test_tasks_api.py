@@ -164,10 +164,10 @@ class CancelTaskEndpointTests(unittest.TestCase):
 
     def _get_client(self, task=None):
         """Build a TestClient with all dependencies overridden."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
@@ -235,10 +235,10 @@ class CancelTaskEndpointTests(unittest.TestCase):
 
     def test_cancel_task_404_when_not_found(self) -> None:
         """POST /api/tasks/{id}/cancel should return 404 when task not found."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
@@ -437,10 +437,10 @@ def _make_mock_provider(id=1):
 
 def _make_app_client_with_db(mock_db, extra_overrides=None):
     """Build a TestClient with DB, access scope, and auth overridden."""
-    from app.main import app
     from app.database import get_db
     from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-    from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+    from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+    from app.main import app
 
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
@@ -1121,10 +1121,10 @@ class CreateTaskAPITests(unittest.TestCase):
 
     def test_create_task_success(self):
         """POST /api/tasks should create a new task and return its ID."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
@@ -1175,11 +1175,11 @@ class CreateTaskAPITests(unittest.TestCase):
 
     def test_create_task_returns_409_when_usage_limit_exceeded(self):
         """POST /api/tasks returns structured 409 when quota is already exceeded."""
-        from app.main import app
+        from app.core.usage_limits import UsageLimitExceeded
         from app.database import get_db
         from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
-        from app.core.usage_limits import UsageLimitExceeded
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
@@ -1433,7 +1433,6 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
 
     def test_retry_task_with_future_scheduled_datetime(self):
         """POST /api/tasks/{id}/retry with future scheduled_datetime schedules retry."""
-        from datetime import timezone
         from app.models import Task
         task = _make_serializable_task(task_status=TaskStatus.FAILED)
         task.id = 80
@@ -1471,7 +1470,7 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
 
         client, app = _make_app_client_with_db(mock_db)
 
-        future_dt = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
 
         with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
@@ -1537,10 +1536,10 @@ class ListTasksRestrictedScopeTests(unittest.TestCase):
         app.dependency_overrides.clear()
 
     def _setup_restricted_client(self, tasks_list, accessible_project_ids):
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         accessible_projects = [{"id": pid, "name": f"Project {pid}"} for pid in accessible_project_ids]
         access_scope = ProjectAccessScope(
@@ -1618,10 +1617,10 @@ class PaginationTests(unittest.TestCase):
         calls made in paginated mode (COUNT then data).  When *total_count* is
         ``None`` only a single data result is returned (legacy mode).
         """
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 

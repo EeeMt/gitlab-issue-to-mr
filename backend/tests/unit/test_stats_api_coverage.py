@@ -15,19 +15,19 @@ Covers uncovered lines in app/api/stats.py:
 import os
 import sys
 import unittest
-from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
+
 from starlette.requests import Request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from fastapi.testclient import TestClient
-from app.main import app
+
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_context
-from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
-
+from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+from app.main import app
 
 # ---------------------------------------------------------------------------
 # Direct helper function tests
@@ -80,7 +80,7 @@ class TestApplyAnalyticsFilters(unittest.TestCase):
         query = MagicMock()
         # Chain: _apply_project_scope returns query (unrestricted), then .where for project_id
         scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
-        result = _apply_analytics_filters(query, scope, project_id=42)
+        _apply_analytics_filters(query, scope, project_id=42)
         query.where.assert_called_once()
 
     def test_with_initiator_username(self):
@@ -89,7 +89,7 @@ class TestApplyAnalyticsFilters(unittest.TestCase):
 
         query = MagicMock()
         scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
-        result = _apply_analytics_filters(query, scope, initiator_username="alice")
+        _apply_analytics_filters(query, scope, initiator_username="alice")
         query.where.assert_called_once()
 
     def test_with_both_filters(self):
@@ -100,7 +100,7 @@ class TestApplyAnalyticsFilters(unittest.TestCase):
         # Need to chain .where calls
         query.where.return_value = query  # Allow chaining
         scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
-        result = _apply_analytics_filters(query, scope, project_id=42, initiator_username="bob")
+        _apply_analytics_filters(query, scope, project_id=42, initiator_username="bob")
         self.assertEqual(query.where.call_count, 2)
 
 

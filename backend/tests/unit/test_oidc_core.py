@@ -7,7 +7,6 @@ Targets the missed lines: 42-47, 52-72, 77, 82-91, 96, 101-119,
 
 import os
 import sys
-import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -611,7 +610,6 @@ class TestValidateIdToken(unittest.IsolatedAsyncioTestCase):
 
     async def test_jwt_decode_uses_correct_algorithms_and_audience(self):
         """Lines 164-170: jwt.decode called with RS256/384/512, audience, issuer."""
-        import jwt as jwt_lib
 
         fake_settings = _make_settings()
         expected_claims = {"sub": "42", "nonce": "n"}

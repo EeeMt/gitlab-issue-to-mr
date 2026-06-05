@@ -14,11 +14,9 @@ Targets missed lines:
 
 import asyncio
 import unittest
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.models import TaskStatus
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -189,7 +187,7 @@ class TestRunTaskBackground(unittest.IsolatedAsyncioTestCase):
 
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        with patch("app.scheduler._worker_executor") as mock_executor, \
+        with patch("app.scheduler._worker_executor"), \
              patch("app.scheduler.AsyncSessionLocal", return_value=mock_db), \
              patch("app.scheduler._run_worker_task", return_value=False):
 
@@ -1253,8 +1251,8 @@ class TestMarkEligibleAsQueuedIssueTransition(unittest.IsolatedAsyncioTestCase):
         The issue-ID query now filters Task.task_mode != 'plan', so plan tasks
         return an empty result and no issue update is executed.
         """
+
         from app.scheduler import Scheduler
-        import sqlalchemy
 
         scheduler = Scheduler()
         mock_db = AsyncMock()

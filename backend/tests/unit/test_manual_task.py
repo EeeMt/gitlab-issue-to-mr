@@ -5,11 +5,13 @@ Unit tests for manual task creation API.
 
 import os
 import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import pytest
 from datetime import UTC, datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
@@ -18,9 +20,9 @@ from app.api.tasks import (
     RescheduleTaskRequest,
     reschedule_task,
 )
+from app.core.scheduling import normalize_scheduled_datetime, resolve_scheduled_at
 from app.core.task_helpers import _can_manage_task
 from app.dependencies.project_access import ProjectAccessScope
-from app.core.scheduling import normalize_scheduled_datetime, resolve_scheduled_at
 from app.models import Task, TaskStatus, User
 
 
@@ -302,7 +304,7 @@ class TestScheduledAtCalculation:
     def test_resolve_scheduled_at_normalizes_absolute_datetime(self):
         """Test absolute scheduled datetimes are converted to naive UTC."""
         # Use a fixed future date in UTC
-        scheduled_time = datetime(2030, 6, 15, 14, 32, 34, tzinfo=timezone.utc)
+        scheduled_time = datetime(2030, 6, 15, 14, 32, 34, tzinfo=UTC)
 
         scheduled_at = resolve_scheduled_at(scheduled_time, None)
 

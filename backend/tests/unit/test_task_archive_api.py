@@ -4,21 +4,21 @@ import os
 import sys
 import unittest
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
 from tempfile import NamedTemporaryFile
+from unittest.mock import AsyncMock, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 os.environ.setdefault("CONFIG_ENCRYPTION_KEY", "unit-test-key")
 
-from app.models import TaskRunArchive, TaskPayload
+from app.models import TaskPayload, TaskRunArchive
 
 
 class TestGetTaskArchive(unittest.IsolatedAsyncioTestCase):
     async def test_get_task_archive_returns_metadata(self):
         """Test /tasks/{id}/archive returns archive metadata when it exists."""
+
         from app.api.tasks import get_task_archive
-        from fastapi import HTTPException
 
         mock_db = AsyncMock()
         mock_archive = TaskRunArchive(
@@ -63,8 +63,9 @@ class TestGetTaskArchive(unittest.IsolatedAsyncioTestCase):
             assert result["file_exists"] is True
 
     async def test_get_task_archive_404_when_no_archive(self):
-        from app.api.tasks import get_task_archive
         from fastapi import HTTPException
+
+        from app.api.tasks import get_task_archive
 
         mock_db = AsyncMock()
         mock_result = MagicMock()
@@ -76,8 +77,9 @@ class TestGetTaskArchive(unittest.IsolatedAsyncioTestCase):
         assert ctx.exception.status_code == 404
 
     async def test_download_task_archive_returns_file_response(self):
-        from app.api.tasks import download_task_archive
         from fastapi.responses import FileResponse
+
+        from app.api.tasks import download_task_archive
 
         with NamedTemporaryFile(suffix=".tar.gz") as tmp:
             tmp.write(b"archive")
@@ -101,8 +103,9 @@ class TestGetTaskArchive(unittest.IsolatedAsyncioTestCase):
             assert result.filename == "task-1-runtime-archive.tar.gz"
 
     async def test_download_task_archive_404_when_file_missing(self):
-        from app.api.tasks import download_task_archive
         from fastapi import HTTPException
+
+        from app.api.tasks import download_task_archive
 
         mock_db = AsyncMock()
         mock_archive = TaskRunArchive(
@@ -143,8 +146,9 @@ class TestGetTaskArchive(unittest.IsolatedAsyncioTestCase):
         assert result["payload_kind"] == "tool_input"
 
     async def test_get_task_payload_404_when_not_found(self):
-        from app.api.tasks import get_task_payload
         from fastapi import HTTPException
+
+        from app.api.tasks import get_task_payload
 
         mock_db = AsyncMock()
         mock_result = MagicMock()

@@ -13,7 +13,6 @@ Prerequisites:
     docker-compose -f backend/tests/mock_integration/docker-compose.mock-test.yml up -d
 """
 
-import json
 import logging
 
 import httpx

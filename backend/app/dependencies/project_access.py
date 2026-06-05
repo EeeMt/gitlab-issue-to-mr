@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 from fastapi import Depends, HTTPException, status
@@ -77,7 +77,7 @@ async def _fetch_and_cache_projects(
 
 
 async def require_project_access_scope(
-    auth_context: Optional[AuthContext] = Depends(require_authenticated_context),
+    auth_context: AuthContext | None = Depends(require_authenticated_context),
 ) -> ProjectAccessScope:
     """Resolve the set of GitLab projects the current user may access.
 

@@ -1,5 +1,6 @@
 """Task operation helpers for the Task API."""
 
+import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
@@ -16,8 +17,6 @@ from app.core.scheduling import normalize_scheduled_datetime
 from app.core.utcnow import utcnow
 from app.dependencies.project_access import ProjectAccessScope, require_project_access
 from app.models import Task, TaskStatus
-
-import logging
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -177,7 +176,7 @@ async def notify_task_cancelled(task: Task) -> None:
         logger.warning("Failed to send Mattermost cancel notification for task %s: %s", task.id, exc)
 
 
-async def notify_task_retried(task: Task, previous_scheduled_at: Optional[datetime], scheduled_at: Optional[datetime]) -> None:
+async def notify_task_retried(task: Task, previous_scheduled_at: datetime | None, scheduled_at: datetime | None) -> None:
     """Send notification for retried task.
 
     Args:
@@ -198,7 +197,7 @@ async def notify_task_retried(task: Task, previous_scheduled_at: Optional[dateti
         logger.warning("Failed to send Mattermost retry notification for task %s: %s", task.id, exc)
 
 
-async def notify_task_execute_now(task: Task, previous_scheduled_at: Optional[datetime]) -> None:
+async def notify_task_execute_now(task: Task, previous_scheduled_at: datetime | None) -> None:
     """Send notification for immediate execution.
 
     Args:
@@ -218,7 +217,7 @@ async def notify_task_execute_now(task: Task, previous_scheduled_at: Optional[da
         logger.warning("Failed to send Mattermost execute-now notification for task %s: %s", task.id, exc)
 
 
-async def notify_task_rescheduled(task: Task, previous_scheduled_at: Optional[datetime], scheduled_at: datetime) -> None:
+async def notify_task_rescheduled(task: Task, previous_scheduled_at: datetime | None, scheduled_at: datetime) -> None:
     """Send notification for rescheduled task.
 
     Args:
