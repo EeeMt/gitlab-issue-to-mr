@@ -7,22 +7,30 @@
     <div class="result-body">
       <!-- AI delivery summary (last assistant text event, collapsed by default) -->
       <div v-if="lastAssistantLog" class="result-card result-card--summary-text">
-        <div class="result-card__title">
+        <button
+          type="button"
+          class="result-card__title summary-header-button"
+          :class="{ 'summary-header-button--open': summaryExpanded }"
+          :disabled="summaryPayloadLoading"
+          :aria-expanded="summaryExpanded"
+          @click="toggleSummary"
+        >
           <n-icon size="16" class="result-card__icon result-card__icon--summary"><ChatboxOutline /></n-icon>
-          {{ t('taskView.aiDeliverySummary') }}
+          <span class="summary-title-label">{{ t('taskView.aiDeliverySummary') }}</span>
           <span v-if="summaryPreview && !summaryExpanded" class="summary-preview">{{ summaryPreview }}</span>
-          <button
+          <span
             class="summary-toggle"
             :class="{ 'summary-toggle--active': summaryExpanded, 'summary-toggle--loading': summaryPayloadLoading }"
-            :disabled="summaryPayloadLoading"
-            @click="toggleSummary"
           >
+            <span class="summary-toggle__label">
+              {{ summaryExpanded ? t('taskView.summaryCollapse') : t('taskView.summaryExpand') }}
+            </span>
             <span v-if="summaryPayloadLoading" class="badge-spin-ring"></span>
             <n-icon v-else size="11" class="badge-chevron" :class="{ 'badge-chevron--open': summaryExpanded }">
               <ChevronForward />
             </n-icon>
-          </button>
-        </div>
+          </span>
+        </button>
         <div class="summary-expand-track" :class="{ 'summary-expand-track--open': summaryExpanded }">
           <div class="summary-expand-body">
             <div
@@ -642,12 +650,45 @@ const skillUsageBreakdown = computed(() =>
 }
 
 .result-card--summary-text .result-card__title {
-  min-height: 22px;
+  min-height: 28px;
   margin-bottom: 0;
 }
 
 .result-card__icon--summary {
   color: #0284c7;
+}
+
+.summary-header-button {
+  width: 100%;
+  padding: 2px 2px 2px 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.summary-header-button:hover {
+  background: rgba(2, 132, 199, 0.06);
+}
+
+.summary-header-button:focus-visible {
+  outline: 2px solid rgba(2, 132, 199, 0.45);
+  outline-offset: 2px;
+}
+
+.summary-header-button:disabled {
+  cursor: wait;
+}
+
+.summary-header-button--open {
+  color: var(--n-text-color-1, #333);
+}
+
+.summary-title-label {
+  flex-shrink: 0;
 }
 
 .summary-preview {
@@ -667,34 +708,40 @@ const skillUsageBreakdown = computed(() =>
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
+  gap: 4px;
+  min-width: 52px;
+  height: 24px;
+  padding: 0 8px;
   margin-left: auto;
   flex-shrink: 0;
-  background: transparent;
-  border: 1px solid var(--n-border-color, rgba(128, 128, 128, 0.2));
+  background: rgba(2, 132, 199, 0.08);
+  border: 1px solid rgba(2, 132, 199, 0.22);
   border-radius: 4px;
-  cursor: pointer;
-  color: var(--n-text-color-3, #999);
+  color: #0284c7;
   transition: color 0.15s, border-color 0.15s, background 0.15s;
   font-family: inherit;
 }
 
-.summary-toggle:hover {
-  color: var(--n-text-color, inherit);
-  border-color: rgba(128, 128, 128, 0.4);
+.summary-header-button:hover .summary-toggle {
+  background: rgba(2, 132, 199, 0.13);
+  border-color: rgba(2, 132, 199, 0.36);
+}
+
+.summary-toggle__label {
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .summary-toggle--active {
-  color: #0284c7;
-  border-color: #0284c7;
-  background: rgba(2, 132, 199, 0.06);
+  color: var(--n-text-color-2, #555);
+  border-color: rgba(128, 128, 128, 0.2);
+  background: rgba(128, 128, 128, 0.06);
 }
 
-.summary-toggle:disabled {
-  cursor: not-allowed;
-  pointer-events: none;
+.summary-toggle--loading {
+  opacity: 0.72;
 }
 
 .badge-chevron {

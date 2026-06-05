@@ -577,6 +577,8 @@ const zhCN = {
     assistantLabel: 'Claude',
     fullText: '完整内容',
     aiDeliverySummary: 'AI 交付摘要',
+    summaryExpand: '展开',
+    summaryCollapse: '收起',
     runStatistics: '运行统计',
     mergeRequest: '合并请求',
     taskNotStarted: '任务未开始',

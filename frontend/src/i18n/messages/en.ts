@@ -587,6 +587,8 @@ const en = {
     assistantLabel: 'Claude',
     fullText: 'Full text',
     aiDeliverySummary: 'AI Delivery Summary',
+    summaryExpand: 'Expand',
+    summaryCollapse: 'Collapse',
     runStatistics: 'Run Statistics',
     mergeRequest: 'Merge Request',
     taskNotStarted: 'Task not started',

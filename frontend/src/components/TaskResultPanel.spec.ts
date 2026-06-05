@@ -30,6 +30,13 @@ describe('TaskResultPanel', () => {
     expect(taskResultPanelSource).toContain('const summaryExpanded = ref(false)')
   })
 
+  it('summary header exposes the full row as an expandable button', () => {
+    expect(taskResultPanelSource).toContain('class="result-card__title summary-header-button"')
+    expect(taskResultPanelSource).toContain(':aria-expanded="summaryExpanded"')
+    expect(taskResultPanelSource).toContain('taskView.summaryExpand')
+    expect(taskResultPanelSource).toContain('taskView.summaryCollapse')
+  })
+
   it('context compact count item is guarded by v-if="contextCompactCount != null"', () => {
     expect(taskResultPanelSource).toContain('v-if="contextCompactCount != null"')
   })
