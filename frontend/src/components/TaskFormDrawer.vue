@@ -95,30 +95,68 @@
         </div>
 
         <!-- Task mode + require changes -->
-        <n-form-item :label="t('issue.taskMode')">
+        <n-form-item
+          class="task-mode-form-item"
+          :validation-status="taskModeErrorVisible ? 'error' : undefined"
+          :feedback="taskModeErrorVisible ? t('issue.taskModeRequiredFeedback') : undefined"
+        >
+          <template #label>
+            <div class="task-mode-label-row">
+              <span>{{ t('issue.taskMode') }}</span>
+              <span class="task-mode-label-hint">{{ t('issue.taskModeManualHint') }}</span>
+            </div>
+          </template>
           <div class="task-mode-section">
-            <div class="task-mode-selector">
+            <div class="task-mode-selector" role="radiogroup" :aria-label="t('issue.taskMode')">
               <div
                 class="task-mode-card"
-                :class="{ 'task-mode-card--active': taskMode === 'execute' }"
-                @click="taskMode = 'execute'"
+                role="radio"
+                tabindex="0"
+                :aria-checked="taskMode === 'execute'"
+                :class="{
+                  'task-mode-card--active': taskMode === 'execute',
+                  'task-mode-card--error': taskModeErrorVisible
+                }"
+                @click="selectTaskMode('execute')"
+                @keydown.enter.prevent="selectTaskMode('execute')"
+                @keydown.space.prevent="selectTaskMode('execute')"
               >
                 <n-icon :component="CodeSlashOutline" size="18" class="task-mode-card__icon" />
                 <div class="task-mode-card__body">
                   <div class="task-mode-card__label">{{ t('issue.taskModeExecute') }}</div>
                   <div class="task-mode-card__desc">{{ t('issue.taskModeExecuteDesc') }}</div>
                 </div>
+                <n-icon
+                  v-if="taskMode === 'execute'"
+                  :component="CheckmarkCircleOutline"
+                  size="16"
+                  class="task-mode-card__check"
+                />
               </div>
               <div
                 class="task-mode-card"
-                :class="{ 'task-mode-card--active': taskMode === 'plan' }"
-                @click="taskMode = 'plan'"
+                role="radio"
+                tabindex="0"
+                :aria-checked="taskMode === 'plan'"
+                :class="{
+                  'task-mode-card--active': taskMode === 'plan',
+                  'task-mode-card--error': taskModeErrorVisible
+                }"
+                @click="selectTaskMode('plan')"
+                @keydown.enter.prevent="selectTaskMode('plan')"
+                @keydown.space.prevent="selectTaskMode('plan')"
               >
                 <n-icon :component="BulbOutline" size="18" class="task-mode-card__icon" />
                 <div class="task-mode-card__body">
                   <div class="task-mode-card__label">{{ t('issue.taskModePlan') }}</div>
                   <div class="task-mode-card__desc">{{ t('issue.taskModePlanDesc') }}</div>
                 </div>
+                <n-icon
+                  v-if="taskMode === 'plan'"
+                  :component="CheckmarkCircleOutline"
+                  size="16"
+                  class="task-mode-card__check"
+                />
               </div>
             </div>
             <div v-if="taskMode === 'execute'" class="require-changes-row">
@@ -270,7 +308,8 @@ import {
   CloseOutline,
   InformationCircleOutline,
   CodeSlashOutline,
-  BulbOutline
+  BulbOutline,
+  CheckmarkCircleOutline
 } from '@vicons/ionicons5'
 import VariableEditor from './VariableEditor.vue'
 import HeatmapChart from './HeatmapChart.vue'
@@ -321,6 +360,7 @@ const prompt = ref('')
 const priority = ref(1)
 const requireChanges = ref(true)
 const taskMode = ref<'execute' | 'plan' | null>(null)
+const taskModeErrorVisible = ref(false)
 const selectedProviderId = ref<number | null>(null)
 const scheduleType = ref<'now' | 'scheduled'>('now')
 const scheduledAt = ref<number | null>(null)
@@ -395,6 +435,10 @@ watch(scheduledAt, () => {
   if (props.mode === 'create') checkSlotCapacity()
 })
 
+watch(taskMode, (val) => {
+  if (val !== null) taskModeErrorVisible.value = false
+})
+
 watch(() => props.show, (val) => {
   if (val) {
     if (props.mode === 'edit' && props.task) {
@@ -414,6 +458,7 @@ watch(() => props.show, (val) => {
       void loadScheduleContext()
     }
     usageLimitDetail.value = null
+    taskModeErrorVisible.value = false
   }
 })
 
@@ -483,6 +528,10 @@ function handleHeatmapCellClick(startMs: number) {
   showHeatmapDrawer.value = false
 }
 
+function selectTaskMode(mode: 'execute' | 'plan') {
+  taskMode.value = mode
+}
+
 function isScheduleDateDisabled(timestamp: number): boolean {
   const candidate = new Date(timestamp)
   const today = new Date()
@@ -523,6 +572,7 @@ function cancelTemplateOverwrite() {
 // --- Submit actions ---
 async function handleCreate() {
   if (taskMode.value === null) {
+    taskModeErrorVisible.value = true
     message.warning(t('issue.pleaseSelectTaskMode'))
     return
   }
@@ -677,6 +727,26 @@ onUnmounted(() => {
   gap: 6px;
 }
 
+.task-mode-label-row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.task-mode-label-hint {
+  color: var(--n-text-color-3);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.task-mode-form-item :deep(.n-form-item-feedback-wrapper:not(:empty)) {
+  margin-bottom: 8px;
+}
+
+.task-mode-form-item :deep(.n-form-item-feedback) {
+  margin-bottom: 8px;
+}
+
 .task-mode-section {
   display: flex;
   flex-direction: column;
@@ -700,7 +770,8 @@ onUnmounted(() => {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px 12px;
+  position: relative;
+  padding: 10px 32px 10px 12px;
   border: 1px solid var(--n-border-color);
   border-radius: 8px;
   cursor: pointer;
@@ -709,6 +780,14 @@ onUnmounted(() => {
 
 .task-mode-card:hover {
   border-color: var(--n-primary-color);
+}
+
+.task-mode-card--error {
+  border-color: var(--n-feedback-text-color-error, #d03050);
+}
+
+.task-mode-card--error:hover {
+  border-color: var(--n-feedback-text-color-error, #d03050);
 }
 
 .task-mode-card--active {
@@ -723,6 +802,13 @@ onUnmounted(() => {
 }
 
 .task-mode-card--active .task-mode-card__icon {
+  color: var(--n-primary-color);
+}
+
+.task-mode-card__check {
+  position: absolute;
+  top: 10px;
+  right: 10px;
   color: var(--n-primary-color);
 }
 

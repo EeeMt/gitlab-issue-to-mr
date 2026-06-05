@@ -120,16 +120,23 @@ vi.mock('naive-ui', () => ({
   },
   NFormItem: {
     name: 'NFormItem',
-    props: ['label'],
-    setup(_props: any, { slots }: any) {
-      return () => h('div', { class: 'n-form-item' }, slots.default?.())
+    props: ['label', 'validationStatus', 'feedback'],
+    setup(props: any, { attrs, slots }: any) {
+      return () => h('div', {
+        ...attrs,
+        class: ['n-form-item', attrs.class, props.validationStatus ? `n-form-item--${props.validationStatus}` : null],
+      }, [
+        slots.label ? h('div', { class: 'n-form-item-label' }, slots.label()) : null,
+        slots.default?.(),
+        props.feedback ? h('div', { class: 'n-form-item-feedback' }, props.feedback) : null,
+      ])
     },
   },
   NIcon: {
     name: 'NIcon',
     props: ['component', 'size'],
-    setup() {
-      return () => h('i', { class: 'n-icon' })
+    setup(_props: any, { attrs }: any) {
+      return () => h('i', { ...attrs, class: ['n-icon', attrs.class] })
     },
   },
   NRadio: {
@@ -194,6 +201,7 @@ vi.mock('@vicons/ionicons5', () => {
     CalendarOutline: icon('CalendarOutline'),
     CloseOutline: icon('CloseOutline'),
     CodeSlashOutline: icon('CodeSlashOutline'),
+    CheckmarkCircleOutline: icon('CheckmarkCircleOutline'),
     DocumentTextOutline: icon('DocumentTextOutline'),
     InformationCircleOutline: icon('InformationCircleOutline'),
     WarningOutline: icon('WarningOutline'),
@@ -303,6 +311,30 @@ describe('TaskFormDrawer', () => {
       await nextTick()
 
       expect((wrapper.find('.variable-editor-mock').element as HTMLTextAreaElement).value).toBe('Existing prompt')
+    })
+
+    it('shows a field-level error when task mode is not selected and clears it after selection', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      await submitCreate()
+
+      expect(mockMessage.warning).toHaveBeenCalledWith('issue.pleaseSelectTaskMode')
+      expect(mockApi.createTask).not.toHaveBeenCalled()
+      expect(wrapper.vm.taskModeErrorVisible).toBe(true)
+      expect(wrapper.find('.task-mode-label-row').text()).toContain('issue.taskMode')
+      expect(wrapper.find('.task-mode-label-hint').text()).toBe('issue.taskModeManualHint')
+      expect(wrapper.find('.n-form-item-feedback').text()).toBe('issue.taskModeRequiredFeedback')
+      expect(wrapper.findAll('.task-mode-card--error')).toHaveLength(2)
+
+      await wrapper.find('.task-mode-card').trigger('click')
+      await nextTick()
+
+      expect(wrapper.vm.taskMode).toBe('execute')
+      expect(wrapper.vm.taskModeErrorVisible).toBe(false)
+      expect(wrapper.findAll('.task-mode-card--error')).toHaveLength(0)
+      expect(wrapper.findAll('.task-mode-selector .n-radio')).toHaveLength(0)
+      expect(wrapper.findAll('.task-mode-card__check')).toHaveLength(1)
     })
 
     it('warns when scheduled mode has no selected time', async () => {
