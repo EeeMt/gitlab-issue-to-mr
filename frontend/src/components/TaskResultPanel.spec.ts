@@ -46,4 +46,31 @@ describe('TaskResultPanel', () => {
     expect(taskResultPanelSource).toContain('taskView.skillUsage')
     expect(taskResultPanelSource).toContain('skillUsageStats.length > 0')
   })
+
+  it('adds Mermaid rendering only to the AI delivery summary panel', () => {
+    expect(taskResultPanelSource).toContain("await import('mermaid')")
+    expect(taskResultPanelSource).not.toContain("import mermaid from 'mermaid'")
+    expect(taskResultPanelSource).toContain('function renderSummaryMarkdown(text: string): string')
+    expect(taskResultPanelSource).toContain('[ \\t]*mermaid')
+    expect(taskResultPanelSource).toContain('const renderRun = ++summaryMermaidRenderRun')
+    expect(taskResultPanelSource).toContain('summaryRenderedHtml.value = renderSummaryMarkdown(text)')
+    expect(taskResultPanelSource).toContain('if (summaryMermaidDiagrams.value.length === 0) return')
+    expect(taskResultPanelSource).toContain('renderSummaryMermaidDiagrams(renderRun)')
+    expect(taskResultPanelSource).toContain('renderMarkdown(before)')
+    expect(taskResultPanelSource).toContain('renderMarkdown(after)')
+  })
+
+  it('handles stale and failed Mermaid render attempts without leaving loading placeholders', () => {
+    expect(taskResultPanelSource).toContain('function markMermaidDiagramError(')
+    expect(taskResultPanelSource).toContain('diagrams.forEach((_, index) => markMermaidDiagramError(root, diagrams, index, error))')
+    expect(taskResultPanelSource).toContain('if (renderRun !== summaryMermaidRenderRun) return')
+    expect(taskResultPanelSource).toContain('resetMermaidViewer()')
+  })
+
+  it('provides a larger Mermaid diagram viewer for summary diagrams', () => {
+    expect(taskResultPanelSource).toContain('summary-mermaid-modal')
+    expect(taskResultPanelSource).toContain('mermaidViewerVisible')
+    expect(taskResultPanelSource).toContain('mermaidZoomOptions')
+    expect(taskResultPanelSource).toContain('taskView.mermaidOpenLarge')
+  })
 })

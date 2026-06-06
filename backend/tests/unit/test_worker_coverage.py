@@ -619,6 +619,14 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('commit_message:$commit_message', content)
         self.assertIn('--arg commit_message "${FINAL_COMMIT_MESSAGE:-}"', content)
 
+    def test_entrypoint_prompts_execution_summary_diagrams_as_mermaid(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn("最终输出简短执行摘要", content)
+        self.assertIn("必须使用 Markdown 的 mermaid fenced code block", content)
+        self.assertIn("不要使用 ASCII 图、图片链接或其它图表格式", content)
+
     def test_entrypoint_generates_overall_summary_with_claude_cli(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = script.read_text()

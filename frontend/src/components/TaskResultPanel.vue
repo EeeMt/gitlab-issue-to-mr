@@ -35,7 +35,9 @@
           <div class="summary-expand-body">
             <div
               v-if="summaryRenderedHtml"
+              ref="summaryContentRef"
               class="summary-content markdown-content"
+              @click="handleSummaryContentClick"
               v-html="summaryRenderedHtml"
             ></div>
             <div v-else-if="!summaryPayloadLoading && summaryPayloadLoaded && !summaryRenderedHtml" class="summary-content summary-content--empty">
@@ -214,10 +216,42 @@
       </div>
     </n-space>
   </n-modal>
+
+  <!-- Mermaid diagram viewer -->
+  <n-modal
+    v-model:show="mermaidViewerVisible"
+    preset="card"
+    class="summary-mermaid-modal"
+    :style="{ width: 'min(1100px, 94vw)' }"
+  >
+    <template #header>
+      <span>{{ t('taskView.mermaidDiagram') }}</span>
+    </template>
+    <div class="summary-mermaid-modal__toolbar">
+      <n-button
+        v-for="option in mermaidZoomOptions"
+        :key="option.value"
+        size="tiny"
+        secondary
+        :type="mermaidZoom === option.value ? 'primary' : 'default'"
+        @click="mermaidZoom = option.value"
+      >
+        {{ option.label }}
+      </n-button>
+    </div>
+    <div class="summary-mermaid-modal__viewport">
+      <div
+        class="summary-mermaid-modal__canvas"
+        :class="{ 'summary-mermaid-modal__canvas--fit': mermaidZoom === 'fit' }"
+        :style="{ width: mermaidViewerWidth }"
+        v-html="activeMermaidSvg"
+      ></div>
+    </div>
+  </n-modal>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { NCard, NIcon, NButton, NModal, NInput, NSpace, NTag, useMessage } from 'naive-ui'
 import { AlertCircleOutline, TimeOutline, GitCommitOutline, OpenOutline, ChatbubbleEllipsesOutline, ArrowBackOutline, CheckmarkCircleOutline, CloseCircleOutline, ShieldCheckmarkOutline, ChevronForward, ChatboxOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
@@ -227,6 +261,14 @@ import type { Task, TaskLog } from '../api'
 import { overrideTaskStatus, getTaskPayload } from '../api'
 import { parseTextEntry, renderMarkdown } from './task-process/taskProcessUtils'
 import type { SkillUsageStat } from './task-process/taskProcessUtils'
+
+type MermaidZoom = 'fit' | '100' | '150' | '200'
+
+interface SummaryMermaidDiagram {
+  source: string
+  svg: string
+  error: string
+}
 
 const props = defineProps<{
   task: Task
@@ -255,6 +297,14 @@ const summaryPayloadLoading = ref(false)
 const summaryPayloadLoaded = ref(false)
 const summaryRenderedHtml = ref('')
 const summaryRenderedSource = ref('')
+const summaryContentRef = ref<HTMLElement | null>(null)
+const summaryMermaidDiagrams = ref<SummaryMermaidDiagram[]>([])
+const mermaidViewerVisible = ref(false)
+const activeMermaidIndex = ref<number | null>(null)
+const mermaidZoom = ref<MermaidZoom>('fit')
+let mermaidConfigured = false
+let mermaidRenderer: typeof import('mermaid').default | null = null
+let summaryMermaidRenderRun = 0
 
 const summaryEntry = computed(() =>
   props.lastAssistantLog ? parseTextEntry(props.lastAssistantLog.metadata) : null
@@ -271,11 +321,183 @@ const summaryPreview = computed(() => {
   return entry.text.slice(0, 120) || ''
 })
 
+const mermaidZoomOptions = computed<{ value: MermaidZoom, label: string }[]>(() => [
+  { value: 'fit', label: t('taskView.mermaidFitWidth') },
+  { value: '100', label: '100%' },
+  { value: '150', label: '150%' },
+  { value: '200', label: '200%' },
+])
+
+const activeMermaidSvg = computed(() => {
+  if (activeMermaidIndex.value == null) return ''
+  return summaryMermaidDiagrams.value[activeMermaidIndex.value]?.svg ?? ''
+})
+
+const mermaidViewerWidth = computed(() => {
+  if (mermaidZoom.value === 'fit') return '100%'
+  return `${mermaidZoom.value}%`
+})
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function renderSummaryMermaidPlaceholder(index: number): string {
+  return [
+    `<div class="summary-mermaid" data-summary-mermaid-index="${index}" data-summary-mermaid-state="loading">`,
+    '<div class="summary-mermaid__toolbar">',
+    '<span class="summary-mermaid__label">Mermaid</span>',
+    `<button type="button" class="summary-mermaid__expand" data-summary-mermaid-action="zoom" data-summary-mermaid-index="${index}">${escapeHtml(t('taskView.mermaidOpenLarge'))}</button>`,
+    '</div>',
+    `<div class="summary-mermaid__canvas" data-summary-mermaid-canvas="${index}">${escapeHtml(t('taskView.mermaidLoading'))}</div>`,
+    '</div>',
+  ].join('')
+}
+
+function renderSummaryMarkdown(text: string): string {
+  const diagrams: SummaryMermaidDiagram[] = []
+  const mermaidFencePattern = /(^|\n)(`{3,}|~{3,})[ \t]*mermaid[^\n]*\n([\s\S]*?)\n\2[ \t]*(?=\n|$)/gi
+  let html = ''
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = mermaidFencePattern.exec(text)) !== null) {
+    const prefix = match[1] ?? ''
+    const blockStart = match.index + prefix.length
+    const before = text.slice(lastIndex, blockStart)
+    if (before) html += renderMarkdown(before)
+
+    const source = (match[3] ?? '').trim()
+    const index = diagrams.length
+    diagrams.push({ source, svg: '', error: '' })
+    html += renderSummaryMermaidPlaceholder(index)
+    lastIndex = mermaidFencePattern.lastIndex
+  }
+
+  const after = text.slice(lastIndex)
+  if (after) html += renderMarkdown(after)
+  summaryMermaidDiagrams.value = diagrams
+  return html || renderMarkdown(text)
+}
+
+async function getMermaidRenderer() {
+  if (!mermaidRenderer) {
+    mermaidRenderer = (await import('mermaid')).default
+  }
+  if (mermaidConfigured) return mermaidRenderer
+
+  const mermaid = mermaidRenderer
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'neutral',
+    securityLevel: 'strict',
+    flowchart: {
+      useMaxWidth: true,
+      htmlLabels: true,
+    },
+  })
+  mermaidConfigured = true
+  return mermaid
+}
+
+function renderMermaidError(source: string, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return [
+    `<div class="summary-mermaid__error">${escapeHtml(t('taskView.mermaidRenderError'))}</div>`,
+    `<pre class="md-code-block hljs"><code>${escapeHtml(source)}</code></pre>`,
+    message ? `<div class="summary-mermaid__error-detail">${escapeHtml(message)}</div>` : '',
+  ].join('')
+}
+
+function resetMermaidViewer() {
+  mermaidViewerVisible.value = false
+  activeMermaidIndex.value = null
+  mermaidZoom.value = 'fit'
+}
+
+function markMermaidDiagramError(
+  root: HTMLElement,
+  diagrams: SummaryMermaidDiagram[],
+  index: number,
+  error: unknown,
+) {
+  const diagram = diagrams[index]
+  const container = root.querySelector<HTMLElement>(`[data-summary-mermaid-index="${index}"]`)
+  const canvas = root.querySelector<HTMLElement>(`[data-summary-mermaid-canvas="${index}"]`)
+  if (!diagram || !container || !canvas) return
+
+  diagram.svg = ''
+  diagram.error = error instanceof Error ? error.message : String(error)
+  canvas.innerHTML = renderMermaidError(diagram.source, error)
+  container.dataset.summaryMermaidState = 'error'
+}
+
+async function renderSummaryMermaidDiagrams(renderRun: number) {
+  const diagrams = summaryMermaidDiagrams.value
+  if (diagrams.length === 0) return
+
+  await nextTick()
+  if (renderRun !== summaryMermaidRenderRun) return
+
+  const root = summaryContentRef.value
+  if (!root) return
+
+  let mermaid: typeof import('mermaid').default
+  try {
+    mermaid = await getMermaidRenderer()
+  } catch (error) {
+    if (renderRun !== summaryMermaidRenderRun) return
+    diagrams.forEach((_, index) => markMermaidDiagramError(root, diagrams, index, error))
+    summaryMermaidDiagrams.value = [...diagrams]
+    return
+  }
+  if (renderRun !== summaryMermaidRenderRun) return
+
+  await Promise.all(diagrams.map(async (diagram, index) => {
+    const container = root.querySelector<HTMLElement>(`[data-summary-mermaid-index="${index}"]`)
+    const canvas = root.querySelector<HTMLElement>(`[data-summary-mermaid-canvas="${index}"]`)
+    if (!container || !canvas) return
+
+    try {
+      const renderId = `summary-mermaid-${props.task.id}-${renderRun}-${index}`
+      const { svg, bindFunctions } = await mermaid.render(renderId, diagram.source)
+      if (renderRun !== summaryMermaidRenderRun) return
+      diagram.svg = svg
+      diagram.error = ''
+      canvas.innerHTML = svg
+      bindFunctions?.(canvas)
+      container.dataset.summaryMermaidState = 'ready'
+    } catch (error) {
+      if (renderRun !== summaryMermaidRenderRun) return
+      markMermaidDiagramError(root, diagrams, index, error)
+    }
+  }))
+
+  summaryMermaidDiagrams.value = [...diagrams]
+}
+
 function syncSummaryRender() {
   const text = summaryText.value.trim()
-  if (!text || summaryRenderedSource.value === text) return
-  summaryRenderedHtml.value = renderMarkdown(text)
+  if (!text) {
+    summaryMermaidRenderRun += 1
+    summaryRenderedHtml.value = ''
+    summaryRenderedSource.value = ''
+    summaryMermaidDiagrams.value = []
+    resetMermaidViewer()
+    return
+  }
+  if (summaryRenderedSource.value === text) return
+  const renderRun = ++summaryMermaidRenderRun
+  resetMermaidViewer()
+  summaryRenderedHtml.value = renderSummaryMarkdown(text)
   summaryRenderedSource.value = text
+  if (summaryMermaidDiagrams.value.length === 0) return
+  void renderSummaryMermaidDiagrams(renderRun)
 }
 
 async function toggleSummary() {
@@ -302,6 +524,22 @@ async function toggleSummary() {
       summaryPayloadLoading.value = false
     }
   }
+}
+
+function handleSummaryContentClick(event: MouseEvent) {
+  const target = event.target
+  if (!(target instanceof HTMLElement)) return
+
+  const button = target.closest<HTMLButtonElement>('[data-summary-mermaid-action="zoom"]')
+  if (!button) return
+
+  const index = Number(button.dataset.summaryMermaidIndex)
+  if (!Number.isInteger(index)) return
+  if (!summaryMermaidDiagrams.value[index]?.svg) return
+
+  activeMermaidIndex.value = index
+  mermaidZoom.value = 'fit'
+  mermaidViewerVisible.value = true
 }
 
 function openOverrideModal(targetStatus: 'completed' | 'failed') {
@@ -830,5 +1068,116 @@ const skillUsageBreakdown = computed(() =>
   margin: 0.5em 0; padding: 0.2em 0.8em;
   border-left: 3px solid var(--n-border-color, rgba(128,128,128,0.35));
   color: var(--n-text-color-3, #888);
+}
+
+.summary-content :deep(.summary-mermaid) {
+  margin: 0.7em 0;
+  border: 1px solid rgba(2, 132, 199, 0.16);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.6);
+  overflow: hidden;
+}
+
+.summary-content :deep(.summary-mermaid__toolbar) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(2, 132, 199, 0.12);
+  background: rgba(2, 132, 199, 0.04);
+}
+
+.summary-content :deep(.summary-mermaid__label) {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--n-text-color-3, #777);
+}
+
+.summary-content :deep(.summary-mermaid__expand) {
+  border: 1px solid rgba(2, 132, 199, 0.22);
+  border-radius: 4px;
+  padding: 2px 8px;
+  background: rgba(2, 132, 199, 0.08);
+  color: #0284c7;
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.summary-content :deep(.summary-mermaid__expand:hover) {
+  background: rgba(2, 132, 199, 0.14);
+  border-color: rgba(2, 132, 199, 0.36);
+}
+
+.summary-content :deep(.summary-mermaid[data-summary-mermaid-state="loading"] .summary-mermaid__expand),
+.summary-content :deep(.summary-mermaid[data-summary-mermaid-state="error"] .summary-mermaid__expand) {
+  display: none;
+}
+
+.summary-content :deep(.summary-mermaid__canvas) {
+  min-height: 96px;
+  max-height: 60vh;
+  padding: 12px;
+  overflow: auto;
+  color: var(--n-text-color-2);
+}
+
+.summary-content :deep(.summary-mermaid__canvas svg) {
+  display: block;
+  max-width: none;
+}
+
+.summary-content :deep(.summary-mermaid__error) {
+  margin-bottom: 8px;
+  color: #d03050;
+  font-weight: 600;
+}
+
+.summary-content :deep(.summary-mermaid__error-detail) {
+  margin-top: 6px;
+  color: var(--n-text-color-3, #888);
+  font-family: var(--n-font-family-mono, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+:global(.summary-mermaid-modal .n-card__content) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+:global(.summary-mermaid-modal__toolbar) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+:global(.summary-mermaid-modal__viewport) {
+  max-height: min(76vh, 820px);
+  min-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--n-border-color, rgba(128, 128, 128, 0.18));
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 16px;
+}
+
+:global(.summary-mermaid-modal__canvas) {
+  min-width: 100%;
+}
+
+:global(.summary-mermaid-modal__canvas svg) {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: none;
+}
+
+:global(.summary-mermaid-modal__canvas--fit svg) {
+  max-width: 100%;
 }
 </style>
