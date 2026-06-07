@@ -156,13 +156,19 @@ vi.mock('naive-ui', () => ({
   },
   NSelect: {
     name: 'NSelect',
-    props: ['value', 'options', 'clearable', 'placeholder'],
+    props: ['value', 'options', 'clearable', 'placeholder', 'multiple'],
     emits: ['update:value'],
     setup(props: any, { emit }: any) {
       return () => h('select', {
         class: 'n-select',
+        multiple: props.multiple,
         value: props.value ?? '',
-        onChange: (event: Event) => emit('update:value', Number((event.target as HTMLSelectElement).value) || null),
+        onChange: (event: Event) => {
+          const select = event.target as HTMLSelectElement
+          emit('update:value', props.multiple
+            ? Array.from(select.selectedOptions).map(option => option.value)
+            : Number(select.value) || null)
+        },
       }, props.options?.map((option: any) => h('option', { value: option.value, disabled: option.disabled }, option.label)))
     },
   },
@@ -182,6 +188,13 @@ vi.mock('naive-ui', () => ({
         class: 'n-switch',
         onClick: () => emit('update:value', !props.value),
       })
+    },
+  },
+  NTag: {
+    name: 'NTag',
+    props: ['size', 'round', 'type'],
+    setup(_props: any, { slots }: any) {
+      return () => h('span', { class: 'n-tag' }, slots.default?.())
     },
   },
   NTooltip: {
@@ -239,8 +252,8 @@ vi.mock('./HeatmapChart.vue', () => ({
 }))
 
 const mockTemplates = [
-  { id: 1, name: 'Bug Fix', content: 'Fix {{issue_type}}', variable_tips: { issue_type: 'Bug type' }, is_active: true, sort_order: 1, created_at: '2026-03-31T10:00:00Z', updated_at: '2026-03-31T10:00:00Z' },
-  { id: 2, name: 'Simple', content: 'Do something', is_active: true, sort_order: 2, created_at: '2026-03-30T10:00:00Z', updated_at: '2026-03-30T10:00:00Z' },
+  { id: 1, name: 'Bug Fix', content: 'Fix {{issue_type}}', variable_tips: { issue_type: 'Bug type' }, tags: ['backend', 'review'], is_active: true, sort_order: 1, created_at: '2026-03-31T10:00:00Z', updated_at: '2026-03-31T10:00:00Z' },
+  { id: 2, name: 'Simple', content: 'Do something', tags: ['frontend'], is_active: true, sort_order: 2, created_at: '2026-03-30T10:00:00Z', updated_at: '2026-03-30T10:00:00Z' },
 ]
 
 const mockProviders = [
@@ -549,6 +562,52 @@ describe('TaskFormDrawer', () => {
       expect(wrapper.vm.promptVariableTips).toEqual({ issue_type: 'Bug type' })
       expect(wrapper.vm.pendingTemplate).toBeNull()
       expect(wrapper.vm.showTemplateDrawer).toBe(false)
+    })
+
+    it('filters active templates by all selected tags', async () => {
+      await mountDrawer({ issueDescription: '' })
+      await openDrawer()
+
+      wrapper.vm.promptTemplates = [
+        ...mockTemplates,
+        { id: 3, name: 'Inactive', content: 'Hidden', tags: ['backend', 'review'], is_active: false, sort_order: 3, created_at: '2026-03-29T10:00:00Z', updated_at: '2026-03-29T10:00:00Z' },
+        { id: 4, name: 'Backend only', content: 'Backend', tags: ['backend'], is_active: true, sort_order: 4, created_at: '2026-03-28T10:00:00Z', updated_at: '2026-03-28T10:00:00Z' },
+      ]
+      wrapper.vm.selectedTemplateTags = ['backend', 'review']
+      wrapper.vm.showTemplateDrawer = true
+      await nextTick()
+
+      expect(wrapper.vm.filteredPromptTemplates.map((template: any) => template.name)).toEqual(['Bug Fix'])
+      expect(wrapper.findAll('.prompt-template-dropdown__item')).toHaveLength(1)
+      expect(wrapper.text()).toContain('backend')
+      expect(wrapper.text()).toContain('review')
+      expect(wrapper.text()).not.toContain('Inactive')
+      expect(wrapper.text()).not.toContain('Backend only')
+    })
+
+    it('closes the tag filter dropdown after selecting tags', async () => {
+      await mountDrawer({ issueDescription: '' })
+      await openDrawer()
+
+      wrapper.vm.templateTagFilterVisible = true
+      wrapper.vm.handleTemplateTagFilterUpdate(['backend'])
+
+      expect(wrapper.vm.selectedTemplateTags).toEqual(['backend'])
+      expect(wrapper.vm.templateTagFilterVisible).toBe(false)
+    })
+
+    it('renders legacy templates without tags in the drawer', async () => {
+      await mountDrawer({ issueDescription: '' })
+      await openDrawer()
+
+      wrapper.vm.promptTemplates = [
+        { id: 5, name: 'Legacy', content: 'Legacy content', is_active: true, sort_order: 5, created_at: '2026-03-27T10:00:00Z', updated_at: '2026-03-27T10:00:00Z' },
+      ]
+      wrapper.vm.showTemplateDrawer = true
+      await nextTick()
+
+      expect(wrapper.findAll('.prompt-template-dropdown__item')).toHaveLength(1)
+      expect(wrapper.text()).toContain('Legacy')
     })
   })
 

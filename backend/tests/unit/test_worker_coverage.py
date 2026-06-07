@@ -627,6 +627,18 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn("必须使用 Markdown 的 mermaid fenced code block", content)
         self.assertIn("不要使用 ASCII 图、图片链接或其它图表格式", content)
 
+    def test_entrypoint_plan_prompt_diagrams_as_mermaid(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+        plan_prompt = content.split('if [ "${TASK_MODE}" = "plan" ]; then', 1)[1].split(
+            "else",
+            1,
+        )[0]
+
+        self.assertIn("给出详细的实施方案", plan_prompt)
+        self.assertIn("必须使用 Markdown 的 mermaid fenced code block", plan_prompt)
+        self.assertIn("不要使用 ASCII 图、图片链接或其它图表格式", plan_prompt)
+
     def test_entrypoint_generates_overall_summary_with_claude_cli(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = script.read_text()

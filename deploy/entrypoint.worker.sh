@@ -517,7 +517,8 @@ ${USER_PROMPT}
     - 为什么这么设计
     - 潜在风险或需要注意的地方
 3. 不要修改任何文件，不要执行任何写操作。
-4. 不要要求人工确认。
+4. 如果方案需要表达流程、架构、时序、状态转换等图表，必须使用 Markdown 的 mermaid fenced code block（语言标记为 mermaid），不要使用 ASCII 图、图片链接或其它图表格式。
+5. 不要要求人工确认。
 EOF
 else
 cat > /tmp/claude_prompt.txt <<EOF

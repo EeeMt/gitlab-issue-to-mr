@@ -25,12 +25,19 @@ from app.api.prompt_templates import (
 from app.models import PromptTemplate
 
 
-def _make_template(template_id: int, name: str, content: str, is_active: bool = True) -> PromptTemplate:
+def _make_template(
+    template_id: int,
+    name: str,
+    content: str,
+    is_active: bool = True,
+    tags: list[str] | None = None,
+) -> PromptTemplate:
     now = datetime.now(UTC)
     return PromptTemplate(
         id=template_id,
         name=name,
         content=content,
+        tags=tags or [],
         is_active=is_active,
         sort_order=template_id,
         created_at=now,
@@ -55,6 +62,7 @@ async def test_list_prompt_templates_returns_all_templates():
     assert len(result) == 2
     assert result[0].name == "Code Review"
     assert result[0].content == "Please review {{project_name}}"
+    assert result[0].tags == []
     assert result[0].is_active is True
     assert result[0].sort_order == 1
     assert result[1].name == "Generate Tests"
@@ -75,16 +83,23 @@ async def test_create_prompt_template_adds_new_template():
         obj.updated_at = datetime.now(UTC)
     db.refresh = AsyncMock(side_effect=mock_refresh)
 
-    template_input = PromptTemplateCreate(name="Bug Fix", content="Fix the bug in {{component}}", is_active=True)
+    template_input = PromptTemplateCreate(
+        name="Bug Fix",
+        content="Fix the bug in {{component}}",
+        tags=[" backend ", "Backend", "", "urgent"],
+        is_active=True,
+    )
 
     with _mock_admin_user():
         result = await create_prompt_template(template=template_input, db=db)
 
     assert result.name == "Bug Fix"
     assert result.content == "Fix the bug in {{component}}"
+    assert result.tags == ["backend", "urgent"]
     assert result.is_active is True
     assert result.sort_order == 4
     db.add.assert_called_once()
+    assert db.add.call_args.args[0].tags == ["backend", "urgent"]
     db.commit.assert_called_once()
 
 
@@ -123,6 +138,7 @@ async def test_get_prompt_template_returns_template_when_exists():
 
     assert result.id == 1
     assert result.name == "Code Review"
+    assert result.tags == []
 
 
 @pytest.mark.asyncio
@@ -145,13 +161,19 @@ async def test_update_prompt_template_updates_fields():
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
 
-    update_input = PromptTemplateUpdate(name="New Name", content="New content", is_active=False)
+    update_input = PromptTemplateUpdate(
+        name="New Name",
+        content="New content",
+        tags=["frontend", " review ", "Frontend"],
+        is_active=False,
+    )
 
     with _mock_admin_user():
         result = await update_prompt_template(template_id=1, update=update_input, db=db)
 
     assert result.name == "New Name"
     assert result.content == "New content"
+    assert result.tags == ["frontend", "review"]
     assert result.is_active is False
     db.commit.assert_called_once()
 
@@ -173,6 +195,41 @@ async def test_update_prompt_template_partial_update():
     assert result.name == "Updated Name"
     assert result.content == "Original content"  # Unchanged
     assert result.is_active is True  # Unchanged
+
+
+@pytest.mark.asyncio
+async def test_update_prompt_template_clears_tags_with_empty_list():
+    template = _make_template(1, "Original Name", "Original content", tags=["review"])
+    db = AsyncMock()
+    db.execute.return_value = SimpleNamespace(scalar_one_or_none=lambda: template)
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    update_input = PromptTemplateUpdate(tags=[])
+
+    with _mock_admin_user():
+        result = await update_prompt_template(template_id=1, update=update_input, db=db)
+
+    assert result.tags == []
+    assert template.tags == []
+
+
+@pytest.mark.asyncio
+async def test_update_prompt_template_rejects_too_many_tags():
+    template = _make_template(1, "Original Name", "Original content")
+    db = AsyncMock()
+    db.execute.return_value = SimpleNamespace(scalar_one_or_none=lambda: template)
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    update_input = PromptTemplateUpdate(tags=[f"tag-{index}" for index in range(21)])
+
+    with _mock_admin_user():
+        with pytest.raises(Exception) as exc_info:
+            await update_prompt_template(template_id=1, update=update_input, db=db)
+
+    assert "422" in str(exc_info.value)
+    db.commit.assert_not_called()
 
 
 @pytest.mark.asyncio

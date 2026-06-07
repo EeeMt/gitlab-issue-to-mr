@@ -110,6 +110,25 @@ vi.mock('naive-ui', () => ({
       })
     }
   },
+  NSelect: {
+    name: 'NSelect',
+    props: ['value', 'options', 'multiple', 'filterable', 'tag', 'clearable', 'placeholder'],
+    emits: ['update:value'],
+    setup(props: any, { emit, attrs }: any) {
+      return () => h('select', {
+        class: 'n-select',
+        multiple: props.multiple,
+        value: props.value,
+        ...attrs,
+        onChange: (event: Event) => {
+          const select = event.target as HTMLSelectElement
+          emit('update:value', props.multiple
+            ? Array.from(select.selectedOptions).map(option => option.value)
+            : select.value)
+        }
+      }, props.options?.map((option: any) => h('option', { value: option.value }, option.label)))
+    }
+  },
   NIcon: {
     name: 'NIcon',
     props: ['component'],
@@ -193,6 +212,7 @@ const mockTemplates = [
     name: 'Bug Fix Template',
     content: 'Fix the {{issue_type}} in {{file_path}}',
     variable_tips: { issue_type: 'Type of issue', file_path: 'Path to file' },
+    tags: ['backend', 'review'],
     is_active: true,
     sort_order: 1,
     created_at: '2026-03-31T10:00:00Z',
@@ -203,6 +223,7 @@ const mockTemplates = [
     name: 'Feature Template',
     content: 'Add {{feature_name}} feature',
     variable_tips: {},
+    tags: ['frontend'],
     is_active: false,
     sort_order: 2,
     created_at: '2026-03-30T10:00:00Z',
@@ -321,6 +342,7 @@ describe('PromptTemplatesPanel', () => {
       expect(wrapper.vm.promptTemplateEditingId).toBe(template.id)
       expect(wrapper.vm.promptTemplateForm.name).toBe(template.name)
       expect(wrapper.vm.promptTemplateForm.content).toBe(template.content)
+      expect(wrapper.vm.promptTemplateForm.tags).toEqual(template.tags)
       expect(wrapper.vm.promptTemplateModalVisible).toBe(true)
     })
   })
@@ -412,11 +434,14 @@ describe('PromptTemplatesPanel', () => {
       wrapper.vm.handleCreatePromptTemplate()
       wrapper.vm.promptTemplateForm.name = 'New Template'
       wrapper.vm.promptTemplateForm.content = 'Test content'
+      wrapper.vm.promptTemplateForm.tags = ['backend', 'urgent']
       wrapper.vm.promptTemplateForm.is_active = true
 
       await wrapper.vm.handleSavePromptTemplate()
 
-      expect(mockApi.createPromptTemplate).toHaveBeenCalled()
+      expect(mockApi.createPromptTemplate).toHaveBeenCalledWith(expect.objectContaining({
+        tags: ['backend', 'urgent']
+      }))
       expect(wrapper.vm.promptTemplateModalVisible).toBe(false)
     })
 
@@ -428,10 +453,13 @@ describe('PromptTemplatesPanel', () => {
       const template = mockTemplates[0]
       wrapper.vm.handleEditPromptTemplate(template)
       wrapper.vm.promptTemplateForm.name = 'Updated Name'
+      wrapper.vm.promptTemplateForm.tags = ['review']
 
       await wrapper.vm.handleSavePromptTemplate()
 
-      expect(mockApi.updatePromptTemplate).toHaveBeenCalledWith(template.id, expect.any(Object))
+      expect(mockApi.updatePromptTemplate).toHaveBeenCalledWith(template.id, expect.objectContaining({
+        tags: ['review']
+      }))
       expect(wrapper.vm.promptTemplateModalVisible).toBe(false)
     })
 
@@ -469,6 +497,17 @@ describe('PromptTemplatesPanel', () => {
       await wrapper.vm.$nextTick()
 
       expect(wrapper.find('[data-testid="prompt-template-modal"]').exists()).toBe(true)
+    })
+  })
+
+  describe('tag display', () => {
+    it('renders tags below the template name', async () => {
+      const wrapper = mountComponent()
+      wrapper.vm.promptTemplates = mockTemplates
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.text()).toContain('backend')
+      expect(wrapper.text()).toContain('review')
     })
   })
 

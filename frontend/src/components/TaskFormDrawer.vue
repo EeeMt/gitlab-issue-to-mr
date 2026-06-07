@@ -18,17 +18,42 @@
         </div>
       </Transition>
       <div class="template-drawer-layout__body">
-        <div v-if="promptTemplates.length === 0" class="prompt-template-dropdown__empty">
+        <div v-if="activePromptTemplates.length > 0" class="template-tag-filter">
+          <n-select
+            :value="selectedTemplateTags"
+            :show="templateTagFilterVisible"
+            multiple
+            clearable
+            :options="templateTagOptions"
+            :placeholder="t('createTask.filterTemplatesByTags')"
+            @update:value="handleTemplateTagFilterUpdate"
+            @update:show="templateTagFilterVisible = $event"
+          />
+        </div>
+        <div v-if="activePromptTemplates.length === 0" class="prompt-template-dropdown__empty">
           {{ t('createTask.noPromptTemplates') }}
         </div>
+        <div v-else-if="filteredPromptTemplates.length === 0" class="prompt-template-dropdown__empty">
+          {{ t('createTask.noMatchingPromptTemplates') }}
+        </div>
         <div
-          v-for="tmpl in promptTemplates"
+          v-for="tmpl in filteredPromptTemplates"
           :key="tmpl.id"
           class="prompt-template-dropdown__item"
           :class="{ 'prompt-template-dropdown__item--pending': pendingTemplate?.id === tmpl.id }"
           @click="handleTemplateItemClick(tmpl)"
         >
           <div class="prompt-template-dropdown__item-name">{{ tmpl.name }}</div>
+          <div v-if="(tmpl.tags ?? []).length > 0" class="prompt-template-dropdown__tags">
+            <n-tag
+              v-for="tag in tmpl.tags ?? []"
+              :key="tag"
+              size="small"
+              round
+            >
+              {{ tag }}
+            </n-tag>
+          </div>
           <div class="prompt-template-dropdown__item-preview">{{ tmpl.content.substring(0, 80) }}...</div>
         </div>
       </div>
@@ -68,7 +93,7 @@
               <span class="prompt-section-label-text">{{ t('issue.prompt') }}</span>
               <n-button
                 size="tiny"
-                :disabled="promptTemplatesLoading || promptTemplates.length === 0"
+                :disabled="promptTemplatesLoading || activePromptTemplates.length === 0"
                 :loading="promptTemplatesLoading"
                 type="primary"
                 ghost
@@ -299,7 +324,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, useAttrs } from 'vue'
 import {
   NButton, NDrawer, NDrawerContent, NForm, NFormItem, NRadio, NRadioGroup,
-  NDatePicker, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon,
+  NDatePicker, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon, NTag,
   useMessage
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -321,6 +346,11 @@ import {
 } from '../api'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
+import {
+  filterPromptTemplatesByTags,
+  getActivePromptTemplates,
+  getPromptTemplateTags
+} from '../utils/promptTemplates'
 import { extractSlotErrorMessage } from '../utils/slotError'
 import { formatUsageResetAt, isUsageLimitExceededDetail, type UsageLimitExceededDetail } from '../utils/usageLimits'
 
@@ -373,6 +403,8 @@ const usageLimitDetail = ref<UsageLimitExceededDetail | null>(null)
 const showTemplateDrawer = ref(false)
 const promptTemplates = ref<PromptTemplate[]>([])
 const promptTemplatesLoading = ref(false)
+const selectedTemplateTags = ref<string[]>([])
+const templateTagFilterVisible = ref(false)
 const pendingTemplate = ref<PromptTemplate | null>(null)
 const promptVariableTips = ref<Record<string, string> | undefined>(undefined)
 
@@ -422,6 +454,14 @@ const providerOptions = computed(() =>
     value: p.id,
     disabled: p.is_disabled,
   }))
+)
+
+const activePromptTemplates = computed(() => getActivePromptTemplates(promptTemplates.value))
+const templateTagOptions = computed(() =>
+  getPromptTemplateTags(activePromptTemplates.value).map(tag => ({ label: tag, value: tag }))
+)
+const filteredPromptTemplates = computed(() =>
+  filterPromptTemplatesByTags(activePromptTemplates.value, selectedTemplateTags.value)
 )
 
 // --- Watchers ---
@@ -532,6 +572,11 @@ function handleHeatmapCellClick(startMs: number) {
 
 function selectTaskMode(mode: 'execute' | 'plan') {
   taskMode.value = mode
+}
+
+function handleTemplateTagFilterUpdate(tags: string[] | null) {
+  selectedTemplateTags.value = tags ?? []
+  templateTagFilterVisible.value = false
 }
 
 function isScheduleDateDisabled(timestamp: number): boolean {
@@ -953,6 +998,10 @@ onUnmounted(() => {
   padding: 8px 0;
 }
 
+.template-tag-filter {
+  padding: 8px 16px 12px;
+}
+
 .prompt-template-dropdown__empty {
   padding: 16px;
   text-align: center;
@@ -978,6 +1027,13 @@ onUnmounted(() => {
 .prompt-template-dropdown__item-name {
   font-weight: 600;
   margin-bottom: 4px;
+}
+
+.prompt-template-dropdown__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
 }
 
 .prompt-template-dropdown__item-preview {

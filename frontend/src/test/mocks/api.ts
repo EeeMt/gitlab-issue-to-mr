@@ -73,6 +73,7 @@ export const createMockPromptTemplate = (overrides = {}): PromptTemplate => ({
   name: 'Bug Fix Template',
   content: 'Fix the {{issue_type}} in {{file_path}}',
   variable_tips: { issue_type: 'Type of issue (bug, feature, etc.)', file_path: 'Path to the file' },
+  tags: [],
   is_active: true,
   sort_order: 1,
   created_at: '2026-03-31T10:00:00Z',

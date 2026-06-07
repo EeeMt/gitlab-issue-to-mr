@@ -81,12 +81,18 @@ vi.mock('naive-ui', () => ({
   },
   NSelect: {
     name: 'NSelect',
-    props: ['options', 'loading', 'placeholder', 'disabled', 'value', 'filterable'],
+    props: ['options', 'loading', 'placeholder', 'disabled', 'value', 'filterable', 'multiple'],
     setup(props: any, { emit }: any) {
       return () => h('select', {
         class: 'n-select',
         disabled: props.disabled,
-        onChange: (e: Event) => emit('update:value', Number((e.target as HTMLSelectElement).value) || (e.target as HTMLSelectElement).value)
+        multiple: props.multiple,
+        onChange: (e: Event) => {
+          const select = e.target as HTMLSelectElement
+          emit('update:value', props.multiple
+            ? Array.from(select.selectedOptions).map(option => option.value)
+            : Number(select.value) || select.value)
+        }
       }, props.options?.map((o: any) => h('option', { value: o.value }, o.label)))
     }
   },
@@ -186,6 +192,13 @@ vi.mock('naive-ui', () => ({
       return () => h('i', { class: 'n-icon' })
     }
   },
+  NTag: {
+    name: 'NTag',
+    props: ['size', 'round', 'type'],
+    setup(_props: any, { slots }: any) {
+      return () => h('span', { class: 'n-tag' }, slots.default?.())
+    }
+  },
   NAutoComplete: {
     name: 'NAutoComplete',
     props: ['value', 'options', 'placeholder', 'getShow'],
@@ -261,8 +274,8 @@ const mockBranches = [
 ]
 
 const mockTemplates = [
-  createMockPromptTemplate({ id: 1, name: 'Bug Fix', content: 'Fix {{issue}}', variable_tips: { issue: 'Issue description' } }),
-  createMockPromptTemplate({ id: 2, name: 'Feature', content: 'Add {{feature}}', variable_tips: { feature: 'Feature name' } }),
+  createMockPromptTemplate({ id: 1, name: 'Bug Fix', content: 'Fix {{issue}}', variable_tips: { issue: 'Issue description' }, tags: ['backend', 'review'] }),
+  createMockPromptTemplate({ id: 2, name: 'Feature', content: 'Add {{feature}}', variable_tips: { feature: 'Feature name' }, tags: ['frontend'] }),
 ]
 
 const mockCreatedIssue = {
@@ -947,6 +960,49 @@ describe('CreateIssue', () => {
 
       const templateItems = wrapper.findAll('.prompt-template-dropdown__item')
       expect(templateItems).toHaveLength(2)
+    })
+
+    it('should filter templates by all selected tags', async () => {
+      await mountComponent()
+
+      wrapper.vm.promptTemplates = [
+        ...mockTemplates,
+        createMockPromptTemplate({ id: 3, name: 'Inactive', content: 'Hidden', tags: ['backend', 'review'], is_active: false }),
+        createMockPromptTemplate({ id: 4, name: 'Backend only', content: 'Backend', tags: ['backend'] }),
+      ]
+      wrapper.vm.selectedTemplateTags = ['backend', 'review']
+      wrapper.vm.showTemplateDrawer = true
+      await nextTick()
+
+      expect(wrapper.vm.filteredPromptTemplates.map((template: any) => template.name)).toEqual(['Bug Fix'])
+      expect(wrapper.findAll('.prompt-template-dropdown__item')).toHaveLength(1)
+      expect(wrapper.text()).toContain('backend')
+      expect(wrapper.text()).toContain('review')
+      expect(wrapper.text()).not.toContain('Inactive')
+      expect(wrapper.text()).not.toContain('Backend only')
+    })
+
+    it('should close the tag filter dropdown after selecting tags', async () => {
+      await mountComponent()
+
+      wrapper.vm.templateTagFilterVisible = true
+      wrapper.vm.handleTemplateTagFilterUpdate(['backend'])
+
+      expect(wrapper.vm.selectedTemplateTags).toEqual(['backend'])
+      expect(wrapper.vm.templateTagFilterVisible).toBe(false)
+    })
+
+    it('should render legacy templates without tags in the drawer', async () => {
+      await mountComponent()
+
+      wrapper.vm.promptTemplates = [
+        createMockPromptTemplate({ id: 5, name: 'Legacy', content: 'Legacy content', tags: undefined }),
+      ]
+      wrapper.vm.showTemplateDrawer = true
+      await nextTick()
+
+      expect(wrapper.findAll('.prompt-template-dropdown__item')).toHaveLength(1)
+      expect(wrapper.text()).toContain('Legacy')
     })
 
     it('should apply template and close drawer on template item click', async () => {

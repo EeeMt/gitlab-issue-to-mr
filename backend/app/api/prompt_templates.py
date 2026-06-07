@@ -15,12 +15,16 @@ from app.models import PromptTemplate
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+MAX_TEMPLATE_TAGS = 20
+MAX_TEMPLATE_TAG_LENGTH = 30
+
 
 # Request/Response models
 class PromptTemplateCreate(BaseModel):
     name: str
     content: str
     variable_tips: dict[str, str] | None = None
+    tags: list[str] | None = None
     is_active: bool = True
 
 
@@ -28,6 +32,7 @@ class PromptTemplateUpdate(BaseModel):
     name: str | None = None
     content: str | None = None
     variable_tips: dict[str, str] | None = None
+    tags: list[str] | None = None
     is_active: bool | None = None
 
 
@@ -40,6 +45,7 @@ class PromptTemplateResponse(BaseModel):
     name: str
     content: str
     variable_tips: dict[str, str] | None = None
+    tags: list[str]
     is_active: bool
     sort_order: int
     created_at: datetime
@@ -50,12 +56,41 @@ class DeleteResponse(BaseModel):
     status: str
 
 
+def _normalize_template_tags(tags: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+
+    for raw_tag in tags or []:
+        tag = raw_tag.strip()
+        if not tag:
+            continue
+        if len(tag) > MAX_TEMPLATE_TAG_LENGTH:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Prompt template tags must be {MAX_TEMPLATE_TAG_LENGTH} characters or fewer",
+            )
+        tag_key = tag.casefold()
+        if tag_key in seen:
+            continue
+        seen.add(tag_key)
+        normalized.append(tag)
+
+    if len(normalized) > MAX_TEMPLATE_TAGS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Prompt templates can have at most {MAX_TEMPLATE_TAGS} tags",
+        )
+
+    return normalized
+
+
 def _template_response(template: PromptTemplate) -> PromptTemplateResponse:
     return PromptTemplateResponse(
         id=template.id,
         name=template.name,
         content=template.content,
         variable_tips=template.variable_tips,
+        tags=_normalize_template_tags(template.tags),
         is_active=template.is_active,
         sort_order=template.sort_order,
         created_at=template.created_at,
@@ -95,6 +130,7 @@ async def create_prompt_template(
         name=template.name,
         content=template.content,
         variable_tips=template.variable_tips,
+        tags=_normalize_template_tags(template.tags),
         is_active=template.is_active,
         sort_order=next_sort_order,
     )
@@ -184,6 +220,8 @@ async def update_prompt_template(
         template.content = update.content
     if update.variable_tips is not None:
         template.variable_tips = update.variable_tips
+    if update.tags is not None:
+        template.tags = _normalize_template_tags(update.tags)
     if update.is_active is not None:
         template.is_active = update.is_active
 

@@ -66,6 +66,23 @@
                 </n-form-item>
               </n-gi>
               <n-gi :span="isMobile ? 1 : 2">
+                <n-form-item :label="t('config.promptTemplateTags')" path="tags">
+                  <n-select
+                    v-model:value="promptTemplateForm.tags"
+                    multiple
+                    filterable
+                    tag
+                    clearable
+                    :options="promptTemplateTagOptions"
+                    data-testid="prompt-template-tags-select"
+                    :placeholder="t('config.promptTemplateTagsPlaceholder')"
+                  />
+                  <template #feedback>
+                    {{ t('config.promptTemplateTagsHint') }}
+                  </template>
+                </n-form-item>
+              </n-gi>
+              <n-gi :span="isMobile ? 1 : 2">
                 <n-form-item :label="t('config.promptTemplateContent')" path="content" required>
                   <VariableEditor
                     data-testid="prompt-template-content-editor"
@@ -137,7 +154,19 @@
                     />
                     <span class="prompt-template-order-index">{{ index + 1 }}</span>
                   </div>
-                  <div class="prompt-template-table__name">{{ template.name }}</div>
+                  <div class="prompt-template-table__name-cell">
+                    <div class="prompt-template-table__name">{{ template.name }}</div>
+                    <div v-if="(template.tags ?? []).length > 0" class="prompt-template-tags">
+                      <n-tag
+                        v-for="tag in template.tags ?? []"
+                        :key="tag"
+                        size="small"
+                        round
+                      >
+                        {{ tag }}
+                      </n-tag>
+                    </div>
+                  </div>
                   <div class="prompt-template-content-preview">
                     {{ template.content.substring(0, 100) }}{{ template.content.length > 100 ? '...' : '' }}
                   </div>
@@ -209,6 +238,16 @@
                   />
                   <div>
                     <div class="prompt-template-mobile__title">{{ template.name }}</div>
+                    <div v-if="(template.tags ?? []).length > 0" class="prompt-template-tags prompt-template-tags--mobile">
+                      <n-tag
+                        v-for="tag in template.tags ?? []"
+                        :key="tag"
+                        size="small"
+                        round
+                      >
+                        {{ tag }}
+                      </n-tag>
+                    </div>
                     <div class="prompt-template-mobile__meta">{{ new Date(template.updated_at).toLocaleString() }}</div>
                   </div>
                 </div>
@@ -263,6 +302,7 @@ import {
   NIcon,
   NInput,
   NPopconfirm,
+  NSelect,
   NSpace,
   NSpin,
   NSwitch,
@@ -281,6 +321,7 @@ import {
   type PromptTemplate
 } from '../../api'
 import VariableEditor from '../../components/VariableEditor.vue'
+import { getPromptTemplateTags } from '../../utils/promptTemplates'
 import { ReorderThreeOutline } from '@vicons/ionicons5'
 import Draggable from 'vuedraggable'
 
@@ -305,10 +346,14 @@ const promptTemplateForm = reactive({
   name: '',
   content: '',
   variable_tips: {} as Record<string, string>,
+  tags: [] as string[],
   is_active: true
 })
 
 const isMobile = computed(() => props.isMobile)
+const promptTemplateTagOptions = computed(() =>
+  getPromptTemplateTags(promptTemplates.value).map(tag => ({ label: tag, value: tag }))
+)
 
 function getPromptTemplateEditButtonTestId(id: number) {
   return `prompt-template-edit-button-${id}`
@@ -408,6 +453,7 @@ function resetPromptTemplateForm() {
   promptTemplateForm.name = ''
   promptTemplateForm.content = ''
   promptTemplateForm.variable_tips = {}
+  promptTemplateForm.tags = []
   promptTemplateForm.is_active = true
 }
 
@@ -421,6 +467,7 @@ function handleEditPromptTemplate(template: PromptTemplate) {
   promptTemplateForm.name = template.name
   promptTemplateForm.content = template.content
   promptTemplateForm.variable_tips = template.variable_tips ? { ...template.variable_tips } : {}
+  promptTemplateForm.tags = [...(template.tags ?? [])]
   promptTemplateForm.is_active = template.is_active
   promptTemplateModalVisible.value = true
   promptTemplateFormRef.value?.restoreValidation?.()
@@ -443,6 +490,7 @@ function handlePromptTemplateModalVisibilityChange(show: boolean) {
 async function handleSavePromptTemplate() {
   const currentContent = promptTemplateForm.content || ''
   const currentTips = { ...promptTemplateForm.variable_tips }
+  const currentTags = [...promptTemplateForm.tags]
 
   // Validate: extract variables from content and check for orphan tips
   const contentMatches = currentContent.match(/\{\{([^}]+)\}\}/g) || []
@@ -463,6 +511,7 @@ async function handleSavePromptTemplate() {
         name: promptTemplateForm.name,
         content: currentContent,
         variable_tips: currentTips,
+        tags: currentTags,
         is_active: promptTemplateForm.is_active
       })
       message.success(t('config.updatePromptTemplateSuccess'))
@@ -471,6 +520,7 @@ async function handleSavePromptTemplate() {
         name: promptTemplateForm.name,
         content: currentContent,
         variable_tips: currentTips,
+        tags: currentTags,
         is_active: promptTemplateForm.is_active
       })
       message.success(t('config.createPromptTemplateSuccess'))
@@ -553,14 +603,29 @@ defineExpose({
   background: rgba(248, 250, 252, 0.72);
 }
 
-.prompt-template-table__name {
+.prompt-template-table__name-cell {
   min-width: 0;
   padding-right: 12px;
+}
+
+.prompt-template-table__name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 500;
   color: #0f172a;
+}
+
+.prompt-template-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.prompt-template-tags--mobile {
+  margin-top: 4px;
+  margin-bottom: 4px;
 }
 
 .prompt-template-content-preview {

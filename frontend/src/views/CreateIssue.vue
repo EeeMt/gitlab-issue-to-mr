@@ -119,7 +119,7 @@
                 </div>
                 <n-button
                   size="small"
-                  :disabled="promptTemplatesLoading || promptTemplates.length === 0"
+                  :disabled="promptTemplatesLoading || activePromptTemplates.length === 0"
                   :loading="promptTemplatesLoading"
                   type="primary"
                   ghost
@@ -274,17 +274,42 @@
             </div>
           </Transition>
           <div class="template-drawer-layout__body">
-            <div v-if="promptTemplates.length === 0" class="prompt-template-dropdown__empty">
+            <div v-if="activePromptTemplates.length > 0" class="template-tag-filter">
+              <n-select
+                :value="selectedTemplateTags"
+                :show="templateTagFilterVisible"
+                multiple
+                clearable
+                :options="templateTagOptions"
+                :placeholder="t('createTask.filterTemplatesByTags')"
+                @update:value="handleTemplateTagFilterUpdate"
+                @update:show="templateTagFilterVisible = $event"
+              />
+            </div>
+            <div v-if="activePromptTemplates.length === 0" class="prompt-template-dropdown__empty">
               {{ t('createTask.noPromptTemplates') }}
             </div>
+            <div v-else-if="filteredPromptTemplates.length === 0" class="prompt-template-dropdown__empty">
+              {{ t('createTask.noMatchingPromptTemplates') }}
+            </div>
             <div
-              v-for="tmpl in promptTemplates"
+              v-for="tmpl in filteredPromptTemplates"
               :key="tmpl.id"
               class="prompt-template-dropdown__item"
               :class="{ 'prompt-template-dropdown__item--pending': pendingTemplate?.id === tmpl.id }"
               @click="handleTemplateItemClick(tmpl)"
             >
               <div class="prompt-template-dropdown__item-name">{{ tmpl.name }}</div>
+              <div v-if="(tmpl.tags ?? []).length > 0" class="prompt-template-dropdown__tags">
+                <n-tag
+                  v-for="tag in tmpl.tags ?? []"
+                  :key="tag"
+                  size="small"
+                  round
+                >
+                  {{ tag }}
+                </n-tag>
+              </div>
               <div class="prompt-template-dropdown__item-preview">{{ tmpl.content.substring(0, 80) }}...</div>
             </div>
           </div>
@@ -313,6 +338,7 @@ import {
   NSwitch,
   NDrawer,
   NIcon,
+  NTag,
   useMessage,
   type FormInst,
   type FormRules,
@@ -322,6 +348,11 @@ import PageHeader from '../components/PageHeader.vue'
 import VariableEditor from '../components/VariableEditor.vue'
 import { createIssue, getProjects, getBranches, getPromptTemplates, type Project, type Branch, type CreateIssueRequest, type PromptTemplate } from '../api'
 import { useBreakpoints } from '../composables/useBreakpoints'
+import {
+  filterPromptTemplatesByTags,
+  getActivePromptTemplates,
+  getPromptTemplateTags
+} from '../utils/promptTemplates'
 
 const router = useRouter()
 const message = useMessage()
@@ -343,11 +374,21 @@ const promptTemplates = ref<PromptTemplate[]>([])
 // Template picker state
 const promptVariableTips = ref<Record<string, string> | undefined>(undefined)
 const showTemplateDrawer = ref(false)
+const selectedTemplateTags = ref<string[]>([])
+const templateTagFilterVisible = ref(false)
 const pendingTemplate = ref<PromptTemplate | null>(null)
 
 watch(showTemplateDrawer, (val) => {
   if (!val) pendingTemplate.value = null
 })
+
+const activePromptTemplates = computed(() => getActivePromptTemplates(promptTemplates.value))
+const templateTagOptions = computed(() =>
+  getPromptTemplateTags(activePromptTemplates.value).map(tag => ({ label: tag, value: tag }))
+)
+const filteredPromptTemplates = computed(() =>
+  filterPromptTemplatesByTags(activePromptTemplates.value, selectedTemplateTags.value)
+)
 
 // Detect unreplaced variables in description
 const unreplacedVariables = computed(() => {
@@ -586,6 +627,11 @@ function applyPromptTemplate(tmpl: PromptTemplate) {
   }
 }
 
+function handleTemplateTagFilterUpdate(tags: string[] | null) {
+  selectedTemplateTags.value = tags ?? []
+  templateTagFilterVisible.value = false
+}
+
 const hasExistingPrompt = computed(() =>
   Boolean(formValue.value.description && formValue.value.description.trim())
 )
@@ -745,6 +791,10 @@ onMounted(() => {
   padding: 8px 0;
 }
 
+.template-tag-filter {
+  padding: 8px 16px 12px;
+}
+
 .prompt-template-dropdown__item {
   padding: 12px 16px;
   cursor: pointer;
@@ -764,6 +814,13 @@ onMounted(() => {
 .prompt-template-dropdown__item-name {
   font-weight: 600;
   margin-bottom: 4px;
+}
+
+.prompt-template-dropdown__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
 }
 
 .prompt-template-dropdown__item-preview {

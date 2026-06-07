@@ -377,6 +377,7 @@ vi.mock('@vicons/ionicons5', () => {
     AddCircleOutline: icon('AddCircleOutline'),
     BulbOutline: icon('BulbOutline'),
     CalendarOutline: icon('CalendarOutline'),
+    CheckmarkCircleOutline: icon('CheckmarkCircleOutline'),
     CloseCircleOutline: icon('CloseCircleOutline'),
     CloseOutline: icon('CloseOutline'),
     CodeOutline: icon('CodeOutline'),
@@ -458,7 +459,18 @@ const mockProjects = [
 ]
 
 const mockPromptTemplates = [
-  { id: 1, name: 'Bug Fix', content: 'Fix the {{issue_type}} in {{file_path}}', variable_tips: { issue_type: 'Type', file_path: 'Path' }, is_active: true, sort_order: 1, created_at: '2024-01-01T10:00:00Z', updated_at: '2024-01-01T10:00:00Z' },
+  { id: 1, name: 'Bug Fix', content: 'Fix the {{issue_type}} in {{file_path}}', variable_tips: { issue_type: 'Type', file_path: 'Path' }, tags: [], is_active: true, sort_order: 1, created_at: '2024-01-01T10:00:00Z', updated_at: '2024-01-01T10:00:00Z' },
+]
+
+const mockProviders = [
+  {
+    id: 1,
+    name: 'Claude',
+    provider_type: 'anthropic',
+    model: 'claude-sonnet-4',
+    is_default: true,
+    is_disabled: false,
+  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -472,7 +484,7 @@ function setupDefaultMocks(issueOverrides: Record<string, any> = {}) {
   mockApi.getScheduledTasks.mockResolvedValue([])
   mockApi.getSlotCapacity.mockResolvedValue(null)
   mockApi.getConfig.mockResolvedValue({ runtime: { slot_max_tasks: 5, slot_max_tasks_enforce: false } })
-  mockApi.getProviders.mockResolvedValue([])
+  mockApi.getProviders.mockResolvedValue(mockProviders)
   return issue
 }
 
