@@ -37,6 +37,47 @@ describe('TaskResultPanel', () => {
     expect(taskResultPanelSource).toContain('taskView.summaryCollapse')
   })
 
+  it('shows a floating collapse action while the summary is expanded', () => {
+    const collapseFloat = cssBlock('.summary-collapse-float')
+    const collapseFooter = cssBlock('.summary-collapse-footer')
+    const collapseButtonIcon = cssBlock('.summary-collapse-button__icon')
+
+    expect(taskResultPanelSource).toContain('v-if="summaryExpanded && !mermaidViewerVisible"')
+    expect(taskResultPanelSource).toContain('class="summary-collapse-button"')
+    expect(taskResultPanelSource).toContain('class="summary-collapse-footer"')
+    expect(taskResultPanelSource).toContain(':style="summaryCollapseFloatStyle"')
+    expect(taskResultPanelSource).toContain('ref="summaryCardRef"')
+    expect(taskResultPanelSource).toContain('function updateSummaryCollapseFloat()')
+    expect(taskResultPanelSource).toContain('summaryCollapseFloatEndThreshold')
+    expect(taskResultPanelSource).toContain('rect.bottom <= window.innerHeight + summaryCollapseFloatEndThreshold')
+    expect(taskResultPanelSource).toContain('@click="toggleSummary"')
+    expect(taskResultPanelSource).toContain("{{ t('taskView.summaryCollapse') }}")
+    expect(collapseFloat).toContain('position: fixed;')
+    expect(collapseFloat).not.toContain('left: 50%;')
+    expect(collapseFloat).toContain('justify-content: center;')
+    expect(collapseFloat).toContain('transform: translate(-50%, -100%);')
+    expect(collapseFloat).toContain('pointer-events: none;')
+    expect(collapseFooter).toContain('display: flex;')
+    expect(collapseFooter).toContain('justify-content: center;')
+    expect(collapseButtonIcon).toContain('transform: rotate(-90deg);')
+  })
+
+  it('keeps the collapsed summary row from forcing horizontal overflow', () => {
+    const resultBody = cssBlock('.result-body')
+    const summaryCard = cssBlock('.result-card--summary-text')
+    const summaryHeaderButton = cssBlock('.summary-header-button')
+    const summaryPreview = cssBlock('.summary-preview')
+
+    expect(resultBody).toContain('min-width: 0;')
+    expect(summaryCard).toContain('min-width: 0;')
+    expect(summaryHeaderButton).toContain('min-width: 0;')
+    expect(summaryHeaderButton).toContain('box-sizing: border-box;')
+    expect(summaryPreview).toContain('min-width: 0;')
+    expect(summaryPreview).toContain('max-width: 100%;')
+    expect(summaryPreview).toContain('text-overflow: ellipsis;')
+    expect(summaryPreview).toContain('white-space: nowrap;')
+  })
+
   it('context compact count item is guarded by v-if="contextCompactCount != null"', () => {
     expect(taskResultPanelSource).toContain('v-if="contextCompactCount != null"')
   })
@@ -68,9 +109,58 @@ describe('TaskResultPanel', () => {
   })
 
   it('provides a larger Mermaid diagram viewer for summary diagrams', () => {
+    const mermaidViewerSvg = cssBlock(':global(.summary-mermaid-modal__canvas svg)')
+    const mermaidModalContent = cssBlock(':global(.summary-mermaid-modal .n-card-content)')
+    const mermaidModalViewport = cssBlock(':global(.summary-mermaid-modal__viewport)')
+    const mermaidModalScrollbarContainer = cssBlock(':global(.summary-mermaid-modal__viewport .n-scrollbar-container)')
+
     expect(taskResultPanelSource).toContain('summary-mermaid-modal')
     expect(taskResultPanelSource).toContain('mermaidViewerVisible')
     expect(taskResultPanelSource).toContain('mermaidZoomOptions')
     expect(taskResultPanelSource).toContain('taskView.mermaidOpenLarge')
+    expect(taskResultPanelSource).toContain("height: 'calc(100vh - 32px)'")
+    expect(taskResultPanelSource).toContain("width: 'calc(100vw - 32px)'")
+    expect(taskResultPanelSource).toContain("{ value: '400', label: '400%' }")
+    expect(taskResultPanelSource).toContain('applyMermaidViewerSvgStyle(activeMermaidRawSvg.value, mermaidViewerSvgWidth.value)')
+    expect(taskResultPanelSource).toContain('width: ${width}; height: auto; max-width: none; display: block;')
+    expect(taskResultPanelSource).toContain('style="$1 ${viewerStyle}"')
+    expect(taskResultPanelSource).toContain('content-style="min-width: 100%; min-height: 100%; padding: 16px;"')
+    expect(mermaidModalContent).toContain('overflow: hidden;')
+    expect(mermaidModalContent).not.toContain('height: 100%;')
+    expect(mermaidModalViewport).toContain('flex: 1 1 auto;')
+    expect(mermaidModalViewport).toContain('height: auto;')
+    expect(mermaidModalScrollbarContainer).toContain('max-height: 100%;')
+    expect(mermaidViewerSvg).not.toContain('width: var(--summary-mermaid-viewer-width')
+  })
+
+  it('keeps the Mermaid viewer from changing the page scrollbar gutter', () => {
+    const mermaidModalIndex = taskResultPanelSource.indexOf('class="summary-mermaid-modal"')
+    expect(mermaidModalIndex).toBeGreaterThanOrEqual(0)
+
+    const nearbySource = taskResultPanelSource.slice(
+      Math.max(0, mermaidModalIndex - 120),
+      mermaidModalIndex + 180
+    )
+    expect(nearbySource).toContain(':block-scroll="false"')
+  })
+
+  it('uses Naive UI scrollbars for summary content and the Mermaid viewer', () => {
+    const summaryContentScrollbar = cssBlock('.summary-content-scrollbar')
+    const summaryContent = cssBlock('.summary-content')
+    const summaryCodeBlock = cssBlock('.summary-content :deep(pre.md-code-block)')
+    const summaryMermaidCanvas = cssBlock('.summary-content :deep(.summary-mermaid__canvas)')
+
+    expect(taskResultPanelSource).toContain('NScrollbar')
+    expect(taskResultPanelSource).toContain('class="summary-content-scrollbar"')
+    expect(taskResultPanelSource).toContain('content-style="min-width: 100%;"')
+    expect(taskResultPanelSource).toContain('class="summary-mermaid-modal__viewport"')
+    expect(taskResultPanelSource).toContain('x-scrollable')
+    expect(taskResultPanelSource).toContain('content-style="min-width: 100%; min-height: 100%; padding: 16px;"')
+    expect(summaryContentScrollbar).toContain('width: 100%;')
+    expect(summaryContent).toContain('width: 100%;')
+    expect(summaryContent).toContain('box-sizing: border-box;')
+    expect(summaryCodeBlock).not.toContain('overflow-x: auto;')
+    expect(summaryMermaidCanvas).toContain('max-height: 60vh;')
+    expect(summaryMermaidCanvas).toContain('overflow: auto;')
   })
 })

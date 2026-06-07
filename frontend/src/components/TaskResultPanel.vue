@@ -6,7 +6,7 @@
 
     <div class="result-body">
       <!-- AI delivery summary (last assistant text event, collapsed by default) -->
-      <div v-if="lastAssistantLog" class="result-card result-card--summary-text">
+      <div v-if="lastAssistantLog" ref="summaryCardRef" class="result-card result-card--summary-text">
         <button
           type="button"
           class="result-card__title summary-header-button"
@@ -33,17 +33,52 @@
         </button>
         <div class="summary-expand-track" :class="{ 'summary-expand-track--open': summaryExpanded }">
           <div class="summary-expand-body">
-            <div
+            <n-scrollbar
               v-if="summaryRenderedHtml"
-              ref="summaryContentRef"
-              class="summary-content markdown-content"
-              @click="handleSummaryContentClick"
-              v-html="summaryRenderedHtml"
-            ></div>
-            <div v-else-if="!summaryPayloadLoading && summaryPayloadLoaded && !summaryRenderedHtml" class="summary-content summary-content--empty">
-              {{ t('taskView.emptyContent') }}
-            </div>
+              class="summary-content-scrollbar"
+              x-scrollable
+              trigger="hover"
+              content-style="min-width: 100%;"
+            >
+              <div
+                ref="summaryContentRef"
+                class="summary-content markdown-content"
+                @click="handleSummaryContentClick"
+                v-html="summaryRenderedHtml"
+              ></div>
+            </n-scrollbar>
+            <n-scrollbar
+              v-else-if="!summaryPayloadLoading && summaryPayloadLoaded && !summaryRenderedHtml"
+              class="summary-content-scrollbar"
+              x-scrollable
+              trigger="hover"
+              content-style="min-width: 100%;"
+            >
+              <div class="summary-content summary-content--empty">
+                {{ t('taskView.emptyContent') }}
+              </div>
+            </n-scrollbar>
           </div>
+        </div>
+        <div v-if="summaryExpanded && !mermaidViewerVisible" class="summary-collapse-footer">
+          <n-button class="summary-collapse-button" size="small" secondary round @click="toggleSummary">
+            <template #icon>
+              <n-icon size="14" class="summary-collapse-button__icon"><ChevronForward /></n-icon>
+            </template>
+            {{ t('taskView.summaryCollapse') }}
+          </n-button>
+        </div>
+        <div
+          v-if="summaryExpanded && !mermaidViewerVisible"
+          class="summary-collapse-float"
+          :style="summaryCollapseFloatStyle"
+        >
+          <n-button class="summary-collapse-button" size="small" secondary round @click="toggleSummary">
+            <template #icon>
+              <n-icon size="14" class="summary-collapse-button__icon"><ChevronForward /></n-icon>
+            </template>
+            {{ t('taskView.summaryCollapse') }}
+          </n-button>
         </div>
       </div>
 
@@ -222,7 +257,8 @@
     v-model:show="mermaidViewerVisible"
     preset="card"
     class="summary-mermaid-modal"
-    :style="{ width: 'min(1100px, 94vw)' }"
+    :block-scroll="false"
+    :style="{ width: 'calc(100vw - 32px)', height: 'calc(100vh - 32px)', maxWidth: 'none' }"
   >
     <template #header>
       <span>{{ t('taskView.mermaidDiagram') }}</span>
@@ -239,20 +275,25 @@
         {{ option.label }}
       </n-button>
     </div>
-    <div class="summary-mermaid-modal__viewport">
+    <n-scrollbar
+      class="summary-mermaid-modal__viewport"
+      x-scrollable
+      trigger="hover"
+      content-style="min-width: 100%; min-height: 100%; padding: 16px;"
+    >
       <div
         class="summary-mermaid-modal__canvas"
         :class="{ 'summary-mermaid-modal__canvas--fit': mermaidZoom === 'fit' }"
-        :style="{ width: mermaidViewerWidth }"
-        v-html="activeMermaidSvg"
+        v-html="activeMermaidViewerSvg"
       ></div>
-    </div>
+    </n-scrollbar>
   </n-modal>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
-import { NCard, NIcon, NButton, NModal, NInput, NSpace, NTag, useMessage } from 'naive-ui'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { CSSProperties } from 'vue'
+import { NCard, NIcon, NButton, NModal, NInput, NSpace, NTag, NScrollbar, useMessage } from 'naive-ui'
 import { AlertCircleOutline, TimeOutline, GitCommitOutline, OpenOutline, ChatbubbleEllipsesOutline, ArrowBackOutline, CheckmarkCircleOutline, CloseCircleOutline, ShieldCheckmarkOutline, ChevronForward, ChatboxOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -262,7 +303,7 @@ import { overrideTaskStatus, getTaskPayload } from '../api'
 import { parseTextEntry, renderMarkdown } from './task-process/taskProcessUtils'
 import type { SkillUsageStat } from './task-process/taskProcessUtils'
 
-type MermaidZoom = 'fit' | '100' | '150' | '200'
+type MermaidZoom = 'fit' | '100' | '150' | '200' | '300' | '400'
 
 interface SummaryMermaidDiagram {
   source: string
@@ -297,14 +338,24 @@ const summaryPayloadLoading = ref(false)
 const summaryPayloadLoaded = ref(false)
 const summaryRenderedHtml = ref('')
 const summaryRenderedSource = ref('')
+const summaryCardRef = ref<HTMLElement | null>(null)
 const summaryContentRef = ref<HTMLElement | null>(null)
 const summaryMermaidDiagrams = ref<SummaryMermaidDiagram[]>([])
 const mermaidViewerVisible = ref(false)
 const activeMermaidIndex = ref<number | null>(null)
 const mermaidZoom = ref<MermaidZoom>('fit')
+const hiddenSummaryCollapseFloatStyle: CSSProperties = {
+  display: 'none',
+  left: '0px',
+  top: '0px',
+  visibility: 'hidden',
+}
+const summaryCollapseFloatStyle = ref<CSSProperties>(hiddenSummaryCollapseFloatStyle)
+const summaryCollapseFloatEndThreshold = 160
 let mermaidConfigured = false
 let mermaidRenderer: typeof import('mermaid').default | null = null
 let summaryMermaidRenderRun = 0
+let summaryCollapseFloatRaf = 0
 
 const summaryEntry = computed(() =>
   props.lastAssistantLog ? parseTextEntry(props.lastAssistantLog.metadata) : null
@@ -326,17 +377,80 @@ const mermaidZoomOptions = computed<{ value: MermaidZoom, label: string }[]>(() 
   { value: '100', label: '100%' },
   { value: '150', label: '150%' },
   { value: '200', label: '200%' },
+  { value: '300', label: '300%' },
+  { value: '400', label: '400%' },
 ])
 
-const activeMermaidSvg = computed(() => {
+const activeMermaidRawSvg = computed(() => {
   if (activeMermaidIndex.value == null) return ''
   return summaryMermaidDiagrams.value[activeMermaidIndex.value]?.svg ?? ''
 })
 
-const mermaidViewerWidth = computed(() => {
+const mermaidViewerSvgWidth = computed(() => {
   if (mermaidZoom.value === 'fit') return '100%'
   return `${mermaidZoom.value}%`
 })
+
+const activeMermaidViewerSvg = computed(() =>
+  applyMermaidViewerSvgStyle(activeMermaidRawSvg.value, mermaidViewerSvgWidth.value)
+)
+
+function updateSummaryCollapseFloat() {
+  summaryCollapseFloatRaf = 0
+  const card = summaryCardRef.value
+  if (!summaryExpanded.value || mermaidViewerVisible.value || !card) {
+    summaryCollapseFloatStyle.value = hiddenSummaryCollapseFloatStyle
+    return
+  }
+
+  const rect = card.getBoundingClientRect()
+  const visibleTop = Math.max(rect.top, 0)
+  const visibleBottom = Math.min(rect.bottom, window.innerHeight)
+  const nearSummaryEnd = rect.bottom <= window.innerHeight + summaryCollapseFloatEndThreshold
+  if (visibleBottom <= visibleTop || nearSummaryEnd) {
+    summaryCollapseFloatStyle.value = hiddenSummaryCollapseFloatStyle
+    return
+  }
+
+  summaryCollapseFloatStyle.value = {
+    display: 'flex',
+    left: `${rect.left + rect.width / 2}px`,
+    top: `${Math.max(visibleTop + 44, visibleBottom - 12)}px`,
+    visibility: 'visible',
+  }
+}
+
+function scheduleSummaryCollapseFloatUpdate() {
+  if (summaryCollapseFloatRaf) return
+  summaryCollapseFloatRaf = window.requestAnimationFrame(updateSummaryCollapseFloat)
+}
+
+onMounted(() => {
+  window.addEventListener('scroll', scheduleSummaryCollapseFloatUpdate, true)
+  window.addEventListener('resize', scheduleSummaryCollapseFloatUpdate)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', scheduleSummaryCollapseFloatUpdate, true)
+  window.removeEventListener('resize', scheduleSummaryCollapseFloatUpdate)
+  if (summaryCollapseFloatRaf) {
+    window.cancelAnimationFrame(summaryCollapseFloatRaf)
+  }
+})
+
+watch([summaryExpanded, mermaidViewerVisible, summaryRenderedHtml], async () => {
+  await nextTick()
+  scheduleSummaryCollapseFloatUpdate()
+})
+
+function applyMermaidViewerSvgStyle(svg: string, width: string): string {
+  if (!svg) return ''
+  const viewerStyle = `width: ${width}; height: auto; max-width: none; display: block;`
+  if (/\sstyle="/i.test(svg)) {
+    return svg.replace(/\sstyle="([^"]*)"/i, ` style="$1 ${viewerStyle}"`)
+  }
+  return svg.replace(/<svg\b/i, `<svg style="${viewerStyle}"`)
+}
 
 function escapeHtml(value: string): string {
   return value
@@ -625,6 +739,7 @@ const skillUsageBreakdown = computed(() =>
 .result-body {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 
 .result-card {
@@ -884,6 +999,8 @@ const skillUsageBreakdown = computed(() =>
 .result-card--summary-text {
   border-color: rgba(2, 132, 199, 0.18);
   background: rgba(2, 132, 199, 0.03);
+  min-width: 0;
+  padding-bottom: 18px;
   overflow-anchor: none;
 }
 
@@ -898,6 +1015,8 @@ const skillUsageBreakdown = computed(() =>
 
 .summary-header-button {
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 2px 2px 2px 0;
   border: 0;
   border-radius: 6px;
@@ -932,6 +1051,7 @@ const skillUsageBreakdown = computed(() =>
 .summary-preview {
   flex: 1;
   min-width: 0;
+  max-width: 100%;
   font-size: 12px;
   line-height: 22px;
   font-weight: 400;
@@ -1020,8 +1140,16 @@ const skillUsageBreakdown = computed(() =>
   min-height: 0;
 }
 
-.summary-content {
+.summary-content-scrollbar {
   margin-top: 10px;
+  width: 100%;
+  max-width: 100%;
+  border-radius: 6px;
+}
+
+.summary-content {
+  width: 100%;
+  box-sizing: border-box;
   padding: 10px 12px;
   font-size: 13px;
   line-height: 1.65;
@@ -1034,6 +1162,31 @@ const skillUsageBreakdown = computed(() =>
 .summary-content--empty {
   font-style: italic;
   opacity: 0.4;
+}
+
+.summary-collapse-footer {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 0;
+}
+
+.summary-collapse-float {
+  position: fixed;
+  z-index: 2400;
+  display: flex;
+  justify-content: center;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+}
+
+.summary-collapse-button {
+  pointer-events: auto;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(8px);
+}
+
+.summary-collapse-button__icon {
+  transform: rotate(-90deg);
 }
 
 /* reuse markdown styles for summary content */
@@ -1058,7 +1211,7 @@ const skillUsageBreakdown = computed(() =>
 .summary-content :deep(pre.md-code-block) {
   margin: 0.5em 0; padding: 10px 12px;
   background: rgba(0, 0, 0, 0.06); border-radius: 5px;
-  overflow-x: auto; font-family: var(--n-font-family-mono, monospace);
+  font-family: var(--n-font-family-mono, monospace);
   font-size: 0.85em; line-height: 1.55; white-space: pre;
 }
 .summary-content :deep(pre.md-code-block code) { background: none; padding: 0; border-radius: 0; font-size: inherit; color: inherit; }
@@ -1143,10 +1296,22 @@ const skillUsageBreakdown = computed(() =>
   white-space: pre-wrap;
 }
 
-:global(.summary-mermaid-modal .n-card__content) {
+:global(.summary-mermaid-modal) {
   display: flex;
   flex-direction: column;
+  max-width: none;
+}
+
+:global(.summary-mermaid-modal .n-card-header) {
+  flex-shrink: 0;
+}
+
+:global(.summary-mermaid-modal .n-card-content) {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 :global(.summary-mermaid-modal__toolbar) {
@@ -1157,13 +1322,17 @@ const skillUsageBreakdown = computed(() =>
 }
 
 :global(.summary-mermaid-modal__viewport) {
-  max-height: min(76vh, 820px);
-  min-height: 260px;
-  overflow: auto;
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
   border: 1px solid var(--n-border-color, rgba(128, 128, 128, 0.18));
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.72);
-  padding: 16px;
+}
+
+:global(.summary-mermaid-modal__viewport .n-scrollbar-container) {
+  min-height: 0;
+  max-height: 100%;
 }
 
 :global(.summary-mermaid-modal__canvas) {
@@ -1172,7 +1341,6 @@ const skillUsageBreakdown = computed(() =>
 
 :global(.summary-mermaid-modal__canvas svg) {
   display: block;
-  width: 100%;
   height: auto;
   max-width: none;
 }
