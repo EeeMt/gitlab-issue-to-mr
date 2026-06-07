@@ -591,7 +591,6 @@ const en = {
     aiDeliverySummary: 'AI Delivery Summary',
     summaryExpand: 'Expand',
     summaryCollapse: 'Collapse',
-    mermaidDiagram: 'Mermaid Diagram',
     mermaidOpenLarge: 'View Larger',
     mermaidFitWidth: 'Fit Width',
     mermaidLoading: 'Rendering diagram...',

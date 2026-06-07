@@ -581,7 +581,6 @@ const zhCN = {
     aiDeliverySummary: 'AI 交付摘要',
     summaryExpand: '展开',
     summaryCollapse: '收起',
-    mermaidDiagram: 'Mermaid 图表',
     mermaidOpenLarge: '放大查看',
     mermaidFitWidth: '适应宽度',
     mermaidLoading: '正在渲染图表...',

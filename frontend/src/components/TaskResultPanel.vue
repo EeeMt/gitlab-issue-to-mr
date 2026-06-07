@@ -260,9 +260,6 @@
     :block-scroll="false"
     :style="{ width: 'calc(100vw - 32px)', height: 'calc(100vh - 32px)', maxWidth: 'none' }"
   >
-    <template #header>
-      <span>{{ t('taskView.mermaidDiagram') }}</span>
-    </template>
     <div class="summary-mermaid-modal__toolbar">
       <n-button
         v-for="option in mermaidZoomOptions"
@@ -277,9 +274,11 @@
     </div>
     <n-scrollbar
       class="summary-mermaid-modal__viewport"
+      :class="{ 'summary-mermaid-modal__viewport--dragging': mermaidViewerDragging }"
       x-scrollable
       trigger="hover"
       content-style="min-width: 100%; min-height: 100%; padding: 16px;"
+      @mousedown="handleMermaidViewerMouseDown"
     >
       <div
         class="summary-mermaid-modal__canvas"
@@ -344,6 +343,7 @@ const summaryMermaidDiagrams = ref<SummaryMermaidDiagram[]>([])
 const mermaidViewerVisible = ref(false)
 const activeMermaidIndex = ref<number | null>(null)
 const mermaidZoom = ref<MermaidZoom>('fit')
+const mermaidViewerDragging = ref(false)
 const hiddenSummaryCollapseFloatStyle: CSSProperties = {
   display: 'none',
   left: '0px',
@@ -356,6 +356,13 @@ let mermaidConfigured = false
 let mermaidRenderer: typeof import('mermaid').default | null = null
 let summaryMermaidRenderRun = 0
 let summaryCollapseFloatRaf = 0
+let mermaidViewerDrag: {
+  container: HTMLElement
+  startX: number
+  startY: number
+  scrollLeft: number
+  scrollTop: number
+} | null = null
 
 const summaryEntry = computed(() =>
   props.lastAssistantLog ? parseTextEntry(props.lastAssistantLog.metadata) : null
@@ -436,11 +443,16 @@ onBeforeUnmount(() => {
   if (summaryCollapseFloatRaf) {
     window.cancelAnimationFrame(summaryCollapseFloatRaf)
   }
+  stopMermaidViewerDrag()
 })
 
 watch([summaryExpanded, mermaidViewerVisible, summaryRenderedHtml], async () => {
   await nextTick()
   scheduleSummaryCollapseFloatUpdate()
+})
+
+watch(mermaidViewerVisible, (visible) => {
+  if (!visible) stopMermaidViewerDrag()
 })
 
 function applyMermaidViewerSvgStyle(svg: string, width: string): string {
@@ -532,6 +544,71 @@ function resetMermaidViewer() {
   mermaidViewerVisible.value = false
   activeMermaidIndex.value = null
   mermaidZoom.value = 'fit'
+  stopMermaidViewerDrag()
+}
+
+function isInteractiveMermaidDragTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  const ignoredSelector = [
+    'button',
+    'a',
+    'input',
+    'textarea',
+    'select',
+    '[role="button"]',
+    '.n-scrollbar-rail',
+    '.n-scrollbar-rail__scrollbar',
+  ].join(', ')
+  return Boolean(target.closest(ignoredSelector))
+}
+
+function getMermaidViewerScrollContainer(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof Element)) return null
+  const viewport = target.closest('.summary-mermaid-modal__viewport')
+  return viewport?.querySelector<HTMLElement>('.n-scrollbar-container') ?? null
+}
+
+function handleMermaidViewerMouseDown(event: MouseEvent) {
+  if (event.button !== 0 || isInteractiveMermaidDragTarget(event.target)) return
+
+  const container = getMermaidViewerScrollContainer(event.currentTarget)
+  if (!container) return
+  const canDrag = container.scrollWidth > container.clientWidth || container.scrollHeight > container.clientHeight
+  if (!canDrag) return
+
+  mermaidViewerDrag = {
+    container,
+    startX: event.clientX,
+    startY: event.clientY,
+    scrollLeft: container.scrollLeft,
+    scrollTop: container.scrollTop,
+  }
+  mermaidViewerDragging.value = true
+  event.preventDefault()
+  window.addEventListener('mousemove', handleMermaidViewerMouseMove)
+  window.addEventListener('mouseup', handleMermaidViewerMouseUp)
+}
+
+function handleMermaidViewerMouseMove(event: MouseEvent) {
+  if (!mermaidViewerDrag) return
+
+  const deltaX = event.clientX - mermaidViewerDrag.startX
+  const deltaY = event.clientY - mermaidViewerDrag.startY
+  mermaidViewerDrag.container.scrollLeft = mermaidViewerDrag.scrollLeft - deltaX
+  mermaidViewerDrag.container.scrollTop = mermaidViewerDrag.scrollTop - deltaY
+  event.preventDefault()
+}
+
+function handleMermaidViewerMouseUp() {
+  stopMermaidViewerDrag()
+}
+
+function stopMermaidViewerDrag() {
+  if (!mermaidViewerDrag && !mermaidViewerDragging.value) return
+  window.removeEventListener('mousemove', handleMermaidViewerMouseMove)
+  window.removeEventListener('mouseup', handleMermaidViewerMouseUp)
+  mermaidViewerDrag = null
+  mermaidViewerDragging.value = false
 }
 
 function markMermaidDiagramError(
@@ -1300,10 +1377,15 @@ const skillUsageBreakdown = computed(() =>
   display: flex;
   flex-direction: column;
   max-width: none;
+  position: relative;
 }
 
 :global(.summary-mermaid-modal .n-card-header) {
-  flex-shrink: 0;
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+  padding: 0;
 }
 
 :global(.summary-mermaid-modal .n-card-content) {
@@ -1312,12 +1394,14 @@ const skillUsageBreakdown = computed(() =>
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  padding-top: 12px;
 }
 
 :global(.summary-mermaid-modal__toolbar) {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  padding-right: 36px;
   margin-bottom: 10px;
 }
 
@@ -1328,6 +1412,17 @@ const skillUsageBreakdown = computed(() =>
   border: 1px solid var(--n-border-color, rgba(128, 128, 128, 0.18));
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.72);
+  cursor: grab;
+  user-select: none;
+  overscroll-behavior: contain;
+}
+
+:global(.summary-mermaid-modal__viewport--dragging) {
+  cursor: grabbing;
+}
+
+:global(.summary-mermaid-modal__viewport--dragging *) {
+  cursor: grabbing;
 }
 
 :global(.summary-mermaid-modal__viewport .n-scrollbar-container) {
