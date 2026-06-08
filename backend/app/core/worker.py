@@ -45,7 +45,6 @@ from app.core.worker_results import (
 from app.core.worker_runtime import (
     build_container_env,
     build_container_volumes,
-    build_legacy_container_env,
     get_container_name,
     resolve_commit_author,
     resolve_provider,
@@ -275,28 +274,7 @@ class WorkerExecutor:
         custom_environment: dict[str, str] | None = None,
     ) -> dict[str, str]:
         settings = get_settings()
-
-        if provider and getattr(provider, 'id', None):
-            if custom_environment:
-                from app.core.worker_environment_variables import (
-                    validate_worker_environment_variable_key,
-                )
-
-                for key in custom_environment:
-                    validate_worker_environment_variable_key(key)
-            return build_container_env(
-                task,
-                issue,
-                mr_iid,
-                target_branch,
-                provider=provider,
-                author_name=author_name,
-                author_email=author_email,
-                custom_environment=custom_environment,
-            )
-
-        return build_legacy_container_env(
-            settings,
+        return build_container_env(
             task,
             issue,
             mr_iid,
@@ -305,6 +283,7 @@ class WorkerExecutor:
             author_name=author_name,
             author_email=author_email,
             custom_environment=custom_environment,
+            settings=settings,
         )
 
     async def _prepare_container_inputs(

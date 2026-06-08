@@ -78,20 +78,42 @@ def build_container_env(
     author_name: str | None = None,
     author_email: str | None = None,
     custom_environment: dict[str, str] | None = None,
+    settings: Any | None = None,
 ) -> dict[str, str]:
     """Build environment variables for the worker container."""
-    settings = get_settings()
+    return _build_container_env_with_settings(
+        settings or get_settings(),
+        task,
+        issue,
+        mr_iid,
+        target_branch,
+        provider=provider,
+        author_name=author_name,
+        author_email=author_email,
+        custom_environment=custom_environment,
+    )
 
-    if provider and provider.id:
-        api_key = _decrypt_provider_api_key(provider)
-    elif provider:
-        api_key = provider.api_key or ""
-    else:
-        api_key = settings.anthropic_api_key
 
-    base_url = provider.base_url if provider else settings.anthropic_base_url
-    model = provider.model if provider else settings.anthropic_model
-    max_turns = str(provider.max_turns) if provider else str(settings.claude_max_turns)
+def _build_container_env_with_settings(
+    settings: Any,
+    task: Task,
+    issue: Issue,
+    mr_iid: int | None,
+    target_branch: str | None,
+    provider: AIProvider = None,
+    *,
+    author_name: str | None = None,
+    author_email: str | None = None,
+    custom_environment: dict[str, str] | None = None,
+) -> dict[str, str]:
+    if custom_environment:
+        for key in custom_environment:
+            validate_worker_environment_key(key)
+
+    api_key, base_url, model, max_turns = _resolve_provider_environment_values(
+        settings,
+        provider,
+    )
 
     environment = {
         "GITLAB_URL": settings.gitlab_url,
@@ -119,8 +141,7 @@ def build_container_env(
 
     task_mode = task.task_mode if task.task_mode else "execute"
     environment["TASK_MODE"] = task_mode
-    # Plan mode: skip session resume to avoid polluting execute sessions with plan context
-    if task_mode != "plan" and issue.claude_session_id:
+    if issue.claude_session_id:
         environment["RESUME_SESSION"] = issue.claude_session_id
 
     if issue.base_branch:
@@ -135,73 +156,26 @@ def build_container_env(
         environment["CUSTOM_CA_BUNDLE"] = settings.custom_ca_bundle
 
     if custom_environment:
-        for key, value in custom_environment.items():
-            validate_worker_environment_key(key)
-            environment[key] = value
+        environment.update(custom_environment)
 
     return environment
 
 
-def build_legacy_container_env(
+def _resolve_provider_environment_values(
     settings: Any,
-    task: Task,
-    issue: Issue,
-    mr_iid: int | None,
-    target_branch: str | None,
-    provider: AIProvider = None,
-    *,
-    author_name: str | None = None,
-    author_email: str | None = None,
-    custom_environment: dict[str, str] | None = None,
-) -> dict[str, str]:
-    """Build the legacy worker environment while preserving validation order."""
-    api_key = provider.api_key if provider else settings.anthropic_api_key
+    provider: AIProvider | None,
+) -> tuple[str, str, str, str]:
+    if provider and provider.id:
+        api_key = _decrypt_provider_api_key(provider)
+    elif provider:
+        api_key = provider.api_key or ""
+    else:
+        api_key = settings.anthropic_api_key
+
     base_url = provider.base_url if provider else settings.anthropic_base_url
     model = provider.model if provider else settings.anthropic_model
     max_turns = str(provider.max_turns) if provider else str(settings.claude_max_turns)
-
-    environment = {
-        "GITLAB_URL": settings.gitlab_url,
-        "GITLAB_TOKEN": settings.gitlab_bot_token,
-        "PROJECT_ID": str(task.project_id),
-        "BRANCH_NAME": issue.branch_name,
-        "USER_PROMPT": task.user_prompt,
-        "TARGET_BRANCH": target_branch or "",
-        "ANTHROPIC_BASE_URL": base_url,
-        "ANTHROPIC_API_KEY": api_key,
-        "ANTHROPIC_MODEL": model,
-        "CLAUDE_MAX_TURNS": max_turns,
-        "TASK_ID": str(task.id),
-        "TASK_TIMEOUT": str(settings.task_timeout),
-        "ISSUE_ID": str(issue.id),
-        "ISSUE_TITLE": issue.title or "",
-        "GIT_AUTHOR_NAME": author_name or (getattr(task, "initiator_display_name", None) or task.initiator_username or "Codify User"),
-        "GIT_AUTHOR_EMAIL": author_email or (getattr(task, "initiator_email", None) or "codify-task@codify.local"),
-        "CODIFY_COAUTHOR_NAME": "Codify",
-        "CODIFY_COAUTHOR_EMAIL": "codify@codify.local",
-    }
-
-    if provider and getattr(provider, "system_prompt", None):
-        environment["APPEND_SYSTEM_PROMPT"] = provider.system_prompt
-    task_mode = task.task_mode if task.task_mode else "execute"
-    environment["TASK_MODE"] = task_mode
-    if task_mode != "plan" and issue.claude_session_id:
-        environment["RESUME_SESSION"] = issue.claude_session_id
-    if issue.base_branch:
-        environment["BASE_BRANCH"] = issue.base_branch
-    if mr_iid:
-        environment["MR_IID"] = str(mr_iid)
-
-    environment["REQUIRE_CHANGES"] = "true" if getattr(task, "require_changes", True) else "false"
-
-    if settings.custom_ca_bundle:
-        environment["CUSTOM_CA_BUNDLE"] = settings.custom_ca_bundle
-    if custom_environment:
-        for key, value in custom_environment.items():
-            validate_worker_environment_key(key)
-            environment[key] = value
-
-    return environment
+    return api_key, base_url, model, max_turns
 
 
 def build_container_volumes(
