@@ -359,6 +359,7 @@ const en = {
       emptyBoard: 'No items in this view yet.',
       emptyColumn: 'No items in this status.',
       limitNotice: 'Showing the first {shown} items out of {total}. Refine filters or open the full list to see more.',
+      viewMore: 'View more',
     },
     autoRefresh: 'Auto-refresh',
     updatedJustNow: 'Just updated',

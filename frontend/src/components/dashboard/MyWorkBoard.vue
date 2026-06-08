@@ -109,6 +109,19 @@
                 {{ t('dashboard.myWorkBoard.emptyColumn') }}
               </div>
             </div>
+            <div
+              v-if="column.viewMoreRoute && column.count > column.items.length"
+              class="my-work-board__column-view-more"
+            >
+              <n-button
+                text
+                size="tiny"
+                :data-testid="`my-work-board-view-more-${activeTab}-${column.status}`"
+                @click="emit('viewMore', column.viewMoreRoute!)"
+              >
+                {{ t('dashboard.myWorkBoard.viewMore') }}
+              </n-button>
+            </div>
           </n-scrollbar>
         </section>
       </div>
@@ -119,7 +132,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { NCard, NIcon, NScrollbar } from 'naive-ui'
+import { NCard, NIcon, NButton, NScrollbar } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
   CheckmarkCircleOutline,
@@ -147,6 +160,7 @@ export interface BoardColumn {
   label: string
   count: number
   items: BoardCardItem[]
+  viewMoreRoute?: string
 }
 
 const props = defineProps<{
@@ -160,6 +174,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: [route: string]
+  viewMore: [route: string]
 }>()
 
 const { t } = useI18n()
@@ -418,6 +433,11 @@ function getColumnIcon(status: string) {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.my-work-board__column-view-more {
+  padding: 8px 0 4px;
+  text-align: center;
 }
 
 .my-work-board__card-badge {

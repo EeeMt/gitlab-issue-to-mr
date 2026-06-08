@@ -99,7 +99,7 @@
 <script setup lang="ts">
 import { ref, onMounted, h, watch, computed } from 'vue'
 import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, NIcon, useMessage, type DataTableColumns } from 'naive-ui'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getIssues, getProjects, getStats, type Issue, type IssueStatus, type Project } from '../api'
 import { authState } from '../auth'
@@ -113,6 +113,7 @@ import { formatDurationSec } from '../utils/format'
 import { EllipseOutline, FolderOpenOutline, CalendarOutline, PersonOutline, GitMergeOutline, DocumentTextOutline, AlertCircleOutline, SyncOutline, CheckmarkCircleOutline } from '@vicons/ionicons5'
 
 const router = useRouter()
+const route = useRoute()
 const message = useMessage()
 const { t } = useI18n()
 const { isMobile } = useBreakpoints()
@@ -215,7 +216,16 @@ const filterConfig: FilterSortConfig = {
   defaultSort: { field: 'created_at', order: 'desc' },
 }
 
-const filterState = useFilterSort(filterConfig)
+function getInitialFiltersFromQuery(): Record<string, any> {
+  const filters: Record<string, any> = {}
+  const { status, initiator_username, project_id } = route.query
+  if (status) filters.status = String(status).split(',')
+  if (initiator_username) filters.initiator_username = String(initiator_username).split(',')
+  if (project_id) filters.project_id = String(project_id).split(',').map(Number)
+  return filters
+}
+
+const filterState = useFilterSort(filterConfig, getInitialFiltersFromQuery())
 const searchTerm = ref('')
 
 const currentUsername = computed(() => authState.user?.username ?? null)

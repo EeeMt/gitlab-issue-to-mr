@@ -273,16 +273,18 @@
       </n-button>
     </div>
     <n-scrollbar
+      :key="mermaidViewerScrollbarKey"
       class="summary-mermaid-modal__viewport"
       :class="{ 'summary-mermaid-modal__viewport--dragging': mermaidViewerDragging }"
       x-scrollable
-      trigger="hover"
-      content-style="min-width: 100%; min-height: 100%; padding: 16px;"
+      trigger="none"
+      :content-style="mermaidViewerContentStyle"
       @mousedown="handleMermaidViewerMouseDown"
     >
       <div
         class="summary-mermaid-modal__canvas"
         :class="{ 'summary-mermaid-modal__canvas--fit': mermaidZoom === 'fit' }"
+        :style="mermaidViewerCanvasStyle"
         v-html="activeMermaidViewerSvg"
       ></div>
     </n-scrollbar>
@@ -394,12 +396,38 @@ const activeMermaidRawSvg = computed(() => {
 })
 
 const mermaidViewerSvgWidth = computed(() => {
-  if (mermaidZoom.value === 'fit') return '100%'
-  return `${mermaidZoom.value}%`
+  return '100%'
+})
+
+const mermaidViewerCanvasStyle = computed<CSSProperties>(() => {
+  return { width: '100%' }
+})
+
+const mermaidViewerContentStyle = computed<CSSProperties>(() => {
+  if (mermaidZoom.value === 'fit') {
+    return {
+      width: '100%',
+      minWidth: '100%',
+      minHeight: '100%',
+      padding: '16px',
+      boxSizing: 'border-box',
+    }
+  }
+  return {
+    width: `${mermaidZoom.value}%`,
+    minWidth: '100%',
+    minHeight: '100%',
+    padding: '16px',
+    boxSizing: 'border-box',
+  }
 })
 
 const activeMermaidViewerSvg = computed(() =>
   applyMermaidViewerSvgStyle(activeMermaidRawSvg.value, mermaidViewerSvgWidth.value)
+)
+
+const mermaidViewerScrollbarKey = computed(() =>
+  `${activeMermaidIndex.value ?? 'none'}-${mermaidZoom.value}-${activeMermaidRawSvg.value.length}`
 )
 
 function updateSummaryCollapseFloat() {
@@ -1407,7 +1435,7 @@ const skillUsageBreakdown = computed(() =>
 
 :global(.summary-mermaid-modal__viewport) {
   flex: 1 1 auto;
-  height: auto;
+  height: 0;
   min-height: 0;
   border: 1px solid var(--n-border-color, rgba(128, 128, 128, 0.18));
   border-radius: 6px;

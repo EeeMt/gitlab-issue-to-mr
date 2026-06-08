@@ -24,6 +24,23 @@ vi.mock('naive-ui', () => ({
       return () => h('i', { class: 'n-icon' }, slots.default?.())
     },
   },
+  NButton: {
+    name: 'NButton',
+    props: ['text', 'size'],
+    setup(props: any, { attrs, slots }: any) {
+      return () =>
+        h(
+          'button',
+          {
+            ...attrs,
+            class: ['n-button', attrs.class],
+            'data-text': props.text ? 'true' : undefined,
+            'data-size': props.size,
+          },
+          slots.default?.(),
+        )
+    },
+  },
   NScrollbar: {
     name: 'NScrollbar',
     props: ['trigger', 'xScrollable', 'contentStyle'],
@@ -162,6 +179,119 @@ describe('MyWorkBoard', () => {
     const wrapper = mountBoard() // issueTotal: 1, visibleLimit: 100
     expect(wrapper.find('[data-testid="my-work-board-notice-issues"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="my-work-board-notice-tasks"]').exists()).toBe(false)
+  })
+
+  it('renders view-more button when count exceeds items length and viewMoreRoute is set', async () => {
+    const cols: BoardColumn[] = [
+      {
+        status: 'completed',
+        label: 'Completed',
+        count: 151,
+        items: [
+          { id: 1, title: 'Task 1', subtitle: 'sub', meta: [], route: '/tasks/1' },
+          { id: 2, title: 'Task 2', subtitle: 'sub', meta: [], route: '/tasks/2' },
+        ],
+        viewMoreRoute: '/tasks?status=completed&initiator_username=alice',
+      },
+    ]
+    const wrapper = mount(MyWorkBoard, {
+      props: {
+        issueColumns,
+        taskColumns: cols,
+        issueTotal: 1,
+        taskTotal: 151,
+        visibleLimit: 20,
+        isMobile: false,
+      },
+    })
+
+    await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
+    const btn = wrapper.find('[data-testid="my-work-board-view-more-tasks-completed"]')
+    expect(btn.exists()).toBe(true)
+    expect(btn.text()).toContain('dashboard.myWorkBoard.viewMore')
+  })
+
+  it('hides view-more button when count equals items length', async () => {
+    const cols: BoardColumn[] = [
+      {
+        status: 'completed',
+        label: 'Completed',
+        count: 2,
+        items: [
+          { id: 1, title: 'Task 1', subtitle: 'sub', meta: [], route: '/tasks/1' },
+          { id: 2, title: 'Task 2', subtitle: 'sub', meta: [], route: '/tasks/2' },
+        ],
+        viewMoreRoute: '/tasks?status=completed&initiator_username=alice',
+      },
+    ]
+    const wrapper = mount(MyWorkBoard, {
+      props: {
+        issueColumns,
+        taskColumns: cols,
+        issueTotal: 1,
+        taskTotal: 2,
+        visibleLimit: 20,
+        isMobile: false,
+      },
+    })
+
+    await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
+    expect(wrapper.find('[data-testid="my-work-board-view-more-tasks-completed"]').exists()).toBe(false)
+  })
+
+  it('emits viewMore with the route when view-more button is clicked', async () => {
+    const cols: BoardColumn[] = [
+      {
+        status: 'completed',
+        label: 'Completed',
+        count: 10,
+        items: [
+          { id: 1, title: 'Task 1', subtitle: 'sub', meta: [], route: '/tasks/1' },
+        ],
+        viewMoreRoute: '/tasks?status=completed&initiator_username=alice',
+      },
+    ]
+    const wrapper = mount(MyWorkBoard, {
+      props: {
+        issueColumns,
+        taskColumns: cols,
+        issueTotal: 1,
+        taskTotal: 10,
+        visibleLimit: 20,
+        isMobile: false,
+      },
+    })
+
+    await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
+    await wrapper.find('[data-testid="my-work-board-view-more-tasks-completed"]').trigger('click')
+    expect(wrapper.emitted('viewMore')).toBeTruthy()
+    expect(wrapper.emitted('viewMore')![0]).toEqual(['/tasks?status=completed&initiator_username=alice'])
+  })
+
+  it('hides view-more button when viewMoreRoute is not set even if count exceeds items', async () => {
+    const cols: BoardColumn[] = [
+      {
+        status: 'completed',
+        label: 'Completed',
+        count: 10,
+        items: [
+          { id: 1, title: 'Task 1', subtitle: 'sub', meta: [], route: '/tasks/1' },
+        ],
+      },
+    ]
+    const wrapper = mount(MyWorkBoard, {
+      props: {
+        issueColumns,
+        taskColumns: cols,
+        issueTotal: 1,
+        taskTotal: 10,
+        visibleLimit: 20,
+        isMobile: false,
+      },
+    })
+
+    await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
+    expect(wrapper.find('[data-testid="my-work-board-view-more-tasks-completed"]').exists()).toBe(false)
   })
 
   it('notice data-testid matches active tab', async () => {

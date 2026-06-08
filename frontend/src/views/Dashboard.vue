@@ -126,6 +126,7 @@
           :visible-limit="boardVisibleLimit"
           :is-mobile="isMobile"
           @select="router.push($event)"
+          @view-more="router.push($event)"
         />
       </n-space>
     </n-spin>
@@ -291,14 +292,23 @@ const taskChartData = computed(() => {
   ].filter((d) => d.value > 0)
 })
 
+const currentUsername = computed(() => authState.user?.username ?? '')
+
+function boardViewMoreRoute(base: string, statusFilter: string): string {
+  const params = new URLSearchParams({ status: statusFilter })
+  if (currentUsername.value) params.set('initiator_username', currentUsername.value)
+  return `${base}?${params.toString()}`
+}
+
 const issueBoardColumns = computed<BoardColumn[]>(() =>
   issueStatuses.map((status) => {
     const items = boardIssues.value.filter((issue) => issue.status === status).map(buildIssueCard)
     return {
       status,
       label: t(`issue.status.${status}`),
-      count: items.length,
+      count: statsIssueByStatus.value[status] ?? items.length,
       items,
+      viewMoreRoute: boardViewMoreRoute('/issues', status),
     }
   }),
 )
@@ -317,11 +327,12 @@ const taskBoardColumns = computed<BoardColumn[]>(() => {
     ...tasks.filter(task => task.status === 'failed').map(task => buildTaskCard(task)),
     ...tasks.filter(task => task.status === 'cancelled').map(task => buildTaskCard(task, cancelledBadge)),
   ].sort((a, b) => b.id - a.id)
+
   return [
-    { status: 'pending', label: t('status.pending'), count: statsPending.value + statsQueued.value, items: pendingItems },
-    { status: 'running', label: t('status.running'), count: statsRunning.value, items: runningItems },
-    { status: 'completed', label: t('status.completed'), count: statsCompleted.value, items: completedItems },
-    { status: 'failed', label: `${t('status.failed')} / ${t('status.cancelled')}`, count: statsFailed.value + statsCancelled.value, items: failedItems },
+    { status: 'pending', label: t('status.pending'), count: statsPending.value + statsQueued.value, items: pendingItems, viewMoreRoute: boardViewMoreRoute('/tasks', 'pending,queued') },
+    { status: 'running', label: t('status.running'), count: statsRunning.value, items: runningItems, viewMoreRoute: boardViewMoreRoute('/tasks', 'running') },
+    { status: 'completed', label: t('status.completed'), count: statsCompleted.value, items: completedItems, viewMoreRoute: boardViewMoreRoute('/tasks', 'completed') },
+    { status: 'failed', label: `${t('status.failed')} / ${t('status.cancelled')}`, count: statsFailed.value + statsCancelled.value, items: failedItems, viewMoreRoute: boardViewMoreRoute('/tasks', 'failed,cancelled') },
   ]
 })
 

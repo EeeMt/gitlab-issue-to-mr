@@ -357,6 +357,7 @@ const zhCN = {
       emptyBoard: '当前视图下暂无内容。',
       emptyColumn: '该状态下暂无内容。',
       limitNotice: '当前仅显示前 {shown} 条，共 {total} 条。请使用筛选条件或打开完整列表查看更多。',
+      viewMore: '查看更多',
     },
     autoRefresh: '自动刷新',
     updatedJustNow: '刚刚已更新',
