@@ -3,17 +3,13 @@ cache invalidation, container logs, and break-glass auth.
 """
 
 import random
-import time
 
 import httpx
 import pytest
 
 from .conftest import (
     BACKEND_URL,
-    MOCK_SERVICES_URL,
-    create_issue,
     create_issue_and_task,
-    create_task,
     wait_for_task_status,
 )
 

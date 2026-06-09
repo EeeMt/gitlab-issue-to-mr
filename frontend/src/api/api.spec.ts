@@ -53,8 +53,11 @@ import {
   getStats,
   getProjects,
   getBranches,
-  getAuthStatus
+  getAuthStatus,
+  downloadTaskArchive,
+  cleanupSystemData
 } from './index'
+import * as apiModule from './index'
 
 describe('API functions', () => {
   beforeEach(() => {
@@ -142,6 +145,43 @@ describe('API functions', () => {
       mockAxiosGet.mockRejectedValue(error)
 
       await expect(getTask(999)).rejects.toEqual(error)
+    })
+  })
+
+  describe('downloadTaskArchive', () => {
+    it('downloads the task runtime archive as a blob', async () => {
+      const blob = new Blob(['archive'])
+      mockAxiosGet.mockResolvedValue({ data: blob })
+
+      const result = await downloadTaskArchive(42)
+
+      expect(result).toBe(blob)
+      expect(mockAxiosGet).toHaveBeenCalledWith('/tasks/42/archive/download', { responseType: 'blob' })
+    })
+  })
+
+  describe('cleanupSystemData', () => {
+    it('posts cleanup options to the maintenance endpoint', async () => {
+      const response = {
+        deleted_issues: 1,
+        deleted_tasks: 2,
+        skipped_active_issues: 0,
+        skipped_active_tasks: 0,
+        deleted_archives: 2,
+        missing_archives: 0,
+        deleted_workspaces: 1,
+        container_cleanup_errors: [],
+        file_cleanup_errors: []
+      }
+      mockAxiosPost.mockResolvedValue({ data: response })
+
+      const result = await cleanupSystemData({ older_than_days: 30, force: true })
+
+      expect(result).toEqual(response)
+      expect(mockAxiosPost).toHaveBeenCalledWith('/config/maintenance/cleanup-system-data', {
+        older_than_days: 30,
+        force: true
+      })
     })
   })
 
@@ -381,6 +421,116 @@ describe('API functions', () => {
 
       // With X-Skip-Auth-Redirect header, location.assign should NOT be called
       expect(assignMock).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('admin usage limits', () => {
+    it('should call /api/admin/usage-limits/default', async () => {
+      const getAdminUsageLimitDefault = (
+        apiModule as unknown as Record<string, () => Promise<unknown>>
+      ).getAdminUsageLimitDefault
+      mockAxiosGet.mockResolvedValue({ data: { daily_tokens: { mode: 'custom', value: 1000 } } })
+
+      expect(typeof getAdminUsageLimitDefault).toBe('function')
+      await getAdminUsageLimitDefault?.()
+
+      expect(mockAxiosGet).toHaveBeenCalledWith('/admin/usage-limits/default')
+    })
+
+    it('should call /api/admin/usage-limits/users', async () => {
+      const listAdminUsageLimitUsers = (
+        apiModule as unknown as Record<string, () => Promise<unknown>>
+      ).listAdminUsageLimitUsers
+      mockAxiosGet.mockResolvedValue({ data: [] })
+
+      expect(typeof listAdminUsageLimitUsers).toBe('function')
+      await listAdminUsageLimitUsers?.()
+
+      expect(mockAxiosGet).toHaveBeenCalledWith('/admin/usage-limits/users')
+    })
+
+    it('should patch /api/admin/usage-limits/users/:id', async () => {
+      const updateAdminUsageLimitUser = (
+        apiModule as unknown as Record<string, (userId: number, payload: unknown) => Promise<unknown>>
+      ).updateAdminUsageLimitUser
+      const payload = {
+        daily_tokens: { mode: 'inherit', value: null },
+        weekly_tokens: { mode: 'custom', value: 4000 },
+        daily_tasks: { mode: 'unlimited', value: null },
+        weekly_tasks: { mode: 'inherit', value: null },
+      }
+      mockAxiosPatch.mockResolvedValue({ data: { user_id: 7 } })
+
+      expect(typeof updateAdminUsageLimitUser).toBe('function')
+      await updateAdminUsageLimitUser?.(7, payload)
+
+      expect(mockAxiosPatch).toHaveBeenCalledWith('/admin/usage-limits/users/7', payload)
+    })
+  })
+
+  describe('deleteIssueBranch', () => {
+    it('should POST to /issues/123/delete-branch and return issue', async () => {
+      const mockIssue = {
+        id: 123,
+        project_id: 1,
+        issue_iid: 10,
+        title: 'Test issue',
+        delete_branch_on_close: true,
+        branch_deleted: false
+      }
+      mockAxiosPost.mockResolvedValue({ data: mockIssue })
+
+      const fn = (apiModule as unknown as Record<string, any>).deleteIssueBranch
+      expect(typeof fn).toBe('function')
+
+      const result = await fn(123)
+
+      expect(mockAxiosPost).toHaveBeenCalledWith('/issues/123/delete-branch')
+      expect(result).toEqual(mockIssue)
+    })
+  })
+
+  describe('closeIssue', () => {
+    it('should POST close choice to /issues/123/close and return issue', async () => {
+      const mockIssue = {
+        id: 123,
+        project_id: 1,
+        title: 'Test issue',
+        status: 'closed',
+        branch_deleted: true
+      }
+      mockAxiosPost.mockResolvedValue({ data: mockIssue })
+
+      const fn = (apiModule as unknown as Record<string, any>).closeIssue
+      expect(typeof fn).toBe('function')
+
+      const result = await fn(123, { branch_action: 'delete', delete_branch: true })
+
+      expect(mockAxiosPost).toHaveBeenCalledWith('/issues/123/close', {
+        branch_action: 'delete',
+        delete_branch: true,
+      })
+      expect(result).toEqual(mockIssue)
+    })
+
+    it('should keep branch when closeIssue is called without options', async () => {
+      const mockIssue = {
+        id: 123,
+        project_id: 1,
+        title: 'Test issue',
+        status: 'closed',
+        branch_deleted: false
+      }
+      mockAxiosPost.mockResolvedValue({ data: mockIssue })
+
+      const fn = (apiModule as unknown as Record<string, any>).closeIssue
+      const result = await fn(123)
+
+      expect(mockAxiosPost).toHaveBeenCalledWith('/issues/123/close', {
+        branch_action: 'keep',
+        delete_branch: false,
+      })
+      expect(result).toEqual(mockIssue)
     })
   })
 })

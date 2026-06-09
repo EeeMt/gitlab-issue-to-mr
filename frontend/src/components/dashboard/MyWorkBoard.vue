@@ -1,8 +1,22 @@
 <template>
-  <n-card class="my-work-board" :bordered="false" data-testid="dashboard-my-work-board">
+  <n-card
+    class="my-work-board"
+    :bordered="false"
+    data-testid="dashboard-my-work-board"
+    :header-style="{ paddingBottom: '6px' }"
+  >
     <template #header>
       <div class="my-work-board__header">
-        <span>{{ t('dashboard.myWorkBoard.title') }}</span>
+        <div class="my-work-board__header-meta">
+          <span class="my-work-board__title">{{ t('dashboard.myWorkBoard.title') }}</span>
+          <span
+            v-if="hasMoreItems"
+            class="my-work-board__header-notice"
+            :data-testid="`my-work-board-notice-${activeTab}`"
+          >
+            {{ t('dashboard.myWorkBoard.limitNotice', { shown: visibleLimit, total: activeTotal }) }}
+          </span>
+        </div>
         <div class="my-work-board__tabs">
           <button
             type="button"
@@ -28,24 +42,33 @@
       </div>
     </template>
 
-    <div class="my-work-board__panel" data-testid="my-work-board-panel">
-      <div
-        v-if="hasMoreItems"
-        class="my-work-board__notice"
-        :data-testid="`my-work-board-notice-${activeTab}`"
-      >
-        {{ t('dashboard.myWorkBoard.limitNotice', { shown: visibleLimit, total: activeTotal }) }}
-      </div>
+    <div
+      class="my-work-board__panel"
+      :class="{ 'my-work-board__panel--mobile': isMobile }"
+      data-testid="my-work-board-panel"
+    >
 
       <div
-        v-if="activeColumns.every((column) => column.count === 0)"
+        v-if="activeColumns.every((column) => column.items.length === 0)"
         :data-testid="`my-work-board-empty-${activeTab}`"
         class="my-work-board__empty"
       >
         {{ t('dashboard.myWorkBoard.emptyBoard') }}
       </div>
 
-      <div class="my-work-board__columns" :class="{ 'my-work-board__columns--mobile': isMobile }">
+      <n-scrollbar
+        v-else
+        :x-scrollable="!isMobile"
+        trigger="hover"
+        class="my-work-board__columns-scrollbar"
+        :class="{ 'my-work-board__columns-scrollbar--mobile': isMobile }"
+        :content-style="!isMobile ? 'height: 100%; padding-bottom: 8px;' : 'padding-bottom: 8px;'"
+      >
+        <div
+          class="my-work-board__columns"
+          :class="{ 'my-work-board__columns--mobile': isMobile }"
+          :style="boardColumnsStyle"
+        >
         <section
           v-for="column in activeColumns"
           :key="`${activeTab}-${column.status}`"
@@ -62,35 +85,54 @@
             <span>{{ column.count }}</span>
           </header>
 
-          <div class="my-work-board__column-body">
-            <button
-              v-for="item in column.items"
-              :key="item.id"
-              type="button"
-              class="my-work-board__card"
+          <n-scrollbar class="my-work-board__column-body-scrollbar" trigger="hover" content-style="padding-right: 12px; padding-bottom: 2px;">
+            <div class="my-work-board__column-body">
+              <button
+                v-for="item in column.items"
+                :key="item.id"
+                type="button"
+                class="my-work-board__card"
               :class="{ 'my-work-board__card--task': activeTab === 'tasks' }"
               :data-testid="`${activeTab === 'issues' ? 'issue' : 'task'}-card-${item.id}`"
-              :title="item.fullTitle || item.title"
-              @click="emit('select', item.route)"
-            >
-              <div class="my-work-board__card-title">{{ item.title }}</div>
-              <div class="my-work-board__card-subtitle">{{ item.subtitle }}</div>
-              <div class="my-work-board__card-meta">{{ item.meta.join(' · ') }}</div>
-            </button>
+                :title="item.fullTitle || item.title"
+                @click="emit('select', item.route)"
+              >
+                <div class="my-work-board__card-title">{{ item.title }}</div>
+                <div class="my-work-board__card-subtitle">
+                  {{ item.subtitle }}
+                  <span v-if="item.badge" class="my-work-board__card-badge">{{ item.badge }}</span>
+                </div>
+                <div class="my-work-board__card-meta">{{ item.meta.join(' · ') }}</div>
+              </button>
 
-            <div v-if="column.items.length === 0" class="my-work-board__column-empty">
-              {{ t('dashboard.myWorkBoard.emptyColumn') }}
+              <div v-if="column.items.length === 0" class="my-work-board__column-empty">
+                {{ t('dashboard.myWorkBoard.emptyColumn') }}
+              </div>
             </div>
-          </div>
+            <div
+              v-if="column.viewMoreRoute && column.count > column.items.length"
+              class="my-work-board__column-view-more"
+            >
+              <n-button
+                text
+                size="tiny"
+                :data-testid="`my-work-board-view-more-${activeTab}-${column.status}`"
+                @click="emit('viewMore', column.viewMoreRoute!)"
+              >
+                {{ t('dashboard.myWorkBoard.viewMore') }}
+              </n-button>
+            </div>
+          </n-scrollbar>
         </section>
       </div>
+      </n-scrollbar>
     </div>
   </n-card>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { NCard, NIcon } from 'naive-ui'
+import { NCard, NIcon, NButton, NScrollbar } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
   CheckmarkCircleOutline,
@@ -98,9 +140,7 @@ import {
   EllipseOutline,
   PauseCircleOutline,
   PlayCircleOutline,
-  RadioButtonOffOutline,
   SearchOutline,
-  TimeOutline,
 } from '@vicons/ionicons5'
 
 export type BoardKind = 'issues' | 'tasks'
@@ -110,6 +150,7 @@ export interface BoardCardItem {
   title: string
   fullTitle?: string
   subtitle: string
+  badge?: string
   meta: string[]
   route: string
 }
@@ -119,6 +160,7 @@ export interface BoardColumn {
   label: string
   count: number
   items: BoardCardItem[]
+  viewMoreRoute?: string
 }
 
 const props = defineProps<{
@@ -132,6 +174,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: [route: string]
+  viewMore: [route: string]
 }>()
 
 const { t } = useI18n()
@@ -143,11 +186,9 @@ const columnIcons = {
   in_review: SearchOutline,
   closed: CheckmarkCircleOutline,
   pending: PauseCircleOutline,
-  queued: TimeOutline,
   running: PlayCircleOutline,
   completed: CheckmarkCircleOutline,
   failed: CloseCircleOutline,
-  cancelled: RadioButtonOffOutline,
 } as const
 
 const activeColumns = computed(() =>
@@ -159,6 +200,15 @@ const activeTotal = computed(() =>
 )
 
 const hasMoreItems = computed(() => activeTotal.value > props.visibleLimit)
+const boardColumnsStyle = computed(() => {
+  const columnCount = activeColumns.value.length
+  const desktopMinWidth = columnCount * 220 + Math.max(columnCount - 1, 0) * 12
+  return {
+    '--my-work-board-column-count': String(columnCount),
+    minWidth: props.isMobile ? '100%' : `${desktopMinWidth}px`,
+    ...(props.isMobile ? {} : { height: '100%' }),
+  }
+})
 
 function getColumnIcon(status: string) {
   return columnIcons[status as keyof typeof columnIcons] ?? EllipseOutline
@@ -175,6 +225,31 @@ function getColumnIcon(status: string) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
+}
+
+.my-work-board__header-meta {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.my-work-board__title {
+  font-size: inherit;
+  font-weight: inherit;
+  white-space: nowrap;
+}
+
+.my-work-board__header-notice {
+  min-width: 0;
+  color: rgba(15, 23, 42, 0.55);
+  font-size: 12px;
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .my-work-board__tabs {
@@ -220,15 +295,16 @@ function getColumnIcon(status: string) {
 }
 
 .my-work-board__panel {
-  height: clamp(280px, 45vh, 360px);
+  height: clamp(340px, 45vh, 430px);
   display: flex;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
 }
 
-.my-work-board__notice {
-  margin-bottom: 12px;
+.my-work-board__panel--mobile {
+  height: auto;
+  overflow: visible;
 }
 
 .my-work-board__empty {
@@ -239,31 +315,32 @@ function getColumnIcon(status: string) {
   text-align: center;
 }
 
-.my-work-board__columns {
+.my-work-board__columns-scrollbar {
   flex: 1;
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(220px, 1fr);
-  gap: 12px;
   min-height: 0;
-  min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
+}
+
+.my-work-board__columns-scrollbar--mobile {
+  flex: none;
+  height: auto;
+}
+
+.my-work-board__columns {
+  display: grid;
+  grid-template-columns: repeat(var(--my-work-board-column-count), minmax(220px, 1fr));
+  gap: 12px;
   align-items: stretch;
 }
 
 .my-work-board__columns--mobile {
-  grid-auto-flow: row;
-  grid-auto-columns: unset;
   grid-template-columns: 1fr;
-  overflow-x: hidden;
-  overflow-y: auto;
+  min-width: 100% !important;
 }
 
 .my-work-board__column {
   border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 12px;
-  padding: 12px;
+  padding: 12px 0 12px 12px;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -281,6 +358,7 @@ function getColumnIcon(status: string) {
   align-items: center;
   margin-bottom: 12px;
   font-weight: 600;
+  padding-right: 12px;
 }
 
 .my-work-board__column-title {
@@ -295,13 +373,24 @@ function getColumnIcon(status: string) {
   flex-shrink: 0;
 }
 
+.my-work-board__columns--mobile .my-work-board__column {
+  height: clamp(220px, 42vh, 320px);
+  min-width: 0;
+}
+
+.my-work-board__column-body-scrollbar {
+  flex: 1;
+  min-height: 0;
+}
+
+.my-work-board__column-body-scrollbar :deep(.n-scrollbar-rail.n-scrollbar-rail--vertical) {
+  right: 1px;
+}
+
 .my-work-board__column-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
 }
 
 .my-work-board__card {
@@ -332,18 +421,37 @@ function getColumnIcon(status: string) {
   overflow: hidden;
 }
 
-.my-work-board__card--task .my-work-board__card-title {
-  font-weight: 500;
-  color: rgba(15, 23, 42, 0.82);
-}
-
-.my-work-board__notice,
 .my-work-board__card-subtitle,
 .my-work-board__card-meta,
 .my-work-board__column-empty,
 .my-work-board__empty {
   color: rgba(15, 23, 42, 0.6);
   font-size: 12px;
+}
+
+.my-work-board__card-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.my-work-board__column-view-more {
+  padding: 8px 0 4px;
+  text-align: center;
+}
+
+.my-work-board__card-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(14, 165, 233, 0.1);
+  color: #0ea5e9;
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  white-space: nowrap;
+  line-height: 1.4;
 }
 
 @media (max-width: 768px) {
@@ -358,4 +466,3 @@ function getColumnIcon(status: string) {
   }
 }
 </style>
-

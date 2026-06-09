@@ -8,12 +8,12 @@ if GitLab is not available.
 
 import os
 import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import logging
 import time
 from datetime import datetime
-from typing import Optional
 
 import pytest
 import requests
@@ -60,7 +60,7 @@ pytestmark = pytest.mark.skipif(
 
 # ─── Authenticated backend session ─────────────────────────────────────────────
 
-_be_session: Optional[requests.Session] = None
+_be_session: requests.Session | None = None
 
 
 def _get_be_session() -> requests.Session:

@@ -11,7 +11,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from app.core.worker import scrub_sensitive_data, sanitize_sensitive_data
+from app.core.worker import sanitize_sensitive_data, scrub_sensitive_data
 
 
 class ScrubSensitiveDataTests(unittest.TestCase):

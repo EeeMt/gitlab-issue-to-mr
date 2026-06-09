@@ -4,18 +4,17 @@
 import os
 import sys
 import unittest
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
-from starlette.requests import Request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from fastapi.testclient import TestClient
-from app.main import app
+
+from app.api.containers import _compact_raw_log_noise, _get_container_pattern
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_context
-from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
-from app.api.containers import _get_container_pattern
+from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+from app.main import app
 
 
 class ContainerPatternTests(unittest.TestCase):
@@ -65,6 +64,22 @@ class ContainerPatternTests(unittest.TestCase):
 
 class ContainerLogsHelpersTests(unittest.TestCase):
     """Test helper functions for container handling."""
+
+    def test_compact_raw_log_noise_collapses_ca_replacement_lines(self):
+        logs = (
+            "Installing custom CA certificate\n"
+            "Replacing debian:Amazon_Root_CA_1.pem\n"
+            "Replacing debian:Amazon_Root_CA_2.pem\n"
+            "Replacing debian:Amazon_Root_CA_3.pem\n"
+            "Custom CA installed; SSL verification enabled\n"
+            "Tool output stays complete\n"
+        )
+
+        compacted = _compact_raw_log_noise(logs)
+
+        self.assertIn("[suppressed 3 CA certificate replacement lines]", compacted)
+        self.assertNotIn("Replacing debian:Amazon_Root_CA_3.pem", compacted)
+        self.assertIn("Tool output stays complete", compacted)
 
     @patch("app.api.containers.get_settings")
     def test_extract_container_info_valid_name(self, mock_settings):
@@ -140,6 +155,7 @@ class TaskContainerLogsAPIHelperTests(unittest.TestCase):
 def _make_auth_override():
     """Create an async function that returns a mock admin auth context."""
     from types import SimpleNamespace
+
     from starlette.requests import Request
 
     async def mock_auth_context(request: Request):
@@ -161,10 +177,10 @@ class ListContainersEndpointTests(unittest.TestCase):
 
     def test_list_containers_returns_500_on_docker_error(self):
         """If docker_client raises, endpoint should return 500."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
         mock_db = MagicMock()
@@ -184,10 +200,10 @@ class ListContainersEndpointTests(unittest.TestCase):
 
     def test_list_containers_filters_non_worker_containers(self):
         """Only containers matching the worker pattern should appear in the response."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
@@ -246,10 +262,10 @@ class GetContainerLogsEndpointTests(unittest.TestCase):
 
     def test_get_task_container_logs_returns_404_for_missing_task(self):
         """Should return 404 when task does not exist in DB."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
         mock_result = MagicMock()
@@ -271,10 +287,10 @@ class GetContainerLogsEndpointTests(unittest.TestCase):
 
     def test_get_task_container_logs_returns_empty_when_no_container_id(self):
         """Should return empty logs when task exists but has no container_id."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
         from app.models import TaskStatus
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -317,10 +333,10 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
 
     def test_get_task_container_logs_returns_logs_when_container_exists(self):
         """Should return logs when task has a container_id and docker returns logs."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
         from app.models import TaskStatus
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -360,10 +376,10 @@ class GetTaskContainerLogsHappyPathTests(unittest.TestCase):
 
     def test_get_task_container_logs_returns_error_when_docker_fails(self):
         """When Docker fails, falls back to DB-stored log chunks (returns 200 with available data)."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
         from app.models import TaskStatus
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -410,10 +426,10 @@ class ListContainersAccessScopeFilterTests(unittest.TestCase):
 
     def test_list_containers_includes_all_worker_containers_for_unrestricted_scope(self):
         """All worker containers appear when access scope is unrestricted."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_context, require_authenticated_user
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         # Unrestricted scope: all containers visible
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -735,7 +751,7 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
     def test_source_db_returns_db_chunks_directly(self):
         """When source=db, should fetch logs from DB without trying Docker."""
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
         from app.models import TaskStatus
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -752,8 +768,12 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
         mock_log_result = MagicMock()
         mock_log_result.scalars.return_value.all.return_value = [mock_chunk]
 
+        # _fetch_db_chunks now checks TaskRawLogChunk first (empty), then falls back to TaskLog
+        mock_empty_raw_chunks = MagicMock()
+        mock_empty_raw_chunks.scalars.return_value.all.return_value = []
+
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_log_result])
+        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_empty_raw_chunks, mock_log_result])
 
         async def override_db():
             yield mock_db
@@ -774,7 +794,7 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
     def test_source_db_returns_empty_when_no_chunks(self):
         """When source=db and no log chunks exist, should return empty logs."""
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
         from app.models import TaskStatus
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -789,8 +809,12 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
         mock_log_result = MagicMock()
         mock_log_result.scalars.return_value.all.return_value = []
 
+        # _fetch_db_chunks checks TaskRawLogChunk first (empty), then falls back to TaskLog (also empty)
+        mock_empty_raw_chunks = MagicMock()
+        mock_empty_raw_chunks.scalars.return_value.all.return_value = []
+
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_log_result])
+        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_empty_raw_chunks, mock_log_result])
 
         async def override_db():
             yield mock_db
@@ -810,7 +834,7 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
     def test_source_db_multiple_chunks_concatenated(self):
         """Multiple DB log chunks should be concatenated."""
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
         from app.models import TaskStatus
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -831,8 +855,12 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
         mock_log_result = MagicMock()
         mock_log_result.scalars.return_value.all.return_value = [chunk1, chunk2, chunk3]
 
+        # _fetch_db_chunks checks TaskRawLogChunk first (empty), then falls back to TaskLog
+        mock_empty_raw_chunks = MagicMock()
+        mock_empty_raw_chunks.scalars.return_value.all.return_value = []
+
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_log_result])
+        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_empty_raw_chunks, mock_log_result])
 
         async def override_db():
             yield mock_db
@@ -863,7 +891,7 @@ class TaskContainerLogsDockerFailDbFallbackTests(unittest.TestCase):
     def test_docker_fail_with_db_chunks_returns_db_data(self):
         """When Docker fails but DB has log chunks, should return DB data with source=db."""
         from app.dependencies.auth import require_authenticated_context
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
         from app.models import TaskStatus
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -882,8 +910,12 @@ class TaskContainerLogsDockerFailDbFallbackTests(unittest.TestCase):
         mock_log_result = MagicMock()
         mock_log_result.scalars.return_value.all.return_value = [mock_chunk_1, mock_chunk_2]
 
+        # _fetch_db_chunks checks TaskRawLogChunk first (empty), then falls back to TaskLog
+        mock_empty_raw_chunks = MagicMock()
+        mock_empty_raw_chunks.scalars.return_value.all.return_value = []
+
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_log_result])
+        mock_db.execute = AsyncMock(side_effect=[mock_task_result, mock_empty_raw_chunks, mock_log_result])
 
         async def override_db():
             yield mock_db

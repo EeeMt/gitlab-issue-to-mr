@@ -8,14 +8,10 @@ import pytest
 
 from .conftest import (
     BACKEND_URL,
-    MOCK_SERVICES_URL,
-    create_issue,
     create_issue_and_task,
     create_task,
-    get_mock_calls,
     wait_for_task_status,
 )
-
 
 # ── MR Follow-up Task ────────────────────────────────────────────────
 
@@ -46,7 +42,7 @@ class TestMRFollowUpTask:
         )
         assert task["status"] == "completed"
 
-        mr_iid = task["issue"]["merge_request_iid"]
+        task["issue"]["merge_request_iid"]
         branch = task["issue"]["branch_name"]
 
         # Step 3: Create a follow-up task on the SAME issue

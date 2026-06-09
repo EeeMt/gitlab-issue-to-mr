@@ -3,6 +3,7 @@ import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { h, ref, nextTick } from 'vue'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import IssueView from './IssueView.vue'
+import issueViewSource from './IssueView.vue?raw'
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks
@@ -11,9 +12,11 @@ const { mockApi, resetMockApi, mockMessage, mockDialog } = vi.hoisted(() => {
   const mock = {
     getIssue: vi.fn<() => Promise<any>>(),
     updateIssue: vi.fn<() => Promise<any>>(),
-    closeIssue: vi.fn<() => Promise<any>>(),
+    closeIssue: vi.fn<(...args: any[]) => Promise<any>>(),
     createTask: vi.fn<() => Promise<any>>(),
     retryTask: vi.fn<() => Promise<any>>(),
+    rescheduleTask: vi.fn<() => Promise<any>>(),
+    deleteIssueBranch: vi.fn<() => Promise<any>>(),
     getPromptTemplates: vi.fn<() => Promise<any[]>>(),
     getScheduledTasks: vi.fn<() => Promise<any[]>>(),
     getSlotCapacity: vi.fn<() => Promise<any>>(),
@@ -37,10 +40,14 @@ vi.mock('../i18n', () => ({ currentLocale: ref('en') }))
 vi.mock('../utils/datetime', () => ({
   formatDateTimeUtc8Compact: vi.fn((value: any) => `formatted-${value}`),
   formatTimeUtc8: vi.fn((value: any) => `time-${value}`),
+  parseUtcDate: vi.fn((value: any) => new Date(value)),
 }))
 
 vi.mock('../utils/slotError', () => ({
-  extractSlotErrorMessage: vi.fn((_error: any, t: any, fallbackKey: string) => t(fallbackKey)),
+  extractSlotErrorMessage: vi.fn((error: any, t: any, fallbackKey: string) => {
+    const detail = error?.response?.data?.detail
+    return typeof detail === 'string' ? detail : t(fallbackKey)
+  }),
 }))
 
 vi.mock('../auth', () => ({
@@ -58,6 +65,8 @@ vi.mock('../api', () => ({
   closeIssue: mockApi.closeIssue,
   createTask: mockApi.createTask,
   retryTask: mockApi.retryTask,
+  rescheduleTask: mockApi.rescheduleTask,
+  deleteIssueBranch: mockApi.deleteIssueBranch,
   getPromptTemplates: mockApi.getPromptTemplates,
   getScheduledTasks: mockApi.getScheduledTasks,
   getSlotCapacity: mockApi.getSlotCapacity,
@@ -108,7 +117,7 @@ vi.mock('../components/PageHeader.vue', () => ({
     setup(_p: any, { slots }: any) {
       return () => h('div', { class: 'page-header-mock', 'data-testid': 'page-header' }, [
         slots.title?.(),
-        slots.actions?.(),
+        h('div', { class: 'page-header-actions-mock', 'data-testid': 'page-header-actions' }, slots.actions?.()),
       ])
     },
   },
@@ -160,7 +169,10 @@ vi.mock('naive-ui', () => ({
         class: 'n-button',
         disabled: props.disabled,
         onClick: props.onClick,
-      }, slots.default?.())
+      }, [
+        slots.icon?.(),
+        slots.default?.(),
+      ])
     },
   },
   NCard: {
@@ -213,8 +225,11 @@ vi.mock('naive-ui', () => ({
   NIcon: {
     name: 'NIcon',
     props: ['size', 'component'],
-    setup(_p: any, { slots }: any) {
-      return () => h('i', { class: 'n-icon' }, slots.default?.())
+    setup(props: any) {
+      return () => h('i', {
+        class: 'n-icon',
+        'data-icon': props.component?.name,
+      })
     },
   },
   NDataTable: {
@@ -254,9 +269,9 @@ vi.mock('naive-ui', () => ({
   NDrawer: {
     name: 'NDrawer',
     props: ['show', 'width', 'placement'],
-    setup(props: any, { slots }: any) {
+    setup(props: any, { attrs, slots }: any) {
       return () => props.show
-        ? h('div', { class: 'n-drawer' }, slots.default?.())
+        ? h('div', { ...attrs, class: ['n-drawer', attrs.class] }, slots.default?.())
         : null
     },
   },
@@ -318,10 +333,68 @@ vi.mock('naive-ui', () => ({
       return () => h('div', { class: 'n-alert' }, slots.default?.())
     },
   },
+  NSwitch: {
+    name: 'NSwitch',
+    props: ['value', 'disabled'],
+    emits: ['update:value'],
+    setup(props: any, { emit }: any) {
+      return () => h('button', {
+        class: 'n-switch',
+        disabled: props.disabled,
+        onClick: () => {
+          if (!props.disabled) {
+            emit('update:value', !props.value)
+          }
+        },
+      })
+    },
+  },
+  // Simple NTooltip stub that renders both trigger and content slots
+  NTooltip: {
+    name: 'NTooltip',
+    props: ['title'],
+    setup(props: any, { slots }: any) {
+      return () => h('span', { class: 'n-tooltip', 'data-tooltip': props.title, 'data-testid': 'n-tooltip' }, [
+        slots.trigger?.(),
+        slots.default?.()
+      ])
+    }
+  },
   useMessage: () => mockMessage,
   useDialog: () => mockDialog,
   DataTableColumns: {},
+  NScrollbar: {
+    name: 'NScrollbar',
+    setup(_p: any, { slots }: any) {
+      return () => h('div', { class: 'n-scrollbar' }, slots.default?.())
+    },
+  },
 }))
+
+vi.mock('@vicons/ionicons5', () => {
+  const icon = (name: string) => ({ name, render: () => null })
+  return {
+    AddCircleOutline: icon('AddCircleOutline'),
+    BulbOutline: icon('BulbOutline'),
+    CalendarOutline: icon('CalendarOutline'),
+    CheckmarkCircleOutline: icon('CheckmarkCircleOutline'),
+    CloseCircleOutline: icon('CloseCircleOutline'),
+    CloseOutline: icon('CloseOutline'),
+    CodeOutline: icon('CodeOutline'),
+    CodeSlashOutline: icon('CodeSlashOutline'),
+    CreateOutline: icon('CreateOutline'),
+    DocumentTextOutline: icon('DocumentTextOutline'),
+    FolderOpenOutline: icon('FolderOpenOutline'),
+    GitBranchOutline: icon('GitBranchOutline'),
+    GitPullRequest: icon('GitPullRequest'),
+    InformationCircleOutline: icon('InformationCircleOutline'),
+    PersonOutline: icon('PersonOutline'),
+    RefreshOutline: icon('RefreshOutline'),
+    TrashOutline: icon('TrashOutline'),
+    TimeOutline: icon('TimeOutline'),
+    WarningOutline: icon('WarningOutline'),
+  }
+})
 
 // ---------------------------------------------------------------------------
 // Router
@@ -375,7 +448,7 @@ function createMockIssue(overrides: Record<string, any> = {}): any {
     ],
     totals: {
       additions: 10, deletions: 5, total_changes: 15,
-      input_tokens: 150, output_tokens: 75,
+      input_tokens: 150, output_tokens: 75, duration_seconds: 0,
     },
     ...overrides,
   }
@@ -386,7 +459,18 @@ const mockProjects = [
 ]
 
 const mockPromptTemplates = [
-  { id: 1, name: 'Bug Fix', content: 'Fix the {{issue_type}} in {{file_path}}', variable_tips: { issue_type: 'Type', file_path: 'Path' }, is_active: true, created_at: '2024-01-01T10:00:00Z', updated_at: '2024-01-01T10:00:00Z' },
+  { id: 1, name: 'Bug Fix', content: 'Fix the {{issue_type}} in {{file_path}}', variable_tips: { issue_type: 'Type', file_path: 'Path' }, tags: [], is_active: true, sort_order: 1, created_at: '2024-01-01T10:00:00Z', updated_at: '2024-01-01T10:00:00Z' },
+]
+
+const mockProviders = [
+  {
+    id: 1,
+    name: 'Claude',
+    provider_type: 'anthropic',
+    model: 'claude-sonnet-4',
+    is_default: true,
+    is_disabled: false,
+  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -400,7 +484,7 @@ function setupDefaultMocks(issueOverrides: Record<string, any> = {}) {
   mockApi.getScheduledTasks.mockResolvedValue([])
   mockApi.getSlotCapacity.mockResolvedValue(null)
   mockApi.getConfig.mockResolvedValue({ runtime: { slot_max_tasks: 5, slot_max_tasks_enforce: false } })
-  mockApi.getProviders.mockResolvedValue([])
+  mockApi.getProviders.mockResolvedValue(mockProviders)
   return issue
 }
 
@@ -458,6 +542,7 @@ describe('IssueView', () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const text = wrapper.text()
+      expect(text).toContain('issue.metadata')
       expect(text).toContain('common.status')
       expect(text).toContain('issue.field.project')
       expect(text).toContain('issue.field.creator')
@@ -467,6 +552,26 @@ describe('IssueView', () => {
       expect(text).toContain('codify/issue-1')
       expect(text).toContain('!42')
       expect(text).toContain('session-abc')
+    })
+
+    it('aligns issue metadata values after the widest field label', () => {
+      expect(issueViewSource).toContain('grid-template-columns: max-content minmax(0, 1fr);')
+      expect(issueViewSource).toContain('display: contents;')
+      expect(issueViewSource).toContain(`.metadata-body {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 14px;
+  align-items: center;
+}`)
+      expect(issueViewSource).not.toContain(`.metadata-body {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 14px;
+  align-items: baseline;
+}`)
+      expect(issueViewSource).not.toContain('min-width: 90px;')
     })
 
     it('displays description card when description exists', async () => {
@@ -512,6 +617,34 @@ describe('IssueView', () => {
       expect(link.exists()).toBe(true)
     })
 
+    it('renders header actions with icons in semantic order', async () => {
+      setupDefaultMocks({ status: 'closed', branch_name: 'codify/issue-1' })
+      wrapper = await mountComponent()
+
+      const actionButtons = wrapper.find('[data-testid="page-header-actions"]').findAll('button.n-button')
+      const labels = actionButtons.map(button => button.text())
+
+      expect(labels).toEqual([
+        'issue.close',
+        'issue.deleteBranch',
+        'issue.edit',
+        'common.refresh',
+      ])
+      expect(actionButtons.every(button => button.find('.n-icon').exists())).toBe(true)
+      expect(actionButtons.map(button => button.find('.n-icon').attributes('data-icon'))).toEqual([
+        'CloseCircleOutline',
+        'TrashOutline',
+        'CreateOutline',
+        'RefreshOutline',
+      ])
+    })
+
+    it('matches task header mobile action sizing', () => {
+      expect(issueViewSource).toContain('.issue-actions__toolbar {\n    align-items: stretch;')
+      expect(issueViewSource).toContain('.issue-actions__command {\n    flex: 1 1 150px;')
+      expect(issueViewSource).toContain('justify-content: center;')
+    })
+
     it('shows no MR text when merge_request_url is null', async () => {
       setupDefaultMocks({ merge_request_url: null, merge_request_iid: null })
       wrapper = await mountComponent()
@@ -532,6 +665,23 @@ describe('IssueView', () => {
       expect(text).toContain('common.changes')
       expect(text).toContain('15')
       expect(text).toContain('analytics.tokens')
+    })
+
+    it('shows total duration from backend issue totals', async () => {
+      setupDefaultMocks({
+        totals: {
+          additions: 10,
+          deletions: 5,
+          total_changes: 15,
+          input_tokens: 150,
+          output_tokens: 75,
+          duration_seconds: 3661,
+        },
+      })
+      wrapper = await mountComponent()
+
+      expect(wrapper.text()).toContain('issue.totalTaskDuration')
+      expect(wrapper.text()).toContain('1h 1m')
     })
 
     it('shows timeline with created and updated dates', async () => {
@@ -555,6 +705,77 @@ describe('IssueView', () => {
       const branchFlow = wrapper.find('.branch-flow')
       expect(branchFlow.exists()).toBe(true)
       expect(branchFlow.text()).toBe('-')
+    })
+  })
+
+  // =========================================================================
+  // Branch policy & delete branch (Task 11)
+  // =========================================================================
+  describe('branch policy and delete branch', () => {
+    it('renders a branch-policy metadata row when issue.branch_name exists', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      // Expect a dedicated branch policy row to be rendered (data-testid used by implementation)
+      expect(wrapper.find('[data-testid="issue-branch-policy-row"]').exists()).toBe(true)
+    })
+
+    it('shows deleteBranchBadge or keepBranchBadge based on delete_branch_on_close', async () => {
+      setupDefaultMocks({ delete_branch_on_close: true })
+      wrapper = await mountComponent()
+      expect(wrapper.find('[data-testid="delete-branch-badge"]').exists()).toBe(true)
+
+      await wrapper.unmount()
+      setupDefaultMocks({ delete_branch_on_close: false })
+      wrapper = await mountComponent()
+      expect(wrapper.find('[data-testid="keep-branch-badge"]').exists()).toBe(true)
+    })
+
+    it('shows branchDeletedBadge when issue.branch_deleted is true', async () => {
+      setupDefaultMocks({ branch_deleted: true })
+      wrapper = await mountComponent()
+      expect(wrapper.find('[data-testid="branch-deleted-badge"]').exists()).toBe(true)
+    })
+
+    it('shows a delete-branch button only when issue.status === \"closed\" and issue.branch_name exists', async () => {
+      setupDefaultMocks({ status: 'open', branch_name: 'codify/issue-1' })
+      wrapper = await mountComponent()
+      expect(wrapper.find('[data-testid="issue-delete-branch-button"]').exists()).toBe(false)
+
+      await wrapper.unmount()
+      setupDefaultMocks({ status: 'closed', branch_name: 'codify/issue-1' })
+      wrapper = await mountComponent()
+      expect(wrapper.find('[data-testid="page-header-actions"] [data-testid="issue-delete-branch-button"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="issue-branch-policy-row"] [data-testid="issue-delete-branch-button"]').exists()).toBe(false)
+    })
+
+    it('clicking delete-branch calls deleteIssueBranch, updates issue state, and shows success message', async () => {
+      const initial = setupDefaultMocks({ status: 'closed', branch_name: 'codify/issue-1' })
+      mockApi.deleteIssueBranch.mockResolvedValue({ ...initial, branch_deleted: true })
+
+      wrapper = await mountComponent()
+      const btn = wrapper.find('[data-testid="issue-delete-branch-button"]')
+      expect(btn.exists()).toBe(true)
+
+      const confirmButtons = wrapper.findAll('.popconfirm-confirm-btn')
+      await confirmButtons[confirmButtons.length - 1].trigger('click')
+      await flushPromises()
+
+      expect(mockApi.deleteIssueBranch).toHaveBeenCalledWith(1)
+      expect(mockMessage.success).toHaveBeenCalledWith('issue.deleteBranchSuccess')
+      expect(wrapper.find('[data-testid="branch-deleted-badge"]').exists()).toBe(true)
+    })
+
+    it('when issue.branch_deleted is true, delete-branch button is disabled and tooltip text branchAlreadyDeleted is available', async () => {
+      setupDefaultMocks({ status: 'closed', branch_name: 'codify/issue-1', branch_deleted: true })
+      wrapper = await mountComponent()
+      const btn = wrapper.find('[data-testid="issue-delete-branch-button"]')
+      expect(btn.exists()).toBe(true)
+      expect(btn.attributes('disabled')).toBeDefined()
+
+      // Tooltip should be available via NTooltip stub (data-tooltip attribute)
+      const tooltip = wrapper.find('[data-testid="n-tooltip"]')
+      expect(tooltip.exists()).toBe(true)
+      expect(tooltip.attributes('data-tooltip')).toBe('issue.branchAlreadyDeleted')
     })
   })
 
@@ -661,18 +882,46 @@ describe('IssueView', () => {
   // Close issue
   // =========================================================================
   describe('close issue', () => {
-    it('calls closeIssue and shows success message', async () => {
+    it('opens close choices and keeps branch by default when selected', async () => {
       const closedIssue = createMockIssue({ status: 'closed' })
       setupDefaultMocks()
       mockApi.closeIssue.mockResolvedValue(closedIssue)
       wrapper = await mountComponent()
 
-      const confirmBtn = wrapper.find('.popconfirm-confirm-btn')
-      expect(confirmBtn.exists()).toBe(true)
-      await confirmBtn.trigger('click')
+      await wrapper.find('[data-testid="issue-close-button"]').trigger('click')
+      await nextTick()
+
+      expect(wrapper.text()).toContain('issue.closeBranchChoiceHint')
+      const keepBranchBtn = wrapper.find('[data-testid="issue-close-keep-branch-button"]')
+      expect(keepBranchBtn.exists()).toBe(true)
+      await keepBranchBtn.trigger('click')
       await flushPromises()
 
-      expect(mockApi.closeIssue).toHaveBeenCalledWith(1)
+      expect(mockApi.closeIssue).toHaveBeenCalledWith(1, {
+        branch_action: 'keep',
+        delete_branch: false,
+      })
+      expect(mockMessage.success).toHaveBeenCalledWith('issue.closeSuccess')
+    })
+
+    it('deletes branch when the close delete option is selected', async () => {
+      const closedIssue = createMockIssue({ status: 'closed', branch_deleted: true })
+      setupDefaultMocks({ branch_name: 'codify/issue-1', branch_deleted: false })
+      mockApi.closeIssue.mockResolvedValue(closedIssue)
+      wrapper = await mountComponent()
+
+      await wrapper.find('[data-testid="issue-close-button"]').trigger('click')
+      await nextTick()
+
+      const deleteBranchBtn = wrapper.find('[data-testid="issue-close-delete-branch-button"]')
+      expect(deleteBranchBtn.exists()).toBe(true)
+      await deleteBranchBtn.trigger('click')
+      await flushPromises()
+
+      expect(mockApi.closeIssue).toHaveBeenCalledWith(1, {
+        branch_action: 'delete',
+        delete_branch: true,
+      })
       expect(mockMessage.success).toHaveBeenCalledWith('issue.closeSuccess')
     })
 
@@ -681,8 +930,9 @@ describe('IssueView', () => {
       mockApi.closeIssue.mockRejectedValue(new Error('fail'))
       wrapper = await mountComponent()
 
-      const confirmBtn = wrapper.find('.popconfirm-confirm-btn')
-      await confirmBtn.trigger('click')
+      await wrapper.find('[data-testid="issue-close-button"]').trigger('click')
+      await nextTick()
+      await wrapper.find('[data-testid="issue-close-keep-branch-button"]').trigger('click')
       await flushPromises()
 
       expect(mockMessage.error).toHaveBeenCalledWith('issue.closeFailed')
@@ -781,6 +1031,7 @@ describe('IssueView', () => {
 
       // Drawer is visible (rendered via NDrawer v-if show)
       expect(wrapper.findAll('.n-drawer').length).toBeGreaterThanOrEqual(1)
+      expect(wrapper.find('[data-testid="issue-create-task-drawer"]').exists()).toBe(true)
     })
 
     it('pre-fills task prompt with issue description when drawer opens', async () => {
@@ -794,35 +1045,6 @@ describe('IssueView', () => {
       expect(editor.exists()).toBe(true)
     })
 
-    it('refreshes schedule preview data after creating another task', async () => {
-      setupDefaultMocks()
-      mockApi.createTask.mockResolvedValue({ id: 3 })
-      mockApi.getScheduledTasks
-        .mockResolvedValueOnce([{ id: 1 }])
-        .mockResolvedValueOnce([{ id: 1 }, { id: 2 }])
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await vm.openScheduleDrawer()
-      await flushPromises()
-      expect(mockApi.getScheduledTasks).toHaveBeenCalledTimes(1)
-      expect(vm.scheduledTasksForPreview).toEqual([{ id: 1 }])
-
-      vm.showScheduleDrawer = false
-      await nextTick()
-
-      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
-      await nextTick()
-      await wrapper.find('[data-testid="issue-create-task-button"]').trigger('click')
-      await flushPromises()
-
-      await vm.openScheduleDrawer()
-      await flushPromises()
-
-      expect(mockApi.getScheduledTasks).toHaveBeenCalledTimes(2)
-      expect(vm.scheduledTasksForPreview).toEqual([{ id: 1 }, { id: 2 }])
-    })
-
     it('calls createTask with correct payload (execute now)', async () => {
       const newTask = { id: 3 }
       setupDefaultMocks()
@@ -833,6 +1055,10 @@ describe('IssueView', () => {
       // Open drawer
       await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
       await nextTick()
+
+      // Set task mode (required before creation)
+      const drawer = wrapper.findComponent({ name: 'TaskFormDrawer' })
+      drawer.vm.taskMode = 'execute'
 
       // Click create task button
       const createBtn = wrapper.find('[data-testid="issue-create-task-button"]')
@@ -856,11 +1082,56 @@ describe('IssueView', () => {
       await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
       await nextTick()
 
+      const drawer = wrapper.findComponent({ name: 'TaskFormDrawer' })
+      drawer.vm.taskMode = 'execute'
+
       const createBtn = wrapper.find('[data-testid="issue-create-task-button"]')
       await createBtn.trigger('click')
       await flushPromises()
 
       expect(mockMessage.error).toHaveBeenCalled()
+    })
+
+    it('shows a quota alert when createTask is rejected for usage limits', async () => {
+      setupDefaultMocks()
+      mockApi.createTask.mockRejectedValue({
+        response: {
+          data: {
+            detail: {
+              reason: 'usage_limit_exceeded',
+              scope: 'user',
+              exceeded_items: [
+                {
+                  field: 'daily_tasks',
+                  window: 'daily',
+                  metric: 'tasks',
+                  used: 6,
+                  limit: 5,
+                  reset_at: '2026-04-29T00:00:00+08:00',
+                },
+              ],
+            },
+          },
+        },
+      })
+      wrapper = await mountComponent()
+
+      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
+      await nextTick()
+
+      const drawer = wrapper.findComponent({ name: 'TaskFormDrawer' })
+      drawer.vm.taskMode = 'execute'
+
+      const createBtn = wrapper.find('[data-testid="issue-create-task-button"]')
+      await createBtn.trigger('click')
+      await flushPromises()
+
+      const quotaAlert = wrapper.find('[data-testid="issue-create-task-usage-alert"]')
+      expect(quotaAlert.exists()).toBe(true)
+      expect(quotaAlert.text()).toContain('6')
+      expect(quotaAlert.text()).toContain('5')
+      expect(quotaAlert.text()).toContain('2026-04-29 00:00')
+      expect(mockMessage.error).not.toHaveBeenCalled()
     })
 
     it('refreshes issue data after successful task creation', async () => {
@@ -874,10 +1145,24 @@ describe('IssueView', () => {
       await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
       await nextTick()
 
+      const drawer = wrapper.findComponent({ name: 'TaskFormDrawer' })
+      drawer.vm.taskMode = 'execute'
+
       await wrapper.find('[data-testid="issue-create-task-button"]').trigger('click')
       await flushPromises()
 
       // Second call from re-fetch after task creation
+      expect(mockApi.getIssue).toHaveBeenCalledTimes(2)
+    })
+
+    it('refreshes issue data when TaskFormDrawer emits created', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+
+      const drawer = wrapper.findComponent({ name: 'TaskFormDrawer' })
+      drawer.vm.$emit('created', { id: 3 })
+      await flushPromises()
+
       expect(mockApi.getIssue).toHaveBeenCalledTimes(2)
     })
   })
@@ -955,11 +1240,13 @@ describe('IssueView', () => {
     })
 
     it('handles getProjects failure silently', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
       setupDefaultMocks()
       mockApi.getProjects.mockRejectedValue(new Error('fail'))
       wrapper = await mountComponent()
       // Should NOT show error for projects
       expect(mockMessage.error).not.toHaveBeenCalled()
+      warnSpy.mockRestore()
     })
 
     it('shows loading spinner when issue is null due to error', async () => {
@@ -1126,17 +1413,42 @@ describe('IssueView', () => {
   // Task column render functions
   // =========================================================================
   describe('taskColumns render functions', () => {
-    it('renders status column with NTag vnode', async () => {
+    it('renders status column with a status tag only', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
       const columns = vm.taskColumns
       const statusCol = columns.find((c: any) => c.key === 'status')
       expect(statusCol).toBeDefined()
-      const vnode = statusCol.render({ status: 'completed' })
+      const vnode = statusCol.render({ status: 'completed', is_retry: true })
       expect(vnode).toBeDefined()
-      // vnode created by h(NTag, ...) — should be an object with type
       expect(vnode.type).toBeDefined()
+      expect(vnode.props.type).toBe('success')
+      expect(vnode.props.size).toBe('small')
+    })
+
+    it('renders retry badge before prompt text in the description column', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const descCol = columns.find((c: any) => c.key === 'user_prompt')
+
+      const vnode = descCol.render({ id: 2, user_prompt: 'Retry me', is_retry: true })
+
+      expect(vnode.props.class).toBe('task-prompt-link')
+      expect(vnode.children).toHaveLength(2)
+      expect(vnode.children[0].props).toMatchObject({
+        class: 'task-prompt-link__retry-badge',
+        size: 'tiny',
+        round: true,
+      })
+      expect(vnode.children[0].props.type).toBeUndefined()
+      expect(vnode.children[1]).toBe('Retry me')
+      expect(issueViewSource).toContain('.issue-view :deep(.task-prompt-link)')
+      expect(issueViewSource).toContain('.issue-view :deep(.task-prompt-link__retry-badge)')
+      expect(issueViewSource).toContain('--n-color: #eef2ff')
+      expect(issueViewSource).toContain('--n-text-color: #4338ca')
     })
 
     it('renders description column with truncation for long text', async () => {
@@ -1148,7 +1460,7 @@ describe('IssueView', () => {
       expect(descCol).toBeDefined()
 
       const longPrompt = 'A'.repeat(100)
-      const vnode = descCol.render({ id: 1, user_prompt: longPrompt })
+      const vnode = descCol.render({ id: 1, user_prompt: longPrompt, is_retry: false })
       // Should truncate to 80 chars + '…'
       expect(vnode).toBeDefined()
       expect(vnode.children).toContain('A'.repeat(80) + '…')
@@ -1162,32 +1474,17 @@ describe('IssueView', () => {
       const descCol = columns.find((c: any) => c.key === 'user_prompt')
 
       const shortPrompt = 'Fix a bug'
-      const vnode = descCol.render({ id: 1, user_prompt: shortPrompt })
+      const vnode = descCol.render({ id: 1, user_prompt: shortPrompt, is_retry: false })
       expect(vnode.children).toBe('Fix a bug')
     })
 
-    it('renders retry column with tag when is_retry is true', async () => {
+    it('does not render a separate retry column', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
       const columns = vm.taskColumns
       const retryCol = columns.find((c: any) => c.key === 'is_retry')
-      expect(retryCol).toBeDefined()
-
-      const vnodeRetry = retryCol.render({ is_retry: true })
-      expect(vnodeRetry).toBeDefined()
-      expect(vnodeRetry.type).toBeDefined() // h(NTag, ...)
-    })
-
-    it('renders retry column with empty string when is_retry is false', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const retryCol = columns.find((c: any) => c.key === 'is_retry')
-
-      const vnode = retryCol.render({ is_retry: false })
-      expect(vnode).toBe('')
+      expect(retryCol).toBeUndefined()
     })
 
     it('renders created_at column with formatted date', async () => {
@@ -1211,6 +1508,57 @@ describe('IssueView', () => {
 
       const result = createdCol.render({ created_at: null })
       expect(result).toBe('-')
+    })
+
+    it('renders scheduled_at column with formatted appointment time', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const scheduledCol = columns.find((c: any) => c.key === 'scheduled_at')
+      expect(scheduledCol).toBeDefined()
+      expect(scheduledCol.title).toBe('dashboard.scheduled')
+
+      const result = scheduledCol.render({ scheduled_at: '2024-01-03T09:30:00Z' })
+      expect(result).toBe('formatted-2024-01-03T09:30:00Z')
+    })
+
+    it('renders scheduled_at column with dash for unscheduled task', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const scheduledCol = columns.find((c: any) => c.key === 'scheduled_at')
+      expect(scheduledCol).toBeDefined()
+
+      const result = scheduledCol.render({ scheduled_at: null })
+      expect(result).toBe('-')
+    })
+
+    it('renders duration column from task start and completion time', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const durationCol = columns.find((c: any) => c.key === 'duration')
+      expect(durationCol).toBeDefined()
+
+      const result = durationCol.render({
+        started_at: '2024-01-01T10:00:00Z',
+        completed_at: '2024-01-01T10:05:00Z',
+      })
+      expect(result).toBe('5m 0s')
+    })
+
+    it('renders duration column with dash when task has not started', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const durationCol = columns.find((c: any) => c.key === 'duration')
+      expect(durationCol).toBeDefined()
+
+      expect(durationCol.render({ started_at: null, completed_at: null })).toBe('—')
     })
 
     it('renders actions column with retry button for failed task when isOwner', async () => {
@@ -1308,7 +1656,7 @@ describe('IssueView', () => {
       expect(router.currentRoute.value.params.id).toBe('42')
     })
 
-    it('actions column retry button onClick calls handleRetryTask', async () => {
+    it('actions column retry button onClick opens retry drawer', async () => {
       setupDefaultMocks()
       mockApi.retryTask.mockResolvedValue(undefined)
       wrapper = await mountComponent()
@@ -1325,7 +1673,95 @@ describe('IssueView', () => {
       await flushPromises()
 
       expect(mockEvent.stopPropagation).toHaveBeenCalled()
-      expect(mockApi.retryTask).toHaveBeenCalledWith(7)
+      expect(mockApi.retryTask).not.toHaveBeenCalled()
+      expect(vm.showRetryDrawer).toBe(true)
+      expect(vm.retryTargetTask?.id).toBe(7)
+    })
+
+    it('actions column reschedule button opens reschedule drawer for pending scheduled task', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const actionsCol = columns.find((c: any) => c.key === 'actions')
+
+      const vnode = actionsCol.render({
+        id: 8,
+        status: 'pending',
+        scheduled_at: '2024-01-01T12:00:00Z',
+        is_retry: false,
+        retry_source_task_id: null,
+      })
+      const mockEvent = { stopPropagation: vi.fn() }
+      vnode.props.onClick(mockEvent)
+      await flushPromises()
+
+      expect(mockEvent.stopPropagation).toHaveBeenCalled()
+      expect(vm.showRescheduleDrawer).toBe(true)
+      expect(vm.rescheduleTargetTask?.id).toBe(8)
+    })
+
+    it('renders reschedule action for task initiator even when issue is owned by another user', async () => {
+      const { authState } = await import('../auth')
+      authState.oidcEnabled = true
+      authState.user = { id: 99 } as any
+      setupDefaultMocks({ initiator_user_id: 5 })
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const actionsCol = columns.find((c: any) => c.key === 'actions')
+
+      const vnode = actionsCol.render({
+        id: 8,
+        status: 'pending',
+        scheduled_at: '2024-01-01T12:00:00Z',
+        is_retry: false,
+        retry_source_task_id: null,
+        initiator_user_id: 99,
+        initiator_gitlab_user_id: null,
+      })
+
+      expect(vnode).not.toBe('')
+
+      authState.oidcEnabled = false
+      authState.user = null
+    })
+
+    it('actions column reschedule button opens reschedule drawer for queued task', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const actionsCol = columns.find((c: any) => c.key === 'actions')
+
+      const vnode = actionsCol.render({
+        id: 9,
+        status: 'queued',
+        scheduled_at: null,
+        is_retry: false,
+        retry_source_task_id: null,
+      })
+
+      expect(vnode).toBeDefined()
+      expect(vnode.type).toBeDefined()
+    })
+
+    it('actions column does not render reschedule for unscheduled pending task', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+      const columns = vm.taskColumns
+      const actionsCol = columns.find((c: any) => c.key === 'actions')
+
+      const vnode = actionsCol.render({
+        id: 10,
+        status: 'pending',
+        scheduled_at: null,
+        is_retry: false,
+        retry_source_task_id: null,
+      })
+
+      expect(vnode).toBe('')
     })
 
     it('actions column "retried as" button navigates to retry task', async () => {
@@ -1423,416 +1859,115 @@ describe('IssueView', () => {
   })
 
   // =========================================================================
-  // handleCreateTask with schedule validation
+  // retry drawer scheduling
   // =========================================================================
-  describe('handleCreateTask with schedule', () => {
-    it('warns when scheduleType is scheduled but no time selected', async () => {
+  describe('retry drawer scheduling', () => {
+    it('opens retry drawer and preloads schedule context', async () => {
       setupDefaultMocks()
+      mockApi.getScheduledTasks.mockResolvedValue([{ id: 31 }])
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
 
-      // Open drawer so prompt gets pre-filled
-      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
-      await nextTick()
-
-      vm.scheduleType = 'scheduled'
-      vm.newTaskSchedule = null
-
-      await vm.handleCreateTask()
+      await vm.openRetryDrawer({ id: 2, user_prompt: 'Retry me' })
       await flushPromises()
 
-      expect(mockMessage.warning).toHaveBeenCalledWith('createTask.pleaseSelectScheduledTime')
-      expect(mockApi.createTask).not.toHaveBeenCalled()
-    })
-
-    it('warns when scheduled time is in the past', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
-      await nextTick()
-
-      vm.scheduleType = 'scheduled'
-      vm.newTaskSchedule = Date.now() - 60000 // 1 minute in the past
-
-      await vm.handleCreateTask()
-      await flushPromises()
-
-      expect(mockMessage.warning).toHaveBeenCalledWith('createTask.scheduledTimeFuture')
-      expect(mockApi.createTask).not.toHaveBeenCalled()
-    })
-
-    it('sends scheduled_datetime when scheduleType is scheduled with future time', async () => {
-      setupDefaultMocks()
-      mockApi.createTask.mockResolvedValue({ id: 10 })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
-      await nextTick()
-
-      const futureMs = Date.now() + 3600000 // 1 hour in the future
-      vm.scheduleType = 'scheduled'
-      vm.newTaskSchedule = futureMs
-
-      await vm.handleCreateTask()
-      await flushPromises()
-
-      expect(mockApi.createTask).toHaveBeenCalledWith(
-        expect.objectContaining({
-          issue_id: 1,
-          scheduled_datetime: new Date(futureMs).toISOString(),
-        }),
-      )
-      expect(mockMessage.success).toHaveBeenCalledWith('issue.taskCreated')
-    })
-
-    it('does not include scheduled_datetime when scheduleType is now', async () => {
-      setupDefaultMocks()
-      mockApi.createTask.mockResolvedValue({ id: 11 })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
-      await nextTick()
-
-      vm.scheduleType = 'now'
-      vm.newTaskSchedule = null
-
-      await vm.handleCreateTask()
-      await flushPromises()
-
-      const callArg = mockApi.createTask.mock.calls[0][0]
-      expect(callArg.scheduled_datetime).toBeUndefined()
-    })
-
-    it('resets form state after successful scheduled task creation', async () => {
-      setupDefaultMocks()
-      mockApi.createTask.mockResolvedValue({ id: 12 })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
-      await nextTick()
-
-      vm.scheduleType = 'scheduled'
-      vm.newTaskSchedule = Date.now() + 3600000
-      vm.newTaskPrompt = 'test prompt'
-
-      await vm.handleCreateTask()
-      await flushPromises()
-
-      expect(vm.newTaskPrompt).toBe('')
-      expect(vm.newTaskSchedule).toBeNull()
-      expect(vm.scheduleType).toBe('now')
-      expect(vm.showCreateDrawer).toBe(false)
-    })
-
-    it('includes user_prompt when prompt is non-empty', async () => {
-      setupDefaultMocks()
-      mockApi.createTask.mockResolvedValue({ id: 13 })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await wrapper.find('[data-testid="issue-toggle-create-task"]').trigger('click')
-      await nextTick()
-
-      vm.newTaskPrompt = '  Custom prompt text  '
-
-      await vm.handleCreateTask()
-      await flushPromises()
-
-      expect(mockApi.createTask).toHaveBeenCalledWith(
-        expect.objectContaining({
-          user_prompt: 'Custom prompt text',
-        }),
-      )
-    })
-  })
-
-  // =========================================================================
-  // Template handling
-  // =========================================================================
-  describe('template handling (direct calls)', () => {
-    it('applyPromptTemplate sets content and variable_tips', async () => {
-      setupDefaultMocks({ description: '' })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      const tmpl = {
-        id: 1,
-        name: 'Test',
-        content: 'Fix the {{issue_type}}',
-        variable_tips: { issue_type: 'Bug type' },
-      }
-      vm.applyPromptTemplate(tmpl)
-
-      expect(vm.newTaskPrompt).toBe('Fix the {{issue_type}}')
-      expect(vm.promptVariableTips).toEqual({ issue_type: 'Bug type' })
-    })
-
-    it('applyPromptTemplate works without variable_tips', async () => {
-      setupDefaultMocks({ description: '' })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.promptVariableTips = { old: 'tip' }
-      vm.applyPromptTemplate({ id: 2, name: 'Simple', content: 'Do something' })
-
-      expect(vm.newTaskPrompt).toBe('Do something')
-      // variable_tips not set, so old value remains
-      expect(vm.promptVariableTips).toEqual({ old: 'tip' })
-    })
-
-    it('handleTemplateClick applies directly when prompt is empty', async () => {
-      setupDefaultMocks({ description: '' })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.newTaskPrompt = ''
-      const tmpl = { id: 1, name: 'T', content: 'New content', variable_tips: null }
-      vm.handleTemplateClick(tmpl)
-
-      expect(vm.newTaskPrompt).toBe('New content')
-      expect(vm.showTemplateDrawer).toBe(false)
-      expect(mockDialog.warning).not.toHaveBeenCalled()
-    })
-
-    it('handleTemplateClick shows confirmation when prompt has content', async () => {
-      setupDefaultMocks({ description: '' })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.newTaskPrompt = 'Existing prompt'
-      const tmpl = { id: 1, name: 'T', content: 'Override content', variable_tips: null }
-
-      mockDialog.warning.mockImplementation(() => {})
-      vm.handleTemplateClick(tmpl)
-
-      expect(mockDialog.warning).toHaveBeenCalledWith(
-        expect.objectContaining({
-          title: 'common.confirm',
-          content: 'createTask.templateOverwriteConfirm',
-          positiveText: 'common.confirm',
-          negativeText: 'common.cancel',
-        }),
-      )
-      // Prompt should NOT have changed yet (waiting for confirmation)
-      expect(vm.newTaskPrompt).toBe('Existing prompt')
-    })
-
-    it('handleTemplateClick confirmation callback applies template and closes drawer', async () => {
-      setupDefaultMocks({ description: '' })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.newTaskPrompt = 'Old content'
-      vm.showTemplateDrawer = true
-      const tmpl = { id: 1, name: 'T', content: 'New overridden', variable_tips: { x: 'tip' } }
-
-      mockDialog.warning.mockImplementation(({ onPositiveClick }: any) => {
-        onPositiveClick?.()
-      })
-      vm.handleTemplateClick(tmpl)
-
-      expect(vm.newTaskPrompt).toBe('New overridden')
-      expect(vm.promptVariableTips).toEqual({ x: 'tip' })
-      expect(vm.showTemplateDrawer).toBe(false)
-    })
-  })
-
-  // =========================================================================
-  // Schedule drawer & slot capacity
-  // =========================================================================
-  describe('schedule drawer and slot capacity', () => {
-    it('openScheduleDrawer opens drawer and fetches scheduled tasks', async () => {
-      setupDefaultMocks()
-      mockApi.getScheduledTasks.mockResolvedValue([{ id: 1 }])
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await vm.openScheduleDrawer()
-      await flushPromises()
-
-      expect(vm.showScheduleDrawer).toBe(true)
+      expect(vm.showRetryDrawer).toBe(true)
+      expect(vm.retryTargetTask.id).toBe(2)
+      expect(vm.retryScheduleType).toBe('now')
       expect(mockApi.getScheduledTasks).toHaveBeenCalled()
       expect(mockApi.getConfig).toHaveBeenCalled()
     })
 
-    it('openScheduleDrawer handles getScheduledTasks error', async () => {
+    it('submits scheduled retry with selected future time', async () => {
       setupDefaultMocks()
-      mockApi.getScheduledTasks.mockRejectedValue(new Error('fail'))
+      mockApi.retryTask.mockResolvedValue({ id: 8 })
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
+      const futureMs = Date.now() + 3600000
 
-      await vm.openScheduleDrawer()
+      await vm.openRetryDrawer({ id: 2, user_prompt: 'Retry me' })
+      vm.retryScheduleType = 'scheduled'
+      vm.retryTaskSchedule = futureMs
+
+      await vm.handleSubmitRetry()
       await flushPromises()
 
-      expect(vm.showScheduleDrawer).toBe(true)
-      expect(vm.scheduledTasksForPreview).toEqual([])
+      expect(mockApi.retryTask).toHaveBeenCalledWith(2, new Date(futureMs).toISOString())
+      expect(mockMessage.success).toHaveBeenCalledWith('issue.retrySuccess')
+      expect(vm.showRetryDrawer).toBe(false)
+      expect(vm.retryTargetTask).toBeNull()
     })
 
-    it('openScheduleDrawer does not re-fetch if tasks already loaded', async () => {
+    it('submits immediate retry when retry drawer is set to now', async () => {
       setupDefaultMocks()
+      mockApi.retryTask.mockResolvedValue({ id: 8 })
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
 
-      // Pre-populate
-      vm.scheduledTasksForPreview = [{ id: 1 }]
-      mockApi.getScheduledTasks.mockClear()
+      await vm.openRetryDrawer({ id: 2, user_prompt: 'Retry me' })
+      vm.retryScheduleType = 'now'
 
-      await vm.openScheduleDrawer()
+      await vm.handleSubmitRetry()
       await flushPromises()
 
-      expect(mockApi.getScheduledTasks).not.toHaveBeenCalled()
+      expect(mockApi.retryTask).toHaveBeenCalledWith(2)
+      expect(mockMessage.success).toHaveBeenCalledWith('issue.retrySuccess')
     })
 
-    it('openScheduleDrawer sets slotMaxTasks and slotEnforce from config', async () => {
+    it('warns when scheduled retry has no selected time', async () => {
       setupDefaultMocks()
-      mockApi.getConfig.mockResolvedValue({
-        runtime: { slot_max_tasks: 10, slot_max_tasks_enforce: true },
-      })
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
 
-      await vm.openScheduleDrawer()
+      await vm.openRetryDrawer({ id: 2, user_prompt: 'Retry me' })
+      vm.retryScheduleType = 'scheduled'
+      vm.retryTaskSchedule = null
+
+      await vm.handleSubmitRetry()
       await flushPromises()
 
-      expect(vm.slotMaxTasks).toBe(10)
-      expect(vm.slotEnforce).toBe(true)
-    })
-
-    it('openScheduleDrawer handles getConfig error silently', async () => {
-      setupDefaultMocks()
-      mockApi.getConfig.mockRejectedValue(new Error('config fail'))
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      await vm.openScheduleDrawer()
-      await flushPromises()
-
-      // Should not throw, drawer is still open
-      expect(vm.showScheduleDrawer).toBe(true)
-    })
-
-    it('handleScheduleHeatmapCellClick sets time and closes drawer', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.showScheduleDrawer = true
-      const ts = Date.now() + 3600000
-      vm.handleScheduleHeatmapCellClick(ts)
-
-      expect(vm.newTaskSchedule).toBe(ts)
-      expect(vm.showScheduleDrawer).toBe(false)
-    })
-
-    it('watch(scheduleType) clears schedule when set to now', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.newTaskSchedule = Date.now() + 3600000
-      vm.scheduleType = 'scheduled'
-      await nextTick()
-
-      // Now switch back to 'now' — this should clear newTaskSchedule
-      vm.scheduleType = 'now'
-      await nextTick()
-
-      expect(vm.newTaskSchedule).toBeNull()
-    })
-
-    it('watch(showCreateDrawer) pre-fills prompt from issue description', async () => {
-      setupDefaultMocks({ description: 'Auto-filled description' })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      // Ensure prompt is empty
-      vm.newTaskPrompt = ''
-      vm.showCreateDrawer = true
-      await nextTick()
-
-      expect(vm.newTaskPrompt).toBe('Auto-filled description')
-    })
-
-    it('watch(showCreateDrawer) does not overwrite existing prompt', async () => {
-      setupDefaultMocks({ description: 'Issue desc' })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.newTaskPrompt = 'Existing prompt'
-      vm.showCreateDrawer = false
-      await nextTick()
-      vm.showCreateDrawer = true
-      await nextTick()
-
-      expect(vm.newTaskPrompt).toBe('Existing prompt')
-    })
-
-    it('checkSlotCapacity calls getSlotCapacity after debounce', async () => {
-      vi.useFakeTimers()
-      setupDefaultMocks()
-      mockApi.getSlotCapacity.mockResolvedValue({ available: 3 })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.newTaskSchedule = Date.now() + 3600000
-      await nextTick() // trigger the watch on heatmapSelectedMs
-
-      // Advance past debounce timeout (300ms)
-      vi.advanceTimersByTime(350)
-      await flushPromises()
-
-      expect(mockApi.getSlotCapacity).toHaveBeenCalled()
-      expect(vm.slotCapacity).toEqual({ available: 3 })
-
-      vi.useRealTimers()
-    })
-
-    it('checkSlotCapacity clears capacity when no time selected', async () => {
-      vi.useFakeTimers()
-      setupDefaultMocks()
-      mockApi.getSlotCapacity.mockResolvedValue({ available: 5 })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      // First set a time so capacity is fetched
-      vm.newTaskSchedule = Date.now() + 3600000
-      await nextTick()
-      vi.advanceTimersByTime(350)
-      await flushPromises()
-      expect(vm.slotCapacity).toEqual({ available: 5 })
-
-      // Now clear the selection
-      vm.newTaskSchedule = null
-      await nextTick()
-
-      // checkSlotCapacity immediately sets slotCapacity = null and returns
-      expect(vm.slotCapacity).toBeNull()
-
-      vi.useRealTimers()
-    })
-
-    it('checkSlotCapacity handles API error gracefully', async () => {
-      vi.useFakeTimers()
-      setupDefaultMocks()
-      mockApi.getSlotCapacity.mockRejectedValue(new Error('fail'))
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      vm.newTaskSchedule = Date.now() + 3600000
-      await nextTick()
-
-      vi.advanceTimersByTime(350)
-      await flushPromises()
-
-      expect(vm.slotCapacity).toBeNull()
-      expect(vm.slotCapacityLoading).toBe(false)
-
-      vi.useRealTimers()
+      expect(mockMessage.warning).toHaveBeenCalledWith('createTask.pleaseSelectScheduledTime')
+      expect(mockApi.retryTask).not.toHaveBeenCalled()
     })
   })
+
+  // =========================================================================
+  // reschedule drawer
+  // =========================================================================
+  describe('reschedule drawer', () => {
+    it('opens reschedule drawer and passes the selected task to RescheduleDrawer', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+
+      vm.openRescheduleDrawer({
+        id: 8,
+        user_prompt: 'Scheduled task',
+        scheduled_at: '2024-01-01T12:00:00Z',
+      })
+      await nextTick()
+
+      const drawer = wrapper.findComponent({ name: 'RescheduleDrawer' })
+      expect(vm.showRescheduleDrawer).toBe(true)
+      expect(vm.rescheduleTargetTask.id).toBe(8)
+      expect(drawer.props('show')).toBe(true)
+      expect(drawer.props('task').id).toBe(8)
+    })
+
+    it('refreshes issue data when RescheduleDrawer emits rescheduled', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const vm = wrapper.vm as any
+
+      vm.openRescheduleDrawer({ id: 8, user_prompt: 'Scheduled task', scheduled_at: null })
+      await nextTick()
+
+      const drawer = wrapper.findComponent({ name: 'RescheduleDrawer' })
+      drawer.vm.$emit('rescheduled', { id: 8 })
+      await flushPromises()
+
+      expect(mockApi.getIssue).toHaveBeenCalledTimes(2)
+    })
+  })
+
 })

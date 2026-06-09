@@ -1,10 +1,11 @@
 """Task and Issue helper utilities for API responses and authorization."""
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import inspect as sa_inspect, select, func
+from sqlalchemy import func, select
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings
@@ -13,10 +14,19 @@ from app.models import Issue, IssueStatus, Task, TaskStatus, User
 logger = logging.getLogger(__name__)
 
 
-def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-    """Serialize a task row for API responses."""
+def _serialize_task(
+    task: Task,
+    project_metadata: dict[str, Any] | None = None,
+    settings: Any | None = None,
+) -> dict[str, Any]:
+    """Serialize a task row for API responses.
+
+    Pass ``settings`` from the caller when serializing multiple tasks in a loop
+    to avoid recreating the Settings object for every task.
+    """
     metadata = project_metadata or {}
-    settings = get_effective_settings()
+    if settings is None:
+        settings = get_effective_settings()
     project_path = metadata.get("project_path_with_namespace")
     project_url = f"{settings.gitlab_url.rstrip('/')}/{project_path}" if project_path else None
     data = {
@@ -49,13 +59,17 @@ def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = Non
         "input_tokens": task.input_tokens,
         "output_tokens": task.output_tokens,
         "model_name": task.model_name,
-        "merge_request_title": task.merge_request_title,
+        "commit_message": task.commit_message,
+        "require_changes": task.require_changes,
+        "task_mode": task.task_mode if task.task_mode else "execute",
         "provider_id": task.provider_id,
         "provider_name": None,
         "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat(),
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "is_manually_overridden": task.is_manually_overridden,
+        "override_reason": task.override_reason,
     }
     # Safely check if issue relationship is loaded (avoid lazy load / MissingGreenlet)
     issue = None
@@ -88,7 +102,7 @@ def _serialize_task(task: Task, project_metadata: Optional[dict[str, Any]] = Non
     return data
 
 
-def _can_manage_task(task: Task, current_user: Optional[User]) -> bool:
+def _can_manage_task(task: Task, current_user: User | None) -> bool:
     """Return whether the current user may operate on a task."""
     settings = get_effective_settings()
     if not settings.oidc_enabled:
@@ -112,7 +126,7 @@ def _can_manage_task(task: Task, current_user: Optional[User]) -> bool:
     return False
 
 
-def _require_task_operator(task: Task, current_user: Optional[User]) -> None:
+def _require_task_operator(task: Task, current_user: User | None) -> None:
     """Ensure the current user may operate on a task."""
     if _can_manage_task(task, current_user):
         return
@@ -123,7 +137,7 @@ def _require_task_operator(task: Task, current_user: Optional[User]) -> None:
     )
 
 
-def _can_manage_issue(issue: Issue, current_user: Optional[User]) -> bool:
+def _can_manage_issue(issue: Issue, current_user: User | None) -> bool:
     """Return whether the current user may operate on an issue."""
     settings = get_effective_settings()
     if not settings.oidc_enabled:
@@ -141,7 +155,7 @@ def _can_manage_issue(issue: Issue, current_user: Optional[User]) -> bool:
     return False
 
 
-def _require_issue_operator(issue: Issue, current_user: Optional[User]) -> None:
+def _require_issue_operator(issue: Issue, current_user: User | None) -> None:
     """Ensure the current user may operate on an issue."""
     if _can_manage_issue(issue, current_user):
         return
@@ -180,6 +194,7 @@ async def maybe_update_issue_status(db: AsyncSession, issue_id: int) -> None:
             select(func.count(Task.id)).where(
                 Task.issue_id == issue_id,
                 Task.status == TaskStatus.COMPLETED,
+                Task.task_mode != "plan",  # plan tasks do not constitute code delivery
             )
         )
         if completed_count_result.scalar() > 0:

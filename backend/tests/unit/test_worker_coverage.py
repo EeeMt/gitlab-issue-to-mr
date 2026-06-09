@@ -6,7 +6,6 @@ Covers functionality NOT tested by test_worker_new_patterns.py or test_mr_stats.
 - _build_initial_mr_title       (lines 127-144)
 - _build_initial_mr_description (lines 146-159)
 - _remove_mr_draft_status       (lines 161-178)
-- _flush_log_chunk              (lines 180-195: empty skip, truncation)
 - _stream_logs_to_db timeout    (lines 242-247)
 - _create_mr_if_needed          (lines 384-410: reuse existing MR)
 - _find_existing_mr             (lines 412-438: not found, exception)
@@ -26,14 +25,17 @@ Covers functionality NOT tested by test_worker_new_patterns.py or test_mr_stats.
 
 import asyncio
 import json
+import os
+import re
+import subprocess
+import textwrap
 import unittest
-from datetime import datetime
+from pathlib import Path
 from unittest import IsolatedAsyncioTestCase
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
-from app.core.worker import WorkerExecutor, scrub_sensitive_data, sanitize_sensitive_data
-from app.models import Task, TaskStatus, TaskLog
-
+from app.core.worker import WorkerExecutor
+from app.models import Task, TaskLog, TaskStatus
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -57,6 +59,7 @@ def _make_settings(**overrides):
     s.maven_cache_host_path = ""
     s.maven_settings_host_path = ""
     s.worker_volume_mounts_parsed = []
+    s.worker_workspace_host_path = ""
     s.alert_on_failure = False
     s.alert_webhook_url = None
     s.claude_max_turns = 20
@@ -75,6 +78,7 @@ def _make_worker(mock_gitlab=None, mock_docker=None):
 def _make_task(**kwargs):
     """Create a Task object with defaults."""
     from unittest.mock import MagicMock
+
     from app.models import AIProvider
 
     # Separate issue-level kwargs
@@ -116,12 +120,12 @@ def _make_task(**kwargs):
             'branch_name',
             f"codify-{defaults['id']}-p{defaults['project_id']}-i{defaults.get('issue_id', 1)}",
         )
-        mock_issue.base_branch = issue_overrides.get('base_branch', None)
+        mock_issue.base_branch = issue_overrides.get('base_branch')
         mock_issue.target_branch = issue_overrides.get('target_branch', 'main')
-        mock_issue.merge_request_iid = issue_overrides.get('merge_request_iid', None)
-        mock_issue.merge_request_url = issue_overrides.get('merge_request_url', None)
-        mock_issue.title = issue_overrides.get('title', None)
-        mock_issue.description = issue_overrides.get('description', None)
+        mock_issue.merge_request_iid = issue_overrides.get('merge_request_iid')
+        mock_issue.merge_request_url = issue_overrides.get('merge_request_url')
+        mock_issue.title = issue_overrides.get('title')
+        mock_issue.description = issue_overrides.get('description')
         mock_issue.claude_session_id = None
         mock_issue.session_storage_path = None
         mock_issue.project_id = defaults['project_id']
@@ -144,6 +148,9 @@ def _make_db(task=None):
             provider = getattr(task, 'provider', None) if task else None
             mock_result.scalar_one_or_none.return_value = provider
             mock_result.scalars.return_value.all.return_value = [provider] if provider else []
+        elif 'FROM worker_environment_variables' in statement_str:
+            mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.all.return_value = []
         else:
             mock_result.scalar_one_or_none.return_value = task
             mock_result.scalars.return_value.all.return_value = [task] if task else []
@@ -291,8 +298,8 @@ class TestBuildInitialMrDescription(unittest.TestCase):
 class TestRemoveMrDraftStatus(unittest.TestCase):
     """Tests for _remove_mr_draft_status_for_issue and legacy _remove_mr_draft_status."""
 
-    def test_removes_draft_prefix(self):
-        """Should remove 'Draft: ' prefix and save."""
+    def test_marks_ready_and_removes_draft_prefix(self):
+        """Should explicitly mark ready, remove 'Draft: ' prefix, and save."""
         mock_mr = MagicMock()
         mock_mr.title = "Draft: Add new feature"
         mock_project = MagicMock()
@@ -305,6 +312,7 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
 
         worker._remove_mr_draft_status_for_issue(task, task.issue)
 
+        self.assertFalse(mock_mr.draft)
         self.assertEqual(mock_mr.title, "Add new feature")
         mock_mr.save.assert_called_once()
 
@@ -340,8 +348,24 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
 
         self.assertEqual(mock_mr.title, "New API endpoint")
 
-    def test_skips_when_title_not_string(self):
-        """Should skip when title is not a string (e.g., None)."""
+    def test_marks_ready_without_title_prefix(self):
+        """Should still set draft=False even when title has no draft prefix."""
+        mock_mr = MagicMock()
+        mock_mr.title = "Add new feature"
+        mock_project = MagicMock()
+        mock_project.mergerequests.get.return_value = mock_mr
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.gl.projects.get.return_value = mock_project
+        worker = _make_worker(mock_gitlab=mock_gitlab)
+        task = _make_task(merge_request_iid=5)
+
+        worker._remove_mr_draft_status_for_issue(task, task.issue)
+
+        self.assertFalse(mock_mr.draft)
+        self.assertEqual(mock_mr.title, "Add new feature")
+        mock_mr.save.assert_called_once()
+
         mock_mr = MagicMock()
         mock_project = MagicMock()
         mock_project.mergerequests.get.return_value = mock_mr
@@ -357,8 +381,8 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
 
         mock_mr.save.assert_not_called()
 
-    def test_skips_already_non_draft(self):
-        """Should skip when title doesn't have draft prefix."""
+    def test_marks_ready_for_already_non_draft(self):
+        """Should still mark ready and save when title has no draft prefix."""
         mock_mr = MagicMock()
         mock_mr.title = "Add new feature"
         mock_project = MagicMock()
@@ -371,7 +395,8 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
 
         worker._remove_mr_draft_status_for_issue(task, task.issue)
 
-        mock_mr.save.assert_not_called()
+        self.assertFalse(mock_mr.draft)
+        mock_mr.save.assert_called_once()
 
     def test_legacy_method_is_noop(self):
         """The legacy _remove_mr_draft_status(task) does nothing."""
@@ -382,57 +407,6 @@ class TestRemoveMrDraftStatus(unittest.TestCase):
         worker._remove_mr_draft_status(task)
 
         mock_gitlab.gl.projects.get.assert_not_called()
-
-
-# ===================================================================
-# _flush_log_chunk
-# ===================================================================
-
-class TestFlushLogChunk(unittest.TestCase):
-    """Tests for _flush_log_chunk — lines 180-195."""
-
-    def test_saves_log_chunk(self):
-        """Normal chunk should be saved as TaskLog."""
-        worker = _make_worker()
-        db = _make_db()
-
-        asyncio.run(worker._flush_log_chunk(1, ["line1\n", "line2\n"], 0, db))
-
-        db.add.assert_called_once()
-        db.commit.assert_awaited_once()
-
-    def test_skips_empty_content(self):
-        """Empty or whitespace-only content should be skipped — line 190."""
-        worker = _make_worker()
-        db = _make_db()
-
-        asyncio.run(worker._flush_log_chunk(1, ["   \n", "  \n"], 0, db))
-
-        db.add.assert_not_called()
-        db.commit.assert_not_awaited()
-
-    def test_truncates_large_content(self):
-        """Content > 8000 chars should be truncated — line 192."""
-        worker = _make_worker()
-        db = _make_db()
-        long_line = "x" * 9000 + "\n"
-
-        asyncio.run(worker._flush_log_chunk(1, [long_line], 0, db))
-
-        db.add.assert_called_once()
-        log_entry = db.add.call_args[0][0]
-        self.assertLessEqual(len(log_entry.message), 8000)
-
-    def test_scrubs_sensitive_data(self):
-        """Token in log should be scrubbed before saving."""
-        worker = _make_worker()
-        db = _make_db()
-
-        asyncio.run(worker._flush_log_chunk(1, ["token=glpat-abcdef1234567890\n"], 0, db))
-
-        log_entry = db.add.call_args[0][0]
-        self.assertNotIn("glpat-", log_entry.message)
-        self.assertIn("[GITLAB_TOKEN]", log_entry.message)
 
 
 # ===================================================================
@@ -514,21 +488,374 @@ class TestBuildContainerEnv(unittest.TestCase):
         self.assertEqual(env["CUSTOM_CA_BUNDLE"], "/etc/ssl/custom-ca.crt")
 
     @patch('app.core.worker.get_settings')
-    def test_env_target_branch_none_becomes_empty(self, mock_get_settings):
-        """TARGET_BRANCH should be '' when target_branch is None (no-MR mode) — line 500."""
+    def test_env_merges_custom_environment_values(self, mock_get_settings):
+        """Custom environment values are validated and merged, including empty strings."""
         mock_get_settings.return_value = _make_settings()
         worker = _make_worker()
         task = _make_task()
         issue = task.issue
 
-        env = worker._build_container_env(task, issue, mr_iid=None, target_branch=None)
+        env = worker._build_container_env(
+            task,
+            issue,
+            mr_iid=None,
+            target_branch="main",
+            custom_environment={
+                "FEATURE_FLAG": "enabled",
+                "EMPTY_ALLOWED": "",
+            },
+        )
 
-        self.assertEqual(env["TARGET_BRANCH"], "")
+        self.assertEqual(env["FEATURE_FLAG"], "enabled")
+        self.assertEqual(env["EMPTY_ALLOWED"], "")
+        self.assertEqual(env["TASK_ID"], "1")
+
+    @patch('app.core.worker.get_settings')
+    def test_env_rejects_reserved_custom_environment_key(self, mock_get_settings):
+        """Reserved custom environment keys raise ValueError."""
+        mock_get_settings.return_value = _make_settings()
+        worker = _make_worker()
+        task = _make_task()
+        issue = task.issue
+
+        with self.assertRaisesRegex(ValueError, "reserved"):
+            worker._build_container_env(
+                task,
+                issue,
+                mr_iid=None,
+                target_branch="main",
+                custom_environment={"TASK_ID": "999"},
+            )
+
+    @patch('app.core.worker.get_settings')
+    def test_env_includes_commit_author_metadata(self, mock_get_settings):
+        """Should pass initiator author identity and fixed Codify co-author into the worker env."""
+        mock_get_settings.return_value = _make_settings()
+        worker = _make_worker()
+        task = _make_task(
+            initiator_display_name="Alice Zhang",
+            initiator_email="alice@example.com",
+            initiator_username="alice",
+        )
+        issue = task.issue
+
+        env = worker._build_container_env(task, issue, mr_iid=None, target_branch="main")
+
+        self.assertEqual(env["GIT_AUTHOR_NAME"], "Alice Zhang")
+        self.assertEqual(env["GIT_AUTHOR_EMAIL"], "alice@example.com")
+        self.assertEqual(env["CODIFY_COAUTHOR_NAME"], "Codify")
+
+    @patch('app.core.worker.get_settings')
+    def test_env_falls_back_to_username_and_service_email(self, mock_get_settings):
+        """Should fall back when task has no display name or email snapshot."""
+        mock_get_settings.return_value = _make_settings()
+        worker = _make_worker()
+        task = _make_task(initiator_username="alice")
+        issue = task.issue
+
+        env = worker._build_container_env(task, issue, mr_iid=None, target_branch="main")
+
+        self.assertEqual(env["GIT_AUTHOR_NAME"], "alice")
+        self.assertEqual(env["GIT_AUTHOR_EMAIL"], "codify-task@codify.local")
 
 
-# ===================================================================
-# _build_container_volumes
-# ===================================================================
+
+class TestResolveCommitAuthor(unittest.IsolatedAsyncioTestCase):
+    """Tests for _resolve_commit_author."""
+
+    async def test_uses_user_record_when_task_snapshot_missing(self):
+        worker = _make_worker()
+        task = _make_task(initiator_user_id=7, initiator_username="alice")
+        task.initiator_display_name = None
+        task.initiator_email = None
+
+        db = MagicMock()
+        db.get = AsyncMock(return_value=MagicMock(display_name="Alice Zhang", username="alice", email="alice@example.com"))
+
+        name, email = await worker._resolve_commit_author(db, task)
+
+        self.assertEqual(name, "Alice Zhang")
+        self.assertEqual(email, "alice@example.com")
+
+
+class TestEntrypointCommitAttribution(unittest.TestCase):
+    """Regression tests for commit attribution shell logic."""
+
+    @staticmethod
+    def _extract_shell_function(content, name):
+        match = re.search(rf"(?ms)^{re.escape(name)}\(\) \{{\n.*?^\}}\n", content)
+        if match is None:
+            raise AssertionError(f"{name} shell function not found")
+        return match.group(0)
+
+    def test_entrypoint_uses_codify_coauthor_and_git_author_env(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('GIT_AUTHOR_NAME_VALUE', content)
+        self.assertIn('GIT_AUTHOR_EMAIL_VALUE', content)
+        self.assertIn('Co-authored-by: %s <%s>', content)
+        self.assertIn('CODIFY_COAUTHOR_NAME_VALUE', content)
+        self.assertIn('CODIFY_COAUTHOR_EMAIL_VALUE', content)
+        self.assertNotIn('Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>', content)
+
+    def test_entrypoint_configures_git_for_codify_runtime_user(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('CODIFY_GIT_CONFIG="/home/codify/.gitconfig"', content)
+        self.assertIn('/home/codify/.git-credentials', content)
+        self.assertIn('git config --file "${CODIFY_GIT_CONFIG}" credential.helper store', content)
+        self.assertIn('git config --file "${CODIFY_GIT_CONFIG}" user.email "bot@codify.local"', content)
+        self.assertIn('git config --file "${CODIFY_GIT_CONFIG}" user.name "Codify Bot"', content)
+        self.assertIn('git config --file "${CODIFY_GIT_CONFIG}" --add safe.directory /workspace', content)
+        self.assertIn('chown codify:codify /home/codify/.git-credentials', content)
+        self.assertIn('chown codify:codify "${CODIFY_GIT_CONFIG}"', content)
+
+    def test_entrypoint_includes_commit_message_in_finalization(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('commit_message:$commit_message', content)
+        self.assertIn('--arg commit_message "${FINAL_COMMIT_MESSAGE:-}"', content)
+
+    def test_entrypoint_prompts_execution_summary_diagrams_as_mermaid(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn("最终输出简短执行摘要", content)
+        self.assertIn("必须使用 Markdown 的 mermaid fenced code block", content)
+        self.assertIn("不要使用 ASCII 图、图片链接或其它图表格式", content)
+
+    def test_entrypoint_plan_prompt_diagrams_as_mermaid(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+        plan_prompt = content.split('if [ "${TASK_MODE}" = "plan" ]; then', 1)[1].split(
+            "else",
+            1,
+        )[0]
+
+        self.assertIn("给出详细的实施方案", plan_prompt)
+        self.assertIn("必须使用 Markdown 的 mermaid fenced code block", plan_prompt)
+        self.assertIn("不要使用 ASCII 图、图片链接或其它图表格式", plan_prompt)
+
+    def test_entrypoint_validates_and_persists_delivery_summary(self):
+        root = Path(__file__).resolve().parents[3]
+        script = root / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('DELIVERY_SUMMARY_FILE="${CODIFY_RUNTIME_DIR}/delivery-summary.md"', content)
+        self.assertIn('DELIVERY_SUMMARY_VALIDATION_FILE="${CODIFY_RUNTIME_DIR}/delivery-summary-validation.json"', content)
+        self.assertIn('prepare_delivery_summary "${FINAL_SUMMARY_CONTENT}"', content)
+        self.assertIn('write_delivery_summary_artifacts "${FINAL_SUMMARY_CONTENT}"', content)
+        self.assertIn('/opt/codify-mermaid/validate_mermaid_summary.mjs', content)
+        self.assertIn('reason: "validator_unavailable"', content)
+        self.assertIn('ok: false, diagramCount: 0', content)
+        self.assertIn('cd /tmp && /usr/local/bin/claude -p --bare --tools "" --permission-mode plan', content)
+        self.assertNotIn("cd /workspace && /usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model \"${ANTHROPIC_MODEL}\" < /tmp/delivery-summary-repair-prompt.md", content)
+        self.assertIn('delivery-summary.md', content)
+        self.assertIn('delivery-summary-validation.json', content)
+
+        dockerfile = (root / "deploy" / "Dockerfile.worker").read_text()
+        self.assertIn("npm install --omit=dev mermaid@11.15.0 jsdom@25.0.1", dockerfile)
+        self.assertIn("deploy/scripts/validate_mermaid_summary.mjs", dockerfile)
+
+        lifecycle = (root / "backend" / "app" / "core" / "worker_task_lifecycle.py").read_text()
+        self.assertIn('_CONTAINER_DELIVERY_SUMMARY_PATH = "/tmp/codify-runtime/delivery-summary.md"', lifecycle)
+        self.assertIn('payload_kind="delivery_summary"', lifecycle)
+        self.assertIn('log_type="delivery_summary"', lifecycle)
+        self.assertIn('await _save_delivery_summary_from_container(worker, container, task, db)', lifecycle)
+
+    def test_entrypoint_writes_plan_task_metadata_for_previous_summaries(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+        function_definition = self._extract_shell_function(content, "write_plan_task_metadata")
+        plan_exit_block = content.split('if [ "${TASK_MODE}" = "plan" ]; then', 2)[2].split(
+            "fi",
+            1,
+        )[0]
+
+        self.assertIn('printf \'%s\\n\' "${task_metadata}" > "${CODIFY_RUNTIME_DIR}/task-metadata.json"', function_definition)
+        self.assertIn('execution_summary: $execution_summary', function_definition)
+        self.assertIn('commit_sha: ""', function_definition)
+        self.assertIn('commit_message: ""', function_definition)
+        self.assertIn('new_files: []', function_definition)
+        self.assertIn('write_plan_task_metadata "${FINAL_SUMMARY_CONTENT}"', plan_exit_block)
+        self.assertLess(
+            plan_exit_block.index('write_plan_task_metadata "${FINAL_SUMMARY_CONTENT}"'),
+            plan_exit_block.index("create_runtime_archive"),
+        )
+
+    def test_entrypoint_generates_overall_summary_with_claude_cli(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('FINAL_OVERALL_SUMMARY=""', content)
+        self.assertIn('PREVIOUS_SUMMARY_FILE="${CODIFY_RUNTIME_DIR}/previous-task-summaries.md"', content)
+        self.assertIn(
+            'build_overall_summary_prompt "${PREVIOUS_SUMMARY_FILE}"',
+            content,
+        )
+        self.assertIn('echo "Previous task summaries found:', content)
+        self.assertIn('echo "Previous task summaries not found at', content)
+        self.assertIn("< /tmp/overall_summary_prompt.txt", content)
+        self.assertIn('echo "Claude overall summary generation succeeded"', content)
+        self.assertIn('echo "Overall MR summary generated (${#FINAL_OVERALL_SUMMARY} chars)"', content)
+        self.assertIn('echo "Claude overall summary normalized to empty; keeping previous MR summary"', content)
+        self.assertIn('overall_summary_chars=${#FINAL_OVERALL_SUMMARY}', content)
+        self.assertIn('--arg overall_summary "${FINAL_OVERALL_SUMMARY:-}"', content)
+        self.assertIn('overall_summary: $overall_summary', content)
+        self.assertNotIn("/messages", content)
+
+    def test_entrypoint_sanitizes_generated_commit_message(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+        function_definition = self._extract_shell_function(content, "normalize_model_commit_message")
+        raw_message = textwrap.dedent(
+            """
+            <think>
+            选择 docs 类型，因为 joke.md 是文档文件。
+            </think>
+
+            docs: 新增程序员笑话文件
+
+            - 添加 joke.md
+
+            AI-Generated: true
+
+            docs: 后续说明不应被截断
+            """
+        ).strip()
+
+        result = subprocess.run(
+            ["bash", "-c", f"{function_definition}\nnormalize_model_commit_message \"$(cat)\""],
+            input=raw_message,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertEqual(
+            result.stdout,
+            "docs: 新增程序员笑话文件\n\n- 添加 joke.md\n\nAI-Generated: true\n\ndocs: 后续说明不应被截断",
+        )
+
+    def test_entrypoint_does_not_clear_commit_message_for_unclosed_think_tag(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+        function_definition = self._extract_shell_function(content, "normalize_model_commit_message")
+        raw_message = "<think>\ndocs: 新增程序员笑话文件\n\nAI-Generated: true"
+
+        result = subprocess.run(
+            ["bash", "-c", f"{function_definition}\nnormalize_model_commit_message \"$(cat)\""],
+            input=raw_message,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertEqual(
+            result.stdout,
+            "docs: 新增程序员笑话文件\n\nAI-Generated: true",
+        )
+
+    def test_entrypoint_logs_commit_message_generation_steps(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('echo "Generating commit message with Claude..."', content)
+        self.assertIn('echo "Commit message prompt written to /tmp/commit_message_prompt.txt"', content)
+        self.assertIn('echo "Claude commit message generation succeeded"', content)
+        self.assertIn('echo "Claude raw commit message response:"', content)
+        self.assertIn("printf '%s\\n' \"${GENERATED_COMMIT_MESSAGE}\" | sed 's/^/  /'", content)
+        self.assertIn('echo "Claude commit message generation failed with exit code ${COMMIT_MESSAGE_RESULT}; using fallback"', content)
+        self.assertIn('echo "Generated commit message was empty after normalization; using fallback"', content)
+        self.assertIn('echo "Commit message written to /tmp/commit_message.txt"', content)
+        self.assertIn('echo "Final commit message:"', content)
+        self.assertIn("sed 's/^/  /' /tmp/commit_message.txt", content)
+
+    def test_entrypoint_pipes_commit_message_prompt_to_claude_stdin(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn("< /tmp/commit_message_prompt.txt", content)
+        self.assertNotIn('"$(cat /tmp/commit_message_prompt.txt)"', content)
+
+    def test_entrypoint_writes_system_prompt_file_for_ci_claude(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('CLAUDE_SYSTEM_PROMPT_FILE="/tmp/claude_system_prompt.txt"', content)
+        self.assertIn('printf \'%s\' "${APPEND_SYSTEM_PROMPT}" > "${CLAUDE_SYSTEM_PROMPT_FILE}"', content)
+        self.assertIn('APPEND_SYSTEM_PROMPT_FILE="${CLAUDE_SYSTEM_PROMPT_FILE}"', content)
+
+    def test_entrypoint_keeps_runtime_artifacts_outside_worktree_until_after_commit(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('CODIFY_RUNTIME_DIR="${CODIFY_RUNTIME_DIR:-/tmp/codify-runtime}"', content)
+        self.assertIn('CONSOLE_LOG="${CODIFY_RUNTIME_DIR}/console.log"', content)
+        self.assertIn('tee -a "${CONSOLE_LOG}"', content)
+        self.assertIn('exec > "${CONSOLE_TEE_PIPE}" 2>&1', content)
+        self.assertIn('CI_CLAUDE_DISABLE_CONSOLE_TEE=1', content)
+        self.assertIn('ARTIFACT_DIR="${CODIFY_RUNTIME_DIR}" CI_CLAUDE_DISABLE_CONSOLE_TEE=1 PROMPT_FILE=/tmp/claude_prompt.txt', content)
+        self.assertIn('local archive_path="${CODIFY_RUNTIME_DIR}/${archive_name}"', content)
+        self.assertIn('local archive_files=(event.jsonl runtime.json console.log)', content)
+        self.assertIn('[ -f "${DELIVERY_SUMMARY_FILE}" ] && archive_files+=(delivery-summary.md)', content)
+        self.assertIn('[ -f "${DELIVERY_SUMMARY_VALIDATION_FILE}" ] && archive_files+=(delivery-summary-validation.json)', content)
+        self.assertIn('tar -czf "${archive_path}" -C "${CODIFY_RUNTIME_DIR}" "${archive_files[@]}"', content)
+        self.assertNotIn('[ -f "/workspace/event.jsonl" ]', content)
+        self.assertNotIn('/workspace/.codify-archive', content)
+
+        tee_index = content.index('exec > "${CONSOLE_TEE_PIPE}" 2>&1')
+        banner_index = content.index('echo "Codify Worker"')
+        self.assertLess(tee_index, banner_index)
+
+        git_add_index = content.index('git add -A')
+        archive_success_index = content.index('    create_runtime_archive\n\n    echo "========================================"')
+        self.assertGreater(archive_success_index, git_add_index)
+
+    def test_entrypoint_silences_update_ca_certificate_noise(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('update-ca-certificates --fresh >/dev/null 2>&1 || true', content)
+        self.assertNotIn('update-ca-certificates --fresh 2>/dev/null || true', content)
+
+    def test_entrypoint_does_not_emit_legacy_codify_markers_to_console(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        for marker in [
+            "CODIFY_STATS",
+            "CODIFY_TOOL_CALLS",
+            "CODIFY_SESSION_ID",
+            "CODIFY_DIFF",
+            "CODIFY_COMMIT_SHA",
+            "CODIFY_MR_TITLE",
+        ]:
+            self.assertNotIn(f'echo "{marker}:', content)
+
+    def test_entrypoint_reuses_existing_git_workspace_safely(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('if [ -d /workspace/.git ]; then', content)
+        self.assertIn('git remote set-url origin "${GIT_REPO_URL}"', content)
+        self.assertIn('git fetch origin', content)
+        self.assertIn('WORKSPACE_CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD', content)
+        self.assertIn('Workspace has uncommitted changes on branch', content)
+        self.assertIn('git clone "${GIT_REPO_URL}" /workspace', content)
+
+
+    def test_entrypoint_no_changes_uses_require_changes_not_target_branch(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('REQUIRE_CHANGES', content)
+        self.assertIn('[ "${REQUIRE_CHANGES:-true}" = "false" ]', content)
+        self.assertIn('require_changes disabled: task completed without code changes', content)
+
 
 class TestBuildContainerVolumes(unittest.TestCase):
     """Tests for _build_container_volumes — lines 527-557."""
@@ -600,6 +927,63 @@ class TestBuildContainerVolumes(unittest.TestCase):
         volumes = worker._build_container_volumes(settings)
 
         self.assertEqual(volumes, {})
+
+    def test_issue_workspace_and_task_runtime_volumes_enabled(self):
+        """Persistent workspace mounts issue repo, Claude state, and task runtime."""
+        settings = _make_settings(worker_workspace_host_path="/opt/codify-workspaces")
+        worker = _make_worker()
+        issue = MagicMock()
+        issue.project_id = 123
+        issue.id = 456
+        issue.session_storage_path = "/var/codify/sessions/456/claude"
+        task = MagicMock()
+        task.id = 789
+
+        repo_path = "/opt/codify-workspaces/project-123/issue-456/repo"
+        claude_path = "/opt/codify-workspaces/project-123/issue-456/claude"
+        runtime_path = "/opt/codify-workspaces/project-123/issue-456/runtime/task-789"
+
+        with patch("app.core.worker_runtime.os.makedirs") as makedirs:
+            makedirs.side_effect = [None, OSError("claude unavailable"), None]
+
+            volumes = worker._build_container_volumes(settings, issue, task=task)
+
+        self.assertEqual(volumes[repo_path]["bind"], "/workspace")
+        self.assertEqual(volumes[repo_path]["mode"], "rw")
+        self.assertEqual(volumes[claude_path]["bind"], "/home/codify/.claude")
+        self.assertEqual(volumes[claude_path]["mode"], "rw")
+        self.assertEqual(volumes[runtime_path]["bind"], "/tmp/codify-runtime")
+        self.assertEqual(volumes[runtime_path]["mode"], "rw")
+        self.assertNotIn("/var/codify/sessions/456/claude", volumes)
+        makedirs.assert_any_call(repo_path, exist_ok=True)
+        makedirs.assert_any_call(claude_path, exist_ok=True)
+        makedirs.assert_any_call(runtime_path, exist_ok=True)
+
+    def test_issue_workspace_volumes_disabled_when_setting_empty(self):
+        settings = _make_settings(worker_workspace_host_path="")
+        worker = _make_worker()
+        issue = MagicMock(project_id=123, id=456)
+        task = MagicMock(id=789)
+
+        volumes = worker._build_container_volumes(settings, issue, task=task)
+
+        self.assertNotIn("/workspace", [v["bind"] for v in volumes.values()])
+        self.assertNotIn("/tmp/codify-runtime", [v["bind"] for v in volumes.values()])
+
+    def test_legacy_session_storage_mount_used_when_workspace_disabled(self):
+        settings = _make_settings(worker_workspace_host_path="")
+        worker = _make_worker()
+        issue = MagicMock(project_id=123, id=456)
+        issue.session_storage_path = "/var/codify/sessions/456/claude"
+        task = MagicMock(id=789)
+
+        with patch("app.core.worker_runtime.os.makedirs"):
+            volumes = worker._build_container_volumes(settings, issue, task=task)
+
+        self.assertEqual(
+            volumes["/var/codify/sessions/456/claude"],
+            {"bind": "/home/codify/.claude", "mode": "rw"},
+        )
 
     def test_generic_volume_mount_default_mode_is_ro(self):
         """Mount with no mode defaults to 'ro' — line 553."""
@@ -751,10 +1135,10 @@ class TestCreateMrIfNeeded(unittest.TestCase):
 # ===================================================================
 
 class TestParseTaskResult(unittest.TestCase):
-    """Tests for _parse_task_result — lines 559-646."""
+    """Tests for _parse_task_result."""
 
-    def test_parses_codify_stats(self):
-        """Parses CODIFY_STATS for token usage — lines 575-586."""
+    def test_ignores_codify_stats_marker(self):
+        """Legacy CODIFY_STATS marker no longer sets token usage."""
         worker = _make_worker()
         task = _make_task()
         db = _make_db()
@@ -762,11 +1146,11 @@ class TestParseTaskResult(unittest.TestCase):
 
         asyncio.run(worker._parse_task_result(task, logs, db, exit_code=0))
 
-        self.assertEqual(task.input_tokens, 500)
-        self.assertEqual(task.output_tokens, 150)
+        self.assertIsNone(task.input_tokens)
+        self.assertIsNone(task.output_tokens)
 
-    def test_handles_invalid_codify_stats(self):
-        """Invalid JSON in CODIFY_STATS should not crash — lines 585-586."""
+    def test_invalid_codify_stats_marker_is_ignored(self):
+        """Invalid legacy CODIFY_STATS marker should not crash."""
         worker = _make_worker()
         task = _make_task()
         db = _make_db()
@@ -777,8 +1161,8 @@ class TestParseTaskResult(unittest.TestCase):
 
         self.assertIsNone(task.input_tokens)
 
-    def test_parses_codify_commit_sha(self):
-        """Parses CODIFY_COMMIT_SHA marker — lines 601-604."""
+    def test_ignores_codify_commit_sha_marker(self):
+        """Legacy CODIFY_COMMIT_SHA marker no longer sets commit_sha."""
         worker = _make_worker()
         task = _make_task()
         db = _make_db()
@@ -787,32 +1171,7 @@ class TestParseTaskResult(unittest.TestCase):
 
         asyncio.run(worker._parse_task_result(task, logs, db, exit_code=0))
 
-        self.assertEqual(task.commit_sha, sha)
-
-    def test_parses_codify_tool_calls(self):
-        """Parses CODIFY_TOOL_CALLS and stores as TaskLog — lines 620-635."""
-        worker = _make_worker()
-        task = _make_task()
-        db = _make_db()
-        tool_calls = json.dumps([{"name": "read_file", "input": {"path": "main.py"}}])
-        logs = f'CODIFY_TOOL_CALLS:{tool_calls}\n'
-
-        asyncio.run(worker._parse_task_result(task, logs, db, exit_code=0))
-
-        db.add.assert_called()
-        added_log = db.add.call_args[0][0]
-        self.assertEqual(added_log.log_type, "tool_calls_json")
-        self.assertEqual(added_log.log_metadata, tool_calls)
-
-    def test_handles_invalid_codify_tool_calls(self):
-        """Invalid JSON in CODIFY_TOOL_CALLS should not crash — line 634-635."""
-        worker = _make_worker()
-        task = _make_task()
-        db = _make_db()
-        logs = 'CODIFY_TOOL_CALLS:{{bad json\n'
-
-        asyncio.run(worker._parse_task_result(task, logs, db, exit_code=0))
-        # Should not raise; no log entry added
+        self.assertIsNone(task.commit_sha)
 
     def test_exit_code_zero_sets_completed(self):
         """exit_code=0 → status=COMPLETED — lines 637-641."""
@@ -894,8 +1253,18 @@ class TestParseMrFromLogs(unittest.TestCase):
 class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
     """Tests for _update_mr_description_for_issue — comprehensive MR description."""
 
+    def _make_issue(self, **kwargs):
+        issue = MagicMock()
+        issue.id = kwargs.get("id", 10)
+        issue.title = kwargs.get("title", "Test Issue")
+        issue.description = kwargs.get("description", "Some description")
+        issue.merge_request_iid = kwargs.get("merge_request_iid", 5)
+        issue.gitlab_issue_iid = None
+        issue.project_id = kwargs.get("project_id", 100)
+        return issue
+
     async def test_builds_description_with_all_tasks(self):
-        """Builds MR description from issue + all tasks."""
+        """Builds MR description from issue + all tasks (no metadata)."""
         mock_mr = MagicMock()
         mock_mr.description = ""
 
@@ -903,12 +1272,7 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
         mock_gitlab.gl.projects.get.return_value.mergerequests.get.return_value = mock_mr
         worker = _make_worker(mock_gitlab=mock_gitlab)
 
-        issue = MagicMock()
-        issue.id = 10
-        issue.title = "Test Issue"
-        issue.description = "Some description"
-        issue.merge_request_iid = 5
-        issue.gitlab_issue_iid = None
+        issue = self._make_issue()
 
         task1 = _make_task(id=1)
         task1.user_prompt = "Prompt 1"
@@ -925,15 +1289,108 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
         mock_result.scalars.return_value.all.return_value = [task1, task2]
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        await worker._update_mr_description_for_issue(task1, issue, mock_db)
+        with patch("app.core.worker_gitlab.load_task_metadata_files", return_value={}):
+            with patch("app.core.worker_gitlab._resolve_issue_root", return_value=None):
+                with patch("app.core.worker_gitlab.get_settings") as mock_settings:
+                    mock_settings.return_value = _make_settings(dashboard_url="http://codify.example.com")
+                    await worker._update_mr_description_for_issue(task1, issue, mock_db)
 
         desc = mock_mr.description
-        self.assertIn("Test Issue", desc)
+        self.assertNotIn("## Test Issue", desc)  # title not repeated in description body
         self.assertIn("Some description", desc)
-        self.assertIn("Prompt 1", desc)
-        self.assertIn("Prompt 2", desc)
         self.assertIn("✅", desc)
         self.assertIn("❌", desc)
+        self.assertIn("http://codify.example.com/issues/10", desc)
+        mock_mr.save.assert_called_once()
+
+    async def test_builds_description_with_metadata(self):
+        """Builds enriched MR description when task-metadata.json files are present."""
+        mock_mr = MagicMock()
+        mock_mr.description = ""
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.gl.projects.get.return_value.mergerequests.get.return_value = mock_mr
+        worker = _make_worker(mock_gitlab=mock_gitlab)
+
+        issue = self._make_issue()
+
+        task1 = _make_task(id=1)
+        task1.user_prompt = "Add JWT auth"
+        task1.status = TaskStatus.COMPLETED
+        task1.issue_id = 10
+        task1.additions = 120
+        task1.deletions = 45
+        task1.commit_message = "feat: add JWT auth"
+
+        task2 = _make_task(id=2)
+        task2.user_prompt = "Fix token expiry"
+        task2.status = TaskStatus.COMPLETED
+        task2.issue_id = 10
+        task2.additions = 15
+        task2.deletions = 3
+        task2.commit_message = "fix: token expiry"
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [task1, task2]
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        metadata_map = {
+            1: {
+                "task_id": 1,
+                "prompt": "Add JWT auth",
+                "commit_sha": "abc1234567890",
+                "commit_message": "feat: add JWT auth\n\nAI-Generated: true",
+                "execution_summary": "Implemented JWT authentication using RS256.",
+                "new_files": ["src/auth.py", "tests/test_auth.py"],
+                "modified_files": ["src/main.py"],
+                "deleted_files": [],
+                "additions": 120,
+                "deletions": 45,
+            },
+            2: {
+                "task_id": 2,
+                "prompt": "Fix token expiry",
+                "commit_sha": "def5678901234",
+                "commit_message": "fix: token expiry\n\nAI-Generated: true",
+                "overall_summary": (
+                    "- 认证能力已完成并覆盖令牌过期处理。\n"
+                    "- 相关验证已补充。"
+                ),
+                "execution_summary": "Fixed token expiry handling.",
+                "new_files": [],
+                "modified_files": ["src/main.py", "src/config.py"],
+                "deleted_files": [],
+                "additions": 15,
+                "deletions": 3,
+            },
+        }
+
+        with patch("app.core.worker_gitlab.load_task_metadata_files", return_value=metadata_map):
+            with patch("app.core.worker_gitlab._resolve_issue_root", return_value="/some/issue/root"):
+                with patch("app.core.worker_gitlab.get_settings") as mock_settings:
+                    mock_settings.return_value = _make_settings(dashboard_url="http://codify.example.com")
+                    await worker._update_mr_description_for_issue(task1, issue, mock_db)
+
+        desc = mock_mr.description
+        # Codify issue link
+        self.assertIn("http://codify.example.com/issues/10", desc)
+        # AI-generated cross-task summary section
+        self.assertIn("📋 总体总结", desc)
+        self.assertIn("认证能力已完成并覆盖令牌过期处理", desc)
+        self.assertIn("相关验证已补充", desc)
+        self.assertNotIn("Task #1 - feat: add JWT auth", desc)
+        self.assertNotIn("整体变更", desc)
+        self.assertNotIn("新增文件", desc)
+        self.assertNotIn("修改文件", desc)
+        # Execution record table
+        self.assertIn("🔖 执行记录", desc)
+        self.assertIn("feat: add JWT auth", desc)
+        self.assertIn("fix: token expiry", desc)
+        # Per-task details
+        self.assertIn("<details>", desc)
+        self.assertIn("Implemented JWT authentication", desc)
+        self.assertIn("abc1234567890"[:12], desc)
         mock_mr.save.assert_called_once()
 
     async def test_skips_when_no_mr_iid(self):
@@ -947,178 +1404,292 @@ class TestUpdateMrDescriptionForIssue(IsolatedAsyncioTestCase):
         mock_db.execute.assert_not_called()
 
     async def test_skips_when_mr_not_found(self):
-        """Does nothing when MR is not found in GitLab."""
+        """Returns early when project.mergerequests.get raises (MR not found in GitLab)."""
+        mock_mr = MagicMock()
+        mock_project = MagicMock()
+        mock_project.mergerequests.get.side_effect = Exception("404 MR not found")
+        mock_project.mergerequests.get.return_value = mock_mr  # never reached
         mock_gitlab = MagicMock()
-        mock_gitlab.get_merge_request.return_value = None
+        mock_gitlab.gl.projects.get.return_value = mock_project
         worker = _make_worker(mock_gitlab=mock_gitlab)
 
-        issue = MagicMock()
-        issue.id = 10
-        issue.title = "Test"
-        issue.description = ""
-        issue.merge_request_iid = 5
-        issue.gitlab_issue_iid = None
+        issue = self._make_issue()
 
         mock_db = AsyncMock()
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = []
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        await worker._update_mr_description_for_issue(_make_task(), issue, mock_db)
+        with patch("app.core.worker_gitlab.load_task_metadata_files", return_value={}):
+            with patch("app.core.worker_gitlab._resolve_issue_root", return_value=None):
+                with patch("app.core.worker_gitlab.get_settings") as mock_settings:
+                    mock_settings.return_value = _make_settings()
+                    await worker._update_mr_description_for_issue(_make_task(), issue, mock_db)
 
+        # Verify get() was invoked (correct code path) but save() was never called
+        mock_project.mergerequests.get.assert_called_once()
+        mock_mr.save.assert_not_called()
 
-# ===================================================================
-# _notify_task_started
-# ===================================================================
+    async def test_preserves_existing_overall_summary_when_metadata_has_no_summary(self):
+        """Keeps the previous overall summary if task metadata has no new summary."""
+        mock_mr = MagicMock()
+        mock_mr.description = """Some description
 
-class TestNotifyTaskStarted(unittest.TestCase):
-    """Tests for _notify_task_started — now takes issue parameter."""
+---
 
-    @patch('app.core.worker.get_settings')
-    def test_skips_when_no_issue(self, mock_get_settings):
-        """Skips notification when issue is None."""
-        mock_get_settings.return_value = _make_settings()
-        worker = _make_worker()
-        task = _make_task()
+## 📋 总体总结
 
-        worker._notify_task_started(task, issue=None)
+- 旧的总体总结
 
-        worker.gitlab.create_note.assert_not_called()
-        worker.gitlab.create_mr_note.assert_not_called()
+---
 
-    @patch('app.core.worker.get_settings')
-    def test_notifies_mr_when_mr_iid_set(self, mock_get_settings):
-        """Sends notification to MR when merge_request_iid is set on issue."""
-        mock_get_settings.return_value = _make_settings()
-        worker = _make_worker()
-        task = _make_task(merge_request_iid=55)
-        issue = task.issue
+## 🔖 执行记录
+"""
 
-        worker._notify_task_started(task, issue=issue)
-
-        worker.gitlab.create_mr_note.assert_called_once()
-        args = worker.gitlab.create_mr_note.call_args
-        self.assertEqual(args[0][0], 100)  # project_id
-        self.assertEqual(args[0][1], 55)   # mr_iid
-        self.assertIn("开始处理", args[0][2])
-
-    @patch('app.core.worker.get_settings')
-    def test_only_notifies_mr_when_mr_iid_set(self, mock_get_settings):
-        """Start notification only sent to MR, not to issue."""
-        mock_get_settings.return_value = _make_settings()
-        worker = _make_worker()
-        task = _make_task(merge_request_iid=None)
-        issue = task.issue
-
-        worker._notify_task_started(task, issue=issue)
-
-        # With no MR, no notification is sent
-        worker.gitlab.create_note.assert_not_called()
-        worker.gitlab.create_mr_note.assert_not_called()
-
-
-# ===================================================================
-# _notify_task_completed
-# ===================================================================
-
-class TestNotifyTaskCompleted(unittest.TestCase):
-    """Tests for _notify_task_completed — now takes issue parameter."""
-
-    @patch('app.core.worker.get_settings')
-    def test_skips_when_no_issue(self, mock_get_settings):
-        """Skips notification when issue is None."""
-        mock_get_settings.return_value = _make_settings()
-        worker = _make_worker()
-        task = _make_task()
-
-        asyncio.run(worker._notify_task_completed(task, success=True, issue=None))
-
-        worker.gitlab.create_note.assert_not_called()
-
-    @patch('app.core.worker.get_settings')
-    def test_success_with_mr_url_and_iid(self, mock_get_settings):
-        """Success with MR URL and IID sends proper message."""
-        mock_get_settings.return_value = _make_settings()
         mock_gitlab = MagicMock()
-        mock_gitlab.create_mr_note = MagicMock()
+        mock_gitlab.gl.projects.get.return_value.mergerequests.get.return_value = mock_mr
         worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(
-            merge_request_iid=55,
-            merge_request_url="http://gitlab.example.com/mr/55",
-        )
-        issue = task.issue
 
-        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr", issue=issue))
+        issue = self._make_issue()
+        task1 = _make_task(id=1)
+        task1.user_prompt = "Add JWT auth"
+        task1.status = TaskStatus.COMPLETED
+        task1.issue_id = 10
+        task1.commit_message = "feat: add JWT auth"
 
-        mock_gitlab.create_mr_note.assert_called_once()
-        msg = mock_gitlab.create_mr_note.call_args[0][2]
-        self.assertIn("✅", msg)
-        self.assertIn("!55", msg)
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [task1]
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
-    @patch('app.core.worker.get_settings')
-    def test_success_without_mr_url(self, mock_get_settings):
-        """Success without MR URL — no notification to issue (only MR supported)."""
-        mock_get_settings.return_value = _make_settings()
-        mock_gitlab = MagicMock()
-        mock_gitlab.create_note = MagicMock()
-        mock_gitlab.create_mr_note = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(
-            merge_request_iid=None,
-            merge_request_url=None,
-        )
-        issue = task.issue
+        metadata_map = {
+            1: {
+                "task_id": 1,
+                "prompt": "Add JWT auth",
+                "commit_message": "feat: add JWT auth",
+                "execution_summary": "Implemented JWT authentication.",
+            },
+        }
 
-        # With notify_target="issue" but no issue notification path, nothing happens
-        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="issue", issue=issue))
+        with patch("app.core.worker_gitlab.load_task_metadata_files", return_value=metadata_map):
+            with patch("app.core.worker_gitlab._resolve_issue_root", return_value="/some/issue/root"):
+                with patch("app.core.worker_gitlab.get_settings") as mock_settings:
+                    mock_settings.return_value = _make_settings(dashboard_url="http://codify.example.com")
+                    await worker._update_mr_description_for_issue(task1, issue, mock_db)
 
-        # No notification is sent since notify_target="issue" path only sends to MR when mr_iid
-        mock_gitlab.create_note.assert_not_called()
-        mock_gitlab.create_mr_note.assert_not_called()
-
-    @patch('app.core.worker.get_settings')
-    def test_failure_notification_to_mr(self, mock_get_settings):
-        """Failure sends error message to MR when mr_iid is set."""
-        mock_get_settings.return_value = _make_settings()
-        mock_gitlab = MagicMock()
-        mock_gitlab.create_mr_note = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(
-            merge_request_iid=55,
-            error_message="Container crashed with OOM",
-        )
-        issue = task.issue
-
-        asyncio.run(worker._notify_task_completed(task, success=False, notify_target="mr", issue=issue))
-
-        mock_gitlab.create_mr_note.assert_called_once()
-        msg = mock_gitlab.create_mr_note.call_args[0][2]
-        self.assertIn("❌", msg)
-        self.assertIn("Container crashed with OOM", msg)
-
-    @patch('app.core.worker.get_settings')
-    def test_success_mr_extracts_iid_from_url(self, mock_get_settings):
-        """Success message includes MR IID."""
-        mock_get_settings.return_value = _make_settings()
-        mock_gitlab = MagicMock()
-        mock_gitlab.create_mr_note = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(
-            merge_request_iid=42,
-            merge_request_url="http://gitlab.example.com/project/-/merge_requests/42",
-        )
-        issue = task.issue
-
-        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr", issue=issue))
-
-        mock_gitlab.create_mr_note.assert_called_once()
-        msg = mock_gitlab.create_mr_note.call_args[0][2]
-        self.assertIn("!42", msg)
+        self.assertIn("📋 总体总结", mock_mr.description)
+        self.assertIn("旧的总体总结", mock_mr.description)
 
 
 # ===================================================================
-# _send_failure_alert
+# load_task_metadata_files
 # ===================================================================
+
+class TestLoadTaskMetadataFiles(unittest.TestCase):
+    """Tests for load_task_metadata_files."""
+
+    def test_returns_empty_when_no_files(self):
+        """Returns empty dict when runtime directory does not exist."""
+        from app.core.worker_gitlab import load_task_metadata_files
+        result = load_task_metadata_files("/nonexistent/path", [1, 2, 3])
+        self.assertEqual(result, {})
+
+    def test_reads_existing_metadata_files(self):
+        """Reads and parses task-metadata.json files that exist."""
+        import tempfile
+
+        from app.core.worker_gitlab import load_task_metadata_files
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            task_dir = os.path.join(tmpdir, "runtime", "task-42")
+            os.makedirs(task_dir)
+            metadata = {
+                "task_id": 42,
+                "prompt": "Add feature",
+                "commit_sha": "abc1234",
+                "new_files": ["src/foo.py"],
+                "modified_files": [],
+                "deleted_files": [],
+                "additions": 10,
+                "deletions": 2,
+            }
+            with open(os.path.join(task_dir, "task-metadata.json"), "w") as f:
+                json.dump(metadata, f)
+
+            result = load_task_metadata_files(tmpdir, [42, 99])
+            self.assertIn(42, result)
+            self.assertNotIn(99, result)
+            self.assertEqual(result[42]["commit_sha"], "abc1234")
+            self.assertEqual(result[42]["new_files"], ["src/foo.py"])
+
+    def test_skips_invalid_json(self):
+        """Silently skips files with invalid JSON."""
+        import tempfile
+
+        from app.core.worker_gitlab import load_task_metadata_files
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            task_dir = os.path.join(tmpdir, "runtime", "task-7")
+            os.makedirs(task_dir)
+            with open(os.path.join(task_dir, "task-metadata.json"), "w") as f:
+                f.write("not json{{{")
+
+            result = load_task_metadata_files(tmpdir, [7])
+            self.assertEqual(result, {})
+
+
+# ===================================================================
+# overall MR summary helpers
+# ===================================================================
+
+class TestOverallMrSummaryHelpers(unittest.TestCase):
+    """Tests for overall MR summary helpers."""
+
+    def test_latest_overall_summary_uses_newest_metadata(self):
+        from app.core.worker_gitlab import _latest_overall_summary
+
+        task1 = _make_task(id=1)
+        task2 = _make_task(id=2)
+        result = _latest_overall_summary(
+            [task1, task2],
+            {
+                1: {"overall_summary": "- 旧总结"},
+                2: {"overall_summary": "- 新总结</details>"},
+            },
+        )
+
+        self.assertEqual(result, "- 新总结&lt;/details&gt;")
+
+    def test_latest_overall_summary_returns_none_without_metadata_summary(self):
+        from app.core.worker_gitlab import _latest_overall_summary
+
+        result = _latest_overall_summary(
+            [_make_task(id=1)],
+            {1: {"execution_summary": "任务摘要"}},
+        )
+
+        self.assertIsNone(result)
+
+    def test_extracts_existing_overall_summary(self):
+        """Extracts the existing overall summary block from an MR description."""
+        from app.core.worker_gitlab import _extract_existing_overall_summary
+
+        result = _extract_existing_overall_summary("""Intro
+
+## 📋 总体总结
+
+- 已完成主要能力
+- 验证通过
+
+---
+
+## 🔖 执行记录
+""")
+
+        self.assertEqual(result, "- 已完成主要能力\n- 验证通过")
+
+    def test_builds_previous_task_summaries_content(self):
+        from app.core.worker_gitlab import _build_previous_task_summaries_content
+
+        issue = MagicMock()
+        issue.title = "Auth Issue"
+        issue.description = "Implement authentication"
+        task1 = _make_task(id=1)
+        task1.status = TaskStatus.COMPLETED
+        task2 = _make_task(id=2)
+        task2.status = TaskStatus.FAILED
+        metadata_map = {
+            1: {
+                "prompt": "Add JWT auth",
+                "commit_message": "feat: add auth",
+                "execution_summary": "Implemented JWT authentication.\nAdded tests.",
+            },
+            2: {
+                "prompt": "Fix token expiry",
+                "commit_message": "fix: token expiry",
+                "execution_summary": "Fixed token expiry handling.</details>",
+            },
+        }
+
+        result = _build_previous_task_summaries_content(issue, [task1, task2], metadata_map)
+
+        self.assertIn("# Previous Task Summaries", result)
+        self.assertIn("Task #1", result)
+        self.assertIn("Implemented JWT authentication. Added tests.", result)
+        self.assertIn("Fixed token expiry handling.&lt;/details&gt;", result)
+
+    def test_builds_empty_previous_task_summaries_content(self):
+        from app.core.worker_gitlab import _build_previous_task_summaries_content
+
+        issue = MagicMock()
+        issue.title = "Issue title"
+        issue.description = ""
+
+        result = _build_previous_task_summaries_content(issue, [], {})
+
+        self.assertIn("暂无前序任务摘要。", result)
+
+
+class TestWritePreviousTaskSummariesFile(IsolatedAsyncioTestCase):
+    """Tests for writing previous task summaries into the current runtime dir."""
+
+    async def test_skips_when_workspace_path_is_not_string(self):
+        from app.core.worker_gitlab import write_previous_task_summaries_file
+
+        settings = _make_settings(worker_workspace_host_path=MagicMock())
+        issue = MagicMock()
+        issue.id = 10
+        issue.project_id = 100
+        current_task = _make_task(id=3, issue_id=10, project_id=100)
+        mock_db = AsyncMock()
+
+        path = await write_previous_task_summaries_file(mock_db, settings, issue, current_task)
+
+        self.assertIsNone(path)
+        mock_db.execute.assert_not_called()
+
+    async def test_writes_previous_task_summaries_file(self):
+        import tempfile
+
+        from app.core.worker_gitlab import write_previous_task_summaries_file
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings = _make_settings(worker_workspace_host_path=tmpdir)
+            issue = MagicMock()
+            issue.id = 10
+            issue.project_id = 100
+            issue.title = "Auth Issue"
+            issue.description = "Implement auth"
+            current_task = _make_task(id=3, issue_id=10, project_id=100)
+            previous_task = _make_task(id=2, issue_id=10, project_id=100)
+            previous_task.status = TaskStatus.COMPLETED
+
+            previous_runtime = os.path.join(tmpdir, "project-100", "issue-10", "runtime", "task-2")
+            os.makedirs(previous_runtime)
+            with open(os.path.join(previous_runtime, "task-metadata.json"), "w") as f:
+                json.dump({
+                    "task_id": 2,
+                    "prompt": "Add JWT auth",
+                    "commit_message": "feat: add auth",
+                    "execution_summary": "Implemented JWT authentication.",
+                }, f)
+
+            mock_db = AsyncMock()
+            mock_result = MagicMock()
+            mock_result.scalars.return_value.all.return_value = [previous_task]
+            mock_db.execute = AsyncMock(return_value=mock_result)
+
+            path = await write_previous_task_summaries_file(mock_db, settings, issue, current_task)
+
+            self.assertIsNotNone(path)
+            self.assertTrue(os.path.exists(path))
+            content = Path(path).read_text()
+            self.assertIn("Task #2", content)
+            self.assertIn("Implemented JWT authentication.", content)
+            self.assertIn("Auth Issue", content)
+
+
+
 
 class TestSendFailureAlert(unittest.TestCase):
     """Tests for _send_failure_alert — lines 1097-1136."""
@@ -1216,11 +1787,170 @@ class TestExecuteTask(unittest.TestCase):
             'CODIFY_STATS:{"input_tokens":100,"output_tokens":50}\n'
         )
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         self.assertTrue(result)
         self.assertEqual(task.status, TaskStatus.COMPLETED)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_execute_task_upserts_usage_ledger_for_finished_task(self, mock_notify, mock_get_settings):
+        """Finished tasks with parsed usage should be written to the quota ledger."""
+        mock_get_settings.return_value = _make_settings()
+        mock_gitlab = MagicMock()
+        mock_gitlab.normalize_web_url.side_effect = lambda x: x
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+
+        mock_docker = MagicMock()
+        mock_docker.create_container.return_value = MagicMock(id="ctr-usage")
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(target_branch="main", merge_request_iid=None, initiator_user_id=7)
+        db = _make_db(task)
+
+        fake_logs = (
+            "http://gitlab.example.com/project/-/merge_requests/42\n"
+            "CODIFY_DIFF:+10-5\n"
+            'CODIFY_STATS:{"input_tokens":100,"output_tokens":50}\n'
+        )
+
+        with (
+            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))),
+            patch("app.core.worker.upsert_task_usage_ledger", new=AsyncMock()) as mock_upsert,
+        ):
+            result = asyncio.run(worker.execute_task(db, task.id))
+
+        self.assertTrue(result)
+        mock_upsert.assert_awaited_once_with(db, task)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_execute_task_upserts_usage_ledger_when_post_parse_commit_fails(
+        self,
+        mock_notify,
+        mock_get_settings,
+    ):
+        """Post-parse failures should still attempt quota ledger persistence."""
+        mock_get_settings.return_value = _make_settings()
+        mock_gitlab = MagicMock()
+        mock_gitlab.normalize_web_url.side_effect = lambda x: x
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+
+        mock_docker = MagicMock()
+        mock_docker.create_container.return_value = MagicMock(id="ctr-usage-fail")
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(target_branch=None, merge_request_iid=None, initiator_user_id=7)
+        db = _make_db(task)
+        db.commit = AsyncMock(side_effect=[None, None, RuntimeError("post-parse commit failed"), None])
+
+        fake_logs = (
+            "http://gitlab.example.com/project/-/merge_requests/42\n"
+            "CODIFY_DIFF:+10-5\n"
+            'CODIFY_STATS:{"input_tokens":100,"output_tokens":50}\n'
+        )
+
+        with (
+            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))),
+            patch("app.core.worker.upsert_task_usage_ledger", new=AsyncMock()) as mock_upsert,
+        ):
+            result = asyncio.run(worker.execute_task(db, task.id))
+
+        self.assertFalse(result)
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        mock_upsert.assert_awaited_once_with(db, task)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    @patch('app.core.worker.build_worker_environment_map')
+    @patch('app.core.worker.list_worker_environment_variables', new_callable=AsyncMock)
+    def test_execute_task_loads_persisted_custom_environment(
+        self,
+        mock_list_worker_environment_variables,
+        mock_build_worker_environment_map,
+        mock_notify,
+        mock_get_settings,
+    ):
+        """execute_task loads persisted worker env vars and passes them into container env building."""
+        mock_get_settings.return_value = _make_settings()
+
+        persisted_rows = [MagicMock(key="FEATURE_FLAG", value="stored", is_secret=False)]
+        custom_environment = {"FEATURE_FLAG": "enabled", "EMPTY_ALLOWED": ""}
+        mock_list_worker_environment_variables.return_value = persisted_rows
+        mock_build_worker_environment_map.return_value = custom_environment
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.normalize_web_url.side_effect = lambda x: x
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+
+        mock_docker = MagicMock()
+        mock_docker.create_container.return_value = MagicMock(id="ctr-custom-env")
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(target_branch="main", merge_request_iid=None)
+        db = _make_db(task)
+
+        with (
+            patch.object(worker, '_build_container_env', return_value={"TASK_ID": "1"}) as mock_build_container_env,
+            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1, False))),
+        ):
+            result = asyncio.run(worker.execute_task(db, task.id))
+
+        self.assertTrue(result)
+        mock_list_worker_environment_variables.assert_awaited_once_with(db)
+        mock_build_worker_environment_map.assert_called_once_with(persisted_rows)
+        self.assertEqual(
+            mock_build_container_env.call_args.kwargs["custom_environment"],
+            custom_environment,
+        )
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    @patch('app.core.worker.list_worker_environment_variables', new_callable=AsyncMock)
+    def test_execute_task_persists_failure_for_invalid_persisted_custom_environment_key(
+        self,
+        mock_list_worker_environment_variables,
+        mock_notify,
+        mock_get_settings,
+    ):
+        """execute_task persists failure state for invalid persisted custom env keys."""
+        mock_get_settings.return_value = _make_settings()
+        mock_list_worker_environment_variables.return_value = [
+            MagicMock(key="TASK_ID", value="reserved", is_secret=False)
+        ]
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.normalize_web_url.side_effect = lambda x: x
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+
+        mock_docker = MagicMock()
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(target_branch=None, merge_request_iid=None)
+        db = _make_db(task)
+
+        with (
+            patch('app.core.worker.logger') as mock_logger,
+        ):
+            result = asyncio.run(worker.execute_task(db, task.id))
+
+        self.assertFalse(result)
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        self.assertIsNotNone(task.completed_at)
+        self.assertIn("TASK_ID", task.error_message)
+        self.assertIn("reserved", task.error_message)
+        mock_logger.error.assert_called_once()
+        self.assertIn(
+            "Failed while building worker environment",
+            mock_logger.error.call_args.args[0],
+        )
+        mock_logger.exception.assert_not_called()
+        mock_notify.assert_awaited_once()
+        mock_docker.create_container.assert_not_called()
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
@@ -1238,7 +1968,7 @@ class TestExecuteTask(unittest.TestCase):
         task = _make_task(target_branch="main", merge_request_iid=None)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error output", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error output", 1, False))):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         self.assertFalse(result)
@@ -1260,7 +1990,7 @@ class TestExecuteTask(unittest.TestCase):
         task = _make_task(target_branch="main", merge_request_iid=None)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error output", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error output", 1, False))):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         self.assertFalse(result)
@@ -1334,7 +2064,7 @@ class TestExecuteTask(unittest.TestCase):
 
         fake_logs = "CODIFY_DIFF:+1-0\n"
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         # Should succeed despite pull failure
@@ -1359,7 +2089,7 @@ class TestExecuteTask(unittest.TestCase):
         fake_logs = "CODIFY_DIFF:+1-0\n"
 
         with patch.object(worker, '_create_mr_if_needed') as mock_create_mr:
-            with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
+            with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))):
                 asyncio.run(worker.execute_task(db, task.id))
 
         # _create_mr_if_needed should NOT have been called
@@ -1382,7 +2112,7 @@ class TestExecuteTask(unittest.TestCase):
         task = _make_task(target_branch="main", merge_request_iid=None)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 0))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 0, False))):
             asyncio.run(worker.execute_task(db, task.id))
 
         # Should have added a fallback log entry
@@ -1418,7 +2148,7 @@ class TestExecuteTask(unittest.TestCase):
         db.execute = AsyncMock(side_effect=tracking_execute)
 
         fake_logs = "CODIFY_DIFF:+1-0\n"
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))):
             asyncio.run(worker.execute_task(db, task.id))
 
         # The first execute call should be the DELETE for TaskLog
@@ -1426,6 +2156,55 @@ class TestExecuteTask(unittest.TestCase):
         # First call: SELECT task; second call: DELETE logs
         delete_found = any('task_logs' in call.lower() or 'DELETE' in call for call in execute_calls[:3])
         self.assertTrue(delete_found, f"Expected DELETE on task_logs in early calls: {execute_calls[:3]}")
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_task_timeout_sets_error_message_prefix(self, mock_notify, mock_get_settings):
+        """When timed_out=True, error_message starts with timeout prefix."""
+        mock_get_settings.return_value = _make_settings(task_timeout=1800)
+        mock_docker = MagicMock()
+        mock_docker.create_container.return_value = MagicMock(id="ctr-timeout")
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(target_branch="main", merge_request_iid=None)
+        db = _make_db(task)
+
+        with patch.object(worker, '_stream_logs_to_db',
+                          new=AsyncMock(return_value=(-1, "running...", 1, True))):
+            result = asyncio.run(worker.execute_task(db, task.id))
+
+        self.assertFalse(result)
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        self.assertIn("Task timed out after 1800s", task.error_message)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_task_non_timeout_failure_regular_error_message(self, mock_notify, mock_get_settings):
+        """When timed_out=False and exit_code!=0, error_message is log tail without timeout prefix."""
+        mock_get_settings.return_value = _make_settings(task_timeout=1800)
+        mock_docker = MagicMock()
+        mock_docker.create_container.return_value = MagicMock(id="ctr-regular-fail")
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(target_branch="main", merge_request_iid=None)
+        db = _make_db(task)
+
+        with patch.object(worker, '_stream_logs_to_db',
+                          new=AsyncMock(return_value=(1, "claude error occurred", 1, False))):
+            result = asyncio.run(worker.execute_task(db, task.id))
+
+        self.assertFalse(result)
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        self.assertNotIn("Task timed out", task.error_message)
+        self.assertIn("claude error occurred", task.error_message)
 
 
 # ===================================================================
@@ -1528,6 +2307,89 @@ class TestProcessPendingTasks(unittest.TestCase):
             count = asyncio.run(worker.process_pending_tasks(db))
 
         self.assertEqual(count, 0)
+
+
+class TestDeployComposeWorkspaceMounts(unittest.TestCase):
+    def test_backend_compose_mounts_workspace_root(self):
+        compose = Path(__file__).resolve().parents[3] / "deploy" / "docker-compose.yml"
+        content = compose.read_text()
+
+        self.assertIn("/opt/codify-workspaces:/opt/codify-workspaces", content)
+
+    def test_offline_compose_mounts_workspace_root(self):
+        compose = Path(__file__).resolve().parents[3] / "deploy" / "offline-bundle" / "docker-compose.yml"
+        content = compose.read_text()
+
+        self.assertIn("/opt/codify-workspaces:/opt/codify-workspaces", content)
+
+
+class TestRequireChangesEnvVar(unittest.TestCase):
+    def test_build_container_env_includes_require_changes(self):
+        from app.core.worker_runtime import build_container_env
+
+        task = MagicMock()
+        task.id = 1
+        task.issue_id = 1
+        task.project_id = 1
+        task.user_prompt = "test"
+        task.require_changes = True
+
+        issue = MagicMock()
+        issue.id = 1
+        issue.branch_name = "codify/issue-1"
+        issue.title = "Test"
+        issue.claude_session_id = None
+        issue.base_branch = None
+
+        with patch("app.core.worker_runtime.get_settings") as mock_settings:
+            settings = MagicMock()
+            settings.gitlab_url = "http://gitlab.example.com"
+            settings.gitlab_bot_token = "token"
+            settings.anthropic_api_key = "key"
+            settings.anthropic_base_url = "http://api.example.com"
+            settings.anthropic_model = "claude"
+            settings.claude_max_turns = 10
+            settings.task_timeout = 1800
+            settings.custom_ca_bundle = ""
+            mock_settings.return_value = settings
+
+            env = build_container_env(task, issue, mr_iid=None, target_branch="main")
+
+        self.assertIn("REQUIRE_CHANGES", env)
+        self.assertEqual(env["REQUIRE_CHANGES"], "true")
+
+    def test_build_container_env_require_changes_false(self):
+        from app.core.worker_runtime import build_container_env
+
+        task = MagicMock()
+        task.id = 1
+        task.issue_id = 1
+        task.project_id = 1
+        task.user_prompt = "test"
+        task.require_changes = False
+
+        issue = MagicMock()
+        issue.id = 1
+        issue.branch_name = "codify/issue-1"
+        issue.title = "Test"
+        issue.claude_session_id = None
+        issue.base_branch = None
+
+        with patch("app.core.worker_runtime.get_settings") as mock_settings:
+            settings = MagicMock()
+            settings.gitlab_url = "http://gitlab.example.com"
+            settings.gitlab_bot_token = "token"
+            settings.anthropic_api_key = "key"
+            settings.anthropic_base_url = "http://api.example.com"
+            settings.anthropic_model = "claude"
+            settings.claude_max_turns = 10
+            settings.task_timeout = 1800
+            settings.custom_ca_bundle = ""
+            mock_settings.return_value = settings
+
+            env = build_container_env(task, issue, mr_iid=None, target_branch="main")
+
+        self.assertEqual(env["REQUIRE_CHANGES"], "false")
 
 
 if __name__ == "__main__":

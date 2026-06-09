@@ -2,15 +2,17 @@
 
 import logging
 import re
-from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config_crypto import decrypt_config_secret, encrypt_config_secret, ConfigEncryptionError
+from app.core.config_crypto import (
+    ConfigEncryptionError,
+    decrypt_config_secret,
+    encrypt_config_secret,
+)
 from app.database import get_db
 from app.dependencies.auth import require_admin_user
 from app.models import AIProvider, Task, TaskStatus, User
@@ -30,8 +32,9 @@ class ProviderResponse(BaseModel):
     api_key_configured: bool
     model: str
     max_turns: int
-    system_prompt: Optional[str]
+    system_prompt: str | None
     is_default: bool
+    is_disabled: bool
     created_at: str
     updated_at: str
 
@@ -39,10 +42,11 @@ class ProviderResponse(BaseModel):
 class CreateProviderRequest(BaseModel):
     name: str
     base_url: str
-    api_key: Optional[str] = None
+    api_key: str | None = None
     model: str
     max_turns: int = 20
-    system_prompt: Optional[str] = None
+    system_prompt: str | None = None
+    is_disabled: bool = False
 
     @field_validator("name")
     @classmethod
@@ -77,25 +81,26 @@ class CreateProviderRequest(BaseModel):
 
     @field_validator("system_prompt")
     @classmethod
-    def validate_system_prompt(cls, v: Optional[str]) -> Optional[str]:
+    def validate_system_prompt(cls, v: str | None) -> str | None:
         if v is not None and len(v) > 10000:
             raise ValueError("System prompt must be 10000 characters or fewer")
         return v
 
 
 class UpdateProviderRequest(BaseModel):
-    name: Optional[str] = None
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
+    name: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
     clear_api_key: bool = False
-    model: Optional[str] = None
-    max_turns: Optional[int] = None
-    system_prompt: Optional[str] = None
+    model: str | None = None
+    max_turns: int | None = None
+    system_prompt: str | None = None
     clear_system_prompt: bool = False
+    is_disabled: bool | None = None
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, v: Optional[str]) -> Optional[str]:
+    def validate_name(cls, v: str | None) -> str | None:
         if v is not None and not _NAME_RE.match(v):
             raise ValueError(
                 "Name must be 1-100 characters, alphanumeric/hyphens/underscores, "
@@ -105,28 +110,28 @@ class UpdateProviderRequest(BaseModel):
 
     @field_validator("base_url")
     @classmethod
-    def validate_base_url(cls, v: Optional[str]) -> Optional[str]:
+    def validate_base_url(cls, v: str | None) -> str | None:
         if v is not None and not v.startswith(("http://", "https://")):
             raise ValueError("Base URL must start with http:// or https://")
         return v
 
     @field_validator("model")
     @classmethod
-    def validate_model(cls, v: Optional[str]) -> Optional[str]:
+    def validate_model(cls, v: str | None) -> str | None:
         if v is not None and not v.strip():
             raise ValueError("Model name cannot be empty")
         return v.strip() if v else v
 
     @field_validator("max_turns")
     @classmethod
-    def validate_max_turns(cls, v: Optional[int]) -> Optional[int]:
+    def validate_max_turns(cls, v: int | None) -> int | None:
         if v is not None and (v < 1 or v > 1000):
             raise ValueError("Max turns must be between 1 and 1000")
         return v
 
     @field_validator("system_prompt")
     @classmethod
-    def validate_system_prompt(cls, v: Optional[str]) -> Optional[str]:
+    def validate_system_prompt(cls, v: str | None) -> str | None:
         if v is not None and len(v) > 10000:
             raise ValueError("System prompt must be 10000 characters or fewer")
         return v
@@ -144,6 +149,7 @@ def _serialize_provider(provider: AIProvider) -> dict:
         "max_turns": provider.max_turns,
         "system_prompt": provider.system_prompt,
         "is_default": provider.is_default,
+        "is_disabled": provider.is_disabled,
         "created_at": provider.created_at.isoformat(),
         "updated_at": provider.updated_at.isoformat(),
     }
@@ -201,6 +207,11 @@ async def create_provider(
     # Determine if this should be the default (first provider)
     count_result = await db.execute(select(func.count(AIProvider.id)))
     is_first = count_result.scalar() == 0
+    if is_first and request.is_disabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Default provider cannot be disabled",
+        )
 
     # Encrypt API key if provided
     encrypted_key = None
@@ -221,6 +232,7 @@ async def create_provider(
         max_turns=request.max_turns,
         system_prompt=request.system_prompt,
         is_default=is_first,
+        is_disabled=request.is_disabled,
     )
     db.add(provider)
     await db.commit()
@@ -262,6 +274,15 @@ async def update_provider(
 
     if request.max_turns is not None:
         provider.max_turns = request.max_turns
+
+    if request.is_disabled is True and provider.is_default:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Default provider cannot be disabled",
+        )
+
+    if request.is_disabled is not None:
+        provider.is_disabled = request.is_disabled
 
     # Handle API key update/clear
     if request.clear_api_key:
@@ -323,17 +344,27 @@ async def delete_provider(
         )
 
     was_default = provider.is_default
-    await db.delete(provider)
-
-    # If we deleted the default, promote the lowest-ID remaining provider
+    new_default = None
     if was_default:
         result = await db.execute(
-            select(AIProvider).order_by(AIProvider.id).limit(1)
+            select(AIProvider)
+            .where(AIProvider.id != provider_id, AIProvider.is_disabled == False)
+            .order_by(AIProvider.id)
+            .limit(1)
         )
         new_default = result.scalar_one_or_none()
-        if new_default:
-            new_default.is_default = True
-            logger.info(f"Promoted provider '{new_default.name}' to default after deletion")
+        if not new_default:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot delete default provider — no enabled provider remains",
+            )
+
+    await db.delete(provider)
+
+    # If we deleted the default, promote the lowest-ID enabled provider.
+    if new_default:
+        new_default.is_default = True
+        logger.info(f"Promoted provider '{new_default.name}' to default after deletion")
 
     await db.commit()
     logger.info(f"Deleted AI provider id={provider_id}")
@@ -349,6 +380,12 @@ async def set_default_provider(
     provider = await db.get(AIProvider, provider_id)
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
+
+    if provider.is_disabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Disabled provider cannot be set as default",
+        )
 
     if provider.is_default:
         return _serialize_provider(provider)

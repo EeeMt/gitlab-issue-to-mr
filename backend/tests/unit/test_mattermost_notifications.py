@@ -16,7 +16,7 @@ from app.core.mattermost_notifications import (
     MATTERMOST_TARGET_TYPE_INITIATOR_DM,
     notify_task_event,
 )
-from app.models import MattermostNotificationProfile, Task, TaskStatus
+from app.models import Issue, MattermostNotificationProfile, Task, TaskStatus
 
 
 class _SessionContext:
@@ -471,22 +471,305 @@ class TestNotifyTaskEventAdditional(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(failed), 1)
         self.assertIn("connection lost", failed[0].args[0].error_message)
 
+    async def test_expired_task_reloaded_and_notification_sent(self) -> None:
+        """When a task is expired (after intermediate db.commit()), it is reloaded
+        from DB and the notification is sent successfully.
+
+        This is a regression test for the bug where completion notifications were
+        silently dropped because db.commit() in monitor_container_run expired the
+        task's SQLAlchemy state, causing attribute access to raise MissingGreenlet.
+        """
+        # Build the fresh task that will be returned by the reload query
+        reloaded_task = Task(
+            id=13, project_id=1, user_prompt="x",
+            status=TaskStatus.COMPLETED, initiator_username="alice",
+        )
+        reloaded_task.issue_id = None  # no issue → simpler path
+        reloaded_task.__dict__.pop("issue", None)
+
+        profile = MattermostNotificationProfile(
+            id=5, name="C", enabled=True,
+            target_type=MATTERMOST_TARGET_TYPE_CHANNEL,
+            channel_id="channel-1",
+            mention_in_channel=False,
+            event_types_json='["task_completed"]',
+            field_keys_json='["task_id","status"]',
+        )
+
+        # The reload session returns the reloaded task; the profile session returns profiles
+        reload_session = MagicMock()
+        reload_session.execute = AsyncMock(
+            return_value=SimpleNamespace(
+                scalar_one_or_none=lambda: reloaded_task
+            )
+        )
+        reload_session.expunge = MagicMock()
+
+        profile_session = MagicMock()
+        profile_session.execute = AsyncMock(
+            return_value=SimpleNamespace(
+                scalars=lambda: SimpleNamespace(all=lambda: [profile])
+            )
+        )
+        profile_session.commit = AsyncMock()
+
+        session_call_count = 0
+
+        class _MultiSessionContext:
+            """Returns reload_session on first call, profile_session on second."""
+            def __init__(self_inner):
+                pass
+            async def __aenter__(self_inner):
+                nonlocal session_call_count
+                session_call_count += 1
+                return reload_session if session_call_count == 1 else profile_session
+            async def __aexit__(self_inner, exc_type, exc, tb):
+                return False
+
+        mock_client = AsyncMock()
+
+        # Simulate the expired state: inspect(task).expired is True, identity = (13,)
+        expired_state = MagicMock()
+        expired_state.expired = True
+        expired_state.identity = (13,)
+
+        original_task = Task(id=13, project_id=1, user_prompt="x", status=TaskStatus.COMPLETED)
+
+        with patch(
+            "app.core.mattermost_notifications.inspect",
+            side_effect=lambda obj: expired_state if obj is original_task else __import__("sqlalchemy").inspect(obj),
+        ), patch(
+            "app.core.mattermost_notifications.AsyncSessionLocal",
+            return_value=_MultiSessionContext(),
+        ), patch(
+            "app.core.mattermost_notifications.MattermostClient",
+            return_value=mock_client,
+        ), patch(
+            "app.core.mattermost_notifications.get_effective_settings",
+            return_value=SimpleNamespace(
+                mattermost_server_url="https://mm",
+                mattermost_bot_token="tok",
+                dashboard_url="https://dash",
+            ),
+        ):
+            await notify_task_event(original_task, MATTERMOST_EVENT_TASK_COMPLETED)
+
+        # Reload session was used (expunge called for reloaded task)
+        reload_session.expunge.assert_called()
+        # Notification was posted
+        mock_client.create_post.assert_awaited_once()
+        post_args = mock_client.create_post.await_args.args
+        self.assertEqual(post_args[0], "channel-1")
+
+    async def test_unloaded_issue_does_not_detach_caller_task(self) -> None:
+        """Loading an unloaded issue for rendering must not mutate the caller's session.
+
+        Successful task notifications run before monitor_container_run commits the
+        final task status and stats.  Detaching the caller's Task there can make
+        the later commit miss those changes, while failed/retry paths already
+        have the terminal state persisted before notifying.
+        """
+        task = Task(
+            id=14,
+            project_id=1,
+            issue_id=44,
+            user_prompt="x",
+            status=TaskStatus.COMPLETED,
+            initiator_username="alice",
+        )
+
+        issue = Issue(
+            id=44,
+            project_id=1,
+            title="Notify",
+            description="Notify",
+            branch_name="feature/notify",
+            target_branch="main",
+            merge_request_iid=7,
+            merge_request_url="https://gitlab.example.com/project/-/merge_requests/7",
+        )
+        profile = MattermostNotificationProfile(
+            id=6,
+            name="C",
+            enabled=True,
+            target_type=MATTERMOST_TARGET_TYPE_CHANNEL,
+            channel_id="channel-1",
+            mention_in_channel=False,
+            event_types_json='["task_completed"]',
+            field_keys_json='["task_id","status","merge_request"]',
+        )
+
+        caller_session = MagicMock()
+        task_state = MagicMock()
+        task_state.expired = False
+        task_state.unloaded = {"issue"}
+        task_state.session = caller_session
+
+        issue_session = MagicMock()
+        issue_session.execute = AsyncMock(
+            return_value=SimpleNamespace(scalar_one_or_none=lambda: issue)
+        )
+        issue_session.expunge = MagicMock()
+
+        profile_session = MagicMock()
+        profile_session.execute = AsyncMock(
+            return_value=SimpleNamespace(
+                scalars=lambda: SimpleNamespace(all=lambda: [profile])
+            )
+        )
+        profile_session.commit = AsyncMock()
+
+        session_call_count = 0
+
+        class _MultiSessionContext:
+            async def __aenter__(self_inner):
+                nonlocal session_call_count
+                session_call_count += 1
+                return issue_session if session_call_count == 1 else profile_session
+
+            async def __aexit__(self_inner, exc_type, exc, tb):
+                return False
+
+        mock_client = AsyncMock()
+
+        with patch(
+            "app.core.mattermost_notifications.inspect",
+            return_value=task_state,
+        ), patch(
+            "app.core.mattermost_notifications.AsyncSessionLocal",
+            return_value=_MultiSessionContext(),
+        ), patch(
+            "app.core.mattermost_notifications.MattermostClient",
+            return_value=mock_client,
+        ), patch(
+            "app.core.mattermost_notifications.get_effective_settings",
+            return_value=SimpleNamespace(
+                mattermost_server_url="https://mm",
+                mattermost_bot_token="tok",
+                dashboard_url="https://dash",
+            ),
+        ):
+            await notify_task_event(task, MATTERMOST_EVENT_TASK_COMPLETED)
+
+        caller_session.expunge.assert_not_called()
+        issue_session.expunge.assert_called_once_with(issue)
+        mock_client.create_post.assert_awaited_once()
+
+    async def test_custom_session_factory_is_used_for_database_queries(self) -> None:
+        """Worker threads must be able to keep notification queries on their loop."""
+        task = Task(
+            id=15,
+            project_id=1,
+            issue_id=45,
+            user_prompt="x",
+            status=TaskStatus.COMPLETED,
+            initiator_username="alice",
+        )
+        task.__dict__.pop("issue", None)
+
+        issue = Issue(
+            id=45,
+            project_id=1,
+            title="Notify",
+            description="Notify",
+            branch_name="feature/thread-local-session",
+            target_branch="main",
+            merge_request_iid=8,
+            merge_request_url="https://gitlab.example.com/project/-/merge_requests/8",
+        )
+        profile = MattermostNotificationProfile(
+            id=7,
+            name="C",
+            enabled=True,
+            target_type=MATTERMOST_TARGET_TYPE_CHANNEL,
+            channel_id="channel-1",
+            mention_in_channel=False,
+            event_types_json='["task_completed"]',
+            field_keys_json='["task_id","status"]',
+        )
+
+        issue_session = MagicMock()
+        issue_session.execute = AsyncMock(
+            return_value=SimpleNamespace(scalar_one_or_none=lambda: issue)
+        )
+        issue_session.expunge = MagicMock()
+
+        profile_session = MagicMock()
+        profile_session.execute = AsyncMock(
+            return_value=SimpleNamespace(
+                scalars=lambda: SimpleNamespace(all=lambda: [profile])
+            )
+        )
+        profile_session.commit = AsyncMock()
+
+        session_factory = MagicMock(
+            side_effect=[
+                _SessionContext(issue_session),
+                _SessionContext(profile_session),
+            ]
+        )
+        mock_client = AsyncMock()
+        task_state = MagicMock()
+        task_state.expired = False
+        task_state.unloaded = {"issue"}
+
+        def default_session_factory():
+            raise AssertionError("default AsyncSessionLocal should not be used")
+
+        with patch(
+            "app.core.mattermost_notifications.inspect",
+            return_value=task_state,
+        ), patch(
+            "app.core.mattermost_notifications.AsyncSessionLocal",
+            side_effect=default_session_factory,
+        ), patch(
+            "app.core.mattermost_notifications.MattermostClient",
+            return_value=mock_client,
+        ), patch(
+            "app.core.mattermost_notifications.get_effective_settings",
+            return_value=SimpleNamespace(
+                mattermost_server_url="https://mm",
+                mattermost_bot_token="tok",
+                dashboard_url="https://dash",
+            ),
+        ):
+            await notify_task_event(
+                task,
+                MATTERMOST_EVENT_TASK_COMPLETED,
+                session_factory=session_factory,
+            )
+
+        self.assertEqual(session_factory.call_count, 2)
+        issue_session.expunge.assert_called_once_with(issue)
+        mock_client.create_post.assert_awaited_once()
+
 
 # =======================================================================
 # Pure-function tests (no async, no DB)
 # =======================================================================
 
+from datetime import UTC, datetime
+
 import pytest
-from datetime import datetime, timezone
 
 from app.core.mattermost_notifications import (
+    MATTERMOST_EVENT_TASK_CANCELLED,
+    MATTERMOST_EVENT_TASK_EXECUTE_NOW,
+    MATTERMOST_EVENT_TASK_RESCHEDULED,
+    MATTERMOST_EVENT_TASK_RETRY_SCHEDULED,
+    MATTERMOST_FIELD_BRANCH,
+    MATTERMOST_FIELD_ERROR,
+    MATTERMOST_FIELD_INITIATOR,
+    MATTERMOST_FIELD_ISSUE,
+    MATTERMOST_FIELD_MERGE_REQUEST,
+    MATTERMOST_FIELD_PROJECT,
+    MATTERMOST_FIELD_SCHEDULE_CHANGE,
+    MATTERMOST_FIELD_STATUS,
+    MATTERMOST_FIELD_TARGET_BRANCH,
+    MATTERMOST_FIELD_TASK_ID,
+    MATTERMOST_FIELD_TASK_LINK,
     MattermostClient,
     MattermostNotificationError,
-    deserialize_string_list,
-    normalize_string_list,
-    serialize_profile,
-    serialize_string_list,
-    test_mattermost_connection as _fn_test_mattermost_connection,
     _build_attachment_fields,
     _build_card_markdown,
     _event_color,
@@ -494,25 +777,14 @@ from app.core.mattermost_notifications import (
     _event_label,
     _format_datetime,
     _resolve_mattermost_user_id,
-    MATTERMOST_EVENT_TASK_FAILED,
-    MATTERMOST_EVENT_TASK_RESCHEDULED,
-    MATTERMOST_EVENT_TASK_EXECUTE_NOW,
-    MATTERMOST_EVENT_TASK_RETRY_SCHEDULED,
-    MATTERMOST_EVENT_TASK_CANCELLED,
-    MATTERMOST_FIELD_TASK_ID,
-    MATTERMOST_FIELD_PROJECT,
-    MATTERMOST_FIELD_ISSUE,
-    MATTERMOST_FIELD_STATUS,
-    MATTERMOST_FIELD_BRANCH,
-    MATTERMOST_FIELD_INITIATOR,
-    MATTERMOST_FIELD_MERGE_REQUEST,
-    MATTERMOST_FIELD_TARGET_BRANCH,
-    MATTERMOST_FIELD_SCHEDULED_AT,
-    MATTERMOST_FIELD_SCHEDULE_CHANGE,
-    MATTERMOST_FIELD_ERROR,
-    MATTERMOST_FIELD_TASK_LINK,
+    deserialize_string_list,
+    normalize_string_list,
+    serialize_profile,
+    serialize_string_list,
 )
-
+from app.core.mattermost_notifications import (
+    test_mattermost_connection as _fn_test_mattermost_connection,
+)
 
 # ---- deserialize_string_list ----
 
@@ -597,8 +869,8 @@ class TestSerializeProfile:
         p.mention_in_channel = False
         p.event_types_json = '["task_completed"]'
         p.field_keys_json = '["task_id", "status"]'
-        p.created_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
-        p.updated_at = datetime(2024, 1, 2, tzinfo=timezone.utc)
+        p.created_at = datetime(2024, 1, 1, tzinfo=UTC)
+        p.updated_at = datetime(2024, 1, 2, tzinfo=UTC)
 
         result = serialize_profile(p)
 
@@ -618,7 +890,7 @@ class TestFormatDatetime:
 
     def test_datetime_returns_iso(self):
         """A datetime is formatted as ISO with seconds precision (line 147)."""
-        dt = datetime(2024, 6, 15, 10, 30, 45, tzinfo=timezone.utc)
+        dt = datetime(2024, 6, 15, 10, 30, 45, tzinfo=UTC)
         assert _format_datetime(dt) == "2024-06-15T10:30:45+00:00"
 
 
@@ -1113,8 +1385,8 @@ class TestBuildAttachmentFields:
             target_branch=None,
         )
         ctx = {
-            "previous_scheduled_at": datetime(2024, 1, 1, tzinfo=timezone.utc),
-            "scheduled_at": datetime(2024, 1, 2, tzinfo=timezone.utc),
+            "previous_scheduled_at": datetime(2024, 1, 1, tzinfo=UTC),
+            "scheduled_at": datetime(2024, 1, 2, tzinfo=UTC),
         }
         with self._settings_patch():
             fields = _build_attachment_fields(
@@ -1212,7 +1484,7 @@ class TestBuildCardMarkdown:
             id=2, project_id=10, user_prompt="x",
             status=TaskStatus.FAILED,
             initiator_username="bob",
-            scheduled_at=datetime(2024, 6, 1, tzinfo=timezone.utc),
+            scheduled_at=datetime(2024, 6, 1, tzinfo=UTC),
             error_message="Out of memory",
         )
         task.issue_id = 20
@@ -1223,8 +1495,8 @@ class TestBuildCardMarkdown:
             target_branch=None,
         )
         ctx = {
-            "previous_scheduled_at": datetime(2024, 5, 1, tzinfo=timezone.utc),
-            "scheduled_at": datetime(2024, 6, 1, tzinfo=timezone.utc),
+            "previous_scheduled_at": datetime(2024, 5, 1, tzinfo=UTC),
+            "scheduled_at": datetime(2024, 6, 1, tzinfo=UTC),
         }
         with self._settings_patch():
             md = _build_card_markdown(task, MATTERMOST_EVENT_TASK_FAILED, ctx)

@@ -57,10 +57,18 @@ function saveToStorage(key: string, state: PersistedState) {
   }
 }
 
-export function useFilterSort(config: FilterSortConfig) {
+/**
+ * @param config - Filter/sort/column configuration
+ * @param initialFilters - Optional seed values that take precedence over localStorage.
+ *   Use this for URL query params so they win over persisted state on first load.
+ */
+export function useFilterSort(config: FilterSortConfig, initialFilters?: Record<string, any>) {
   const saved = loadFromStorage(config.storageKey)
 
-  const filters: Ref<Record<string, any>> = ref(saved?.filters ?? {})
+  const filters: Ref<Record<string, any>> = ref({
+    ...(saved?.filters ?? {}),
+    ...(initialFilters ?? {}),
+  })
   const sort: Ref<{ field: string; order: 'asc' | 'desc' }> = ref(
     saved?.sort ?? { ...config.defaultSort }
   )

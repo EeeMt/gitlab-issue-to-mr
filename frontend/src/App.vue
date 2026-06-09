@@ -1,5 +1,5 @@
 <template>
-  <n-config-provider :locale="naiveUiLocale" :date-locale="naiveUiDateLocale">
+  <n-config-provider :locale="naiveUiLocale" :date-locale="naiveUiDateLocale" :theme-overrides="popconfirmThemeOverrides">
     <n-message-provider>
     <n-dialog-provider>
       <div v-if="!authState.initialized" class="app-loading">
@@ -69,8 +69,27 @@
         </n-drawer>
 
         <n-layout :native-scrollbar="false" class="app-shell__main">
-          <div v-if="showUserToolbar && !isMobile" class="app-shell__topbar">
-            <div class="app-shell__topbar-user">
+          <div v-if="showUserToolbar && !isMobile" class="app-shell__topbar-wrapper">
+            <div
+              v-if="announcement?.enabled && announcement?.text"
+              class="app-shell__announcement-banner"
+            >
+              <div
+                class="app-shell__topbar-announcement-pill"
+                :class="`app-shell__topbar-announcement-pill--${announcement.level}`"
+              >
+                <n-icon :component="announcementIcon" size="13" class="app-shell__topbar-announcement-icon" />
+                <div
+                  ref="announcementMarqueeRef"
+                  class="app-shell__topbar-announcement-marquee"
+                  :class="{ 'app-shell__topbar-announcement-marquee--scrolling': announcementOverflows }"
+                >
+                  <span ref="announcementTextRef" class="app-shell__topbar-announcement-text" v-html="announcement.text" />
+                </div>
+              </div>
+            </div>
+            <div class="app-shell__topbar">
+              <div class="app-shell__topbar-user">
               <n-avatar round size="small" :src="authState.user?.avatar_url || undefined">
                 {{ userInitial }}
               </n-avatar>
@@ -82,6 +101,66 @@
               </div>
             </div>
             <div class="app-shell__topbar-actions">
+              <n-tooltip v-if="usageSummary" trigger="hover" :style="usageTooltipStyle">
+                <template #trigger>
+                  <n-button
+                    tertiary
+                    circle
+                    data-testid="usage-indicator-desktop"
+                    class="usage-indicator"
+                    :class="`usage-indicator--${usageSummary.severity}`"
+                    :title="t(usageSeverityLabelKey)"
+                  >
+                    <template #icon>
+                      <n-icon :component="SpeedometerOutline" />
+                    </template>
+                  </n-button>
+                </template>
+                <div class="usage-indicator__tooltip">
+                  <div class="usage-indicator__tooltip-title">{{ t(usageSeverityLabelKey) }}</div>
+                  <div v-for="item in usageTooltipItems" :key="item.labelKey" class="usage-indicator__tooltip-row">
+                    <div class="usage-indicator__tooltip-row-top">
+                      <span class="usage-indicator__tooltip-label">{{ t(item.labelKey) }}</span>
+                      <span class="usage-indicator__tooltip-value">
+                        {{ formatLargeNumber(item.used) }} / {{ formatUsageLimitDisplay(item.limitNumeric, item.limit) }}
+                        &nbsp;({{ formatUsagePercent(item.used, item.limitNumeric) }})
+                      </span>
+                    </div>
+                    <div class="usage-indicator__progress">
+                      <div
+                        class="usage-indicator__progress-fill"
+                        :class="`usage-indicator__progress-fill--${usageSummary.severity}`"
+                        :style="{ width: formatUsagePercent(item.used, item.limitNumeric) }"
+                      />
+                    </div>
+                  </div>
+                  <div class="usage-indicator__tooltip-row usage-indicator__tooltip-row--reset">
+                    <span>{{ t('shell.dailyReset') }}</span>
+                    <span>{{ formatUsageResetAt(usageSummary.reset_at.daily) }}</span>
+                  </div>
+                  <div class="usage-indicator__tooltip-row usage-indicator__tooltip-row--reset">
+                    <span>{{ t('shell.weeklyReset') }}</span>
+                    <span>{{ formatUsageResetAt(usageSummary.reset_at.weekly) }}</span>
+                  </div>
+                </div>
+              </n-tooltip>
+              <n-tooltip trigger="hover" :style="onboardingTooltipStyle">
+                <template #trigger>
+                  <n-button
+                    type="primary"
+                    tertiary
+                    circle
+                    class="app-shell__create-issue-button"
+                    :title="t('shell.createIssueTooltip')"
+                    @click="navigateToCreateIssue"
+                  >
+                    <template #icon>
+                      <n-icon :component="AddCircleOutline" />
+                    </template>
+                  </n-button>
+                </template>
+                {{ t('shell.createIssueTooltip') }}
+              </n-tooltip>
               <LanguageToggle size="small" class="app-shell__language-toggle" />
               <n-tooltip trigger="hover" :style="onboardingTooltipStyle">
                 <template #trigger>
@@ -108,6 +187,7 @@
               </n-button>
             </div>
           </div>
+          </div>
 
           <div v-if="isMobile" class="mobile-header">
             <div class="mobile-header__left">
@@ -129,6 +209,19 @@
                 <span class="mobile-header__user-name">{{ userDisplayName }}</span>
               </div>
               <LanguageToggle size="small" class="mobile-header__language-toggle" />
+              <n-button
+                v-if="showUserToolbar"
+                type="primary"
+                tertiary
+                circle
+                class="mobile-header__create-issue-button"
+                :title="t('shell.createIssueTooltip')"
+                @click="navigateToCreateIssue"
+              >
+                <template #icon>
+                  <n-icon :component="AddCircleOutline" />
+                </template>
+              </n-button>
               <n-button
                 v-if="showUserToolbar"
                 quaternary
@@ -160,6 +253,18 @@
           <n-layout content-style="padding: 20px;" :native-scrollbar="false" class="app-shell__content">
             <div class="app-shell__content-inner">
               <router-view />
+              <footer class="app-footer">
+                <span class="app-footer__text">Powered by</span>
+                <a
+                  href="https://github.com/EeeMt/codify"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="app-footer__link"
+                >
+                  <n-icon size="13" :component="LogoGithub" class="app-footer__icon" />
+                  Codify
+                </a>
+              </footer>
             </div>
           </n-layout>
 
@@ -178,7 +283,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   NAvatar,
   NButton,
@@ -199,6 +304,7 @@ import type { MenuOption } from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
+  AddCircleOutline,
   BarChartOutline,
   DocumentTextOutline,
   FingerPrintOutline,
@@ -207,17 +313,21 @@ import {
   LogOutOutline,
   MenuOutline,
   InformationCircleOutline,
+  LogoGithub,
   CalendarOutline,
   PeopleOutline,
   RocketOutline,
   SettingsOutline,
-  SpeedometerOutline
+  SpeedometerOutline,
+  MegaphoneOutline
 } from '@vicons/ionicons5'
 import { authState, canAccessSharedPage, initializeAuth, isAdmin, logoutAndClearAuth } from './auth'
+import { getMyUsageSummary, getAnnouncement, type CurrentUserUsageSummary, type AnnouncementInfo } from './api'
 import LanguageToggle from './components/LanguageToggle.vue'
 import OnboardingModal from './components/OnboardingModal.vue'
 import { useBreakpoints } from './composables/useBreakpoints'
 import { getOnboardingDismissed, setOnboardingDismissed } from './composables/useOnboarding'
+import { formatLargeNumber, formatUsageResetAt } from './utils/usageLimits'
 import {
   naiveUiDateLocale,
   naiveUiLocale,
@@ -230,6 +340,13 @@ const collapsed = ref(false)
 const showDrawer = ref(false)
 
 const { isMobile } = useBreakpoints()
+
+const popconfirmThemeOverrides = {
+  Popover: {
+    borderRadius: '18px',
+    boxShadow: '0 8px 32px rgba(15, 23, 42, 0.25)',
+  }
+}
 
 const activeKey = computed(() => route.name as string)
 const isLoginRoute = computed(() => route.name === 'Login')
@@ -246,7 +363,8 @@ const menuLabels: Record<string, string> = {
   ScheduleOverview: 'nav.scheduleOverview',
   Analytics: 'nav.analytics',
   Config: 'nav.config',
-  AccessManagement: 'nav.accessManagement'
+  AccessManagement: 'nav.accessManagement',
+  UsageManagement: 'nav.usageManagement'
 }
 
 const onboardingTooltipStyle = {
@@ -255,10 +373,41 @@ const onboardingTooltipStyle = {
   borderRadius: '6px',
 }
 
+const usageTooltipStyle = {
+  borderRadius: '12px',
+  padding: '12px 16px',
+  fontSize: '12px',
+}
+
 const currentPageLabel = computed(() => t(menuLabels[activeKey.value] || 'app.navigation'))
 const showUserToolbar = computed(() => authState.authenticated)
 const onboardingDismissed = ref(getOnboardingDismissed())
 const manualOnboardingOpen = ref(false)
+const usageSummary = ref<CurrentUserUsageSummary | null>(null)
+const usageRefreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
+const usageSummaryRequestToken = ref(0)
+const announcement = ref<AnnouncementInfo | null>(null)
+const announcementRefreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
+const announcementMarqueeRef = ref<HTMLElement | null>(null)
+const announcementTextRef = ref<HTMLElement | null>(null)
+const announcementOverflows = ref(false)
+
+function updateAnnouncementOverflow() {
+  const marquee = announcementMarqueeRef.value
+  const text = announcementTextRef.value
+  if (!marquee || !text) {
+    announcementOverflows.value = false
+    return
+  }
+  const overflows = text.scrollWidth > marquee.clientWidth
+  announcementOverflows.value = overflows
+  if (overflows) {
+    const offset = text.scrollWidth - marquee.clientWidth
+    marquee.style.setProperty('--scroll-offset', `-${offset}px`)
+  }
+}
+
+const announcementIcon = computed(() => MegaphoneOutline)
 const showOnboarding = computed(
   () => authState.initialized && authState.authenticated && showShell.value && (!onboardingDismissed.value || manualOnboardingOpen.value)
 )
@@ -268,6 +417,63 @@ const userDisplayName = computed(
 const userInitial = computed(() => userDisplayName.value.slice(0, 1).toUpperCase())
 const renderIcon = (icon: any) => () => h(NIcon, null, { default: () => h(icon) })
 const shouldGroupMenu = computed(() => !collapsed.value || isMobile.value)
+const usageSeverityLabelKey = computed(() => {
+  switch (usageSummary.value?.severity) {
+    case 'over_limit':
+      return 'shell.usageOverLimit'
+    case 'near_limit':
+      return 'shell.usageNearLimit'
+    default:
+      return 'shell.usageNormal'
+  }
+})
+const usageTooltipItems = computed(() => {
+  if (!usageSummary.value) {
+    return []
+  }
+
+  return [
+    {
+      labelKey: 'shell.dailyTokens',
+      used: usageSummary.value.usage.daily_tokens,
+      limit: formatUsageLimit(usageSummary.value.limits.daily_tokens),
+      limitNumeric: usageSummary.value.limits.daily_tokens.value,
+    },
+    {
+      labelKey: 'shell.weeklyTokens',
+      used: usageSummary.value.usage.weekly_tokens,
+      limit: formatUsageLimit(usageSummary.value.limits.weekly_tokens),
+      limitNumeric: usageSummary.value.limits.weekly_tokens.value,
+    },
+    {
+      labelKey: 'shell.dailyTasks',
+      used: usageSummary.value.usage.daily_tasks,
+      limit: formatUsageLimit(usageSummary.value.limits.daily_tasks),
+      limitNumeric: usageSummary.value.limits.daily_tasks.value,
+    },
+    {
+      labelKey: 'shell.weeklyTasks',
+      used: usageSummary.value.usage.weekly_tasks,
+      limit: formatUsageLimit(usageSummary.value.limits.weekly_tasks),
+      limitNumeric: usageSummary.value.limits.weekly_tasks.value,
+    },
+  ]
+})
+
+function formatUsageLimit(limit: CurrentUserUsageSummary['limits']['daily_tokens']) {
+  return limit.mode === 'unlimited' || limit.value === null ? t('shell.usageUnlimited') : String(limit.value)
+}
+
+function formatUsageLimitDisplay(limitNumeric: number | null, fallback: string): string {
+  if (limitNumeric === null) return fallback
+  return formatLargeNumber(limitNumeric)
+}
+
+function formatUsagePercent(used: number, limitNumeric: number | null): string {
+  if (limitNumeric === null || limitNumeric <= 0) return '0%'
+  const pct = Math.min((used / limitNumeric) * 100, 100)
+  return `${Math.round(pct)}%`
+}
 
 function buildMenuItem(labelKey: string, key: string, icon: any): MenuOption {
   return {
@@ -325,6 +531,7 @@ const menuOptions = computed<MenuOption[]>(() => {
 
   if (!authState.oidcEnabled || isAdmin.value) {
     adminItems.push(buildMenuItem('nav.accessManagement', 'AccessManagement', PeopleOutline))
+    adminItems.push(buildMenuItem('nav.usageManagement', 'UsageManagement', RocketOutline))
     adminItems.push(buildMenuItem('nav.config', 'Config', SettingsOutline))
   }
 
@@ -374,8 +581,135 @@ async function handleLogout() {
   await logoutAndClearAuth()
 }
 
+async function loadUsageSummary() {
+  if (!showShell.value || !authState.authenticated || !authState.user?.id) {
+    usageSummaryRequestToken.value += 1
+    usageSummary.value = null
+    return
+  }
+
+  const requestToken = ++usageSummaryRequestToken.value
+  const requestedUserId = authState.user.id
+
+  try {
+    const summary = await getMyUsageSummary()
+    if (
+      requestToken !== usageSummaryRequestToken.value ||
+      !showShell.value ||
+      !authState.authenticated ||
+      authState.user?.id !== requestedUserId
+    ) {
+      return
+    }
+    usageSummary.value = summary
+  } catch {
+    if (
+      requestToken !== usageSummaryRequestToken.value ||
+      !showShell.value ||
+      !authState.authenticated ||
+      authState.user?.id !== requestedUserId
+    ) {
+      return
+    }
+    usageSummary.value = null
+  }
+}
+
+function stopUsageRefresh() {
+  if (usageRefreshTimer.value !== null) {
+    clearInterval(usageRefreshTimer.value)
+    usageRefreshTimer.value = null
+  }
+}
+
+function startUsageRefresh() {
+  stopUsageRefresh()
+  if (!showShell.value || !authState.authenticated || !authState.user?.id) {
+    return
+  }
+  usageRefreshTimer.value = setInterval(() => {
+    void loadUsageSummary()
+  }, 60_000)
+}
+
+async function loadAnnouncement() {
+  if (!showShell.value || !authState.authenticated) {
+    announcement.value = null
+    return
+  }
+  try {
+    announcement.value = await getAnnouncement()
+    await nextTick()
+    updateAnnouncementOverflow()
+  } catch {
+    announcement.value = null
+  }
+}
+
+function stopAnnouncementRefresh() {
+  if (announcementRefreshTimer.value !== null) {
+    clearInterval(announcementRefreshTimer.value)
+    announcementRefreshTimer.value = null
+  }
+}
+
+function startAnnouncementRefresh() {
+  stopAnnouncementRefresh()
+  if (!showShell.value || !authState.authenticated) {
+    return
+  }
+  announcementRefreshTimer.value = setInterval(() => {
+    void loadAnnouncement()
+  }, 300_000) // 5 minutes
+}
+
+watch(
+  () => [showShell.value, authState.authenticated, authState.user?.id],
+  () => {
+    void loadUsageSummary()
+    startUsageRefresh()
+    void loadAnnouncement()
+    startAnnouncementRefresh()
+  },
+  { immediate: true }
+)
+
+watch(announcementMarqueeRef, (el) => {
+  announcementResizeObserver?.disconnect()
+  if (el && announcementResizeObserver) {
+    announcementResizeObserver.observe(el)
+    updateAnnouncementOverflow()
+  }
+})
+
+let scrollTimer: ReturnType<typeof setTimeout>
+
+function onDocumentScroll() {
+  document.documentElement.classList.add('is-scrolling')
+  clearTimeout(scrollTimer)
+  scrollTimer = setTimeout(() => {
+    document.documentElement.classList.remove('is-scrolling')
+  }, 600)
+}
+
+let announcementResizeObserver: ResizeObserver | null = null
+
 onMounted(() => {
   initializeAuth()
+  document.addEventListener('scroll', onDocumentScroll, { capture: true, passive: true })
+  announcementResizeObserver = new ResizeObserver(() => {
+    updateAnnouncementOverflow()
+  })
+})
+
+onBeforeUnmount(() => {
+  stopUsageRefresh()
+  stopAnnouncementRefresh()
+  usageSummaryRequestToken.value += 1
+  document.removeEventListener('scroll', onDocumentScroll, { capture: true })
+  clearTimeout(scrollTimer)
+  announcementResizeObserver?.disconnect()
+  announcementResizeObserver = null
 })
 </script>
 
@@ -452,13 +786,17 @@ body {
   min-height: calc(100vh - 40px);
 }
 
+.app-shell__topbar-wrapper {
+  width: min(calc(100% - 40px), var(--app-page-max-width));
+  margin: 14px auto 0;
+}
+
 .app-shell__topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  width: min(calc(100% - 40px), var(--app-page-max-width));
-  margin: 14px auto 0;
+  width: 100%;
   box-sizing: border-box;
   padding: 12px 14px;
   border-radius: 18px;
@@ -476,6 +814,10 @@ body {
 
 .app-shell__onboarding-button,
 .app-shell__logout-button {
+  flex-shrink: 0;
+}
+
+.app-shell__create-issue-button {
   flex-shrink: 0;
 }
 
@@ -507,8 +849,186 @@ body {
   gap: 10px;
 }
 
+.app-shell__announcement-banner {
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+
+.app-shell__topbar-announcement-pill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 12px 4px 10px;
+  border-radius: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  overflow: hidden;
+  transition: opacity 0.2s ease;
+}
+
+.app-shell__topbar-announcement-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+/* Scrolling marquee container */
+.app-shell__topbar-announcement-marquee {
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* Only apply animation when text actually overflows */
+.app-shell__topbar-announcement-text {
+  display: inline-block;
+  font-size: 12.5px;
+  font-weight: 400;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.app-shell__topbar-announcement-text a,
+.app-shell__topbar-announcement-text a:visited {
+  color: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: currentColor;
+  opacity: 0.85;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.app-shell__topbar-announcement-text a:hover {
+  opacity: 1;
+}
+
+.app-shell__topbar-announcement-marquee--scrolling .app-shell__topbar-announcement-text {
+  animation: announcement-scroll 12s linear 2s infinite;
+}
+
+/* Pause on hover */
+.app-shell__topbar-announcement-marquee--scrolling:hover .app-shell__topbar-announcement-text {
+  animation-play-state: paused;
+}
+
+@keyframes announcement-scroll {
+  0%, 15% {
+    transform: translateX(0);
+  }
+  80%, 95% {
+    transform: translateX(var(--scroll-offset, -60%));
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.app-shell__topbar-announcement-pill--info {
+  background: rgba(32, 128, 240, 0.08);
+  border: 1px solid rgba(32, 128, 240, 0.2);
+  color: #1565c7;
+}
+
+.app-shell__topbar-announcement-pill--warning {
+  background: rgba(240, 160, 32, 0.1);
+  border: 1px solid rgba(240, 160, 32, 0.28);
+  color: #a06800;
+}
+
+.app-shell__topbar-announcement-pill--error {
+  background: rgba(208, 48, 80, 0.08);
+  border: 1px solid rgba(208, 48, 80, 0.22);
+  color: #b81030;
+}
+
+.app-shell__topbar-announcement-pill--success {
+  background: rgba(24, 160, 88, 0.08);
+  border: 1px solid rgba(24, 160, 88, 0.22);
+  color: #0d7a3e;
+}
+
 .app-shell__language-toggle {
   flex-shrink: 0;
+}
+
+.usage-indicator {
+  flex-shrink: 0;
+}
+
+.usage-indicator--normal {
+  color: #18a058;
+}
+
+.usage-indicator--near_limit {
+  color: #f0a020;
+}
+
+.usage-indicator--over_limit {
+  color: #d03050;
+}
+
+.usage-indicator__tooltip {
+  min-width: 260px;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.usage-indicator__tooltip-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.usage-indicator__tooltip-row {
+  margin-top: 6px;
+}
+
+.usage-indicator__tooltip-row-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.usage-indicator__tooltip-row--reset {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.usage-indicator__tooltip-label {
+  flex-shrink: 0;
+}
+
+.usage-indicator__tooltip-value {
+  text-align: right;
+}
+
+.usage-indicator__progress {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.15);
+  margin-top: 4px;
+  overflow: hidden;
+}
+
+.usage-indicator__progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.usage-indicator__progress-fill--normal {
+  background: #18a058;
+}
+
+.usage-indicator__progress-fill--near_limit {
+  background: #f0a020;
+}
+
+.usage-indicator__progress-fill--over_limit {
+  background: #d03050;
 }
 
 .logo {
@@ -777,6 +1297,39 @@ a.app-link:visited:hover {
   }
 }
 
+.app-footer {
+  margin-top: 32px;
+  padding: 12px 0;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.app-footer__text {
+  font-size: 11px;
+  color: rgba(15, 23, 42, 0.22);
+}
+
+.app-footer__link {
+  font-size: 11px;
+  color: rgba(15, 23, 42, 0.28);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.2s ease;
+}
+
+.app-footer__link:hover {
+  color: rgba(15, 23, 42, 0.45);
+}
+
+.app-footer__icon {
+  flex-shrink: 0;
+}
+
 @media (max-width: 480px) {
   .mobile-header {
     align-items: flex-start;
@@ -793,5 +1346,83 @@ a.app-link:visited:hover {
   .mobile-header__user-chip {
     padding-right: 4px;
   }
+}
+
+/* ===================================================================
+   Shared page hero section (gradient header + summary cards)
+   =================================================================== */
+
+.page-hero {
+  position: relative;
+  padding: 32px 36px 28px;
+  margin: -16px -16px 16px;
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 0%, rgba(99, 102, 241, 0.06), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 80% 100%, rgba(59, 130, 246, 0.05), transparent 55%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgba(248, 250, 252, 0.4) 100%);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+}
+
+.page-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(15, 23, 42, 0.03) 1px, transparent 1px);
+  background-size: 20px 20px;
+  pointer-events: none;
+  mask-image: linear-gradient(180deg, black 0%, transparent 100%);
+}
+
+.page-hero > .n-grid {
+  margin-top: 24px;
+}
+
+.page-hero .n-gi {
+  display: flex;
+}
+
+.page-hero .n-gi > * {
+  width: 100%;
+}
+
+@media (max-width: 767px) {
+  .page-hero {
+    padding: 20px 16px 20px;
+    margin: -12px -12px 12px;
+  }
+}
+
+/* Unified native scrollbar — thin, subtle, cross-platform consistent */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+  transition: background 0.3s ease 0.1s;
+}
+
+html.is-scrolling ::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.3);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.5) !important;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Popconfirm: additional padding via CSS */
+.n-popover-body:has(.n-popconfirm) {
+  padding: 16px 20px !important;
 }
 </style>

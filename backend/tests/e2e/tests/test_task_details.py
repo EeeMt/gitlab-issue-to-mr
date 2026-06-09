@@ -12,8 +12,6 @@ import pytest
 from playwright.sync_api import Page, expect
 
 
-
-
 @pytest.mark.task_details
 class TestTaskDetailView:
     """Tests for the task detail view functionality."""
@@ -90,19 +88,19 @@ class TestTaskActions:
         """Test that cancel button is shown for pending/running tasks."""
         class_page.goto("/tasks/1")
         class_page.wait_for_selector(".task-view", state="visible", timeout=5000)
-        cancel_button = class_page.get_by_role("button", name="Cancel")
+        class_page.get_by_role("button", name="Cancel")
 
     def test_retry_button_exists_for_failed_tasks(self, class_page: Page):
         """Test that retry button is shown for failed/cancelled tasks."""
         class_page.goto("/tasks/1")
         class_page.wait_for_selector(".task-view", state="visible", timeout=5000)
-        retry_button = class_page.get_by_role("button", name="Retry")
+        class_page.get_by_role("button", name="Retry")
 
     def test_execute_button_exists_for_pending_tasks(self, class_page: Page):
         """Test that execute button is shown for pending tasks."""
         class_page.goto("/tasks/1")
         class_page.wait_for_selector(".task-view", state="visible", timeout=5000)
-        execute_button = class_page.get_by_role("button", name="Execute")
+        class_page.get_by_role("button", name="Execute")
 
     def test_task_view_no_actions_for_completed_tasks(self, class_page: Page):
         """Test that completed tasks show no action buttons or show the no-action message."""

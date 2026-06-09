@@ -14,7 +14,6 @@ sys.path.insert(
 
 from app.config import get_settings, reset_runtime_config
 
-
 # ── Env helpers ─────────────────────────────────────────────────────
 _ORIG_ENC_KEY = os.environ.get("CONFIG_ENCRYPTION_KEY")
 
@@ -46,6 +45,8 @@ def _make_test_client(*, is_unrestricted=True, accessible_projects=None):
     """Build a TestClient with dependency overrides for projects endpoints."""
     from types import SimpleNamespace
 
+    from fastapi.testclient import TestClient
+
     from app.database import get_db
     from app.dependencies.auth import require_authenticated_context
     from app.dependencies.project_access import (
@@ -53,7 +54,6 @@ def _make_test_client(*, is_unrestricted=True, accessible_projects=None):
         require_project_access_scope,
     )
     from app.main import app
-    from fastapi.testclient import TestClient
 
     mock_db = MagicMock()
     mock_db.execute = AsyncMock(

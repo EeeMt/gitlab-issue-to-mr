@@ -1,30 +1,47 @@
 <template>
   <div class="schedule-overview">
     <n-spin :show="initialLoading" :description="t('scheduleOverview.loading')">
-      <n-space vertical :size="20">
-        <div class="schedule-overview__hero">
-          <div>
-            <h2 class="schedule-overview__title">{{ t('scheduleOverview.title') }}</h2>
-            <p class="schedule-overview__subtitle">
-              {{ t('scheduleOverview.subtitle') }}
-            </p>
-          </div>
-          <n-space align="center" wrap class="schedule-overview__actions">
-            <n-button @click="refresh" :loading="loading">
-              {{ t('common.refresh') }}
-            </n-button>
-          </n-space>
-        </div>
+      <div class="page-hero">
+        <PageHeader
+          :title="t('scheduleOverview.title')"
+          :subtitle="t('scheduleOverview.subtitle')"
+        >
+          <template #actions>
+            <n-space align="center">
+              <div class="schedule-toggle" role="tablist">
+                <button
+                  type="button"
+                  class="schedule-toggle__button"
+                  :class="{ 'schedule-toggle__button--active': !myTasksOnly }"
+                  @click="myTasksOnly = false"
+                >{{ t('common.all') }}</button>
+                <button
+                  type="button"
+                  class="schedule-toggle__button"
+                  :class="{ 'schedule-toggle__button--active': myTasksOnly }"
+                  @click="myTasksOnly = true"
+                >{{ t('scheduleOverview.myTasksOnly') }}</button>
+              </div>
+              <n-button @click="refresh" :loading="loading">
+                {{ t('common.refresh') }}
+              </n-button>
+            </n-space>
+          </template>
+        </PageHeader>
 
         <n-grid :cols="isMobile ? 2 : 3" :x-gap="16" :y-gap="16">
           <n-gi v-for="item in summaryItems" :key="item.label">
-            <n-card size="small" class="schedule-summary-card" :bordered="false">
-              <div class="schedule-summary-card__label">{{ item.label }}</div>
-              <div class="schedule-summary-card__value">{{ item.value }}</div>
-              <div v-if="item.note" class="schedule-summary-card__note">{{ item.note }}</div>
-            </n-card>
+            <SummaryCard
+              :label="item.label"
+              :value="item.value"
+              :note="item.note"
+              :icon="item.icon"
+              :accent="item.accent"
+            />
           </n-gi>
         </n-grid>
+      </div>
+      <n-space vertical :size="20">
 
         <n-grid class="schedule-overview__insights-grid" :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="16">
           <n-gi>
@@ -132,8 +149,8 @@
           <HeatmapChart
             :tasks="scheduledTasks"
             :selected-ms="selectedWindow?.startMs ?? null"
-            :max-per-slot="slotMaxTasks"
-            :enforce-capacity="slotEnforce"
+            :max-per-slot="myTasksOnly ? 0 : slotMaxTasks"
+            :enforce-capacity="!myTasksOnly && slotEnforce"
             :allow-full-selection="true"
             @cell-click="handleHeatmapCellClick"
           />
@@ -255,7 +272,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -271,11 +288,14 @@ import { useWindowSize } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { authState, isAdmin, initializeAuth } from '../auth'
-import { getScheduledTasks, getScheduledStats, rescheduleTask, getConfig, type Task, type ScheduledStatsResponse } from '../api'
+import { getScheduledTasks, getScheduledStats, rescheduleTask, type Task, type ScheduledStatsResponse } from '../api'
 import { formatDateTimeUtc8Compact, formatMonthDayTimeUtc8, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
 import { formatPriority, getProjectLabel as _getProjectLabel, isSameLocalDay } from '../utils/format'
 import { extractSlotErrorMessage } from '../utils/slotError'
+import PageHeader from '../components/PageHeader.vue'
+import SummaryCard from '../components/SummaryCard.vue'
 import HeatmapChart from '../components/HeatmapChart.vue'
+import { CalendarOutline, TimeOutline, CheckmarkCircleOutline, BarChartOutline, FlameOutline } from '@vicons/ionicons5'
 
 type HourBucket = {
   key: string
@@ -313,6 +333,7 @@ const savingTaskId = ref<number | null>(null)
 let pollTimer: number | null = null
 
 const canEditScheduleOverview = computed(() => !authState.oidcEnabled || isAdmin.value)
+const myTasksOnly = ref(false)
 
 function getProjectLabel(task: Task): string {
   return _getProjectLabel(task, t('dashboard.projectFallback', { id: task.project_id }))
@@ -359,24 +380,28 @@ const summaryItems = computed(() => {
   if (!s) return []
 
   const baseItems = [
-    { label: t('scheduleOverview.scheduledQueue'), value: String(s.total), note: t('scheduleOverview.activeScheduledTasks') },
-    { label: t('scheduleOverview.readyNow'), value: String(s.ready_now), note: t('scheduleOverview.alreadyDue') },
-    { label: t('scheduleOverview.upcoming24h'), value: String(s.next_24h), note: t('scheduleOverview.upcomingScheduledWork') },
-    { label: t('scheduleOverview.after24h'), value: String(s.later), note: t('scheduleOverview.laterBacklog') },
+    { label: t('scheduleOverview.scheduledQueue'), value: String(s.total), note: t('scheduleOverview.activeScheduledTasks'), icon: CalendarOutline, accent: 'blue' as const },
+    { label: t('scheduleOverview.readyNow'), value: String(s.ready_now), note: t('scheduleOverview.alreadyDue'), icon: CheckmarkCircleOutline, accent: 'green' as const },
+    { label: t('scheduleOverview.upcoming24h'), value: String(s.next_24h), note: t('scheduleOverview.upcomingScheduledWork'), icon: TimeOutline, accent: 'amber' as const },
+    { label: t('scheduleOverview.after24h'), value: String(s.later), note: t('scheduleOverview.laterBacklog'), icon: BarChartOutline, accent: 'purple' as const },
     {
       label: t('scheduleOverview.busiestHour'),
       value: s.busiest_hour_count > 0 ? String(s.busiest_hour_count) : '0',
       note: s.busiest_hour_count > 0 ? formatMonthDayTimeUtc8(parseUtcDate(s.busiest_hour_label)) : t('scheduleOverview.noScheduledWork'),
+      icon: FlameOutline,
+      accent: 'red' as const,
     },
   ]
 
-  if (slotMaxTasks.value > 0) {
+  if (slotMaxTasks.value > 0 && !myTasksOnly.value) {
     baseItems.push({
       label: t('scheduleOverview.fullSlots'),
       value: String(fullSlotCount.value),
       note: fullSlotCount.value > 0
         ? t('scheduleOverview.fullSlotsNote', { capacity: slotMaxTasks.value })
         : t('scheduleOverview.noSlotsAtCapacity', { capacity: slotMaxTasks.value }),
+      icon: CalendarOutline,
+      accent: 'amber' as const,
     })
   }
 
@@ -532,7 +557,7 @@ const selectedWindowTasks = computed(() => {
 })
 
 const selectedWindowLoadLabel = computed(() => {
-  if (!selectedWindow.value || slotMaxTasks.value <= 0) {
+  if (!selectedWindow.value || slotMaxTasks.value <= 0 || myTasksOnly.value) {
     return null
   }
 
@@ -573,17 +598,15 @@ async function fetchData() {
   if (loading.value) return
   loading.value = true
   try {
-    const [statsData, scheduledTaskData, config] = await Promise.all([
-      getScheduledStats(),
-      getScheduledTasks(),
-      getConfig().catch(() => null),
+    const my = myTasksOnly.value || undefined
+    const [statsData, scheduledTaskData] = await Promise.all([
+      getScheduledStats(my ? { my } : undefined),
+      getScheduledTasks(my ? { my } : undefined),
     ])
     scheduledStats.value = statsData
     scheduledTasks.value = scheduledTaskData
-    if (config) {
-      slotMaxTasks.value = config.runtime?.slot_max_tasks ?? 0
-      slotEnforce.value = config.runtime?.slot_max_tasks_enforce ?? false
-    }
+    slotMaxTasks.value = statsData.slot_max_tasks ?? 0
+    slotEnforce.value = statsData.slot_max_tasks_enforce ?? false
     if (selectedWindow.value) {
       syncScheduleDrafts()
     }
@@ -636,6 +659,10 @@ onMounted(() => {
   }, 15000)
 })
 
+watch(myTasksOnly, () => {
+  fetchData()
+})
+
 onBeforeUnmount(() => {
   if (pollTimer !== null) {
     clearInterval(pollTimer)
@@ -645,55 +672,47 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.schedule-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.schedule-toggle__button {
+  position: relative;
+  z-index: 1;
+  border: none;
+  background: transparent;
+  color: rgba(15, 23, 42, 0.62);
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.22s ease, color 0.22s ease, box-shadow 0.22s ease, transform 0.22s ease;
+}
+
+.schedule-toggle__button:hover {
+  color: rgba(15, 23, 42, 0.88);
+}
+
+.schedule-toggle__button--active {
+  background: rgba(255, 255, 255, 0.92);
+  color: rgba(15, 23, 42, 0.92);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+  transform: translateY(-1px);
+}
+
+.schedule-toggle__button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.18), 0 1px 3px rgba(15, 23, 42, 0.12);
+}
 .schedule-overview {
   max-width: 1240px;
-}
-
-.schedule-overview__hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.schedule-overview__title {
-  margin: 0;
-  font-size: 28px;
-  line-height: 1.2;
-}
-
-.schedule-overview__subtitle {
-  margin: 8px 0 0;
-  color: rgba(15, 23, 42, 0.68);
-  max-width: 780px;
-}
-
-.schedule-overview__actions {
-  justify-content: flex-end;
-}
-
-.schedule-summary-card {
-  border-radius: 12px;
-  background: linear-gradient(180deg, rgba(32, 128, 240, 0.06), rgba(32, 128, 240, 0.02));
-}
-
-.schedule-summary-card__label {
-  margin-bottom: 8px;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.6);
-}
-
-.schedule-summary-card__value {
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--n-text-color-1);
-}
-
-.schedule-summary-card__note {
-  margin-top: 6px;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.58);
 }
 
 .schedule-card {
@@ -1037,19 +1056,9 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 768px) {
-  .schedule-overview__hero,
   .schedule-card__header {
     flex-direction: column;
     align-items: flex-start;
-  }
-
-  .schedule-overview__actions {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .schedule-overview__title {
-    font-size: 24px;
   }
 
   .hourly-chart {

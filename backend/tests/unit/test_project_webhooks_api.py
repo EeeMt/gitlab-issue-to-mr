@@ -21,7 +21,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-
 # ---------------------------------------------------------------------------
 # Shared test helpers
 # ---------------------------------------------------------------------------
@@ -67,9 +66,9 @@ def _make_mock_project(name="test-project", path="group/test-project"):
 
 def _get_test_client():
     """Build TestClient with dependency overrides for admin auth and DB."""
-    from app.main import app
     from app.database import get_db
     from app.dependencies.auth import require_admin_user, require_authenticated_user
+    from app.main import app
 
     override_db, mock_db = _make_db_override()
 
@@ -244,7 +243,7 @@ class BuildStatusResponseEdgeCaseTests(unittest.TestCase):
         return _build_gitlab_project_webhook_status_response(**defaults)
 
     def test_ssl_verification_disabled_only(self):
-        """Line 118: SSL verification disabled with note_events enabled shows needs_attention."""
+        """SSL verification disabled shows needs_attention."""
         resp = self._build(
             managed_secret_configured=True,
             matched_hook={
@@ -258,18 +257,18 @@ class BuildStatusResponseEdgeCaseTests(unittest.TestCase):
         self.assertIn("SSL verification disabled", resp.status_detail)
         self.assertNotIn("note events", resp.status_detail)
 
-    def test_both_note_events_and_ssl_disabled(self):
-        """Both issues flagged when note_events and SSL verification are off."""
+    def test_both_mr_events_and_ssl_disabled(self):
+        """Both issues flagged when MR events and SSL verification are off."""
         resp = self._build(
             matched_hook={
                 "id": 1,
                 "url": "https://url.example.com/api/webhook/gitlab",
-                "note_events": False,
+                "merge_requests_events": False,
                 "enable_ssl_verification": False,
             },
         )
         self.assertEqual(resp.status, "needs_attention")
-        self.assertIn("note events disabled", resp.status_detail)
+        self.assertIn("MR events disabled", resp.status_detail)
         self.assertIn("SSL verification disabled", resp.status_detail)
         self.assertEqual(resp.secret_mode, "none")
 
@@ -519,7 +518,7 @@ class GetGitlabProjectWebhookStatusTests(unittest.TestCase):
         self.assertEqual(response.json()["status"], "missing")
 
     def test_status_hook_needs_attention(self):
-        """Hook with note_events disabled should show 'needs_attention'."""
+        """Hook with MR events disabled should show 'needs_attention'."""
         client, app, mock_db = _get_test_client()
 
         mock_settings = _make_mock_settings()
@@ -529,7 +528,7 @@ class GetGitlabProjectWebhookStatusTests(unittest.TestCase):
         mock_client_instance = MagicMock()
         mock_client_instance.get_project.return_value = mock_project
         mock_client_instance.get_project_hooks.return_value = [
-            {"id": 10, "url": target_url, "note_events": False, "enable_ssl_verification": True},
+            {"id": 10, "url": target_url, "merge_requests_events": False, "enable_ssl_verification": True},
         ]
 
         with patch("app.api.project_webhooks.load_runtime_config_from_db", new=AsyncMock()):
@@ -543,7 +542,7 @@ class GetGitlabProjectWebhookStatusTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["status"], "needs_attention")
-        self.assertIn("note events disabled", data["status_detail"])
+        self.assertIn("MR events disabled", data["status_detail"])
 
     def test_status_gitlab_error_returns_400(self):
         """GitLab API error during status check should return 400."""

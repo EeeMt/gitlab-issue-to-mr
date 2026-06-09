@@ -11,6 +11,11 @@ This document explains the configuration items required by `config/.env.offline`
   - PostgreSQL data volume
   - task logs and generated repositories
 - The host user can access `/var/run/docker.sock`
+- Create `/var/codify/sessions` on the host (needed for Claude session persistence across tasks):
+  ```bash
+  mkdir -p /var/codify/sessions
+  ```
+- (Optional) If your environment uses a custom CA, place the PEM file at `/opt/ca.crt`
 
 ## 2. Network prerequisites
 
@@ -62,6 +67,14 @@ If the environment is fully offline, both endpoints must exist inside the intran
 - `TASK_TIMEOUT`: max seconds a task may run
 - `SCHEDULER_INTERVAL`: polling interval
 - `DEFAULT_TARGET_BRANCH`: fallback branch when a task does not specify one
+- `SESSION_STORAGE_ROOT`: host path for Claude session persistence (default `/var/codify/sessions`; the `docker-compose.yml` already mounts this path to the scheduler)
+
+### Slot capacity
+
+- `SLOT_MAX_TASKS`: max tasks allowed per 1-hour time window (default `0` = unlimited)
+- `SLOT_MAX_TASKS_ENFORCE`: when `true`, new tasks are rejected once the slot is full; when `false`, only a warning is logged (default `false`)
+
+These limits are also configurable at runtime via the dashboard Config page.
 
 ## 4. Optional configuration
 
@@ -93,18 +106,22 @@ These are optional host paths mounted into worker containers to speed up Maven d
 
 ### Custom CA certificate
 
-- `CUSTOM_CA_BUNDLE`: path inside the container to a PEM-encoded CA certificate file (e.g. `/certs/ca.crt`)
+- `CUSTOM_CA_BUNDLE`: path inside the container to a PEM-encoded CA certificate file (default `/etc/ssl/certs/custom-ca.crt`)
 
 Use this when GitLab, the LLM gateway, Mattermost, or any other service uses a certificate signed by an internal or self-signed CA.
 
-**Setup steps:**
+**The CA cert bind mount is pre-configured** in `docker-compose.yml` for both `backend` and `scheduler`:
+```yaml
+volumes:
+  - type: bind
+    source: /opt/ca.crt
+    target: /etc/ssl/certs/custom-ca.crt
+    read_only: true
+    bind:
+      create_host_path: false
+```
 
-1. Mount the CA cert file into the backend and scheduler containers:
-   ```yaml
-   volumes:
-     - /host/path/ca.crt:/certs/ca.crt:ro
-   ```
-2. Set `CUSTOM_CA_BUNDLE=/certs/ca.crt` in `config/.env.offline` (or via the `environment:` block in `docker-compose.yml`).
+**Setup:** place your PEM CA certificate at `/opt/ca.crt` on the Docker host. If the path differs, edit `docker-compose.yml` to match. If no CA is needed, comment out the bind mount block and remove `CUSTOM_CA_BUNDLE` from the environment block.
 
 When this variable is set, the following components inside every spawned **worker container** will trust the CA:
 
@@ -150,14 +167,19 @@ Only configure these if the dashboard will use GitLab OIDC in the offline enviro
 ## 5. Deployment steps
 
 1. Copy this bundle to the target host.
-2. Create `config/.env.offline` from the example template.
-3. Load the exported images.
-4. Start the stack with Docker Compose.
-5. Confirm:
+2. Create required host directories:
+   ```bash
+   mkdir -p /var/codify/sessions
+   ```
+3. Create `config/.env.offline` from the example template.
+4. Load the exported images (`./scripts/load-images.sh`).
+5. If using an internal CA, place the cert at `/opt/ca.crt` (or adjust the bind mount in `docker-compose.yml`). If not, comment out the bind mount and `CUSTOM_CA_BUNDLE`.
+6. Start the stack: `./scripts/start.sh`.
+7. Confirm health:
    - `http://host:8000/health` returns `200`
    - `http://host:8880/` opens
-6. Log into the dashboard and verify runtime config.
-7. Configure GitLab project webhooks if they are not already present.
+8. Log into the dashboard and verify runtime config.
+9. Configure GitLab project webhooks if they are not already present.
 
 ## 6. Post-deployment checklist
 

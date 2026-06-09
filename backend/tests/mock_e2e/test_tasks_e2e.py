@@ -22,16 +22,16 @@ Endpoints under test:
 from __future__ import annotations
 
 import os
-import pytest
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
-    create_async_engine,
     async_sessionmaker,
+    create_async_engine,
 )
 from sqlalchemy.pool import StaticPool
 
@@ -49,14 +49,14 @@ from app.dependencies.project_access import (
     require_project_access_scope,
 )
 from app.main import app
-from app.models import Base, Issue, Task, TaskLog, TaskStatus
+from app.models import AIProvider, Base, Issue, Task, TaskLog, TaskStatus
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 async def _test_engine():
     """In-memory SQLite async engine with all tables created."""
     engine = create_async_engine(
@@ -76,7 +76,7 @@ async def _test_engine():
     await engine.dispose()
 
 
-@pytest.fixture()
+@pytest.fixture
 async def session_factory(_test_engine):
     """Async session factory bound to the test engine."""
     return async_sessionmaker(
@@ -84,26 +84,28 @@ async def session_factory(_test_engine):
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 async def db_session(session_factory):
     """Session for direct data manipulation inside tests (seeding, etc.)."""
     async with session_factory() as session:
         yield session
 
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_admin_user():
     """A mock admin user returned by admin-gated auth overrides."""
     user = MagicMock()
     user.id = 1
     user.username = "testadmin"
     user.gitlab_user_id = 100
+    user.display_name = "Test Admin"
+    user.email = "testadmin@example.com"
     user.platform_role = "platform_admin"
     return user
 
 
-@pytest.fixture()
-async def client(session_factory, _mock_admin_user):
+@pytest.fixture
+async def client(session_factory, _mock_admin_user, _default_provider):
     """httpx.AsyncClient wired to the FastAPI app with auth overrides.
 
     * ``get_db`` → yields sessions from the in-memory test database
@@ -137,6 +139,22 @@ async def client(session_factory, _mock_admin_user):
         yield ac
 
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def _default_provider(session_factory):
+    """Seed a default AIProvider so task creation has a valid provider_id."""
+    async with session_factory() as session:
+        provider = AIProvider(
+            name="Test Provider",
+            base_url="https://api.example.com",
+            api_key="test-key",
+            model="test-model",
+            is_default=True,
+        )
+        session.add(provider)
+        await session.commit()
+        return provider.id
 
 
 @pytest.fixture(autouse=True)
@@ -220,7 +238,7 @@ async def _seed_task(db_session: AsyncSession, issue: Issue = None, **overrides)
     """Create a task directly in the DB for testing."""
     if issue is None:
         issue = await _seed_issue(db_session)
-    
+
     defaults = dict(
         project_id=issue.project_id,
         issue_id=issue.id,
@@ -275,10 +293,11 @@ class TestCreateTask:
         })
         assert issue_resp.status_code == 200
         issue_id = issue_resp.json()["id"]
-        
+
         # Create task under the issue
         resp = await client.post("/api/tasks", json={
             "issue_id": issue_id,
+            "provider_id": 1,
             "user_prompt": "Fix the bug",
         })
         assert resp.status_code == 200
@@ -303,10 +322,11 @@ class TestCreateTask:
         })
         assert issue_resp.status_code == 200
         issue_id = issue_resp.json()["id"]
-        
+
         # Create task with all fields
         resp = await client.post("/api/tasks", json={
             "issue_id": issue_id,
+            "provider_id": 1,
             "user_prompt": "Refactor the module",
             "priority": 2,
         })
@@ -315,6 +335,29 @@ class TestCreateTask:
         assert data["project_id"] == 42
         assert data["issue_id"] == issue_id
         assert data["priority"] == 2
+
+    async def test_create_task_rejects_disabled_provider(self, client, session_factory):
+        """Create task rejects providers disabled in AI provider configuration."""
+        async with session_factory() as session:
+            provider = await session.get(AIProvider, 1)
+            provider.is_disabled = True
+            await session.commit()
+
+        issue_resp = await client.post("/api/issues", json={
+            "project_id": 1,
+            "title": "Disabled provider issue",
+            "target_branch": "main",
+        })
+        assert issue_resp.status_code == 200
+        issue_id = issue_resp.json()["id"]
+
+        resp = await client.post("/api/tasks", json={
+            "issue_id": issue_id,
+            "provider_id": 1,
+            "user_prompt": "Should not start",
+        })
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "Provider is disabled"
 
     async def test_create_task_with_delay_seconds(self, client):
         """Create a task with delay_seconds → scheduled_at is set in the future."""
@@ -326,10 +369,11 @@ class TestCreateTask:
         })
         assert issue_resp.status_code == 200
         issue_id = issue_resp.json()["id"]
-        
+
         # Create task with delay
         resp = await client.post("/api/tasks", json={
             "issue_id": issue_id,
+            "provider_id": 1,
             "user_prompt": "Delayed task",
             "delay_seconds": 3600,
         })
@@ -351,10 +395,11 @@ class TestCreateTask:
         })
         assert issue_resp.status_code == 200
         issue_id = issue_resp.json()["id"]
-        
+
         future = _future_dt(hours=72)
         resp = await client.post("/api/tasks", json={
             "issue_id": issue_id,
+            "provider_id": 1,
             "user_prompt": "Scheduled task",
             "scheduled_datetime": future.isoformat(),
         })
@@ -372,10 +417,11 @@ class TestCreateTask:
         })
         assert issue_resp.status_code == 200
         issue_id = issue_resp.json()["id"]
-        
+
         past = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)
         resp = await client.post("/api/tasks", json={
             "issue_id": issue_id,
+            "provider_id": 1,
             "user_prompt": "Past task",
             "scheduled_datetime": past.isoformat(),
         })
@@ -396,10 +442,11 @@ class TestCreateTask:
         })
         assert issue_resp.status_code == 200
         issue_id = issue_resp.json()["id"]
-        
+
         # Create task without user_prompt and issue has no description → should fail
         resp = await client.post("/api/tasks", json={
             "issue_id": issue_id,
+            "provider_id": 1,
         })
         assert resp.status_code == 400  # "No prompt provided and issue has no description"
 
@@ -413,9 +460,10 @@ class TestCreateTask:
         })
         assert issue_resp.status_code == 200
         issue_id = issue_resp.json()["id"]
-        
+
         resp = await client.post("/api/tasks", json={
             "issue_id": issue_id,
+            "provider_id": 1,
             "user_prompt": "Priority 0 task",
             "priority": 0,
         })
@@ -433,9 +481,10 @@ class TestCreateTask:
         })
         assert issue_resp.status_code == 200
         issue_id = issue_resp.json()["id"]
-        
+
         resp = await client.post("/api/tasks", json={
             "issue_id": issue_id,
+            "provider_id": 1,
             "user_prompt": "Bad delay",
             "delay_seconds": -10,
         })
@@ -451,7 +500,7 @@ class TestCreateTask:
         })
         assert issue1_resp.status_code == 200
         issue1_id = issue1_resp.json()["id"]
-        
+
         issue2_resp = await client.post("/api/issues", json={
             "project_id": 1,
             "title": "Issue B",
@@ -459,13 +508,15 @@ class TestCreateTask:
         })
         assert issue2_resp.status_code == 200
         issue2_id = issue2_resp.json()["id"]
-        
+
         r1 = await client.post("/api/tasks", json={
             "issue_id": issue1_id,
+            "provider_id": 1,
             "user_prompt": "Task A",
         })
         r2 = await client.post("/api/tasks", json={
             "issue_id": issue2_id,
+            "provider_id": 1,
             "user_prompt": "Task B",
         })
         assert r1.status_code == 200
@@ -638,13 +689,13 @@ class TestGetTask:
             "scheduled_at", "container_id", "container_name",
             "commit_sha", "error_message", "additions",
             "deletions", "total_changes", "input_tokens", "output_tokens",
-            "model_name", "merge_request_title", "created_at",
+            "model_name", "commit_message", "created_at",
             "updated_at", "started_at", "completed_at",
         }
         assert expected_keys.issubset(data.keys())
         # Issue fields are nested under "issue"
         if data.get("issue"):
-            issue_keys = {"id", "title", "branch_name", "base_branch", "target_branch", 
+            issue_keys = {"id", "title", "branch_name", "base_branch", "target_branch",
                          "merge_request_iid", "merge_request_url"}
             assert issue_keys.issubset(data["issue"].keys())
 
@@ -803,7 +854,7 @@ class TestRetryTask:
         assert data["is_retry"] is True
         assert data["retry_source_task_id"] == task.id
         assert data["status"] == "pending"
-        
+
         # Original task remains FAILED
         resp2 = await client.get(f"/api/tasks/{task.id}")
         assert resp2.json()["status"] == "failed"
@@ -906,7 +957,7 @@ class TestRetryTask:
         # Original task's logs remain
         resp2 = await client.get(f"/api/tasks/{task.id}/logs")
         assert len(resp2.json()) == 2
-        
+
         # New retry task has no logs
         resp3 = await client.get(f"/api/tasks/{new_task_id}/logs")
         assert len(resp3.json()) == 0

@@ -15,19 +15,19 @@ Covers uncovered lines in app/api/stats.py:
 import os
 import sys
 import unittest
-from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
+
 from starlette.requests import Request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from fastapi.testclient import TestClient
-from app.main import app
+
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_context
-from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
-
+from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+from app.main import app
 
 # ---------------------------------------------------------------------------
 # Direct helper function tests
@@ -80,7 +80,7 @@ class TestApplyAnalyticsFilters(unittest.TestCase):
         query = MagicMock()
         # Chain: _apply_project_scope returns query (unrestricted), then .where for project_id
         scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
-        result = _apply_analytics_filters(query, scope, project_id=42)
+        _apply_analytics_filters(query, scope, project_id=42)
         query.where.assert_called_once()
 
     def test_with_initiator_username(self):
@@ -89,7 +89,7 @@ class TestApplyAnalyticsFilters(unittest.TestCase):
 
         query = MagicMock()
         scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
-        result = _apply_analytics_filters(query, scope, initiator_username="alice")
+        _apply_analytics_filters(query, scope, initiator_username="alice")
         query.where.assert_called_once()
 
     def test_with_both_filters(self):
@@ -100,7 +100,7 @@ class TestApplyAnalyticsFilters(unittest.TestCase):
         # Need to chain .where calls
         query.where.return_value = query  # Allow chaining
         scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
-        result = _apply_analytics_filters(query, scope, project_id=42, initiator_username="bob")
+        _apply_analytics_filters(query, scope, project_id=42, initiator_username="bob")
         self.assertEqual(query.where.call_count, 2)
 
 
@@ -475,3 +475,64 @@ class TestScheduledStatsRestrictedScope(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["summary"]["total"], 5)
+
+
+# GET /api/stats/scheduled with my=True
+# ---------------------------------------------------------------------------
+
+
+class TestScheduledStatsMineFilter(unittest.TestCase):
+    """Test GET /api/stats/scheduled with my=True (own-tasks-only filter)."""
+
+    def _build_side_effects(self, summary_attrs=None, hourly_entries=None):
+        defaults = dict(total=0, ready_now=0, next_24h=0, later=0, queued_count=0, running_count=0)
+        defaults.update(summary_attrs or {})
+        summary_row = SimpleNamespace(**defaults)
+        summary_mock = MagicMock()
+        summary_mock.one = MagicMock(return_value=summary_row)
+
+        hourly_rows = [
+            SimpleNamespace(hour_start=hs, count=c) for hs, c in (hourly_entries or [])
+        ]
+        hourly_mock = MagicMock()
+        hourly_mock.all = MagicMock(return_value=hourly_rows)
+
+        return [summary_mock, hourly_mock]
+
+    def setUp(self):
+        self.mock_db = MagicMock()
+        self.mock_db.execute = AsyncMock(side_effect=self._build_side_effects())
+        app.dependency_overrides[get_db] = lambda: self.mock_db
+
+        async def mock_auth_context(request: Request, auth_context=None):
+            return SimpleNamespace(
+                user=SimpleNamespace(id=1, username="alice", platform_role="platform_user"),
+                session=None,
+                gitlab_access_token=None,
+                gitlab_refresh_token=None,
+            )
+        app.dependency_overrides[require_authenticated_context] = mock_auth_context
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+
+    def test_scheduled_stats_my_true_filters_by_initiator_username(self):
+        """GET /api/stats/scheduled?my=true queries with initiator_username = current user."""
+        response = self.client.get("/api/stats/scheduled?my=true")
+        self.assertEqual(response.status_code, 200)
+
+        executed_calls = self.mock_db.execute.await_args_list
+        self.assertGreater(len(executed_calls), 0)
+        all_queries = " ".join(str(call.args[0]) for call in executed_calls)
+        self.assertIn("tasks.initiator_username", all_queries)
+
+    def test_scheduled_stats_my_false_does_not_filter_by_initiator_username(self):
+        """GET /api/stats/scheduled?my=false does not add initiator_username condition."""
+        response = self.client.get("/api/stats/scheduled?my=false")
+        self.assertEqual(response.status_code, 200)
+
+        executed_calls = self.mock_db.execute.await_args_list
+        self.assertGreater(len(executed_calls), 0)
+        all_queries = " ".join(str(call.args[0]) for call in executed_calls)
+        self.assertNotIn("tasks.initiator_username", all_queries)

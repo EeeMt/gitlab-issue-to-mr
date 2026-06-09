@@ -143,6 +143,19 @@
               </n-form-item>
             </n-gi>
             <n-gi>
+              <n-form-item :label="t('config.sessionRetentionDays')" path="session_retention_days">
+                <n-input-number
+                  v-model:value="formValue.session_retention_days"
+                  :min="1"
+                  :max="365"
+                  class="config-form__input"
+                />
+                <template #feedback>
+                  {{ t('config.sessionRetentionDaysHint') }}
+                </template>
+              </n-form-item>
+            </n-gi>
+            <n-gi>
               <n-form-item :label="t('config.cookieSecure')" path="cookie_secure">
                 <n-switch v-model:value="formValue.cookie_secure" />
                 <template #feedback>

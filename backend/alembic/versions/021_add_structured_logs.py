@@ -19,7 +19,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # log_type distinguishes plain output from structured entries (e.g. 'tool_calls_json')
+    # log_type distinguishes plain output from structured entries
+    # Supported types: 'thinking', 'assistant_text', 'tool_call', 'context_compact', 'system_init'
     op.add_column(
         "task_logs",
         sa.Column("log_type", sa.String(50), nullable=True),

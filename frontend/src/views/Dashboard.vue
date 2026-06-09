@@ -2,6 +2,25 @@
   <div class="dashboard" data-testid="dashboard-page">
     <n-spin :show="initialLoading" :description="t('common.loadingTasks')">
       <n-space vertical :size="16">
+        <div class="dashboard__top-bar">
+          <n-space align="center" :size="8">
+            <span v-if="lastUpdatedText" class="dashboard__last-updated">{{ lastUpdatedText }}</span>
+            <n-button size="small" quaternary :loading="loading" @click="manualRefresh">
+              <template #icon><n-icon :component="RefreshOutline" /></template>
+            </n-button>
+            <n-divider vertical style="height: 14px; margin: 0" />
+            <span class="dashboard__refresh-label">{{ t('dashboard.autoRefresh') }}</span>
+            <n-switch v-model:value="autoRefreshEnabled" size="small" />
+            <n-select
+              class="dashboard__interval-select"
+              v-model:value="refreshIntervalMs"
+              :disabled="!autoRefreshEnabled"
+              size="small"
+              :options="intervalOptions"
+              style="width: 72px"
+            />
+          </n-space>
+        </div>
         <n-grid
           v-if="hasLoadedOnce"
           data-testid="dashboard-summary"
@@ -107,6 +126,7 @@
           :visible-limit="boardVisibleLimit"
           :is-mobile="isMobile"
           @select="router.push($event)"
+          @view-more="router.push($event)"
         />
       </n-space>
     </n-spin>
@@ -114,8 +134,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { NSpace, NCard, NGrid, NGi, NSpin, NIcon, NTooltip, useMessage } from 'naive-ui'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { NSpace, NCard, NGrid, NGi, NSpin, NIcon, NTooltip, NButton, NSwitch, NSelect, NDivider, useMessage } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getIssues, getTasksPaginated, getStats, getAnalytics, getActivityHeatmap, type Issue, type Task, type ActivityHeatmapEntry, type AnalyticsTrendPoint } from '../api'
@@ -126,6 +146,7 @@ import {
   FlashOutline,
   InformationCircleOutline,
   PlayCircleOutline,
+  RefreshOutline,
   TrendingUpOutline,
 } from '@vicons/ionicons5'
 
@@ -134,21 +155,61 @@ import ActivityHeatmap from '../components/ActivityHeatmap.vue'
 import TrendChart from '../components/TrendChart.vue'
 import MyWorkBoard, { type BoardCardItem, type BoardColumn } from '../components/dashboard/MyWorkBoard.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
-import { usePolling } from '../composables/usePolling'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
 import { formatPriority } from '../utils/format'
 import { authState } from '../auth'
 
 const issueStatuses = ['open', 'in_progress', 'in_review', 'closed'] as const
-const taskStatuses = ['pending', 'queued', 'running', 'completed', 'failed', 'cancelled'] as const
 
-const boardVisibleLimit = 100
+const boardVisibleLimit = 20
 
 const router = useRouter()
 const message = useMessage()
 const { t } = useI18n()
 const { isMobile } = useBreakpoints()
 const tooltipStyle = { fontSize: '11px', borderRadius: '6px', padding: '6px 12px', maxWidth: '280px' }
+
+// Auto-refresh state
+const autoRefreshEnabled = ref(true)
+const refreshIntervalMs = ref(15_000)
+const secondsSinceUpdate = ref<number | null>(null)
+
+const intervalOptions = [
+  { label: '5s', value: 5_000 },
+  { label: '15s', value: 15_000 },
+  { label: '30s', value: 30_000 },
+  { label: '1m', value: 60_000 },
+]
+
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+let clockTimer: ReturnType<typeof setInterval> | null = null
+
+const lastUpdatedText = computed(() => {
+  const s = secondsSinceUpdate.value
+  if (s === null) return ''
+  if (s < 3) return t('dashboard.updatedJustNow')
+  if (s < 60) return t('dashboard.updatedSecondsAgo', { n: s })
+  const m = Math.floor(s / 60)
+  return m === 1 ? t('dashboard.updated1MinuteAgo') : t('dashboard.updatedMinutesAgo', { n: m })
+})
+
+function startRefreshTimer() {
+  if (refreshTimer !== null) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
+  }
+  if (!autoRefreshEnabled.value) return
+  refreshTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') refreshAll()
+  }, refreshIntervalMs.value)
+}
+
+watch([autoRefreshEnabled, refreshIntervalMs], startRefreshTimer)
+
+function manualRefresh() {
+  refreshAll()
+  startRefreshTimer()
+}
 
 const boardIssues = ref<Issue[]>([])
 const boardTasks = ref<Task[]>([])
@@ -195,14 +256,14 @@ function buildIssueCard(issue: Issue): BoardCardItem {
   }
 }
 
-function buildTaskCard(task: Task): BoardCardItem {
+function buildTaskCard(task: Task, badge?: string): BoardCardItem {
   return {
     id: task.id,
     title: task.user_prompt,
     fullTitle: task.user_prompt,
     subtitle: `#${task.id}`,
+    badge,
     meta: [
-      task.project_path_with_namespace || t('dashboard.projectFallback', { id: task.project_id }),
       formatPriority(task.priority),
       formatDateTimeUtc8Compact(task.started_at || task.created_at),
     ],
@@ -231,29 +292,49 @@ const taskChartData = computed(() => {
   ].filter((d) => d.value > 0)
 })
 
+const currentUsername = computed(() => authState.user?.username ?? '')
+
+function boardViewMoreRoute(base: string, statusFilter: string): string {
+  const params = new URLSearchParams({ status: statusFilter })
+  if (currentUsername.value) params.set('initiator_username', currentUsername.value)
+  return `${base}?${params.toString()}`
+}
+
 const issueBoardColumns = computed<BoardColumn[]>(() =>
   issueStatuses.map((status) => {
     const items = boardIssues.value.filter((issue) => issue.status === status).map(buildIssueCard)
     return {
       status,
       label: t(`issue.status.${status}`),
-      count: items.length,
+      count: statsIssueByStatus.value[status] ?? items.length,
       items,
+      viewMoreRoute: boardViewMoreRoute('/issues', status),
     }
   }),
 )
 
-const taskBoardColumns = computed<BoardColumn[]>(() =>
-  taskStatuses.map((status) => {
-    const items = boardTasks.value.filter((task) => task.status === status).map(buildTaskCard)
-    return {
-      status,
-      label: t(`status.${status}`),
-      count: items.length,
-      items,
-    }
-  }),
-)
+const taskBoardColumns = computed<BoardColumn[]>(() => {
+  const tasks = boardTasks.value
+  const queuedBadge = t('status.queued')
+  const cancelledBadge = t('status.cancelled')
+  const pendingItems = [
+    ...tasks.filter(task => task.status === 'pending').map(task => buildTaskCard(task)),
+    ...tasks.filter(task => task.status === 'queued').map(task => buildTaskCard(task, queuedBadge)),
+  ].sort((a, b) => b.id - a.id)
+  const runningItems = tasks.filter(task => task.status === 'running').map(task => buildTaskCard(task))
+  const completedItems = tasks.filter(task => task.status === 'completed').map(task => buildTaskCard(task))
+  const failedItems = [
+    ...tasks.filter(task => task.status === 'failed').map(task => buildTaskCard(task)),
+    ...tasks.filter(task => task.status === 'cancelled').map(task => buildTaskCard(task, cancelledBadge)),
+  ].sort((a, b) => b.id - a.id)
+
+  return [
+    { status: 'pending', label: t('status.pending'), count: statsPending.value + statsQueued.value, items: pendingItems, viewMoreRoute: boardViewMoreRoute('/tasks', 'pending,queued') },
+    { status: 'running', label: t('status.running'), count: statsRunning.value, items: runningItems, viewMoreRoute: boardViewMoreRoute('/tasks', 'running') },
+    { status: 'completed', label: t('status.completed'), count: statsCompleted.value, items: completedItems, viewMoreRoute: boardViewMoreRoute('/tasks', 'completed') },
+    { status: 'failed', label: `${t('status.failed')} / ${t('status.cancelled')}`, count: statsFailed.value + statsCancelled.value, items: failedItems, viewMoreRoute: boardViewMoreRoute('/tasks', 'failed,cancelled') },
+  ]
+})
 
 async function fetchData() {
   if (loading.value) return
@@ -284,6 +365,7 @@ async function fetchData() {
   } finally {
     hasLoadedOnce.value = true
     loading.value = false
+    secondsSinceUpdate.value = 0
   }
 }
 
@@ -334,17 +416,20 @@ function refreshAll() {
   fetchAnalytics()
 }
 
-const { start: startPolling } = usePolling(
-  () => refreshAll(),
-  { interval: 15_000, immediate: false },
-)
-
 onMounted(() => {
   fetchStats()
   fetchHeatmap()
   fetchAnalytics()
   fetchData()
-  startPolling()
+  startRefreshTimer()
+  clockTimer = setInterval(() => {
+    if (secondsSinceUpdate.value !== null) secondsSinceUpdate.value += 1
+  }, 1_000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer !== null) clearInterval(refreshTimer)
+  if (clockTimer !== null) clearInterval(clockTimer)
 })
 </script>
 
@@ -357,6 +442,16 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   margin-bottom: 4px;
+}
+
+.dashboard__last-updated {
+  font-size: 12px;
+  color: #aaa;
+}
+
+.dashboard__refresh-label {
+  font-size: 12px;
+  color: #888;
 }
 
 .dashboard-table-card {

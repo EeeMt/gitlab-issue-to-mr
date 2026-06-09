@@ -4,7 +4,7 @@
 import os
 import sys
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,8 +20,8 @@ from app.models import TaskStatus
 
 @pytest.mark.asyncio
 async def test_create_task_persists_manual_initiator_metadata():
-    from app.models import Issue
     request = CreateTaskRequest(
+        provider_id=1,
         issue_id=1,
         user_prompt="Build analytics page",
         priority=1,
@@ -44,17 +44,83 @@ async def test_create_task_persists_manual_initiator_metadata():
         task.updated_at = datetime(2026, 3, 14, 12, 0, 0)
 
     db.refresh = AsyncMock(side_effect=refresh)
-    current_user = SimpleNamespace(id=7, gitlab_user_id=77, username="alice")
+    current_user = SimpleNamespace(
+        id=7,
+        gitlab_user_id=77,
+        username="alice",
+        display_name="Alice Zhang",
+        email="alice@example.com",
+    )
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
-    with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})):
-        result = await create_task(request=request, db=db, current_user=current_user, access_scope=access_scope)
+    with patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})), \
+         patch(
+             "app.api.tasks.get_usage_quota_service",
+             return_value=MagicMock(raise_if_over_limit=AsyncMock()),
+         ):
+        await create_task(request=request, db=db, current_user=current_user, access_scope=access_scope)
 
     task = db.add.call_args.args[0]
     assert task.initiator_user_id == 7
     assert task.initiator_gitlab_user_id == 77
     assert task.initiator_username == "alice"
-    assert result["id"] == 23
+    assert task.initiator_display_name == "Alice Zhang"
+    assert task.initiator_email == "alice@example.com"
+
+
+@pytest.mark.asyncio
+async def test_retry_task_persists_manual_initiator_metadata():
+    from app.api.tasks import retry_task
+    from app.models import Task
+
+    original_task = Task(
+        id=12,
+        issue_id=1,
+        project_id=101,
+        user_prompt="Retry analytics task",
+        priority=2,
+        provider_id=5,
+        status=TaskStatus.FAILED,
+    )
+
+    db = MagicMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+
+    original_result = MagicMock()
+    original_result.scalar_one_or_none.return_value = None
+    issue_result = MagicMock()
+    issue_result.scalar_one_or_none.return_value = MagicMock(id=1)
+    db.execute = AsyncMock(side_effect=[original_result, issue_result])
+    async def refresh(task):
+        task.id = 24
+        task.status = TaskStatus.PENDING
+        task.created_at = datetime(2026, 3, 14, 12, 0, 0)
+        task.updated_at = datetime(2026, 3, 14, 12, 0, 0)
+
+    db.refresh = AsyncMock(side_effect=refresh)
+
+    current_user = SimpleNamespace(
+        id=7,
+        gitlab_user_id=77,
+        username="alice",
+        display_name="Alice Zhang",
+        email="alice@example.com",
+    )
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+    with patch("app.api.tasks.get_task_with_access_check", new=AsyncMock(return_value=original_task)), \
+         patch("app.api.tasks.notify_task_retried", new=AsyncMock()), \
+         patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})), \
+         patch(
+             "app.api.tasks.get_usage_quota_service",
+             return_value=MagicMock(raise_if_over_limit=AsyncMock()),
+         ):
+        await retry_task(task_id=12, request=None, db=db, current_user=current_user, access_scope=access_scope)
+
+    task = db.add.call_args.args[0]
+    assert task.initiator_display_name == "Alice Zhang"
+    assert task.initiator_email == "alice@example.com"
 
 
 class MockResult:
@@ -93,6 +159,7 @@ class AnalyticsSummaryRow:
     tracked_initiator_tasks: int = 0
     token_tracked_tasks: int = 0
     initiator_tracking_started_at: datetime | None = None
+    total_execution_seconds: float | None = None
     avg_execution_seconds: float | None = None
     max_execution_seconds: float | None = None
     avg_queue_wait_seconds: float | None = None
@@ -115,6 +182,7 @@ class AnalyticsSummaryRow:
             self.tracked_initiator_tasks,
             self.token_tracked_tasks,
             self.initiator_tracking_started_at,
+            self.total_execution_seconds,
             self.avg_execution_seconds,
             self.max_execution_seconds,
             self.avg_queue_wait_seconds,
@@ -205,6 +273,47 @@ class AnalyticsQueryStub:
 
 
 @pytest.mark.asyncio
+async def test_get_analytics_summary_query_requests_total_execution_seconds():
+    fixed_now = datetime(2026, 3, 14, 12, 0, 0)
+    captured_summary_sql: list[str] = []
+    db = MagicMock()
+
+    def execute_side_effect(query):
+        sql = " ".join(str(query).split())
+        if AnalyticsQueryStub._is_summary_query(sql):
+            captured_summary_sql.append(sql)
+        return AnalyticsQueryStub(
+            summary=AnalyticsSummaryRow(
+                total_tasks=1,
+                finished_tasks=1,
+                completed_tasks=1,
+                total_execution_seconds=120.0,
+                avg_execution_seconds=120.0,
+                max_execution_seconds=120.0,
+            )
+        )(query)
+
+    db.execute = AsyncMock(side_effect=execute_side_effect)
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+    with patch("app.api.stats.utcnow", return_value=fixed_now), patch(
+        "app.api.stats.build_project_lookup",
+        new=AsyncMock(return_value={}),
+    ):
+        await get_analytics(
+            days=7,
+            project_id=None,
+            initiator_username=None,
+            db=db,
+            _current_user=None,
+            access_scope=access_scope,
+        )
+
+    assert captured_summary_sql
+    assert "total_execution_seconds" in captured_summary_sql[0]
+
+
+@pytest.mark.asyncio
 async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
     fixed_now = datetime(2026, 3, 14, 12, 0, 0)
 
@@ -233,6 +342,7 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
                 2,      # tracked_initiator_tasks
                 2,      # token_tracked_tasks
                 datetime(2026, 3, 12, 8, 0, 0),  # initiator_tracking_started_at
+                2160.0, # total_execution_seconds
                 540.0,  # avg_execution_seconds
                 900.0,  # max_execution_seconds
                 180.0,  # avg_queue_wait_seconds
@@ -257,6 +367,7 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
                     output_tokens=1600,
                     total_tokens=2400,
                     avg_execution_seconds=600.0,
+                    total_execution_seconds=1800.0,
                     avg_queue_wait_seconds=150.0,
                     last_task_at=datetime(2026, 3, 14, 9, 0, 0),
                 )
@@ -283,6 +394,7 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
                     output_tokens=1000,
                     total_tokens=1500,
                     avg_execution_seconds=420.0,
+                    total_execution_seconds=840.0,
                     avg_queue_wait_seconds=120.0,
                     last_task_at=datetime(2026, 3, 14, 9, 0, 0),
                 )
@@ -382,6 +494,7 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
     assert response["window_days"] == 7
     assert response["summary"]["total_tasks"] == 4
     assert response["summary"]["success_rate"] == pytest.approx(0.75)
+    assert response["summary"]["total_execution_seconds"] == pytest.approx(2160.0)
     assert response["summary"]["avg_execution_seconds"] == pytest.approx(540.0)
     assert response["summary"]["avg_queue_wait_seconds"] == pytest.approx(180.0)
     assert response["summary"]["tracked_initiator_tasks"] == 2
@@ -417,8 +530,8 @@ async def test_get_analytics_returns_project_initiator_and_trend_breakdowns():
 
 
 @pytest.mark.asyncio
-async def test_get_analytics_returns_provider_metrics_and_unknown_legacy_bucket():
-    """It returns separate provider/model rows plus an Unknown / Legacy bucket for legacy tasks."""
+async def test_get_analytics_returns_provider_metrics():
+    """It returns provider rows built from joined provider records."""
     fixed_now = datetime(2026, 3, 14, 12, 0, 0)
     db = MagicMock()
 
@@ -465,9 +578,9 @@ async def test_get_analytics_returns_provider_metrics_and_unknown_legacy_bucket(
                     avg_execution_seconds_per_changed_line=3.0,
                 ),
                 SimpleNamespace(
-                    provider_id=1,
-                    provider_name="Claude Sonnet",
-                    provider_model="claude-3-5-sonnet",
+                    provider_id=2,
+                    provider_name="Claude Haiku",
+                    provider_model="claude-haiku-4-6",
                     task_count=1,
                     completed_tasks=0,
                     failed_tasks=1,
@@ -481,24 +594,6 @@ async def test_get_analytics_returns_provider_metrics_and_unknown_legacy_bucket(
                     avg_tokens_per_changed_line=10.0,
                     avg_execution_seconds=250.0,
                     avg_execution_seconds_per_changed_line=5.0,
-                ),
-                SimpleNamespace(
-                    provider_id=None,
-                    provider_name=None,
-                    provider_model=None,
-                    task_count=2,
-                    completed_tasks=1,
-                    failed_tasks=0,
-                    cancelled_tasks=1,
-                    finished_tasks=2,
-                    total_input_tokens=200,
-                    total_output_tokens=300,
-                    total_tokens=500,
-                    avg_tokens_per_task=250.0,
-                    avg_tokens_per_second=None,
-                    avg_tokens_per_changed_line=None,
-                    avg_execution_seconds=450.0,
-                    avg_execution_seconds_per_changed_line=None,
                 ),
             ],
         )
@@ -517,10 +612,10 @@ async def test_get_analytics_returns_provider_metrics_and_unknown_legacy_bucket(
             access_scope=access_scope,
         )
 
-    assert response["provider_summary"]["active_provider_count"] == 3
-    assert response["provider_summary"]["provider_covered_task_count"] == 5
-    assert response["provider_summary"]["provider_covered_total_tokens"] == 2000
-    assert response["provider_summary"]["provider_success_rate"] == pytest.approx(3 / 5)
+    assert response["provider_summary"]["active_provider_count"] == 2
+    assert response["provider_summary"]["provider_covered_task_count"] == 3
+    assert response["provider_summary"]["provider_covered_total_tokens"] == 1500
+    assert response["provider_summary"]["provider_success_rate"] == pytest.approx(2 / 3)
 
     provider_rows = {
         (row["provider_name"], row["provider_model"]): row for row in response["providers"]
@@ -529,13 +624,8 @@ async def test_get_analytics_returns_provider_metrics_and_unknown_legacy_bucket(
     claude_sonnet_46 = provider_rows[("Claude Sonnet", "claude-sonnet-4-6")]
     assert claude_sonnet_46["avg_tokens_per_second"] == pytest.approx(1.0909090909090908)
 
-    unknown_legacy = provider_rows[("Unknown / Legacy", None)]
-    assert unknown_legacy["avg_tokens_per_second"] is None
-    assert unknown_legacy["avg_tokens_per_changed_line"] is None
-    assert unknown_legacy["avg_execution_seconds_per_changed_line"] is None
-
-    claude_sonnet_35 = provider_rows[("Claude Sonnet", "claude-3-5-sonnet")]
-    assert claude_sonnet_35["success_rate"] == pytest.approx(0.0)
+    claude_haiku = provider_rows[("Claude Haiku", "claude-haiku-4-6")]
+    assert claude_haiku["success_rate"] == pytest.approx(0.0)
 
     assert response["provider_chart_series"]["success_rate"] == [
         {
@@ -544,14 +634,9 @@ async def test_get_analytics_returns_provider_metrics_and_unknown_legacy_bucket(
             "value": pytest.approx(1.0),
         },
         {
-            "provider_id": 1,
-            "label": "Claude Sonnet / claude-3-5-sonnet",
+            "provider_id": 2,
+            "label": "Claude Haiku / claude-haiku-4-6",
             "value": pytest.approx(0.0),
-        },
-        {
-            "provider_id": None,
-            "label": "Unknown / Legacy",
-            "value": pytest.approx(0.5),
         },
     ]
     assert response["provider_chart_series"]["avg_tokens_per_second"] == [
@@ -561,16 +646,16 @@ async def test_get_analytics_returns_provider_metrics_and_unknown_legacy_bucket(
             "value": pytest.approx(1.0909090909090908),
         },
         {
-            "provider_id": 1,
-            "label": "Claude Sonnet / claude-3-5-sonnet",
+            "provider_id": 2,
+            "label": "Claude Haiku / claude-haiku-4-6",
             "value": pytest.approx(2.0),
         },
     ]
 
 
 @pytest.mark.asyncio
-async def test_get_analytics_provider_query_groups_by_provider_and_model():
-    """It groups provider analytics by provider/model pair instead of provider only."""
+async def test_get_analytics_provider_query_groups_by_joined_provider_model():
+    """It groups provider analytics by the joined provider configuration."""
     fixed_now = datetime(2026, 3, 14, 12, 0, 0)
     db = MagicMock()
 
@@ -596,7 +681,10 @@ async def test_get_analytics_provider_query_groups_by_provider_and_model():
         if AnalyticsQueryStub._is_error_query(sql):
             return MockResult([])
         if AnalyticsQueryStub._is_provider_query(sql):
-            assert "GROUP BY tasks.provider_id, ai_providers.name, tasks.model_name" in sql
+            assert "JOIN ai_providers ON ai_providers.id = tasks.provider_id" in sql
+            assert "LEFT OUTER JOIN ai_providers" not in sql
+            assert "GROUP BY tasks.provider_id, ai_providers.name, ai_providers.model" in sql
+            assert "tasks.model_name" not in sql
             provider_metric_sql = sql.split(" AS avg_tokens_per_second")[0].rsplit(" AS avg_tokens_per_task, ", 1)[-1]
             assert "tasks.output_tokens" in provider_metric_sql
             assert "tasks.input_tokens" not in provider_metric_sql
@@ -621,9 +709,59 @@ async def test_get_analytics_provider_query_groups_by_provider_and_model():
         )
 
     assert response["providers"] == []
-    assert response["provider_chart_series"] == {
-        "success_rate": [],
-        "avg_tokens_per_second": [],
-        "avg_tokens_per_changed_line": [],
-        "avg_execution_seconds_per_changed_line": [],
-    }
+
+
+@pytest.mark.asyncio
+async def test_get_analytics_queue_wait_excludes_pre_schedule_delay():
+    """Scheduled tasks should only count waiting time after scheduled_at."""
+    fixed_now = datetime(2026, 3, 14, 12, 0, 0)
+    db = MagicMock()
+
+    def execute_side_effect(query):
+        sql = " ".join(str(query).split())
+
+        if AnalyticsQueryStub._is_summary_query(sql):
+            assert "tasks.scheduled_at" in sql
+            assert "tasks.started_at - tasks.scheduled_at" in sql
+            assert "tasks.started_at - tasks.created_at" in sql
+            assert "tasks.scheduled_at > tasks.created_at" in sql
+            return MockResult(AnalyticsSummaryRow().as_result_row())
+        if AnalyticsQueryStub._is_project_query(sql):
+            assert "tasks.scheduled_at" in sql
+            return MockResult([])
+        if AnalyticsQueryStub._is_available_initiators_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_initiators_query(sql):
+            assert "tasks.scheduled_at" in sql
+            return MockResult([])
+        if AnalyticsQueryStub._is_trend_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_priority_wait_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_issue_status_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_task_status_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_error_query(sql):
+            return MockResult([])
+        if AnalyticsQueryStub._is_provider_query(sql):
+            return MockResult([])
+
+        raise AssertionError(f"unrecognized analytics query: {sql}")
+
+    db.execute = AsyncMock(side_effect=execute_side_effect)
+    access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+    with patch("app.api.stats.utcnow", return_value=fixed_now), patch(
+        "app.api.stats.build_project_lookup", new=AsyncMock(return_value={})
+    ):
+        response = await get_analytics(
+            days=7,
+            project_id=None,
+            initiator_username=None,
+            db=db,
+            _current_user=None,
+            access_scope=access_scope,
+        )
+
+    assert response["summary"]["avg_queue_wait_seconds"] is None

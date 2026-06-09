@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
+from gitlab.exceptions import GitlabError
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._validators import _is_valid_http_url
 from app.config import Settings, get_effective_settings
-from gitlab.exceptions import GitlabError
-
 from app.core.gitlab_client import GitLabClient
 from app.database import get_db
 from app.dependencies.auth import require_admin_user
@@ -34,12 +32,12 @@ class IntegrationConfigSection(BaseModel):
 
 class IntegrationConfigUpdate(BaseModel):
     """Request model for updating integration settings."""
-    gitlab_url: Optional[str] = None
-    gitlab_bot_token: Optional[str] = None
+    gitlab_url: str | None = None
+    gitlab_bot_token: str | None = None
     clear_gitlab_bot_token: bool = False
-    gitlab_admin_token: Optional[str] = None
+    gitlab_admin_token: str | None = None
     clear_gitlab_admin_token: bool = False
-    gitlab_webhook_secret: Optional[str] = None
+    gitlab_webhook_secret: str | None = None
     clear_gitlab_webhook_secret: bool = False
 
 
@@ -159,6 +157,8 @@ async def invalidate_project_cache(
     Forces the next request to fetch a fresh project list from GitLab.
     """
     from app.core.gitlab_client import invalidate_project_list_cache
+    from app.dependencies.project_access import invalidate_project_access_cache
 
     invalidate_project_list_cache()
+    invalidate_project_access_cache()
     return {"status": "success", "message": "Project cache invalidated"}

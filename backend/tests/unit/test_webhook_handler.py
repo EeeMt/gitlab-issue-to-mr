@@ -96,8 +96,8 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         )
         self.mock_get_secret = self.secret_patcher.start()
 
-        from app.main import app
         from app.database import get_db
+        from app.main import app
 
         app.dependency_overrides[get_db] = override_db
         self.client = TestClient(app)
@@ -106,8 +106,8 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         self.settings_patcher.stop()
         self.runtime_patcher.stop()
         self.secret_patcher.stop()
-        from app.main import app
         from app.database import get_db
+        from app.main import app
         app.dependency_overrides.pop(get_db, None)
 
     def test_missing_token_returns_401(self):
@@ -278,6 +278,32 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(data["results"]), 2)
         self.assertTrue(all(r["result"] == "issue_closed" for r in data["results"]))
 
+    @patch("app.api.webhook_handler._try_delete_issue_branch", new_callable=AsyncMock)
+    def test_mr_merge_calls_try_delete_issue_branch(self, mock_delete_branch):
+        """When MR is merged, _try_delete_issue_branch is called for the issue."""
+        mock_issue = MagicMock()
+        mock_issue.id = 1
+        mock_issue.status = "in_review"
+        mock_issue.project_id = 42
+        mock_issue.merge_request_iid = 7
+        mock_issue.branch_name = "codify/issue-1"
+        mock_issue.delete_branch_on_close = True
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [mock_issue]
+        self.mock_db.execute = AsyncMock(return_value=mock_result)
+
+        payload = _build_mr_merge_payload(project_id=42, mr_iid=7)
+        resp = self.client.post(
+            "/api/webhook/gitlab",
+            json=payload,
+            headers={"X-Gitlab-Token": "global-secret"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(mock_issue.status, "closed")
+        # Verify _try_delete_issue_branch was called with the issue and db
+        mock_delete_branch.assert_awaited_once_with(mock_issue, self.mock_db)
+
 
 class TestWebhookEventsEndpoint(unittest.IsolatedAsyncioTestCase):
     """Tests for GET /api/webhook/events."""
@@ -289,24 +315,23 @@ class TestWebhookEventsEndpoint(unittest.IsolatedAsyncioTestCase):
         async def override_db():
             yield self.mock_db
 
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_user
+        from app.main import app
 
         app.dependency_overrides[get_db] = override_db
         app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
         self.client = TestClient(app)
 
     def tearDown(self):
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import require_authenticated_user
+        from app.main import app
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(require_authenticated_user, None)
 
     def _mock_db_results(self, events, total):
         """Set up mock DB to return the given events and total count."""
-        from datetime import datetime
 
         count_result = MagicMock()
         count_result.scalar.return_value = total

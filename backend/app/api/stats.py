@@ -2,22 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import case, select, func, false, literal_column
+from sqlalchemy import case, false, func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_effective_settings
+from app.core.projects import build_project_lookup
+from app.core.utcnow import utcnow
 from app.database import get_db
 from app.dependencies.auth import get_optional_current_user, require_page_access
 from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
-from app.models import Task, TaskStatus, Issue, IssueStatus, User, AIProvider
-from app.core.projects import build_project_lookup
-from app.core.utcnow import utcnow
+from app.models import AIProvider, Issue, IssueStatus, Task, TaskStatus, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -48,7 +47,7 @@ ERROR_CATEGORY_PATTERNS = (
 async def get_stats(
     my: bool = Query(False, description="When true, scope to the current user's data only"),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Get task statistics.
@@ -179,8 +178,8 @@ def _apply_project_scope(query, access_scope: ProjectAccessScope):
 def _apply_analytics_filters(
     query,
     access_scope: ProjectAccessScope,
-    project_id: Optional[int] = None,
-    initiator_username: Optional[str] = None,
+    project_id: int | None = None,
+    initiator_username: str | None = None,
 ):
     query = _apply_project_scope(query, access_scope)
     if project_id is not None:
@@ -193,8 +192,8 @@ def _apply_analytics_filters(
 def _apply_issue_analytics_filters(
     query,
     access_scope: ProjectAccessScope,
-    project_id: Optional[int] = None,
-    initiator_username: Optional[str] = None,
+    project_id: int | None = None,
+    initiator_username: str | None = None,
 ):
     query = _apply_project_column_scope(query, Issue.project_id, access_scope)
     if project_id is not None:
@@ -314,8 +313,8 @@ def _summarize_error_message(error_message: str | None) -> str | None:
 @router.get("/stats/analytics")
 async def get_analytics(
     days: int = Query(default=30, ge=7, le=90),
-    project_id: Optional[int] = Query(default=None),
-    initiator_username: Optional[str] = Query(default=None),
+    project_id: int | None = Query(default=None),
+    initiator_username: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     _current_user=Depends(require_page_access("analytics")),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
@@ -351,6 +350,12 @@ async def get_analytics(
         else_=None,
     )
     queue_wait_seconds_expr = case(
+        (
+            Task.started_at.is_not(None)
+            & Task.scheduled_at.is_not(None)
+            & (Task.scheduled_at > Task.created_at),
+            func.extract("epoch", Task.started_at - Task.scheduled_at),
+        ),
         (
             Task.started_at.is_not(None),
             func.extract("epoch", Task.started_at - Task.created_at),
@@ -394,6 +399,7 @@ async def get_analytics(
             func.coalesce(func.sum(case((Task.initiator_username.is_not(None), 1), else_=0)), 0),
             func.coalesce(func.sum(token_tracked_expr), 0),
             func.min(case((Task.initiator_username.is_not(None), Task.created_at), else_=None)),
+            func.coalesce(func.sum(execution_seconds_expr), 0).label("total_execution_seconds"),
             func.avg(execution_seconds_expr),
             func.max(execution_seconds_expr),
             func.avg(queue_wait_seconds_expr),
@@ -420,6 +426,7 @@ async def get_analytics(
         tracked_initiator_tasks,
         token_tracked_tasks,
         initiator_tracking_started_at,
+        total_execution_seconds,
         avg_execution_seconds,
         max_execution_seconds,
         avg_queue_wait_seconds,
@@ -450,6 +457,7 @@ async def get_analytics(
                 "total_tokens"
             ),
             func.avg(execution_seconds_expr).label("avg_execution_seconds"),
+            func.coalesce(func.sum(execution_seconds_expr), 0).label("total_execution_seconds"),
             func.avg(queue_wait_seconds_expr).label("avg_queue_wait_seconds"),
             func.max(Task.created_at).label("last_task_at"),
         )
@@ -513,6 +521,7 @@ async def get_analytics(
                 "total_tokens"
             ),
             func.avg(execution_seconds_expr).label("avg_execution_seconds"),
+            func.coalesce(func.sum(execution_seconds_expr), 0).label("total_execution_seconds"),
             func.avg(queue_wait_seconds_expr).label("avg_queue_wait_seconds"),
             func.max(Task.created_at).label("last_task_at"),
         )
@@ -643,7 +652,7 @@ async def get_analytics(
         select(
             Task.provider_id.label("provider_id"),
             AIProvider.name.label("provider_name"),
-            Task.model_name.label("provider_model"),
+            AIProvider.model.label("provider_model"),
             func.count(Task.id).label("task_count"),
             func.coalesce(func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0)), 0).label(
                 "completed_tasks"
@@ -693,17 +702,17 @@ async def get_analytics(
             ).label("avg_execution_seconds_per_changed_line"),
         )
         .select_from(Task)
-        .outerjoin(AIProvider, AIProvider.id == Task.provider_id)
+        .join(AIProvider, AIProvider.id == Task.provider_id)
         .where(
             Task.created_at >= since,
-            (Task.provider_id.is_not(None)) | (Task.model_name.is_not(None)),
+            Task.status.in_(FINISHED_TASK_STATUSES),
         )
-        .group_by(Task.provider_id, AIProvider.name, Task.model_name)
+        .group_by(Task.provider_id, AIProvider.name, AIProvider.model)
         .order_by(
             func.count(Task.id).desc(),
             func.coalesce(func.sum(token_total_expr), 0).desc(),
             AIProvider.name.asc(),
-            Task.model_name.asc(),
+            AIProvider.model.asc(),
             Task.provider_id.asc(),
         )
     )
@@ -718,7 +727,7 @@ async def get_analytics(
     provider_items: list[dict] = []
     for row in provider_rows:
         provider_name = row.provider_name or "Unknown / Legacy"
-        provider_model = row.provider_model if row.provider_name else None
+        provider_model = row.provider_model
         finished_count = int(row.finished_tasks or 0)
         completed_count = int(row.completed_tasks or 0)
 
@@ -814,6 +823,7 @@ async def get_analytics(
             "initiator_tracking_started_at": (
                 initiator_tracking_started_at.isoformat() if initiator_tracking_started_at else None
             ),
+            "total_execution_seconds": float(total_execution_seconds) if total_execution_seconds is not None else 0.0,
             "avg_execution_seconds": float(avg_execution_seconds) if avg_execution_seconds is not None else None,
             "max_execution_seconds": float(max_execution_seconds) if max_execution_seconds is not None else None,
             "avg_queue_wait_seconds": float(avg_queue_wait_seconds) if avg_queue_wait_seconds is not None else None,
@@ -866,6 +876,7 @@ async def get_analytics(
                 "avg_execution_seconds": (
                     float(row.avg_execution_seconds) if row.avg_execution_seconds is not None else None
                 ),
+                "total_execution_seconds": float(row.total_execution_seconds or 0),
                 "avg_queue_wait_seconds": (
                     float(row.avg_queue_wait_seconds) if row.avg_queue_wait_seconds is not None else None
                 ),
@@ -898,6 +909,7 @@ async def get_analytics(
                 "avg_execution_seconds": (
                     float(row.avg_execution_seconds) if row.avg_execution_seconds is not None else None
                 ),
+                "total_execution_seconds": float(row.total_execution_seconds or 0),
                 "avg_queue_wait_seconds": (
                     float(row.avg_queue_wait_seconds) if row.avg_queue_wait_seconds is not None else None
                 ),
@@ -933,7 +945,7 @@ async def get_activity_heatmap(
     days: int = Query(default=365, ge=1, le=730),
     my: bool = Query(False, description="When true, scope to the current user's data only"),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Return daily completed-task counts for the heatmap."""
@@ -968,15 +980,17 @@ async def get_activity_heatmap(
 
 @router.get("/stats/scheduled")
 async def get_scheduled_stats(
-    project_id: Optional[int] = None,
+    project_id: int | None = None,
+    my: bool = Query(False, description="When true, restrict to tasks initiated by the current user"),
     db: AsyncSession = Depends(get_db),
     _current_user=Depends(require_page_access("schedule_overview")),
-    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Get aggregated statistics for scheduled tasks.
 
     Returns summary counts and 24-hour hourly distribution without
     fetching individual task objects — designed for ScheduleOverview polling.
+    All authenticated users with schedule_overview access see the global queue.
+    When my=True, restricts results to the current user's tasks.
     """
     now = utcnow()
     now_hour = now.replace(minute=0, second=0, microsecond=0)
@@ -988,14 +1002,10 @@ async def get_scheduled_stats(
         Task.scheduled_at.isnot(None),
         Task.status.in_([TaskStatus.PENDING, TaskStatus.QUEUED, TaskStatus.RUNNING]),
     ]
-    if not access_scope.is_unrestricted:
-        allowed_project_ids = access_scope.accessible_project_ids
-        if not allowed_project_ids:
-            base_conditions.append(false())
-        else:
-            base_conditions.append(Task.project_id.in_(allowed_project_ids))
     if project_id is not None:
         base_conditions.append(Task.project_id == project_id)
+    if my and _current_user and getattr(_current_user, "username", None):
+        base_conditions.append(Task.initiator_username == _current_user.username)
 
     # Summary counts in a single query using conditional aggregation
     summary_q = select(
@@ -1049,6 +1059,8 @@ async def get_scheduled_stats(
     # Find busiest hour
     busiest = max(hourly_distribution, key=lambda b: b["count"])
 
+    settings = get_effective_settings()
+
     return {
         "summary": {
             "total": s.total,
@@ -1062,4 +1074,6 @@ async def get_scheduled_stats(
         },
         "hourly_distribution": hourly_distribution,
         "max_count": max_count,
+        "slot_max_tasks": settings.slot_max_tasks,
+        "slot_max_tasks_enforce": settings.slot_max_tasks_enforce,
     }

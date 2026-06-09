@@ -6,13 +6,13 @@ Targets missed lines: 68-69, 72-73, 76-81.
 import os
 import sys
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 
-from app.core.logging import setup_logging, get_logger, LoggerContext
+from app.core.logging import LoggerContext, get_logger, setup_logging
 
 
 class SetupLoggingTests(unittest.TestCase):

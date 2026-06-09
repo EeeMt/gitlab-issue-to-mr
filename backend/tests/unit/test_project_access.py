@@ -5,7 +5,7 @@ import os
 import sys
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 
@@ -87,19 +87,25 @@ class ProjectAccessTests(unittest.IsolatedAsyncioTestCase):
             gitlab_access_token=None,
             gitlab_refresh_token="refresh-token",
         )
-        db = AsyncMock()
+        mock_db = MagicMock()
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+        mock_db.commit = AsyncMock()
         response = httpx.Response(status_code=401, request=httpx.Request("POST", "https://gitlab.example.com/oauth/token"))
         error = httpx.HTTPStatusError("unauthorized", request=response.request, response=response)
 
         with patch(
             "app.dependencies.project_access.exchange_refresh_token",
             AsyncMock(side_effect=error),
+        ), patch(
+            "app.dependencies.project_access.AsyncSessionLocal",
+            MagicMock(return_value=mock_db),
         ), self.assertLogs("app.dependencies.project_access", level="WARNING") as captured:
-            refreshed = await _refresh_auth_context_tokens(context, db)
+            refreshed = await _refresh_auth_context_tokens(context)
 
         self.assertFalse(refreshed)
         self.assertIsNotNone(context.session.revoked_at)
-        db.flush.assert_awaited_once()
+        mock_db.commit.assert_awaited_once()
         self.assertIn("GitLab token refresh rejected for session session-4", captured.output[0])
 
     def test_require_project_access_rejects_inaccessible_project(self) -> None:

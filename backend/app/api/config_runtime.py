@@ -3,27 +3,51 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api._validators import _is_valid_http_url, _sanitize_string_list
+from app.api._validators import _is_valid_http_url
 from app.config import Settings, get_effective_settings, get_runtime_config_types, get_settings
 from app.core.config_crypto import ConfigEncryptionError
+from app.core.worker_environment_variables import (
+    list_worker_environment_variables,
+    replace_worker_environment_variables,
+    serialize_worker_environment_variable_for_runtime,
+)
 from app.database import get_db
 from app.dependencies.auth import require_admin_user
 from app.runtime_config import (
     load_runtime_config_from_db,
-    reset_all_runtime_config_overrides,
     reset_runtime_config_override,
     save_runtime_config_override,
 )
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+class RuntimeWorkerEnvironmentVariableRequest(BaseModel):
+    """One worker environment variable submitted via runtime config APIs."""
+
+    # Round-tripped for UI identity; persisted rows are still matched by key during replace.
+    id: int | None = None
+    key: str
+    value: str
+    is_secret: bool = False
+
+
+class RuntimeWorkerEnvironmentVariableResponse(BaseModel):
+    """One worker environment variable returned by runtime config APIs."""
+
+    id: int
+    key: str
+    value: str
+    is_secret: bool
+    value_configured: bool
 
 
 class RuntimeConfigSection(BaseModel):
@@ -45,40 +69,59 @@ class RuntimeConfigSection(BaseModel):
     allow_analytics_for_users: bool
     allow_oidc_diagnostics_for_users: bool
     worker_volume_mounts: str
+    worker_workspace_host_path: str
+    worker_workspace_retention_days: int
+    worker_failed_workspace_retention_days: int
     maven_cache_host_path: str
     maven_settings_host_path: str
     slot_max_tasks: int
     slot_max_tasks_enforce: bool
+    announcement_enabled: bool
+    announcement_text: str
+    announcement_level: str
+    worker_environment_variables: list[RuntimeWorkerEnvironmentVariableResponse] = Field(
+        default_factory=list
+    )
 
 
 class RuntimeConfigUpdate(BaseModel):
     """Request model for updating runtime settings."""
-    max_concurrency: Optional[int] = None
-    task_timeout: Optional[int] = None
-    scheduler_interval: Optional[int] = None
-    default_target_branch: Optional[str] = None
-    max_retries: Optional[int] = None
-    retry_delay: Optional[int] = None
-    alert_on_failure: Optional[bool] = None
-    alert_webhook_url: Optional[str] = None
+    max_concurrency: int | None = None
+    task_timeout: int | None = None
+    scheduler_interval: int | None = None
+    default_target_branch: str | None = None
+    max_retries: int | None = None
+    retry_delay: int | None = None
+    alert_on_failure: bool | None = None
+    alert_webhook_url: str | None = None
     clear_alert_webhook_url: bool = False
-    anthropic_base_url: Optional[str] = None
-    anthropic_api_key: Optional[str] = None
+    anthropic_base_url: str | None = None
+    anthropic_api_key: str | None = None
     clear_anthropic_api_key: bool = False
-    anthropic_model: Optional[str] = None
-    claude_max_turns: Optional[int] = None
-    allow_monitor_for_users: Optional[bool] = None
-    allow_schedule_overview_for_users: Optional[bool] = None
-    allow_analytics_for_users: Optional[bool] = None
-    allow_oidc_diagnostics_for_users: Optional[bool] = None
-    worker_volume_mounts: Optional[str] = None
-    maven_cache_host_path: Optional[str] = None
-    maven_settings_host_path: Optional[str] = None
-    slot_max_tasks: Optional[int] = None
-    slot_max_tasks_enforce: Optional[bool] = None
+    anthropic_model: str | None = None
+    claude_max_turns: int | None = None
+    allow_monitor_for_users: bool | None = None
+    allow_schedule_overview_for_users: bool | None = None
+    allow_analytics_for_users: bool | None = None
+    allow_oidc_diagnostics_for_users: bool | None = None
+    worker_volume_mounts: str | None = None
+    worker_workspace_host_path: str | None = None
+    worker_workspace_retention_days: int | None = None
+    worker_failed_workspace_retention_days: int | None = None
+    maven_cache_host_path: str | None = None
+    maven_settings_host_path: str | None = None
+    slot_max_tasks: int | None = None
+    slot_max_tasks_enforce: bool | None = None
+    announcement_enabled: bool | None = None
+    announcement_text: str | None = None
+    announcement_level: str | None = None
+    worker_environment_variables: list[RuntimeWorkerEnvironmentVariableRequest] | None = None
 
 
-def _serialize_runtime_config(settings: Settings) -> RuntimeConfigSection:
+def _serialize_runtime_config(
+    settings: Settings,
+    worker_environment_variables: list[RuntimeWorkerEnvironmentVariableResponse] | None = None,
+) -> RuntimeConfigSection:
     return RuntimeConfigSection(
         max_concurrency=settings.max_concurrency,
         task_timeout=settings.task_timeout,
@@ -97,10 +140,35 @@ def _serialize_runtime_config(settings: Settings) -> RuntimeConfigSection:
         allow_analytics_for_users=settings.allow_analytics_for_users,
         allow_oidc_diagnostics_for_users=settings.allow_oidc_diagnostics_for_users,
         worker_volume_mounts=settings.worker_volume_mounts,
+        worker_workspace_host_path=settings.worker_workspace_host_path,
+        worker_workspace_retention_days=settings.worker_workspace_retention_days,
+        worker_failed_workspace_retention_days=settings.worker_failed_workspace_retention_days,
         maven_cache_host_path=settings.maven_cache_host_path,
         maven_settings_host_path=settings.maven_settings_host_path,
         slot_max_tasks=settings.slot_max_tasks,
         slot_max_tasks_enforce=settings.slot_max_tasks_enforce,
+        announcement_enabled=settings.announcement_enabled,
+        announcement_text=settings.announcement_text,
+        announcement_level=settings.announcement_level,
+        worker_environment_variables=worker_environment_variables or [],
+    )
+
+
+async def _serialize_runtime_config_response(
+    db: AsyncSession,
+    settings: Settings | None = None,
+) -> RuntimeConfigSection:
+    """Serialize runtime config including persisted worker env vars."""
+    rows = await list_worker_environment_variables(db)
+    serialized_rows = [
+        RuntimeWorkerEnvironmentVariableResponse.model_validate(
+            serialize_worker_environment_variable_for_runtime(row)
+        )
+        for row in rows
+    ]
+    return _serialize_runtime_config(
+        settings or get_effective_settings(),
+        worker_environment_variables=serialized_rows,
     )
 
 
@@ -173,6 +241,28 @@ def _validate_config_value(key: str, value: object) -> object:
             )
         return value
 
+    if key == "worker_workspace_host_path":
+        if not isinstance(value, str):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="worker_workspace_host_path must be a string",
+            )
+        stripped = value.strip()
+        if stripped and not stripped.startswith("/"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="worker_workspace_host_path must be empty or an absolute path",
+            )
+        return stripped
+
+    if key in {"worker_workspace_retention_days", "worker_failed_workspace_retention_days"}:
+        if not isinstance(value, int) or value < 0 or value > 365:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{key} must be between 0 and 365 days",
+            )
+        return value
+
     if key in {"anthropic_base_url", "alert_webhook_url"}:
         if not isinstance(value, str) or not value.strip() or not _is_valid_http_url(value.strip()):
             raise HTTPException(
@@ -212,11 +302,36 @@ def _validate_config_value(key: str, value: object) -> object:
         "allow_analytics_for_users",
         "allow_oidc_diagnostics_for_users",
         "slot_max_tasks_enforce",
+        "announcement_enabled",
     }:
         if not isinstance(value, bool):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"{key} must be a boolean",
+            )
+        return value
+
+    if key == "announcement_level":
+        if value not in {"info", "warning", "error", "success"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="announcement_level must be one of: info, warning, error, success",
+            )
+        return value
+
+    if key == "announcement_text":
+        if not isinstance(value, str):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="announcement_text must be a string",
+            )
+        return value
+
+    if key == "announcement_enabled":
+        if not isinstance(value, bool):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="announcement_enabled must be a boolean",
             )
         return value
 
@@ -276,21 +391,27 @@ async def get_runtime_config(
 ):
     """Get current runtime configuration."""
     await load_runtime_config_from_db(db)
-    return _serialize_runtime_config(get_effective_settings())
+    return await _serialize_runtime_config_response(db)
 
 
-@router.patch("/config/runtime")
-async def update_runtime_config(
+async def apply_runtime_config_update(
+    db: AsyncSession,
     runtime_update: RuntimeConfigUpdate,
-    db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_admin_user),
-):
-    """Update persisted runtime configuration overrides."""
+    *,
+    commit: bool,
+) -> RuntimeConfigSection:
+    """Apply runtime config updates and return the serialized runtime section."""
     await load_runtime_config_from_db(db)
 
-    runtime_updates = _normalize_runtime_updates(
-        runtime_update.model_dump(exclude_unset=True)
+    raw_runtime_updates = runtime_update.model_dump(
+        exclude_unset=True,
+        exclude={"worker_environment_variables"},
     )
+    runtime_updates = _normalize_runtime_updates(raw_runtime_updates)
+    worker_environment_variables_provided = (
+        "worker_environment_variables" in runtime_update.model_fields_set
+    )
+    worker_environment_variables = runtime_update.worker_environment_variables
 
     clear_alert_webhook = bool(runtime_updates.pop("clear_alert_webhook_url", False))
     clear_anthropic_api_key = bool(runtime_updates.pop("clear_anthropic_api_key", False))
@@ -298,8 +419,6 @@ async def update_runtime_config(
     provider_sync_updates = dict(runtime_updates)
     if clear_anthropic_api_key:
         provider_sync_updates["clear_anthropic_api_key"] = True
-
-    preview_settings = _build_preview_settings(runtime_updates, get_settings())
 
     if clear_alert_webhook and "alert_webhook_url" not in runtime_updates:
         runtime_updates["alert_webhook_url"] = get_settings().alert_webhook_url
@@ -318,16 +437,57 @@ async def update_runtime_config(
         if clear_anthropic_api_key and "anthropic_api_key" not in runtime_updates:
             await reset_runtime_config_override(db, "anthropic_api_key")
             logger.info("Cleared stored Anthropic API key")
+    except ConfigEncryptionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
 
+    if worker_environment_variables_provided:
+        if worker_environment_variables is None:
+            logger.info("Ignored null runtime worker environment variables update")
+        else:
+            try:
+                await replace_worker_environment_variables(
+                    db,
+                    worker_environment_variables,
+                )
+                logger.info("Replaced runtime worker environment variables")
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
+            except ConfigEncryptionError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=str(exc),
+                ) from exc
+
+    try:
         await load_runtime_config_from_db(db)
     except ConfigEncryptionError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
 
     # Sync anthropic_* changes to default AI provider
     await _sync_anthropic_to_default_provider(db, provider_sync_updates)
-    await db.commit()
+    if commit:
+        await db.commit()
 
-    return _serialize_runtime_config(get_effective_settings())
+    return await _serialize_runtime_config_response(db)
+
+
+@router.patch("/config/runtime")
+async def update_runtime_config(
+    runtime_update: RuntimeConfigUpdate,
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_admin_user),
+):
+    """Update persisted runtime configuration overrides."""
+    return await apply_runtime_config_update(db, runtime_update, commit=True)
 
 
 @router.delete("/config/runtime/{key}")
@@ -346,4 +506,4 @@ async def reset_runtime_config_key(
     await reset_runtime_config_override(db, key)
     await load_runtime_config_from_db(db)
     logger.info("Reset persisted runtime configuration override for %s", key)
-    return _serialize_runtime_config(get_effective_settings())
+    return await _serialize_runtime_config_response(db)

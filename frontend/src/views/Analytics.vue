@@ -1,7 +1,7 @@
 <template>
   <div class="analytics-page">
     <n-spin :show="initialLoading" :description="t('analytics.loading')">
-      <n-space vertical :size="20">
+      <div class="page-hero">
         <PageHeader
           :title="t('analytics.title')"
           :subtitle="t('analytics.subtitle')"
@@ -38,8 +38,10 @@
             </n-button>
           </template>
         </PageHeader>
+      </div>
+      <n-space vertical :size="20">
 
-        <n-alert type="info" :show-icon="false">
+        <n-alert type="info" :show-icon="false" :style="{ borderRadius: '12px' }">
           {{ t('analytics.projectInfo') }}
         </n-alert>
 
@@ -830,6 +832,14 @@ const summaryItems = computed(() => {
           : t('analytics.noFinishedTasksYet')
     },
     {
+      label: t('analytics.totalDuration'),
+      value: formatDurationSec(summary.total_execution_seconds),
+      note:
+        summary.finished_tasks > 0
+          ? t('analytics.finishedBreakdown', { completed: summary.completed_tasks, failed: summary.failed_tasks, cancelled: summary.cancelled_tasks })
+          : t('analytics.noFinishedTasksYet')
+    },
+    {
       label: t('analytics.avgDuration'),
       value: formatDurationSec(summary.avg_execution_seconds),
       note:
@@ -865,13 +875,6 @@ const summaryItems = computed(() => {
         summary.max_total_tokens_per_tracked_task !== null
           ? t('analytics.maxTokens', { value: formatNumber(summary.max_total_tokens_per_tracked_task) })
           : t('analytics.noTokenData')
-    },
-    {
-      label: t('analytics.trackedInitiators'),
-      value: String(summary.tracked_initiator_tasks),
-      note: summary.initiator_tracking_started_at
-        ? t('analytics.since', { time: formatDateTime(summary.initiator_tracking_started_at) })
-        : t('analytics.noTrackedInitiators')
     }
   )
 
@@ -1143,7 +1146,7 @@ const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
           : null
       ])
   },
-  { title: t('analytics.tasks'), key: 'task_count', width: 80, sorter: (a, b) => a.task_count - b.task_count },
+  { title: t('analytics.tasks'), key: 'task_count', width: 90, sorter: (a, b) => a.task_count - b.task_count },
   {
     title: t('analytics.success'),
     key: 'success_rate',
@@ -1152,11 +1155,15 @@ const projectColumns = computed<DataTableColumns<AnalyticsProjectRow>>(() => [
     render: (row) => formatPercentage(row.success_rate)
   },
   {
-    title: t('analytics.avgDuration'),
-    key: 'avg_execution_seconds',
-    width: 120,
-    sorter: (a, b) => (a.avg_execution_seconds ?? -1) - (b.avg_execution_seconds ?? -1),
-    render: (row) => formatDurationSec(row.avg_execution_seconds)
+    title: t('analytics.duration'),
+    key: 'total_execution_seconds',
+    width: 130,
+    sorter: (a, b) => a.total_execution_seconds - b.total_execution_seconds,
+    render: (row) =>
+      h('div', [
+        h('div', formatDurationSec(row.total_execution_seconds)),
+        h('div', { style: secondaryTextStyle }, t('analytics.durationAvgLine', { value: formatDurationSec(row.avg_execution_seconds) }))
+      ])
   },
   {
     title: t('analytics.avgWait'),
@@ -1211,7 +1218,7 @@ const initiatorColumns = computed<DataTableColumns<AnalyticsInitiatorRow>>(() =>
           : null
       ])
   },
-  { title: t('analytics.tasks'), key: 'task_count', width: 80, sorter: (a, b) => a.task_count - b.task_count },
+  { title: t('analytics.tasks'), key: 'task_count', width: 90, sorter: (a, b) => a.task_count - b.task_count },
   {
     title: t('analytics.success'),
     key: 'success_rate',
@@ -1220,11 +1227,15 @@ const initiatorColumns = computed<DataTableColumns<AnalyticsInitiatorRow>>(() =>
     render: (row) => formatPercentage(row.success_rate)
   },
   {
-    title: t('analytics.avgDuration'),
-    key: 'avg_execution_seconds',
-    width: 120,
-    sorter: (a, b) => (a.avg_execution_seconds ?? -1) - (b.avg_execution_seconds ?? -1),
-    render: (row) => formatDurationSec(row.avg_execution_seconds)
+    title: t('analytics.duration'),
+    key: 'total_execution_seconds',
+    width: 130,
+    sorter: (a, b) => a.total_execution_seconds - b.total_execution_seconds,
+    render: (row) =>
+      h('div', [
+        h('div', formatDurationSec(row.total_execution_seconds)),
+        h('div', { style: secondaryTextStyle }, t('analytics.durationAvgLine', { value: formatDurationSec(row.avg_execution_seconds) }))
+      ])
   },
   {
     title: t('analytics.avgWait'),

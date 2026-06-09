@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,10 +32,10 @@ class SlotCapacityInfo:
 
 def _get_slot_boundaries(scheduled_at: datetime) -> tuple[datetime, datetime]:
     """Return the 1-hour slot boundaries for a given datetime (always tz-naive)."""
-    from datetime import timedelta, timezone
+    from datetime import timedelta
     # DB stores TIMESTAMP WITHOUT TIME ZONE; strip tzinfo to avoid mismatch
     if scheduled_at.tzinfo is not None:
-        scheduled_at = scheduled_at.astimezone(timezone.utc).replace(tzinfo=None)
+        scheduled_at = scheduled_at.astimezone(UTC).replace(tzinfo=None)
     hour_start = scheduled_at.replace(minute=0, second=0, microsecond=0)
     hour_end = hour_start + timedelta(hours=SLOT_DURATION_HOURS)
     return hour_start, hour_end

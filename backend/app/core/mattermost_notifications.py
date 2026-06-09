@@ -5,16 +5,17 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import httpx
-from sqlalchemy import or_, select
+from sqlalchemy import inspect, or_, select
 
 from app.config import get_effective_settings
 from app.core.ssl_utils import get_ssl_verify
 from app.core.utcnow import utcnow
 from app.database import AsyncSessionLocal
 from app.models import (
+    Issue,
     MattermostNotificationDelivery,
     MattermostNotificationProfile,
     MattermostUserMapping,
@@ -75,6 +76,7 @@ MATTERMOST_FIELD_KEYS = (
     MATTERMOST_FIELD_TASK_LINK,
 )
 MATTERMOST_FIELD_KEY_SET = set(MATTERMOST_FIELD_KEYS)
+_ISSUE_NOT_PROVIDED = object()
 
 
 class MattermostNotificationError(RuntimeError):
@@ -139,7 +141,7 @@ def serialize_profile(profile: MattermostNotificationProfile) -> dict[str, Any]:
     }
 
 
-def _format_datetime(value: Optional[datetime]) -> str:
+def _format_datetime(value: datetime | None) -> str:
     if value is None:
         return "-"
     return value.isoformat(timespec="seconds")
@@ -193,7 +195,7 @@ class MattermostClient:
             timeout=10,
             verify=get_ssl_verify(),
         )
-        self._me: Optional[dict[str, Any]] = None
+        self._me: dict[str, Any] | None = None
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -241,8 +243,8 @@ class MattermostClient:
 
 async def test_mattermost_connection(
     *,
-    server_url: Optional[str] = None,
-    bot_token: Optional[str] = None,
+    server_url: str | None = None,
+    bot_token: str | None = None,
 ) -> dict[str, str]:
     """Validate Mattermost connectivity using stored or preview integration values."""
     settings = get_effective_settings()
@@ -268,7 +270,7 @@ async def _resolve_mattermost_user_id(
     session,
     client: MattermostClient,
     task: Task,
-) -> Optional[str]:
+) -> str | None:
     filters = []
     if task.initiator_user_id is not None:
         filters.append(MattermostUserMapping.user_id == task.initiator_user_id)
@@ -313,9 +315,23 @@ async def _resolve_mattermost_user_id(
     return mattermost_user_id
 
 
-def _build_attachment_fields(task: Task, event_type: str, field_keys: list[str], context: dict[str, Any]) -> list[dict[str, Any]]:
+def _resolve_render_issue(task: Task, issue: Any = _ISSUE_NOT_PROVIDED) -> Any:
+    if issue is not _ISSUE_NOT_PROVIDED:
+        return issue
+    return getattr(task, "issue", None)
+
+
+def _build_attachment_fields(
+    task: Task,
+    event_type: str,
+    field_keys: list[str],
+    context: dict[str, Any],
+    *,
+    issue: Any = _ISSUE_NOT_PROVIDED,
+) -> list[dict[str, Any]]:
     settings = get_effective_settings()
     task_url = f"{settings.dashboard_url}/tasks/{task.id}"
+    render_issue = _resolve_render_issue(task, issue)
     schedule_change = None
     if context.get("previous_scheduled_at") is not None or context.get("scheduled_at") is not None:
         schedule_change = (
@@ -323,7 +339,7 @@ def _build_attachment_fields(task: Task, event_type: str, field_keys: list[str],
             f"{_format_datetime(context.get('scheduled_at'))}"
         )
 
-    field_map: dict[str, Optional[tuple[str, str, bool]]] = {
+    field_map: dict[str, tuple[str, str, bool] | None] = {
         MATTERMOST_FIELD_TASK_ID: ("任务 ID", str(task.id), True),
         MATTERMOST_FIELD_PROJECT: ("项目", f"#{task.project_id}", True),
         MATTERMOST_FIELD_ISSUE: (
@@ -333,13 +349,13 @@ def _build_attachment_fields(task: Task, event_type: str, field_keys: list[str],
         ),
         MATTERMOST_FIELD_MERGE_REQUEST: (
             "Merge Request",
-            (getattr(task.issue, 'merge_request_url', None) or "-") if task.issue_id else "-",
+            (getattr(render_issue, "merge_request_url", None) or "-") if task.issue_id else "-",
             True,
         ),
         MATTERMOST_FIELD_INITIATOR: ("发起人", task.initiator_username or "-", True),
         MATTERMOST_FIELD_STATUS: ("状态", task.status.value, True),
-        MATTERMOST_FIELD_BRANCH: ("分支", (getattr(task.issue, 'branch_name', None) or "-") if task.issue_id else "-", True),
-        MATTERMOST_FIELD_TARGET_BRANCH: ("目标分支", (getattr(task.issue, 'target_branch', None) or "-") if task.issue_id else "-", True),
+        MATTERMOST_FIELD_BRANCH: ("分支", (getattr(render_issue, "branch_name", None) or "-") if task.issue_id else "-", True),
+        MATTERMOST_FIELD_TARGET_BRANCH: ("目标分支", (getattr(render_issue, "target_branch", None) or "-") if task.issue_id else "-", True),
         MATTERMOST_FIELD_SCHEDULED_AT: ("预约时间", _format_datetime(task.scheduled_at), False),
         MATTERMOST_FIELD_SCHEDULE_CHANGE: ("时间变更", schedule_change or "-", False),
         MATTERMOST_FIELD_ERROR: ("错误摘要", (task.error_message or "-")[:500], False),
@@ -362,7 +378,13 @@ def _build_attachment_fields(task: Task, event_type: str, field_keys: list[str],
     return fields
 
 
-def _build_card_markdown(task: Task, event_type: str, context: dict[str, Any]) -> str:
+def _build_card_markdown(
+    task: Task,
+    event_type: str,
+    context: dict[str, Any],
+    *,
+    issue: Any = _ISSUE_NOT_PROVIDED,
+) -> str:
     settings = get_effective_settings()
     task_url = f"{settings.dashboard_url}/tasks/{task.id}"
     lines = [
@@ -374,9 +396,9 @@ def _build_card_markdown(task: Task, event_type: str, context: dict[str, Any]) -
 
     if task.issue_id is not None:
         lines.append(f"- Issue: `#{task.issue_id}`")
-    issue = getattr(task, 'issue', None)
-    if issue and getattr(issue, 'merge_request_iid', None) is not None:
-        lines.append(f"- Merge Request: `!{issue.merge_request_iid}`")
+    render_issue = _resolve_render_issue(task, issue)
+    if render_issue and getattr(render_issue, "merge_request_iid", None) is not None:
+        lines.append(f"- Merge Request: `!{render_issue.merge_request_iid}`")
     if task.initiator_username:
         lines.append(f"- 发起人: `{task.initiator_username}`")
     if task.scheduled_at is not None:
@@ -396,9 +418,17 @@ async def notify_task_event(
     task: Task,
     event_type: str,
     *,
-    context: Optional[dict[str, Any]] = None,
+    context: dict[str, Any] | None = None,
+    session_factory: Any = None,
 ) -> None:
-    """Send Mattermost notifications for one task lifecycle event."""
+    """Send Mattermost notifications for one task lifecycle event.
+
+    session_factory: Optional async_sessionmaker to use for DB queries.
+    Defaults to the main engine's AsyncSessionLocal. Worker threads that
+    run in their own event loop must pass their thread-local session factory
+    to avoid "Future attached to a different loop" errors from asyncpg.
+    """
+    _Session = session_factory if session_factory is not None else AsyncSessionLocal
     if event_type not in MATTERMOST_EVENT_TYPE_SET:
         raise ValueError(f"Unsupported Mattermost event type: {event_type}")
 
@@ -408,7 +438,55 @@ async def notify_task_event(
 
     context_data = context or {}
 
-    async with AsyncSessionLocal() as session:
+    # Resolve issue data for rendering without mutating the caller's Task.
+    # Successful worker notifications run before the caller commits final task
+    # status/stats; detaching or reassigning that Task here can drop those
+    # pending changes.
+    render_issue: Any = _ISSUE_NOT_PROVIDED
+    task_state = inspect(task)
+    if task_state.expired:
+        # The task was expired by an intermediate db.commit() in the caller
+        # (e.g. after persisting issue.claude_session_id or merge_request_iid
+        # on task completion).  Accessing any expired column attribute in async
+        # context raises MissingGreenlet because Task does not use AsyncAttrs.
+        # Reload the task — and its issue — from a fresh session so that all
+        # attribute access below is safe.
+        task_pk = task_state.identity
+        if not task_pk:
+            logger.warning("notify_task_event: expired task has no identity key; skipping notification")
+            return
+        task_id_val = task_pk[0]
+        async with _Session() as reload_session:
+            reload_result = await reload_session.execute(select(Task).where(Task.id == task_id_val))
+            task = reload_result.scalar_one_or_none()
+            if task is None:
+                logger.warning(
+                    "notify_task_event: task %s not found on reload; skipping notification", task_id_val
+                )
+                return
+            if task.issue_id is not None:
+                issue_result = await reload_session.execute(select(Issue).where(Issue.id == task.issue_id))
+                render_issue = issue_result.scalar_one_or_none()
+                if render_issue is not None:
+                    reload_session.expunge(render_issue)
+                reload_session.expunge(task)
+            else:
+                render_issue = None
+                reload_session.expunge(task)
+    elif task.issue_id is not None and "issue" in task_state.unloaded:
+        async with _Session() as session:
+            issue_result = await session.execute(
+                select(Issue).where(Issue.id == task.issue_id)
+            )
+            render_issue = issue_result.scalar_one_or_none()
+            if render_issue is not None:
+                session.expunge(render_issue)
+    elif task.issue_id is not None:
+        render_issue = getattr(task, "issue", None)
+    else:
+        render_issue = None
+
+    async with _Session() as session:
         result = await session.execute(
             select(MattermostNotificationProfile)
             .where(MattermostNotificationProfile.enabled.is_(True))
@@ -437,6 +515,7 @@ async def notify_task_event(
                         event_type,
                         deserialize_string_list(profile.field_keys_json),
                         context_data,
+                        issue=render_issue,
                     )
                     task_url = f"{settings.dashboard_url}/tasks/{task.id}"
                     mention_prefix = (
@@ -453,7 +532,7 @@ async def notify_task_event(
                             "title": _event_label(event_type),
                             "fields": fields,
                         }],
-                        "card": _build_card_markdown(task, event_type, context_data),
+                        "card": _build_card_markdown(task, event_type, context_data, issue=render_issue),
                     }
 
                     if profile.target_type == MATTERMOST_TARGET_TYPE_CHANNEL:

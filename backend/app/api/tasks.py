@@ -3,31 +3,17 @@
 import asyncio
 import json as _json
 import logging
+import os
 import time
 from datetime import datetime, timedelta
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import StreamingResponse
-from sqlalchemy import delete, func, or_, select, false
+from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.docker_client import get_docker_client
-from app.core.projects import build_project_lookup, get_project_metadata
-from app.core.scheduling import resolve_scheduled_at
-from app.core.task_helpers import _serialize_task, maybe_update_issue_status
-from app.core.utcnow import utcnow
-from app.database import get_db
-from app.dependencies.auth import get_optional_current_user, require_page_access
-from app.dependencies.project_access import (
-    ProjectAccessScope,
-    require_project_access,
-    require_project_access_scope,
-)
-from app.models import Issue, Task, TaskLog, TaskStatus, User
-
-from app.api.task_schemas import CreateTaskRequest, RescheduleTaskRequest, RetryTaskRequest
 from app.api.task_operations import (
     get_task_with_access_check,
     notify_task_cancelled,
@@ -37,34 +23,61 @@ from app.api.task_operations import (
     validate_scheduled_datetime_in_future,
     validate_task_status_for_cancel,
     validate_task_status_for_execute,
-    validate_task_status_for_retry,
     validate_task_status_for_reschedule,
+    validate_task_status_for_retry,
 )
+from app.api.task_schemas import (
+    CreateTaskRequest,
+    RescheduleTaskRequest,
+    RetryTaskRequest,
+    UpdateTaskRequest,
+)
+from app.config import get_effective_settings
+from app.core.docker_client import get_docker_client
+from app.core.issue_execution_locks import release_issue_execution_lock
+from app.core.projects import build_project_lookup, get_project_metadata
+from app.core.scheduling import resolve_scheduled_at
+from app.core.task_helpers import _serialize_task, maybe_update_issue_status
+from app.core.usage_limits import (
+    UsageLimitExceeded,
+    get_usage_quota_service,
+    usage_limit_exceeded_detail,
+)
+from app.core.utcnow import utcnow
+from app.core.worker_workspace import build_issue_workspace_paths, remove_issue_workspace
+from app.database import AsyncSessionLocal, get_db
+from app.dependencies.auth import get_optional_current_user, require_page_access
+from app.dependencies.project_access import (
+    ProjectAccessScope,
+    require_project_access,
+    require_project_access_scope,
+)
+from app.models import AIProvider, Issue, Task, TaskLog, TaskStatus, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-TASKS_SORT_FIELDS = {"created_at", "status", "priority", "total_changes", "input_tokens", "output_tokens"}
+TASKS_SORT_FIELDS = {"created_at", "status", "priority", "total_changes", "input_tokens", "output_tokens", "duration"}
 SORT_ORDERS = {"asc", "desc"}
 
 
 @router.get("/tasks")
 async def list_tasks(
-    status: Optional[str] = None,
-    project_id: Optional[str] = None,
-    issue_id: Optional[int] = None,
-    initiator_username: Optional[str] = None,
-    priority: Optional[str] = None,
-    has_mr: Optional[bool] = None,
-    search: Optional[str] = None,
-    created_after: Optional[str] = None,
-    created_before: Optional[str] = None,
-    scheduled_after: Optional[str] = None,
-    scheduled_before: Optional[str] = None,
-    sort_by: Optional[str] = None,
-    sort_order: Optional[str] = None,
-    page: Optional[int] = None,
+    status: str | None = None,
+    project_id: str | None = None,
+    issue_id: int | None = None,
+    initiator_username: str | None = None,
+    priority: str | None = None,
+    has_mr: bool | None = None,
+    search: str | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
+    scheduled_after: str | None = None,
+    scheduled_before: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str | None = None,
+    page: int | None = None,
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
@@ -92,11 +105,22 @@ async def list_tasks(
             )
         effective_sort_order = sort_order
 
-    sort_column = getattr(Task, effective_sort_by)
-    if effective_sort_order == "asc":
-        order_clause = sort_column.asc().nullslast()
+    if effective_sort_by == "duration":
+        # Duration = completed_at - started_at (or now - started_at for running tasks)
+        duration_expr = func.coalesce(
+            func.extract("epoch", Task.completed_at - Task.started_at),
+            func.extract("epoch", func.now() - Task.started_at),
+        )
+        if effective_sort_order == "asc":
+            order_clause = duration_expr.asc().nullslast()
+        else:
+            order_clause = duration_expr.desc().nullslast()
     else:
-        order_clause = sort_column.desc().nullslast()
+        sort_column = getattr(Task, effective_sort_by)
+        if effective_sort_order == "asc":
+            order_clause = sort_column.asc().nullslast()
+        else:
+            order_clause = sort_column.desc().nullslast()
 
     query = select(Task).options(selectinload(Task.issue), selectinload(Task.provider)).order_by(order_clause)
 
@@ -229,6 +253,10 @@ async def list_tasks(
         is_unrestricted=access_scope.is_unrestricted,
     )
 
+    # Compute settings once — _serialize_task uses it per-task, so pass it in
+    # to avoid recreating the Settings object for every row in the result set.
+    settings = get_effective_settings()
+
     # Paginated mode: return { items, total, page, page_size }
     if page is not None:
         page = max(1, page)
@@ -245,7 +273,7 @@ async def list_tasks(
 
         return {
             "items": [
-                _serialize_task(task, project_lookup.get(task.project_id))
+                _serialize_task(task, project_lookup.get(task.project_id), settings)
                 for task in tasks
             ],
             "total": total,
@@ -258,21 +286,27 @@ async def list_tasks(
     tasks = result.scalars().all()
 
     return [
-        _serialize_task(task, project_lookup.get(task.project_id))
+        _serialize_task(task, project_lookup.get(task.project_id), settings)
         for task in tasks
     ]
 
 
 @router.get("/tasks/scheduled")
 async def list_scheduled_tasks(
-    project_id: Optional[int] = None,
-    hour_start: Optional[str] = Query(None, description="ISO datetime; filter tasks in this 1-hour window"),
+    project_id: int | None = None,
+    hour_start: str | None = Query(None, description="ISO datetime; filter tasks in this 1-hour window"),
+    my: bool = Query(False, description="When true, restrict to tasks initiated by the current user"),
     db: AsyncSession = Depends(get_db),
     _current_user=Depends(require_page_access("schedule_overview")),
-    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """List active scheduled tasks for queue analytics views.
 
+    Returns all scheduled tasks regardless of project membership — the schedule
+    overview is a global queue view where all authenticated users with page access
+    can see the full pipeline. Project-level access is only enforced for write
+    operations (reschedule, cancel, etc.).
+
+    When my=True, restricts results to the current user's tasks.
     When hour_start is provided, returns only tasks within that 1-hour window.
     """
     query = (
@@ -301,22 +335,17 @@ async def list_scheduled_tasks(
 
     if project_id:
         query = query.where(Task.project_id == project_id)
-    elif not access_scope.is_unrestricted:
-        allowed_project_ids = access_scope.accessible_project_ids
-        if not allowed_project_ids:
-            query = query.where(false())
-        else:
-            query = query.where(Task.project_id.in_(allowed_project_ids))
+
+    if my and _current_user and getattr(_current_user, "username", None):
+        query = query.where(Task.initiator_username == _current_user.username)
 
     result = await db.execute(query)
     tasks = result.scalars().all()
-    project_lookup = await build_project_lookup(
-        accessible_projects=access_scope.accessible_projects,
-        is_unrestricted=access_scope.is_unrestricted,
-    )
+    project_lookup = await build_project_lookup(is_unrestricted=True)
+    settings = get_effective_settings()
 
     return [
-        _serialize_task(task, project_lookup.get(task.project_id))
+        _serialize_task(task, project_lookup.get(task.project_id), settings)
         for task in tasks
     ]
 
@@ -420,7 +449,7 @@ async def get_task_logs(
             "task_id": log.task_id,
             "log_level": log.log_level,
             "log_type": log.log_type,
-            "metadata": log.log_metadata,
+            "metadata": _json.loads(log.log_metadata) if log.log_metadata else None,
             "message": log.message,
             "created_at": log.created_at.isoformat(),
         }
@@ -432,7 +461,6 @@ async def get_task_logs(
 async def stream_task_logs(
     task_id: int,
     since_id: int = 0,
-    db: AsyncSession = Depends(get_db),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Stream task log entries as Server-Sent Events.
@@ -444,15 +472,17 @@ async def stream_task_logs(
     Args:
         task_id: Task ID to stream logs for
         since_id: Only return log entries with id > since_id (for resuming)
-        db: Database session
         access_scope: Project access scope for authorization
 
     Returns:
         StreamingResponse with text/event-stream media type
     """
-    # Validate task exists and user has access before starting the stream
-    result = await db.execute(select(Task).where(Task.id == task_id))
-    task = result.scalar_one_or_none()
+    # Validate task exists and user has access before starting the stream.
+    # Use a short-lived session that closes immediately — this endpoint must not
+    # hold a DB connection for the full stream duration (up to 30 min).
+    async with AsyncSessionLocal() as init_db:
+        result = await init_db.execute(select(Task).where(Task.id == task_id))
+        task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -462,49 +492,239 @@ async def stream_task_logs(
 
     _TERMINAL_STATUSES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
 
+    def _log_to_event_data(log: TaskLog) -> dict:
+        return {
+            "id": log.id,
+            "log_type": log.log_type,
+            "metadata": _json.loads(log.log_metadata) if log.log_metadata else None,
+            "message": log.message,
+            "created_at": log.created_at.isoformat(),
+        }
+
     async def generate_log_events():
         cursor = since_id
+        # Track tool_call log IDs that were emitted without output_payload_id.
+        # These logs are updated in-place (not appended) by the worker, so they
+        # are never re-emitted by the id > cursor query.  We re-query them each
+        # cycle and push an "update" SSE event the moment output_payload_id
+        # appears, eliminating the need for a client-side fetchLogs() poll.
+        pending_tool_calls: set[int] = set()
+        _BATCH_SIZE = 500
+        _SLOW_QUERY_THRESHOLD_S = 0.5
+        stream_start = time.monotonic()
+        total_events_sent = 0
+        poll_cycle = 0
+        first_batch_sent = False   # tracks whether the first "batch" event was yielded
+        ff_streak = 0              # consecutive fast-forward cycles currently running
+        ff_streak_logs = 0         # total log entries delivered across the streak
+        logger.info(
+            f"[Task {task_id}] log-stream opened since_id={since_id} "
+            f"resume={'yes' if since_id > 0 else 'no'}"
+        )
         try:
             while True:
-                # Fetch next batch of log entries after cursor
-                log_result = await db.execute(
-                    select(TaskLog)
-                    .where(TaskLog.task_id == task_id, TaskLog.id > cursor)
-                    .order_by(TaskLog.id.asc())
-                    .limit(100)
-                )
-                new_logs = log_result.scalars().all()
+                poll_cycle += 1
+                cycle_start = time.monotonic()
 
-                for log in new_logs:
-                    event_data = {
-                        "id": log.id,
-                        "log_type": log.log_type,
-                        "metadata": log.log_metadata,
-                        "message": log.message,
-                        "created_at": log.created_at.isoformat(),
-                    }
-                    yield f"data: {_json.dumps(event_data)}\n\n"
-                    cursor = log.id
+                # Collect all SSE payloads while the session is open, then close
+                # the session and yield outside it.  This ensures the DB connection
+                # is returned to the pool before we block on network I/O to the
+                # client (a slow or stalled client must not hold a DB connection).
+                #
+                # Regular log entries are batched into a single "batch" SSE event
+                # (a JSON array) so the browser processes them in ONE macrotask.
+                # Without batching, each individual SSE message fires a separate
+                # macrotask; queueMicrotask() cannot coalesce across macrotasks, so
+                # 100 events produce 100 Vue reactive updates and O(n²) total work.
+                cycle_log_data: list[dict] = []    # payload for the "batch" event
+                cycle_update_events: list[str] = []  # "update" events stay individual
+                fast_forward = False
+                current_status = None
+                new_log_count = 0
 
-                # Check current task status (re-query to get fresh state)
-                task_result = await db.execute(
-                    select(Task.status).where(Task.id == task_id)
-                )
-                current_status = task_result.scalar_one_or_none()
+                async with AsyncSessionLocal() as poll_db:
+                    # Fetch new log entries since last cursor
+                    t0 = time.monotonic()
+                    log_result = await poll_db.execute(
+                        select(TaskLog)
+                        .where(TaskLog.task_id == task_id, TaskLog.id > cursor)
+                        .order_by(TaskLog.id.asc())
+                        .limit(_BATCH_SIZE)
+                    )
+                    new_logs = log_result.scalars().all()
+                    new_log_count = len(new_logs)
+                    log_query_ms = (time.monotonic() - t0) * 1000
 
-                if current_status in _TERMINAL_STATUSES and not new_logs:
-                    # Task is done and no new logs — signal completion and stop
+                    if log_query_ms > _SLOW_QUERY_THRESHOLD_S * 1000:
+                        logger.warning(
+                            f"[Task {task_id}] log-stream slow log query cycle={poll_cycle} "
+                            f"cursor={cursor} fetched={new_log_count} query_ms={log_query_ms:.1f}"
+                        )
+                    elif new_logs:
+                        logger.debug(
+                            f"[Task {task_id}] log-stream cycle={poll_cycle} "
+                            f"fetched={new_log_count} cursor={cursor} query_ms={log_query_ms:.1f}"
+                        )
+
+                    for log in new_logs:
+                        event_data = _log_to_event_data(log)
+                        cursor = log.id
+                        total_events_sent += 1
+                        # Queue tool_call logs that don't yet have output_payload_id
+                        if log.log_type == "tool_call":
+                            meta = event_data["metadata"] or {}
+                            if not meta.get("output_payload_id"):
+                                pending_tool_calls.add(log.id)
+                        cycle_log_data.append(event_data)
+
+                    if new_log_count == _BATCH_SIZE:
+                        # Batch was full — more logs likely waiting; skip sleep
+                        fast_forward = True
+                    else:
+                        # Re-check pending tool_call logs for in-place updates.
+                        # Fresh session means no stale identity map; no need for
+                        # populate_existing.
+                        if pending_tool_calls:
+                            t0 = time.monotonic()
+                            updated_result = await poll_db.execute(
+                                select(TaskLog)
+                                .where(TaskLog.id.in_(pending_tool_calls))
+                            )
+                            update_query_ms = (time.monotonic() - t0) * 1000
+                            if update_query_ms > _SLOW_QUERY_THRESHOLD_S * 1000:
+                                logger.warning(
+                                    f"[Task {task_id}] log-stream slow tool_call update query "
+                                    f"cycle={poll_cycle} pending={len(pending_tool_calls)} "
+                                    f"query_ms={update_query_ms:.1f}"
+                                )
+                            for log in updated_result.scalars().all():
+                                meta = _json.loads(log.log_metadata) if log.log_metadata else {}
+                                if meta.get("output_payload_id"):
+                                    cycle_update_events.append(
+                                        f"event: update\ndata: {_json.dumps(_log_to_event_data(log))}\n\n"
+                                    )
+                                    pending_tool_calls.discard(log.id)
+                                    total_events_sent += 1
+
+                        # Check current task status
+                        t0 = time.monotonic()
+                        task_result = await poll_db.execute(
+                            select(Task.status).where(Task.id == task_id)
+                        )
+                        current_status = task_result.scalar_one_or_none()
+                        status_query_ms = (time.monotonic() - t0) * 1000
+                        if status_query_ms > _SLOW_QUERY_THRESHOLD_S * 1000:
+                            logger.warning(
+                                f"[Task {task_id}] log-stream slow status query cycle={poll_cycle} "
+                                f"status={current_status} query_ms={status_query_ms:.1f}"
+                            )
+                # Session closed here — DB connection returned to pool.
+
+                cycle_ms = (time.monotonic() - cycle_start) * 1000
+                if cycle_ms > 1000:
+                    logger.warning(
+                        f"[Task {task_id}] log-stream slow cycle cycle={poll_cycle} "
+                        f"cycle_ms={cycle_ms:.1f} total_sent={total_events_sent}"
+                    )
+
+                # Yield events with DB connection already released.
+                # All log entries are batched into a single SSE event so the
+                # browser processes the entire cycle in one macrotask.
+                if cycle_log_data:
+                    _batch_payload = f"event: batch\ndata: {_json.dumps(cycle_log_data)}\n\n"
+                    _yield_t0 = time.monotonic()
+                    yield _batch_payload
+                    # NOTE: measures time for the ASGI send() call to return, i.e. the
+                    # time to copy the payload into the kernel TCP send buffer.  Spikes
+                    # (> 500 ms) indicate client-side TCP backpressure, not network RTT.
+                    _yield_ms = (time.monotonic() - _yield_t0) * 1000
+                    if not first_batch_sent:
+                        first_batch_sent = True
+                        logger.info(
+                            f"[Task {task_id}] log-stream first-batch "
+                            f"cycle={poll_cycle} count={len(cycle_log_data)} "
+                            f"time_to_first_ms={((_yield_t0 - stream_start) * 1000):.1f} "
+                            f"idle_cycles_before={poll_cycle - 1} "
+                            f"yield_ms={_yield_ms:.1f}"
+                        )
+                    elif _yield_ms > 500:
+                        logger.warning(
+                            f"[Task {task_id}] log-stream slow-yield "
+                            f"cycle={poll_cycle} count={len(cycle_log_data)} "
+                            f"yield_ms={_yield_ms:.1f}"
+                        )
+                for ev in cycle_update_events:
+                    yield ev
+
+                if len(pending_tool_calls) > 20:
+                    # Rate-limited: log on first detection and every 10th cycle
+                    # thereafter to avoid spamming when the condition persists.
+                    if poll_cycle % 10 == 1:
+                        logger.warning(
+                            f"[Task {task_id}] log-stream large-pending-tool-calls "
+                            f"size={len(pending_tool_calls)} cycle={poll_cycle}"
+                        )
+
+                if fast_forward:
+                    ff_streak += 1
+                    ff_streak_logs += len(cycle_log_data)
+                    # Per-cycle detail suppressed; streak summary fires when burst ends.
+                    continue
+
+                if ff_streak > 0:
+                    # Streak just ended — summarise how much catch-up was done
+                    logger.info(
+                        f"[Task {task_id}] log-stream fast-forward-done "
+                        f"cycles={ff_streak} logs={ff_streak_logs} cursor={cursor}"
+                    )
+                    ff_streak = 0
+                    ff_streak_logs = 0
+
+                if current_status not in _TERMINAL_STATUSES and not new_log_count:
+                    # Periodic heartbeat so we can confirm the stream is alive in logs
+                    if poll_cycle % 20 == 0:
+                        logger.debug(
+                            f"[Task {task_id}] log-stream alive "
+                            f"cycle={poll_cycle} cursor={cursor} status={current_status} "
+                            f"pending={len(pending_tool_calls)} "
+                            f"elapsed_s={time.monotonic() - stream_start:.0f}"
+                        )
+
+                if current_status in _TERMINAL_STATUSES and new_log_count == 0:
+                    # new_log_count == 0 means cycle_log_data was also empty —
+                    # no "batch" event was yielded this cycle, so no pending
+                    # microtask flush exists on the client when "done" arrives.
                     yield "event: done\ndata: {}\n\n"
+                    elapsed_s = time.monotonic() - stream_start
+                    logger.info(
+                        f"[Task {task_id}] log-stream closed reason=done "
+                        f"total_events={total_events_sent} cycles={poll_cycle} "
+                        f"elapsed_s={elapsed_s:.1f}"
+                    )
                     break
 
                 # Wait before polling again
                 await asyncio.sleep(1.5)
 
         except asyncio.CancelledError:
-            # Client disconnected
-            pass
+            elapsed_s = time.monotonic() - stream_start
+            logger.info(
+                f"[Task {task_id}] log-stream closed reason=client_disconnected "
+                f"total_events={total_events_sent} cycles={poll_cycle} "
+                f"elapsed_s={elapsed_s:.1f}"
+                + (
+                    f" ff_streak_aborted={ff_streak} ff_streak_logs={ff_streak_logs}"
+                    if ff_streak > 0 else ""
+                )
+            )
         except Exception as exc:
-            logger.error(f"[Task {task_id}] log-stream error: {exc}")
+            elapsed_s = time.monotonic() - stream_start
+            logger.error(
+                f"[Task {task_id}] log-stream error after {elapsed_s:.1f}s "
+                f"cycle={poll_cycle} total_events={total_events_sent}"
+                + (f" ff_streak={ff_streak}" if ff_streak > 0 else "")
+                + f": {exc}"
+            )
             yield f"data: {_json.dumps({'error': str(exc)})}\n\n"
 
     return StreamingResponse(
@@ -624,11 +844,108 @@ async def update_task_stats(
     }
 
 
+@router.patch("/tasks/{task_id}")
+async def update_task(
+    task_id: int,
+    request: UpdateTaskRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Update editable fields of a task that has not yet started.
+
+    Only fields present in the request body are applied.  The task must be in
+    PENDING or QUEUED status; any other status results in a 409 response.
+    """
+    task = await get_task_with_access_check(
+        task_id, db, access_scope, current_user, with_for_update=True
+    )
+
+    if task.status not in (TaskStatus.PENDING, TaskStatus.QUEUED):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Task {task_id} cannot be edited because its status is "
+                f"'{task.status.value}'. Only PENDING or QUEUED tasks can be updated."
+            ),
+        )
+
+    updated_fields = request.model_fields_set
+
+    if "user_prompt" in updated_fields:
+        if not request.user_prompt or not request.user_prompt.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="user_prompt must be a non-empty string",
+            )
+        task.user_prompt = request.user_prompt.strip()
+
+    if "priority" in updated_fields:
+        if request.priority not in (0, 1, 2):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="priority must be 0 (low), 1 (normal), or 2 (high)",
+            )
+        task.priority = request.priority
+
+    if "provider_id" in updated_fields:
+        # None means "clear to system default"; an integer must reference an existing provider
+        if request.provider_id is not None:
+            provider = await db.get(AIProvider, request.provider_id)
+            if not provider:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Provider not found",
+                )
+            if provider.is_disabled is True:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Provider is disabled",
+                )
+        task.provider_id = request.provider_id
+
+    if "require_changes" in updated_fields:
+        task.require_changes = request.require_changes  # type: ignore[assignment]  # null rejected by schema
+
+    if "task_mode" in updated_fields:
+        task.task_mode = request.task_mode  # type: ignore[assignment]  # null rejected by schema
+
+    # Enforce invariant: plan tasks must never have require_changes=True,
+    # regardless of whether task_mode or require_changes was the field being updated.
+    if task.task_mode == "plan":
+        task.require_changes = False
+
+    # Re-read the row inside the same transaction before committing.
+    # Under READ COMMITTED, this sees any status changes that were committed by a
+    # concurrent worker *before* this transaction acquired its FOR UPDATE lock.
+    # This prevents a successful PATCH on a task whose status was already advanced
+    # to RUNNING (or beyond) by the time we are ready to write.
+    await db.refresh(task)
+    if task.status not in (TaskStatus.PENDING, TaskStatus.QUEUED):
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Task {task_id} can no longer be edited: "
+                f"status changed to '{task.status.value}' while processing the request."
+            ),
+        )
+
+    await db.commit()
+    await db.refresh(task)
+
+    logger.info(
+        "Task %s updated via PATCH: fields=%s", task_id, sorted(updated_fields)
+    )
+
+    return _serialize_task(task, await get_project_metadata(task.project_id))
+
+
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_task(
     task_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Cancel a task."""
@@ -641,15 +958,19 @@ async def cancel_task(
     await db.commit()
     await db.refresh(task)
 
-    # Kill the running container (if any) to free the thread pool slot immediately
-    container_name = f"codify-{task_id}-issue{task.issue_id}"
+    await release_issue_execution_lock(db, issue_id=task.issue_id)
+    await db.commit()
+
+    # Kill and remove the running container (if any) to free the thread pool slot immediately
+    settings = get_effective_settings()
+    container_name = f"{settings.worker_container_prefix}-{task_id}-issue{task.issue_id}"
     try:
         docker = get_docker_client()
         container = await asyncio.to_thread(docker.client.containers.get, container_name)
-        await asyncio.to_thread(container.stop, timeout=5)
-        logger.info(f"Stopped container {container_name} for cancelled task {task_id}")
+        await asyncio.to_thread(container.remove, force=True)
+        logger.info(f"Removed container {container_name} for cancelled task {task_id}")
     except Exception:
-        pass  # Container may not exist or already stopped
+        pass  # Container may not exist or already removed
 
     await notify_task_cancelled(task)
     logger.info(f"Task {task_id} cancelled via API")
@@ -661,12 +982,55 @@ async def cancel_task(
     return {"status": "success", "message": f"Task {task_id} cancelled"}
 
 
+class OverrideStatusRequest(BaseModel):
+    status: str  # "completed" or "failed"
+    reason: str | None = None
+
+
+@router.post("/tasks/{task_id}/override-status")
+async def override_task_status(
+    task_id: int,
+    request: OverrideStatusRequest,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+    current_user: User | None = Depends(get_optional_current_user),
+) -> dict:
+    """Manually override a terminal task's status (completed <-> failed)."""
+    task = await get_task_with_access_check(task_id, db, access_scope, current_user)
+
+    if request.status not in ("completed", "failed"):
+        raise HTTPException(status_code=400, detail="status must be 'completed' or 'failed'")
+
+    new_status = TaskStatus(request.status)
+    if task.status not in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Can only override completed or failed tasks, current: {task.status.value}",
+        )
+    if task.status == new_status:
+        raise HTTPException(status_code=400, detail=f"Task is already {task.status.value}")
+
+    task.status = new_status
+    task.is_manually_overridden = True
+    task.override_reason = request.reason or None
+    task.overridden_by_user_id = current_user.id if current_user else None
+    task.overridden_at = utcnow()
+    await db.commit()
+    await db.refresh(task)
+
+    if task.issue_id:
+        await maybe_update_issue_status(db, task.issue_id)
+
+    logger.info(f"Task {task_id} status manually overridden to {new_status.value}")
+    return {"status": "success", "message": f"Task {task_id} status overridden to {new_status.value}"}
+
+
 @router.post("/tasks/{task_id}/retry")
 async def retry_task(
     task_id: int,
-    request: Optional[RetryTaskRequest] = None,
+    request: RetryTaskRequest | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Retry a failed or cancelled task by creating a new task with the same prompt.
@@ -690,9 +1054,22 @@ async def retry_task(
             detail=f"An active retry task (#{existing_retry.id}) already exists for task #{task_id}",
         )
 
-    scheduled_at: Optional[datetime] = None
+    scheduled_at: datetime | None = None
     if request and request.scheduled_datetime is not None:
         scheduled_at = validate_scheduled_datetime_in_future(request.scheduled_datetime)
+
+    if current_user is not None and current_user.id is not None:
+        try:
+            await get_usage_quota_service().raise_if_over_limit(
+                db,
+                current_user.id,
+                scope="create",
+            )
+        except UsageLimitExceeded as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=usage_limit_exceeded_detail(exc),
+            ) from exc
 
     # Check slot capacity for scheduled retries
     if scheduled_at is not None:
@@ -704,6 +1081,27 @@ async def retry_task(
                 detail=slot_full_detail_dict(slot_info),
             )
 
+    provider_id = original_task.provider_id
+    if provider_id is None:
+        default_result = await db.execute(
+            select(AIProvider).where(AIProvider.is_default == True)
+        )
+        provider = default_result.scalar_one_or_none()
+        if not provider:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No default provider configured. Please set a default AI provider.",
+            )
+        provider_id = provider.id
+    else:
+        provider = await db.get(AIProvider, provider_id)
+
+    if provider and provider.is_disabled is True:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Provider is disabled",
+        )
+
     new_task = Task(
         issue_id=original_task.issue_id,
         project_id=original_task.project_id,
@@ -712,10 +1110,14 @@ async def retry_task(
         scheduled_at=scheduled_at,
         is_retry=True,
         retry_source_task_id=original_task.id,
-        provider_id=original_task.provider_id,
+        provider_id=provider_id,
         initiator_user_id=current_user.id if current_user is not None else None,
         initiator_gitlab_user_id=current_user.gitlab_user_id if current_user is not None else None,
         initiator_username=current_user.username if current_user is not None else None,
+        initiator_display_name=current_user.display_name if current_user is not None else None,
+        initiator_email=current_user.email if current_user is not None else None,
+        task_mode=original_task.task_mode if original_task.task_mode else "execute",
+        require_changes=original_task.require_changes,
     )
     db.add(new_task)
     await db.commit()
@@ -735,7 +1137,7 @@ async def retry_task(
 async def execute_task(
     task_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Trigger immediate execution of a pending task."""
@@ -758,7 +1160,7 @@ async def reschedule_task(
     task_id: int,
     request: RescheduleTaskRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Update the scheduled execution time for an existing pending scheduled task."""
@@ -794,7 +1196,7 @@ async def reschedule_task(
 async def create_task(
     request: CreateTaskRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     """Create a new task under an Issue.
@@ -827,17 +1229,34 @@ async def create_task(
             detail="No prompt provided and issue has no description",
         )
 
-    # Validate provider_id if provided
-    if request.provider_id is not None:
-        from app.models import AIProvider
-        provider = await db.get(AIProvider, request.provider_id)
-        if not provider:
-            raise HTTPException(status_code=404, detail="Provider not found")
+    # Validate provider_id is required
+    from app.models import AIProvider
+    provider = await db.get(AIProvider, request.provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    if provider.is_disabled is True:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Provider is disabled",
+        )
 
     scheduled_at = resolve_scheduled_at(
         request.scheduled_datetime,
         request.delay_seconds,
     )
+
+    if current_user is not None and current_user.id is not None:
+        try:
+            await get_usage_quota_service().raise_if_over_limit(
+                db,
+                current_user.id,
+                scope="create",
+            )
+        except UsageLimitExceeded as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=usage_limit_exceeded_detail(exc),
+            ) from exc
 
     # Slot capacity only applies to scheduled tasks
     slot_warning = None
@@ -859,9 +1278,13 @@ async def create_task(
         initiator_user_id=current_user.id if current_user is not None else None,
         initiator_gitlab_user_id=current_user.gitlab_user_id if current_user is not None else None,
         initiator_username=current_user.username if current_user is not None else None,
+        initiator_display_name=current_user.display_name if current_user is not None else None,
+        initiator_email=current_user.email if current_user is not None else None,
         priority=request.priority,
         scheduled_at=scheduled_at,
         provider_id=request.provider_id,
+        task_mode=request.task_mode,
+        require_changes=request.effective_require_changes,
     )
     db.add(task)
     await db.commit()
@@ -877,3 +1300,132 @@ async def create_task(
     if slot_warning:
         response["slot_warning"] = slot_warning
     return response
+
+
+@router.get("/tasks/{task_id}/workspace")
+async def get_task_workspace_status(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    task = await get_task_with_access_check(task_id, db, access_scope, current_user)
+    if task.issue is None and task.issue_id is not None:
+        task.issue = await db.get(Issue, task.issue_id)
+
+    settings = get_effective_settings()
+    if not task.issue:
+        return {"enabled": False, "reason": "task has no issue"}
+
+    paths = build_issue_workspace_paths(settings, task.issue, task)
+    if paths is None:
+        return {"enabled": False, "reason": "worker workspace host path is not configured"}
+
+    repo_exists = os.path.isdir(paths.repo_path)
+    return {
+        "enabled": True,
+        "issue_root": paths.issue_root,
+        "repo_path": paths.repo_path,
+        "runtime_path": paths.runtime_path,
+        "repo_exists": repo_exists,
+    }
+
+
+@router.delete("/tasks/{task_id}/workspace")
+async def delete_task_workspace(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    task = await get_task_with_access_check(task_id, db, access_scope, current_user)
+    if task.status == TaskStatus.RUNNING:
+        raise HTTPException(status_code=400, detail="Cannot delete workspace while task is running")
+    if task.issue is None and task.issue_id is not None:
+        task.issue = await db.get(Issue, task.issue_id)
+    if not task.issue:
+        raise HTTPException(status_code=404, detail="Workspace not available for task without issue")
+
+    settings = get_effective_settings()
+    paths = build_issue_workspace_paths(settings, task.issue, task)
+    if paths is None:
+        raise HTTPException(status_code=404, detail="Worker workspace host path is not configured")
+
+    removed = remove_issue_workspace(paths.issue_root)
+    return {"removed": removed, "issue_root": paths.issue_root}
+
+
+@router.get("/tasks/{task_id}/archive")
+async def get_task_archive(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Get runtime archive metadata for a completed task."""
+    from app.models import TaskRunArchive
+    archive = (
+        await db.execute(
+            select(TaskRunArchive).where(TaskRunArchive.task_id == task_id)
+        )
+    ).scalar_one_or_none()
+    if not archive:
+        raise HTTPException(status_code=404, detail="Archive not available")
+    return {
+        "archive_name": archive.archive_name,
+        "archive_size_bytes": archive.archive_size_bytes,
+        "created_at": archive.created_at.isoformat(),
+        "file_exists": bool(archive.archive_path and os.path.exists(archive.archive_path)),
+    }
+
+
+@router.get("/tasks/{task_id}/archive/download")
+async def download_task_archive(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Download the compressed runtime archive for a completed task."""
+    from app.models import TaskRunArchive
+    archive = (
+        await db.execute(
+            select(TaskRunArchive).where(TaskRunArchive.task_id == task_id)
+        )
+    ).scalar_one_or_none()
+    if not archive:
+        raise HTTPException(status_code=404, detail="Archive not available")
+    if not archive.archive_path or not os.path.exists(archive.archive_path):
+        raise HTTPException(status_code=404, detail="Archive file not found")
+    return FileResponse(
+        archive.archive_path,
+        media_type="application/gzip",
+        filename=archive.archive_name,
+    )
+
+
+@router.get("/tasks/{task_id}/payloads/{payload_id}")
+async def get_task_payload(
+    task_id: int,
+    payload_id: int,
+    db: AsyncSession = Depends(get_db),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Get payload content for a task log entry."""
+    from app.models import TaskPayload
+    payload = (
+        await db.execute(
+            select(TaskPayload).where(
+                TaskPayload.task_id == task_id, TaskPayload.id == payload_id
+            )
+        )
+    ).scalar_one_or_none()
+    if not payload:
+        raise HTTPException(status_code=404, detail="Payload not found")
+    content = payload.content.decode("utf-8", errors="replace")
+    return {
+        "id": payload.id,
+        "payload_kind": payload.payload_kind,
+        "content": content,
+        "encoding": payload.encoding,
+        "char_count": payload.char_count,
+        "byte_count": payload.byte_count,
+    }

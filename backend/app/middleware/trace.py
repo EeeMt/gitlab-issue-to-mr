@@ -6,6 +6,7 @@ Trace ID 中间件
 import time
 import uuid
 from typing import Callable
+
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware

@@ -7,7 +7,7 @@ import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.config import get_settings, reset_runtime_config, get_effective_settings
+from app.config import get_effective_settings, get_settings, reset_runtime_config
 from app.models import SystemConfig
 from app.runtime_config import (
     _deserialize_runtime_value,
@@ -165,7 +165,6 @@ class RuntimeConfigCoverageTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_load_config_handles_config_encryption_error(self) -> None:
         """ConfigEncryptionError during deserialization is logged and skipped (lines 70-73)."""
-        from app.core.config_crypto import ConfigEncryptionError
 
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [

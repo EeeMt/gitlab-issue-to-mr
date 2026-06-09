@@ -1,14 +1,14 @@
 """Shared project utilities."""
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from app.core.gitlab_client import get_cached_projects
 
 logger = logging.getLogger(__name__)
 
 
-def _projects_to_lookup(projects: list[dict[str, Any]]) -> dict[int, dict[str, Optional[str]]]:
+def _projects_to_lookup(projects: list[dict[str, Any]]) -> dict[int, dict[str, str | None]]:
     """Convert a list of project dicts to a lookup keyed by project ID.
 
     Args:
@@ -27,9 +27,9 @@ def _projects_to_lookup(projects: list[dict[str, Any]]) -> dict[int, dict[str, O
 
 
 async def build_project_lookup(
-    accessible_projects: Optional[list[dict[str, Any]]] = None,
+    accessible_projects: list[dict[str, Any]] | None = None,
     is_unrestricted: bool = True,
-) -> dict[int, dict[str, Optional[str]]]:
+) -> dict[int, dict[str, str | None]]:
     """Build a project metadata lookup keyed by GitLab project ID.
 
     Args:
@@ -49,7 +49,7 @@ async def build_project_lookup(
         return {}
 
 
-async def get_project_metadata(project_id: int) -> dict[str, Optional[str]]:
+async def get_project_metadata(project_id: int) -> dict[str, str | None]:
     """Get project metadata for a single project ID.
 
     Args:

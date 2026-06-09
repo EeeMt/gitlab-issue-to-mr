@@ -20,7 +20,9 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     streamTaskLogs: vi.fn<() => any>(),
     getScheduledTasks: vi.fn<() => Promise<any[]>>(),
     getConfig: vi.fn<() => Promise<any>>(),
-    getIssue: vi.fn<() => Promise<any>>()
+    getIssue: vi.fn<() => Promise<any>>(),
+    getTaskArchive: vi.fn<() => Promise<any>>(),
+    downloadTaskArchive: vi.fn<() => Promise<any>>()
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => {
@@ -72,7 +74,9 @@ vi.mock('../api', () => ({
   streamTaskLogs: mockApi.streamTaskLogs,
   getScheduledTasks: mockApi.getScheduledTasks,
   getConfig: mockApi.getConfig,
-  getIssue: mockApi.getIssue
+  getIssue: mockApi.getIssue,
+  getTaskArchive: mockApi.getTaskArchive,
+  downloadTaskArchive: mockApi.downloadTaskArchive
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -202,12 +206,16 @@ vi.mock('naive-ui', () => ({
   NButton: {
     name: 'NButton',
     props: ['type', 'secondary', 'strong', 'round', 'loading', 'disabled'],
-    setup(props: any, { slots }: any) {
+    setup(props: any, { slots, attrs }: any) {
       return () => h('button', {
-        class: ['n-button', `n-button--${props.type || 'default'}`, { loading: props.loading, disabled: props.disabled }],
+        ...attrs,
+        class: [attrs.class, 'n-button', `n-button--${props.type || 'default'}`, { loading: props.loading, disabled: props.disabled }],
         disabled: props.disabled || props.loading,
         'data-type': props.type
-      }, slots.default?.())
+      }, [
+        slots.icon?.(),
+        slots.default?.()
+      ])
     },
     template: '<button class="n-button"><slot /></button>'
   },
@@ -265,8 +273,11 @@ vi.mock('naive-ui', () => ({
   NIcon: {
     name: 'NIcon',
     props: ['component', 'size'],
-    setup() {
-      return () => h('i', { class: 'n-icon' })
+    setup(props: any) {
+      return () => h('i', {
+        class: 'n-icon',
+        'data-icon': props.component?.name
+      })
     }
   },
   NSpin: {
@@ -319,11 +330,25 @@ vi.mock('naive-ui', () => ({
       return () => h('div', { class: 'n-tabs' }, slots.default?.())
     }
   },
+  NTab: {
+    name: 'NTab',
+    props: ['name', 'disabled'],
+    setup(_props: any, { slots }: any) {
+      return () => h('button', { class: 'n-tab' }, slots.default?.())
+    }
+  },
   NTabPane: {
     name: 'NTabPane',
     props: ['name', 'tab', 'disabled'],
     setup(_props: any, { slots }: any) {
       return () => h('div', { class: 'n-tab-pane' }, slots.default?.())
+    }
+  },
+  NBadge: {
+    name: 'NBadge',
+    props: ['value', 'max', 'show-zero'],
+    setup(props: any) {
+      return () => h('span', { class: 'n-badge' }, String(props.value ?? ''))
     }
   },
   NCollapse: {
@@ -343,8 +368,10 @@ vi.mock('naive-ui', () => ({
   NDrawer: {
     name: 'NDrawer',
     props: ['show', 'width', 'placement'],
-    setup(_props: any, { slots }: any) {
-      return () => h('div', { class: 'n-drawer' }, slots.default?.())
+    setup(props: any, { attrs, slots }: any) {
+      return () => props.show
+        ? h('div', { ...attrs, class: ['n-drawer', attrs.class] }, slots.default?.())
+        : null
     }
   },
   NDrawerContent: {
@@ -360,32 +387,59 @@ vi.mock('naive-ui', () => ({
     setup(props: any) {
       return () => h('div', { class: 'n-empty' }, props.description)
     }
-  }
+  },
+  NScrollbar: {
+    name: 'NScrollbar',
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-scrollbar' }, slots.default?.())
+    }
+  },
+  NModal: {
+    name: 'NModal',
+    props: ['show', 'preset', 'title'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-modal' }, slots.default?.())
+    }
+  },
 }))
 
 // Mock @vicons/ionicons5
-vi.mock('@vicons/ionicons5', () => ({
-  PersonOutline: { name: 'PersonOutline' },
-  LogoGitlab: { name: 'LogoGitlab' },
-  FolderOpenOutline: { name: 'FolderOpenOutline' },
-  GitMergeOutline: { name: 'GitMergeOutline' },
-  GitBranchOutline: { name: 'GitBranchOutline' },
-  ChatbubbleOutline: { name: 'ChatbubbleOutline' },
-  TimeOutline: { name: 'TimeOutline' },
-  GitPullRequest: { name: 'GitPullRequest' },
-  CubeOutline: { name: 'CubeOutline' },
-  ArrowDownCircleOutline: { name: 'ArrowDownCircleOutline' },
-  AlertCircleOutline: { name: 'AlertCircleOutline' },
-  CodeOutline: { name: 'CodeOutline' },
-  TerminalOutline: { name: 'TerminalOutline' },
-  CheckmarkCircleOutline: { name: 'CheckmarkCircleOutline' },
-  CloseCircleOutline: { name: 'CloseCircleOutline' },
-  DocumentTextOutline: { name: 'DocumentTextOutline' },
-  CreateOutline: { name: 'CreateOutline' },
-  BulbOutline: { name: 'BulbOutline' },
-  SearchOutline: { name: 'SearchOutline' },
-  CalendarOutline: { name: 'CalendarOutline' }
-}))
+vi.mock('@vicons/ionicons5', () => {
+  const icon = (name: string) => ({ name, render: () => null })
+  return {
+    AlertCircleOutline: icon('AlertCircleOutline'),
+    ArrowDownCircleOutline: icon('ArrowDownCircleOutline'),
+    ArrowBackOutline: icon('ArrowBackOutline'),
+    BulbOutline: icon('BulbOutline'),
+    CalendarOutline: icon('CalendarOutline'),
+    ChatbubbleEllipsesOutline: icon('ChatbubbleEllipsesOutline'),
+    ChatbubbleOutline: icon('ChatbubbleOutline'),
+    CheckmarkCircleOutline: icon('CheckmarkCircleOutline'),
+    CloseCircleOutline: icon('CloseCircleOutline'),
+    CloseOutline: icon('CloseOutline'),
+    CodeOutline: icon('CodeOutline'),
+    CreateOutline: icon('CreateOutline'),
+    CubeOutline: icon('CubeOutline'),
+    DocumentTextOutline: icon('DocumentTextOutline'),
+    DownloadOutline: icon('DownloadOutline'),
+    FolderOpenOutline: icon('FolderOpenOutline'),
+    GitBranchOutline: icon('GitBranchOutline'),
+    GitCommitOutline: icon('GitCommitOutline'),
+    GitMergeOutline: icon('GitMergeOutline'),
+    GitPullRequest: icon('GitPullRequest'),
+    InformationCircleOutline: icon('InformationCircleOutline'),
+    LogoGitlab: icon('LogoGitlab'),
+    OpenOutline: icon('OpenOutline'),
+    PersonOutline: icon('PersonOutline'),
+    PlayOutline: icon('PlayOutline'),
+    RefreshOutline: icon('RefreshOutline'),
+    SearchOutline: icon('SearchOutline'),
+    ShieldCheckmarkOutline: icon('ShieldCheckmarkOutline'),
+    TerminalOutline: icon('TerminalOutline'),
+    TimeOutline: icon('TimeOutline'),
+    WarningOutline: icon('WarningOutline'),
+  }
+})
 
 // Mock ansi-to-html
 vi.mock('ansi-to-html', () => ({
@@ -471,6 +525,8 @@ describe('TaskView', () => {
     ;(mockApi.getScheduledTasks as Mock).mockResolvedValue([])
     ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: {} })
     ;(mockApi.getIssue as Mock).mockResolvedValue({ tasks: [] })
+    ;(mockApi.getTaskArchive as Mock).mockRejectedValue({ response: { status: 404 } })
+    ;(mockApi.downloadTaskArchive as Mock).mockResolvedValue(new Blob(['archive']))
 
     wrapper = mount(TaskView, {
       global: {
@@ -483,9 +539,17 @@ describe('TaskView', () => {
       return (mockApi.getTask as Mock).mock.calls.length > 0
     })
 
+    await flushPromises()
     await nextTick()
 
     return wrapper
+  }
+
+  const showRawLogsTab = async () => {
+    const processPanel = wrapper.findComponent({ name: 'TaskProcessPanel' })
+    expect(processPanel.exists()).toBe(true)
+    ;(processPanel.vm as any).activeTab = 'raw'
+    await nextTick()
   }
 
   describe('basic rendering', () => {
@@ -502,17 +566,19 @@ describe('TaskView', () => {
       expect(mockApi.getTask).toHaveBeenCalledWith(1)
     })
 
-    it('should display summary cards', async () => {
-      await mountComponent()
+    it('should display task summary and header actions', async () => {
+      await mountComponent({ task_mode: 'plan' })
 
       await vi.waitFor(() => {
-        return wrapper.find('[data-testid="task-actions-card"]').exists()
+        return wrapper.find('[data-testid="task-actions"]').exists()
       })
 
-      // New layout: TaskMetadataPanel + actions card in top row, TaskProcessPanel below
+      // Header carries compact actions; the detail card is only rendered when an action needs extra context.
       expect(wrapper.find('.task-metadata-panel').exists()).toBe(true)
-      expect(wrapper.find('[data-testid="task-actions-card"]').exists()).toBe(true)
+      expect(wrapper.find('.task-metadata-panel').text()).toContain('taskView.taskMode')
+      expect(wrapper.find('.task-metadata-panel').text()).toContain('taskView.taskModePlan')
       expect(wrapper.find('[data-testid="task-actions"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="task-actions-card"]').exists()).toBe(false)
     })
 
     it('should display error message for failed tasks', async () => {
@@ -554,6 +620,82 @@ describe('TaskView', () => {
       expect(wrapper.vm.hasActions).toBe(true)
     })
 
+    it('shows an icon on the existing retry task header action', async () => {
+      await mountComponent({ status: 'failed' })
+      wrapper.vm.activeRetryTask = createMockTask({ id: 2, retry_source_task_id: 1 })
+      await nextTick()
+
+      const retryLink = wrapper
+        .findAll('.task-actions__linked-task button')
+        .find((button) => button.text().includes('Task #2'))
+
+      expect(retryLink).toBeTruthy()
+      expect(retryLink!.find('.n-icon').exists()).toBe(true)
+      expect(retryLink!.find('.n-icon').attributes('data-icon')).toBe('OpenOutline')
+    })
+
+    it('orders retry actions before runtime archive and refresh actions', async () => {
+      await mountComponent({ status: 'failed' })
+      wrapper.vm.archiveMetadata = {
+        archive_name: 'task-1-runtime-archive.tar.gz',
+        archive_size_bytes: 1024,
+        created_at: '2026-04-01T10:00:00Z',
+        file_exists: true,
+      }
+      await nextTick()
+
+      const actionLabels = wrapper
+        .find('.task-actions__toolbar')
+        .findAll('button.n-button')
+        .map(button => button.text())
+
+      expect(actionLabels).toEqual([
+        'common.retry',
+        'taskView.retryWithSchedule',
+        'taskView.downloadRuntimeArchive',
+        'common.refresh',
+      ])
+    })
+
+    it('should open scheduled retry drawer from the header action', async () => {
+      await mountComponent({ status: 'failed' })
+
+      await vi.waitFor(() => {
+        return wrapper.vm.task !== null
+      })
+
+      const scheduleRetryButton = wrapper
+        .findAll('button')
+        .find((button) => button.text().includes('taskView.retryWithSchedule'))
+      expect(scheduleRetryButton).toBeTruthy()
+
+      await scheduleRetryButton!.trigger('click')
+      await flushPromises()
+
+      expect(wrapper.vm.showScheduleDrawer).toBe(true)
+      expect(wrapper.find('[data-testid="task-actions-card"]').exists()).toBe(false)
+      expect(wrapper.find('.n-date-picker').exists()).toBe(true)
+      expect(wrapper.text()).toContain('taskView.scheduleRetry')
+      expect(mockApi.getScheduledTasks).toHaveBeenCalled()
+    })
+
+    it('should keep scheduled retry drawer open when selecting a heatmap time', async () => {
+      await mountComponent({ status: 'failed' })
+
+      const scheduleRetryButton = wrapper
+        .findAll('button')
+        .find((button) => button.text().includes('taskView.retryWithSchedule'))
+      await scheduleRetryButton!.trigger('click')
+      await flushPromises()
+
+      const selectedTime = Date.now() + 3600000
+      wrapper.vm.handleScheduleHeatmapCellClick(selectedTime)
+      await nextTick()
+
+      expect(wrapper.vm.showScheduleDrawer).toBe(true)
+      expect(wrapper.vm.retryScheduleDatetime).toBe(selectedTime)
+    })
+
     it('should show execute button for pending tasks', async () => {
       await mountComponent({ status: 'pending' })
 
@@ -577,6 +719,44 @@ describe('TaskView', () => {
 
       // canReschedule should be true when task is pending with scheduled_at
       expect(wrapper.vm.canReschedule).toBe(true)
+    })
+
+    it('loads runtime archive metadata for terminal tasks', async () => {
+      await mountComponent({ status: 'completed' })
+      ;(mockApi.getTaskArchive as Mock).mockResolvedValue({
+        archive_name: 'task-1-runtime-archive.tar.gz',
+        archive_size_bytes: 42,
+        created_at: '2026-05-01T10:00:00Z',
+        file_exists: true,
+      })
+
+      await wrapper.vm.fetchArchiveMetadata()
+      await nextTick()
+
+      expect(mockApi.getTaskArchive).toHaveBeenCalledWith(1)
+      expect(wrapper.text()).toContain('taskView.downloadRuntimeArchive')
+    })
+
+    it('shows expired badge and disables download when archive file was cleaned up', async () => {
+      await mountComponent({ status: 'completed' })
+      ;(mockApi.getTaskArchive as Mock).mockResolvedValue({
+        archive_name: 'task-1-runtime-archive.tar.gz',
+        archive_size_bytes: 42,
+        created_at: '2026-05-01T10:00:00Z',
+        file_exists: false,
+      })
+
+      await wrapper.vm.fetchArchiveMetadata()
+      await nextTick()
+
+      expect(wrapper.text()).toContain('taskView.downloadRuntimeArchive')
+      expect(wrapper.text()).toContain('taskView.archiveFileExpired')
+      const buttons = wrapper.findAllComponents({ name: 'NButton' })
+      const downloadButton = buttons.find(
+        (b) => b.text() === 'taskView.downloadRuntimeArchive',
+      )
+      expect(downloadButton).toBeTruthy()
+      expect(downloadButton!.props('disabled')).toBe(true)
     })
 
     it('should disable actions based on permissions when not allowed', async () => {
@@ -615,6 +795,44 @@ describe('TaskView', () => {
       })
 
       expect(mockApi.cancelTask).toHaveBeenCalledWith(1)
+    })
+
+    it('downloads the runtime archive when requested', async () => {
+      Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(), configurable: true })
+      Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), configurable: true })
+      const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:archive')
+      const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+      const archiveBlob = new Blob(['archive'])
+      ;(mockApi.downloadTaskArchive as Mock).mockResolvedValue(archiveBlob)
+      await mountComponent({ status: 'completed' })
+      wrapper.vm.archiveMetadata = {
+        archive_name: 'task-1-runtime-archive.tar.gz',
+        archive_size_bytes: 42,
+        created_at: '2026-05-01T10:00:00Z',
+        file_exists: true,
+      }
+      await wrapper.vm.handleDownloadArchive()
+
+      expect(mockApi.downloadTaskArchive).toHaveBeenCalledWith(1)
+      expect(createObjectURL).toHaveBeenCalledWith(archiveBlob)
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:archive')
+
+      createObjectURL.mockRestore()
+      revokeObjectURL.mockRestore()
+    })
+
+    it('does not attempt download when archive file is expired', async () => {
+      await mountComponent({ status: 'completed' })
+      ;(mockApi.downloadTaskArchive as Mock).mockResolvedValue(new Blob(['archive']))
+      wrapper.vm.archiveMetadata = {
+        archive_name: 'task-1-runtime-archive.tar.gz',
+        archive_size_bytes: 42,
+        created_at: '2026-05-01T10:00:00Z',
+        file_exists: false,
+      }
+      await wrapper.vm.handleDownloadArchive()
+
+      expect(mockApi.downloadTaskArchive).not.toHaveBeenCalled()
     })
 
     it('should call retryTask API on retry', async () => {
@@ -657,7 +875,7 @@ describe('TaskView', () => {
       expect(mockApi.executeTask).toHaveBeenCalledWith(1)
     })
 
-    it('should call rescheduleTask API on reschedule', async () => {
+    it('should open reschedule drawer with the current task', async () => {
       await mountComponent({
         status: 'pending',
         scheduled_at: new Date(Date.now() + 60 * 60 * 1000).toISOString()
@@ -667,23 +885,32 @@ describe('TaskView', () => {
         return (mockApi.getTask as Mock).mock.calls.length > 0
       })
 
-      const futureTimestamp = Date.now() + 24 * 60 * 60 * 1000
-      const futureIso = new Date(futureTimestamp).toISOString()
-      ;(mockApi.rescheduleTask as Mock).mockResolvedValue(
-        createMockTaskWithStatus('pending', { scheduled_at: futureIso })
-      )
+      const rescheduleButton = wrapper
+        .findAll('button')
+        .find((button) => button.text().includes('taskView.rescheduleTask'))
+      expect(rescheduleButton).toBeTruthy()
 
-      // Set the reschedule datetime
-      wrapper.vm.rescheduleDatetime = futureTimestamp
+      await rescheduleButton!.trigger('click')
+      await nextTick()
 
-      // Call handleReschedule directly
-      await wrapper.vm.handleReschedule()
+      const drawer = wrapper.findComponent({ name: 'RescheduleDrawer' })
+      expect(wrapper.vm.showRescheduleDrawer).toBe(true)
+      expect(drawer.props('show')).toBe(true)
+      expect(drawer.props('task').id).toBe(1)
+    })
 
-      await vi.waitFor(() => {
-        return (mockApi.rescheduleTask as Mock).mock.calls.length > 0
+    it('should update task when reschedule drawer emits rescheduled', async () => {
+      const scheduledAt = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+      await mountComponent({ status: 'pending', scheduled_at: scheduledAt })
+      const updatedTask = createMockTaskWithStatus('pending', {
+        scheduled_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
       })
 
-      expect(mockApi.rescheduleTask).toHaveBeenCalled()
+      const drawer = wrapper.findComponent({ name: 'RescheduleDrawer' })
+      drawer.vm.$emit('rescheduled', updatedTask)
+      await nextTick()
+
+      expect(wrapper.vm.task).toEqual(updatedTask)
     })
 
     it('should call retryTask API with schedule on retry with schedule', async () => {
@@ -753,6 +980,7 @@ describe('TaskView', () => {
       })
 
       await flushPromises()
+      await showRawLogsTab()
       await nextTick()
 
       expect(wrapper.find('.log-content').exists()).toBe(true)
@@ -780,6 +1008,7 @@ describe('TaskView', () => {
       })
 
       await flushPromises()
+      await showRawLogsTab()
       await nextTick()
 
       const logContent = wrapper.find('.log-content')
@@ -1004,6 +1233,54 @@ describe('TaskView', () => {
       await mountComponent({ status: 'completed' })
       expect(wrapper.vm.hasActions).toBe(false)
     })
+
+    it('contextCompactCount returns 0 when there are no context_compact logs', async () => {
+      ;(mockApi.getTaskLogs as Mock).mockResolvedValue([
+        createMockTaskLog({ log_type: 'assistant_text', message: 'summary' })
+      ])
+      await mountComponent({ status: 'completed' })
+      await vi.waitFor(() => mockApi.getTaskLogs.mock.calls.length > 0)
+      await nextTick()
+
+      expect(wrapper.vm.contextCompactCount).toBe(0)
+    })
+
+    it('contextCompactCount returns correct count and lastAssistantLog is the last assistant_text log', async () => {
+      await mountComponent({ status: 'completed' })
+
+      // Override logs after mounting so mountComponent's default setup doesn't win
+      ;(mockApi.getTaskLogs as Mock).mockResolvedValue([
+        createMockTaskLog({ log_type: 'assistant_text', message: 'First summary' }),
+        createMockTaskLog({ log_type: 'context_compact' }),
+        createMockTaskLog({ log_type: 'context_compact' }),
+        createMockTaskLog({ log_type: 'assistant_text', message: 'Last summary' })
+      ])
+
+      await wrapper.vm.refreshTask()
+      await flushPromises()
+      await nextTick()
+
+      expect(wrapper.vm.contextCompactCount).toBe(2)
+      expect(wrapper.vm.lastAssistantLog).not.toBeNull()
+      expect(wrapper.vm.lastAssistantLog.message).toBe('Last summary')
+    })
+
+    it('deliverySummaryLog returns the latest delivery_summary log', async () => {
+      await mountComponent({ status: 'completed' })
+
+      ;(mockApi.getTaskLogs as Mock).mockResolvedValue([
+        createMockTaskLog({ log_type: 'delivery_summary', message: 'Old delivery summary' }),
+        createMockTaskLog({ log_type: 'assistant_text', message: 'Raw assistant summary' }),
+        createMockTaskLog({ log_type: 'delivery_summary', message: 'Final delivery summary' })
+      ])
+
+      await wrapper.vm.refreshTask()
+      await flushPromises()
+      await nextTick()
+
+      expect(wrapper.vm.deliverySummaryLog).not.toBeNull()
+      expect(wrapper.vm.deliverySummaryLog.message).toBe('Final delivery summary')
+    })
   })
 
   describe('refreshTask', () => {
@@ -1157,89 +1434,23 @@ describe('TaskView', () => {
     })
   })
 
-  describe('handleReschedule validation', () => {
-    it('should not call API when no datetime is selected', async () => {
-      await mountComponent({ status: 'pending', scheduled_at: '2026-04-01T10:00:00Z' })
-
-      wrapper.vm.rescheduleDatetime = null
-
-      await wrapper.vm.handleReschedule()
-
-      expect(mockApi.rescheduleTask).not.toHaveBeenCalled()
-    })
-
-    it('should not call API when datetime is in the past', async () => {
-      await mountComponent({ status: 'pending', scheduled_at: '2026-04-01T10:00:00Z' })
-
-      wrapper.vm.rescheduleDatetime = Date.now() - 1000
-
-      await wrapper.vm.handleReschedule()
-
-      expect(mockApi.rescheduleTask).not.toHaveBeenCalled()
-    })
-
-    it('should handle rescheduleTask API error with slot error extraction', async () => {
-      await mountComponent({ status: 'pending', scheduled_at: '2026-04-01T10:00:00Z' })
-      ;(mockApi.rescheduleTask as Mock).mockRejectedValue(new Error('Slot full'))
-
-      wrapper.vm.rescheduleDatetime = Date.now() + 86400000
-
-      await wrapper.vm.handleReschedule()
-
-      expect(wrapper.vm.actionLoading).toBe(false)
-    })
-  })
-
-  describe('fetchContainerLogs', () => {
-    it('should clear containerLogs when no container_id', async () => {
-      await mountComponent({ status: 'completed', container_id: null })
-
-      wrapper.vm.containerLogs = 'old logs'
-
-      await wrapper.vm.fetchContainerLogs()
-
-      expect(wrapper.vm.containerLogs).toBe('')
-    })
-
-    it('should fetch container logs for completed tasks', async () => {
-      await mountComponent({ status: 'completed', container_id: 'container-123' })
-
-      await wrapper.vm.fetchContainerLogs()
-
-      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1)
-      expect(wrapper.vm.containerLogs).toBe('Container log content')
-    })
-
-    it('should handle fetchContainerLogs API error', async () => {
-      await mountComponent({ status: 'completed', container_id: 'container-123' })
-      ;(mockApi.getTaskContainerLogs as Mock).mockRejectedValue(new Error('Fetch failed'))
-
-      await wrapper.vm.fetchContainerLogs()
-
-      expect(wrapper.vm.containerLogs).toContain('taskView.failedToFetchContainerLogs')
-    })
-
-    it('should prevent duplicate requests via containerRequestInFlight guard', async () => {
-      await mountComponent({ status: 'completed', container_id: 'container-123' })
-
-      // Simulate in-flight request
-      wrapper.vm.containerRequestInFlight = true
-
-      await wrapper.vm.fetchContainerLogs()
-
-      // Should not have called the API since request is in-flight
-      expect(mockApi.getTaskContainerLogs).not.toHaveBeenCalled()
-    })
-  })
-
   describe('onRawTabOpen and onRawTabClose', () => {
-    it('should fetch container logs for completed tasks via onRawTabOpen', async () => {
+    it('should fetch container logs for completed tasks via onRawTabOpen using source=db', async () => {
       await mountComponent({ status: 'completed', container_id: 'container-123' })
 
       await wrapper.vm.onRawTabOpen()
 
-      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1)
+      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1, 'db')
       expect(wrapper.vm.containerLogs).toBe('Container log content')
+    })
+
+    it('should pass source=db when fetching logs for completed tasks', async () => {
+      await mountComponent({ status: 'completed', container_id: 'container-123' })
+
+      await wrapper.vm.onRawTabOpen()
+
+      // Verify it always uses 'db' source for completed tasks
+      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1, 'db')
     })
 
     it('should close log stream on onRawTabClose', async () => {
@@ -1308,16 +1519,16 @@ describe('TaskView', () => {
   })
 
   describe('handleScheduleHeatmapCellClick', () => {
-    it('should set rescheduleDatetime and close drawer', async () => {
-      await mountComponent({ status: 'pending', scheduled_at: '2026-04-01T10:00:00Z' })
+    it('should set retryScheduleDatetime and keep retry drawer open', async () => {
+      await mountComponent({ status: 'failed' })
 
       wrapper.vm.showScheduleDrawer = true
       const clickTime = Date.now() + 3600000
 
       wrapper.vm.handleScheduleHeatmapCellClick(clickTime)
 
-      expect(wrapper.vm.rescheduleDatetime).toBe(clickTime)
-      expect(wrapper.vm.showScheduleDrawer).toBe(false)
+      expect(wrapper.vm.retryScheduleDatetime).toBe(clickTime)
+      expect(wrapper.vm.showScheduleDrawer).toBe(true)
     })
   })
 
@@ -1332,9 +1543,10 @@ describe('TaskView', () => {
     it('should not show cancel button for completed tasks', async () => {
       await mountComponent({ status: 'completed' })
 
-      // Cancel section should not exist
-      const cancelItems = wrapper.findAll('.task-actions__item--error')
-      expect(cancelItems.length).toBe(0)
+      const cancelCommands = wrapper
+        .findAll('.task-actions__command')
+        .filter((command) => command.text().includes('common.cancel'))
+      expect(cancelCommands.length).toBe(0)
     })
   })
 
@@ -1409,22 +1621,6 @@ describe('TaskView', () => {
       expect(wrapper.vm.logs).toBe('')
       expect(wrapper.vm.containerLogs).toBe('')
       expect(mockEventSourceInstance.close).toHaveBeenCalled()
-    })
-  })
-
-  describe('syncRescheduleDatetime', () => {
-    it('should sync rescheduleDatetime from task scheduled_at', async () => {
-      const scheduledAt = '2026-04-01T10:00:00Z'
-      await mountComponent({ status: 'pending', scheduled_at: scheduledAt })
-
-      // After mount, syncRescheduleDatetime should have been called
-      expect(wrapper.vm.rescheduleDatetime).toBe(new Date(scheduledAt).getTime())
-    })
-
-    it('should set null when task has no scheduled_at', async () => {
-      await mountComponent({ status: 'pending', scheduled_at: null })
-
-      expect(wrapper.vm.rescheduleDatetime).toBeNull()
     })
   })
 

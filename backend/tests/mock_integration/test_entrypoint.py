@@ -1,4 +1,4 @@
-"""Entrypoint.sh logic tests — MR updates, CODIFY markers, no-MR mode, git ops.
+"""Entrypoint.sh logic tests — MR updates, event projection, no-MR mode, git ops.
 
 Tests specific behaviors of the real entrypoint.sh that runs inside worker
 containers with mock external services. Uses the Issue → Task flow.
@@ -65,7 +65,7 @@ class TestMRDescription:
 
 
 class TestCODIFYMarkersDetailed:
-    """Verify specific CODIFY markers are emitted and parsed."""
+    """Verify structured event records are projected to task logs."""
 
     async def test_commit_sha_parsed(
         self,
@@ -162,7 +162,7 @@ class TestClaudeOutputTypes:
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """CODIFY_THINKING markers should create 'thinking' log entries."""
+        """Stream event thinking blocks should create 'thinking' log entries."""
         _issue, task = await create_issue_and_task(
             http_client, backend_url, admin_auth_headers,
             title="Thinking output test",
@@ -191,11 +191,11 @@ class TestClaudeOutputTypes:
             f"Log types: {[l.get('log_type') for l in logs]}"
         )
 
-        # Verify thinking metadata contains text
+        # Verify thinking metadata references a payload (text stored separately)
         for tl in thinking_logs:
             meta = json.loads(tl["metadata"]) if isinstance(tl["metadata"], str) else tl["metadata"]
-            assert "text" in meta, f"Thinking log should have 'text' field: {meta}"
-            assert len(meta["text"]) > 0, "Thinking text should not be empty"
+            assert "payload_id" in meta, f"Thinking log should have 'payload_id' field: {meta}"
+            assert meta["char_count"] > 0, "Thinking char_count should be positive"
 
         logger.info(f"✅ {len(thinking_logs)} thinking entries verified for task {task_id}")
 
@@ -205,7 +205,7 @@ class TestClaudeOutputTypes:
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """CODIFY_TOOL_USE_START + CODIFY_TOOL_RESULT should create tool_call logs with output."""
+        """Assistant tool_use + user tool_result events should create tool_call logs with output."""
         _issue, task = await create_issue_and_task(
             http_client, backend_url, admin_auth_headers,
             title="Tool call output test",
@@ -239,10 +239,10 @@ class TestClaudeOutputTypes:
         for tc in tool_call_logs:
             meta = json.loads(tc["metadata"]) if isinstance(tc["metadata"], str) else tc["metadata"]
             assert "name" in meta, f"Tool call should have 'name': {meta}"
-            assert "input" in meta, f"Tool call should have 'input': {meta}"
-            # Output should be populated by CODIFY_TOOL_RESULT
-            assert meta.get("output") is not None, (
-                f"Tool call output should be populated by TOOL_RESULT: {meta}"
+            assert "input_payload_id" in meta, f"Tool call should have 'input_payload_id': {meta}"
+            # Output is stored as a referenced payload (output_payload_id)
+            assert meta.get("output_payload_id") is not None, (
+                f"Tool call output_payload_id should be populated: {meta}"
             )
             assert meta.get("error") is False, f"Tool call should not have error: {meta}"
             tool_names.append(meta["name"])
@@ -259,7 +259,7 @@ class TestClaudeOutputTypes:
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """CODIFY_ASSISTANT_TEXT markers should create 'assistant_text' log entries."""
+        """Stream event text blocks should create 'assistant_text' log entries."""
         _issue, task = await create_issue_and_task(
             http_client, backend_url, admin_auth_headers,
             title="Assistant text output test",
@@ -290,7 +290,7 @@ class TestClaudeOutputTypes:
 
         for tl in text_logs:
             meta = json.loads(tl["metadata"]) if isinstance(tl["metadata"], str) else tl["metadata"]
-            assert "text" in meta, f"Assistant text log should have 'text' field: {meta}"
+            assert "payload_id" in meta, f"Assistant text log should have 'payload_id' field: {meta}"
 
         logger.info(f"✅ {len(text_logs)} assistant_text entries verified")
 
@@ -300,7 +300,7 @@ class TestClaudeOutputTypes:
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """CODIFY_SYSTEM_INIT should create 'system_init' log entry with model name."""
+        """System init event should create 'system_init' log entry with model name."""
         _issue, task = await create_issue_and_task(
             http_client, backend_url, admin_auth_headers,
             title="System init test",
@@ -370,7 +370,7 @@ class TestClaudeOutputTypes:
 
         # Extract typed log entries (exclude raw log chunks)
         typed_logs = [l for l in logs if l.get("log_type") in (
-            "system_init", "thinking", "assistant_text", "tool_call", "tool_calls_json"
+            "system_init", "thinking", "assistant_text", "tool_call"
         )]
 
         # Extract sequence of types

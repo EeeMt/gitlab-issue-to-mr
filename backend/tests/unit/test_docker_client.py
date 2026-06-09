@@ -1,6 +1,5 @@
 """Tests for DockerClientWrapper."""
 
-import pytest
 from unittest.mock import MagicMock, patch
 
 

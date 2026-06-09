@@ -5,8 +5,13 @@ import logging
 
 from fastapi import APIRouter, Depends
 
-from app.core.gitlab_client import get_cached_projects as _get_cached_projects, get_gitlab_client
-from app.dependencies.project_access import ProjectAccessScope, require_project_access, require_project_access_scope
+from app.core.gitlab_client import get_cached_projects as _get_cached_projects
+from app.core.gitlab_client import get_gitlab_client
+from app.dependencies.project_access import (
+    ProjectAccessScope,
+    require_project_access,
+    require_project_access_scope,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

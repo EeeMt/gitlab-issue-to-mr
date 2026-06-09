@@ -18,7 +18,6 @@ import pytest
 
 from .conftest import (
     create_issue_and_task,
-    get_mock_calls,
     wait_for_task_status,
 )
 

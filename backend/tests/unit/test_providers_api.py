@@ -18,10 +18,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.database import get_db
-from app.dependencies.auth import require_authenticated_user, require_admin_user
-
+from app.dependencies.auth import require_admin_user, require_authenticated_user
+from app.main import app
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -37,6 +36,7 @@ def _make_provider(
     max_turns=20,
     system_prompt=None,
     is_default=False,
+    is_disabled=False,
 ):
     """Build a mock AIProvider ORM object."""
     from app.models import AIProvider
@@ -49,6 +49,7 @@ def _make_provider(
         max_turns=max_turns,
         system_prompt=system_prompt,
         is_default=is_default,
+        is_disabled=is_disabled,
     )
     p.id = id
     p.created_at = datetime(2026, 1, 1)
@@ -133,6 +134,7 @@ class ProviderListTests(unittest.TestCase):
         self.assertEqual(item["max_turns"], 30)
         self.assertEqual(item["system_prompt"], "You are helpful.")
         self.assertTrue(item["is_default"])
+        self.assertFalse(item["is_disabled"])
         self.assertEqual(item["created_at"], "2026-01-01T00:00:00")
         self.assertEqual(item["updated_at"], "2026-01-01T00:00:00")
 
@@ -227,6 +229,72 @@ class ProviderCreateTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("already exists", response.json()["detail"])
 
+    def test_create_first_provider_disabled_409(self):
+        """The first provider would become default, so it cannot be created disabled."""
+        name_check_result = MagicMock()
+        name_check_result.scalar_one_or_none.return_value = None
+        count_result = MagicMock()
+        count_result.scalar.return_value = 0
+        self.mock_db.execute = AsyncMock(side_effect=[name_check_result, count_result])
+
+        response = self.client.post(
+            "/api/providers",
+            json={
+                "name": "first-provider",
+                "base_url": "http://localhost:11434/v1",
+                "model": "claude-sonnet-4-20250514",
+                "is_disabled": True,
+            },
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("Default provider cannot be disabled", response.json()["detail"])
+
+
+# ---------------------------------------------------------------------------
+# Update provider
+# ---------------------------------------------------------------------------
+
+
+class ProviderUpdateTests(unittest.TestCase):
+    """Tests for PATCH /api/providers/{id}."""
+
+    def setUp(self):
+        self._original_key = os.environ.get("CONFIG_ENCRYPTION_KEY")
+        os.environ["CONFIG_ENCRYPTION_KEY"] = "unit-test-config-key"
+
+        self.mock_db = MagicMock()
+        self.mock_db.execute = AsyncMock()
+        self.mock_db.get = AsyncMock()
+        self.mock_db.commit = AsyncMock()
+        self.mock_db.flush = AsyncMock()
+        self.mock_db.add = MagicMock()
+        self.mock_db.refresh = AsyncMock()
+        self.mock_db.delete = AsyncMock()
+
+        app.dependency_overrides[get_db] = lambda: self.mock_db
+        app.dependency_overrides[require_authenticated_user] = lambda: MagicMock()
+        app.dependency_overrides[require_admin_user] = lambda: MagicMock()
+
+        self.client = TestClient(app, raise_server_exceptions=False)
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+        if self._original_key is None:
+            os.environ.pop("CONFIG_ENCRYPTION_KEY", None)
+        else:
+            os.environ["CONFIG_ENCRYPTION_KEY"] = self._original_key
+
+    def test_update_default_provider_disabled_409(self):
+        """PATCH /api/providers/{id} rejects disabling the current default provider."""
+        provider = _make_provider(id=1, is_default=True, is_disabled=False)
+        self.mock_db.get = AsyncMock(return_value=provider)
+
+        response = self.client.patch("/api/providers/1", json={"is_disabled": True})
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("Default provider cannot be disabled", response.json()["detail"])
+
 
 # ---------------------------------------------------------------------------
 # Delete provider
@@ -286,6 +354,26 @@ class ProviderDeleteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("only provider", response.json()["detail"].lower())
 
+    def test_delete_default_provider_without_enabled_replacement_409(self):
+        """Deleting the default provider must not promote a disabled replacement."""
+        provider = _make_provider(id=1, is_default=True)
+        self.mock_db.get = AsyncMock(return_value=provider)
+
+        total_result = MagicMock()
+        total_result.scalar.return_value = 2
+        active_count_result = MagicMock()
+        active_count_result.scalar.return_value = 0
+        replacement_result = MagicMock()
+        replacement_result.scalar_one_or_none.return_value = None
+        self.mock_db.execute = AsyncMock(
+            side_effect=[total_result, active_count_result, replacement_result]
+        )
+
+        response = self.client.delete("/api/providers/1")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("no enabled provider remains", response.json()["detail"])
+
 
 # ---------------------------------------------------------------------------
 # Set default provider
@@ -329,6 +417,16 @@ class ProviderSetDefaultTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertIn("not found", response.json()["detail"].lower())
+
+    def test_set_default_disabled_provider_409(self):
+        """POST /api/providers/{id}/set-default rejects disabled providers."""
+        provider = _make_provider(id=2, is_default=False, is_disabled=True)
+        self.mock_db.get = AsyncMock(return_value=provider)
+
+        response = self.client.post("/api/providers/2/set-default")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("Disabled provider cannot be set as default", response.json()["detail"])
 
 
 

@@ -3,7 +3,7 @@
     <n-spin :show="initialLoading">
       <template #description>{{ t('monitor.loading') }}</template>
 
-      <n-space vertical :size="16">
+      <div class="page-hero">
         <PageHeader
           :title="t('monitor.title')"
           :subtitle="t('monitor.subtitle')"
@@ -15,10 +15,6 @@
             </n-button>
           </template>
         </PageHeader>
-
-        <n-alert type="info" :show-icon="false">
-          {{ t('monitor.dataSourceInfo') }}
-        </n-alert>
 
         <n-grid :x-gap="16" :y-gap="16" cols="2 s:2 l:4" responsive="screen">
           <n-gi v-for="item in overviewCards" :key="item.key" class="monitor-grid-cell">
@@ -32,6 +28,11 @@
             </n-card>
           </n-gi>
         </n-grid>
+      </div>
+      <n-space vertical :size="16">
+        <n-alert type="info" :show-icon="false" :style="{ borderRadius: '12px' }">
+          {{ t('monitor.dataSourceInfo') }}
+        </n-alert>
 
         <n-tabs v-model:value="activeTab" type="line" animated class="monitor-tabs">
           <n-tab-pane name="runtime" :tab="t('monitor.runtimeTab')">
@@ -69,7 +70,7 @@
                   </div>
                 </template>
 
-                <n-empty v-if="!tableLoading && activeTasks.length === 0" :description="t('monitor.noActiveTasks')" />
+                <div v-if="!tableLoading && activeTasks.length === 0" class="queue-empty"><n-empty :description="t('monitor.noActiveTasks')" /></div>
 
                 <!-- Kanban View -->
                 <div v-else-if="queueViewMode === 'kanban'" class="queue-kanban">
@@ -79,7 +80,7 @@
                       <span>{{ t('monitor.kanbanRunning') }}</span>
                       <n-tag size="tiny" round :bordered="false">{{ runningTasks.length }}</n-tag>
                     </div>
-                    <div class="queue-kanban__column-cards">
+                    <n-scrollbar class="queue-kanban__column-cards" trigger="hover">
                     <div
                       v-for="task in runningTasks"
                       :key="task.id"
@@ -111,7 +112,7 @@
                       size="small"
                       style="padding: 16px 0"
                     />
-                    </div>
+                    </n-scrollbar>
                   </div>
 
                   <!-- Ready Column -->
@@ -120,7 +121,7 @@
                       <span>{{ t('monitor.kanbanReady') }}</span>
                       <n-tag size="tiny" round :bordered="false">{{ readyTasks.length }}</n-tag>
                     </div>
-                    <div class="queue-kanban__column-cards">
+                    <n-scrollbar class="queue-kanban__column-cards" trigger="hover">
                     <div
                       v-for="task in readyTasks"
                       :key="task.id"
@@ -157,7 +158,7 @@
                       size="small"
                       style="padding: 16px 0"
                     />
-                    </div>
+                    </n-scrollbar>
                   </div>
 
                   <!-- Waiting Column -->
@@ -166,7 +167,7 @@
                       <span>{{ t('monitor.kanbanWaiting') }}</span>
                       <n-tag size="tiny" round :bordered="false">{{ waitingTasks.length }}</n-tag>
                     </div>
-                    <div class="queue-kanban__column-cards">
+                    <n-scrollbar class="queue-kanban__column-cards" trigger="hover">
                     <div
                       v-for="task in waitingTasks"
                       :key="task.id"
@@ -199,7 +200,7 @@
                       size="small"
                       style="padding: 16px 0"
                     />
-                    </div>
+                    </n-scrollbar>
                   </div>
                 </div>
 
@@ -233,7 +234,7 @@
                   </div>
 
                   <!-- Scrollable area -->
-                  <div ref="timelineScrollRef" class="queue-timeline__scroll">
+                  <n-scrollbar ref="timelineScrollRef" class="queue-timeline__scroll" x-scrollable trigger="hover">
                     <div class="queue-timeline__container" :style="{ minWidth: timelineContainerMinWidth }">
                       <!-- Time axis -->
                       <div class="queue-timeline__axis">
@@ -368,7 +369,7 @@
                         </div>
                       </div>
                     </div>
-                  </div>
+                  </n-scrollbar>
 
                   <!-- Dynamic tooltip element -->
                   <div
@@ -378,18 +379,19 @@
                   >{{ tooltipText }}</div>
                 </div>
 
-                <!-- Table View (existing) -->
-                <n-data-table
-                  v-else
-                  :columns="activeTaskColumns"
-                  :data="activeTasks"
-                  :loading="tableLoading"
-                  :pagination="false"
-                  :row-props="activeTaskRowProps"
-                  size="small"
-                  scroll-x="960"
-                  :max-height="400"
-                />
+                <!-- Table View -->
+                <div v-else class="queue-table-wrapper">
+                  <n-data-table
+                    :columns="activeTaskColumns"
+                    :data="activeTasks"
+                    :loading="tableLoading"
+                    :pagination="false"
+                    :row-props="activeTaskRowProps"
+                    size="small"
+                    scroll-x="1040"
+                    :max-height="340"
+                  />
+                </div>
               </n-card>
 
               <n-card class="monitor-card">
@@ -411,7 +413,7 @@
                   :pagination="false"
                   :row-props="recentActivityRowProps"
                   size="small"
-                  scroll-x="980"
+                  scroll-x="1080"
                 />
               </n-card>
             </n-space>
@@ -575,6 +577,8 @@ import {
   NTabPane,
   NTabs,
   NTag,
+  NScrollbar,
+  NTooltip,
   type DataTableColumns,
   useMessage
 } from 'naive-ui'
@@ -649,16 +653,17 @@ const timelineZoomOptions = [
   { label: '24h', value: '24h' as const },
 ]
 
-const timelineScrollRef = ref<HTMLElement | null>(null)
+const timelineScrollRef = ref<InstanceType<typeof NScrollbar> | null>(null)
 
 function scrollTimelineToNow() {
-  const el = timelineScrollRef.value
+  const el = timelineScrollRef.value?.$el as HTMLElement | undefined
   if (!el) return
-  const containerWidth = el.scrollWidth
-  const viewportWidth = el.clientWidth
+  const scrollEl = (el.querySelector('.n-scrollbar-container') as HTMLElement) || el
+  const containerWidth = scrollEl.scrollWidth
+  const viewportWidth = scrollEl.clientWidth
   const nowPct = timelinePct(nowMs.value) / 100
   const nowPx = nowPct * containerWidth
-  el.scrollLeft = nowPx - viewportWidth / 2
+  scrollEl.scrollLeft = nowPx - viewportWidth / 2
 }
 
 watch(timelineZoom, () => {
@@ -1005,43 +1010,56 @@ const activeTaskColumns = computed<DataTableColumns<Task>>(() => [
   {
     title: t('common.project'),
     key: 'project',
-    minWidth: 180,
+    minWidth: 170,
     render: (task) => getProjectLabel(task)
+  },
+  {
+    title: t('common.initiator'),
+    key: 'initiator_username',
+    width: 100,
+    render: (task) => task.initiator_username || '—'
   },
   {
     title: t('monitor.task'),
     key: 'task',
-    minWidth: 240,
-    render: (task) => formatPromptPreview(task.user_prompt)
+    minWidth: 220,
+    render: (task) => {
+      const preview = formatPromptPreview(task.user_prompt)
+      const full = (task.user_prompt || '').replace(/\s+/g, ' ').trim()
+      if (!full) return '—'
+      return h(NTooltip, { trigger: 'hover', placement: 'top-start' }, {
+        trigger: () => h('span', { style: 'cursor: default' }, preview),
+        default: () => h('div', { style: 'max-width: 420px; white-space: pre-wrap; word-break: break-word' }, full)
+      })
+    }
   },
   {
     title: t('monitor.status'),
     key: 'status',
-    width: 110,
-    render: (task) => renderStatusTag(task.status)
-  },
-  {
-    title: t('common.priority'),
-    key: 'priority',
-    width: 90,
-    render: (task) => formatPriority(task.priority)
+    width: 130,
+    render: (task) =>
+      h('div', { style: 'display: flex; align-items: center; gap: 6px' }, [
+        renderStatusTag(task.status),
+        h('span', { style: 'font-size: 12px; font-weight: 600; white-space: nowrap' }, formatPriority(task.priority))
+      ])
   },
   {
     title: t('common.scheduledAt'),
     key: 'scheduled_at',
-    width: 160,
-    render: (task) => task.scheduled_at ? formatTimestamp(task.scheduled_at) : t('monitor.immediateTask')
-  },
-  {
-    title: t('monitor.waitingOrRunning'),
-    key: 'elapsed',
-    width: 140,
-    render: (task) => getTaskElapsedLabel(task)
+    width: 170,
+    render: (task) => {
+      const scheduled = task.scheduled_at ? formatTimestamp(task.scheduled_at) : t('monitor.immediateTask')
+      const elapsed = getTaskElapsedLabel(task)
+      return h('div', {}, [
+        h('div', { style: 'line-height: 1.4' }, scheduled),
+        h('div', { style: 'font-size: 12px; color: var(--n-text-color-3); line-height: 1.4' }, elapsed)
+      ])
+    }
   },
   {
     title: t('common.createdAt'),
     key: 'created_at',
-    width: 160,
+    width: 140,
     render: (task) => formatTimestamp(task.created_at)
   }
 ])
@@ -1064,6 +1082,12 @@ const recentActivityColumns = computed<DataTableColumns<Task>>(() => [
     key: 'status',
     width: 110,
     render: (task) => renderStatusTag(task.status)
+  },
+  {
+    title: t('common.initiator'),
+    key: 'initiator_username',
+    width: 100,
+    render: (task) => task.initiator_username || '—'
   },
   {
     title: t('monitor.duration'),
@@ -1554,9 +1578,23 @@ onBeforeUnmount(() => {
   height: 100%;
 }
 
-.monitor-summary-card {
+.monitor-card {
   border-radius: var(--app-card-radius);
-  background: var(--app-summary-card-background);
+}
+
+.monitor-summary-card {
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  transition: transform 0.25s cubic-bezier(0.22, 0.61, 0.36, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.monitor-summary-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+  border-color: rgba(15, 23, 42, 0.1);
 }
 
 .monitor-summary-card :deep(.n-card__content) {
@@ -1726,15 +1764,15 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 16px;
-  min-height: 200px;
+  height: 340px;
 }
 
 .queue-kanban__column {
   background: rgba(248, 250, 252, 0.72);
   border-radius: 8px;
   padding: 12px;
-  min-height: 180px;
-  max-height: 320px;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
@@ -1752,7 +1790,6 @@ onBeforeUnmount(() => {
 
 .queue-kanban__column-cards {
   flex: 1;
-  overflow-y: auto;
   min-height: 0;
 }
 
@@ -1858,10 +1895,24 @@ onBeforeUnmount(() => {
   opacity: 0.8;
 }
 
+.queue-empty {
+  height: 340px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.queue-table-wrapper {
+  height: 340px;
+}
+
 /* ----- Timeline View ----- */
 /* ===== Timeline — redesigned ===== */
 .queue-timeline {
   position: relative;
+  height: 340px;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ─── Toolbar (legend + zoom) ─── */
@@ -1899,13 +1950,16 @@ onBeforeUnmount(() => {
 
 /* ─── Scroll wrapper ─── */
 .queue-timeline__scroll {
-  overflow-x: auto;
   padding: 0;
+  flex: 1;
 }
 
 .queue-timeline__container {
   position: relative;
   padding: 0 24px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
 }
 
 /* ─── Time axis ─── */
@@ -1941,6 +1995,7 @@ onBeforeUnmount(() => {
 /* ─── Content area (positions gridlines + now marker) ─── */
 .queue-timeline__content {
   position: relative;
+  flex: 1;
   min-height: 80px;
   padding-bottom: 8px;
 }
@@ -2153,6 +2208,14 @@ onBeforeUnmount(() => {
   .health-check {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+@media (hover: none) {
+  .monitor-summary-card:hover {
+    transform: none;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    border-color: rgba(15, 23, 42, 0.06);
   }
 }
 </style>

@@ -2,11 +2,10 @@
 
 import logging
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -16,34 +15,87 @@ from app.models import PromptTemplate
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+MAX_TEMPLATE_TAGS = 20
+MAX_TEMPLATE_TAG_LENGTH = 30
+
 
 # Request/Response models
 class PromptTemplateCreate(BaseModel):
     name: str
     content: str
-    variable_tips: Optional[dict[str, str]] = None
+    variable_tips: dict[str, str] | None = None
+    tags: list[str] | None = None
     is_active: bool = True
 
 
 class PromptTemplateUpdate(BaseModel):
-    name: Optional[str] = None
-    content: Optional[str] = None
-    variable_tips: Optional[dict[str, str]] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    content: str | None = None
+    variable_tips: dict[str, str] | None = None
+    tags: list[str] | None = None
+    is_active: bool | None = None
+
+
+class PromptTemplateReorder(BaseModel):
+    template_ids: list[int]
 
 
 class PromptTemplateResponse(BaseModel):
     id: int
     name: str
     content: str
-    variable_tips: Optional[dict[str, str]] = None
+    variable_tips: dict[str, str] | None = None
+    tags: list[str]
     is_active: bool
+    sort_order: int
     created_at: datetime
     updated_at: datetime
 
 
 class DeleteResponse(BaseModel):
     status: str
+
+
+def _normalize_template_tags(tags: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+
+    for raw_tag in tags or []:
+        tag = raw_tag.strip()
+        if not tag:
+            continue
+        if len(tag) > MAX_TEMPLATE_TAG_LENGTH:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Prompt template tags must be {MAX_TEMPLATE_TAG_LENGTH} characters or fewer",
+            )
+        tag_key = tag.casefold()
+        if tag_key in seen:
+            continue
+        seen.add(tag_key)
+        normalized.append(tag)
+
+    if len(normalized) > MAX_TEMPLATE_TAGS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Prompt templates can have at most {MAX_TEMPLATE_TAGS} tags",
+        )
+
+    return normalized
+
+
+def _template_response(template: PromptTemplate) -> PromptTemplateResponse:
+    return PromptTemplateResponse(
+        id=template.id,
+        name=template.name,
+        content=template.content,
+        variable_tips=template.variable_tips,
+        tags=_normalize_template_tags(template.tags),
+        is_active=template.is_active,
+        sort_order=template.sort_order,
+        created_at=template.created_at,
+        updated_at=template.updated_at,
+    )
 
 
 @router.get("/prompt-templates", response_model=list[PromptTemplateResponse])
@@ -53,21 +105,14 @@ async def list_prompt_templates(
 ):
     """List all prompt templates."""
     result = await db.execute(
-        select(PromptTemplate).order_by(PromptTemplate.created_at.desc())
+        select(PromptTemplate).order_by(
+            PromptTemplate.sort_order.asc(),
+            PromptTemplate.created_at.desc(),
+            PromptTemplate.id.asc(),
+        )
     )
     templates = result.scalars().all()
-    return [
-        PromptTemplateResponse(
-            id=t.id,
-            name=t.name,
-            content=t.content,
-            variable_tips=t.variable_tips,
-            is_active=t.is_active,
-            created_at=t.created_at,
-            updated_at=t.updated_at,
-        )
-        for t in templates
-    ]
+    return [_template_response(t) for t in templates]
 
 
 @router.post("/prompt-templates", response_model=PromptTemplateResponse, status_code=status.HTTP_201_CREATED)
@@ -77,24 +122,59 @@ async def create_prompt_template(
     _current_user=Depends(require_admin_user),
 ):
     """Create a new prompt template."""
+    max_order_result = await db.execute(
+        select(func.coalesce(func.max(PromptTemplate.sort_order), 0))
+    )
+    next_sort_order = (max_order_result.scalar() or 0) + 1
     db_template = PromptTemplate(
         name=template.name,
         content=template.content,
         variable_tips=template.variable_tips,
+        tags=_normalize_template_tags(template.tags),
         is_active=template.is_active,
+        sort_order=next_sort_order,
     )
     db.add(db_template)
     await db.commit()
     await db.refresh(db_template)
-    return PromptTemplateResponse(
-        id=db_template.id,
-        name=db_template.name,
-        content=db_template.content,
-        variable_tips=db_template.variable_tips,
-        is_active=db_template.is_active,
-        created_at=db_template.created_at,
-        updated_at=db_template.updated_at,
+    return _template_response(db_template)
+
+
+@router.put("/prompt-templates/reorder", response_model=list[PromptTemplateResponse])
+async def reorder_prompt_templates(
+    reorder: PromptTemplateReorder,
+    db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_admin_user),
+):
+    """Persist prompt template display order."""
+    template_ids = reorder.template_ids
+    if len(template_ids) != len(set(template_ids)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Duplicate prompt template IDs are not allowed",
+        )
+    if not template_ids:
+        return []
+
+    result = await db.execute(
+        select(PromptTemplate).where(PromptTemplate.id.in_(template_ids))
     )
+    templates = result.scalars().all()
+    templates_by_id = {template.id: template for template in templates}
+    missing_ids = [
+        template_id for template_id in template_ids if template_id not in templates_by_id
+    ]
+    if missing_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Prompt template {missing_ids[0]} not found",
+        )
+
+    for index, template_id in enumerate(template_ids, start=1):
+        templates_by_id[template_id].sort_order = index
+
+    await db.commit()
+    return [_template_response(templates_by_id[template_id]) for template_id in template_ids]
 
 
 @router.get("/prompt-templates/{template_id}", response_model=PromptTemplateResponse)
@@ -113,15 +193,7 @@ async def get_prompt_template(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Prompt template {template_id} not found",
         )
-    return PromptTemplateResponse(
-        id=template.id,
-        name=template.name,
-        content=template.content,
-        variable_tips=template.variable_tips,
-        is_active=template.is_active,
-        created_at=template.created_at,
-        updated_at=template.updated_at,
-    )
+    return _template_response(template)
 
 
 @router.put("/prompt-templates/{template_id}", response_model=PromptTemplateResponse)
@@ -148,20 +220,14 @@ async def update_prompt_template(
         template.content = update.content
     if update.variable_tips is not None:
         template.variable_tips = update.variable_tips
+    if update.tags is not None:
+        template.tags = _normalize_template_tags(update.tags)
     if update.is_active is not None:
         template.is_active = update.is_active
 
     await db.commit()
     await db.refresh(template)
-    return PromptTemplateResponse(
-        id=template.id,
-        name=template.name,
-        content=template.content,
-        variable_tips=template.variable_tips,
-        is_active=template.is_active,
-        created_at=template.created_at,
-        updated_at=template.updated_at,
-    )
+    return _template_response(template)
 
 
 @router.delete("/prompt-templates/{template_id}", response_model=DeleteResponse)

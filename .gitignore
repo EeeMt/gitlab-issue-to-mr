@@ -61,6 +61,10 @@ temporary/*.png
 # Superpowers
 .superpowers/
 
+# Local agent skills/config
+.agents/
+.codex/
+
 # Logs
 logs/
 scripts/demo/.env

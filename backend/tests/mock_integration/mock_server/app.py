@@ -5,13 +5,12 @@ Runs in a Docker container within the test compose network.
 """
 
 import asyncio
-import json
 import logging
 import os
 import subprocess
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +31,7 @@ _call_log_lock = threading.Lock()
 
 def record_call(service: str, method: str, path: str, body: Any = None, extra: dict | None = None):
     entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "service": service,
         "method": method,
         "path": path,
@@ -48,7 +47,7 @@ def record_call(service: str, method: str, path: str, body: Any = None, extra: d
 @app.get("/mock/calls")
 async def get_calls(service: str | None = None, method: str | None = None, since: str | None = None):
     """Retrieve recorded calls for test assertions.
-    
+
     Args:
         service: Filter by service name (e.g., 'gitlab', 'git')
         method: Filter by HTTP method
@@ -164,7 +163,7 @@ async def gitlab_create_issue_note(project_id: int, issue_iid: int, request: Req
     record_call("gitlab", "POST", f"/api/v4/projects/{project_id}/issues/{issue_iid}/notes", body)
     if _mock_config.get("fail_issue_notes"):
         return JSONResponse(status_code=403, content={"message": "Forbidden"})
-    return {"id": int(time.time() * 1000), "body": body.get("body", ""), "created_at": datetime.now(timezone.utc).isoformat()}
+    return {"id": int(time.time() * 1000), "body": body.get("body", ""), "created_at": datetime.now(UTC).isoformat()}
 
 
 @app.post("/api/v4/projects/{project_id}/merge_requests/{mr_iid}/notes")

@@ -55,6 +55,7 @@ export type ConfigForm = {
   oidc_redirect_uri: string
   session_cookie_name: string
   session_ttl_seconds: number
+  session_retention_days: number
   cookie_secure: boolean
   cookie_samesite: string
   auth_admin_usernames: string
@@ -109,6 +110,7 @@ export const oidcSectionFields: readonly (keyof ConfigForm)[] = [
 export const sessionSectionFields: readonly (keyof ConfigForm)[] = [
   'session_cookie_name',
   'session_ttl_seconds',
+  'session_retention_days',
   'cookie_secure',
   'cookie_samesite',
   'auth_admin_usernames',
@@ -163,6 +165,7 @@ function createDefaultFormValue(): ConfigForm {
     oidc_redirect_uri: '',
     session_cookie_name: 'codify_session',
     session_ttl_seconds: 28800,
+    session_retention_days: 30,
     cookie_secure: true,
     cookie_samesite: 'lax',
     auth_admin_usernames: '',
@@ -296,6 +299,7 @@ function createConfigForm(): UseConfigFormReturn {
       oidc_redirect_uri: config.auth.oidc_redirect_uri,
       session_cookie_name: config.auth.session_cookie_name,
       session_ttl_seconds: config.auth.session_ttl_seconds,
+      session_retention_days: config.auth.session_retention_days,
       cookie_secure: config.auth.cookie_secure,
       cookie_samesite: config.auth.cookie_samesite,
       auth_admin_usernames: config.auth.auth_admin_usernames,
@@ -390,6 +394,7 @@ function createConfigForm(): UseConfigFormReturn {
     return {
       session_cookie_name: formValue.value.session_cookie_name.trim(),
       session_ttl_seconds: formValue.value.session_ttl_seconds,
+      session_retention_days: formValue.value.session_retention_days,
       cookie_secure: formValue.value.cookie_secure,
       cookie_samesite: formValue.value.cookie_samesite,
       auth_admin_usernames: formValue.value.auth_admin_usernames,

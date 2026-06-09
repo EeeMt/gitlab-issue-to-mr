@@ -19,20 +19,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from app.api.mattermost import (
     MattermostConnectionTestRequest,
     MattermostIntegrationUpdate,
-    MattermostResolveChannelRequest,
     MattermostNotificationProfileInput,
+    MattermostResolveChannelRequest,
     _normalize_updates,
     create_mattermost_notification_profile,
     delete_mattermost_notification_profile,
-    get_mattermost_notification_config,
     get_mattermost_channel_target,
+    get_mattermost_notification_config,
     resolve_mattermost_channel_target,
-    test_mattermost_notification_integration as _endpoint_test_connection,
     update_mattermost_notification_integration,
     update_mattermost_notification_profile,
 )
+from app.api.mattermost import (
+    test_mattermost_notification_integration as _endpoint_test_connection,
+)
 from app.core.mattermost_notifications import MattermostNotificationError
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -323,8 +324,9 @@ class TestUpdateIntegration:
     @pytest.mark.asyncio
     async def test_encryption_error_returns_500(self):
         """ConfigEncryptionError during save should surface as HTTP 500."""
-        from app.core.config_crypto import ConfigEncryptionError
         from fastapi import HTTPException
+
+        from app.core.config_crypto import ConfigEncryptionError
 
         db = _mock_db(profiles=[])
         req = MattermostIntegrationUpdate(mattermost_server_url="https://x")

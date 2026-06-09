@@ -8,7 +8,6 @@ Prerequisites:
     docker-compose -f backend/tests/mock_integration/docker-compose.mock-test.yml up -d
 """
 
-import asyncio
 import logging
 import time
 
@@ -17,7 +16,6 @@ import pytest
 
 from .conftest import (
     create_issue_and_task,
-    get_mock_calls,
     wait_for_task_status,
 )
 

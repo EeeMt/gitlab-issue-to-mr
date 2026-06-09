@@ -8,9 +8,6 @@ A. _stream_logs_to_db internal paths:
    - Lines 243-248: deadline exceeded → timeout return (-1)
    - Lines 252-260: asyncio.TimeoutError → buffer flush on interval
    - Lines 276-278: empty stripped line → append to buffer only
-   - Lines 283-307: CODIFY_TOOL_USE_START marker → tool_call TaskLog
-   - Lines 311-327: CODIFY_TOOL_RESULT marker → update existing tool_call log
-   - Lines 366-381: CODIFY_SYSTEM_INIT marker → system_init TaskLog
    - Lines 388-391: buffer flush when MAX_BUFFER_LINES reached or interval elapsed
 
 B. Post-processing edge cases:
@@ -40,15 +37,13 @@ E. Misc:
 """
 
 import asyncio
-import json
 import time
 import unittest
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.core.worker import WorkerExecutor, scrub_sensitive_data, sanitize_sensitive_data
-from app.models import Task, TaskLog, TaskStatus
-
+from app.core.worker import WorkerExecutor
+from app.models import Task, TaskStatus
 
 # ---------------------------------------------------------------------------
 # Shared helpers (same patterns as existing test_worker_coverage.py)
@@ -90,6 +85,7 @@ def _make_worker(mock_gitlab=None, mock_docker=None):
 def _make_task(**kwargs):
     """Create a Task object with defaults and attach a mock issue."""
     from unittest.mock import MagicMock
+
     from app.models import AIProvider
 
     # Separate issue-level kwargs
@@ -132,12 +128,12 @@ def _make_task(**kwargs):
         mock_issue = MagicMock()
         mock_issue.id = defaults['issue_id']
         mock_issue.branch_name = issue_overrides.get('branch_name', f"codify-{defaults['id']}-p{defaults['project_id']}-i{defaults.get('issue_id', 1)}")
-        mock_issue.base_branch = issue_overrides.get('base_branch', None)
+        mock_issue.base_branch = issue_overrides.get('base_branch')
         mock_issue.target_branch = issue_overrides.get('target_branch', 'main')
-        mock_issue.merge_request_iid = issue_overrides.get('merge_request_iid', None)
-        mock_issue.merge_request_url = issue_overrides.get('merge_request_url', None)
-        mock_issue.title = issue_overrides.get('title', None)
-        mock_issue.description = issue_overrides.get('description', None)
+        mock_issue.merge_request_iid = issue_overrides.get('merge_request_iid')
+        mock_issue.merge_request_url = issue_overrides.get('merge_request_url')
+        mock_issue.title = issue_overrides.get('title')
+        mock_issue.description = issue_overrides.get('description')
         mock_issue.claude_session_id = None
         mock_issue.session_storage_path = None
         mock_issue.project_id = defaults['project_id']
@@ -160,6 +156,9 @@ def _make_db(task=None):
             provider = getattr(task, 'provider', None) if task else None
             mock_result.scalar_one_or_none.return_value = provider
             mock_result.scalars.return_value.all.return_value = [provider] if provider else []
+        elif 'FROM worker_environment_variables' in statement_str:
+            mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.all.return_value = []
         else:
             mock_result.scalar_one_or_none.return_value = task
             mock_result.scalars.return_value.all.return_value = [task] if task else []
@@ -208,11 +207,12 @@ class TestStreamLogsTimeout(unittest.TestCase):
         db = _make_db()
         container = _make_stream_container([b"some log line\n"])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=0)
         )
 
         self.assertEqual(exit_code, -1)
+        self.assertTrue(timed_out)
 
     def test_empty_buffer_on_deadline_exceeded(self):
         """When deadline exceeded with empty buffer, no flush occurs — lines 243-248."""
@@ -227,11 +227,12 @@ class TestStreamLogsTimeout(unittest.TestCase):
         # Let's verify no flush occurs (buffer is empty at that point).
         container = _make_stream_container([])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=0)
         )
 
         self.assertEqual(exit_code, -1)
+        self.assertTrue(timed_out)
         self.assertEqual(chunks, 0)  # no buffer to flush
 
 
@@ -265,7 +266,7 @@ class TestStreamLogsTimeoutFlush(unittest.TestCase):
         container.wait.return_value = {"StatusCode": 0}
 
         # Use a short timeout but enough for the stream to complete
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=10)
         )
 
@@ -282,7 +283,7 @@ class TestStreamLogsEmptyLine(unittest.TestCase):
         db = _make_db()
         container = _make_stream_container([b"\n", b"real content\n", b"  \n"])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
@@ -297,257 +298,12 @@ class TestStreamLogsEmptyLine(unittest.TestCase):
         db = _make_db()
         container = _make_stream_container([b"\n", b"\n", b"\n"])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(logs.strip(), "")
-
-
-class TestStreamLogsToolUseStart(unittest.TestCase):
-    """Test CODIFY_TOOL_USE_START marker parsing — lines 283-307."""
-
-    def test_creates_tool_call_task_log(self):
-        """CODIFY_TOOL_USE_START creates a TaskLog with log_type='tool_call'."""
-        worker = _make_worker()
-        db = _make_db()
-        # Mock flush to assign an id to log entries
-        original_add = db.add
-
-        log_entries_added = []
-
-        def capture_add(obj):
-            if isinstance(obj, TaskLog):
-                obj.id = len(log_entries_added) + 100  # simulate auto-assigned ID
-                log_entries_added.append(obj)
-            return original_add(obj)
-
-        db.add = capture_add
-
-        tool_use_data = json.dumps({
-            "id": "tool_use_001",
-            "name": "read_file",
-            "input": {"path": "/workspace/main.py"},
-        })
-        line = f"CODIFY_TOOL_USE_START:{tool_use_data}\n".encode()
-        container = _make_stream_container([line])
-
-        exit_code, logs, chunks = asyncio.run(
-            worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
-        )
-
-        self.assertEqual(exit_code, 0)
-        tool_call_logs = [e for e in log_entries_added if e.log_type == "tool_call"]
-        self.assertEqual(len(tool_call_logs), 1)
-
-        metadata = json.loads(tool_call_logs[0].log_metadata)
-        self.assertEqual(metadata["name"], "read_file")
-        self.assertEqual(metadata["input"], {"path": "/workspace/main.py"})
-        self.assertIsNone(metadata["output"])
-        self.assertFalse(metadata["error"])
-
-    def test_tool_use_start_invalid_json_does_not_crash(self):
-        """CODIFY_TOOL_USE_START with invalid JSON is silently skipped — line 307."""
-        worker = _make_worker()
-        db = _make_db()
-        container = _make_stream_container([b"CODIFY_TOOL_USE_START:{bad json}\n"])
-
-        # Should not raise
-        exit_code, logs, chunks = asyncio.run(
-            worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
-        )
-
-        self.assertEqual(exit_code, 0)
-
-    def test_tool_use_start_no_regex_match(self):
-        """CODIFY_TOOL_USE_START: line that doesn't match regex is ignored."""
-        worker = _make_worker()
-        db = _make_db()
-        # A line that starts with CODIFY_TOOL_USE_START: but has nothing after the colon.
-        # The (.+) in the regex requires at least one char, so empty payload produces no match.
-        container = _make_stream_container([b"CODIFY_TOOL_USE_START:\n"])
-
-        exit_code, logs, chunks = asyncio.run(
-            worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
-        )
-
-        self.assertEqual(exit_code, 0)
-
-
-class TestStreamLogsToolResult(unittest.TestCase):
-    """Test CODIFY_TOOL_RESULT marker parsing — lines 311-327."""
-
-    def test_updates_existing_tool_call_log(self):
-        """CODIFY_TOOL_RESULT updates the matching tool_call log with output."""
-        worker = _make_worker()
-        db = _make_db()
-
-        # We need to simulate: TOOL_USE_START creates a log, then TOOL_RESULT updates it.
-        # The tricky part is that _stream_logs_to_db uses db.flush() to get auto-assigned IDs,
-        # and db.get() to retrieve the log entry for updating.
-
-        log_entries_added = []
-
-        original_add_fn = db.add
-
-        def capture_add(obj):
-            if isinstance(obj, TaskLog):
-                obj.id = len(log_entries_added) + 100
-                log_entries_added.append(obj)
-            return original_add_fn(obj)
-
-        db.add = capture_add
-
-        # Make db.get return the log entry we added
-        async def mock_get(model_class, log_id):
-            for entry in log_entries_added:
-                if entry.id == log_id:
-                    return entry
-            return None
-
-        db.get = mock_get
-
-        tool_use_line = json.dumps({
-            "id": "tool_use_abc",
-            "name": "write_file",
-            "input": {"path": "/workspace/test.py", "content": "pass"},
-        })
-        tool_result_line = json.dumps({
-            "id": "tool_use_abc",
-            "output": "File written successfully",
-            "error": False,
-        })
-
-        container = _make_stream_container([
-            f"CODIFY_TOOL_USE_START:{tool_use_line}\n".encode(),
-            f"CODIFY_TOOL_RESULT:{tool_result_line}\n".encode(),
-        ])
-
-        exit_code, logs, chunks = asyncio.run(
-            worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
-        )
-
-        self.assertEqual(exit_code, 0)
-        # The tool_call log should have been updated with the result
-        tool_call_log = log_entries_added[0]
-        metadata = json.loads(tool_call_log.log_metadata)
-        self.assertEqual(metadata["output"], "File written successfully")
-        self.assertFalse(metadata["error"])
-
-    def test_tool_result_with_error_flag(self):
-        """CODIFY_TOOL_RESULT with error=True updates the log accordingly."""
-        worker = _make_worker()
-        db = _make_db()
-
-        log_entries_added = []
-        original_add_fn = db.add
-
-        def capture_add(obj):
-            if isinstance(obj, TaskLog):
-                obj.id = len(log_entries_added) + 100
-                log_entries_added.append(obj)
-            return original_add_fn(obj)
-
-        db.add = capture_add
-
-        async def mock_get(model_class, log_id):
-            for entry in log_entries_added:
-                if entry.id == log_id:
-                    return entry
-            return None
-
-        db.get = mock_get
-
-        tool_use_line = json.dumps({"id": "tu_err", "name": "bash", "input": {"command": "exit 1"}})
-        tool_result_line = json.dumps({"id": "tu_err", "output": "Command failed", "error": True})
-
-        container = _make_stream_container([
-            f"CODIFY_TOOL_USE_START:{tool_use_line}\n".encode(),
-            f"CODIFY_TOOL_RESULT:{tool_result_line}\n".encode(),
-        ])
-
-        exit_code, logs, chunks = asyncio.run(
-            worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
-        )
-
-        self.assertEqual(exit_code, 0)
-        metadata = json.loads(log_entries_added[0].log_metadata)
-        self.assertTrue(metadata["error"])
-        self.assertEqual(metadata["output"], "Command failed")
-
-    def test_tool_result_no_matching_tool_use(self):
-        """CODIFY_TOOL_RESULT with unknown id is silently skipped (no pending entry)."""
-        worker = _make_worker()
-        db = _make_db()
-
-        tool_result_line = json.dumps({
-            "id": "unknown_tool_id",
-            "output": "some result",
-            "error": False,
-        })
-        container = _make_stream_container([
-            f"CODIFY_TOOL_RESULT:{tool_result_line}\n".encode(),
-        ])
-
-        # Should not raise
-        exit_code, logs, chunks = asyncio.run(
-            worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
-        )
-
-        self.assertEqual(exit_code, 0)
-
-    def test_tool_result_invalid_json_does_not_crash(self):
-        """CODIFY_TOOL_RESULT with invalid JSON is silently skipped — line 327."""
-        worker = _make_worker()
-        db = _make_db()
-        container = _make_stream_container([b"CODIFY_TOOL_RESULT:{bad}\n"])
-
-        exit_code, logs, chunks = asyncio.run(
-            worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
-        )
-
-        self.assertEqual(exit_code, 0)
-
-
-class TestStreamLogsSystemInit(unittest.TestCase):
-    """Test CODIFY_SYSTEM_INIT marker in _stream_logs_to_db — lines 366-381."""
-
-    def test_creates_system_init_task_log(self):
-        """CODIFY_SYSTEM_INIT with valid JSON creates a TaskLog with log_type='system_init'."""
-        worker = _make_worker()
-        db = _make_db()
-
-        json_str = json.dumps({"model": "claude-sonnet-4-20250514", "cwd": "/workspace"})
-        container = _make_stream_container([
-            f"CODIFY_SYSTEM_INIT:{json_str}\n".encode(),
-        ])
-
-        exit_code, logs, chunks = asyncio.run(
-            worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
-        )
-
-        self.assertEqual(exit_code, 0)
-        added_objects = [c[0][0] for c in db.add.call_args_list if isinstance(c[0][0], TaskLog)]
-        system_init_logs = [o for o in added_objects if o.log_type == "system_init"]
-        self.assertEqual(len(system_init_logs), 1)
-        self.assertEqual(system_init_logs[0].log_metadata, json_str)
-        self.assertEqual(system_init_logs[0].message, "")
-
-    def test_system_init_invalid_json_does_not_crash(self):
-        """CODIFY_SYSTEM_INIT with invalid JSON is silently skipped — line 381."""
-        worker = _make_worker()
-        db = _make_db()
-        container = _make_stream_container([b"CODIFY_SYSTEM_INIT:not-json\n"])
-
-        exit_code, logs, chunks = asyncio.run(
-            worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
-        )
-
-        self.assertEqual(exit_code, 0)
-        added_objects = [c[0][0] for c in db.add.call_args_list if isinstance(c[0][0], TaskLog)]
-        system_init_logs = [o for o in added_objects if getattr(o, "log_type", None) == "system_init"]
-        self.assertEqual(len(system_init_logs), 0)
 
 
 class TestStreamLogsBufferFlush(unittest.TestCase):
@@ -562,7 +318,7 @@ class TestStreamLogsBufferFlush(unittest.TestCase):
         lines = [f"log line {i}\n".encode() for i in range(250)]
         container = _make_stream_container(lines)
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=10)
         )
 
@@ -579,7 +335,7 @@ class TestStreamLogsBufferFlush(unittest.TestCase):
         multi_line = b"line 1\nline 2\nline 3\n"
         container = _make_stream_container([multi_line])
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
@@ -612,15 +368,15 @@ class TestParseMrTitleException(unittest.TestCase):
             # Should not raise
             asyncio.run(worker._parse_task_result(task, logs, db, exit_code=0))
 
-        # merge_request_title should remain unset
-        self.assertIsNone(task.merge_request_title)
+        # commit_message should remain unset
+        self.assertIsNone(task.commit_message)
 
 
 class TestUpdateTaskStatsFromApi(unittest.TestCase):
     """Test MR stats from API paths — lines 737-747."""
 
     def test_mr_stats_from_api_success(self):
-        """When diff stats not in logs, fetches from API — lines 737-745."""
+        """When diff stats not in logs but commit exists, fetches from API."""
         mock_gitlab = MagicMock()
         mock_gitlab.get_merge_request_stats = AsyncMock(return_value={
             "additions": 25,
@@ -630,6 +386,7 @@ class TestUpdateTaskStatsFromApi(unittest.TestCase):
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task()
         task.issue.merge_request_iid = 42
+        task.commit_sha = "a" * 40
         logs = "no diff stats here\n"
 
         asyncio.run(worker._update_task_stats_from_logs_or_api(task, logs, issue=task.issue))
@@ -638,13 +395,29 @@ class TestUpdateTaskStatsFromApi(unittest.TestCase):
         self.assertEqual(task.deletions, 10)
         self.assertEqual(task.total_changes, 35)
 
+    def test_mr_stats_skipped_when_no_commit_sha(self):
+        """When no CODIFY_DIFF and no commit_sha, stats stay at 0 (no changes made)."""
+        mock_gitlab = MagicMock()
+        mock_gitlab.get_merge_request_stats = AsyncMock()
+        worker = _make_worker(mock_gitlab=mock_gitlab)
+        task = _make_task()
+        task.issue.merge_request_iid = 42
+        logs = "no diff stats\n"
+
+        asyncio.run(worker._update_task_stats_from_logs_or_api(task, logs, issue=task.issue))
+
+        mock_gitlab.get_merge_request_stats.assert_not_awaited()
+        self.assertEqual(task.additions, 0)
+        self.assertEqual(task.deletions, 0)
+
     def test_mr_stats_from_api_returns_none(self):
-        """When API returns None for stats — lines 746-747."""
+        """When API returns None for stats."""
         mock_gitlab = MagicMock()
         mock_gitlab.get_merge_request_stats = AsyncMock(return_value=None)
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task()
         task.issue.merge_request_iid = 42
+        task.commit_sha = "a" * 40
         logs = "no diff stats\n"
 
         # Should not raise, stats remain at defaults
@@ -654,12 +427,13 @@ class TestUpdateTaskStatsFromApi(unittest.TestCase):
         self.assertEqual(task.deletions, 0)
 
     def test_mr_stats_from_api_exception(self):
-        """When API call raises, stats remain unchanged — line 749."""
+        """When API call raises, stats remain unchanged."""
         mock_gitlab = MagicMock()
         mock_gitlab.get_merge_request_stats = AsyncMock(side_effect=Exception("API error"))
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task()
         task.issue.merge_request_iid = 42
+        task.commit_sha = "a" * 40
         logs = "no diff stats\n"
 
         # Should not raise
@@ -674,6 +448,7 @@ class TestUpdateTaskStatsFromApi(unittest.TestCase):
         worker = _make_worker(mock_gitlab=mock_gitlab)
         task = _make_task()
         task.issue.merge_request_iid = None
+        task.commit_sha = "a" * 40
         logs = "no diff stats\n"
 
         asyncio.run(worker._update_task_stats_from_logs_or_api(task, logs, issue=task.issue))
@@ -706,29 +481,6 @@ class TestUpdateMrDescriptionForIssueExceptionHandling(IsolatedAsyncioTestCase):
 
 class TestSendNotificationsExceptions(unittest.TestCase):
     """Test _send_notifications and _send_failure_notifications exception paths."""
-
-    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
-    def test_send_notifications_completion_exception(self, mock_notify_event):
-        """_send_notifications catches exception from _notify_task_completed — lines 809-810."""
-        mock_gitlab = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(issue_id=1)
-
-        # Make _notify_task_completed raise
-        with patch.object(worker, '_notify_task_completed', new=AsyncMock(side_effect=Exception("notify error"))):
-            # Should not raise
-            asyncio.run(worker._send_notifications(task, success=True, had_existing_mr=False, logs="", issue=task.issue))
-
-    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
-    def test_send_failure_notifications_completion_exception(self, mock_notify_event):
-        """_send_failure_notifications catches exception from _notify_task_completed — lines 835-836."""
-        mock_gitlab = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(issue_id=1, status=TaskStatus.FAILED)
-
-        with patch.object(worker, '_notify_task_completed', new=AsyncMock(side_effect=Exception("notify boom"))):
-            # Should not raise
-            asyncio.run(worker._send_failure_notifications(task, success=False, had_existing_mr=False, issue=task.issue))
 
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
     def test_send_failure_notifications_mattermost_exception(self, mock_notify_event):
@@ -765,7 +517,7 @@ class TestExecuteTaskNotifyStartedException(unittest.TestCase):
 
         fake_logs = "CODIFY_DIFF:+1-0\n"
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         # Should still succeed despite notification failure
@@ -840,12 +592,50 @@ class TestResumeTaskSuccess(unittest.TestCase):
 
         fake_logs = "CODIFY_DIFF:+5-3\nhttp://gitlab.example.com/-/merge_requests/42\n"
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 2))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 2, False))):
             result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
         self.assertTrue(result)
         self.assertEqual(task.status, TaskStatus.COMPLETED)
         mock_docker.remove_container.assert_called_with(mock_container, force=True)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_resume_success_upserts_usage_ledger(self, mock_notify, mock_get_settings):
+        """resume_task should write completed usage into the quota ledger."""
+        mock_get_settings.return_value = _make_settings()
+        mock_container = MagicMock(id="ctr-resume-usage")
+        mock_docker = MagicMock()
+        mock_docker.client.containers.get.return_value = mock_container
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+        mock_gitlab.normalize_web_url.side_effect = lambda x: x
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(
+            status=TaskStatus.RUNNING,
+            initiator_user_id=7,
+            merge_request_iid=42,
+            merge_request_url="http://gitlab.example.com/-/merge_requests/42",
+        )
+        db = _make_db(task)
+
+        fake_logs = (
+            "CODIFY_DIFF:+5-3\n"
+            "http://gitlab.example.com/-/merge_requests/42\n"
+            'CODIFY_STATS:{"input_tokens":100,"output_tokens":50}\n'
+        )
+
+        with (
+            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 2, False))),
+            patch("app.core.worker.upsert_task_usage_ledger", new=AsyncMock()) as mock_upsert,
+        ):
+            result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
+
+        self.assertTrue(result)
+        mock_upsert.assert_awaited_once_with(db, task)
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
@@ -864,7 +654,7 @@ class TestResumeTaskSuccess(unittest.TestCase):
         task = _make_task(status=TaskStatus.RUNNING, merge_request_iid=42)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1, False))):
             with patch.object(worker, '_remove_mr_draft_status_for_issue') as mock_remove_draft:
                 asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
@@ -887,7 +677,7 @@ class TestResumeTaskSuccess(unittest.TestCase):
         task = _make_task(status=TaskStatus.RUNNING, merge_request_iid=42)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1, False))):
             with patch.object(worker, '_remove_mr_draft_status_for_issue', side_effect=Exception("draft boom")):
                 result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
@@ -915,7 +705,7 @@ class TestResumeTaskFailure(unittest.TestCase):
         task = _make_task(status=TaskStatus.RUNNING)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error occurred", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error occurred", 1, False))):
             result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
         self.assertFalse(result)
@@ -939,11 +729,36 @@ class TestResumeTaskFailure(unittest.TestCase):
         task = _make_task(status=TaskStatus.RUNNING)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(1, "error", 1, False))):
             result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
         self.assertFalse(result)
         self.assertEqual(task.status, TaskStatus.FAILED)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_resume_timeout_sets_error_message_prefix(self, mock_notify, mock_get_settings):
+        """resume_task with timed_out=True sets timeout error_message prefix."""
+        mock_get_settings.return_value = _make_settings(task_timeout=600)
+        mock_container = MagicMock(id="ctr-resume-timeout")
+        mock_docker = MagicMock()
+        mock_docker.client.containers.get.return_value = mock_container
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(status=TaskStatus.RUNNING)
+        db = _make_db(task)
+
+        with patch.object(worker, '_stream_logs_to_db',
+                          new=AsyncMock(return_value=(-1, "still running", 1, True))):
+            result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
+
+        self.assertFalse(result)
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        self.assertIn("Task timed out after 600s", task.error_message)
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
@@ -963,7 +778,7 @@ class TestResumeTaskFailure(unittest.TestCase):
         task = _make_task(status=TaskStatus.RUNNING)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1, False))):
             result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
         # Should still return True (success) despite cleanup failure
@@ -997,6 +812,41 @@ class TestResumeTaskException(unittest.TestCase):
         self.assertEqual(task.status, TaskStatus.FAILED)
         self.assertIn("Docker exploded", task.error_message)
         mock_docker.remove_container.assert_called_with(mock_container, force=True)
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_exception_after_parse_still_upserts_usage_ledger(self, mock_notify, mock_get_settings):
+        """Post-parse resume failures should still attempt quota ledger persistence."""
+        mock_get_settings.return_value = _make_settings()
+        mock_container = MagicMock(id="ctr-resume-post-parse")
+        mock_docker = MagicMock()
+        mock_docker.client.containers.get.return_value = mock_container
+
+        mock_gitlab = MagicMock()
+        mock_gitlab.create_note = MagicMock()
+        mock_gitlab.create_mr_note = MagicMock()
+        mock_gitlab.normalize_web_url.side_effect = lambda x: x
+
+        worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+        task = _make_task(status=TaskStatus.RUNNING, initiator_user_id=7, merge_request_iid=None)
+        db = _make_db(task)
+        db.commit = AsyncMock(side_effect=[RuntimeError("post-parse commit failed"), None])
+
+        fake_logs = (
+            "http://gitlab.example.com/project/-/merge_requests/42\n"
+            "CODIFY_DIFF:+10-5\n"
+            'CODIFY_STATS:{"input_tokens":100,"output_tokens":50}\n'
+        )
+
+        with (
+            patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 2, False))),
+            patch("app.core.worker.upsert_task_usage_ledger", new=AsyncMock()) as mock_upsert,
+        ):
+            result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
+
+        self.assertFalse(result)
+        self.assertEqual(task.status, TaskStatus.FAILED)
+        mock_upsert.assert_awaited_once_with(db, task)
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
@@ -1037,11 +887,10 @@ class TestResumeTaskException(unittest.TestCase):
         task = _make_task(status=TaskStatus.RUNNING, merge_request_iid=None, is_manual=False)
         db = _make_db(task)
 
-        # Make both _notify_task_completed and notify_task_event raise
+        # Make stream raise
         with patch.object(worker, '_stream_logs_to_db', side_effect=RuntimeError("stream failed")):
-            with patch.object(worker, '_notify_task_completed', new=AsyncMock(side_effect=Exception("notify failed"))):
-                mock_notify.side_effect = Exception("mattermost failed")
-                result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
+            mock_notify.side_effect = Exception("mattermost failed")
+            result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
         self.assertFalse(result)
         self.assertEqual(task.status, TaskStatus.FAILED)
@@ -1067,7 +916,7 @@ class TestResumeTaskException(unittest.TestCase):
         )
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1, False))):
             with patch.object(worker, '_send_notifications', new=AsyncMock()) as mock_send:
                 result = asyncio.run(worker.resume_task(db, task.id, "codify-1"))
 
@@ -1102,7 +951,7 @@ class TestExecuteTaskDraftRemovalException(unittest.TestCase):
 
         fake_logs = "CODIFY_DIFF:+1-0\nhttp://gitlab.example.com/-/merge_requests/42\n"
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1, False))):
             with patch.object(worker, '_remove_mr_draft_status', side_effect=Exception("draft error")):
                 result = asyncio.run(worker.execute_task(db, task.id))
 
@@ -1132,7 +981,7 @@ class TestExecuteTaskContainerRemovalException(unittest.TestCase):
         task = _make_task(target_branch="main", merge_request_iid=None)
         db = _make_db(task)
 
-        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1))):
+        with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1, False))):
             result = asyncio.run(worker.execute_task(db, task.id))
 
         # Should still return True (success) despite cleanup failure
@@ -1158,83 +1007,14 @@ class TestExecuteTaskExceptionNotificationFailures(unittest.TestCase):
         task = _make_task(target_branch="main", merge_request_iid=None, is_manual=False)
         db = _make_db(task)
 
-        # Make stream raise, then also make notifications raise
+        # Make stream raise, Mattermost notification also fails
         mock_notify.side_effect = Exception("mattermost down")
 
         with patch.object(worker, '_stream_logs_to_db', side_effect=RuntimeError("stream failed")):
-            with patch.object(worker, '_notify_task_completed', new=AsyncMock(side_effect=Exception("notify failed"))):
-                result = asyncio.run(worker.execute_task(db, task.id))
+            result = asyncio.run(worker.execute_task(db, task.id))
 
         self.assertFalse(result)
         self.assertEqual(task.status, TaskStatus.FAILED)
-
-
-class TestNotifyTaskCompletedMrIidExtraction(unittest.TestCase):
-    """Test _notify_task_completed MR IID extraction edge cases — lines 1202-1203, 1208."""
-
-    @patch('app.core.worker.get_settings')
-    def test_mr_iid_extraction_from_url_failure(self, mock_get_settings):
-        """When MR URL parsing fails, uses fallback message — lines 1202-1203."""
-        mock_get_settings.return_value = _make_settings()
-        mock_gitlab = MagicMock()
-        mock_gitlab.create_mr_note = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-
-        # URL with /merge_requests/ but the IID part is not extractable
-        task = _make_task(
-            merge_request_iid=None,
-            merge_request_url="http://gitlab.example.com/project/-/merge_requests/",
-            is_manual=False,
-        )
-
-        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr"))
-
-        # Should use the "MR 已更新" fallback message since no numeric IID extracted
-
-    @patch('app.core.worker.get_settings')
-    def test_success_mr_url_with_no_extractable_iid(self, mock_get_settings):
-        """Success with MR URL but non-numeric IID — notify_target=issue does not send."""
-        mock_get_settings.return_value = _make_settings()
-        mock_gitlab = MagicMock()
-        mock_gitlab.create_note = MagicMock()
-        mock_gitlab.create_mr_note = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-
-        # URL that has merge_requests but splitting gives empty string
-        task = _make_task(
-            merge_request_iid=None,
-            merge_request_url="http://gitlab.example.com/merge_requests/abc?foo=bar",
-        )
-        issue = task.issue
-
-        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="issue", issue=issue))
-
-        # With no mr_iid and notify_target="issue", the worker doesn't send to issue
-        # Only MR notifications are supported now
-        mock_gitlab.create_note.assert_not_called()
-        mock_gitlab.create_mr_note.assert_not_called()
-
-
-class TestNotifyTaskCompletedNoDescUpdate(unittest.TestCase):
-    """Test _notify_task_completed no longer updates MR description inline."""
-
-    @patch('app.core.worker.get_settings')
-    def test_notification_does_not_call_update_mr_description(self, mock_get_settings):
-        """MR description update moved to execute_task; notification only creates a note."""
-        mock_get_settings.return_value = _make_settings()
-        mock_gitlab = MagicMock()
-        mock_gitlab.create_mr_note = MagicMock()
-        worker = _make_worker(mock_gitlab=mock_gitlab)
-        task = _make_task(
-            merge_request_iid=42,
-            merge_request_url="http://gitlab.example.com/-/merge_requests/42",
-        )
-        issue = task.issue
-
-        asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr", issue=issue))
-
-        mock_gitlab.create_mr_note.assert_called_once()
-        mock_gitlab.get_merge_request.assert_not_called()
 
 
 class TestSendFailureAlertWebhookException(unittest.TestCase):
@@ -1299,60 +1079,12 @@ class TestStreamLogsContainerWaitException(unittest.TestCase):
         container.wait.side_effect = Exception("container wait timeout")
         container.id = "mock-id"
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 
         self.assertEqual(exit_code, -1)
         self.assertIn("some log", logs)
-
-
-class TestStreamLogsMultipleMarkersSameStream(unittest.TestCase):
-    """Test that multiple marker types in a single stream are all processed correctly."""
-
-    def test_mixed_markers_processed(self):
-        """THINKING, TOOL_USE_START, SYSTEM_INIT in one stream all create logs."""
-        worker = _make_worker()
-        db = _make_db()
-
-        log_entries_added = []
-        original_add_fn = db.add
-
-        def capture_add(obj):
-            if isinstance(obj, TaskLog):
-                obj.id = len(log_entries_added) + 100
-                log_entries_added.append(obj)
-            return original_add_fn(obj)
-
-        db.add = capture_add
-
-        thinking_data = json.dumps({"text": "Let me think..."})
-        system_init_data = json.dumps({"model": "claude-sonnet", "cwd": "/ws"})
-        tool_use_data = json.dumps({"id": "tu1", "name": "bash", "input": {"cmd": "ls"}})
-
-        container = _make_stream_container([
-            b"Normal log line\n",
-            f"CODIFY_THINKING:{thinking_data}\n".encode(),
-            f"CODIFY_SYSTEM_INIT:{system_init_data}\n".encode(),
-            f"CODIFY_TOOL_USE_START:{tool_use_data}\n".encode(),
-            b"Another normal line\n",
-        ])
-
-        exit_code, logs, chunks = asyncio.run(
-            worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
-        )
-
-        self.assertEqual(exit_code, 0)
-
-        # Check each marker type was captured
-        thinking_logs = [e for e in log_entries_added if e.log_type == "thinking"]
-        self.assertEqual(len(thinking_logs), 1)
-
-        system_init_logs = [e for e in log_entries_added if e.log_type == "system_init"]
-        self.assertEqual(len(system_init_logs), 1)
-
-        tool_call_logs = [e for e in log_entries_added if e.log_type == "tool_call"]
-        self.assertEqual(len(tool_call_logs), 1)
 
 
 class TestStreamLogsThreadError(unittest.TestCase):
@@ -1368,7 +1100,7 @@ class TestStreamLogsThreadError(unittest.TestCase):
         container.wait.return_value = {"StatusCode": 1}
         container.id = "mock-id"
 
-        exit_code, logs, chunks = asyncio.run(
+        exit_code, logs, chunks, timed_out = asyncio.run(
             worker._stream_logs_to_db(container, task_id=1, db=db, timeout=5)
         )
 

@@ -19,6 +19,20 @@ EXIT_CODE="${FAKE_CLAUDE_EXIT_CODE:-0}"
 RESULT_TEXT="${FAKE_CLAUDE_RESULT:-Created hello.py with greeting function}"
 FAIL_MSG="${FAKE_CLAUDE_FAIL_MSG:-Task failed}"
 DELAY_SECONDS=0
+ARTIFACT_DIR="${ARTIFACT_DIR:-${PWD}}"
+mkdir -p "${ARTIFACT_DIR}"
+EVENT_JSONL="${ARTIFACT_DIR}/event.jsonl"
+RUNTIME_JSON="${ARTIFACT_DIR}/runtime.json"
+CONSOLE_LOG="${ARTIFACT_DIR}/console.log"
+touch "${EVENT_JSONL}" "${CONSOLE_LOG}"
+jq -n \
+    --arg model "fake-claude-1.0" \
+    --arg cwd "${PWD}" \
+    '{model: $model, cwd: $cwd, resume_session: ""}' > "${RUNTIME_JSON}"
+
+append_event() {
+    printf '%s\n' "$1" >> "${EVENT_JSONL}"
+}
 
 # Fetch dynamic config from mock server — GITLAB_URL points to mock-services in test env.
 # This allows tests to change behavior at runtime via PATCH /mock/config.
@@ -72,38 +86,47 @@ PYEOF
     echo "[fake-claude] Created default: hello.py (task=${TASK_ID:-unknown})" >&2
 fi
 
-# Emit CODIFY markers to stderr — simulates a realistic multi-step AI interaction.
-# worker.py parses these in real-time and creates TaskLog entries.
+# Emit structured events to event.jsonl — mirrors what real Claude CLI produces.
+# WorkerEventProjector tails this file and creates TaskLog entries.
 
 # 1. System initialization
-echo 'CODIFY_SYSTEM_INIT:{"model":"fake-claude-1.0","cwd":"/workspace"}' >&2
+append_event '{"type":"system","subtype":"init","model":"fake-claude-1.0","cwd":"/workspace"}'
 
-# 2. First thinking block — AI analyzes the prompt
-echo 'CODIFY_THINKING:{"text":"Let me analyze the request. I need to create a Python file with a greeting function. I should make it well-structured with docstrings and a main guard."}' >&2
+# 2. First thinking block
+append_event '{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"thinking"}}}'
+append_event '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"Let me analyze the request. I need to create a Python file with a greeting function. I should make it well-structured with docstrings and a main guard."}}}'
+append_event '{"type":"stream_event","event":{"type":"content_block_stop"}}'
 
-# 3. First assistant text — AI explains its plan
-echo 'CODIFY_ASSISTANT_TEXT:{"text":"I'"'"'ll create a hello.py file with a well-structured greeting function."}' >&2
+# 3. First assistant text block
+append_event '{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"text"}}}'
+append_event '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"I'\''ll create a hello.py file with a well-structured greeting function."}}}'
+append_event '{"type":"stream_event","event":{"type":"content_block_stop"}}'
 
-# 4. First tool call — Read existing files to understand context
-echo 'CODIFY_TOOL_USE_START:{"id":"tool_001","name":"Read","input":{"file_path":"README.md"}}' >&2
-echo 'CODIFY_TOOL_RESULT:{"id":"tool_001","output":"# Test Project\n\nThis is a test repository.","error":false}' >&2
+# 4. First tool call — Read existing files
+append_event '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool_001","name":"Read","input":{"file_path":"README.md"}}]}}'
+append_event '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool_001","content":"# Test Project\n\nThis is a test repository.","is_error":false}]}}'
 
-# 5. Second thinking block — AI decides on implementation
-echo 'CODIFY_THINKING:{"text":"The project has a README. I'"'"'ll create hello.py with proper structure and also add a utils.py for helper functions."}' >&2
+# 5. Second thinking block
+append_event '{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"thinking"}}}'
+append_event '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"The project has a README. I'\''ll create hello.py with proper structure and also add a utils.py for helper functions."}}}'
+append_event '{"type":"stream_event","event":{"type":"content_block_stop"}}'
 
-# 6. Second tool call — Write the main file
-echo 'CODIFY_TOOL_USE_START:{"id":"tool_002","name":"Write","input":{"file_path":"hello.py","content":"def hello():\n    return \"Hello from Codify!\""}}' >&2
-echo 'CODIFY_TOOL_RESULT:{"id":"tool_002","output":"File created successfully","error":false}' >&2
+# 6. Second tool call — Write main file
+append_event '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool_002","name":"Write","input":{"file_path":"hello.py","content":"def hello():\n    return \"Hello from Codify!\""}}]}}'
+append_event '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool_002","content":"File created successfully","is_error":false}]}}'
 
-# 7. Third tool call — Write a second file
-echo 'CODIFY_TOOL_USE_START:{"id":"tool_003","name":"Write","input":{"file_path":"utils.py","content":"def greet(name):\n    return f\"Hello, {name}!\""}}' >&2
-echo 'CODIFY_TOOL_RESULT:{"id":"tool_003","output":"File created successfully","error":false}' >&2
+# 7. Third tool call — Write second file
+append_event '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool_003","name":"Write","input":{"file_path":"utils.py","content":"def greet(name):\n    return f\"Hello, {name}!\""}}]}}'
+append_event '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool_003","content":"File created successfully","is_error":false}]}}'
 
-# 8. Final assistant text — AI summarizes what it did
-echo 'CODIFY_ASSISTANT_TEXT:{"text":"I created two files:\n1. hello.py — main greeting function\n2. utils.py — helper greeting with name parameter"}' >&2
+# 8. Final assistant text
+append_event '{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"text"}}}'
+append_event '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"I created two files:\n1. hello.py — main greeting function\n2. utils.py — helper greeting with name parameter"}}}'
+append_event '{"type":"stream_event","event":{"type":"content_block_stop"}}'
 
 # Build and output JSON result to stdout (entrypoint.sh captures this)
 if [[ "$EXIT_CODE" == "0" ]]; then
+    append_event '{"type":"result","subtype":"success","result":"Created hello.py with greeting function","session_id":"fake-session","usage":{"input_tokens":1500,"output_tokens":800,"cache_read_input_tokens":200,"cache_creation_input_tokens":100}}'
     jq -n \
         --argjson success true \
         --arg subtype "success" \
@@ -122,6 +145,7 @@ if [[ "$EXIT_CODE" == "0" ]]; then
             ]
         }'
 else
+    append_event '{"type":"result","subtype":"error","result":"Task failed","session_id":"","usage":{"input_tokens":500,"output_tokens":100}}'
     jq -n \
         --argjson success false \
         --arg subtype "error" \

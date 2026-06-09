@@ -21,8 +21,15 @@ build: ## Build all images (backend, nginx, worker)
 	@printf "  - codify-nginx:latest\n"
 	@printf "  - codify-worker:latest\n"
 
+.PHONY: offline-bundle-export
+offline-bundle-export: ## Build images, export offline bundle images, and package deploy/offline-bundle
+	$(MAKE) build
+	cd $(PROJECT_ROOT)/deploy/offline-bundle && ./scripts/export-images.sh
+	cd $(PROJECT_ROOT)/deploy/offline-bundle && ./scripts/package-bundle.sh
+
 .PHONY: up
-up: ## Start development environment
+up: ## Start development environment (rebuilds backend, nginx, and worker images)
+	docker build -f $(PROJECT_ROOT)/deploy/Dockerfile.worker -t codify-worker:latest $(PROJECT_ROOT)
 	cd $(PROJECT_ROOT)/deploy && docker-compose up -d --build
 
 .PHONY: down
@@ -98,6 +105,13 @@ setup-npm: $(NODE_MODULES)/.installed ## Install frontend npm dependencies
 
 .PHONY: setup
 setup: setup-venv setup-npm ## Install all dependencies (backend venv + frontend npm)
+
+.PHONY: lint-backend
+lint-backend: $(VENV)/.installed ## Run backend Ruff checks
+	cd $(PROJECT_ROOT)/backend && $(VENV_PYTHON) -m ruff check app tests
+
+.PHONY: lint
+lint: lint-backend ## Run all lint checks
 
 # Video recording option: set RECORD_VIDEO=1 to record .webm videos for each test
 # Example: make test-e2e-parallel RECORD_VIDEO=1
@@ -506,6 +520,7 @@ help:
 	@echo ""
 	@echo "Development Environment:"
 	@echo "  make build              Build all images (backend, nginx, worker)"
+	@echo "  make offline-bundle-export  Build images, export offline bundle, and package it"
 	@echo "  make up                Start development environment"
 	@echo "  make down              Stop development environment"
 	@echo "  make restart           Restart development environment"
@@ -524,6 +539,10 @@ help:
 	@echo "  make test-backend      Run backend unit tests"
 	@echo "  make test-frontend     Run frontend unit tests"
 	@echo "  make test-mock-e2e     Run mock E2E tests"
+	@echo ""
+	@echo "Lint:"
+	@echo "  make lint              Run all lint checks"
+	@echo "  make lint-backend      Run backend Ruff checks"
 	@echo ""
 	@echo "Mock Integration Tests (Docker):"
 	@echo "  make test-mock-integration            Run mock integration tests (build + start + test)"

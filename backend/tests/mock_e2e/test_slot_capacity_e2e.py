@@ -11,16 +11,16 @@ or are guarded by empty-default settings that cause early returns.
 
 from __future__ import annotations
 
-import pytest
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
-    create_async_engine,
     async_sessionmaker,
+    create_async_engine,
 )
 from sqlalchemy.pool import StaticPool
 
@@ -35,14 +35,14 @@ from app.dependencies.project_access import (
     require_project_access_scope,
 )
 from app.main import app
-from app.models import Base, Issue, Task, TaskStatus
+from app.models import AIProvider, Base, Issue, Task, TaskStatus
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 async def _test_engine():
     """In-memory SQLite async engine with all tables created.
 
@@ -68,7 +68,7 @@ async def _test_engine():
     await engine.dispose()
 
 
-@pytest.fixture()
+@pytest.fixture
 async def session_factory(_test_engine):
     """Async session factory bound to the test engine."""
     return async_sessionmaker(
@@ -76,14 +76,30 @@ async def session_factory(_test_engine):
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 async def db_session(session_factory):
     """Session for *direct* data manipulation inside tests (seeding, etc.)."""
     async with session_factory() as session:
         yield session
 
 
-@pytest.fixture()
+@pytest.fixture
+async def _default_provider(session_factory):
+    """Seed a default AIProvider so task creation has a valid provider_id."""
+    async with session_factory() as session:
+        provider = AIProvider(
+            name="Test Provider",
+            base_url="https://api.example.com",
+            api_key="test-key",
+            model="test-model",
+            is_default=True,
+        )
+        session.add(provider)
+        await session.commit()
+        return provider.id
+
+
+@pytest.fixture
 def _mock_admin_user():
     """A mock admin user returned by admin-gated auth overrides."""
     user = MagicMock()
@@ -94,8 +110,8 @@ def _mock_admin_user():
     return user
 
 
-@pytest.fixture()
-async def client(session_factory, _mock_admin_user):
+@pytest.fixture
+async def client(session_factory, _mock_admin_user, _default_provider):
     """``httpx.AsyncClient`` wired to the FastAPI app.
 
     * ``get_db`` → yields sessions from the in-memory test database
@@ -184,7 +200,7 @@ async def _seed_tasks(
         )
         session.add(issue)
         await session.flush()
-        
+
         task = Task(
             project_id=project_id,
             issue_id=issue.id,
@@ -359,11 +375,12 @@ class TestTaskCreationSlotEnforcement:
             })
             assert issue_resp.status_code == 200
             issue_id = issue_resp.json()["id"]
-        
+
         payload: dict = {
             "issue_id": issue_id,
             "user_prompt": "Implement feature X",
             "priority": 0,
+            "provider_id": 1,
             **extra,
         }
         if scheduled_datetime is not None:

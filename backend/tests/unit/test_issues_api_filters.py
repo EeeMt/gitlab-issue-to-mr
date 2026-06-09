@@ -51,9 +51,27 @@ def _mock_db_with_rows(rows, total=None):
     return mock_db
 
 
-def _row(issue, task_count=0, additions=0, deletions=0, total_changes=0, input_tokens=0, output_tokens=0):
+def _row(
+    issue,
+    task_count=0,
+    additions=0,
+    deletions=0,
+    total_changes=0,
+    input_tokens=0,
+    output_tokens=0,
+    duration_seconds=0,
+):
     row = MagicMock()
-    vals = [issue, task_count, additions, deletions, total_changes, input_tokens, output_tokens]
+    vals = [
+        issue,
+        task_count,
+        additions,
+        deletions,
+        total_changes,
+        input_tokens,
+        output_tokens,
+        duration_seconds,
+    ]
     row.__getitem__ = lambda self, idx: vals[idx]
     return row
 
@@ -95,6 +113,7 @@ class TestListIssuesMultiStatus(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_status_returns_400(self):
         """Passing a completely invalid status should return 400."""
         from fastapi import HTTPException
+
         from app.api.issues import list_issues
         from app.dependencies.project_access import ProjectAccessScope
 
@@ -123,6 +142,7 @@ class TestListIssuesMultiStatus(unittest.IsolatedAsyncioTestCase):
     async def test_mixed_valid_invalid_status_returns_400(self):
         """Passing status='open,bogus' should return 400 due to invalid part."""
         from fastapi import HTTPException
+
         from app.api.issues import list_issues
         from app.dependencies.project_access import ProjectAccessScope
 
@@ -184,6 +204,7 @@ class TestListIssuesSortParams(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_sort_by_returns_400(self):
         from fastapi import HTTPException
+
         from app.api.issues import list_issues
         from app.dependencies.project_access import ProjectAccessScope
 
@@ -210,6 +231,7 @@ class TestListIssuesSortParams(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_sort_order_returns_400(self):
         from fastapi import HTTPException
+
         from app.api.issues import list_issues
         from app.dependencies.project_access import ProjectAccessScope
 
@@ -351,6 +373,7 @@ class TestListIssuesDateRange(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_created_after_returns_400(self):
         from fastapi import HTTPException
+
         from app.api.issues import list_issues
         from app.dependencies.project_access import ProjectAccessScope
 
@@ -377,6 +400,7 @@ class TestListIssuesDateRange(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_created_before_returns_400(self):
         from fastapi import HTTPException
+
         from app.api.issues import list_issues
         from app.dependencies.project_access import ProjectAccessScope
 
@@ -706,6 +730,7 @@ class TestListIssuesSearchTooLong(unittest.IsolatedAsyncioTestCase):
     async def test_search_too_long_returns_400(self):
         """Search > 200 chars should return 400."""
         from fastapi import HTTPException
+
         from app.api.issues import list_issues
         from app.dependencies.project_access import ProjectAccessScope
 
@@ -783,6 +808,23 @@ class TestListIssuesSortByAggregateFields(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("items", result)
 
+    async def test_sort_by_duration(self):
+        """Sort by duration should use the issue task duration aggregate."""
+        from app.api.issues import list_issues
+        from app.dependencies.project_access import ProjectAccessScope
+
+        db = _mock_db_with_rows([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        result = await list_issues(
+            status=None, project_id=None, initiator_user_id=None,
+            search=None, created_after=None, created_before=None,
+            sort_by="duration", sort_order="desc",
+            page=1, page_size=20,
+            db=db, current_user=MagicMock(), access_scope=scope,
+        )
+        self.assertIn("items", result)
+
 
 # ---------------------------------------------------------------------------
 # Update issue edge cases (lines 394, 403, 412)
@@ -795,7 +837,8 @@ class TestUpdateIssueEdgeCases(unittest.IsolatedAsyncioTestCase):
     async def test_update_issue_not_found_returns_404(self):
         """PATCH on non-existent issue should return 404."""
         from fastapi import HTTPException
-        from app.api.issues import update_issue, UpdateIssueRequest
+
+        from app.api.issues import UpdateIssueRequest, update_issue
 
         result_mock = MagicMock()
         result_mock.scalar_one_or_none.return_value = None
@@ -810,7 +853,7 @@ class TestUpdateIssueEdgeCases(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_issue_description(self):
         """Updating description field should persist."""
-        from app.api.issues import update_issue, UpdateIssueRequest
+        from app.api.issues import UpdateIssueRequest, update_issue
 
         issue = _make_issue(id=1, title="Title", description="Old desc")
 
@@ -830,7 +873,7 @@ class TestUpdateIssueEdgeCases(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_issue_valid_status(self):
         """Updating to a valid status should persist."""
-        from app.api.issues import update_issue, UpdateIssueRequest
+        from app.api.issues import UpdateIssueRequest, update_issue
 
         issue = _make_issue(id=1, status="open")
 
@@ -882,4 +925,3 @@ class TestListIssuesCombinedFilters(unittest.IsolatedAsyncioTestCase):
             access_scope=scope,
         )
         self.assertIn("items", result)
-

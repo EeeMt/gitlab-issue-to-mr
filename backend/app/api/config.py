@@ -3,19 +3,17 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import Settings, get_effective_settings, get_settings
+from app.config import Settings, get_effective_settings
 from app.database import get_db
 from app.dependencies.auth import require_admin_user
 from app.runtime_config import (
     load_runtime_config_from_db,
     reset_all_runtime_config_overrides,
-    reset_runtime_config_override,
 )
 
 logger = logging.getLogger(__name__)
@@ -23,10 +21,10 @@ router = APIRouter()
 
 # Import config submodules
 from app.api import config_integration, config_runtime
+from app.api.config_integration import IntegrationConfigSection, IntegrationConfigUpdate
 
 # Import section models for Pydantic model definitions
 from app.api.config_runtime import RuntimeConfigSection, RuntimeConfigUpdate
-from app.api.config_integration import IntegrationConfigSection, IntegrationConfigUpdate
 
 
 class AuthConfigSection(BaseModel):
@@ -37,6 +35,7 @@ class AuthConfigSection(BaseModel):
     oidc_redirect_uri: str
     session_cookie_name: str
     session_ttl_seconds: int
+    session_retention_days: int
     cookie_secure: bool
     cookie_samesite: str
     auth_admin_usernames: str
@@ -46,32 +45,33 @@ class AuthConfigSection(BaseModel):
 
 class AuthConfigUpdate(BaseModel):
     """Request model for updating auth settings."""
-    oidc_enabled: Optional[bool] = None
-    oidc_issuer_url: Optional[str] = None
-    oidc_client_id: Optional[str] = None
-    oidc_client_secret: Optional[str] = None
+    oidc_enabled: bool | None = None
+    oidc_issuer_url: str | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret: str | None = None
     clear_oidc_client_secret: bool = False
-    oidc_redirect_uri: Optional[str] = None
-    session_cookie_name: Optional[str] = None
-    session_ttl_seconds: Optional[int] = None
-    cookie_secure: Optional[bool] = None
-    cookie_samesite: Optional[str] = None
-    auth_admin_usernames: Optional[str] = None
-    auth_admin_gitlab_groups: Optional[str] = None
+    oidc_redirect_uri: str | None = None
+    session_cookie_name: str | None = None
+    session_ttl_seconds: int | None = None
+    session_retention_days: int | None = None
+    cookie_secure: bool | None = None
+    cookie_samesite: str | None = None
+    auth_admin_usernames: str | None = None
+    auth_admin_gitlab_groups: str | None = None
 
 
 class ConfigResponse(BaseModel):
     """Full configuration response combining all config sections."""
-    runtime: "RuntimeConfigSection"
+    runtime: RuntimeConfigSection
     auth: AuthConfigSection
-    integration: "IntegrationConfigSection"
+    integration: IntegrationConfigSection
 
 
 class ConfigUpdate(BaseModel):
     """Request model for updating all config sections."""
-    runtime: Optional[RuntimeConfigUpdate] = None
-    auth: Optional[AuthConfigUpdate] = None
-    integration: Optional[IntegrationConfigUpdate] = None
+    runtime: RuntimeConfigUpdate | None = None
+    auth: AuthConfigUpdate | None = None
+    integration: IntegrationConfigUpdate | None = None
 
 
 def _serialize_auth_config(settings: Settings) -> AuthConfigSection:
@@ -82,6 +82,7 @@ def _serialize_auth_config(settings: Settings) -> AuthConfigSection:
         oidc_redirect_uri=settings.oidc_redirect_uri,
         session_cookie_name=settings.session_cookie_name,
         session_ttl_seconds=settings.session_ttl_seconds,
+        session_retention_days=settings.session_retention_days,
         cookie_secure=settings.cookie_secure,
         cookie_samesite=settings.cookie_samesite,
         auth_admin_usernames=settings.auth_admin_usernames,
@@ -90,13 +91,21 @@ def _serialize_auth_config(settings: Settings) -> AuthConfigSection:
     )
 
 
-def _serialize_effective_config() -> ConfigResponse:
+def _serialize_effective_config(
+    runtime: RuntimeConfigSection | None = None,
+) -> ConfigResponse:
     settings = get_effective_settings()
     return ConfigResponse(
-        runtime=config_runtime._serialize_runtime_config(settings),
+        runtime=runtime or config_runtime._serialize_runtime_config(settings),
         auth=_serialize_auth_config(settings),
         integration=config_integration._serialize_integration_config(settings),
     )
+
+
+async def _serialize_effective_config_response(db: AsyncSession) -> ConfigResponse:
+    """Serialize the effective config including runtime worker env vars."""
+    runtime = await config_runtime._serialize_runtime_config_response(db)
+    return _serialize_effective_config(runtime=runtime)
 
 
 def _validate_oidc_ready(settings: Settings) -> None:
@@ -126,7 +135,7 @@ async def get_config(
 ):
     """Get current configuration (all sections)."""
     await load_runtime_config_from_db(db)
-    return _serialize_effective_config()
+    return await _serialize_effective_config_response(db)
 
 
 @router.patch("/config")
@@ -140,36 +149,11 @@ async def update_config(
 
     # Handle runtime updates via config_runtime
     if config_update.runtime:
-        from app.api.config_runtime import _normalize_runtime_updates, _build_preview_settings
-        runtime_updates = _normalize_runtime_updates(
-            config_update.runtime.model_dump(exclude_unset=True)
+        await config_runtime.apply_runtime_config_update(
+            db,
+            config_update.runtime,
+            commit=False,
         )
-        clear_alert_webhook = bool(runtime_updates.pop("clear_alert_webhook_url", False))
-        clear_anthropic_api_key = bool(runtime_updates.pop("clear_anthropic_api_key", False))
-        preview_settings = _build_preview_settings(runtime_updates, get_settings())
-
-        if clear_alert_webhook and "alert_webhook_url" not in runtime_updates:
-            runtime_updates["alert_webhook_url"] = get_settings().alert_webhook_url
-        if clear_anthropic_api_key and "anthropic_api_key" not in runtime_updates:
-            runtime_updates["anthropic_api_key"] = get_settings().anthropic_api_key
-
-        from app.core.config_crypto import ConfigEncryptionError
-        from app.runtime_config import save_runtime_config_override, reset_runtime_config_override
-        try:
-            for key, value in runtime_updates.items():
-                await save_runtime_config_override(db, key, value)
-                logger.info("Updated config %s", key)
-
-            if clear_alert_webhook and "alert_webhook_url" not in runtime_updates:
-                await reset_runtime_config_override(db, "alert_webhook_url")
-                logger.info("Cleared stored alert webhook URL")
-
-            if clear_anthropic_api_key and "anthropic_api_key" not in runtime_updates:
-                await reset_runtime_config_override(db, "anthropic_api_key")
-                logger.info("Cleared stored Anthropic API key")
-        except ConfigEncryptionError as exc:
-            from fastapi import HTTPException, status
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
     # Handle auth updates
     if config_update.auth:
@@ -183,7 +167,10 @@ async def update_config(
         if auth_updates or clear_secret:
             from app.api.oidc import _build_preview_settings as _build_auth_preview
             from app.core.config_crypto import ConfigEncryptionError
-            from app.runtime_config import save_runtime_config_override, reset_runtime_config_override
+            from app.runtime_config import (
+                reset_runtime_config_override,
+                save_runtime_config_override,
+            )
             preview_settings = _build_auth_preview(auth_updates)
             if preview_settings.oidc_enabled:
                 _validate_oidc_ready(preview_settings)
@@ -211,13 +198,11 @@ async def update_config(
         clear_gitlab_webhook_secret = bool(integration_updates.pop("clear_gitlab_webhook_secret", False))
 
         if integration_updates or clear_gitlab_bot_token or clear_gitlab_admin_token or clear_gitlab_webhook_secret:
-            from app.api.config_integration import _build_preview_settings_with_integration
             from app.core.config_crypto import ConfigEncryptionError
-            from app.runtime_config import save_runtime_config_override, reset_runtime_config_override
-            preview_settings = _build_preview_settings_with_integration(
-                integration_updates, get_settings()
+            from app.runtime_config import (
+                reset_runtime_config_override,
+                save_runtime_config_override,
             )
-
             try:
                 for key, value in integration_updates.items():
                     await save_runtime_config_override(db, key, value)
@@ -239,7 +224,7 @@ async def update_config(
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
     await load_runtime_config_from_db(db)
-    return _serialize_effective_config()
+    return await _serialize_effective_config_response(db)
 
 
 @router.post("/config/reset")
@@ -251,4 +236,4 @@ async def reset_config(
     await reset_all_runtime_config_overrides(db)
     await load_runtime_config_from_db(db)
     logger.info("Reset all persisted configuration overrides")
-    return _serialize_effective_config()
+    return await _serialize_effective_config_response(db)

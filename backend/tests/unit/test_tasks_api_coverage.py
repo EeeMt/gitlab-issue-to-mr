@@ -11,12 +11,10 @@ Targets missed lines:
 - 502-504: cancel_task docker container stop
 """
 
-import asyncio
-import json
 import os
 import sys
 import unittest
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -24,7 +22,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from fastapi.testclient import TestClient
 
 from app.models import TaskStatus
-
 
 # ---------------------------------------------------------------------------
 # Helpers (reused patterns from test_tasks_api.py)
@@ -59,7 +56,7 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.input_tokens = 0
     task.output_tokens = 0
     task.model_name = None
-    task.merge_request_title = None
+    task.commit_message = None
     task.is_manual = False
     now = datetime(2024, 1, 1, 12, 0, 0)
     task.created_at = now
@@ -71,10 +68,10 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
 
 def _make_app_client_with_db(mock_db, extra_overrides=None):
     """Build a TestClient with DB, access scope, and auth overridden."""
-    from app.main import app
     from app.database import get_db
     from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-    from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+    from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+    from app.main import app
 
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
@@ -178,14 +175,14 @@ class ListScheduledTasksTests(unittest.TestCase):
 
     def _setup_scheduled_client(self, tasks_list, access_scope=None):
         """Build a TestClient with auth + page access overrides for scheduled endpoint."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import (
             get_optional_current_user,
-            require_authenticated_user,
             require_authenticated_context,
+            require_authenticated_user,
         )
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         if access_scope is None:
             access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -284,8 +281,6 @@ class GetTaskSlowPathTests(unittest.TestCase):
         client, app = _make_app_client_with_db(mock_db)
 
         # Make time.time() artificially return values that create > 1s gap
-        import time as time_mod
-        original_time = time_mod.time
         call_count = 0
 
         def slow_time():
@@ -327,9 +322,12 @@ class StreamTaskLogsTests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
 
         client, app = _make_app_client_with_db(mock_db)
-        response = client.get("/api/tasks/9999/log-stream")
+        with patch("app.api.tasks.AsyncSessionLocal", MagicMock(return_value=mock_db)):
+            response = client.get("/api/tasks/9999/log-stream")
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 404)
@@ -346,11 +344,11 @@ class StreamTaskLogsTests(unittest.TestCase):
         log1.message = "test message"
         log1.created_at = datetime(2024, 1, 1, 12, 0, 0)
 
-        # First execute: task lookup
+        # First execute: task lookup (via get_db)
         task_result = MagicMock()
         task_result.scalar_one_or_none.return_value = task
 
-        # Second execute (inside generator): log query — return one log
+        # Second execute (inside generator / poll session): log query — return one log
         log_result = MagicMock()
         log_result.scalars.return_value.all.return_value = [log1]
 
@@ -370,10 +368,15 @@ class StreamTaskLogsTests(unittest.TestCase):
         mock_db.execute = AsyncMock(
             side_effect=[task_result, log_result, status_result, empty_log_result, status_result2]
         )
+        # Allow mock_db to act as an async context manager (for AsyncSessionLocal())
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
 
         client, app = _make_app_client_with_db(mock_db)
 
-        with patch("app.api.tasks.asyncio.sleep", new_callable=AsyncMock):
+        mock_session_local = MagicMock(return_value=mock_db)
+        with patch("app.api.tasks.AsyncSessionLocal", mock_session_local), \
+             patch("app.api.tasks.asyncio.sleep", new_callable=AsyncMock):
             response = client.get("/api/tasks/5/log-stream?since_id=0")
 
         app.dependency_overrides.clear()
@@ -383,7 +386,24 @@ class StreamTaskLogsTests(unittest.TestCase):
 
         # Parse SSE events from the response
         body = response.text
-        self.assertIn('"log_type": "assistant_text"', body)
+        # Logs are now delivered as a single named "batch" event with a JSON array.
+        self.assertIn("event: batch\n", body)
+        import json as _json_mod
+        import re
+        match = re.search(r'event: batch\ndata: (.+)\n', body)
+        self.assertIsNotNone(match, "batch event data line not found")
+        batch_payload = _json_mod.loads(match.group(1))
+        self.assertIsInstance(batch_payload, list, "batch event data must be a JSON array")
+        self.assertTrue(any(e.get("log_type") == "assistant_text" for e in batch_payload))
+        # Regular log entries must NOT appear as unnamed data: events
+        for line in body.splitlines():
+            if line.startswith("data:") and '"log_type"' in line:
+                try:
+                    obj = _json_mod.loads(line[len("data:"):].strip())
+                    if isinstance(obj, dict) and not obj.get("error"):
+                        self.fail(f"log entry leaked into unnamed data: event: {line[:120]}")
+                except _json_mod.JSONDecodeError:
+                    pass
         self.assertIn("event: done", body)
 
     def test_stream_task_logs_running_task_emits_logs(self):
@@ -420,16 +440,23 @@ class StreamTaskLogsTests(unittest.TestCase):
                 empty_log_result, completed_status,
             ]
         )
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
 
         client, app = _make_app_client_with_db(mock_db)
 
-        with patch("app.api.tasks.asyncio.sleep", new_callable=AsyncMock):
+        mock_session_local = MagicMock(return_value=mock_db)
+        with patch("app.api.tasks.AsyncSessionLocal", mock_session_local), \
+             patch("app.api.tasks.asyncio.sleep", new_callable=AsyncMock):
             response = client.get("/api/tasks/6/log-stream")
 
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 200)
         body = response.text
+        # Logs are delivered as a named "batch" event — the message text
+        # appears inside the JSON array, not as an unnamed data: event.
+        self.assertIn("event: batch\n", body)
         self.assertIn("Step 1 done", body)
         self.assertIn("event: done", body)
 
@@ -444,10 +471,14 @@ class StreamTaskLogsTests(unittest.TestCase):
         mock_db.execute = AsyncMock(
             side_effect=[task_result, RuntimeError("DB connection dropped")]
         )
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
 
         client, app = _make_app_client_with_db(mock_db)
 
-        with patch("app.api.tasks.asyncio.sleep", new_callable=AsyncMock):
+        mock_session_local = MagicMock(return_value=mock_db)
+        with patch("app.api.tasks.AsyncSessionLocal", mock_session_local), \
+             patch("app.api.tasks.asyncio.sleep", new_callable=AsyncMock):
             response = client.get("/api/tasks/7/log-stream")
 
         app.dependency_overrides.clear()
@@ -581,7 +612,7 @@ class CancelTaskDockerStopTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         # Docker should have tried to get container "codify-40-issue100"
         mock_docker.client.containers.get.assert_called_once_with("codify-40-issue100")
-        mock_container.stop.assert_called_once_with(timeout=5)
+        mock_container.remove.assert_called_once_with(force=True)
 
     def test_cancel_task_with_different_issue_id(self):
         """Cancel task builds container name from issue_id."""

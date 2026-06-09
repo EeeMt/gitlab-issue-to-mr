@@ -5,7 +5,7 @@ set -e
 # Handles custom CA certificate installation before starting the application
 
 echo "========================================"
-echo "GitLab Issue to MR Backend Service"
+echo "Codify Backend Service"
 echo "========================================"
 
 # Custom CA certificate installation
@@ -26,17 +26,6 @@ if [ -n "${CUSTOM_CA_BUNDLE}" ] && [ -f "${CUSTOM_CA_BUNDLE}" ]; then
     
     # Node.js (if used) picks up extra CA certs from this env var
     export NODE_EXTRA_CA_CERTS="${CUSTOM_CA_BUNDLE}"
-    
-    # Import into JDK truststore so Java tools verify the CA
-    if [ -n "${JAVA_HOME}" ] && [ -x "${JAVA_HOME}/bin/keytool" ]; then
-        echo "Importing custom CA into JDK truststore..."
-        "${JAVA_HOME}/bin/keytool" -importcert -noprompt -trustcacerts \
-            -alias custom-ca \
-            -file "${CUSTOM_CA_BUNDLE}" \
-            -keystore "${JAVA_HOME}/lib/security/cacerts" \
-            -storepass changeit 2>/dev/null || true
-        echo "Custom CA imported into JDK truststore"
-    fi
     
     echo "Custom CA installed; SSL verification enabled"
 else

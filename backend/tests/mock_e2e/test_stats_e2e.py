@@ -13,22 +13,23 @@ Endpoints under test:
 from __future__ import annotations
 
 import os
-import pytest
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
-    create_async_engine,
     async_sessionmaker,
+    create_async_engine,
 )
 from sqlalchemy.pool import StaticPool
 
 # Ensure a usable encryption key is available before importing app modules.
 os.environ.setdefault("CONFIG_ENCRYPTION_KEY", "test-stats-e2e-key-32chars!!!!")
 
+from app.core.utcnow import utcnow
 from app.database import get_db
 from app.dependencies.auth import (
     AuthContext,
@@ -42,16 +43,14 @@ from app.dependencies.project_access import (
     require_project_access_scope,
 )
 from app.main import app
-from app.models import Base, Issue, Task, TaskStatus
-from app.core.utcnow import utcnow
-
+from app.models import AIProvider, Base, Issue, Task, TaskStatus
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 async def _test_engine():
     """In-memory SQLite async engine with all tables created.
 
@@ -84,7 +83,7 @@ async def _test_engine():
     await engine.dispose()
 
 
-@pytest.fixture()
+@pytest.fixture
 async def session_factory(_test_engine):
     """Async session factory bound to the test engine."""
     return async_sessionmaker(
@@ -92,14 +91,14 @@ async def session_factory(_test_engine):
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 async def db_session(session_factory):
     """Session for direct data manipulation inside tests (seeding, etc.)."""
     async with session_factory() as session:
         yield session
 
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_admin_user():
     """A mock admin user returned by admin-gated auth overrides."""
     user = MagicMock()
@@ -110,7 +109,7 @@ def _mock_admin_user():
     return user
 
 
-@pytest.fixture()
+@pytest.fixture
 async def client(session_factory, _mock_admin_user):
     """``httpx.AsyncClient`` wired to the FastAPI app with auth overrides.
 
@@ -158,7 +157,7 @@ async def client(session_factory, _mock_admin_user):
     app.dependency_overrides.clear()
 
 
-@pytest.fixture()
+@pytest.fixture
 async def restricted_client(session_factory, _mock_admin_user):
     """Like ``client``, but with project access restricted to project_id=1."""
 
@@ -253,7 +252,7 @@ async def _seed_task(db_session: AsyncSession, issue: Issue = None, **overrides)
     """Create a task directly in the test database."""
     if issue is None:
         issue = await _seed_issue(db_session)
-    
+
     now = utcnow()
     defaults = dict(
         project_id=issue.project_id,
@@ -271,6 +270,24 @@ async def _seed_task(db_session: AsyncSession, issue: Issue = None, **overrides)
     await db_session.commit()
     await db_session.refresh(task)
     return task
+
+
+async def _seed_provider(db_session: AsyncSession, **overrides) -> AIProvider:
+    """Create an AI provider directly in the test database."""
+    defaults = dict(
+        name="Claude Test",
+        base_url="https://api.example.test",
+        api_key="test-key",
+        model="claude-sonnet-test",
+        max_turns=20,
+        is_default=False,
+    )
+    defaults.update(overrides)
+    provider = AIProvider(**defaults)
+    db_session.add(provider)
+    await db_session.commit()
+    await db_session.refresh(provider)
+    return provider
 
 
 # ---------------------------------------------------------------------------
@@ -805,6 +822,90 @@ class TestGetAnalytics:
         data = resp.json()
         assert data["summary"]["success_rate"] is None
         assert data["summary"]["failure_rate"] is None
+
+    async def test_provider_analytics_excludes_unfinished_tasks(self, client, db_session):
+        """Provider tab metrics should be based on finished tasks only."""
+        now = utcnow()
+        provider = await _seed_provider(db_session)
+        for status in (
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+            TaskStatus.PENDING,
+            TaskStatus.QUEUED,
+            TaskStatus.RUNNING,
+        ):
+            await _seed_task(
+                db_session,
+                status=status,
+                provider_id=provider.id,
+                model_name="claude-sonnet-test",
+                input_tokens=100,
+                output_tokens=50,
+                created_at=now - timedelta(days=1),
+            )
+
+        resp = await client.get("/api/stats/analytics")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert data["provider_summary"]["provider_covered_task_count"] == 3
+        assert data["provider_summary"]["provider_covered_total_tokens"] == 450
+        assert data["provider_summary"]["provider_success_rate"] == pytest.approx(1 / 3)
+
+        provider = data["providers"][0]
+        assert provider["task_count"] == 3
+        assert provider["finished_task_count"] == 3
+        assert provider["completed_task_count"] == 1
+        assert provider["failed_task_count"] == 1
+        assert provider["cancelled_task_count"] == 1
+        assert provider["total_tokens"] == 450
+
+    async def test_provider_analytics_uses_provider_model_and_ignores_unlinked_tasks(self, client, db_session):
+        """Provider tab metrics should ignore tasks that cannot join to a provider row."""
+        now = utcnow()
+        provider = await _seed_provider(
+            db_session,
+            name="Claude Config",
+            model="configured-claude-model",
+        )
+        await _seed_task(
+            db_session,
+            status=TaskStatus.COMPLETED,
+            provider_id=provider.id,
+            model_name=None,
+            input_tokens=100,
+            output_tokens=50,
+            created_at=now - timedelta(days=1),
+        )
+        await _seed_task(
+            db_session,
+            status=TaskStatus.COMPLETED,
+            provider_id=None,
+            model_name="legacy-model",
+            input_tokens=100,
+            output_tokens=50,
+            created_at=now - timedelta(days=1),
+        )
+        await _seed_task(
+            db_session,
+            status=TaskStatus.COMPLETED,
+            provider_id=999,
+            model_name="deleted-provider-model",
+            input_tokens=100,
+            output_tokens=50,
+            created_at=now - timedelta(days=1),
+        )
+
+        resp = await client.get("/api/stats/analytics")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert data["provider_summary"]["provider_covered_task_count"] == 1
+        assert len(data["providers"]) == 1
+        assert data["providers"][0]["provider_name"] == "Claude Config"
+        assert data["providers"][0]["provider_model"] == "configured-claude-model"
+        assert data["providers"][0]["task_count"] == 1
 
     async def test_available_initiators_list(self, client, db_session):
         """available_initiators lists all initiators with task counts."""

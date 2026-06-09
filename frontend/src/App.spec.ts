@@ -4,9 +4,35 @@ import { h } from 'vue'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import App from './App.vue'
 
+function makeUsageSummary(overrides: Partial<Record<string, any>> = {}) {
+  return {
+    user_id: 1,
+    usage: {
+      daily_tokens: 80,
+      weekly_tokens: 200,
+      daily_tasks: 2,
+      weekly_tasks: 4,
+    },
+    limits: {
+      daily_tokens: { mode: 'custom', value: 100 },
+      weekly_tokens: { mode: 'custom', value: 400 },
+      daily_tasks: { mode: 'custom', value: 5 },
+      weekly_tasks: { mode: 'unlimited', value: null },
+    },
+    reset_at: {
+      daily: '2026-04-29T00:00:00+08:00',
+      weekly: '2026-05-04T00:00:00+08:00',
+    },
+    is_over_limit: false,
+    severity: 'near_limit',
+    ...overrides,
+  }
+}
+
 const {
   mockAuthState,
   mockInitializeAuth,
+  mockGetMyUsageSummary,
   mockLogoutAndClearAuth,
   mockSetOnboardingDismissed,
   mockIsAdmin,
@@ -36,6 +62,7 @@ const {
     },
   },
   mockInitializeAuth: vi.fn(() => Promise.resolve()),
+  mockGetMyUsageSummary: vi.fn(() => Promise.resolve(makeUsageSummary())),
   mockLogoutAndClearAuth: vi.fn(() => Promise.resolve()),
   mockSetOnboardingDismissed: vi.fn(),
   mockIsAdmin: { value: true },
@@ -91,6 +118,10 @@ vi.mock('./components/OnboardingModal.vue', () => ({
   },
 }))
 
+vi.mock('./api', () => ({
+  getMyUsageSummary: mockGetMyUsageSummary,
+}))
+
 vi.mock('./i18n', () => ({
   naiveUiLocale: {},
   naiveUiDateLocale: {},
@@ -113,6 +144,7 @@ vi.mock('@vicons/ionicons5', () => ({
   GridOutline: {},
   ListOutline: {},
   LogOutOutline: {},
+  LogoGithub: {},
   MenuOutline: {},
   CalendarOutline: {},
   PeopleOutline: {},
@@ -155,6 +187,7 @@ function createTestRouter() {
       { path: '/analytics', name: 'Analytics', component: { template: '<div>Analytics</div>' } },
       { path: '/configuration', name: 'Config', component: { template: '<div>Config</div>' } },
       { path: '/access-management', name: 'AccessManagement', component: { template: '<div>Access</div>' } },
+      { path: '/usage-management', name: 'UsageManagement', component: { template: '<div>Usage</div>' } },
     ],
   })
 }
@@ -176,6 +209,7 @@ async function mountAppAt(path: string) {
 describe('App onboarding integration', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockGetMyUsageSummary.mockResolvedValue(makeUsageSummary())
     mockDismissedState.value = false
     mockIsMobileState.value = false
     mockIsAdmin.value = true
@@ -197,6 +231,123 @@ describe('App onboarding integration', () => {
 
   afterEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('shows the current user usage indicator in the desktop topbar', async () => {
+    mockDismissedState.value = true
+
+    const { wrapper } = await mountAppAt('/dashboard')
+    await flushPromises()
+
+    expect(mockGetMyUsageSummary).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-testid="usage-indicator-desktop"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('shell.usageNearLimit')
+    expect(wrapper.text()).toContain('shell.dailyTokens')
+  })
+
+  it('formats reset timestamps before showing them in the tooltip', async () => {
+    mockDismissedState.value = true
+
+    const { wrapper } = await mountAppAt('/dashboard')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('2026-04-29 00:00')
+    expect(wrapper.text()).toContain('2026-05-04 00:00')
+  })
+
+  it('refreshes usage summary while the app remains open', async () => {
+    vi.useFakeTimers()
+    mockDismissedState.value = true
+
+    const { wrapper } = await mountAppAt('/dashboard')
+    await flushPromises()
+
+    expect(mockGetMyUsageSummary).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(mockGetMyUsageSummary).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(mockGetMyUsageSummary).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
+  it('ignores a stale usage response after auth changes to a different user', async () => {
+    mockDismissedState.value = true
+
+    let resolveUsageSummary: ((value: ReturnType<typeof makeUsageSummary>) => void) | undefined
+    mockGetMyUsageSummary.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveUsageSummary = resolve
+        })
+    )
+
+    const { wrapper } = await mountAppAt('/dashboard')
+    await flushPromises()
+
+    mockAuthState.authenticated = false
+    mockAuthState.user = null
+    mockAuthState.authenticated = true
+    mockAuthState.user = {
+      id: 2,
+      username: 'reviewer',
+      display_name: 'Reviewer',
+      avatar_url: null,
+      platform_role: 'platform_admin',
+    }
+
+    resolveUsageSummary?.(makeUsageSummary({ user_id: 1 }))
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="usage-indicator-desktop"]').exists()).toBe(false)
+  })
+
+  it('hides the usage indicator when loading the summary fails', async () => {
+    mockDismissedState.value = true
+    mockGetMyUsageSummary.mockRejectedValueOnce(new Error('boom'))
+
+    const { wrapper } = await mountAppAt('/dashboard')
+    await flushPromises()
+
+    expect(mockGetMyUsageSummary).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-testid="usage-indicator-desktop"]').exists()).toBe(false)
+  })
+
+  it('does not fetch usage when the user is unauthenticated', async () => {
+    mockAuthState.authenticated = false
+    mockAuthState.user = null
+
+    const { wrapper } = await mountAppAt('/dashboard')
+    await flushPromises()
+
+    expect(mockGetMyUsageSummary).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="usage-indicator-desktop"]').exists()).toBe(false)
+  })
+
+  it('includes usage management in the admin navigation group', async () => {
+    mockDismissedState.value = true
+
+    const { wrapper } = await mountAppAt('/dashboard')
+    const groups = wrapper.vm.menuOptions as Array<{ children?: Array<{ key: string }> }>
+    const adminGroup = groups.find((item) =>
+      Array.isArray(item.children) && item.children.some((child) => child.key === 'AccessManagement')
+    )
+
+    expect(adminGroup?.children?.some((child) => child.key === 'UsageManagement')).toBe(true)
+  })
+
+  it('uses the usage management label for the current page title', async () => {
+    mockDismissedState.value = true
+
+    const { wrapper } = await mountAppAt('/usage-management')
+
+    expect(wrapper.vm.currentPageLabel).toBe('nav.usageManagement')
   })
 
   it('renders a loading spinner before auth initialization completes', async () => {

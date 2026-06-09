@@ -22,7 +22,7 @@
           :loading="loading"
           :bordered="false"
           size="small"
-          :scroll-x="820"
+          :scroll-x="1120"
         />
       </div>
     </n-card>
@@ -31,93 +31,122 @@
       class="config-editor-modal"
       :show="modalVisible"
       preset="card"
-      :style="{ width: isMobile ? '96vw' : '560px' }"
+      :style="{ width: isMobile ? '96vw' : '720px' }"
       @update:show="handleModalVisibilityChange"
     >
       <template #header>
-        <div>{{ editingProvider ? t('config.providers.edit') : t('config.providers.create') }}</div>
+        <div class="ai-provider-modal__header">
+          <div class="ai-provider-modal__title">
+            {{ editingProvider ? t('config.providers.edit') : t('config.providers.create') }}
+          </div>
+          <div v-if="editingProvider" class="ai-provider-modal__subtitle">
+            {{ editingProvider.name }} / {{ editingProvider.model }}
+          </div>
+        </div>
       </template>
 
-      <n-form
-        ref="formRef"
-        :model="formValue"
-        :rules="rules"
-        label-placement="top"
-        class="config-section-form ai-provider-modal__form"
-      >
-        <n-form-item :label="t('config.providers.name')" path="name">
-          <n-input
-            v-model:value="formValue.name"
-            placeholder="my-provider"
-            class="config-form__input"
-          />
-          <template #feedback>
-            {{ t('config.providers.nameHint') }}
-          </template>
-        </n-form-item>
+      <div class="config-editor-modal__scroll ai-provider-modal__scroll">
+        <n-form
+          ref="formRef"
+          :model="formValue"
+          :rules="rules"
+          label-placement="top"
+          class="config-section-form ai-provider-modal__form"
+        >
+          <div class="ai-provider-modal__grid">
+            <n-form-item :label="t('config.providers.name')" path="name">
+              <n-input
+                v-model:value="formValue.name"
+                placeholder="my-provider"
+                class="config-form__input"
+              />
+              <template #feedback>
+                {{ t('config.providers.nameHint') }}
+              </template>
+            </n-form-item>
 
-        <n-form-item :label="t('config.providers.baseUrl')" path="base_url">
-          <n-input
-            v-model:value="formValue.base_url"
-            placeholder="http://host.docker.internal:11434/v1"
-            class="config-form__input"
-          />
-          <template #feedback>
-            {{ t('config.providers.baseUrlHint') }}
-          </template>
-        </n-form-item>
+            <n-form-item :label="t('config.providers.maxTurns')" path="max_turns">
+              <n-input-number
+                v-model:value="formValue.max_turns"
+                :min="1"
+                :max="1000"
+                class="config-form__input"
+              />
+              <template #feedback>
+                {{ t('config.providers.maxTurnsHint') }}
+              </template>
+            </n-form-item>
 
-        <n-form-item :label="t('config.providers.model')" path="model">
-          <n-input
-            v-model:value="formValue.model"
-            placeholder="claude-sonnet-4-20250514"
-            class="config-form__input"
-          />
-          <template #feedback>
-            {{ t('config.providers.modelHint') }}
-          </template>
-        </n-form-item>
+            <n-form-item :label="t('config.providers.baseUrl')" path="base_url">
+              <n-input
+                v-model:value="formValue.base_url"
+                placeholder="http://host.docker.internal:11434/v1"
+                class="config-form__input"
+              />
+              <template #feedback>
+                {{ t('config.providers.baseUrlHint') }}
+              </template>
+            </n-form-item>
 
-        <n-form-item :label="t('config.providers.maxTurns')" path="max_turns">
-          <n-input-number
-            v-model:value="formValue.max_turns"
-            :min="1"
-            :max="1000"
-            class="config-form__input"
-          />
-          <template #feedback>
-            {{ t('config.providers.maxTurnsHint') }}
-          </template>
-        </n-form-item>
+            <n-form-item :label="t('config.providers.model')" path="model">
+              <n-input
+                v-model:value="formValue.model"
+                placeholder="claude-sonnet-4-20250514"
+                class="config-form__input"
+              />
+              <template #feedback>
+                {{ t('config.providers.modelHint') }}
+              </template>
+            </n-form-item>
+          </div>
 
-        <n-form-item :label="t('config.providers.apiKey')" path="api_key">
-          <n-input
-            v-model:value="formValue.api_key"
-            type="password"
-            show-password-on="click"
-            :placeholder="editingProvider ? t('config.providers.apiKeyHint') : ''"
-            class="config-form__input"
-          />
-          <template #feedback>
-            <span v-if="editingProvider && editingProvider.api_key_configured">
-              <n-tag size="tiny" type="success" round>{{ t('config.providers.apiKeyConfigured') }}</n-tag>
-            </span>
-            <span v-else-if="editingProvider">
-              <n-tag size="tiny" type="warning" round>{{ t('config.providers.apiKeyNotConfigured') }}</n-tag>
-            </span>
-          </template>
-        </n-form-item>
+          <div class="ai-provider-modal__section">
+            <n-form-item :label="t('config.providers.apiKey')" path="api_key">
+              <n-input
+                v-model:value="formValue.api_key"
+                type="password"
+                show-password-on="click"
+                :placeholder="editingProvider ? t('config.providers.apiKeyHint') : ''"
+                class="config-form__input"
+              />
+              <template #feedback>
+                <span v-if="editingProvider && editingProvider.api_key_configured">
+                  <n-tag size="tiny" type="success" round>{{ t('config.providers.apiKeyConfigured') }}</n-tag>
+                </span>
+                <span v-else-if="editingProvider">
+                  <n-tag size="tiny" type="warning" round>{{ t('config.providers.apiKeyNotConfigured') }}</n-tag>
+                </span>
+              </template>
+            </n-form-item>
 
-        <n-form-item :label="t('config.providers.systemPrompt')" path="system_prompt">
-          <n-input
-            v-model:value="formValue.system_prompt"
-            type="textarea"
-            :rows="4"
-            :placeholder="t('config.providers.systemPromptHint')"
-            class="config-form__input"
-          />
-        </n-form-item>
-      </n-form>
+            <n-form-item :label="t('config.providers.systemPrompt')" path="system_prompt">
+              <n-input
+                v-model:value="formValue.system_prompt"
+                type="textarea"
+                :rows="5"
+                :placeholder="t('config.providers.systemPromptHint')"
+                class="config-form__input ai-provider-modal__textarea"
+              />
+            </n-form-item>
+          </div>
+
+          <div class="ai-provider-modal__status">
+            <n-form-item :label="t('config.providers.status')" path="is_disabled">
+              <n-switch
+                :value="!formValue.is_disabled"
+                :disabled="editingProvider?.is_default"
+                @update:value="handleStatusSwitchChange"
+              >
+                <template #checked>{{ t('config.providers.enabled') }}</template>
+                <template #unchecked>{{ t('config.providers.disabled') }}</template>
+              </n-switch>
+              <template #feedback>
+                {{ t('config.providers.disabledHint') }}
+              </template>
+            </n-form-item>
+          </div>
+        </n-form>
+      </div>
 
       <template #footer>
         <n-space justify="end">
@@ -144,6 +173,7 @@ import {
   NInputNumber,
   NPopconfirm,
   NSpace,
+  NSwitch,
   NTag,
   useMessage,
   type DataTableColumns,
@@ -183,7 +213,8 @@ const formValue = ref({
   model: '',
   max_turns: 20,
   api_key: '',
-  system_prompt: ''
+  system_prompt: '',
+  is_disabled: false
 })
 
 const rules: FormRules = {
@@ -243,6 +274,19 @@ const columns = computed<DataTableColumns<AIProvider>>(() => [
       })
   },
   {
+    title: t('config.providers.status'),
+    key: 'is_disabled',
+    width: 100,
+    render: (row: AIProvider) =>
+      h(NTag, {
+        type: row.is_disabled ? 'warning' : 'success',
+        size: 'small',
+        round: true
+      }, {
+        default: () => row.is_disabled ? t('config.providers.disabled') : t('config.providers.enabled')
+      })
+  },
+  {
     title: t('config.providers.model'),
     key: 'model',
     minWidth: 160,
@@ -279,7 +323,12 @@ const columns = computed<DataTableColumns<AIProvider>>(() => [
     title: t('config.providers.systemPrompt'),
     key: 'system_prompt',
     minWidth: 120,
-    ellipsis: { tooltip: true },
+    ellipsis: {
+      tooltip: {
+        style: { maxWidth: '420px', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any
+    },
     render: (row: AIProvider) =>
       row.system_prompt
         ? h('span', { class: 'ai-providers-system-prompt-preview' }, row.system_prompt)
@@ -288,7 +337,7 @@ const columns = computed<DataTableColumns<AIProvider>>(() => [
   {
     title: t('config.actions'),
     key: 'actions',
-    width: 220,
+    width: 280,
     render: (row: AIProvider) =>
       h(NSpace, { size: 'small', wrap: false }, {
         default: () => [
@@ -296,12 +345,16 @@ const columns = computed<DataTableColumns<AIProvider>>(() => [
             size: 'small',
             onClick: () => openEdit(row)
           }, { default: () => t('common.edit') }),
-          !row.is_default
-            ? h(NButton, {
-                size: 'small',
-                onClick: () => handleSetDefault(row)
-              }, { default: () => t('config.providers.setDefault') })
-            : null,
+          h(NButton, {
+            size: 'small',
+            disabled: row.is_default,
+            onClick: () => handleToggleDisabled(row)
+          }, { default: () => row.is_disabled ? t('config.providers.enable') : t('config.providers.disable') }),
+          h(NButton, {
+            size: 'small',
+            disabled: row.is_default || row.is_disabled,
+            onClick: () => handleSetDefault(row)
+          }, { default: () => t('config.providers.setDefault') }),
           h(NPopconfirm, {
             positiveText: t('common.delete'),
             negativeText: t('common.cancel'),
@@ -342,7 +395,8 @@ function resetForm() {
     model: '',
     max_turns: 20,
     api_key: '',
-    system_prompt: ''
+    system_prompt: '',
+    is_disabled: false
   }
 }
 
@@ -380,10 +434,15 @@ function openEdit(provider: AIProvider) {
     model: provider.model,
     max_turns: provider.max_turns,
     api_key: '',
-    system_prompt: provider.system_prompt || ''
+    system_prompt: provider.system_prompt || '',
+    is_disabled: provider.is_disabled
   }
   modalVisible.value = true
   clearFormValidation()
+}
+
+function handleStatusSwitchChange(isEnabled: boolean) {
+  formValue.value.is_disabled = !isEnabled
 }
 
 async function handleSave() {
@@ -402,7 +461,8 @@ async function handleSave() {
         name: formValue.value.name.trim(),
         base_url: formValue.value.base_url.trim(),
         model: formValue.value.model.trim(),
-        max_turns: formValue.value.max_turns
+        max_turns: formValue.value.max_turns,
+        is_disabled: formValue.value.is_disabled
       }
       if (formValue.value.api_key.trim()) {
         req.api_key = formValue.value.api_key.trim()
@@ -420,7 +480,8 @@ async function handleSave() {
         name: formValue.value.name.trim(),
         base_url: formValue.value.base_url.trim(),
         model: formValue.value.model.trim(),
-        max_turns: formValue.value.max_turns
+        max_turns: formValue.value.max_turns,
+        is_disabled: formValue.value.is_disabled
       }
       if (formValue.value.api_key.trim()) {
         req.api_key = formValue.value.api_key.trim()
@@ -438,6 +499,17 @@ async function handleSave() {
     message.error(error?.response?.data?.detail || t('config.saveError'))
   } finally {
     saving.value = false
+  }
+}
+
+async function handleToggleDisabled(provider: AIProvider) {
+  if (provider.is_default) return
+  try {
+    await updateProvider(provider.id, { is_disabled: !provider.is_disabled })
+    message.success(t('config.providers.updated'))
+    await fetchProviders()
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || t('config.saveError'))
   }
 }
 
@@ -472,8 +544,54 @@ onMounted(() => {
   font-size: 12px;
 }
 
+.ai-provider-modal__header {
+  display: grid;
+  gap: 4px;
+}
+
+.ai-provider-modal__title {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #0f172a;
+}
+
+.ai-provider-modal__subtitle {
+  max-width: 560px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: rgba(15, 23, 42, 0.54);
+}
+
+.ai-provider-modal__scroll {
+  max-height: min(68vh, 640px);
+}
+
 .ai-provider-modal__form {
+  gap: 18px;
+}
+
+.ai-provider-modal__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+  row-gap: 14px;
+}
+
+.ai-provider-modal__section {
+  display: grid;
   gap: 14px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.ai-provider-modal__status {
+  padding-top: 16px;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
 }
 
 .ai-provider-modal__form :deep(.n-form-item) {
@@ -483,5 +601,28 @@ onMounted(() => {
 .ai-provider-modal__form :deep(.n-form-item-feedback-wrapper) {
   min-height: auto;
   padding-top: 6px;
+}
+
+.ai-provider-modal__status :deep(.n-form-item-blank) {
+  min-height: auto;
+}
+
+.ai-provider-modal__textarea :deep(textarea) {
+  min-height: 132px;
+  resize: vertical;
+}
+
+@media (max-width: 767px) {
+  .ai-provider-modal__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ai-provider-modal__subtitle {
+    max-width: calc(96vw - 96px);
+  }
+
+  .ai-provider-modal__scroll {
+    max-height: min(72vh, 620px);
+  }
 }
 </style>

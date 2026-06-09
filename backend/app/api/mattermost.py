@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
-from typing import Any, Optional
+from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, model_validator
@@ -17,14 +17,12 @@ from app.core.mattermost_notifications import (
     MATTERMOST_EVENT_TYPE_SET,
     MATTERMOST_FIELD_KEY_SET,
     MATTERMOST_TARGET_TYPE_CHANNEL,
-    MATTERMOST_TARGET_TYPE_INITIATOR_DM,
     MATTERMOST_TARGET_TYPES,
     MattermostClient,
     MattermostNotificationError,
     normalize_string_list,
     serialize_profile,
     serialize_string_list,
-    test_mattermost_connection,
 )
 from app.database import get_db
 from app.dependencies.auth import require_admin_user
@@ -47,8 +45,8 @@ class MattermostIntegrationConfigSection(BaseModel):
 
 class MattermostIntegrationUpdate(BaseModel):
     """Request model for updating Mattermost integration settings."""
-    mattermost_server_url: Optional[str] = None
-    mattermost_bot_token: Optional[str] = None
+    mattermost_server_url: str | None = None
+    mattermost_bot_token: str | None = None
     clear_mattermost_bot_token: bool = False
 
 
@@ -69,7 +67,7 @@ class MattermostNotificationProfileResponse(BaseModel):
     name: str
     enabled: bool
     target_type: str
-    channel_id: Optional[str] = None
+    channel_id: str | None = None
     mention_in_channel: bool
     event_types: list[str]
     field_keys: list[str]
@@ -82,13 +80,13 @@ class MattermostNotificationProfileInput(BaseModel):
     name: str
     enabled: bool = True
     target_type: str
-    channel_id: Optional[str] = None
+    channel_id: str | None = None
     mention_in_channel: bool = False
     event_types: list[str] = Field(default_factory=list)
     field_keys: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_profile(self) -> "MattermostNotificationProfileInput":
+    def validate_profile(self) -> MattermostNotificationProfileInput:
         self.name = self.name.strip()
         self.target_type = self.target_type.strip()
         self.channel_id = self.channel_id.strip() if self.channel_id else None
@@ -123,7 +121,7 @@ class MattermostResolveChannelRequest(BaseModel):
     channel_name: str
 
     @model_validator(mode="after")
-    def validate_payload(self) -> "MattermostResolveChannelRequest":
+    def validate_payload(self) -> MattermostResolveChannelRequest:
         self.team_name = self.team_name.strip()
         self.channel_name = self.channel_name.strip()
         if not self.team_name:
@@ -204,7 +202,7 @@ async def _resolve_channel_target_by_id(channel_id: str) -> MattermostChannelTar
     normalized_channel_id = channel_id.strip()
     if not normalized_channel_id:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="channel_id cannot be empty",
         )
 
@@ -321,6 +319,7 @@ async def test_mattermost_notification_integration(
 ):
     """Validate Mattermost connectivity with current or unsaved values."""
     import httpx
+
     from app.core.mattermost_notifications import test_mattermost_connection
 
     await load_runtime_config_from_db(db)

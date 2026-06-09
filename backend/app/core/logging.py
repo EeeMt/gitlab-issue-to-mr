@@ -1,10 +1,12 @@
 """
 日志配置模块
 """
+import datetime
+import os
 import sys
 from pathlib import Path
+
 from loguru import logger
-import datetime
 
 # 日志目录
 LOG_DIR = Path("logs")
@@ -20,17 +22,20 @@ def setup_logging():
 
     - 控制台输出：彩色友好格式
     - 文件输出：JSON 格式，便于检索
+    - 日志级别通过环境变量 LOG_LEVEL 控制（默认 INFO）
     """
+    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+
     # 移除默认 handler
     logger.remove()
 
     # Set default extra values so format strings don't KeyError during startup
     logger.configure(extra={"trace_id": "--------"})
 
-    # 控制台输出（开发环境）
+    # 控制台输出
     logger.add(
         sys.stderr,
-        level="DEBUG",
+        level=log_level,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{extra[trace_id]}</cyan> | <level>{message}</level>",
         colorize=True,
     )
@@ -41,7 +46,7 @@ def setup_logging():
 
     logger.add(
         str(log_file),
-        level="INFO",
+        level=log_level,
         format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {extra[trace_id]} | {message}",
         rotation="00:00",  # 每天零点轮转
         retention=f"{RETENTION_DAYS} days",  # 保留7天
@@ -49,7 +54,7 @@ def setup_logging():
         enqueue=True,  # 异步写入
     )
 
-    logger.info("日志系统初始化完成")
+    logger.info("日志系统初始化完成，级别: {}", log_level)
 
 
 def get_logger(name: str = None):

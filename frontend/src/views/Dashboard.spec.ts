@@ -98,6 +98,43 @@ vi.mock('naive-ui', () => ({
       return () => h('i', { class: 'n-icon' }, slots.default?.())
     },
   },
+  NButton: {
+    name: 'NButton',
+    props: ['size', 'quaternary', 'loading'],
+    setup(_p: any, { slots, attrs }: any) {
+      return () => h('button', attrs, [slots.icon?.(), slots.default?.()])
+    },
+  },
+  NSwitch: {
+    name: 'NSwitch',
+    props: ['value', 'size'],
+    emits: ['update:value'],
+    setup(_p: any, { attrs }: any) {
+      return () => h('button', { ...attrs, class: 'n-switch' })
+    },
+  },
+  NSelect: {
+    name: 'NSelect',
+    props: ['value', 'disabled', 'size', 'options'],
+    emits: ['update:value'],
+    setup(_p: any, { attrs }: any) {
+      return () => h('select', { ...attrs, class: 'n-select' })
+    },
+  },
+  NDivider: {
+    name: 'NDivider',
+    props: ['vertical'],
+    setup(_p: any, { attrs }: any) {
+      return () => h('span', { ...attrs, class: 'n-divider' })
+    },
+  },
+  NScrollbar: {
+    name: 'NScrollbar',
+    props: ['trigger'],
+    setup(_p: any, { attrs, slots }: any) {
+      return () => h('div', { ...attrs, class: ['n-scrollbar', attrs.class] }, slots.default?.())
+    },
+  },
   NTooltip: {
     name: 'NTooltip',
     props: ['trigger'],
@@ -287,12 +324,12 @@ describe('Dashboard', () => {
   describe('initial data fetching', () => {
     it('calls getIssues on mount', async () => {
       await mountDashboard()
-      expect(mockApi.getIssues).toHaveBeenCalledWith({ page: 1, page_size: 100 })
+      expect(mockApi.getIssues).toHaveBeenCalledWith({ page: 1, page_size: 20 })
     })
 
     it('calls getTasksPaginated once for board tasks', async () => {
       await mountDashboard()
-      expect(mockApi.getTasksPaginated).toHaveBeenCalledWith({ page: 1, page_size: 100 })
+      expect(mockApi.getTasksPaginated).toHaveBeenCalledWith({ page: 1, page_size: 20 })
       expect(mockApi.getTasksPaginated).toHaveBeenCalledTimes(1)
     })
 
@@ -373,15 +410,16 @@ describe('Dashboard', () => {
       await nextTick()
 
       expect(wrapper.find('[data-testid="task-column-running"]').exists()).toBe(true)
-      expect(wrapper.find('[data-testid="task-column-queued"]').exists()).toBe(true)
       expect(wrapper.find('[data-testid="task-column-pending"]').exists()).toBe(true)
       expect(wrapper.find('[data-testid="task-column-completed"]').exists()).toBe(true)
       expect(wrapper.find('[data-testid="task-column-failed"]').exists()).toBe(true)
-      expect(wrapper.find('[data-testid="task-column-cancelled"]').exists()).toBe(true)
+      // queued and cancelled are merged into pending and failed respectively
+      expect(wrapper.find('[data-testid="task-column-queued"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="task-column-cancelled"]').exists()).toBe(false)
       expect(wrapper.find('[data-testid="task-column-pending_queued"]').exists()).toBe(false)
     })
 
-    it('keeps empty columns visible with empty text', async () => {
+    it('shows board-level empty state when all items are empty', async () => {
       setupDefaultMocks()
       mockApi.getIssues.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100 })
       mockApi.getTasksPaginated.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100 })
@@ -390,13 +428,9 @@ describe('Dashboard', () => {
       await flushPromises()
       await nextTick()
 
-      await wrapper.find('[data-testid="my-work-board-tab-tasks"]').trigger('click')
-      await nextTick()
-      await wrapper.find('[data-testid="my-work-board-tab-issues"]').trigger('click')
-      await nextTick()
-
-      expect(wrapper.find('[data-testid="issue-column-open"]').text()).toContain('dashboard.myWorkBoard.emptyColumn')
+      // board-level empty state is shown; columns are NOT rendered (v-if/v-else)
       expect(wrapper.find('[data-testid="my-work-board-empty-issues"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="issue-column-open"]').exists()).toBe(false)
     })
 
     it('renders icons in board lane headers', async () => {

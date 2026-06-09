@@ -3,13 +3,13 @@
 import asyncio
 import logging
 import time
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import gitlab
 import httpx
 from gitlab import Gitlab
-from gitlab.exceptions import GitlabCreateError, GitlabGetError
+from gitlab.exceptions import GitlabCreateError, GitlabDeleteError, GitlabGetError
 from gitlab.v4.objects import MergeRequest, Project
 
 from app.config import Settings, get_effective_settings
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 _PROJECT_LIST_CACHE_TTL_SECONDS = 300  # 5-minute freshness window
 _project_list_cache: list[dict[str, Any]] = []
 _project_list_cache_expires_at = 0.0
-_project_list_refresh_task: Optional[asyncio.Task] = None
+_project_list_refresh_task: asyncio.Task | None = None
 
 
 class GitLabClient:
@@ -29,9 +29,9 @@ class GitLabClient:
 
     def __init__(
         self,
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
         *,
-        private_token: Optional[str] = None,
+        private_token: str | None = None,
     ) -> None:
         """Initialize GitLab client."""
         self.settings = settings or get_effective_settings()
@@ -42,6 +42,7 @@ class GitLabClient:
             private_token=self.private_token,
             ssl_verify=get_ssl_verify(self.settings),
             keep_base_url=True,
+            timeout=30,
         )
         logger.info(f"GitLab client initialized: {self.base_url}")
 
@@ -65,6 +66,7 @@ class GitLabClient:
             private_token=admin_token,
             ssl_verify=get_ssl_verify(self.settings),
             keep_base_url=True,
+            timeout=30,
         )
         gl.headers["Sudo"] = str(gitlab_user_id)
         return gl
@@ -141,6 +143,24 @@ class GitLabClient:
             })
             return branch.__dict__["_attrs"]
 
+    def delete_branch(self, project_id: int, branch_name: str) -> bool:
+        """Delete a branch. Returns True if deleted or already gone. Returns False on other errors."""
+        project = self.get_project(project_id)
+        try:
+            branch = project.branches.get(branch_name)
+            branch.delete()
+            logger.info(f"Deleted branch: {branch_name} in project {project_id}")
+            return True
+        except (GitlabGetError, GitlabDeleteError) as e:
+            if e.response_code == 404:
+                logger.info(f"Branch already gone: {branch_name} in project {project_id}")
+                return True
+            logger.warning(f"GitLab error deleting branch {branch_name} in project {project_id}: {e}")
+            return False
+        except Exception as e:
+            logger.warning(f"Unexpected error deleting branch {branch_name} in project {project_id}: {e}")
+            return False
+
     def create_merge_request(
         self,
         project_id: int,
@@ -148,7 +168,7 @@ class GitLabClient:
         target_branch: str,
         title: str,
         description: str,
-        issue_iid: Optional[int] = None,
+        issue_iid: int | None = None,
     ) -> MergeRequest:
         """Create a merge request.
 
@@ -183,7 +203,7 @@ class GitLabClient:
 
         return mr
 
-    def normalize_web_url(self, url: Optional[str]) -> Optional[str]:
+    def normalize_web_url(self, url: str | None) -> str | None:
         """Normalize GitLab web URLs to the configured GitLab base URL."""
         if not url:
             return url
@@ -204,7 +224,7 @@ class GitLabClient:
 
     def get_merge_request(
         self, project_id: int, mr_iid: int
-    ) -> Optional[MergeRequest]:
+    ) -> MergeRequest | None:
         """Get a merge request by IID.
 
         Args:
@@ -223,7 +243,7 @@ class GitLabClient:
             logger.warning(f"MR not found: {project_id}/{mr_iid}")
             return None
 
-    def get_mr_by_iid(self, project_id: int, mr_iid: int) -> Optional[dict]:
+    def get_mr_by_iid(self, project_id: int, mr_iid: int) -> dict | None:
         """Get MR details by IID.
 
         Args:
@@ -248,7 +268,7 @@ class GitLabClient:
 
     async def get_merge_request_stats(
         self, project_id: int, mr_iid: int
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Get merge request change statistics.
 
         Args:
@@ -382,7 +402,7 @@ class GitLabClient:
             logger.warning(f"File not found: {file_path}@{ref}")
             return ""
 
-    def get_issue(self, project_id: int, issue_iid: int) -> Optional[dict]:
+    def get_issue(self, project_id: int, issue_iid: int) -> dict | None:
         """Get issue details.
 
         Args:
@@ -406,23 +426,47 @@ class GitLabClient:
     def get_projects(self, per_page: int = 100) -> list:
         """Get list of accessible projects.
 
+        Fetches member projects plus public/internal projects visible to the bot
+        user, mirroring the behaviour of the OAuth user path.  Results are
+        deduplicated by project ID.
+
         Args:
-            per_page: Number of projects per page
+            per_page: Number of projects per page for each query
 
         Returns:
             List of project dicts with id, name, path_with_namespace
         """
         logger.info("Fetching accessible projects")
-        projects = self.gl.projects.list(per_page=per_page, membership=True)
-        return [
-            {
-                "id": p.id,
-                "name": p.name,
-                "path_with_namespace": p.path_with_namespace,
-                "default_branch": getattr(p, "default_branch", None),
-            }
-            for p in projects
-        ]
+        projects_by_id: dict[int, Any] = {}
+
+        for query_kwargs in [
+            {"membership": True},
+            {"visibility": "internal"},
+            {"visibility": "public"},
+        ]:
+            try:
+                page_results = self.gl.projects.list(per_page=per_page, all=True, **query_kwargs)
+                for p in page_results:
+                    if getattr(p, "marked_for_deletion_at", None):
+                        logger.debug("Skipping project pending deletion: %s", p.path_with_namespace)
+                        continue
+                    projects_by_id[p.id] = p
+            except Exception as exc:
+                logger.warning("Failed to fetch projects with kwargs %s: %s", query_kwargs, exc)
+
+        result = []
+        for p in projects_by_id.values():
+            result.append(
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "path_with_namespace": p.path_with_namespace,
+                    "default_branch": getattr(p, "default_branch", None),
+                    "web_url": getattr(p, "web_url", None),
+                    "description": getattr(p, "description", None) or "",
+                }
+            )
+        return result
 
     def get_branches(self, project_id: int) -> list:
         """Get list of branches for a project.
@@ -459,7 +503,7 @@ class GitLabClient:
             "url": webhook_url,
             "token": secret_token,
             "enable_ssl_verification": True,
-            "note_events": True,
+            "note_events": False,
             "issues_events": False,
             "merge_requests_events": True,
             "push_events": False,
@@ -506,11 +550,11 @@ class GitLabClient:
 
 
 # Singleton instance
-_gitlab_client: Optional[GitLabClient] = None
-_gitlab_client_config: Optional[tuple[str, str, str]] = None
+_gitlab_client: GitLabClient | None = None
+_gitlab_client_config: tuple[str, str, str] | None = None
 
 
-def _build_gitlab_client_config_snapshot(settings: Optional[Settings] = None) -> tuple[str, str, str]:
+def _build_gitlab_client_config_snapshot(settings: Settings | None = None) -> tuple[str, str, str]:
     active_settings = settings or get_effective_settings()
     return (
         active_settings.gitlab_url.strip(),
@@ -631,10 +675,15 @@ async def get_accessible_projects_for_oauth_token(
                 response.raise_for_status()
                 payload = response.json()
                 for project in payload:
+                    if project.get("marked_for_deletion_at"):
+                        continue
                     projects_by_id[int(project["id"])] = {
                         "id": project["id"],
                         "name": project["name"],
                         "path_with_namespace": project["path_with_namespace"],
+                        "default_branch": project.get("default_branch"),
+                        "web_url": project.get("web_url"),
+                        "description": project.get("description") or "",
                     }
                 next_page = response.headers.get("X-Next-Page")
                 if not next_page:

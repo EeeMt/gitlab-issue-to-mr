@@ -19,7 +19,7 @@ _database_url = os.environ.get("DATABASE_URL", settings.database_url)
 # Create async engine
 engine = create_async_engine(
     _database_url,
-    echo=settings.log_level == "DEBUG",
+    echo=settings.sqlalchemy_echo,
     pool_pre_ping=True,
     pool_size=10,
     max_overflow=20,

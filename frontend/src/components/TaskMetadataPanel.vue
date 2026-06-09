@@ -4,9 +4,6 @@
       <div class="panel-header">
         <span class="panel-title">{{ t('taskView.taskMetadata') }}</span>
         <div class="panel-badges">
-          <n-tag :type="statusColors[task.status] ?? 'default'" round size="small">
-            {{ t(`status.${task.status}`) }}
-          </n-tag>
           <n-tag type="default" round size="small">{{ formatPriority(task.priority) }}</n-tag>
         </div>
       </div>
@@ -38,16 +35,24 @@
         </span>
         <span class="metadata-value">
           <template v-if="task.issue">
-            <router-link :to="`/issues/${task.issue.id}`" class="app-link">
-              #{{ task.issue.id }} {{ task.issue.title }}
+            <router-link :to="`/issues/${task.issue.id}`" class="app-link task-issue-link">
+              <span class="task-issue-link__id">#{{ task.issue.id }}</span>
+              <span class="task-issue-link__title">{{ task.issue.title }}</span>
             </router-link>
-            <span v-if="task.initiator_username" class="metadata-initiator"> · {{ task.initiator_username }}</span>
           </template>
           <template v-else>
             <span class="metadata-manual">{{ t('taskView.manualCreation') }}</span>
-            <span v-if="task.initiator_username" class="metadata-initiator"> · {{ task.initiator_username }}</span>
           </template>
         </span>
+      </div>
+
+      <!-- Initiator -->
+      <div v-if="task.initiator_username" class="metadata-row">
+        <span class="metadata-label">
+          <n-icon size="14" class="metadata-label-icon"><PersonOutline /></n-icon>
+          {{ t('common.initiator') }}
+        </span>
+        <span class="metadata-value">{{ task.initiator_username }}</span>
       </div>
 
       <!-- Retry Source -->
@@ -74,6 +79,15 @@
         </span>
       </div>
 
+      <!-- Task mode -->
+      <div class="metadata-row">
+        <span class="metadata-label">
+          <n-icon size="14" class="metadata-label-icon"><PlayOutline /></n-icon>
+          {{ t('taskView.taskMode') }}
+        </span>
+        <span class="metadata-value">{{ formatTaskMode(task.task_mode) }}</span>
+      </div>
+
       <!-- Branch flow -->
       <div class="metadata-row">
         <span class="metadata-label">
@@ -82,15 +96,20 @@
         </span>
         <span class="metadata-value">
           <span class="branch-flow">
-            <span v-if="task.issue?.base_branch" class="branch-item branch-item--base">{{ task.issue.base_branch }}</span>
+            <template v-if="task.issue?.base_branch">
+              <a v-if="branchUrl(task.issue.base_branch)" :href="branchUrl(task.issue.base_branch)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--base app-link">{{ task.issue.base_branch }}</a>
+              <span v-else class="branch-item branch-item--base">{{ task.issue.base_branch }}</span>
+            </template>
             <span v-if="task.issue?.base_branch && task.issue?.branch_name" class="branch-arrow">➜</span>
-            <span v-if="task.issue?.branch_name" class="branch-item branch-item--work">
-              {{ task.issue.branch_name }}
-            </span>
+            <template v-if="task.issue?.branch_name">
+              <a v-if="branchUrl(task.issue.branch_name)" :href="branchUrl(task.issue.branch_name)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--work app-link">{{ task.issue.branch_name }}</a>
+              <span v-else class="branch-item branch-item--work">{{ task.issue.branch_name }}</span>
+            </template>
             <span v-if="task.issue?.branch_name && task.issue?.target_branch" class="branch-arrow">➜</span>
-            <span v-if="task.issue?.target_branch" class="branch-item branch-item--target">
-              {{ task.issue.target_branch }}
-            </span>
+            <template v-if="task.issue?.target_branch">
+              <a v-if="branchUrl(task.issue.target_branch)" :href="branchUrl(task.issue.target_branch)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--target app-link">{{ task.issue.target_branch }}</a>
+              <span v-else class="branch-item branch-item--target">{{ task.issue.target_branch }}</span>
+            </template>
             <span v-if="!task.issue?.branch_name" class="branch-item branch-item--direct">{{ t('taskView.directPush') }}</span>
           </span>
         </span>
@@ -105,7 +124,7 @@
         <span class="metadata-value">
           <template v-if="task.issue?.merge_request_url">
             <a :href="task.issue.merge_request_url" target="_blank" rel="noopener noreferrer" class="app-link mr-link">
-              {{ task.merge_request_title || 'Merge Request' }}
+              {{ task.issue.merge_request_iid ? `!${task.issue.merge_request_iid}` : t('taskView.mergeRequest') }}
             </a>
           </template>
           <template v-else-if="task.issue?.target_branch">
@@ -166,12 +185,14 @@ import {
   TimeOutline,
   GitPullRequest,
   RefreshOutline,
-  ServerOutline
+  ServerOutline,
+  PlayOutline
 } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import type { Task } from '../api'
 import { formatPriority } from '../utils/format'
 import { formatDateTimeUtc8 } from '../utils/datetime'
+
 
 const props = defineProps<{
   task: Task
@@ -179,23 +200,23 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
-  pending: 'default',
-  queued: 'info',
-  running: 'warning',
-  completed: 'success',
-  failed: 'error',
-  cancelled: 'default'
-}
-
 const projectDisplayName = computed(() => {
   return props.task.project_path_with_namespace
     || props.task.project_name
     || `Project #${props.task.project_id}`
 })
 
+function branchUrl(branchName: string): string | null {
+  if (!props.task.project_url || !branchName) return null
+  return `${props.task.project_url}/-/tree/${encodeURIComponent(branchName)}`
+}
+
 function formatDate(dateStr: string): string {
   return formatDateTimeUtc8(dateStr)
+}
+
+function formatTaskMode(mode?: Task['task_mode'] | null): string {
+  return mode === 'plan' ? t('taskView.taskModePlan') : t('taskView.taskModeExecute')
 }
 
 function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean {
@@ -234,23 +255,30 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 
 .metadata-body {
   display: grid;
-  gap: 14px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 14px;
+  align-items: center;
 }
 
 .metadata-row {
-  display: flex;
-  gap: 12px;
-  align-items: baseline;
+  display: contents;
 }
 
 .metadata-label {
+  display: inline-flex;
+  align-items: center;
   font-size: 13px;
   color: var(--n-text-color-3, #999);
-  min-width: 90px;
-  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.metadata-row > :last-child {
+  min-width: 0;
 }
 
 .metadata-value {
+  min-width: 0;
   font-size: 14px;
   color: var(--n-text-color-1);
   word-break: break-word;
@@ -258,11 +286,6 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 
 .metadata-manual {
   color: var(--n-text-color-2, #666);
-}
-
-.metadata-initiator {
-  color: var(--n-text-color-3, #999);
-  font-size: 13px;
 }
 
 .branch-flow {
@@ -359,6 +382,49 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 }
 .app-link:hover {
   text-decoration: underline;
+}
+
+.task-issue-link {
+  --task-issue-link-color: #3b82f6;
+  --task-issue-link-border: rgba(37, 99, 235, 0.28);
+  --task-issue-link-bg: rgba(37, 99, 235, 0.12);
+  --task-issue-link-hover-border: rgba(37, 99, 235, 0.44);
+  --task-issue-link-hover-bg: rgba(37, 99, 235, 0.18);
+
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 10px;
+  border: 1px solid var(--task-issue-link-border);
+  border-radius: 999px;
+  background: var(--task-issue-link-bg);
+  color: var(--task-issue-link-color);
+  font-weight: 400;
+  line-height: 1.45;
+  vertical-align: middle;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.task-issue-link:hover {
+  border-color: var(--task-issue-link-hover-border);
+  background: var(--task-issue-link-hover-bg);
+  text-decoration: none;
+}
+
+.task-issue-link__id {
+  flex: 0 0 auto;
+  font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.task-issue-link__title {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .metadata-label-icon {

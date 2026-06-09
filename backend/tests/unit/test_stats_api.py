@@ -7,15 +7,17 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+
 from starlette.requests import Request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from fastapi.testclient import TestClient
-from app.main import app
+
 from app.database import get_db
 from app.dependencies.auth import require_authenticated_context
-from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+from app.main import app
 
 
 class StatsAPIValidationTests(unittest.TestCase):
@@ -500,6 +502,19 @@ class ScheduledStatsTests(unittest.TestCase):
         data = response.json()
         self.assertIn("summary", data)
         self.assertEqual(len(data["hourly_distribution"]), 24)
+
+    def test_scheduled_stats_includes_slot_capacity(self):
+        """GET /api/stats/scheduled response includes slot_max_tasks and slot_max_tasks_enforce."""
+        self.mock_db.execute = AsyncMock(
+            side_effect=self._build_side_effects()
+        )
+        response = self.client.get("/api/stats/scheduled")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("slot_max_tasks", data)
+        self.assertIn("slot_max_tasks_enforce", data)
+        self.assertIsInstance(data["slot_max_tasks"], int)
+        self.assertIsInstance(data["slot_max_tasks_enforce"], bool)
 
 
 class ScheduledTasksHourFilterTests(unittest.TestCase):

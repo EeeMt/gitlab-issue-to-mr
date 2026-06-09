@@ -5,15 +5,14 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings
 from app.core.session import (
-    get_gitlab_refresh_token_from_session,
     get_gitlab_access_token_from_session,
+    get_gitlab_refresh_token_from_session,
     resolve_session_authentication,
 )
 from app.database import get_db
@@ -37,7 +36,7 @@ class AuthContext:
 async def get_optional_auth_context(
     request: Request,
     db: AsyncSession = Depends(get_db),
-) -> Optional[AuthContext]:
+) -> AuthContext | None:
     """Resolve the current auth context from the session cookie if auth is enabled."""
     t0 = time.time()
     if not getattr(request.state, "runtime_config_synced", False):
@@ -66,15 +65,15 @@ async def get_optional_auth_context(
 
 
 async def get_optional_current_user(
-    auth_context: Optional[AuthContext] = Depends(get_optional_auth_context),
-) -> Optional[User]:
+    auth_context: AuthContext | None = Depends(get_optional_auth_context),
+) -> User | None:
     """Resolve the current user from the auth context if auth is enabled."""
     return auth_context.user if auth_context is not None else None
 
 
 async def require_authenticated_context(
     request: Request,
-    auth_context: Optional[AuthContext] = Depends(get_optional_auth_context),
+    auth_context: AuthContext | None = Depends(get_optional_auth_context),
 ) -> AuthContext:
     """Require an authenticated request context.
 
@@ -89,15 +88,15 @@ async def require_authenticated_context(
 
 
 async def require_authenticated_user(
-    auth_context: Optional[AuthContext] = Depends(require_authenticated_context),
-) -> Optional[User]:
+    auth_context: AuthContext | None = Depends(require_authenticated_context),
+) -> User | None:
     """Require an authenticated user."""
     return auth_context.user if auth_context is not None else None
 
 
 async def require_admin_user(
     request: Request,
-    auth_context: Optional[AuthContext] = Depends(require_authenticated_context),
+    auth_context: AuthContext | None = Depends(require_authenticated_context),
 ) -> User:
     """Require an admin user."""
     if auth_context is None:
@@ -118,8 +117,8 @@ def require_page_access(page_key: str):
     """Require access to a configured shared page."""
 
     async def _require_page_access(
-        auth_context: Optional[AuthContext] = Depends(require_authenticated_context),
-    ) -> Optional[User]:
+        auth_context: AuthContext | None = Depends(require_authenticated_context),
+    ) -> User | None:
         settings = get_effective_settings()
         current_user = auth_context.user if auth_context is not None else None
         if can_access_page(page_key, current_user, settings):

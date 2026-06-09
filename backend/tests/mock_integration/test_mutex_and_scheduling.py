@@ -12,7 +12,7 @@ Prerequisites:
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -373,7 +373,7 @@ class TestScheduledTasks:
             http_client, backend_url, admin_auth_headers,
             title="Past scheduled test",
         )
-        past_time = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        past_time = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
         resp = await http_client.post(
             f"{backend_url}/api/tasks",
             json={
@@ -406,7 +406,7 @@ class TestScheduledTasks:
         )
 
         # Create a future-scheduled task (won't run for 5 minutes)
-        future_time = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+        future_time = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
         future_task = await create_task(
             http_client, backend_url, admin_auth_headers, future_issue["id"],
             user_prompt="Future scheduled task", scheduled_datetime=future_time,

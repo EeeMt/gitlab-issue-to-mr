@@ -10,13 +10,13 @@ This file specifically targets the uncovered lines:
 import os
 import sys
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from app.api.stats import get_stats, get_analytics, get_activity_heatmap
+from app.api.stats import get_activity_heatmap, get_analytics, get_stats
 from app.dependencies.project_access import ProjectAccessScope
 from app.models import User
 
@@ -48,14 +48,14 @@ class TestGetStatsMyFilterWithUsername(unittest.IsolatedAsyncioTestCase):
         """get_stats with my=True should filter by username (covers line 68)."""
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(side_effect=self._build_side_effects(total=3, issue_total=2))
-        
+
         # Create a User with username attribute
         mock_user = User(id=1, username="testuser", platform_role="developer")
-        
+
         scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
-        
+
         result = await get_stats(my=True, db=mock_db, current_user=mock_user, access_scope=scope)
-        
+
         self.assertEqual(result["total"], 3)
         self.assertGreater(mock_db.execute.call_count, 0)
 
@@ -63,14 +63,14 @@ class TestGetStatsMyFilterWithUsername(unittest.IsolatedAsyncioTestCase):
         """get_stats with my=True should filter issues by user ID (covers line 129)."""
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(side_effect=self._build_side_effects(total=3, issue_total=2))
-        
+
         # Create a User with id for issues filtering
         mock_user = User(id=1, username="testuser", platform_role="developer")
-        
+
         scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
-        
+
         result = await get_stats(my=True, db=mock_db, current_user=mock_user, access_scope=scope)
-        
+
         self.assertEqual(result["issues"]["total"], 2)
         self.assertGreater(mock_db.execute.call_count, 0)
 
@@ -100,6 +100,7 @@ class TestGetAnalyticsEmptyInitiatorUsername(unittest.IsolatedAsyncioTestCase):
             0,
             0,
             0,
+            None,
             None,
             None,
             None,
@@ -147,19 +148,19 @@ class TestGetActivityHeatmapMyFilterWithUsername(unittest.IsolatedAsyncioTestCas
     async def test_activity_heatmap_my_filter_with_username_covers_line_711(self):
         """get_activity_heatmap with my=True should filter by username (covers line 711)."""
         mock_db = MagicMock()
-        
+
         # Mock the query results
         mock_result = MagicMock()
         mock_result.all = MagicMock(return_value=[
             SimpleNamespace(date=datetime.now().date(), count=5),
         ])
         mock_db.execute = AsyncMock(return_value=mock_result)
-        
+
         # Mock user with username
         mock_user = User(id=1, username="heatmapuser", platform_role="developer")
-        
+
         scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
-        
+
         result = await get_activity_heatmap(
             days=7,
             my=True,
@@ -167,6 +168,6 @@ class TestGetActivityHeatmapMyFilterWithUsername(unittest.IsolatedAsyncioTestCas
             current_user=mock_user,
             access_scope=scope,
         )
-        
+
         self.assertIsInstance(result, list)
         self.assertGreater(mock_db.execute.call_count, 0)

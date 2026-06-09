@@ -13,9 +13,8 @@ Tests for the Create Issue page (/issues/create) including:
 import re
 
 import pytest
+from conftest import _get_cookies, api_get_first_project
 from playwright.sync_api import Page, expect
-from conftest import api_get_first_project, _get_cookies
-
 
 # ---------------------------------------------------------------------------
 # 1. Page layout (read-only, class_page)
@@ -135,7 +134,7 @@ class TestCreateIssueBranchLoading:
     def test_selecting_project_loads_branches(self, logged_in_page: Page, backend_url):
         """After selecting a project, branch selects should become populated."""
         cookies = _get_cookies(logged_in_page)
-        project = api_get_first_project(backend_url, cookies)
+        api_get_first_project(backend_url, cookies)
 
         logged_in_page.goto("/issues/create")
         logged_in_page.wait_for_load_state("networkidle")
@@ -169,7 +168,7 @@ class TestCreateIssueSubmission:
     def test_submit_valid_form_redirects_to_issue_view(self, logged_in_page: Page, backend_url):
         """Filling all required fields and submitting should redirect to issue view."""
         cookies = _get_cookies(logged_in_page)
-        project = api_get_first_project(backend_url, cookies)
+        api_get_first_project(backend_url, cookies)
 
         logged_in_page.goto("/issues/create")
         logged_in_page.wait_for_load_state("networkidle")

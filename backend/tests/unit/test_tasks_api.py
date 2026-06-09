@@ -164,10 +164,10 @@ class CancelTaskEndpointTests(unittest.TestCase):
 
     def _get_client(self, task=None):
         """Build a TestClient with all dependencies overridden."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
@@ -211,12 +211,34 @@ class CancelTaskEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(task.status, TaskStatus.CANCELLED)
 
+    def test_cancel_task_releases_issue_execution_lock(self) -> None:
+        """POST /cancel should release the DB issue execution lock."""
+        task = MagicMock()
+        task.id = 2
+        task.project_id = 1
+        task.issue_id = 33
+        task.status = TaskStatus.RUNNING
+        task.scheduled_at = None
+
+        client, app = self._get_client(task)
+
+        with patch("app.api.task_operations.notify_task_cancelled", new=AsyncMock()):
+            with patch("app.core.task_helpers._require_task_operator", return_value=None):
+                with patch("app.api.tasks.release_issue_execution_lock", new=AsyncMock()) as mock_release:
+                    response = client.post("/api/tasks/2/cancel")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        mock_release.assert_awaited_once()
+        self.assertEqual(mock_release.await_args.kwargs["issue_id"], 33)
+
     def test_cancel_task_404_when_not_found(self) -> None:
         """POST /api/tasks/{id}/cancel should return 404 when task not found."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
@@ -239,6 +261,124 @@ class CancelTaskEndpointTests(unittest.TestCase):
         app.dependency_overrides.clear()
 
         self.assertEqual(response.status_code, 404)
+
+    def test_get_task_workspace_status_returns_disabled_when_not_configured(self) -> None:
+        """GET /workspace returns disabled when workspace root is empty."""
+        task = MagicMock()
+        task.id = 3
+        task.project_id = 100
+        task.issue_id = 1
+        task.issue = MagicMock(id=1, project_id=100)
+        task.status = TaskStatus.FAILED
+
+        client, app = self._get_client(task)
+
+        with patch(
+            "app.api.tasks.get_effective_settings",
+            return_value=MagicMock(worker_workspace_host_path=""),
+        ):
+            response = client.get("/api/tasks/3/workspace")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIs(response.json()["enabled"], False)
+
+    def test_delete_task_workspace_calls_remove_helper(self) -> None:
+        """DELETE /workspace removes the issue workspace root."""
+        task = MagicMock()
+        task.id = 4
+        task.project_id = 100
+        task.issue_id = 1
+        task.issue = MagicMock(id=1, project_id=100)
+        task.status = TaskStatus.FAILED
+
+        client, app = self._get_client(task)
+
+        paths = MagicMock()
+        paths.issue_root = "/opt/codify-workspaces/project-100/issue-1"
+        paths.repo_path = "/opt/codify-workspaces/project-100/issue-1/repo"
+        paths.runtime_path = "/opt/codify-workspaces/project-100/issue-1/runtime/task-4"
+
+        with patch(
+            "app.api.tasks.get_effective_settings",
+            return_value=MagicMock(worker_workspace_host_path="/opt/codify-workspaces"),
+        ):
+            with patch("app.api.tasks.build_issue_workspace_paths", return_value=paths):
+                with patch("app.api.tasks.remove_issue_workspace", return_value=True) as mock_remove:
+                    response = client.delete("/api/tasks/4/workspace")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        mock_remove.assert_called_once_with("/opt/codify-workspaces/project-100/issue-1")
+        self.assertIs(response.json()["removed"], True)
+
+
+# ---------------------------------------------------------------------------
+# require_changes: CreateTaskRequest schema and serialization
+# ---------------------------------------------------------------------------
+
+
+class TestRequireChangesSchema(unittest.TestCase):
+    def test_create_task_request_defaults_require_changes_to_true(self):
+        from app.api.task_schemas import CreateTaskRequest
+
+        req = CreateTaskRequest(issue_id=1, provider_id=1)
+        self.assertTrue(req.require_changes)
+
+    def test_create_task_request_accepts_explicit_false(self):
+        from app.api.task_schemas import CreateTaskRequest
+
+        req = CreateTaskRequest(issue_id=1, provider_id=1, require_changes=False)
+        self.assertFalse(req.require_changes)
+
+
+class TestRequireChangesSerialization(unittest.TestCase):
+    def test_serialize_task_includes_require_changes(self):
+        from app.core.task_helpers import _serialize_task
+
+        task = MagicMock()
+        task.id = 1
+        task.issue_id = None
+        task.project_id = 1
+        task.user_prompt = "x"
+        task.initiator_user_id = None
+        task.initiator_gitlab_user_id = None
+        task.initiator_username = None
+        task.is_retry = False
+        task.retry_source_task_id = None
+        task.status = TaskStatus.PENDING
+        task.priority = 0
+        task.scheduled_at = None
+        task.container_id = None
+        task.commit_sha = None
+        task.error_message = None
+        task.additions = 0
+        task.deletions = 0
+        task.total_changes = 0
+        task.input_tokens = None
+        task.output_tokens = None
+        task.model_name = None
+        task.commit_message = None
+        task.provider_id = None
+        task.provider_name = None
+        task.created_at = datetime(2026, 5, 5, 12, 0, 0)
+        task.updated_at = datetime(2026, 5, 5, 12, 0, 0)
+        task.started_at = None
+        task.completed_at = None
+        task.require_changes = True
+
+        with patch("app.core.task_helpers.get_effective_settings",
+                   return_value=MagicMock(gitlab_url="http://gitlab.example.com")):
+            with patch("app.core.task_helpers.sa_inspect") as mock_inspect:
+                mock_insp = MagicMock()
+                mock_insp.unloaded = {"issue", "provider"}
+                mock_inspect.return_value = mock_insp
+                data = _serialize_task(task)
+
+        self.assertIn("require_changes", data)
+        self.assertTrue(data["require_changes"])
 
 
 if __name__ == "__main__":
@@ -273,7 +413,7 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.input_tokens = 0
     task.output_tokens = 0
     task.model_name = None
-    task.merge_request_title = None
+    task.commit_message = None
     task.provider_id = None
     task.provider = None
     task.issue = None
@@ -285,12 +425,23 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     return task
 
 
+def _make_mock_provider(id=1):
+    """Create a mock AIProvider with minimal attributes."""
+    provider = MagicMock()
+    provider.id = id
+    provider.name = "Test Provider"
+    provider.model = "test-model"
+    provider.is_default = True
+    provider.is_disabled = False
+    return provider
+
+
 def _make_app_client_with_db(mock_db, extra_overrides=None):
     """Build a TestClient with DB, access scope, and auth overridden."""
-    from app.main import app
     from app.database import get_db
     from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-    from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+    from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+    from app.main import app
 
     access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
@@ -328,6 +479,7 @@ class GetTaskLogsAPITests(unittest.TestCase):
         log1.log_level = "INFO"
         log1.message = "Starting task execution"
         log1.created_at = datetime(2024, 1, 1, 12, 0, 0)
+        log1.log_metadata = None
 
         task_result = MagicMock()
         task_result.scalar_one_or_none.return_value = task
@@ -444,7 +596,7 @@ class GetTaskLogsAPITests(unittest.TestCase):
         data = response.json()
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["log_type"], "thinking")
-        self.assertEqual(data[0]["metadata"], '{"text":"I need to think about this problem"}')
+        self.assertEqual(data[0]["metadata"], {"text": "I need to think about this problem"})
         self.assertEqual(data[0]["message"], "")
 
     def test_get_task_logs_returns_assistant_text_log_type(self):
@@ -477,7 +629,7 @@ class GetTaskLogsAPITests(unittest.TestCase):
         data = response.json()
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["log_type"], "assistant_text")
-        self.assertEqual(data[0]["metadata"], '{"text":"Here is my response to your request"}')
+        self.assertEqual(data[0]["metadata"], {"text": "Here is my response to your request"})
 
     def test_get_task_logs_returns_tool_call_log_type(self):
         """GET /api/tasks/{id}/logs should return tool_call log entries with log_type='tool_call'."""
@@ -581,11 +733,13 @@ class RetryTaskAPITests(unittest.TestCase):
         task.project_id = 1
 
         # First execute returns the task; second returns None (no existing retry);
-        # third fetches the Issue for serialization
+        # third resolves default provider; fourth fetches the Issue for serialization
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_default_provider = MagicMock()
+        mock_result_default_provider.scalar_one_or_none.return_value = _make_mock_provider(id=1)
         mock_result_issue = MagicMock()
         mock_result_issue.scalar_one_or_none.return_value = None
 
@@ -599,7 +753,7 @@ class RetryTaskAPITests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_default_provider, mock_result_issue])
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
@@ -626,11 +780,13 @@ class RetryTaskAPITests(unittest.TestCase):
         task.project_id = 1
 
         # First execute returns the task; second returns None (no existing retry);
-        # third fetches the Issue for serialization
+        # third resolves default provider; fourth fetches the Issue for serialization
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_default_provider = MagicMock()
+        mock_result_default_provider.scalar_one_or_none.return_value = _make_mock_provider(id=1)
         mock_result_issue = MagicMock()
         mock_result_issue.scalar_one_or_none.return_value = None
 
@@ -644,7 +800,7 @@ class RetryTaskAPITests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_default_provider, mock_result_issue])
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
@@ -689,6 +845,7 @@ class RetryTaskAPITests(unittest.TestCase):
 
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
+        mock_db.get = AsyncMock(return_value=_make_mock_provider(id=23))
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
@@ -705,6 +862,134 @@ class RetryTaskAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         created_task = mock_db.add.call_args.args[0]
         self.assertEqual(created_task.provider_id, 23)
+
+    def test_retry_task_rejects_disabled_original_provider(self):
+        """POST /api/tasks/{id}/retry should reject an explicitly disabled provider."""
+        task = _make_serializable_task(task_status=TaskStatus.FAILED)
+        task.id = 71
+        task.project_id = 1
+        task.provider_id = 23
+
+        mock_result_task = MagicMock()
+        mock_result_task.scalar_one_or_none.return_value = task
+        mock_result_no_retry = MagicMock()
+        mock_result_no_retry.scalar_one_or_none.return_value = None
+        disabled_provider = _make_mock_provider(id=23)
+        disabled_provider.is_disabled = True
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry])
+        mock_db.get = AsyncMock(return_value=disabled_provider)
+        mock_db.add = MagicMock()
+
+        client, app = _make_app_client_with_db(mock_db)
+
+        with patch("app.core.task_helpers._require_task_operator", return_value=None):
+            response = client.post("/api/tasks/71/retry")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "Provider is disabled")
+        mock_db.add.assert_not_called()
+
+    def test_retry_task_rejects_disabled_default_provider(self):
+        """POST /api/tasks/{id}/retry should reject a disabled default provider fallback."""
+        task = _make_serializable_task(task_status=TaskStatus.FAILED)
+        task.id = 72
+        task.project_id = 1
+        task.provider_id = None
+
+        mock_result_task = MagicMock()
+        mock_result_task.scalar_one_or_none.return_value = task
+        mock_result_no_retry = MagicMock()
+        mock_result_no_retry.scalar_one_or_none.return_value = None
+        disabled_default = _make_mock_provider(id=1)
+        disabled_default.is_disabled = True
+        mock_result_default_provider = MagicMock()
+        mock_result_default_provider.scalar_one_or_none.return_value = disabled_default
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_default_provider]
+        )
+        mock_db.add = MagicMock()
+
+        client, app = _make_app_client_with_db(mock_db)
+
+        with patch("app.core.task_helpers._require_task_operator", return_value=None):
+            response = client.post("/api/tasks/72/retry")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "Provider is disabled")
+        mock_db.add.assert_not_called()
+
+    def test_retry_task_returns_409_when_usage_limit_exceeded(self):
+        """POST /api/tasks/{id}/retry should enforce create quota limits."""
+        from app.core.usage_limits import UsageLimitExceeded
+        from app.dependencies.auth import get_optional_current_user, require_authenticated_user
+
+        task = _make_serializable_task(task_status=TaskStatus.FAILED)
+        task.id = 70
+        task.project_id = 1
+
+        mock_result_task = MagicMock()
+        mock_result_task.scalar_one_or_none.return_value = task
+        mock_result_no_retry = MagicMock()
+        mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_issue = MagicMock()
+        mock_result_issue.scalar_one_or_none.return_value = None
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue])
+        mock_db.add = MagicMock()
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        current_user = MagicMock()
+        current_user.id = 7
+        current_user.gitlab_user_id = 17
+        current_user.username = "alice"
+        current_user.display_name = "Alice"
+        current_user.email = "alice@example.com"
+
+        client, app = _make_app_client_with_db(
+            mock_db,
+            extra_overrides={
+                get_optional_current_user: lambda: current_user,
+                require_authenticated_user: lambda: current_user,
+            },
+        )
+
+        with (
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch(
+                "app.api.tasks.get_usage_quota_service",
+                return_value=MagicMock(
+                    raise_if_over_limit=AsyncMock(
+                        side_effect=UsageLimitExceeded(
+                            scope="create",
+                            exceeded_items=[{
+                                "field": "daily_tasks",
+                                "window": "daily",
+                                "metric": "tasks",
+                                "used": 6,
+                                "limit": 5,
+                                "reset_at": "2026-04-28T00:00:00+00:00",
+                            }],
+                        )
+                    )
+                ),
+            ),
+        ):
+            response = client.post("/api/tasks/70/retry")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"]["reason"], "usage_limit_exceeded")
 
     def test_retry_task_returns_404_when_not_found(self):
         """POST /api/tasks/{id}/retry should return 404 when task does not exist."""
@@ -901,10 +1186,10 @@ class CreateTaskAPITests(unittest.TestCase):
 
     def test_create_task_success(self):
         """POST /api/tasks should create a new task and return its ID."""
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 
@@ -943,6 +1228,7 @@ class CreateTaskAPITests(unittest.TestCase):
                 "issue_id": 1,
                 "user_prompt": "Fix the login bug",
                 "priority": 0,
+                "provider_id": 1,
             })
         app.dependency_overrides.clear()
 
@@ -951,6 +1237,76 @@ class CreateTaskAPITests(unittest.TestCase):
         self.assertIn("id", data)
         self.assertEqual(data["project_id"], 1)
         self.assertEqual(data["user_prompt"], "Fix the login bug")
+
+    def test_create_task_returns_409_when_usage_limit_exceeded(self):
+        """POST /api/tasks returns structured 409 when quota is already exceeded."""
+        from app.core.usage_limits import UsageLimitExceeded
+        from app.database import get_db
+        from app.dependencies.auth import get_optional_current_user, require_authenticated_user
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        async def override_db():
+            yield mock_db
+
+        mock_db = MagicMock()
+        mock_db.add = MagicMock()
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        current_user = MagicMock()
+        current_user.id = 7
+        current_user.gitlab_user_id = 17
+        current_user.username = "alice"
+        current_user.display_name = "Alice"
+        current_user.email = "alice@example.com"
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[get_optional_current_user] = lambda: current_user
+        app.dependency_overrides[require_authenticated_user] = lambda: current_user
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        mock_issue = MagicMock()
+        mock_issue.id = 1
+        mock_issue.project_id = 1
+        mock_issue.description = "Ship it"
+        mock_issue.status = "open"
+        mock_db.get = AsyncMock(return_value=mock_issue)
+
+        client = TestClient(app, raise_server_exceptions=False)
+        with (
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+            patch("app.core.task_helpers._require_issue_operator", return_value=None),
+            patch(
+                "app.api.tasks.get_usage_quota_service",
+                return_value=MagicMock(
+                    raise_if_over_limit=AsyncMock(
+                        side_effect=UsageLimitExceeded(
+                            scope="create",
+                            exceeded_items=[{
+                                "metric": "tokens",
+                                "window": "daily",
+                                "used": 120000,
+                                "limit": 100000,
+                                "reset_at": "2026-04-28T00:00:00+08:00",
+                            }],
+                        )
+                    )
+                ),
+            ),
+        ):
+            response = client.post("/api/tasks", json={
+                "issue_id": 1,
+                "user_prompt": "Ship it",
+                "priority": 0,
+                "provider_id": 1,
+            })
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"]["reason"], "usage_limit_exceeded")
 
 
 # ---------------------------------------------------------------------------
@@ -1054,8 +1410,8 @@ class GetTaskEndpointTests(unittest.TestCase):
         self.assertIn("model_name", data)
         self.assertIsNone(data["model_name"])
 
-    def test_get_task_response_includes_merge_request_title_field(self):
-        """GET /api/tasks/{id} response should include merge_request_title field (None when not set)."""
+    def test_get_task_response_includes_commit_message_field(self):
+        """GET /api/tasks/{id} response should include commit_message field (None when not set)."""
         task = _make_serializable_task(task_status=TaskStatus.COMPLETED, task_id=56)
 
         mock_result = MagicMock()
@@ -1073,8 +1429,8 @@ class GetTaskEndpointTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertIn("merge_request_title", data)
-        self.assertIsNone(data["merge_request_title"])
+        self.assertIn("commit_message", data)
+        self.assertIsNone(data["commit_message"])
 
 
 # ---------------------------------------------------------------------------
@@ -1142,18 +1498,20 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
 
     def test_retry_task_with_future_scheduled_datetime(self):
         """POST /api/tasks/{id}/retry with future scheduled_datetime schedules retry."""
-        from datetime import timezone
         from app.models import Task
         task = _make_serializable_task(task_status=TaskStatus.FAILED)
         task.id = 80
         task.project_id = 1
 
         # First execute returns the task; second returns None (no existing retry);
-        # third is for slot capacity count query; fourth fetches Issue for serialization
+        # third resolves default provider; fourth is for slot capacity count query;
+        # fifth fetches Issue for serialization
         mock_result_task = MagicMock()
         mock_result_task.scalar_one_or_none.return_value = task
         mock_result_no_retry = MagicMock()
         mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_default_provider = MagicMock()
+        mock_result_default_provider.scalar_one_or_none.return_value = _make_mock_provider(id=1)
         mock_result_default = MagicMock()
         mock_result_default.scalar_one_or_none.return_value = None
         mock_result_default.scalar.return_value = 0
@@ -1170,14 +1528,14 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
                 obj.updated_at = now
 
         mock_db = MagicMock()
-        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_default, mock_result_issue])
+        mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_default, mock_result_default_provider, mock_result_issue])
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
 
         client, app = _make_app_client_with_db(mock_db)
 
-        future_dt = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        future_dt = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
 
         with patch("app.api.task_operations.notify_task_retried", new=AsyncMock()):
             with patch("app.core.task_helpers._require_task_operator", return_value=None):
@@ -1243,10 +1601,10 @@ class ListTasksRestrictedScopeTests(unittest.TestCase):
         app.dependency_overrides.clear()
 
     def _setup_restricted_client(self, tasks_list, accessible_project_ids):
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         accessible_projects = [{"id": pid, "name": f"Project {pid}"} for pid in accessible_project_ids]
         access_scope = ProjectAccessScope(
@@ -1324,10 +1682,10 @@ class PaginationTests(unittest.TestCase):
         calls made in paginated mode (COUNT then data).  When *total_count* is
         ``None`` only a single data result is returned (legacy mode).
         """
-        from app.main import app
         from app.database import get_db
         from app.dependencies.auth import get_optional_current_user, require_authenticated_user
-        from app.dependencies.project_access import require_project_access_scope, ProjectAccessScope
+        from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+        from app.main import app
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
 

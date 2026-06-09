@@ -8,12 +8,12 @@ Tests that need authentication should call login_as_admin() in their setup.
 import hashlib
 import os
 import re
-import pytest
+from datetime import UTC
+
 import httpx as _httpx
-
 import psycopg2
+import pytest
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
-
 
 # Configure pytest-playwright
 # Note: pytest-playwright auto-registers via entry points, no need to list here
@@ -548,7 +548,7 @@ def api_create_issue(backend_url: str, cookies: dict, project_id: int, title: st
 
 def api_create_task(backend_url: str, cookies: dict, issue_id: int, prompt: str = "E2E test task", priority: int = 2, scheduled_datetime: str = None) -> dict:
     """Create a test task under an issue via the API and return the response JSON."""
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta
     payload = {
         "issue_id": issue_id,
         "user_prompt": prompt,
@@ -556,7 +556,7 @@ def api_create_task(backend_url: str, cookies: dict, issue_id: int, prompt: str 
     }
     if scheduled_datetime is None:
         # Schedule far in the future so it stays pending
-        future = (datetime.now(timezone.utc) + timedelta(hours=48)).isoformat()
+        future = (datetime.now(UTC) + timedelta(hours=48)).isoformat()
         payload["scheduled_datetime"] = future
     else:
         payload["scheduled_datetime"] = scheduled_datetime

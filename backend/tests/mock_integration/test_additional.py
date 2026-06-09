@@ -12,6 +12,7 @@ Prerequisites:
 
 import logging
 import time
+from datetime import UTC
 
 import httpx
 import pytest
@@ -206,7 +207,7 @@ class TestTaskReschedule:
         2. Reschedule to 5 seconds from now
         3. Task should complete after ~5s, not 10 min
         """
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         _issue, task_data = await create_issue_and_task(
             http_client, backend_url, admin_auth_headers,
@@ -217,7 +218,7 @@ class TestTaskReschedule:
         task_id = task_data["id"]
 
         # Reschedule to 5 seconds from now
-        new_time = datetime.now(timezone.utc) + timedelta(seconds=5)
+        new_time = datetime.now(UTC) + timedelta(seconds=5)
         resp = await http_client.patch(
             f"{backend_url}/api/tasks/{task_id}/schedule",
             json={"scheduled_datetime": new_time.isoformat()},

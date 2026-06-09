@@ -61,6 +61,88 @@ export interface ApiError {
   detail?: string
 }
 
+export type UsageSeverity = 'normal' | 'near_limit' | 'over_limit'
+
+export interface UsageLimitValue {
+  mode: 'inherit' | 'custom' | 'unlimited'
+  value: number | null
+}
+
+export interface CurrentUserUsageSummary {
+  user_id: number
+  usage: {
+    daily_tokens: number
+    weekly_tokens: number
+    daily_tasks: number
+    weekly_tasks: number
+  }
+  limits: {
+    daily_tokens: UsageLimitValue
+    weekly_tokens: UsageLimitValue
+    daily_tasks: UsageLimitValue
+    weekly_tasks: UsageLimitValue
+  }
+  reset_at: {
+    daily: string
+    weekly: string
+  }
+  is_over_limit: boolean
+  severity: UsageSeverity
+}
+
+export interface AdminUsageSummary {
+  daily_tokens: number
+  weekly_tokens: number
+  daily_tasks: number
+  weekly_tasks: number
+}
+
+export interface UsageResetAt {
+  daily: string
+  weekly: string
+}
+
+export interface AdminUsageLimitPolicy {
+  daily_tokens: UsageLimitValue
+  weekly_tokens: UsageLimitValue
+  daily_tasks: UsageLimitValue
+  weekly_tasks: UsageLimitValue
+}
+
+export interface AdminUsageLimitDefaultValue {
+  mode: 'custom' | 'unlimited'
+  value: number | null
+}
+
+export interface AdminUsageLimitUserValue {
+  mode: 'inherit' | 'custom' | 'unlimited'
+  value: number | null
+}
+
+export interface AdminUsageLimitDefaultUpdateRequest {
+  daily_tokens: AdminUsageLimitDefaultValue
+  weekly_tokens: AdminUsageLimitDefaultValue
+  daily_tasks: AdminUsageLimitDefaultValue
+  weekly_tasks: AdminUsageLimitDefaultValue
+}
+
+export interface AdminUsageLimitUserUpdateRequest {
+  daily_tokens: AdminUsageLimitUserValue
+  weekly_tokens: AdminUsageLimitUserValue
+  daily_tasks: AdminUsageLimitUserValue
+  weekly_tasks: AdminUsageLimitUserValue
+}
+
+export interface AdminUsageLimitUserRow {
+  user_id: number
+  username: string
+  display_name: string | null
+  usage: AdminUsageSummary
+  limits: AdminUsageLimitPolicy
+  overrides: AdminUsageLimitPolicy
+  reset_at: UsageResetAt
+}
+
 // Issue types
 export interface Issue {
   id: number
@@ -87,7 +169,11 @@ export interface Issue {
     total_changes: number
     input_tokens: number
     output_tokens: number
+    duration_seconds: number
   }
+  // New fields for branch deletion handling
+  delete_branch_on_close: boolean
+  branch_deleted: boolean
 }
 
 export interface CreateIssueRequest {
@@ -96,6 +182,13 @@ export interface CreateIssueRequest {
   project_id: number
   base_branch?: string
   target_branch?: string
+  // Option to delete branch when a webhook auto-closes the issue
+  delete_branch_on_close?: boolean
+}
+
+export interface CloseIssueRequest {
+  branch_action: 'keep' | 'delete'
+  delete_branch: boolean
 }
 
 export interface IssueListResponse {
@@ -132,13 +225,17 @@ export interface Task {
   input_tokens: number | null
   output_tokens: number | null
   model_name?: string | null
-  merge_request_title?: string | null
+  commit_message?: string | null
+  require_changes: boolean
+  task_mode: 'execute' | 'plan'
   provider_id: number | null
   provider_name?: string | null
   created_at: string
   updated_at: string
   started_at: string | null
   completed_at: string | null
+  is_manually_overridden?: boolean
+  override_reason?: string | null
   issue?: {
     id: number
     title: string
@@ -156,6 +253,8 @@ export interface Project {
   name: string
   path_with_namespace: string
   default_branch?: string
+  web_url?: string | null
+  description?: string | null
 }
 
 export interface Branch {
@@ -172,6 +271,7 @@ export interface AIProvider {
   max_turns: number
   system_prompt: string | null
   is_default: boolean
+  is_disabled: boolean
   created_at: string
   updated_at: string
 }
@@ -183,6 +283,7 @@ export interface CreateProviderRequest {
   model: string
   max_turns?: number
   system_prompt?: string
+  is_disabled?: boolean
 }
 
 export interface UpdateProviderRequest {
@@ -194,6 +295,7 @@ export interface UpdateProviderRequest {
   max_turns?: number
   system_prompt?: string | null
   clear_system_prompt?: boolean
+  is_disabled?: boolean
 }
 
 // Request types
@@ -204,6 +306,8 @@ export interface CreateTaskRequest {
   delay_seconds?: number
   scheduled_datetime?: string
   provider_id?: number | null
+  require_changes?: boolean
+  task_mode?: 'execute' | 'plan'
 }
 
 export interface RescheduleTaskRequest {
@@ -215,7 +319,7 @@ export interface TaskLog {
   task_id: number
   log_level: string
   log_type?: string | null
-  metadata?: string | null
+  metadata?: unknown
   message: string
   created_at: string
 }
@@ -227,6 +331,24 @@ export interface ToolCall {
   error: boolean
   /** ISO timestamp present on real-time individual log entries (log_type='tool_call'). */
   timestamp?: string
+  duration_ms?: number
+  // Archive payload fields (from event archive system)
+  input_payload_id?: number
+  input_preview?: string
+  input_truncated?: boolean
+  output_payload_id?: number
+  output_preview?: string
+  output_truncated?: boolean
+  output_char_count?: number
+}
+
+export interface TaskPayloadResponse {
+  id: number
+  payload_kind: string
+  content: string
+  encoding: string
+  char_count: number
+  byte_count: number
 }
 
 export interface TaskStats {
@@ -279,6 +401,7 @@ export interface AnalyticsSummary {
   tracked_initiator_tasks: number
   token_tracked_tasks: number
   initiator_tracking_started_at: string | null
+  total_execution_seconds: number
   avg_execution_seconds: number | null
   max_execution_seconds: number | null
   avg_queue_wait_seconds: number | null
@@ -303,6 +426,7 @@ export interface AnalyticsProjectRow {
   output_tokens: number
   total_tokens: number
   avg_execution_seconds: number | null
+  total_execution_seconds: number
   avg_queue_wait_seconds: number | null
   last_task_at: string | null
 }
@@ -322,6 +446,7 @@ export interface AnalyticsInitiatorRow {
   output_tokens: number
   total_tokens: number
   avg_execution_seconds: number | null
+  total_execution_seconds: number
   avg_queue_wait_seconds: number | null
   last_task_at: string | null
 }
@@ -449,10 +574,22 @@ export interface RuntimeConfig {
   allow_analytics_for_users: boolean
   allow_oidc_diagnostics_for_users: boolean
   worker_volume_mounts: string
+  worker_environment_variables: WorkerEnvironmentVariable[]
   maven_cache_host_path: string
   maven_settings_host_path: string
   slot_max_tasks: number
   slot_max_tasks_enforce: boolean
+  announcement_enabled: boolean
+  announcement_text: string
+  announcement_level: string
+}
+
+export interface WorkerEnvironmentVariable {
+  id?: number
+  key: string
+  value: string
+  is_secret: boolean
+  value_configured: boolean
 }
 
 export interface AuthConfig {
@@ -462,6 +599,7 @@ export interface AuthConfig {
   oidc_redirect_uri: string
   session_cookie_name: string
   session_ttl_seconds: number
+  session_retention_days: number
   cookie_secure: boolean
   cookie_samesite: string
   auth_admin_usernames: string
@@ -562,14 +700,27 @@ export interface MattermostResolveChannelTargetPayload {
 }
 
 export interface RuntimeConfigUpdate
-  extends Partial<Omit<RuntimeConfig, 'alert_webhook_url_configured' | 'anthropic_api_key_configured'>> {
+  extends Partial<
+    Omit<
+      RuntimeConfig,
+      'alert_webhook_url_configured' | 'anthropic_api_key_configured' | 'worker_environment_variables'
+    >
+  > {
   alert_webhook_url?: string
   clear_alert_webhook_url?: boolean
   anthropic_api_key?: string
   clear_anthropic_api_key?: boolean
   worker_volume_mounts?: string
+  worker_environment_variables?: WorkerEnvironmentVariableUpdate[]
   maven_cache_host_path?: string
   maven_settings_host_path?: string
+}
+
+export interface WorkerEnvironmentVariableUpdate {
+  id?: number
+  key: string
+  value: string
+  is_secret: boolean
 }
 
 export interface AuthConfigUpdate extends Partial<Omit<AuthConfig, 'oidc_client_secret_configured'>> {
@@ -803,7 +954,7 @@ export async function getTasksPaginated(params: {
   return response.data
 }
 
-export async function getScheduledTasks(params?: { project_id?: number; hour_start?: string }): Promise<Task[]> {
+export async function getScheduledTasks(params?: { project_id?: number; hour_start?: string; my?: boolean }): Promise<Task[]> {
   const response = await api.get('/tasks/scheduled', { params })
   return response.data
 }
@@ -828,9 +979,11 @@ export interface ScheduledStatsResponse {
   summary: ScheduledStatsSummary
   hourly_distribution: HourlyBucket[]
   max_count: number
+  slot_max_tasks: number
+  slot_max_tasks_enforce: boolean
 }
 
-export async function getScheduledStats(params?: { project_id?: number }): Promise<ScheduledStatsResponse> {
+export async function getScheduledStats(params?: { project_id?: number; my?: boolean }): Promise<ScheduledStatsResponse> {
   const response = await api.get('/stats/scheduled', { params })
   return response.data
 }
@@ -873,26 +1026,80 @@ export function streamTaskLogs(
   sinceId: number,
   onLog: (log: TaskLog) => void,
   onDone?: () => void,
+  onUpdate?: (log: TaskLog) => void,
 ): EventSource {
   const url = `/api/tasks/${id}/log-stream?since_id=${sinceId}`
   const source = new EventSource(url)
+  const _openTime = Date.now()
+  let _firstBatch = true
+  let _totalBatches = 0
+  let _totalLogs = 0
 
   source.onmessage = (event) => {
+    // Unnamed events carry only server-side error payloads:
+    //   data: {"error": "..."}
+    // Regular log entries are delivered via the named "batch" event.
+    // NOTE: backend and frontend must be deployed together — old server
+    // versions emit individual unnamed events that this handler no longer
+    // forwards to onLog.
     try {
       const data = JSON.parse(event.data)
       if (data.error) {
         console.error(`[streamTaskLogs] server error: ${data.error}`)
-      } else {
-        onLog(data as TaskLog)
       }
+      // No else: non-error unnamed events are unexpected with current server.
     } catch (e) {
       console.warn('[streamTaskLogs] failed to parse SSE message', e)
     }
   }
 
+  // "batch" events deliver all log entries from a single poll cycle as a JSON
+  // array in ONE SSE message.  This lets the browser handle them in a single
+  // macrotask so the queueMicrotask gate in TaskView can coalesce them into one
+  // Vue reactive update instead of triggering O(n²) updates for n log entries.
+  source.addEventListener('batch', (event) => {
+    try {
+      const logs = JSON.parse((event as MessageEvent).data) as TaskLog[]
+      _totalBatches++
+      _totalLogs += logs.length
+      if (_firstBatch) {
+        _firstBatch = false
+        console.debug(
+          `[streamTaskLogs] task=${id} first-batch count=${logs.length} ` +
+          `time_to_first_ms=${Date.now() - _openTime}`
+        )
+      } else if (_totalBatches % 10 === 0) {
+        // Sampled log — avoids flooding DevTools for tasks with many poll cycles
+        console.debug(
+          `[streamTaskLogs] task=${id} batch #${_totalBatches} count=${logs.length} total=${_totalLogs}`
+        )
+      }
+      for (const data of logs) {
+        onLog(data)
+      }
+    } catch (e) {
+      console.warn('[streamTaskLogs] failed to parse SSE batch event', e)
+    }
+  })
+
   source.addEventListener('done', () => {
+    console.debug(
+      `[streamTaskLogs] task=${id} done ` +
+      `batches=${_totalBatches} total_logs=${_totalLogs} elapsed_ms=${Date.now() - _openTime}`
+    )
     source.close()
     onDone?.()
+  })
+
+  // "update" events carry an in-place metadata change to an existing log row
+  // (e.g. output_payload_id becoming available on a tool_call log).
+  source.addEventListener('update', (event) => {
+    try {
+      const data = JSON.parse((event as MessageEvent).data)
+      onUpdate?.(data as TaskLog)
+    } catch (e) {
+      console.warn('[streamTaskLogs] failed to parse SSE update event', e)
+    }
   })
 
   source.onerror = (e) => {
@@ -913,6 +1120,21 @@ export async function getTaskContainerLogs(id: number, source?: 'db' | 'auto'): 
   return response.data
 }
 
+export async function getTaskArchive(id: number): Promise<{ archive_name: string; archive_size_bytes: number; created_at: string; file_exists: boolean }> {
+  const response = await api.get(`/tasks/${id}/archive`)
+  return response.data
+}
+
+export async function downloadTaskArchive(id: number): Promise<Blob> {
+  const response = await api.get(`/tasks/${id}/archive/download`, { responseType: 'blob' })
+  return response.data
+}
+
+export async function getTaskPayload(taskId: number, payloadId: number): Promise<TaskPayloadResponse> {
+  const response = await api.get(`/tasks/${taskId}/payloads/${payloadId}`)
+  return response.data
+}
+
 export async function getTaskStats(id: number): Promise<TaskStats> {
   const response = await api.get(`/tasks/${id}/stats`)
   return response.data
@@ -920,6 +1142,10 @@ export async function getTaskStats(id: number): Promise<TaskStats> {
 
 export async function cancelTask(id: number): Promise<void> {
   await api.post(`/tasks/${id}/cancel`)
+}
+
+export async function overrideTaskStatus(id: number, status: 'completed' | 'failed', reason?: string): Promise<void> {
+  await api.post(`/tasks/${id}/override-status`, { status, reason: reason || null })
 }
 
 export async function retryTask(id: number, scheduledDatetime?: string): Promise<Task> {
@@ -978,6 +1204,28 @@ export async function getAnalytics(
 
 export async function getConfig(): Promise<Config> {
   const response = await api.get('/config')
+  return response.data
+}
+
+export interface CleanupSystemDataRequest {
+  older_than_days?: number | null
+  force: boolean
+}
+
+export interface CleanupSystemDataResult {
+  deleted_issues: number
+  deleted_tasks: number
+  skipped_active_issues: number
+  skipped_active_tasks: number
+  deleted_archives: number
+  missing_archives: number
+  deleted_workspaces: number
+  container_cleanup_errors: Array<{ task_id: number; container_name: string; error: string }>
+  file_cleanup_errors: Array<{ kind: string; path: string; error: string }>
+}
+
+export async function cleanupSystemData(request: CleanupSystemDataRequest): Promise<CleanupSystemDataResult> {
+  const response = await api.post('/config/maintenance/cleanup-system-data', request)
   return response.data
 }
 
@@ -1144,6 +1392,31 @@ export async function revokeAdminUserSessions(userId: number): Promise<RevokeUse
   return response.data
 }
 
+export async function getAdminUsageLimitDefault(): Promise<AdminUsageLimitPolicy> {
+  const response = await api.get('/admin/usage-limits/default')
+  return response.data
+}
+
+export async function updateAdminUsageLimitDefault(
+  payload: AdminUsageLimitDefaultUpdateRequest
+): Promise<AdminUsageLimitPolicy> {
+  const response = await api.patch('/admin/usage-limits/default', payload)
+  return response.data
+}
+
+export async function listAdminUsageLimitUsers(): Promise<AdminUsageLimitUserRow[]> {
+  const response = await api.get('/admin/usage-limits/users')
+  return response.data
+}
+
+export async function updateAdminUsageLimitUser(
+  userId: number,
+  payload: AdminUsageLimitUserUpdateRequest
+): Promise<AdminUsageLimitUserRow> {
+  const response = await api.patch(`/admin/usage-limits/users/${userId}`, payload)
+  return response.data
+}
+
 export async function logout(): Promise<void> {
   await api.post('/auth/logout')
 }
@@ -1169,13 +1442,28 @@ export async function rescheduleTask(taskId: number, request: RescheduleTaskRequ
   return response.data
 }
 
+export interface UpdateTaskRequest {
+  user_prompt?: string
+  priority?: number
+  provider_id?: number | null
+  require_changes?: boolean
+  task_mode?: 'execute' | 'plan'
+}
+
+export async function updateTask(taskId: number, request: UpdateTaskRequest): Promise<Task> {
+  const response = await api.patch(`/tasks/${taskId}`, request)
+  return response.data
+}
+
 // Prompt Template APIs
 export interface PromptTemplate {
   id: number
   name: string
   content: string
   variable_tips?: Record<string, string>
+  tags?: string[]
   is_active: boolean
+  sort_order: number
   created_at: string
   updated_at: string
 }
@@ -1185,13 +1473,18 @@ export async function getPromptTemplates(): Promise<PromptTemplate[]> {
   return response.data
 }
 
-export async function createPromptTemplate(template: { name: string; content: string; variable_tips?: Record<string, string>; is_active?: boolean }): Promise<PromptTemplate> {
+export async function createPromptTemplate(template: { name: string; content: string; variable_tips?: Record<string, string>; tags?: string[]; is_active?: boolean }): Promise<PromptTemplate> {
   const response = await api.post('/prompt-templates', template)
   return response.data
 }
 
-export async function updatePromptTemplate(templateId: number, template: { name?: string; content?: string; variable_tips?: Record<string, string>; is_active?: boolean }): Promise<PromptTemplate> {
+export async function updatePromptTemplate(templateId: number, template: { name?: string; content?: string; variable_tips?: Record<string, string>; tags?: string[]; is_active?: boolean }): Promise<PromptTemplate> {
   const response = await api.put(`/prompt-templates/${templateId}`, template)
+  return response.data
+}
+
+export async function reorderPromptTemplates(templateIds: number[]): Promise<PromptTemplate[]> {
+  const response = await api.put('/prompt-templates/reorder', { template_ids: templateIds })
   return response.data
 }
 
@@ -1235,8 +1528,11 @@ export async function updateIssue(id: number, data: Partial<{
   return response.data
 }
 
-export async function closeIssue(id: number): Promise<Issue> {
-  const response = await api.post(`/issues/${id}/close`)
+export async function closeIssue(
+  id: number,
+  request: CloseIssueRequest = { branch_action: 'keep', delete_branch: false }
+): Promise<Issue> {
+  const response = await api.post(`/issues/${id}/close`, request)
   return response.data
 }
 
@@ -1272,6 +1568,27 @@ export async function deleteProvider(id: number): Promise<void> {
 export async function setDefaultProvider(id: number): Promise<AIProvider> {
   const { data } = await api.post(`/providers/${id}/set-default`)
   return data
+}
+
+export async function getMyUsageSummary(): Promise<CurrentUserUsageSummary> {
+  const { data } = await api.get('/usage/me')
+  return data
+}
+
+export async function deleteIssueBranch(id: number): Promise<Issue> {
+  const response = await api.post(`/issues/${id}/delete-branch`)
+  return response.data
+}
+
+export interface AnnouncementInfo {
+  enabled: boolean
+  text: string
+  level: string // 'info' | 'warning' | 'error' | 'success'
+}
+
+export async function getAnnouncement(): Promise<AnnouncementInfo> {
+  const response = await api.get('/announcement')
+  return response.data
 }
 
 export default api

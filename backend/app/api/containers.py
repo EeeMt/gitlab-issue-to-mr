@@ -11,17 +11,50 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
-from app.database import get_db
-from app.dependencies.auth import require_admin_user, require_authenticated_user, require_page_access
-from app.dependencies.auth import get_optional_current_user
-from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
-from app.models import Issue, Task, TaskLog, User
-from app.core.docker_client import get_docker_client
 from app.api.task_operations import get_task_with_access_check
+from app.config import get_settings
+from app.core.docker_client import get_docker_client
+from app.database import get_db
+from app.dependencies.auth import (
+    get_optional_current_user,
+    require_authenticated_user,
+    require_page_access,
+)
+from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
+from app.models import Issue, Task, TaskLog, TaskRawLogChunk, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_CA_REPLACEMENT_LINE_RE = re.compile(r"^Replacing debian:[^\r\n]+\.pem\r?$")
+
+
+def _compact_raw_log_noise(logs: str) -> str:
+    """Collapse noisy certificate replacement chatter while preserving other raw output."""
+    if "Replacing debian:" not in logs:
+        return logs
+
+    output_lines: list[str] = []
+    suppressed_count = 0
+
+    def flush_suppressed() -> None:
+        nonlocal suppressed_count
+        if suppressed_count:
+            output_lines.append(f"[suppressed {suppressed_count} CA certificate replacement lines]")
+            suppressed_count = 0
+
+    for line in logs.splitlines():
+        if _CA_REPLACEMENT_LINE_RE.match(line):
+            suppressed_count += 1
+            continue
+        flush_suppressed()
+        output_lines.append(line)
+
+    flush_suppressed()
+    compacted = "\n".join(output_lines)
+    if logs.endswith("\n"):
+        compacted += "\n"
+    return compacted
 
 
 def _get_container_pattern() -> re.Pattern:
@@ -218,6 +251,17 @@ async def get_task_container_logs(
         }
 
     async def _fetch_db_chunks() -> str:
+        # New format: TaskRawLogChunk (written by the event archive system)
+        chunk_result = await db.execute(
+            select(TaskRawLogChunk)
+            .where(TaskRawLogChunk.task_id == task_id)
+            .order_by(TaskRawLogChunk.sequence_no.asc())
+        )
+        new_chunks = chunk_result.scalars().all()
+        if new_chunks:
+            return "".join(c.content.decode("utf-8", errors="replace") for c in new_chunks)
+
+        # Legacy fallback: TaskLog with log_type IS NULL (old tasks without event archive)
         log_result = await db.execute(
             select(TaskLog)
             .where(TaskLog.task_id == task_id, TaskLog.log_type.is_(None))
@@ -230,7 +274,7 @@ async def get_task_container_logs(
         logs = await _fetch_db_chunks()
         return {
             "container_id": task.container_id,
-            "logs": logs,
+            "logs": _compact_raw_log_noise(logs),
             "status": task.status,
             "source": "db",
         }
@@ -243,7 +287,7 @@ async def get_task_container_logs(
         return {
             "container_id": task.container_id,
             "container_status": container.status,
-            "logs": logs,
+            "logs": _compact_raw_log_noise(logs),
             "status": task.status,
         }
     except Exception as e:
@@ -252,7 +296,7 @@ async def get_task_container_logs(
         if logs:
             return {
                 "container_id": task.container_id,
-                "logs": logs,
+                "logs": _compact_raw_log_noise(logs),
                 "status": task.status,
                 "source": "db",
             }

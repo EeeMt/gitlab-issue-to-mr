@@ -27,7 +27,7 @@ COPY backend/tests/mock_integration/fake_claude/ci-claude.sh /usr/local/bin/ci-c
 RUN chmod +x /usr/local/bin/ci-claude.sh
 
 # Copy real entrypoint.sh (this is what we're testing!)
-COPY deploy/entrypoint.sh /entrypoint.sh
+COPY deploy/entrypoint.worker.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Ensure codify user can write to workspace

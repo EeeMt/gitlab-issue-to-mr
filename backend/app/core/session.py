@@ -7,7 +7,7 @@ import secrets
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 from hashlib import sha256
 
 from sqlalchemy import delete, func, select
@@ -18,7 +18,7 @@ from app.core.config_crypto import decrypt_config_secret, encrypt_config_secret
 from app.core.utcnow import utcnow
 from app.models import User, UserSession
 
-SESSION_RETENTION_DAYS = 30
+SESSION_RETENTION_DAYS = 30  # kept for backward compat (tests); runtime uses get_effective_settings()
 
 # Backward-compatible alias for tests that import the old private helper.
 _utcnow = utcnow
@@ -56,14 +56,11 @@ async def create_user_session(
     user_agent: str | None = None,
     gitlab_access_token: str | None = None,
     gitlab_refresh_token: str | None = None,
-    max_expires_at: datetime | None = None,
 ) -> str:
     """Create a new session row and return the raw session token."""
     settings = get_effective_settings()
     raw_token = generate_session_token()
     expires_at = utcnow() + timedelta(seconds=settings.session_ttl_seconds)
-    if max_expires_at is not None and max_expires_at < expires_at:
-        expires_at = max_expires_at
     session = UserSession(
         id=str(uuid.uuid4()),
         user_id=user.id,
@@ -175,9 +172,8 @@ async def update_session_gitlab_tokens(
     *,
     gitlab_access_token: str | None,
     gitlab_refresh_token: str | None = None,
-    max_expires_at: datetime | None = None,
 ) -> None:
-    """Update encrypted GitLab tokens and optional session expiry."""
+    """Update encrypted GitLab tokens stored for a session."""
     session.gitlab_access_token_encrypted = (
         encrypt_config_secret(gitlab_access_token) if gitlab_access_token else None
     )
@@ -185,8 +181,6 @@ async def update_session_gitlab_tokens(
         session.gitlab_refresh_token_encrypted = (
             encrypt_config_secret(gitlab_refresh_token) if gitlab_refresh_token else None
         )
-    if max_expires_at is not None and max_expires_at < session.expires_at:
-        session.expires_at = max_expires_at
     session.last_seen_at = utcnow()
     await db.flush()
 
@@ -239,9 +233,11 @@ async def revoke_session_by_id(db: AsyncSession, session_id: str) -> bool:
 async def cleanup_stale_sessions(
     db: AsyncSession,
     *,
-    retention_days: int = SESSION_RETENTION_DAYS,
+    retention_days: int | None = None,
 ) -> int:
     """Delete sessions that expired or were revoked before the retention cutoff."""
+    if retention_days is None:
+        retention_days = get_effective_settings().session_retention_days
     cutoff = utcnow() - timedelta(days=retention_days)
     result = await db.execute(
         delete(UserSession).where(

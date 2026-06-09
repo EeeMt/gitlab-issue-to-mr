@@ -19,15 +19,15 @@ Endpoints under test:
 from __future__ import annotations
 
 import os
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
-    create_async_engine,
     async_sessionmaker,
+    create_async_engine,
 )
 from sqlalchemy.pool import StaticPool
 
@@ -52,7 +52,7 @@ from app.models import Base
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 async def _test_engine():
     """In-memory SQLite async engine with all tables created."""
     engine = create_async_engine(
@@ -71,20 +71,20 @@ async def _test_engine():
     await engine.dispose()
 
 
-@pytest.fixture()
+@pytest.fixture
 async def session_factory(_test_engine):
     return async_sessionmaker(
         _test_engine, class_=AsyncSession, expire_on_commit=False
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 async def db_session(session_factory):
     async with session_factory() as session:
         yield session
 
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_admin_user():
     user = MagicMock()
     user.id = 1
@@ -94,7 +94,7 @@ def _mock_admin_user():
     return user
 
 
-@pytest.fixture()
+@pytest.fixture
 async def client(session_factory, _mock_admin_user):
     """httpx.AsyncClient wired to the FastAPI app with auth overrides."""
 
@@ -133,6 +133,22 @@ def _isolate_runtime_config():
     yield
     _runtime_config.clear()
     _runtime_config.update(saved)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_settings_cache():
+    """Ensure tests always run with the expected config encryption key."""
+    from app.config import get_settings
+
+    original = os.environ.get("CONFIG_ENCRYPTION_KEY")
+    os.environ["CONFIG_ENCRYPTION_KEY"] = "test-config-e2e-key-32chars!!!"
+    get_settings.cache_clear()
+    yield
+    if original is None:
+        os.environ.pop("CONFIG_ENCRYPTION_KEY", None)
+    else:
+        os.environ["CONFIG_ENCRYPTION_KEY"] = original
+    get_settings.cache_clear()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -191,6 +207,10 @@ class TestGetRuntimeConfig:
             "allow_analytics_for_users", "allow_oidc_diagnostics_for_users",
             "worker_volume_mounts", "maven_cache_host_path",
             "maven_settings_host_path", "slot_max_tasks", "slot_max_tasks_enforce",
+            "worker_environment_variables",
+            "worker_workspace_host_path", "worker_workspace_retention_days",
+            "worker_failed_workspace_retention_days",
+            "announcement_enabled", "announcement_level", "announcement_text",
         }
         assert expected_keys == set(data.keys())
 
@@ -200,6 +220,44 @@ class TestGetRuntimeConfig:
         resp = await client.get("/api/config/runtime")
         assert resp.status_code == 200
         assert resp.json()["anthropic_api_key_configured"] is True
+
+    async def test_returns_worker_environment_variables_with_plain_and_secret_rows(self, client: AsyncClient):
+        """Runtime config should expose plain values and mask secret values."""
+        patch_resp = await client.patch(
+            "/api/config/runtime",
+            json={
+                "worker_environment_variables": [
+                    {"key": "SECRET_TOKEN", "value": "secret-123", "is_secret": True},
+                    {"key": "PLAIN_TOKEN", "value": "plain-123", "is_secret": False},
+                ]
+            },
+        )
+
+        assert patch_resp.status_code == 200
+        worker_environment_variables = patch_resp.json()["worker_environment_variables"]
+        assert all(isinstance(item["id"], int) for item in worker_environment_variables)
+        assert len({item["id"] for item in worker_environment_variables}) == 2
+        assert [
+            {key: value for key, value in item.items() if key != "id"}
+            for item in worker_environment_variables
+        ] == [
+            {
+                "key": "PLAIN_TOKEN",
+                "value": "plain-123",
+                "is_secret": False,
+                "value_configured": True,
+            },
+            {
+                "key": "SECRET_TOKEN",
+                "value": "",
+                "is_secret": True,
+                "value_configured": True,
+            },
+        ]
+
+        get_resp = await client.get("/api/config/runtime")
+        assert get_resp.status_code == 200
+        assert get_resp.json()["worker_environment_variables"] == patch_resp.json()["worker_environment_variables"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -368,6 +426,98 @@ class TestUpdateRuntimeConfig:
         get2 = await client.get("/api/config/runtime")
         assert get1.json() == get2.json()
 
+    async def test_worker_environment_variables_reject_reserved_key(self, client: AsyncClient):
+        """Reserved worker env var keys should be rejected."""
+        resp = await client.patch(
+            "/api/config/runtime",
+            json={
+                "worker_environment_variables": [
+                    {"key": "TASK_ID", "value": "123", "is_secret": False}
+                ]
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "reserved" in resp.json()["detail"]
+
+    async def test_worker_environment_variables_reject_duplicate_key(self, client: AsyncClient):
+        """Duplicate worker env var keys should be rejected."""
+        resp = await client.patch(
+            "/api/config/runtime",
+            json={
+                "worker_environment_variables": [
+                    {"key": "PLAIN_TOKEN", "value": "one", "is_secret": False},
+                    {"key": "PLAIN_TOKEN", "value": "two", "is_secret": False},
+                ]
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "Duplicate worker environment variable key" in resp.json()["detail"]
+
+    async def test_worker_environment_variables_null_is_non_destructive(self, client: AsyncClient):
+        """Null worker env vars must leave persisted rows unchanged."""
+        first_resp = await client.patch(
+            "/api/config/runtime",
+            json={
+                "worker_environment_variables": [
+                    {"key": "PLAIN_TOKEN", "value": "plain-123", "is_secret": False},
+                    {"key": "SECRET_TOKEN", "value": "secret-123", "is_secret": True},
+                ]
+            },
+        )
+        assert first_resp.status_code == 200
+
+        second_resp = await client.patch(
+            "/api/config/runtime",
+            json={"worker_environment_variables": None},
+        )
+
+        assert second_resp.status_code == 200
+        assert second_resp.json()["worker_environment_variables"] == first_resp.json()["worker_environment_variables"]
+
+        get_resp = await client.get("/api/config/runtime")
+        assert get_resp.status_code == 200
+        assert get_resp.json()["worker_environment_variables"] == first_resp.json()["worker_environment_variables"]
+
+    async def test_blank_secret_worker_environment_value_preserves_existing_secret(self, client: AsyncClient):
+        """Blank secret updates should preserve the previously stored secret value."""
+        first_resp = await client.patch(
+            "/api/config/runtime",
+            json={
+                "worker_environment_variables": [
+                    {"key": "SECRET_TOKEN", "value": "secret-123", "is_secret": True}
+                ]
+            },
+        )
+        assert first_resp.status_code == 200
+
+        second_resp = await client.patch(
+            "/api/config/runtime",
+            json={
+                "worker_environment_variables": [
+                    {"key": "SECRET_TOKEN", "value": "", "is_secret": True}
+                ]
+            },
+        )
+
+        assert second_resp.status_code == 200
+        worker_environment_variables = second_resp.json()["worker_environment_variables"]
+        assert len(worker_environment_variables) == 1
+        assert isinstance(worker_environment_variables[0]["id"], int)
+        assert [{key: value for key, value in worker_environment_variables[0].items() if key != "id"}] == [
+            {
+                "key": "SECRET_TOKEN",
+                "value": "",
+                "is_secret": True,
+                "value_configured": True,
+            }
+        ]
+
+        get_resp = await client.get("/api/config/runtime")
+        assert get_resp.status_code == 200
+        assert get_resp.json()["worker_environment_variables"] == second_resp.json()["worker_environment_variables"]
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # DELETE /api/config/runtime/{key} — Reset single runtime config key
@@ -431,6 +581,15 @@ class TestGetAggregatedConfig:
 
     async def test_runtime_section_matches_standalone(self, client: AsyncClient):
         """runtime section should match the standalone GET /api/config/runtime."""
+        await client.patch(
+            "/api/config/runtime",
+            json={
+                "worker_environment_variables": [
+                    {"key": "SECRET_TOKEN", "value": "secret-123", "is_secret": True},
+                    {"key": "PLAIN_TOKEN", "value": "plain-123", "is_secret": False},
+                ]
+            },
+        )
         agg_resp = await client.get("/api/config")
         rt_resp = await client.get("/api/config/runtime")
         assert agg_resp.json()["runtime"] == rt_resp.json()
@@ -527,6 +686,85 @@ class TestUpdateAggregatedConfig:
         assert data["runtime"]["max_concurrency"] == 7
         assert data["integration"]["gitlab_url"] == "https://gitlab.multi.com"
 
+    async def test_update_runtime_worker_environment_variables_matches_standalone_runtime(self, client: AsyncClient):
+        """Aggregated runtime updates should behave the same as standalone runtime updates."""
+        resp = await client.patch(
+            "/api/config",
+            json={
+                "runtime": {
+                    "worker_environment_variables": [
+                        {"key": "SECRET_TOKEN", "value": "secret-123", "is_secret": True},
+                        {"key": "PLAIN_TOKEN", "value": "plain-123", "is_secret": False},
+                    ]
+                }
+            },
+        )
+
+        assert resp.status_code == 200
+        runtime_resp = await client.get("/api/config/runtime")
+        assert runtime_resp.status_code == 200
+        assert resp.json()["runtime"] == runtime_resp.json()
+
+    async def test_update_runtime_worker_environment_variables_rejects_reserved_key(self, client: AsyncClient):
+        """Aggregated runtime updates should reject reserved worker env var keys."""
+        resp = await client.patch(
+            "/api/config",
+            json={
+                "runtime": {
+                    "worker_environment_variables": [
+                        {"key": "TASK_ID", "value": "123", "is_secret": False}
+                    ]
+                }
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "reserved" in resp.json()["detail"]
+
+    async def test_update_runtime_worker_environment_variables_rejects_duplicate_key(self, client: AsyncClient):
+        """Aggregated runtime updates should reject duplicate worker env var keys."""
+        resp = await client.patch(
+            "/api/config",
+            json={
+                "runtime": {
+                    "worker_environment_variables": [
+                        {"key": "PLAIN_TOKEN", "value": "one", "is_secret": False},
+                        {"key": "PLAIN_TOKEN", "value": "two", "is_secret": False},
+                    ]
+                }
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "Duplicate worker environment variable key" in resp.json()["detail"]
+
+    async def test_update_runtime_worker_environment_variables_null_is_non_destructive(self, client: AsyncClient):
+        """Aggregated runtime null worker env vars must leave persisted rows unchanged."""
+        first_resp = await client.patch(
+            "/api/config",
+            json={
+                "runtime": {
+                    "worker_environment_variables": [
+                        {"key": "PLAIN_TOKEN", "value": "plain-123", "is_secret": False},
+                        {"key": "SECRET_TOKEN", "value": "secret-123", "is_secret": True},
+                    ]
+                }
+            },
+        )
+        assert first_resp.status_code == 200
+
+        second_resp = await client.patch(
+            "/api/config",
+            json={"runtime": {"worker_environment_variables": None}},
+        )
+
+        assert second_resp.status_code == 200
+        assert second_resp.json()["runtime"]["worker_environment_variables"] == first_resp.json()["runtime"]["worker_environment_variables"]
+
+        runtime_resp = await client.get("/api/config/runtime")
+        assert runtime_resp.status_code == 200
+        assert runtime_resp.json()["worker_environment_variables"] == first_resp.json()["runtime"]["worker_environment_variables"]
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # POST /api/config/reset — Reset all overrides
@@ -574,6 +812,29 @@ class TestResetConfig:
         await client.post("/api/config/reset")
         resp2 = await client.get("/api/config/runtime")
         assert resp2.json()["anthropic_api_key_configured"] is False
+
+    async def test_reset_does_not_clear_worker_environment_variables(self, client: AsyncClient):
+        """Reset must NOT remove persisted worker env vars (out of scope for config reset)."""
+        patch_resp = await client.patch(
+            "/api/config/runtime",
+            json={
+                "worker_environment_variables": [
+                    {"key": "PLAIN_TOKEN", "value": "plain-123", "is_secret": False},
+                    {"key": "SECRET_TOKEN", "value": "secret-123", "is_secret": True},
+                ]
+            },
+        )
+        assert patch_resp.status_code == 200
+        assert len(patch_resp.json()["worker_environment_variables"]) == 2
+
+        reset_resp = await client.post("/api/config/reset")
+        assert reset_resp.status_code == 200
+        # worker_environment_variables must survive a config reset
+        assert len(reset_resp.json()["runtime"]["worker_environment_variables"]) == 2
+
+        runtime_resp = await client.get("/api/config/runtime")
+        assert runtime_resp.status_code == 200
+        assert len(runtime_resp.json()["worker_environment_variables"]) == 2
 
 
 # ═══════════════════════════════════════════════════════════════════════════

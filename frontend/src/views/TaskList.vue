@@ -1,7 +1,7 @@
 <template>
   <div class="dashboard" data-testid="tasks-page">
     <n-spin :show="initialLoading" :description="t('common.loadingTasks')">
-      <n-space vertical :size="16">
+      <div class="page-hero">
         <PageHeader
           data-testid="tasks-header"
           root-class="dashboard__hero"
@@ -29,6 +29,8 @@
             <SummaryCard
               :label="item.label"
               :value="item.value"
+              :icon="item.icon"
+              :accent="item.accent"
               data-testid="tasks-summary-card"
               card-class="dashboard-summary-card"
               label-class="dashboard-summary-card__label"
@@ -36,7 +38,8 @@
             />
           </n-gi>
         </n-grid>
-
+      </div>
+      <n-space vertical :size="16">
         <FilterToolbar
           :config="filterConfig"
           :filters="filterState.filters.value"
@@ -54,20 +57,37 @@
           @toggle-column="filterState.toggleColumn"
           @reset-columns="filterState.resetColumns"
           @search="onSearch"
-        />
+        >
+          <template v-if="currentUsername" #quick-filters>
+            <n-button
+              size="small"
+              :type="isMyFilterActive ? 'primary' : 'default'"
+              :secondary="!isMyFilterActive"
+              @click="toggleMyFilter"
+            >
+              <template #icon>
+                <n-icon size="14"><PersonOutline /></n-icon>
+              </template>
+              {{ t('filter.mine') }}
+            </n-button>
+          </template>
+        </FilterToolbar>
 
         <n-card class="dashboard-table-card" :bordered="false" data-testid="tasks-table-card">
-          <n-data-table
-            data-testid="tasks-table"
-            :columns="columns"
-            :data="tasks"
-            :loading="tableLoading"
-            :row-key="(row: Task) => row.id"
-            :row-props="getRowProps"
-            :pagination="pagination"
-            remote
-            :bordered="false"
-          />
+          <div class="dashboard-table-shell">
+            <n-data-table
+              data-testid="tasks-table"
+              :columns="columns"
+              :data="tasks"
+              :loading="tableLoading"
+              :row-key="(row: Task) => row.id"
+              :row-props="getRowProps"
+              :pagination="pagination"
+              :scroll-x="tableScrollX"
+              remote
+              :bordered="false"
+            />
+          </div>
         </n-card>
       </n-space>
     </n-spin>
@@ -76,21 +96,23 @@
 
 <script setup lang="ts">
 import { ref, onMounted, h, watch, computed } from 'vue'
-import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, DataTableColumns } from 'naive-ui'
-import { useRouter } from 'vue-router'
+import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, NIcon, useMessage, DataTableColumns } from 'naive-ui'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getProjects, getTasksPaginated, getStats, type Project, type Task } from '../api'
+import { authState } from '../auth'
 import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
 import FilterToolbar from '../components/filter/FilterToolbar.vue'
 import { useFilterSort, type FilterSortConfig } from '../composables/useFilterSort'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { usePolling } from '../composables/usePolling'
-import { formatDateTimeUtc8Compact } from '../utils/datetime'
-import { formatPriority, getProjectLabel as _getProjectLabel } from '../utils/format'
-import { EllipseOutline, FolderOpenOutline, FlagOutline, PersonOutline, CalendarOutline, GitMergeOutline, TimeOutline } from '@vicons/ionicons5'
+import { formatDateTimeUtc8Compact, parseUtcDate } from '../utils/datetime'
+import { formatDurationMs, formatPriority, getProjectLabel as _getProjectLabel } from '../utils/format'
+import { EllipseOutline, FolderOpenOutline, FlagOutline, PersonOutline, CalendarOutline, GitMergeOutline, TimeOutline, GridOutline, CheckmarkCircleOutline, PlayCircleOutline } from '@vicons/ionicons5'
 
 const router = useRouter()
+const route = useRoute()
 const message = useMessage()
 const { t } = useI18n()
 const { isMobile } = useBreakpoints()
@@ -191,10 +213,11 @@ const filterConfig: FilterSortConfig = {
     { key: 'status', label: 'filter.sortStatus' },
     { key: 'total_changes', label: 'filter.sortChanges' },
     { key: 'input_tokens', label: 'filter.sortTokens' },
+    { key: 'duration', label: 'filter.sortDuration' },
   ],
   columns: [
     { key: 'id', label: 'dashboard.id', defaultVisible: true, alwaysVisible: true },
-    { key: 'user_prompt', label: 'dashboard.task', defaultVisible: true, alwaysVisible: true },
+    { key: 'user_prompt', label: 'dashboard.prompt', defaultVisible: true },
     { key: 'project', label: 'dashboard.project', defaultVisible: true },
     { key: 'initiator_username', label: 'dashboard.initiator', defaultVisible: true },
     { key: 'issue', label: 'dashboard.issue', defaultVisible: false },
@@ -203,6 +226,7 @@ const filterConfig: FilterSortConfig = {
     { key: 'branch_name', label: 'dashboard.branch', defaultVisible: false },
     { key: 'merge_request_url', label: 'dashboard.mergeRequest', defaultVisible: false },
     { key: 'changes', label: 'common.changes', defaultVisible: true },
+    { key: 'duration', label: 'dashboard.duration', defaultVisible: true },
     { key: 'tokens', label: 'analytics.tokens', defaultVisible: false },
     { key: 'created_at', label: 'common.created', defaultVisible: true },
     { key: 'scheduled_at', label: 'dashboard.scheduled', defaultVisible: false },
@@ -210,8 +234,33 @@ const filterConfig: FilterSortConfig = {
   defaultSort: { field: 'created_at', order: 'desc' },
 }
 
-const filterState = useFilterSort(filterConfig)
+function getInitialFiltersFromQuery(): Record<string, any> {
+  const filters: Record<string, any> = {}
+  const { status, initiator_username, project_id, priority } = route.query
+  if (status) filters.status = String(status).split(',')
+  if (initiator_username) filters.initiator_username = String(initiator_username).split(',')
+  if (project_id) filters.project_id = String(project_id).split(',').map(Number)
+  if (priority) filters.priority = String(priority).split(',')
+  return filters
+}
+
+const filterState = useFilterSort(filterConfig, getInitialFiltersFromQuery())
 const searchTerm = ref('')
+
+const currentUsername = computed(() => authState.user?.username ?? null)
+
+const isMyFilterActive = computed(() => {
+  const val = filterState.filters.value['initiator_username']
+  return Array.isArray(val) && val.length === 1 && val[0] === currentUsername.value
+})
+
+function toggleMyFilter() {
+  if (isMyFilterActive.value) {
+    filterState.removeFilter('initiator_username')
+  } else if (currentUsername.value) {
+    filterState.addFilter('initiator_username', [currentUsername.value])
+  }
+}
 
 function onSearch(term: string) {
   searchTerm.value = term
@@ -270,6 +319,10 @@ function getInitiatorLabel(task: Task): string {
   return task.initiator_username?.trim() || '-'
 }
 
+function formatPrompt(value?: string | null): string {
+  return value?.trim() || '-'
+}
+
 const secondaryTextStyle = { fontSize: '11px', color: 'rgba(15,23,42,0.45)', marginTop: '2px', lineHeight: '1.4' }
 
 function formatNumber(value: number | null | undefined) {
@@ -322,10 +375,16 @@ const allDesktopColumns = computed<DataTableColumns<Task>>(() => {
       width: 52
     },
     {
-      title: t('createTask.prompt'),
+      title: t('dashboard.prompt'),
       key: 'user_prompt',
-      ellipsis: { tooltip: true },
-      render: (row) => row.user_prompt || '-',
+      width: 180,
+      ellipsis: {
+        tooltip: {
+          style: { maxWidth: '420px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any
+      },
+      render: (row) => formatPrompt(row.user_prompt)
     },
     {
       title: t('dashboard.project'),
@@ -418,6 +477,18 @@ const allDesktopColumns = computed<DataTableColumns<Task>>(() => {
       }
     },
     {
+      title: t('dashboard.duration'),
+      key: 'duration',
+      width: 80,
+      render: (row) => {
+        if (!row.started_at) return '—'
+        const started = parseUtcDate(row.started_at).getTime()
+        const ended = row.completed_at ? parseUtcDate(row.completed_at).getTime() : Date.now()
+        if (!started || !ended || ended < started) return '—'
+        return formatDurationMs(ended - started)
+      }
+    },
+    {
       title: t('analytics.tokens'),
       key: 'tokens',
       width: 140,
@@ -494,14 +565,23 @@ const columns = computed<DataTableColumns<Task>>(() => {
   const visible = filterState.visibleColumns.value
   return allDesktopColumns.value.filter((col) => 'key' in col && visible.includes(col.key as string))
 })
+
+const tableScrollX = computed(() => {
+  const width = columns.value.reduce((total, col) => {
+    const columnWidth = 'width' in col && typeof col.width === 'number' ? col.width : 160
+    return total + columnWidth
+  }, 0)
+  return Math.max(width, isMobile.value ? 360 : 960)
+})
+
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 const tableLoading = computed(() => loading.value && hasLoadedOnce.value)
 
 const summaryItems = computed(() => [
-  { label: t('dashboard.visibleTasks'), value: String(statsTotal.value) },
-  { label: t('dashboard.running'), value: String(statsRunning.value) },
-  { label: t('dashboard.pendingQueued'), value: String(statsPending.value) },
-  { label: t('dashboard.completed'), value: String(statsCompleted.value) },
+  { label: t('dashboard.visibleTasks'), value: String(statsTotal.value), icon: GridOutline, accent: 'blue' as const },
+  { label: t('dashboard.running'), value: String(statsRunning.value), icon: PlayCircleOutline, accent: 'green' as const },
+  { label: t('dashboard.pendingQueued'), value: String(statsPending.value), icon: TimeOutline, accent: 'amber' as const },
+  { label: t('dashboard.completed'), value: String(statsCompleted.value), icon: CheckmarkCircleOutline, accent: 'purple' as const },
 ])
 
 async function fetchTasks() {
@@ -573,6 +653,7 @@ onMounted(() => {
 <style scoped>
 .dashboard {
   max-width: var(--app-page-max-width);
+  min-width: 0;
 }
 
 .dashboard__filters {
@@ -589,6 +670,18 @@ onMounted(() => {
 
 .dashboard-table-card {
   border-radius: var(--app-card-radius);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.dashboard-table-card :deep(.n-card__content) {
+  min-width: 0;
+}
+
+.dashboard-table-shell {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 @media (max-width: 768px) {

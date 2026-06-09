@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -12,22 +12,22 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._validators import _is_valid_http_url
+
+# Import AuthConfigUpdate from config.py to avoid duplication
+from app.api.config import AuthConfigUpdate
 from app.config import Settings, get_effective_settings
 from app.core.config_crypto import ConfigEncryptionError
 from app.core.oidc import (
     OIDCConfigurationError,
     build_authorization_url_for_settings,
+    get_oidc_discovery_document_for_settings,
     get_required_oidc_scope_string,
     get_required_oidc_scopes,
-    get_oidc_discovery_document_for_settings,
 )
 from app.database import get_db
 from app.dependencies.auth import require_admin_user, require_page_access
-from app.runtime_config import load_runtime_config_from_db
 from app.models import User
-
-# Import AuthConfigUpdate from config.py to avoid duplication
-from app.api.config import AuthConfigUpdate
+from app.runtime_config import load_runtime_config_from_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -41,9 +41,7 @@ def _normalize_updates(updates: dict[str, Any]) -> dict[str, Any]:
             continue
         if key == "session_ttl_seconds" and isinstance(value, int):
             normalized[key] = max(300, min(value, 604800))
-        elif key == "cookie_samesite" and value not in ("lax", "strict", "none"):
-            continue
-        elif isinstance(value, str) and not value.strip():
+        elif key == "cookie_samesite" and value not in ("lax", "strict", "none") or isinstance(value, str) and not value.strip():
             continue
         else:
             normalized[key] = value
@@ -85,9 +83,6 @@ def _build_oidc_diagnostics_warnings(settings: Settings) -> list[str]:
     if settings.cookie_samesite == "none" and not settings.cookie_secure:
         warnings.append("SameSite=None without secure cookies is rejected by many browsers.")
 
-    if not settings.break_glass_enabled:
-        warnings.append("Break-glass recovery is currently disabled.")
-
     if settings.admin_gitlab_groups:
         warnings.append(
             "Group-based admin bootstrap is enabled. Verify GitLab OIDC returns groups in claims or userinfo; otherwise those admin grants will not apply."
@@ -123,7 +118,7 @@ def _build_endpoint_checks(discovery: dict[str, Any]) -> list[OIDCDiagnosticsChe
 
 
 class OIDCConfigTestRequest(BaseModel):
-    auth: "AuthConfigUpdate"
+    auth: AuthConfigUpdate
 
 
 class OIDCConfigTestResponse(BaseModel):
@@ -149,11 +144,11 @@ class OIDCDiagnosticsResponse(BaseModel):
     cookie_samesite: str
     required_scopes: list[str]
     required_scope_string: str
-    authorization_url_preview: Optional[str]
-    discovery_issuer: Optional[str]
-    authorization_endpoint: Optional[str]
-    token_endpoint: Optional[str]
-    userinfo_endpoint: Optional[str]
+    authorization_url_preview: str | None
+    discovery_issuer: str | None
+    authorization_endpoint: str | None
+    token_endpoint: str | None
+    userinfo_endpoint: str | None
     checks: list[OIDCDiagnosticsCheck]
     warnings: list[str]
 
@@ -163,7 +158,7 @@ async def test_oidc_config(
     request: Request,
     oidc_request: OIDCConfigTestRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(require_admin_user),
+    current_user: User | None = Depends(require_admin_user),
 ):
     """Validate OIDC connectivity with current or unsaved config values.
 
@@ -235,11 +230,11 @@ async def get_oidc_diagnostics(
     settings = get_effective_settings()
     warnings = _build_oidc_diagnostics_warnings(settings)
     checks: list[OIDCDiagnosticsCheck] = []
-    authorization_url_preview: Optional[str] = None
-    discovery_issuer: Optional[str] = None
-    authorization_endpoint: Optional[str] = None
-    token_endpoint: Optional[str] = None
-    userinfo_endpoint: Optional[str] = None
+    authorization_url_preview: str | None = None
+    discovery_issuer: str | None = None
+    authorization_endpoint: str | None = None
+    token_endpoint: str | None = None
+    userinfo_endpoint: str | None = None
 
     try:
         discovery = await get_oidc_discovery_document_for_settings(settings)

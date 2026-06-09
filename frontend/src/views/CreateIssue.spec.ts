@@ -81,12 +81,18 @@ vi.mock('naive-ui', () => ({
   },
   NSelect: {
     name: 'NSelect',
-    props: ['options', 'loading', 'placeholder', 'disabled', 'value', 'filterable'],
+    props: ['options', 'loading', 'placeholder', 'disabled', 'value', 'filterable', 'multiple'],
     setup(props: any, { emit }: any) {
       return () => h('select', {
         class: 'n-select',
         disabled: props.disabled,
-        onChange: (e: Event) => emit('update:value', Number((e.target as HTMLSelectElement).value) || (e.target as HTMLSelectElement).value)
+        multiple: props.multiple,
+        onChange: (e: Event) => {
+          const select = e.target as HTMLSelectElement
+          emit('update:value', props.multiple
+            ? Array.from(select.selectedOptions).map(option => option.value)
+            : Number(select.value) || select.value)
+        }
       }, props.options?.map((o: any) => h('option', { value: o.value }, o.label)))
     }
   },
@@ -186,6 +192,27 @@ vi.mock('naive-ui', () => ({
       return () => h('i', { class: 'n-icon' })
     }
   },
+  NTag: {
+    name: 'NTag',
+    props: ['size', 'round', 'type'],
+    setup(_props: any, { slots }: any) {
+      return () => h('span', { class: 'n-tag' }, slots.default?.())
+    }
+  },
+  NAutoComplete: {
+    name: 'NAutoComplete',
+    props: ['value', 'options', 'placeholder', 'getShow'],
+    emits: ['update:value'],
+    setup(props: any, { emit }: any) {
+      return () => h('input', {
+        class: 'n-auto-complete',
+        type: 'text',
+        placeholder: props.placeholder,
+        value: props.value,
+        onInput: (e: Event) => emit('update:value', (e.target as HTMLInputElement).value)
+      })
+    }
+  },
   useMessage: () => mockMessage,
 }))
 
@@ -215,7 +242,13 @@ vi.mock('../components/VariableEditor.vue', () => ({
 // Mock @vicons/ionicons5
 vi.mock('@vicons/ionicons5', () => ({
   DocumentTextOutline: { name: 'DocumentTextOutline' },
-  WarningOutline: { name: 'WarningOutline' }
+  WarningOutline: { name: 'WarningOutline' },
+  GitBranchOutline: { name: 'GitBranchOutline' },
+  SparklesOutline: { name: 'SparklesOutline' },
+  GitMergeOutline: { name: 'GitMergeOutline' },
+  CloseOutline: { name: 'CloseOutline' },
+  SearchOutline: { name: 'SearchOutline' },
+  CheckmarkOutline: { name: 'CheckmarkOutline' },
 }))
 
 // Router
@@ -241,8 +274,8 @@ const mockBranches = [
 ]
 
 const mockTemplates = [
-  createMockPromptTemplate({ id: 1, name: 'Bug Fix', content: 'Fix {{issue}}', variable_tips: { issue: 'Issue description' } }),
-  createMockPromptTemplate({ id: 2, name: 'Feature', content: 'Add {{feature}}', variable_tips: { feature: 'Feature name' } }),
+  createMockPromptTemplate({ id: 1, name: 'Bug Fix', content: 'Fix {{issue}}', variable_tips: { issue: 'Issue description' }, tags: ['backend', 'review'] }),
+  createMockPromptTemplate({ id: 2, name: 'Feature', content: 'Add {{feature}}', variable_tips: { feature: 'Feature name' }, tags: ['frontend'] }),
 ]
 
 const mockCreatedIssue = {
@@ -366,11 +399,11 @@ describe('CreateIssue', () => {
       expect(wrapper.find('button.n-switch').exists()).toBe(true)
     })
 
-    it('should render base branch select', async () => {
+    it('should render base branch and target branch selects by default', async () => {
       await mountComponent()
 
       const selects = wrapper.findAll('select.n-select')
-      // project select + base branch select (target branch hidden when create_mr is false)
+      // base branch select + target branch select (project is now card picker, not select)
       expect(selects.length).toBeGreaterThanOrEqual(2)
     })
   })
@@ -390,13 +423,13 @@ describe('CreateIssue', () => {
       expect(mockApi.getPromptTemplates).toHaveBeenCalledTimes(1)
     })
 
-    it('should populate project options from fetched projects', async () => {
+    it('should populate projects from fetched data', async () => {
       await mountComponent()
 
-      const options = wrapper.vm.projectOptions
-      expect(options).toHaveLength(2)
-      expect(options[0]).toEqual({ label: 'group/project-1', value: 1 })
-      expect(options[1]).toEqual({ label: 'group/project-2', value: 2 })
+      // Project list is now card-based; verify underlying data is populated
+      expect(wrapper.vm.projects).toHaveLength(2)
+      expect(wrapper.vm.projects[0].name).toBe('Project 1')
+      expect(wrapper.vm.projects[1].name).toBe('Project 2')
     })
   })
 
@@ -476,13 +509,13 @@ describe('CreateIssue', () => {
   // ── MR Toggle ─────────────────────────────────────────────────
 
   describe('MR toggle (create_mr)', () => {
-    it('should not show target branch select when create_mr is false', async () => {
+    it('should show target branch select by default when create_mr is true', async () => {
       await mountComponent()
 
-      expect(wrapper.vm.formValue.create_mr).toBe(false)
-      // Target branch select should not be in DOM (v-if="formValue.create_mr")
-      const text = wrapper.text()
-      expect(text).not.toContain('issue.field.targetBranch')
+      expect(wrapper.vm.formValue.create_mr).toBe(true)
+      const selects = wrapper.findAll('select.n-select')
+      // base branch select + target branch select (project is card picker)
+      expect(selects.length).toBeGreaterThanOrEqual(2)
     })
 
     it('should show target branch select when create_mr is true', async () => {
@@ -493,8 +526,8 @@ describe('CreateIssue', () => {
 
       // The target branch section should now render
       const selects = wrapper.findAll('select.n-select')
-      // project select + base branch select + target branch select
-      expect(selects.length).toBeGreaterThanOrEqual(3)
+      // base branch select + target branch select (project is card picker)
+      expect(selects.length).toBeGreaterThanOrEqual(2)
     })
 
     it('should auto-fill target_branch with default branch when MR toggled on', async () => {
@@ -838,7 +871,7 @@ describe('CreateIssue', () => {
       expect(wrapper.vm.formValue.project_id).toBeUndefined()
       expect(wrapper.vm.formValue.base_branch).toBeUndefined()
       expect(wrapper.vm.formValue.target_branch).toBeUndefined()
-      expect(wrapper.vm.formValue.create_mr).toBe(false)
+      expect(wrapper.vm.formValue.create_mr).toBe(true)
     })
 
     it('should clear branches on reset', async () => {
@@ -908,7 +941,7 @@ describe('CreateIssue', () => {
       await nextTick()
 
       expect(wrapper.find('.n-drawer').exists()).toBe(true)
-      expect(wrapper.find('.n-drawer-content').exists()).toBe(true)
+      expect(wrapper.find('.template-drawer-layout').exists()).toBe(true)
     })
 
     it('should not show template drawer when showTemplateDrawer is false', async () => {
@@ -927,6 +960,49 @@ describe('CreateIssue', () => {
 
       const templateItems = wrapper.findAll('.prompt-template-dropdown__item')
       expect(templateItems).toHaveLength(2)
+    })
+
+    it('should filter templates by all selected tags', async () => {
+      await mountComponent()
+
+      wrapper.vm.promptTemplates = [
+        ...mockTemplates,
+        createMockPromptTemplate({ id: 3, name: 'Inactive', content: 'Hidden', tags: ['backend', 'review'], is_active: false }),
+        createMockPromptTemplate({ id: 4, name: 'Backend only', content: 'Backend', tags: ['backend'] }),
+      ]
+      wrapper.vm.selectedTemplateTags = ['backend', 'review']
+      wrapper.vm.showTemplateDrawer = true
+      await nextTick()
+
+      expect(wrapper.vm.filteredPromptTemplates.map((template: any) => template.name)).toEqual(['Bug Fix'])
+      expect(wrapper.findAll('.prompt-template-dropdown__item')).toHaveLength(1)
+      expect(wrapper.text()).toContain('backend')
+      expect(wrapper.text()).toContain('review')
+      expect(wrapper.text()).not.toContain('Inactive')
+      expect(wrapper.text()).not.toContain('Backend only')
+    })
+
+    it('should close the tag filter dropdown after selecting tags', async () => {
+      await mountComponent()
+
+      wrapper.vm.templateTagFilterVisible = true
+      wrapper.vm.handleTemplateTagFilterUpdate(['backend'])
+
+      expect(wrapper.vm.selectedTemplateTags).toEqual(['backend'])
+      expect(wrapper.vm.templateTagFilterVisible).toBe(false)
+    })
+
+    it('should render legacy templates without tags in the drawer', async () => {
+      await mountComponent()
+
+      wrapper.vm.promptTemplates = [
+        createMockPromptTemplate({ id: 5, name: 'Legacy', content: 'Legacy content', tags: undefined }),
+      ]
+      wrapper.vm.showTemplateDrawer = true
+      await nextTick()
+
+      expect(wrapper.findAll('.prompt-template-dropdown__item')).toHaveLength(1)
+      expect(wrapper.text()).toContain('Legacy')
     })
 
     it('should apply template and close drawer on template item click', async () => {
@@ -1026,9 +1102,9 @@ describe('CreateIssue', () => {
       await flushPromises()
 
       expect(mockMessage.error).toHaveBeenCalledWith('createTask.failedToFetchProjects')
-      // Component should not crash
+      // Component should not crash; project list is empty
       expect(wrapper.find('.create-issue-page').exists()).toBe(true)
-      expect(wrapper.vm.projectOptions).toEqual([])
+      expect(wrapper.vm.projects).toEqual([])
     })
 
     it('should show error message when fetchBranches fails', async () => {
@@ -1170,5 +1246,157 @@ describe('CreateIssue', () => {
       const emptyMsg = wrapper.find('.prompt-template-dropdown__empty')
       expect(emptyMsg.exists()).toBe(true)
     })
+
+  // ── Delete Branch on Close Toggle ────────────────────────────
+  describe('delete_branch_on_close toggle', () => {
+    it('should default delete_branch_on_close to true', async () => {
+      await mountComponent()
+
+      expect(wrapper.vm.formValue.delete_branch_on_close).toBe(true)
+    })
+
+    it('should render delete branch toggle alongside MR toggle', async () => {
+      await mountComponent()
+
+      const switches = wrapper.findAll('button.n-switch')
+      // Expect one for create_mr and one for delete_branch_on_close
+      expect(switches.length).toBeGreaterThanOrEqual(2)
+    })
+
+    it('should toggle delete_branch_on_close when switch clicked', async () => {
+      await mountComponent()
+
+      const switches = wrapper.findAll('button.n-switch')
+      const deleteSwitch = switches[1]
+      expect(deleteSwitch).toBeTruthy()
+
+      await deleteSwitch.trigger('click')
+      await nextTick()
+
+      expect(wrapper.vm.formValue.delete_branch_on_close).toBe(false)
+    })
+
+    it('should include delete_branch_on_close in createIssue payload', async () => {
+      await mountComponent()
+
+      // Fill required fields
+      wrapper.vm.formValue.title = 'Test Issue'
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+
+      await wrapper.vm.handleSubmit()
+      await flushPromises()
+
+      const call = (mockApi.createIssue as Mock).mock.calls[0][0]
+      expect(call.delete_branch_on_close).toBe(true)
+    })
+  })
+
+  // ── Recent Titles Autocomplete ────────────────────────────────
+  describe('recent titles autocomplete', () => {
+    const RECENT_TITLES_KEY = 'codify:recent_titles'
+
+    beforeEach(() => {
+      localStorage.clear()
+    })
+
+    it('should save title to localStorage after successful issue creation', async () => {
+      await mountComponent()
+
+      wrapper.vm.formValue.title = 'Fix login bug'
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+
+      await wrapper.vm.handleSubmit()
+      await flushPromises()
+
+      const stored = JSON.parse(localStorage.getItem(RECENT_TITLES_KEY) ?? '[]')
+      expect(stored).toContain('Fix login bug')
+    })
+
+    it('should not save title when issue creation fails', async () => {
+      mockApi.createIssue.mockRejectedValueOnce(new Error('server error'))
+      await mountComponent()
+
+      wrapper.vm.formValue.title = 'Should not be saved'
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+
+      await wrapper.vm.handleSubmit()
+      await flushPromises()
+
+      const stored = JSON.parse(localStorage.getItem(RECENT_TITLES_KEY) ?? '[]')
+      expect(stored).not.toContain('Should not be saved')
+    })
+
+    it('should prepend new title and deduplicate', async () => {
+      localStorage.setItem(RECENT_TITLES_KEY, JSON.stringify(['Old Title', 'Fix login bug']))
+      await mountComponent()
+
+      wrapper.vm.formValue.title = 'Fix login bug'
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+
+      await wrapper.vm.handleSubmit()
+      await flushPromises()
+
+      const stored: string[] = JSON.parse(localStorage.getItem(RECENT_TITLES_KEY) ?? '[]')
+      expect(stored[0]).toBe('Fix login bug')
+      expect(stored.filter(t => t === 'Fix login bug').length).toBe(1)
+    })
+
+    it('should cap stored titles at 10', async () => {
+      const existing = Array.from({ length: 10 }, (_, i) => `Title ${i}`)
+      localStorage.setItem(RECENT_TITLES_KEY, JSON.stringify(existing))
+      await mountComponent()
+
+      wrapper.vm.formValue.title = 'Brand new title'
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+
+      await wrapper.vm.handleSubmit()
+      await flushPromises()
+
+      const stored: string[] = JSON.parse(localStorage.getItem(RECENT_TITLES_KEY) ?? '[]')
+      expect(stored.length).toBe(10)
+      expect(stored[0]).toBe('Brand new title')
+    })
+
+    it('recentTitleOptions should include all stored titles when input is empty', async () => {
+      localStorage.setItem(RECENT_TITLES_KEY, JSON.stringify(['Alpha', 'Beta', 'Gamma']))
+      await mountComponent()
+
+      wrapper.vm.formValue.title = ''
+
+      const options = wrapper.vm.recentTitleOptions
+      expect(options.map((o: any) => o.value)).toEqual(['Alpha', 'Beta', 'Gamma'])
+    })
+
+    it('recentTitleOptions should filter by current input value', async () => {
+      localStorage.setItem(RECENT_TITLES_KEY, JSON.stringify(['Fix login bug', 'Add feature', 'Fix typo']))
+      await mountComponent()
+
+      wrapper.vm.formValue.title = 'fix'
+
+      const options = wrapper.vm.recentTitleOptions
+      expect(options.map((o: any) => o.value)).toEqual(['Fix login bug', 'Fix typo'])
+    })
+
+    it('recentTitles ref should be reactive after save', async () => {
+      await mountComponent()
+
+      expect(wrapper.vm.recentTitles).toEqual([])
+
+      wrapper.vm.formValue.title = 'Reactive test'
+      wrapper.vm.formValue.project_id = 1
+      wrapper.vm.formValue.base_branch = 'main'
+
+      await wrapper.vm.handleSubmit()
+      await flushPromises()
+
+      expect(wrapper.vm.recentTitles[0]).toBe('Reactive test')
+    })
+  })
+
   })
 })

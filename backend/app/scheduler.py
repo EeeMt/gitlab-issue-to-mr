@@ -2,28 +2,39 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
-from typing import Set
 
-from sqlalchemy import case, select, func, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_effective_settings as get_settings
 from app.core.docker_client import get_docker_client
+from app.core.issue_execution_locks import (
+    acquire_issue_execution_lock,
+    cleanup_inactive_issue_execution_locks,
+    release_issue_execution_lock,
+)
 from app.core.session import cleanup_stale_sessions
-from app.core.utcnow import utcnow
-from app.core.worker import WorkerExecutor
-from app.database import AsyncSessionLocal
-from app.models import Task, TaskStatus, Issue, IssueStatus
 from app.core.task_helpers import maybe_update_issue_status
+from app.core.usage_limits import (
+    UsageLimitExceeded,
+    get_usage_quota_service,
+    usage_limit_exceeded_detail,
+)
+from app.core.utcnow import utcnow
+from app.core.worker_workspace import cleanup_expired_workspaces
+from app.database import AsyncSessionLocal
+from app.models import Issue, IssueExecutionLock, IssueStatus, Task, TaskStatus
 from app.runtime_config import load_runtime_config_from_db
 
 logger = logging.getLogger(__name__)
 _SESSION_CLEANUP_INTERVAL_SECONDS = 3600
+_WORKSPACE_CLEANUP_INTERVAL_SECONDS = 21600
+_LOCK_CLEANUP_INTERVAL_SECONDS = 300
 
 # Thread pool for running worker tasks (to avoid blocking the event loop)
 _worker_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="worker-")
@@ -46,9 +57,12 @@ class Scheduler:
 
     def __init__(self) -> None:
         self.running = False
-        self._running_tasks: Set[int] = set()  # task_ids currently running
-        self._running_issues: Set[int] = set()  # issue_ids with running tasks
+        self._running_tasks: set[int] = set()  # task_ids currently running
+        self._running_issues: set[int] = set()  # issue_ids with running tasks
+        self._active_worker_threads: int = 0   # thread pool tasks in-flight (submitted but not done)
         self._last_session_cleanup_at = 0.0
+        self._last_workspace_cleanup_at = 0.0
+        self._last_lock_cleanup_at = 0.0
 
     async def start(self) -> None:
         """Start the scheduler loop."""
@@ -64,7 +78,7 @@ class Scheduler:
         while self.running:
             try:
                 await self._run_cycle()
-            except Exception as e:
+            except Exception:
                 logger.exception("Scheduler cycle failed")
             settings = get_settings()
             await asyncio.sleep(settings.scheduler_interval)
@@ -81,6 +95,14 @@ class Scheduler:
         async with AsyncSessionLocal() as db:
             await load_runtime_config_from_db(db)
             await self._maybe_cleanup_sessions(db)
+            await self._maybe_cleanup_workspaces(db)
+            await self._maybe_cleanup_issue_locks(db)
+
+            # Reconcile in-memory tracking sets against DB to recover from stuck worker threads.
+            # This handles the case where a worker thread blocks indefinitely (e.g., on a
+            # GitLab API call) and never reaches its finally block to clear _running_issues /
+            # _running_tasks — causing the scheduler to incorrectly block new tasks.
+            await self._reconcile_running_state(db)
 
             # Transition eligible PENDING tasks → QUEUED
             await self._mark_eligible_as_queued(db)
@@ -109,6 +131,64 @@ class Scheduler:
             # Execute task
             await self._execute_task(db, task)
 
+    async def _reconcile_running_state(self, db: AsyncSession) -> None:
+        """Reconcile in-memory running-task sets against the database.
+
+        When a worker thread blocks indefinitely (e.g., on a GitLab API call with no
+        timeout), its finally block never executes, so _running_tasks and _running_issues
+        are never cleared even though the DB task has moved out of RUNNING (e.g., was
+        cancelled by the user).  This method corrects that drift every cycle.
+        """
+        if not self._running_tasks and not self._running_issues:
+            return
+
+        if self._running_tasks:
+            result = await db.execute(
+                select(Task.id, Task.issue_id).where(
+                    Task.id.in_(list(self._running_tasks)),
+                    Task.status == TaskStatus.RUNNING,
+                )
+            )
+            rows = result.fetchall()
+            active_task_ids = {row[0] for row in rows}
+            active_issue_ids = {row[1] for row in rows if row[1] is not None}
+
+            stale_tasks = self._running_tasks - active_task_ids
+            for task_id in stale_tasks:
+                self._running_tasks.discard(task_id)
+                logger.warning(
+                    "Reconciled stale _running_tasks entry for task %s "
+                    "(no longer RUNNING in DB — worker thread may be stuck)",
+                    task_id,
+                )
+
+            stale_issues = self._running_issues - active_issue_ids
+            for issue_id in stale_issues:
+                self._running_issues.discard(issue_id)
+                logger.warning(
+                    "Reconciled stale _running_issues entry for issue %s "
+                    "(no RUNNING task found in DB — worker thread may be stuck)",
+                    issue_id,
+                )
+
+        elif self._running_issues:
+            # _running_tasks is empty but _running_issues has entries — possible when a
+            # thread's finally block could not release the issue slot.  Query independently.
+            result = await db.execute(
+                select(Task.issue_id).distinct().where(
+                    Task.issue_id.in_(list(self._running_issues)),
+                    Task.status == TaskStatus.RUNNING,
+                )
+            )
+            active_issue_ids = {row[0] for row in result.fetchall() if row[0] is not None}
+            for issue_id in self._running_issues - active_issue_ids:
+                self._running_issues.discard(issue_id)
+                logger.warning(
+                    "Reconciled stale _running_issues entry for issue %s "
+                    "(no RUNNING task found in DB — worker thread may be stuck)",
+                    issue_id,
+                )
+
     async def _maybe_cleanup_sessions(self, db: AsyncSession) -> None:
         """Periodically delete long-stale dashboard sessions."""
         now = time.time()
@@ -120,6 +200,44 @@ class Scheduler:
             await db.commit()
             logger.info("Cleaned up %s stale dashboard sessions", deleted_count)
         self._last_session_cleanup_at = now
+
+    async def _maybe_cleanup_workspaces(self, db: AsyncSession) -> None:
+        """Periodically delete expired persistent worker workspaces."""
+        now = time.time()
+        if now - self._last_workspace_cleanup_at < _WORKSPACE_CLEANUP_INTERVAL_SECONDS:
+            return
+
+        settings = get_settings()
+        raw_root = getattr(settings, "worker_workspace_host_path", "")
+        root = raw_root.strip() if isinstance(raw_root, str) else ""
+        if not root:
+            self._last_workspace_cleanup_at = now
+            return
+        retention_days = getattr(settings, "worker_workspace_retention_days", 14)
+        if not isinstance(retention_days, int):
+            self._last_workspace_cleanup_at = now
+            return
+
+        removed = await asyncio.to_thread(
+            cleanup_expired_workspaces,
+            root,
+            retention_days=retention_days,
+        )
+        if removed:
+            logger.info("Cleaned up %s expired worker workspace(s)", removed)
+        self._last_workspace_cleanup_at = now
+
+    async def _maybe_cleanup_issue_locks(self, db: AsyncSession) -> None:
+        """Periodically delete locks for completed/failed/cancelled tasks."""
+        now = time.time()
+        if now - self._last_lock_cleanup_at < _LOCK_CLEANUP_INTERVAL_SECONDS:
+            return
+
+        removed = await cleanup_inactive_issue_execution_locks(db)
+        if removed:
+            await db.commit()
+            logger.warning("Cleaned up %s inactive issue execution lock(s)", removed)
+        self._last_lock_cleanup_at = now
 
     async def _mark_eligible_as_queued(self, db: AsyncSession) -> None:
         """Mark eligible PENDING tasks as QUEUED.
@@ -148,6 +266,25 @@ class Scheduler:
         if result.rowcount > 0:
             await db.commit()
             logger.debug(f"Marked {result.rowcount} eligible task(s) as QUEUED")
+            # Transition issues to in_progress for all newly queued tasks
+            queued_issue_result = await db.execute(
+                select(Task.issue_id).where(
+                    Task.status == TaskStatus.QUEUED,
+                    Task.issue_id != None,
+                ).distinct()
+            )
+            issue_ids = [row[0] for row in queued_issue_result]
+            if issue_ids:
+                await db.execute(
+                    update(Issue)
+                    .where(
+                        Issue.id.in_(issue_ids),
+                        Issue.status.in_([IssueStatus.OPEN.value, IssueStatus.IN_REVIEW.value]),
+                    )
+                    .values(status=IssueStatus.IN_PROGRESS.value)
+                )
+                await db.commit()
+                logger.debug(f"Transitioned {len(issue_ids)} issue(s) to IN_PROGRESS for queued tasks")
 
     async def _get_running_count(self, db: AsyncSession) -> int:
         """Get count of currently running tasks."""
@@ -186,18 +323,47 @@ class Scheduler:
         """Execute a task in a separate thread to avoid blocking the event loop."""
         logger.info(f"Executing task {task.id} for issue {task.issue_id}")
 
-        # Mark as running
-        self._running_tasks.add(task.id)
-        if task.issue_id is not None:
-            self._running_issues.add(task.issue_id)
+        lock_acquired = await acquire_issue_execution_lock(db, task)
+        if not lock_acquired:
+            logger.debug("Issue %s locked; task %s remains queued", task.issue_id, task.id)
+            return
 
         try:
+            initiator_user_id = getattr(task, "initiator_user_id", None)
+            if isinstance(initiator_user_id, int):
+                try:
+                    await get_usage_quota_service().raise_if_over_limit(
+                        db,
+                        initiator_user_id,
+                        scope="execute",
+                    )
+                except UsageLimitExceeded as exc:
+                    logger.info(
+                        "Task %s blocked by usage limits before execution",
+                        task.id,
+                    )
+                    task.status = TaskStatus.FAILED
+                    task.error_message = json.dumps(usage_limit_exceeded_detail(exc))
+                    task.completed_at = utcnow()
+                    await db.commit()
+                    if task.issue_id is not None:
+                        await release_issue_execution_lock(db, issue_id=task.issue_id)
+                        await db.commit()
+                        await maybe_update_issue_status(db, task.issue_id)
+                    return
+
             # Update status to RUNNING
             task.status = TaskStatus.RUNNING
             task.started_at = utcnow()
             await db.commit()
 
-            # Auto-transition issue to IN_PROGRESS
+            # Track in memory AFTER the DB commit so _reconcile_running_state
+            # (which queries for RUNNING tasks) doesn't race with the update.
+            self._running_tasks.add(task.id)
+            if task.issue_id is not None:
+                self._running_issues.add(task.issue_id)
+
+            # Any active task means the issue is currently in progress.
             if task.issue_id is not None:
                 await self._transition_issue_to_in_progress(db, task.issue_id)
 
@@ -210,9 +376,13 @@ class Scheduler:
             task.status = TaskStatus.FAILED
             task.error_message = str(e)[:500]
             task.completed_at = utcnow()
-            await db.commit()
+            await release_issue_execution_lock(db, issue_id=task.issue_id)
+            try:
+                await db.commit()
+            except Exception:
+                logger.exception("Failed to persist failure state for task %s", task.id)
 
-            # Clean up tracking
+            # Clean up tracking (may not have been added yet, discard is idempotent)
             self._running_tasks.discard(task.id)
             if task.issue_id is not None:
                 self._running_issues.discard(task.issue_id)
@@ -230,7 +400,13 @@ class Scheduler:
 
     async def _run_task_background(self, task_id: int) -> None:
         """Run task in background thread pool."""
-        issue_key = None
+        self._active_worker_threads += 1
+        t_submit = time.time()
+        logger.info(
+            f"Task {task_id} submitted to thread pool "
+            f"(active_threads={self._active_worker_threads}, "
+            f"max_workers={_worker_executor._max_workers})"
+        )
         try:
             loop = asyncio.get_event_loop()
             success = await loop.run_in_executor(
@@ -238,16 +414,23 @@ class Scheduler:
                 _run_worker_task,
                 task_id,
             )
-
+            elapsed = time.time() - t_submit
             if success:
-                logger.info(f"Task {task_id} completed successfully")
+                logger.info(
+                    f"Task {task_id} completed successfully (total={elapsed:.0f}s, "
+                    f"active_threads={self._active_worker_threads})"
+                )
             else:
-                logger.error(f"Task {task_id} failed")
+                logger.error(
+                    f"Task {task_id} failed (total={elapsed:.0f}s, "
+                    f"active_threads={self._active_worker_threads})"
+                )
 
-        except Exception as e:
+        except Exception:
             logger.exception(f"Task {task_id} failed with exception in background")
 
         finally:
+            self._active_worker_threads -= 1
             # Clean up tracking
             self._running_tasks.discard(task_id)
             try:
@@ -257,11 +440,24 @@ class Scheduler:
                     )
                     task = result.scalar_one_or_none()
                     if task and task.issue_id is not None:
-                        self._running_issues.discard(task.issue_id)
-                        # Auto-transition issue to COMPLETED if all tasks done
-                        await self._maybe_complete_issue(db, task.issue_id)
+                        # Guard: only release the DB lock and in-memory slot if WE still hold it.
+                        # If _reconcile_running_state already cleared us and a replacement task
+                        # re-acquired the lock for this issue, releasing here would corrupt the
+                        # new task's execution slot.
+                        lock_result = await db.execute(
+                            select(IssueExecutionLock).where(
+                                IssueExecutionLock.issue_id == task.issue_id
+                            )
+                        )
+                        lock = lock_result.scalar_one_or_none()
+                        if lock is None or lock.task_id == task_id:
+                            self._running_issues.discard(task.issue_id)
+                            await release_issue_execution_lock(db, issue_id=task.issue_id)
+                            await db.commit()
+                            # Auto-transition issue to COMPLETED if all tasks done
+                            await self._maybe_complete_issue(db, task.issue_id)
             except Exception:
-                pass
+                logger.exception("Failed to release lock for task %s", task_id)
 
     async def _maybe_complete_issue(self, db: AsyncSession, issue_id: int) -> None:
         """Delegate to shared helper."""
@@ -279,6 +475,10 @@ class Scheduler:
         logger.info("Running crash recovery...")
 
         async with AsyncSessionLocal() as db:
+            removed_locks = await cleanup_inactive_issue_execution_locks(db)
+            if removed_locks:
+                logger.warning("Cleaned up %s inactive issue execution lock(s)", removed_locks)
+
             # Find all tasks that are still marked RUNNING in the DB
             result = await db.execute(
                 select(Task).where(Task.status == TaskStatus.RUNNING)
@@ -354,6 +554,7 @@ class Scheduler:
                 task.status = TaskStatus.FAILED
                 task.error_message = "Task was running when scheduler restarted (container not found)"
                 task.completed_at = utcnow()
+                await release_issue_execution_lock(db, issue_id=task.issue_id)
                 logger.warning(f"Marked task {task.id} as failed (no running container)")
 
             await db.commit()
@@ -365,6 +566,13 @@ class Scheduler:
 
     async def _resume_task_background(self, task_id: int, container_name: str) -> None:
         """Resume monitoring a task in the background thread pool."""
+        self._active_worker_threads += 1
+        t_submit = time.time()
+        logger.info(
+            f"Task {task_id} resume submitted to thread pool "
+            f"(active_threads={self._active_worker_threads}, "
+            f"max_workers={_worker_executor._max_workers})"
+        )
         try:
             loop = asyncio.get_event_loop()
             success = await loop.run_in_executor(
@@ -373,13 +581,19 @@ class Scheduler:
                 task_id,
                 container_name,
             )
+            elapsed = time.time() - t_submit
             if success:
-                logger.info(f"Resumed task {task_id} completed successfully")
+                logger.info(
+                    f"Resumed task {task_id} completed successfully (total={elapsed:.0f}s)"
+                )
             else:
-                logger.error(f"Resumed task {task_id} failed")
+                logger.error(
+                    f"Resumed task {task_id} failed (total={elapsed:.0f}s)"
+                )
         except Exception as e:
             logger.exception(f"Resumed task {task_id} failed with exception: {e}")
         finally:
+            self._active_worker_threads -= 1
             self._running_tasks.discard(task_id)
             try:
                 async with AsyncSessionLocal() as db:
@@ -388,10 +602,19 @@ class Scheduler:
                     )
                     task = result.scalar_one_or_none()
                     if task and task.issue_id is not None:
-                        self._running_issues.discard(task.issue_id)
-                        await self._maybe_complete_issue(db, task.issue_id)
+                        lock_result = await db.execute(
+                            select(IssueExecutionLock).where(
+                                IssueExecutionLock.issue_id == task.issue_id
+                            )
+                        )
+                        lock = lock_result.scalar_one_or_none()
+                        if lock is None or lock.task_id == task_id:
+                            self._running_issues.discard(task.issue_id)
+                            await release_issue_execution_lock(db, issue_id=task.issue_id)
+                            await db.commit()
+                            await self._maybe_complete_issue(db, task.issue_id)
             except Exception:
-                pass
+                logger.exception("Failed to release lock for resumed task %s", task_id)
 
 
 # Singleton scheduler instance
@@ -430,14 +653,16 @@ def _run_worker_task(task_id: int) -> bool:
         True if successful, False otherwise
     """
     import asyncio
-    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-    # Get database URL from settings
-    from app.config import get_settings
-    settings = get_settings()
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
     from app.database import _database_url
 
-    # Create a new engine for this thread (not shared with main event loop)
+    # Create new event loop for this thread BEFORE creating the engine,
+    # so asyncpg binds to this thread's loop rather than the scheduler's main loop.
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     engine = create_async_engine(
         _database_url,
         pool_pre_ping=True,
@@ -445,24 +670,18 @@ def _run_worker_task(task_id: int) -> bool:
         max_overflow=2,
     )
 
-    # Create session maker for this engine
     ThreadSessionLocal = async_sessionmaker(
         engine,
         class_=AsyncSession,
         expire_on_commit=False,
     )
 
-    # Import worker
     from app.core.worker import WorkerExecutor
 
     async def run_task():
         async with ThreadSessionLocal() as db:
-            worker = WorkerExecutor()
+            worker = WorkerExecutor(session_factory=ThreadSessionLocal)
             return await worker.execute_task(db, task_id)
-
-    # Create new event loop for this thread
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
 
     try:
         return loop.run_until_complete(run_task())
@@ -481,9 +700,15 @@ def _run_worker_resume_task(task_id: int, container_name: str) -> bool:
     which attaches to an existing container instead of creating a new one.
     """
     import asyncio
-    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from app.database import _database_url
+
+    # Create new event loop for this thread BEFORE creating the engine,
+    # so asyncpg binds to this thread's loop rather than the scheduler's main loop.
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
     engine = create_async_engine(
         _database_url,
@@ -502,11 +727,8 @@ def _run_worker_resume_task(task_id: int, container_name: str) -> bool:
 
     async def run_task():
         async with ThreadSessionLocal() as db:
-            worker = WorkerExecutor()
+            worker = WorkerExecutor(session_factory=ThreadSessionLocal)
             return await worker.resume_task(db, task_id, container_name)
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
 
     try:
         return loop.run_until_complete(run_task())

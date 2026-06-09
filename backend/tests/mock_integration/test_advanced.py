@@ -25,7 +25,6 @@ from .conftest import (
     create_task,
     get_mock_calls,
     wait_for_task_status,
-    DOCKER_HOST_IP,
 )
 
 logger = logging.getLogger(__name__)

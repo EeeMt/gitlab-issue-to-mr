@@ -43,6 +43,8 @@ def _make_issue(
     created_at=None,
     updated_at=None,
     tasks=None,
+    delete_branch_on_close=True,
+    branch_deleted=False,
 ):
     """Build a mock Issue ORM object."""
     issue = MagicMock()
@@ -63,6 +65,8 @@ def _make_issue(
     issue.created_at = created_at or datetime(2025, 1, 1, 12, 0, 0)
     issue.updated_at = updated_at or datetime(2025, 1, 1, 12, 0, 0)
     issue.tasks = tasks or []
+    issue.delete_branch_on_close = delete_branch_on_close
+    issue.branch_deleted = branch_deleted
     return issue
 
 
@@ -70,8 +74,12 @@ def _make_task(
     id=100,
     user_prompt="Fix the bug",
     status=None,
+    scheduled_at=None,
     is_retry=False,
     retry_source_task_id=None,
+    initiator_user_id=None,
+    initiator_gitlab_user_id=None,
+    initiator_username=None,
     container_id=None,
     commit_sha=None,
     error_message=None,
@@ -81,7 +89,7 @@ def _make_task(
     input_tokens=None,
     output_tokens=None,
     model_name=None,
-    merge_request_title=None,
+    commit_message=None,
     created_at=None,
     updated_at=None,
     started_at=None,
@@ -94,8 +102,12 @@ def _make_task(
     task.id = id
     task.user_prompt = user_prompt
     task.status = status or TaskStatus.COMPLETED
+    task.scheduled_at = scheduled_at
     task.is_retry = is_retry
     task.retry_source_task_id = retry_source_task_id
+    task.initiator_user_id = initiator_user_id
+    task.initiator_gitlab_user_id = initiator_gitlab_user_id
+    task.initiator_username = initiator_username
     task.container_id = container_id
     task.commit_sha = commit_sha
     task.error_message = error_message
@@ -105,7 +117,7 @@ def _make_task(
     task.input_tokens = input_tokens
     task.output_tokens = output_tokens
     task.model_name = model_name
-    task.merge_request_title = merge_request_title
+    task.commit_message = commit_message
     task.created_at = created_at or datetime(2025, 1, 1, 13, 0, 0)
     task.updated_at = updated_at or datetime(2025, 1, 1, 13, 0, 0)
     task.started_at = started_at
@@ -123,7 +135,7 @@ class CreateIssueTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_issue_success(self):
         """Should create an issue and return serialized data."""
-        from app.api.issues import create_issue, CreateIssueRequest
+        from app.api.issues import CreateIssueRequest, create_issue
 
         mock_db = MagicMock()
         mock_db.add = MagicMock()
@@ -154,7 +166,8 @@ class CreateIssueTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("app.api.issues.get_effective_settings") as mock_settings:
             mock_settings.return_value.session_storage_root = "/var/codify/sessions"
-            result = await create_issue(body=body, db=mock_db, current_user=mock_user)
+            mock_settings.return_value.worker_workspace_host_path = "/opt/codify-workspaces"
+            await create_issue(body=body, db=mock_db, current_user=mock_user)
 
         mock_db.add.assert_called_once()
         mock_db.flush.assert_awaited_once()
@@ -166,11 +179,52 @@ class CreateIssueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(created.initiator_user_id, 1)
         self.assertEqual(created.initiator_username, "alice")
         self.assertEqual(created.branch_name, "codify/issue-42")
+        self.assertEqual(
+            created.session_storage_path,
+            "/opt/codify-workspaces/project-10/issue-42/claude",
+        )
+
+    async def test_create_issue_uses_legacy_session_path_when_workspace_disabled(self):
+        """Should keep legacy session path when persistent workspace is disabled."""
+        from app.api.issues import CreateIssueRequest, create_issue
+
+        mock_db = MagicMock()
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        captured_issues = []
+
+        def capture_add(obj):
+            obj.id = 42
+            obj.created_at = datetime(2025, 1, 1, 12, 0, 0)
+            obj.updated_at = datetime(2025, 1, 1, 12, 0, 0)
+            captured_issues.append(obj)
+
+        mock_db.add = MagicMock(side_effect=capture_add)
+
+        mock_user = MagicMock()
+        mock_user.id = 1
+        mock_user.username = "alice"
+
+        body = CreateIssueRequest(
+            title="Implement feature X",
+            description="Add feature X to the system",
+            project_id=10,
+            base_branch="main",
+        )
+
+        with patch("app.api.issues.get_effective_settings") as mock_settings:
+            mock_settings.return_value.session_storage_root = "/var/codify/sessions"
+            mock_settings.return_value.worker_workspace_host_path = ""
+            await create_issue(body=body, db=mock_db, current_user=mock_user)
+
+        created = captured_issues[0]
         self.assertEqual(created.session_storage_path, "/var/codify/sessions/42/claude")
 
     async def test_create_issue_sets_open_status(self):
         """Should default new issue status to OPEN."""
-        from app.api.issues import create_issue, CreateIssueRequest
+        from app.api.issues import CreateIssueRequest, create_issue
         from app.models import IssueStatus
 
         mock_db = MagicMock()
@@ -215,9 +269,9 @@ class ListIssuesTests(unittest.IsolatedAsyncioTestCase):
 
         issue = _make_issue(id=1, title="Issue 1")
 
-        # Mock for the main query returning (Issue, task_count, additions, deletions, total_changes, input_tokens, output_tokens) rows
+        # Mock for the main query returning Issue plus task aggregate columns.
         row = MagicMock()
-        row.__getitem__ = lambda self, idx: [issue, 3, 100, 20, 120, 5000, 3000][idx]
+        row.__getitem__ = lambda self, idx: [issue, 3, 100, 20, 120, 5000, 3000, 5400][idx]
         main_result = MagicMock()
         main_result.all.return_value = [row]
 
@@ -250,6 +304,7 @@ class ListIssuesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["items"][0]["totals"]["additions"], 100)
         self.assertEqual(result["items"][0]["totals"]["deletions"], 20)
         self.assertEqual(result["items"][0]["totals"]["input_tokens"], 5000)
+        self.assertEqual(result["items"][0]["totals"]["duration_seconds"], 5400)
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +318,7 @@ class GetIssueTests(unittest.IsolatedAsyncioTestCase):
     async def test_get_issue_not_found(self):
         """Should raise 404 when issue does not exist."""
         from fastapi import HTTPException
+
         from app.api.issues import get_issue
         from app.dependencies.project_access import ProjectAccessScope
 
@@ -304,6 +360,37 @@ class GetIssueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["tasks"][0]["id"], 100)
         self.assertEqual(result["tasks"][1]["id"], 101)
 
+    async def test_get_issue_includes_task_schedule_and_initiator_metadata(self):
+        """Issue detail tasks should include fields needed for task row actions."""
+        from app.api.issues import get_issue
+        from app.dependencies.project_access import ProjectAccessScope
+
+        scheduled_at = datetime(2026, 5, 18, 2, 0, 0)
+        task = _make_task(
+            id=355,
+            status="pending",
+            scheduled_at=scheduled_at,
+            initiator_user_id=1,
+            initiator_gitlab_user_id=42,
+            initiator_username="admin",
+        )
+        issue = _make_issue(id=44, title="mm", tasks=[task])
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_user = MagicMock()
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        result = await get_issue(issue_id=44, db=mock_db, current_user=mock_user, access_scope=access_scope)
+
+        self.assertEqual(result["tasks"][0]["scheduled_at"], scheduled_at.isoformat())
+        self.assertEqual(result["tasks"][0]["initiator_user_id"], 1)
+        self.assertEqual(result["tasks"][0]["initiator_gitlab_user_id"], 42)
+        self.assertEqual(result["tasks"][0]["initiator_username"], "admin")
+
 
 # ---------------------------------------------------------------------------
 # Update issue
@@ -315,7 +402,7 @@ class UpdateIssueTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_issue_title(self):
         """Should update the title field."""
-        from app.api.issues import update_issue, UpdateIssueRequest
+        from app.api.issues import UpdateIssueRequest, update_issue
 
         issue = _make_issue(id=1, title="Old Title")
 
@@ -329,7 +416,7 @@ class UpdateIssueTests(unittest.IsolatedAsyncioTestCase):
         mock_user = MagicMock()
 
         body = UpdateIssueRequest(title="New Title")
-        result = await update_issue(issue_id=1, body=body, db=mock_db, current_user=mock_user)
+        await update_issue(issue_id=1, body=body, db=mock_db, current_user=mock_user)
 
         self.assertEqual(issue.title, "New Title")
         mock_db.commit.assert_awaited_once()
@@ -337,7 +424,8 @@ class UpdateIssueTests(unittest.IsolatedAsyncioTestCase):
     async def test_update_issue_invalid_status(self):
         """Should raise 400 for invalid status value."""
         from fastapi import HTTPException
-        from app.api.issues import update_issue, UpdateIssueRequest
+
+        from app.api.issues import UpdateIssueRequest, update_issue
 
         issue = _make_issue(id=1)
 
@@ -380,14 +468,16 @@ class CloseIssueTests(unittest.IsolatedAsyncioTestCase):
         mock_db.refresh = AsyncMock()
         mock_user = MagicMock()
 
-        result = await close_issue(issue_id=1, db=mock_db, current_user=mock_user)
+        await close_issue(issue_id=1, db=mock_db, current_user=mock_user)
 
         self.assertEqual(issue.status, IssueStatus.CLOSED.value)
+        self.assertEqual(issue.closed_via, "manual")
         mock_db.commit.assert_awaited_once()
 
     async def test_close_issue_not_found(self):
         """Should raise 404 when issue does not exist."""
         from fastapi import HTTPException
+
         from app.api.issues import close_issue
 
         result_mock = MagicMock()
@@ -414,6 +504,7 @@ class DeleteIssueTests(unittest.IsolatedAsyncioTestCase):
     async def test_delete_issue_with_active_tasks_fails(self):
         """Should return 409 when issue has active tasks."""
         from fastapi import HTTPException
+
         from app.api.issues import delete_issue
 
         issue = _make_issue(id=1)
@@ -464,6 +555,7 @@ class DeleteIssueTests(unittest.IsolatedAsyncioTestCase):
     async def test_delete_issue_not_found(self):
         """Should raise 404 when issue does not exist."""
         from fastapi import HTTPException
+
         from app.api.issues import delete_issue
 
         result_mock = MagicMock()
@@ -501,7 +593,8 @@ class IssueOwnershipTests(unittest.IsolatedAsyncioTestCase):
     async def test_update_issue_forbidden_for_non_owner(self):
         """Should raise 403 when non-owner tries to update issue."""
         from fastapi import HTTPException
-        from app.api.issues import update_issue, UpdateIssueRequest
+
+        from app.api.issues import UpdateIssueRequest, update_issue
 
         issue = _make_issue(id=1, initiator_user_id=10)
 
@@ -522,7 +615,7 @@ class IssueOwnershipTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_issue_allowed_for_owner(self):
         """Should allow owner to update issue."""
-        from app.api.issues import update_issue, UpdateIssueRequest
+        from app.api.issues import UpdateIssueRequest, update_issue
 
         issue = _make_issue(id=1, initiator_user_id=10)
 
@@ -538,13 +631,13 @@ class IssueOwnershipTests(unittest.IsolatedAsyncioTestCase):
         body = UpdateIssueRequest(title="Updated")
 
         with patch("app.core.task_helpers.get_effective_settings", return_value=self._mock_settings()):
-            result = await update_issue(issue_id=1, body=body, db=mock_db, current_user=owner)
+            await update_issue(issue_id=1, body=body, db=mock_db, current_user=owner)
 
         self.assertEqual(issue.title, "Updated")
 
     async def test_update_issue_allowed_for_admin(self):
         """Should allow admin to update any issue."""
-        from app.api.issues import update_issue, UpdateIssueRequest
+        from app.api.issues import UpdateIssueRequest, update_issue
 
         issue = _make_issue(id=1, initiator_user_id=10)
 
@@ -560,13 +653,14 @@ class IssueOwnershipTests(unittest.IsolatedAsyncioTestCase):
         body = UpdateIssueRequest(title="Admin Update")
 
         with patch("app.core.task_helpers.get_effective_settings", return_value=self._mock_settings()):
-            result = await update_issue(issue_id=1, body=body, db=mock_db, current_user=admin)
+            await update_issue(issue_id=1, body=body, db=mock_db, current_user=admin)
 
         self.assertEqual(issue.title, "Admin Update")
 
     async def test_close_issue_forbidden_for_non_owner(self):
         """Should raise 403 when non-owner tries to close issue."""
         from fastapi import HTTPException
+
         from app.api.issues import close_issue
 
         issue = _make_issue(id=1, initiator_user_id=10)
@@ -588,6 +682,7 @@ class IssueOwnershipTests(unittest.IsolatedAsyncioTestCase):
     async def test_delete_issue_forbidden_for_non_owner(self):
         """Should raise 403 when non-owner tries to delete issue."""
         from fastapi import HTTPException
+
         from app.api.issues import delete_issue
 
         issue = _make_issue(id=1, initiator_user_id=10)
@@ -603,6 +698,416 @@ class IssueOwnershipTests(unittest.IsolatedAsyncioTestCase):
         with patch("app.core.task_helpers.get_effective_settings", return_value=self._mock_settings()):
             with self.assertRaises(HTTPException) as ctx:
                 await delete_issue(issue_id=1, db=mock_db, current_user=non_owner)
+
+        self.assertEqual(ctx.exception.status_code, 403)
+
+
+# ---------------------------------------------------------------------------
+# close_issue with branch deletion
+# ---------------------------------------------------------------------------
+
+class CloseIssueWithBranchDeletionTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for close_issue with branch deletion integration."""
+
+    async def test_close_issue_keeps_branch_by_default(self):
+        """Manual close should keep the branch unless the request explicitly deletes it."""
+        from app.api.issues import close_issue
+        from app.models import IssueStatus
+
+        issue = _make_issue(
+            id=1,
+            status=IssueStatus.OPEN.value,
+            branch_name="codify/issue-1",
+            delete_branch_on_close=True,
+            branch_deleted=False,
+        )
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        mock_user = MagicMock()
+
+        with patch("app.api.issues._try_delete_issue_branch") as mock_helper:
+            mock_helper.side_effect = AsyncMock(return_value=None)
+            await close_issue(issue_id=1, db=mock_db, current_user=mock_user)
+
+        mock_helper.assert_not_awaited()
+
+    async def test_close_issue_deletes_branch_when_requested(self):
+        """Manual close should delete the branch when delete_branch=True."""
+        from app.api.issues import CloseIssueRequest, close_issue
+        from app.models import IssueStatus
+
+        issue = _make_issue(
+            id=1,
+            status=IssueStatus.OPEN.value,
+            branch_name="codify/issue-1",
+            delete_branch_on_close=False,
+            branch_deleted=False,
+        )
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        mock_user = MagicMock()
+
+        body = CloseIssueRequest(delete_branch=True)
+        with patch("app.api.issues._try_delete_issue_branch") as mock_helper:
+            mock_helper.side_effect = AsyncMock(return_value=None)
+            await close_issue(issue_id=1, body=body, db=mock_db, current_user=mock_user)
+
+        mock_helper.assert_awaited_once_with(issue, mock_db, ignore_close_policy=True)
+
+    async def test_close_issue_keep_action_overrides_legacy_delete_branch_true(self):
+        """Explicit keep action should never delete the branch."""
+        from app.api.issues import CloseIssueRequest, close_issue
+        from app.models import IssueStatus
+
+        issue = _make_issue(
+            id=1,
+            status=IssueStatus.OPEN.value,
+            branch_name="codify/issue-1",
+            delete_branch_on_close=True,
+            branch_deleted=False,
+        )
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        mock_user = MagicMock()
+
+        body = CloseIssueRequest(branch_action="keep", delete_branch=True)
+        with patch("app.api.issues._try_delete_issue_branch") as mock_helper:
+            mock_helper.side_effect = AsyncMock(return_value=None)
+            await close_issue(issue_id=1, body=body, db=mock_db, current_user=mock_user)
+
+        mock_helper.assert_not_awaited()
+
+    async def test_close_issue_commits_even_when_branch_deletion_helper_is_skipped(self):
+        """close_issue should commit even if _try_delete_issue_branch does nothing."""
+        from app.api.issues import CloseIssueRequest, close_issue
+        from app.models import IssueStatus
+
+        issue = _make_issue(id=1, status=IssueStatus.OPEN.value, delete_branch_on_close=False)
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        mock_user = MagicMock()
+
+        with patch("app.api.issues._try_delete_issue_branch") as mock_helper:
+            mock_helper.side_effect = AsyncMock(return_value=None)
+            await close_issue(
+                issue_id=1,
+                body=CloseIssueRequest(delete_branch=True),
+                db=mock_db,
+                current_user=mock_user,
+            )
+
+        mock_db.commit.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# _try_delete_issue_branch helper
+# ---------------------------------------------------------------------------
+
+class TryDeleteIssueBranchTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for the _try_delete_issue_branch helper."""
+
+    async def test_skips_when_no_branch_name(self):
+        """Should do nothing when branch_name is None."""
+        from app.api.issues import _try_delete_issue_branch
+        issue = _make_issue(branch_name=None)
+        issue.delete_branch_on_close = True
+        issue.branch_deleted = False
+        mock_db = MagicMock()
+        with patch("app.api.issues.get_gitlab_client") as mock_gc:
+            await _try_delete_issue_branch(issue, mock_db)
+        mock_gc.assert_not_called()
+        self.assertFalse(issue.branch_deleted)
+
+    async def test_skips_when_delete_branch_on_close_is_false(self):
+        """Should do nothing when delete_branch_on_close is False."""
+        from app.api.issues import _try_delete_issue_branch
+        issue = _make_issue(branch_name="codify/issue-1")
+        issue.delete_branch_on_close = False
+        issue.branch_deleted = False
+        mock_db = MagicMock()
+        with patch("app.api.issues.get_gitlab_client") as mock_gc:
+            await _try_delete_issue_branch(issue, mock_db)
+        mock_gc.assert_not_called()
+        self.assertFalse(issue.branch_deleted)
+
+    async def test_deletes_when_close_policy_is_ignored(self):
+        """Should delete when manual close explicitly bypasses the auto-close policy."""
+        from app.api.issues import _try_delete_issue_branch
+        issue = _make_issue(branch_name="codify/issue-1", project_id=42)
+        issue.delete_branch_on_close = False
+        issue.branch_deleted = False
+        mock_db = MagicMock()
+        mock_db.flush = AsyncMock()
+        mock_client = MagicMock()
+        mock_client.delete_branch.return_value = True
+        with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
+            await _try_delete_issue_branch(issue, mock_db, ignore_close_policy=True)
+        mock_client.delete_branch.assert_called_once_with(42, "codify/issue-1")
+        self.assertTrue(issue.branch_deleted)
+        mock_db.flush.assert_awaited_once()
+
+    async def test_sets_branch_deleted_true_on_success(self):
+        """Should set branch_deleted=True when GitLab client returns True."""
+        from app.api.issues import _try_delete_issue_branch
+        issue = _make_issue(branch_name="codify/issue-1", project_id=42)
+        issue.delete_branch_on_close = True
+        issue.branch_deleted = False
+        mock_db = MagicMock()
+        mock_db.flush = AsyncMock()
+        mock_client = MagicMock()
+        mock_client.delete_branch.return_value = True
+        with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
+            await _try_delete_issue_branch(issue, mock_db)
+        mock_client.delete_branch.assert_called_once_with(42, "codify/issue-1")
+        self.assertTrue(issue.branch_deleted)
+        mock_db.flush.assert_awaited_once()
+
+    async def test_leaves_branch_deleted_false_on_failure(self):
+        """Should leave branch_deleted=False when GitLab client returns False."""
+        from app.api.issues import _try_delete_issue_branch
+        issue = _make_issue(branch_name="codify/issue-1", project_id=42)
+        issue.delete_branch_on_close = True
+        issue.branch_deleted = False
+        mock_db = MagicMock()
+        mock_client = MagicMock()
+        mock_client.delete_branch.return_value = False
+        with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
+            await _try_delete_issue_branch(issue, mock_db)
+        self.assertFalse(issue.branch_deleted)
+
+    async def test_logs_warning_on_unexpected_exception(self):
+        """Should log a warning and not crash when get_gitlab_client raises."""
+        from app.api.issues import _try_delete_issue_branch
+        issue = _make_issue(branch_name="codify/issue-1", project_id=42,
+                            delete_branch_on_close=True, branch_deleted=False)
+        mock_db = MagicMock()
+        mock_db.flush = AsyncMock()
+        with patch("app.api.issues.get_gitlab_client", side_effect=RuntimeError("boom")):
+            # Should not raise
+            await _try_delete_issue_branch(issue, mock_db)
+        self.assertFalse(issue.branch_deleted)
+
+
+# ---------------------------------------------------------------------------
+# DELETE /issues/{id}/delete-branch endpoint
+# ---------------------------------------------------------------------------
+
+class DeleteIssueBranchEndpointTests(unittest.IsolatedAsyncioTestCase):
+    """Tests for POST /issues/{id}/delete-branch."""
+
+    async def _call(self, issue, mock_db, mock_user=None):
+        from app.api.issues import delete_issue_branch
+        if mock_user is None:
+            mock_user = MagicMock()
+        return await delete_issue_branch(
+            issue_id=issue.id, db=mock_db, current_user=mock_user
+        )
+
+    async def test_delete_branch_success(self):
+        """Should delete branch and set branch_deleted=True."""
+        from app.models import IssueStatus
+
+        issue = _make_issue(
+            id=1, status=IssueStatus.CLOSED.value,
+            branch_name="codify/issue-1", project_id=42,
+            branch_deleted=False,
+        )
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        mock_client = MagicMock()
+        mock_client.delete_branch.return_value = True
+
+        with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
+            resp = await self._call(issue, mock_db)
+
+        self.assertIn("id", resp)
+        self.assertEqual(resp["id"], 1)
+        self.assertIn("branch_deleted", resp)
+        self.assertTrue(resp["branch_deleted"])
+        mock_client.delete_branch.assert_called_once_with(42, "codify/issue-1")
+        self.assertTrue(issue.branch_deleted)
+        mock_db.commit.assert_awaited_once()
+
+    async def test_delete_branch_not_found(self):
+        """Should return 404 when issue does not exist."""
+        from fastapi import HTTPException
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = None
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+
+        issue = _make_issue(id=999)
+        with self.assertRaises(HTTPException) as ctx:
+            await self._call(issue, mock_db)
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    async def test_delete_branch_issue_not_closed_returns_400(self):
+        """Should return 400 when issue is still open."""
+        from fastapi import HTTPException
+
+        issue = _make_issue(id=1, status="open", branch_name="codify/issue-1")
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+
+        with self.assertRaises(HTTPException) as ctx:
+            await self._call(issue, mock_db)
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_delete_branch_no_branch_name_returns_400(self):
+        """Should return 400 when issue has no branch_name."""
+        from fastapi import HTTPException
+
+        from app.models import IssueStatus
+
+        issue = _make_issue(id=1, status=IssueStatus.CLOSED.value, branch_name=None)
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+
+        with self.assertRaises(HTTPException) as ctx:
+            await self._call(issue, mock_db)
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_delete_branch_gitlab_failure_returns_500(self):
+        """Should return 500 when GitLab deletion fails."""
+        from fastapi import HTTPException
+
+        from app.models import IssueStatus
+
+        issue = _make_issue(
+            id=1, status=IssueStatus.CLOSED.value,
+            branch_name="codify/issue-1", project_id=42,
+            branch_deleted=False,
+        )
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
+
+        mock_client = MagicMock()
+        mock_client.delete_branch.return_value = False
+
+        with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
+            with self.assertRaises(HTTPException) as ctx:
+                await self._call(issue, mock_db)
+        self.assertEqual(ctx.exception.status_code, 500)
+        self.assertFalse(issue.branch_deleted)
+        mock_db.commit.assert_not_awaited()
+
+    async def test_delete_branch_already_deleted(self):
+        """Should return success early when branch already deleted."""
+        from app.models import IssueStatus
+
+        issue = _make_issue(
+            id=1,
+            status=IssueStatus.CLOSED.value,
+            branch_name="feature/test",
+            branch_deleted=True,
+        )
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        mock_client = MagicMock()
+
+        with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
+            resp = await self._call(issue, mock_db)
+
+        self.assertIn("id", resp)
+        self.assertEqual(resp["id"], 1)
+        self.assertTrue(resp["branch_deleted"])
+        mock_client.delete_branch.assert_not_called()
+        mock_db.commit.assert_not_awaited()
+        mock_db.refresh.assert_not_awaited()
+
+    async def test_delete_branch_gitlab_exception_returns_500(self):
+        """Should return 500 when GitLab client raises an exception."""
+        from fastapi import HTTPException
+
+        from app.models import IssueStatus
+
+        issue = _make_issue(
+            id=1, status=IssueStatus.CLOSED.value,
+            branch_name="codify/issue-1", project_id=42,
+        )
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+
+        mock_client = MagicMock()
+        mock_client.delete_branch.side_effect = RuntimeError("network error")
+
+        with patch("app.api.issues.get_gitlab_client", return_value=mock_client):
+            with self.assertRaises(HTTPException) as ctx:
+                await self._call(issue, mock_db)
+        self.assertEqual(ctx.exception.status_code, 500)
+        self.assertEqual(ctx.exception.detail, "Failed to delete branch in GitLab")
+
+    async def test_delete_branch_forbidden(self):
+        """Should raise 403 when non-owner tries to delete branch."""
+        from fastapi import HTTPException
+
+        from app.api.issues import delete_issue_branch
+        from app.models import IssueStatus
+
+        issue = _make_issue(id=1, initiator_user_id=10, status=IssueStatus.CLOSED.value)
+
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = issue
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=result_mock)
+
+        non_owner = MagicMock()
+        non_owner.id = 99
+        non_owner.platform_role = "platform_user"
+
+        with patch("app.core.task_helpers.get_effective_settings") as mock_settings_fn:
+            mock_settings = MagicMock()
+            mock_settings.oidc_enabled = True
+            mock_settings_fn.return_value = mock_settings
+
+            with self.assertRaises(HTTPException) as ctx:
+                await delete_issue_branch(issue_id=1, db=mock_db, current_user=non_owner)
 
         self.assertEqual(ctx.exception.status_code, 403)
 

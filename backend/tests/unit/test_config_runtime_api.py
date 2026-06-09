@@ -6,15 +6,17 @@ import sys
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+
 from starlette.requests import Request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from fastapi.testclient import TestClient
-from app.main import app
-from app.database import get_db
+
 from app.config import get_settings, reset_runtime_config, set_runtime_config
+from app.database import get_db
 from app.dependencies.auth import require_authenticated_context
+from app.main import app
 from app.runtime_config import reset_runtime_config_sync_state
 
 
@@ -73,6 +75,64 @@ class ConfigRuntimeAPITests(unittest.TestCase):
         self.assertIn("anthropic_base_url", data)
         self.assertIn("anthropic_model", data)
         self.assertIn("claude_max_turns", data)
+
+    def test_get_runtime_config_includes_worker_workspace_settings(self):
+        """GET /config/runtime should expose persistent workspace settings."""
+        response = self.client.get("/api/config/runtime")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("worker_workspace_host_path", data)
+        self.assertIn("worker_workspace_retention_days", data)
+        self.assertIn("worker_failed_workspace_retention_days", data)
+
+    def test_worker_workspace_host_path_defaults_to_issue_workspace_root(self):
+        """Persistent issue workspace should be enabled by default."""
+        from app.config import Settings
+
+        settings = Settings()
+
+        self.assertEqual(settings.worker_workspace_host_path, "/opt/codify-workspaces")
+
+    def test_serialize_runtime_config_includes_worker_workspace_settings(self):
+        from app.api.config_runtime import _serialize_runtime_config
+        from app.config import Settings
+
+        settings = Settings(
+            worker_workspace_host_path="/opt/codify-workspaces",
+            worker_workspace_retention_days=14,
+            worker_failed_workspace_retention_days=30,
+        )
+
+        result = _serialize_runtime_config(settings)
+
+        self.assertEqual(result.worker_workspace_host_path, "/opt/codify-workspaces")
+        self.assertEqual(result.worker_workspace_retention_days, 14)
+        self.assertEqual(result.worker_failed_workspace_retention_days, 30)
+
+    def test_validate_worker_workspace_retention_days_bounds(self):
+        from fastapi import HTTPException
+
+        from app.api.config_runtime import _validate_config_value
+
+        self.assertEqual(_validate_config_value("worker_workspace_retention_days", 14), 14)
+        with self.assertRaises(HTTPException) as ctx:
+            _validate_config_value("worker_workspace_retention_days", -1)
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_validate_worker_workspace_host_path_allows_empty_or_absolute(self):
+        from fastapi import HTTPException
+
+        from app.api.config_runtime import _validate_config_value
+
+        self.assertEqual(_validate_config_value("worker_workspace_host_path", ""), "")
+        self.assertEqual(
+            _validate_config_value("worker_workspace_host_path", "/opt/codify-workspaces"),
+            "/opt/codify-workspaces",
+        )
+        with self.assertRaises(HTTPException) as ctx:
+            _validate_config_value("worker_workspace_host_path", "relative/path")
+        self.assertEqual(ctx.exception.status_code, 400)
 
     def test_patch_runtime_config_updates_max_concurrency(self):
         """PATCH /config/runtime should accept valid max_concurrency update.
@@ -153,6 +213,82 @@ class ConfigRuntimeAPITests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("anthropic_model", response.json()["detail"].lower())
+
+    def test_patch_runtime_config_null_worker_environment_variables_is_noop(self):
+        """PATCH /config/runtime with null worker env vars should not replace rows."""
+        with patch(
+            "app.api.config_runtime.replace_worker_environment_variables",
+            new=AsyncMock(),
+        ) as mock_replace:
+            response = self.client.patch(
+                "/api/config/runtime",
+                json={"worker_environment_variables": None},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_replace.assert_not_awaited()
+
+    def test_get_runtime_config_returns_worker_environment_variable_ids(self):
+        """GET /config/runtime should expose persisted worker env var ids."""
+        row = SimpleNamespace(
+            id=7,
+            key="SECRET_TOKEN",
+            value="encrypted-value",
+            is_secret=True,
+        )
+
+        with patch(
+            "app.api.config_runtime.list_worker_environment_variables",
+            new=AsyncMock(return_value=[row]),
+        ):
+            response = self.client.get("/api/config/runtime")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["worker_environment_variables"],
+            [
+                {
+                    "id": 7,
+                    "key": "SECRET_TOKEN",
+                    "value": "",
+                    "is_secret": True,
+                    "value_configured": True,
+                }
+            ],
+        )
+
+    def test_patch_runtime_config_returns_500_for_unrelated_value_error(self):
+        """PATCH /config/runtime should not report unrelated ValueErrors as 400."""
+        with patch(
+            "app.api.config_runtime.save_runtime_config_override",
+            new=AsyncMock(side_effect=ValueError("unexpected failure")),
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.patch(
+                "/api/config/runtime",
+                json={"max_concurrency": 5},
+            )
+            client.close()
+
+        self.assertEqual(response.status_code, 500)
+
+    def test_patch_runtime_config_returns_reload_encryption_error_detail(self):
+        """PATCH /config/runtime should surface reload encryption failures as 500s."""
+        from app.core.config_crypto import ConfigEncryptionError
+
+        with patch(
+            "app.api.config_runtime.load_runtime_config_from_db",
+            new=AsyncMock(side_effect=[None, ConfigEncryptionError("reload failed")]),
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.patch(
+                "/api/config/runtime",
+                json={"max_concurrency": 5},
+            )
+            client.close()
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["detail"], "reload failed")
 
     def test_api_middleware_refreshes_runtime_config_for_non_auth_route(self):
         """API middleware syncs runtime config before non-authenticated routes run."""

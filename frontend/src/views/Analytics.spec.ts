@@ -199,6 +199,7 @@ const mockAnalytics: AnalyticsResponse = {
     completed_tasks: 30,
     failed_tasks: 4,
     cancelled_tasks: 1,
+    total_execution_seconds: 5400,
     avg_execution_seconds: 125.5,
     max_execution_seconds: 600,
     avg_queue_wait_seconds: 5.2,
@@ -441,8 +442,49 @@ describe('Analytics', () => {
     expect(items[1].value).toBe('42')
     // Third item: success_rate = 0.857 → 85.7%
     expect(items[2].value).toBe('85.7%')
-    // Sixth item: total_changes = 1500
-    expect(items[5].value).toBe('1500')
+    // Fourth item: total_execution_seconds = 5400 → 1h 30m
+    expect(items[3].value).toBe('1h 30m')
+    // Seventh item: total_changes = 1500
+    expect(items[6].value).toBe('1500')
+  })
+
+  it('keeps avg tokens per task as the last summary card', async () => {
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    const items = wrapper.vm.summaryItems as any[]
+    expect(items[8].label).toBe('analytics.avgTokensPerTask')
+    expect(items[8].value).toBe('1,200')
+    expect(items[8].note).toBe('analytics.maxTokens')
+  })
+
+  it('shows total duration ahead of average duration in the overview summary cards', async () => {
+    const analyticsWithTotalDuration: AnalyticsResponse = {
+      ...mockAnalytics,
+      summary: {
+        ...mockAnalytics.summary
+      }
+    }
+    ;(mockApi.getAnalytics as Mock).mockResolvedValue(analyticsWithTotalDuration)
+
+    wrapper = mount(Analytics, mountOptions)
+    await flushPromises()
+
+    const items = wrapper.vm.summaryItems as any[]
+
+    expect(items.map((item) => item.label)).toEqual([
+      'analytics.issues',
+      'analytics.tasks',
+      'analytics.successRate',
+      'analytics.totalDuration',
+      'analytics.avgDuration',
+      'analytics.avgQueueWait',
+      'analytics.changedLines',
+      'analytics.totalTokens',
+      'analytics.avgTokensPerTask'
+    ])
+    expect(items[3].value).toBe('1h 30m')
+    expect(items[3].note).toBe('analytics.finishedBreakdown')
   })
 
   it('does not show summary when hasLoadedOnce is false', async () => {

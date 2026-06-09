@@ -15,6 +15,7 @@ Prerequisites:
 
 import asyncio
 import logging
+from datetime import UTC
 
 import httpx
 import pytest
@@ -141,10 +142,10 @@ class TestScheduledTasksEndpoint:
         admin_auth_headers: dict,
     ):
         """Create a scheduled task and verify it appears in the scheduled list."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         # Create a task scheduled 60 seconds in the future
-        future_time = datetime.now(timezone.utc) + timedelta(seconds=60)
+        future_time = datetime.now(UTC) + timedelta(seconds=60)
 
         issue = await create_issue(
             http_client, backend_url, admin_auth_headers,
@@ -301,7 +302,7 @@ class TestRetryWithSchedule:
 
         The retried task should be scheduled, not executed immediately.
         """
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         # Create a task that will fail
         await http_client.patch(
@@ -331,7 +332,7 @@ class TestRetryWithSchedule:
         )
 
         # Retry with a future scheduled time
-        future_time = datetime.now(timezone.utc) + timedelta(seconds=60)
+        future_time = datetime.now(UTC) + timedelta(seconds=60)
         resp2 = await http_client.post(
             f"{backend_url}/api/tasks/{task_id}/retry",
             json={"scheduled_datetime": future_time.isoformat()},
@@ -639,10 +640,10 @@ class TestCancelPendingTask:
         admin_auth_headers: dict,
     ):
         """A PENDING task should be cancellable without waiting for it to start."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         # Create a task scheduled far in the future (won't start)
-        future_time = datetime.now(timezone.utc) + timedelta(hours=1)
+        future_time = datetime.now(UTC) + timedelta(hours=1)
 
         issue = await create_issue(
             http_client, backend_url, admin_auth_headers,

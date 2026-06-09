@@ -1,12 +1,14 @@
 """Pydantic schemas for Task API request/response models."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from app.core.scheduling import normalize_scheduled_datetime
 from app.core.utcnow import utcnow
+
+_VALID_TASK_MODES = ("execute", "plan")
 
 
 class RetryTaskRequest(BaseModel):
@@ -16,7 +18,7 @@ class RetryTaskRequest(BaseModel):
     instead of being queued immediately.
     """
 
-    scheduled_datetime: Optional[datetime] = None
+    scheduled_datetime: datetime | None = None
 
 
 class RescheduleTaskRequest(BaseModel):
@@ -32,15 +34,65 @@ class RescheduleTaskRequest(BaseModel):
         return self
 
 
+class UpdateTaskRequest(BaseModel):
+    """Request model for updating a pending/queued task's editable fields.
+
+    Only fields explicitly included in the request body are applied.
+    Use ``model_fields_set`` to distinguish "not provided" from "explicitly null".
+
+    Fields:
+        user_prompt: New prompt text. Must be non-empty if provided.
+            Cannot be null — omit the key to leave unchanged.
+        priority: Task priority (0 = low, 1 = normal, 2 = high).
+        provider_id: AI provider ID. Pass ``null`` / ``None`` to clear the
+            provider (revert to system default).  Omit the key entirely to
+            leave the current value unchanged.
+        require_changes: Whether the task must produce file changes.
+            Cannot be null — omit the key to leave unchanged.
+        task_mode: Execution mode — 'execute' (default) or 'plan'.
+            Cannot be null — omit the key to leave unchanged.
+            Setting task_mode='plan' automatically forces require_changes=False.
+    """
+
+    user_prompt: str | None = None
+    priority: int | None = None
+    provider_id: int | None = None  # None = system default / clear
+    require_changes: bool | None = None
+    task_mode: Literal["execute", "plan"] | None = None
+
+    @field_validator("user_prompt", mode="before")
+    @classmethod
+    def user_prompt_not_null(cls, v: Any) -> Any:
+        if v is None:
+            raise ValueError("user_prompt cannot be null; omit the key to leave it unchanged")
+        return v
+
+    @field_validator("require_changes", mode="before")
+    @classmethod
+    def require_changes_not_null(cls, v: Any) -> Any:
+        if v is None:
+            raise ValueError("require_changes cannot be null; omit the key to leave it unchanged")
+        return v
+
+    @field_validator("task_mode", mode="before")
+    @classmethod
+    def task_mode_not_null(cls, v: Any) -> Any:
+        if v is None:
+            raise ValueError("task_mode cannot be null; omit the key to leave it unchanged")
+        return v
+
+
 class CreateTaskRequest(BaseModel):
     """Request model for creating a task under an Issue."""
 
     issue_id: int
-    user_prompt: Optional[str] = None  # If None, uses Issue.description
+    user_prompt: str | None = None  # If None, uses Issue.description
     priority: int = 0
-    delay_seconds: Optional[int] = None
-    scheduled_datetime: Optional[datetime] = None
-    provider_id: Optional[int] = None
+    delay_seconds: int | None = None
+    scheduled_datetime: datetime | None = None
+    provider_id: int
+    require_changes: bool | None = True
+    task_mode: Literal["execute", "plan"] = "execute"
 
     @model_validator(mode="after")
     def validate_schedule_is_future(self) -> "CreateTaskRequest":
@@ -56,3 +108,10 @@ class CreateTaskRequest(BaseModel):
             raise ValueError("Scheduled datetime must be in the future")
 
         return self
+
+    @property
+    def effective_require_changes(self) -> bool:
+        """Plan mode never requires code changes."""
+        if self.task_mode == "plan":
+            return False
+        return self.require_changes if self.require_changes is not None else True

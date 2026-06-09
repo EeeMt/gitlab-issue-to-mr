@@ -1,5 +1,6 @@
 """Task operation helpers for the Task API."""
 
+import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
@@ -17,8 +18,6 @@ from app.core.utcnow import utcnow
 from app.dependencies.project_access import ProjectAccessScope, require_project_access
 from app.models import Task, TaskStatus
 
-import logging
-
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +32,7 @@ async def get_task_with_access_check(
     access_scope: ProjectAccessScope,
     current_user: Optional["User"] = None,
     require_operator: bool = True,
+    with_for_update: bool = False,
 ) -> Task:
     """Get a task by ID with access control checks.
 
@@ -42,6 +42,7 @@ async def get_task_with_access_check(
         access_scope: Project access scope for authorization
         current_user: Current authenticated user (optional)
         require_operator: Whether to require task operator permission
+        with_for_update: Whether to lock the row with SELECT FOR UPDATE
 
     Returns:
         Task model instance
@@ -51,7 +52,10 @@ async def get_task_with_access_check(
     """
     from sqlalchemy import select
 
-    result = await db.execute(select(Task).where(Task.id == task_id))
+    query = select(Task).where(Task.id == task_id)
+    if with_for_update:
+        query = query.with_for_update()
+    result = await db.execute(query)
     task = result.scalar_one_or_none()
 
     if not task:
@@ -172,7 +176,7 @@ async def notify_task_cancelled(task: Task) -> None:
         logger.warning("Failed to send Mattermost cancel notification for task %s: %s", task.id, exc)
 
 
-async def notify_task_retried(task: Task, previous_scheduled_at: Optional[datetime], scheduled_at: Optional[datetime]) -> None:
+async def notify_task_retried(task: Task, previous_scheduled_at: datetime | None, scheduled_at: datetime | None) -> None:
     """Send notification for retried task.
 
     Args:
@@ -193,7 +197,7 @@ async def notify_task_retried(task: Task, previous_scheduled_at: Optional[dateti
         logger.warning("Failed to send Mattermost retry notification for task %s: %s", task.id, exc)
 
 
-async def notify_task_execute_now(task: Task, previous_scheduled_at: Optional[datetime]) -> None:
+async def notify_task_execute_now(task: Task, previous_scheduled_at: datetime | None) -> None:
     """Send notification for immediate execution.
 
     Args:
@@ -213,7 +217,7 @@ async def notify_task_execute_now(task: Task, previous_scheduled_at: Optional[da
         logger.warning("Failed to send Mattermost execute-now notification for task %s: %s", task.id, exc)
 
 
-async def notify_task_rescheduled(task: Task, previous_scheduled_at: Optional[datetime], scheduled_at: datetime) -> None:
+async def notify_task_rescheduled(task: Task, previous_scheduled_at: datetime | None, scheduled_at: datetime) -> None:
     """Send notification for rescheduled task.
 
     Args:

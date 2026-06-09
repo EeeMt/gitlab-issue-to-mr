@@ -12,11 +12,8 @@ Tests for the Issue View page (/issues/:id) including:
 """
 
 import pytest
+from conftest import _get_cookies, api_create_issue, api_create_task, api_get_first_project
 from playwright.sync_api import Page, expect
-from conftest import (
-    api_create_issue, api_create_task, api_get_first_project, _get_cookies
-)
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -243,7 +240,7 @@ class TestIssueViewClose:
     """Tests for closing an issue."""
 
     def test_close_issue_changes_status(self, logged_in_page: Page, backend_url):
-        """Clicking close and confirming popconfirm should change the issue status."""
+        """Clicking close and keeping the branch should change the issue status."""
         cookies = _get_cookies(logged_in_page)
         project = api_get_first_project(backend_url, cookies)
         issue = api_create_issue(
@@ -254,25 +251,17 @@ class TestIssueViewClose:
         logged_in_page.goto(f"/issues/{issue['id']}")
         logged_in_page.wait_for_load_state("networkidle")
 
-        # Click close button (triggers popconfirm)
+        # Click close button (opens close options modal)
         close_btn = logged_in_page.get_by_test_id("issue-close-button")
         expect(close_btn).to_be_visible()
         expect(close_btn).to_be_enabled()
         close_btn.click()
         logged_in_page.wait_for_timeout(500)
 
-        # Confirm in popconfirm — look for the positive-action button in the popover
-        popover = logged_in_page.locator(".n-popconfirm")
-        if popover.count() > 0:
-            confirm_btn = popover.locator(".n-button--primary")
-            if confirm_btn.count() > 0:
-                confirm_btn.first.click()
-            else:
-                # Fallback: click any button in the popconfirm action area
-                popover.locator("button").last.click()
-        else:
-            # Popconfirm may render differently — try body-level positive button
-            logged_in_page.locator(".n-popconfirm__action .n-button--primary-type").first.click()
+        keep_branch_btn = logged_in_page.get_by_test_id("issue-close-keep-branch-button")
+        expect(keep_branch_btn).to_be_visible()
+        expect(keep_branch_btn).to_be_enabled()
+        keep_branch_btn.click()
 
         logged_in_page.wait_for_timeout(1500)
 
@@ -304,13 +293,13 @@ class TestIssueViewCreateTaskDrawer:
         logged_in_page.wait_for_load_state("networkidle")
 
         toggle_btn = logged_in_page.get_by_test_id("issue-toggle-create-task")
-        
+
         # Open drawer
         toggle_btn.click()
         logged_in_page.wait_for_timeout(800)
         drawer = logged_in_page.get_by_test_id("issue-create-task-drawer")
         expect(drawer).to_be_visible()
-        
+
         # Close drawer by pressing Escape key
         logged_in_page.keyboard.press("Escape")
         logged_in_page.wait_for_timeout(500)

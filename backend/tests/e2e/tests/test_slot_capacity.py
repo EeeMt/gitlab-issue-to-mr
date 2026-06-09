@@ -12,7 +12,6 @@ Tests for the slot-capacity feature across multiple pages:
 import pytest
 from playwright.sync_api import Page, expect
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

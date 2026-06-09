@@ -11,8 +11,7 @@ const { mockApi, mockMessage, resetMockApi } = vi.hoisted(() => {
   const api = {
     getScheduledStats: vi.fn(),
     getScheduledTasks: vi.fn(),
-    rescheduleTask: vi.fn(),
-    getConfig: vi.fn()
+    rescheduleTask: vi.fn()
   }
   const msg = {
     error: vi.fn(),
@@ -33,8 +32,7 @@ const { mockApi, mockMessage, resetMockApi } = vi.hoisted(() => {
 vi.mock('../api', () => ({
   getScheduledStats: mockApi.getScheduledStats,
   getScheduledTasks: mockApi.getScheduledTasks,
-  rescheduleTask: mockApi.rescheduleTask,
-  getConfig: mockApi.getConfig
+  rescheduleTask: mockApi.rescheduleTask
 }))
 
 vi.mock('../auth', () => ({
@@ -80,6 +78,8 @@ vi.mock('../components/HeatmapChart.vue', () => ({
         class: 'heatmap-chart-stub',
         'data-task-count': String(props.tasks?.length ?? 0),
         'data-selected-ms': props.selectedMs ?? '',
+        'data-max-per-slot': String(props.maxPerSlot ?? 0),
+        'data-enforce-capacity': String(props.enforceCapacity ?? false),
         'data-allow-full-selection': String(props.allowFullSelection ?? false)
       })
     }
@@ -188,6 +188,19 @@ vi.mock('naive-ui', () => ({
     props: ['name', 'tab'],
     setup(_p: any, { slots }: any) { return () => h('div', { class: 'n-tab-pane' }, slots.default?.()) }
   },
+  NSwitch: {
+    name: 'NSwitch',
+    props: ['value'],
+    emits: ['update:value'],
+    setup(props: any, { emit }: any) {
+      return () => h('button', {
+        class: 'n-switch',
+        role: 'switch',
+        'aria-checked': String(props.value ?? false),
+        onClick: () => emit('update:value', !props.value)
+      })
+    }
+  },
   useMessage: () => mockMessage
 }))
 
@@ -220,7 +233,9 @@ const mockScheduledStats = {
     { hour_start: laterTodayTime, count: 1 },
     { hour_start: farFutureTime, count: 1 }
   ],
-  max_count: 1
+  max_count: 1,
+  slot_max_tasks: 0,
+  slot_max_tasks_enforce: false
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +263,6 @@ describe('ScheduleOverview', () => {
     resetMockApi()
     ;(mockApi.getScheduledStats as Mock).mockResolvedValue(mockScheduledStats)
     ;(mockApi.getScheduledTasks as Mock).mockResolvedValue(mockScheduledTasks)
-    ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 0 } })
     vi.spyOn(window, 'setInterval').mockImplementation(() => 1 as any)
     vi.spyOn(window, 'clearInterval').mockImplementation(() => undefined)
   })
@@ -375,7 +389,7 @@ describe('ScheduleOverview', () => {
 
   // -------------------------------------------------------------------------
   it('derives selected window details from the loaded scheduled tasks', async () => {
-    ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 5 } })
+    ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 5 })
 
     wrapper = mountComponent()
     await flushPromises()
@@ -436,8 +450,8 @@ describe('ScheduleOverview', () => {
   // -------------------------------------------------------------------------
   // Slot capacity integration
   // -------------------------------------------------------------------------
-  it('sets slotMaxTasks from config on load', async () => {
-    ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 8 } })
+  it('sets slotMaxTasks from scheduled stats on load', async () => {
+    ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 8 })
 
     wrapper = mountComponent()
     await flushPromises()
@@ -445,17 +459,9 @@ describe('ScheduleOverview', () => {
     expect(wrapper.vm.slotMaxTasks).toBe(8)
   })
 
-  it('defaults slotMaxTasks to 0 when config has no slot_max_tasks', async () => {
-    ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: {} })
-
-    wrapper = mountComponent()
-    await flushPromises()
-
-    expect(wrapper.vm.slotMaxTasks).toBe(0)
-  })
-
-  it('defaults slotMaxTasks to 0 when getConfig fails', async () => {
-    ;(mockApi.getConfig as Mock).mockRejectedValue(new Error('config error'))
+  it('defaults slotMaxTasks to 0 when stats has no slot_max_tasks field', async () => {
+    const { slot_max_tasks: _, ...withoutSlotMax } = { ...mockScheduledStats, slot_max_tasks: undefined }
+    ;(mockApi.getScheduledStats as Mock).mockResolvedValue(withoutSlotMax)
 
     wrapper = mountComponent()
     await flushPromises()
@@ -464,7 +470,7 @@ describe('ScheduleOverview', () => {
   })
 
   it('includes slot capacity in summaryItems when slotMaxTasks > 0', async () => {
-    ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 5 } })
+    ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 5 })
 
     wrapper = mountComponent()
     await flushPromises()
@@ -691,8 +697,6 @@ describe('ScheduleOverview', () => {
     })
 
     it('selectedWindowLoadLabel returns null when no window selected', async () => {
-      ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 5 } })
-
       wrapper = mountComponent()
       await flushPromises()
 
@@ -973,7 +977,7 @@ describe('ScheduleOverview', () => {
       const sameHour1 = createMockTask({ id: 10, status: 'queued', scheduled_at: futureTime })
       const sameHour2 = createMockTask({ id: 11, status: 'queued', scheduled_at: futureTime })
       ;(mockApi.getScheduledTasks as Mock).mockResolvedValue([sameHour1, sameHour2])
-      ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: { slot_max_tasks: 2 } })
+      ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 2 })
 
       wrapper = mountComponent()
       await flushPromises()
@@ -999,27 +1003,111 @@ describe('ScheduleOverview', () => {
   })
 
   // =========================================================================
-  // slotEnforce
+  // myTasksOnly toggle
   // =========================================================================
-  describe('slotEnforce', () => {
-    it('sets slotEnforce from config on load', async () => {
-      ;(mockApi.getConfig as Mock).mockResolvedValue({
-        runtime: { slot_max_tasks: 5, slot_max_tasks_enforce: true }
-      })
-
+  describe('myTasksOnly toggle', () => {
+    it('exposes myTasksOnly reactive ref starting as false', async () => {
       wrapper = mountComponent()
       await flushPromises()
 
-      expect(wrapper.vm.slotEnforce).toBe(true)
+      expect((wrapper.vm as any).myTasksOnly).toBe(false)
     })
 
-    it('defaults slotEnforce to false when not in config', async () => {
-      ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: {} })
+    it('calls getScheduledTasks without my param on initial load (myTasksOnly=false)', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      const call = (mockApi.getScheduledTasks as Mock).mock.calls[0]
+      expect(call[0]).not.toEqual(expect.objectContaining({ my: true }))
+    })
+
+    it('calls both APIs with { my: true } when myTasksOnly is set to true', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+      ;(mockApi.getScheduledStats as Mock).mockClear()
+      ;(mockApi.getScheduledTasks as Mock).mockClear()
+
+      ;(wrapper.vm as any).myTasksOnly = true
+      await flushPromises()
+
+      expect(mockApi.getScheduledStats).toHaveBeenCalledWith({ my: true })
+      expect(mockApi.getScheduledTasks).toHaveBeenCalledWith({ my: true })
+    })
+
+    it('calls both APIs without my param when myTasksOnly is turned back off', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      ;(wrapper.vm as any).myTasksOnly = true
+      await flushPromises()
+      ;(mockApi.getScheduledStats as Mock).mockClear()
+      ;(mockApi.getScheduledTasks as Mock).mockClear()
+
+      ;(wrapper.vm as any).myTasksOnly = false
+      await flushPromises()
+
+      expect(mockApi.getScheduledStats).toHaveBeenCalledWith(undefined)
+      expect(mockApi.getScheduledTasks).toHaveBeenCalledWith(undefined)
+    })
+
+    it('includes myTasksOnly as an accessible component property for the template', async () => {
+      wrapper = mountComponent()
+      await flushPromises()
+
+      // myTasksOnly is a ref that the template binds to n-button @click toggle
+      expect(typeof (wrapper.vm as any).myTasksOnly).toBe('boolean')
+    })
+
+    it('hides full slots card when myTasksOnly is true even with slot_max_tasks > 0', async () => {
+      ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 5 })
 
       wrapper = mountComponent()
       await flushPromises()
 
-      expect(wrapper.vm.slotEnforce).toBe(false)
+      // Verify card is present in global view
+      expect((wrapper.vm.summaryItems as any[]).find((i: any) => i.label === 'scheduleOverview.fullSlots')).toBeTruthy()
+
+      ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 5 })
+      ;(mockApi.getScheduledTasks as Mock).mockResolvedValue(mockScheduledTasks)
+      ;(wrapper.vm as any).myTasksOnly = true
+      await flushPromises()
+
+      const items = wrapper.vm.summaryItems as any[]
+      const fullSlotsItem = items.find((i: any) => i.label === 'scheduleOverview.fullSlots')
+      expect(fullSlotsItem).toBeUndefined()
+    })
+
+    it('passes maxPerSlot=0 to heatmap when myTasksOnly is true', async () => {
+      ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 5, slot_max_tasks_enforce: true })
+
+      wrapper = mountComponent()
+      await flushPromises()
+
+      ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 5, slot_max_tasks_enforce: true })
+      ;(mockApi.getScheduledTasks as Mock).mockResolvedValue(mockScheduledTasks)
+      ;(wrapper.vm as any).myTasksOnly = true
+      await flushPromises()
+
+      const heatmap = wrapper.find('.heatmap-chart-stub')
+      expect(heatmap.attributes('data-max-per-slot')).toBe('0')
+      expect(heatmap.attributes('data-enforce-capacity')).toBe('false')
+    })
+
+    it('returns null selectedWindowLoadLabel when myTasksOnly is true', async () => {
+      ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 5 })
+
+      wrapper = mountComponent()
+      await flushPromises()
+
+      ;(mockApi.getScheduledStats as Mock).mockResolvedValue({ ...mockScheduledStats, slot_max_tasks: 5 })
+      ;(mockApi.getScheduledTasks as Mock).mockResolvedValue(mockScheduledTasks)
+      ;(wrapper.vm as any).myTasksOnly = true
+      await flushPromises()
+
+      wrapper.vm.handleHeatmapCellClick(new Date(futureTime).getTime())
+      await nextTick()
+
+      expect(wrapper.vm.selectedWindowLoadLabel).toBeNull()
     })
   })
 })

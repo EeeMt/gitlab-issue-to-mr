@@ -5,12 +5,11 @@ Test P0.1: Initial MR creation and MR_IID passing to worker.
 
 import os
 import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
-from unittest.mock import MagicMock, patch, AsyncMock
-from datetime import datetime
-
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # Mock config before importing worker
 mock_settings = MagicMock()
@@ -35,7 +34,7 @@ mock_settings.worker_extra_volumes = ""
 
 with patch('app.core.worker.get_settings', return_value=mock_settings):
     from app.core.worker import WorkerExecutor
-    from app.models import Task, TaskStatus, Issue
+    from app.models import Issue, Task, TaskStatus
 
 
 class MockContainer:
@@ -138,12 +137,12 @@ def test_create_initial_mr():
 
     # Run execute_task (it's async)
     async def run_test():
-        with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1))):
+        with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1, False))):
             with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
                 result = await worker.execute_task(mock_db, task.id)
                 return result
 
-    result = asyncio.run(run_test())
+    asyncio.run(run_test())
 
     # Verify MR was created
     mock_project.mergerequests.create.assert_called_once()
@@ -235,7 +234,7 @@ def test_mr_iid_passed_to_container():
     mock_db = create_mock_db(task, issue)
 
     async def run_test():
-        with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1))):
+        with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1, False))):
             with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
                 await worker.execute_task(mock_db, task.id)
 
@@ -289,12 +288,12 @@ def test_mr_creation_failure_handled():
     mock_db = create_mock_db(task, issue)
 
     async def run_test():
-        with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1))):
+        with patch.object(worker, "_stream_logs_to_db", AsyncMock(return_value=(0, "Success", 1, False))):
             with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
                 result = await worker.execute_task(mock_db, task.id)
                 return result
 
-    result = asyncio.run(run_test())
+    asyncio.run(run_test())
 
     # Verify container was still created (worker continues without MR)
     mock_docker.create_container.assert_called_once()
@@ -329,7 +328,7 @@ def test_draft_removed_on_completion():
     mock_project.mergerequests.list.return_value = []
     mock_project.mergerequests.create.return_value = mock_mr
 
-    # Mock the MR reload/save flow used to remove draft status
+    # Mock the MR reload/save flow used to mark ready and remove draft status
     mock_existing_mr = MagicMock()
     mock_existing_mr.title = "Draft: AI: Complete feature"
     mock_project.mergerequests.get.return_value = mock_existing_mr
@@ -354,7 +353,7 @@ def test_draft_removed_on_completion():
         with patch.object(
             worker,
             "_stream_logs_to_db",
-            AsyncMock(return_value=(0, "Success", 1)),
+            AsyncMock(return_value=(0, "Success", 1, False)),
         ):
             with patch('app.core.worker.notify_task_event', new_callable=AsyncMock):
                 await worker.execute_task(mock_db, task.id)
@@ -362,50 +361,13 @@ def test_draft_removed_on_completion():
     asyncio.run(run_test())
 
     mock_project.mergerequests.get.assert_called_with(42)
+    assert not mock_existing_mr.draft
     assert mock_existing_mr.title == "AI: Complete feature"
     mock_existing_mr.save.assert_called_once()
 
     print("✓ Draft status removed on completion")
     print(f"  - updated title: {mock_existing_mr.title}")
 
-
-def test_mr_iid_in_issue_comment():
-    """Test that completion comments use the MR shorthand (!iid)."""
-    print("\n" + "=" * 60)
-    print("Testing: Completion comment uses GitLab shorthand (!iid)")
-    print("=" * 60)
-
-    mock_gitlab = MagicMock()
-    mock_docker = MagicMock()
-
-    worker = WorkerExecutor(docker_client=mock_docker, gitlab_client=mock_gitlab)
-
-    task = Task(
-        id=5,
-        project_id=123,
-        issue_id=456,
-        user_prompt="Test",
-        priority=2,
-        status=TaskStatus.PENDING,
-    )
-
-    issue = create_mock_issue(456, 123)
-    issue.merge_request_iid = 42
-    issue.merge_request_url = "http://gitlab.example.com/project/-/merge_requests/42"
-
-    # _notify_task_completed with notify_target="mr" sends via create_mr_note
-    asyncio.run(worker._notify_task_completed(task, success=True, notify_target="mr", issue=issue))
-
-    mock_gitlab.create_mr_note.assert_called()
-    call_args = mock_gitlab.create_mr_note.call_args[0]
-
-    # The comment should contain !42 (GitLab shorthand)
-    comment_body = call_args[2]
-    assert "!42" in comment_body or "✅" in comment_body, \
-        "Comment should use GitLab shorthand format"
-
-    print("✓ Completion comment uses GitLab shorthand format")
-    print(f"  - Comment: {comment_body[:60]}...")
 
 
 if __name__ == "__main__":
@@ -414,7 +376,6 @@ if __name__ == "__main__":
     test_mr_iid_passed_to_container()
     test_mr_creation_failure_handled()
     test_draft_removed_on_completion()
-    test_mr_iid_in_issue_comment()
 
     print("\n" + "=" * 60)
     print("All P0.1 tests passed!")

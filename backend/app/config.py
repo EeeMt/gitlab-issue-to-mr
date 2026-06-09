@@ -1,12 +1,15 @@
 """Application configuration management."""
 
 import json
+import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional, Union
+from typing import Union
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 RuntimeConfigValue = Union[int, str, bool]
 
@@ -42,15 +45,22 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "oidc_redirect_uri": str,
     "session_cookie_name": str,
     "session_ttl_seconds": int,
+    "session_retention_days": int,
     "cookie_secure": bool,
     "cookie_samesite": str,
     "auth_admin_usernames": str,
     "auth_admin_gitlab_groups": str,
     "worker_volume_mounts": str,  # JSON array of {host_path, container_path, mode}
     "worker_ca_cert_host_path": str,  # Absolute path to CA cert on Docker host; auto-added to volume mounts
+    "worker_workspace_host_path": str,
+    "worker_workspace_retention_days": int,
+    "worker_failed_workspace_retention_days": int,
     "slot_max_tasks": int,  # Max tasks per 1-hour slot (0 = unlimited)
     "slot_max_tasks_enforce": bool,  # Enforce slot limit (True = hard reject, False = soft warning)
     "session_storage_root": str,
+    "announcement_enabled": bool,
+    "announcement_text": str,
+    "announcement_level": str,  # "info" | "warning" | "error" | "success"
 }
 
 SECRET_CONFIG_KEYS = {
@@ -91,21 +101,22 @@ class Settings(BaseSettings):
 
     # Docker Engine HTTP API Configuration
     docker_host: str = Field(default="tcp://localhost:2376")
-    docker_tls_ca: Optional[str] = Field(default=None)
-    docker_tls_cert: Optional[str] = Field(default=None)
-    docker_tls_key: Optional[str] = Field(default=None)
+    docker_tls_ca: str | None = Field(default=None)
+    docker_tls_cert: str | None = Field(default=None)
+    docker_tls_key: str | None = Field(default=None)
 
     # SSL/TLS Configuration
     # Path to a PEM-format CA certificate bundle for verifying HTTPS connections
     # to GitLab, Mattermost, Anthropic API, etc. Leave empty to use the system
     # CA store. In Docker deployments, mount the cert file and set the path here.
-    custom_ca_bundle: Optional[str] = Field(default=None)
+    custom_ca_bundle: str | None = Field(default=None)
 
     # Application Configuration
     secret_key: str = Field(default="change-me-in-production")
     session_secret: str = Field(default="change-me-in-production")
     config_encryption_key: str = Field(default="")
     log_level: str = Field(default="INFO")
+    sqlalchemy_echo: bool = Field(default=False)  # Set True to log all SQL queries (noisy in prod)
     backend_url: str = Field(default="http://localhost:8000")  # Backend API URL (used for webhook endpoint)
     frontend_url: str = Field(default="")  # Dashboard URL for task links; falls back to backend_url if empty
 
@@ -123,6 +134,7 @@ class Settings(BaseSettings):
     oidc_redirect_uri: str = Field(default="")
     session_cookie_name: str = Field(default="codify_session")
     session_ttl_seconds: int = Field(default=28800)
+    session_retention_days: int = Field(default=30)
     cookie_secure: bool = Field(default=True)
     cookie_samesite: str = Field(default="lax")
     auth_admin_usernames: str = Field(default="")
@@ -143,6 +155,9 @@ class Settings(BaseSettings):
     # Shortcut: absolute path to CA cert on Docker host → automatically mounted into workers.
     # Simpler alternative to encoding a full JSON entry in worker_volume_mounts.
     worker_ca_cert_host_path: str = Field(default="")
+    worker_workspace_host_path: str = Field(default="/opt/codify-workspaces")
+    worker_workspace_retention_days: int = Field(default=14)
+    worker_failed_workspace_retention_days: int = Field(default=30)
 
     # Session storage for Claude session persistence (Issue→Task model)
     session_storage_root: str = Field(default="/var/codify/sessions")
@@ -158,7 +173,7 @@ class Settings(BaseSettings):
     allow_oidc_diagnostics_for_users: bool = Field(default=False)
 
     # Alert Configuration
-    alert_webhook_url: Optional[str] = Field(default=None)  # Slack/Discord webhook URL
+    alert_webhook_url: str | None = Field(default=None)  # Slack/Discord webhook URL
     alert_on_failure: bool = Field(default=False)  # Send alert when task fails
     mattermost_server_url: str = Field(default="")
     mattermost_bot_token: str = Field(default="")
@@ -170,6 +185,11 @@ class Settings(BaseSettings):
     # Slot Capacity Configuration
     slot_max_tasks: int = Field(default=0)  # Max tasks per 1-hour slot (0 = unlimited)
     slot_max_tasks_enforce: bool = Field(default=False)  # True = hard reject, False = soft warning
+
+    # Announcement Configuration
+    announcement_enabled: bool = Field(default=False)
+    announcement_text: str = Field(default="")
+    announcement_level: str = Field(default="info")
 
     @property
     def project_root(self) -> Path:
@@ -206,7 +226,7 @@ class Settings(BaseSettings):
                 if isinstance(parsed, list):
                     mounts = parsed
             except json.JSONDecodeError:
-                pass
+                logger.warning("worker_volume_mounts is not valid JSON — ignoring custom mounts")
         if self.worker_ca_cert_host_path:
             mounts = [m for m in mounts if m.get("container_path") != "/etc/ssl/certs/custom-ca.crt"]
             mounts.append(
@@ -257,7 +277,7 @@ def update_runtime_config(key: str, value: RuntimeConfigValue) -> None:
     _runtime_config[key] = value
 
 
-def reset_runtime_config(key: Optional[str] = None) -> None:
+def reset_runtime_config(key: str | None = None) -> None:
     """Reset one or all runtime configuration overrides."""
     if key is None:
         _runtime_config.clear()

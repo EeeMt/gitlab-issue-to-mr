@@ -87,10 +87,10 @@ class GitLabClientAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             projects,
             [
-                {"id": 2, "name": "private-proj", "path_with_namespace": "team/private-proj"},
-                {"id": 3, "name": "shared-proj", "path_with_namespace": "team/shared-proj"},
-                {"id": 1, "name": "public-proj", "path_with_namespace": "oss/public-proj"},
-                {"id": 4, "name": "internal-proj", "path_with_namespace": "corp/internal-proj"},
+                {"id": 2, "name": "private-proj", "path_with_namespace": "team/private-proj", "default_branch": None, "web_url": None, "description": ""},
+                {"id": 3, "name": "shared-proj", "path_with_namespace": "team/shared-proj", "default_branch": None, "web_url": None, "description": ""},
+                {"id": 1, "name": "public-proj", "path_with_namespace": "oss/public-proj", "default_branch": None, "web_url": None, "description": ""},
+                {"id": 4, "name": "internal-proj", "path_with_namespace": "corp/internal-proj", "default_branch": None, "web_url": None, "description": ""},
             ],
         )
 
@@ -178,7 +178,7 @@ class GitLabClientErrorHandlingTests(unittest.IsolatedAsyncioTestCase):
         """get_issue should return None when GitLab API raises error."""
         from gitlab.exceptions import GitlabGetError
 
-        with patch("app.core.gitlab_client.gitlab.Gitlab", return_value=MagicMock()) as mock_gitlab:
+        with patch("app.core.gitlab_client.gitlab.Gitlab", return_value=MagicMock()):
             client = GitLabClient(private_token="test-token")
 
         # Simulate API error

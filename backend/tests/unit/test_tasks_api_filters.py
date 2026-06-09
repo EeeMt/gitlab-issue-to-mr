@@ -5,17 +5,15 @@ import sys
 import unittest
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import app.api.tasks as tasks_api
-from app.core.projects import build_project_lookup
-from app.api.tasks import list_tasks
 from app.api.projects import list_projects
+from app.api.tasks import list_tasks
+from app.core.projects import build_project_lookup
 from app.dependencies.project_access import ProjectAccessScope
 from app.models import Task, TaskStatus
 
@@ -24,7 +22,7 @@ def _make_task(
     task_id: int,
     project_id: int,
     status: TaskStatus,
-    initiator_username: Optional[str] = None,
+    initiator_username: str | None = None,
 ) -> Task:
     now = datetime.now(UTC)
     return Task(
@@ -159,8 +157,6 @@ async def test_list_projects_uses_ttl_cache_for_unrestricted_scope():
     gitlab_client._project_list_refresh_task = None
 
     # Use a real time.time function to avoid issues with logging and other calls
-    import time
-    real_time = time.time
 
     with patch("app.core.gitlab_client.get_gitlab_client", return_value=SimpleNamespace(get_projects=object())), patch(
         "app.core.gitlab_client.asyncio.to_thread",
@@ -299,6 +295,56 @@ class TestListTasksSortParams(unittest.IsolatedAsyncioTestCase):
                 access_scope=scope,
             )
         self.assertIn("items", result)
+
+    async def test_valid_sort_by_duration_asc(self):
+        """duration sort should not raise and uses computed epoch expression."""
+        db = _mock_paginated_db([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            result = await list_tasks(
+                sort_by="duration",
+                sort_order="asc",
+                page=1,
+                page_size=20,
+                db=db,
+                access_scope=scope,
+            )
+        self.assertIn("items", result)
+
+    async def test_valid_sort_by_duration_desc(self):
+        """duration sort desc should not raise."""
+        db = _mock_paginated_db([], total=0)
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+            result = await list_tasks(
+                sort_by="duration",
+                sort_order="desc",
+                page=1,
+                page_size=20,
+                db=db,
+                access_scope=scope,
+            )
+        self.assertIn("items", result)
+
+    async def test_other_sort_fields_still_work_alongside_duration(self):
+        """Regression: non-duration sort fields must still work (UnboundLocalError guard)."""
+        scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+
+        for field in ("created_at", "status", "priority", "total_changes", "input_tokens", "output_tokens"):
+            with self.subTest(sort_by=field):
+                db = _mock_paginated_db([], total=0)
+                with patch("app.api.tasks.build_project_lookup", new=AsyncMock(return_value={})):
+                    result = await list_tasks(
+                        sort_by=field,
+                        sort_order="desc",
+                        page=1,
+                        page_size=20,
+                        db=db,
+                        access_scope=scope,
+                    )
+                self.assertIn("items", result)
 
 
 class TestListTasksSearchParam(unittest.IsolatedAsyncioTestCase):

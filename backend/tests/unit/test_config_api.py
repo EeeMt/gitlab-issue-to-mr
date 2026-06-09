@@ -9,8 +9,8 @@ from fastapi import HTTPException
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from app.api._validators import _normalize_updates, _validate_config_value
 from app.api.config import _serialize_effective_config
-from app.api._validators import _validate_config_value, _normalize_updates
 from app.api.mattermost import MattermostNotificationProfileInput
 from app.api.project_webhooks import (
     _build_gitlab_project_webhook_status_response,
@@ -222,14 +222,13 @@ class ConfigApiHelperTests(unittest.TestCase):
             matched_hook={
                 "id": 12,
                 "url": "https://bot.example.com/api/webhook/gitlab",
-                "note_events": False,
-                "enable_ssl_verification": True,
+                "enable_ssl_verification": False,
                 "merge_requests_events": True,
             },
         )
 
         self.assertEqual(response.status, "needs_attention")
-        self.assertEqual(response.status_detail, "note events disabled")
+        self.assertEqual(response.status_detail, "SSL verification disabled")
         self.assertEqual(response.secret_mode, "global_fallback")
 
     def test_build_gitlab_project_webhook_status_response_marks_missing_and_error(self) -> None:
@@ -333,16 +332,24 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 
 from unittest.mock import AsyncMock, MagicMock, patch
+
 from fastapi.testclient import TestClient
 
 
 def _make_config_admin_client():
     """Build a TestClient with admin auth and DB overridden for config endpoints."""
-    from app.main import app
     from app.database import get_db
     from app.dependencies.auth import require_admin_user, require_authenticated_user
+    from app.main import app
 
     mock_db = MagicMock()
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = []
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_db.commit = AsyncMock()
+    mock_db.rollback = AsyncMock()
+    mock_db.flush = AsyncMock()
+    mock_db.delete = AsyncMock()
 
     async def override_db():
         yield mock_db
@@ -378,7 +385,7 @@ class GetConfigEndpointTests(unittest.TestCase):
 
     def test_get_config_returns_200_and_config_structure(self):
         """GET /api/config should return 200 with the full config response."""
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock, patch
         client, app, mock_db = _make_config_admin_client()
 
         with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
@@ -413,7 +420,7 @@ class ResetConfigEndpointTests(unittest.TestCase):
 
     def test_reset_config_returns_200(self):
         """POST /api/config/reset should return 200 and the reset config."""
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock, patch
         client, app, mock_db = _make_config_admin_client()
 
         with patch("app.api.config.reset_all_runtime_config_overrides", new=AsyncMock()):
@@ -447,7 +454,7 @@ class UpdateConfigEndpointTests(unittest.TestCase):
 
     def test_update_config_with_empty_payload_returns_200(self):
         """PATCH /api/config with empty payload should return 200."""
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock, patch
         client, app, mock_db = _make_config_admin_client()
 
         with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
@@ -459,11 +466,11 @@ class UpdateConfigEndpointTests(unittest.TestCase):
 
     def test_update_config_with_runtime_update(self):
         """PATCH /api/config with runtime changes should save overrides and return config."""
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock, patch
         client, app, mock_db = _make_config_admin_client()
 
         with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
-            with patch("app.runtime_config.save_runtime_config_override", new=AsyncMock()):
+            with patch("app.api.config_runtime.save_runtime_config_override", new=AsyncMock()):
                 response = client.patch("/api/config", json={
                     "runtime": {
                         "max_concurrency": 3,
@@ -477,9 +484,48 @@ class UpdateConfigEndpointTests(unittest.TestCase):
         data = response.json()
         self.assertIn("runtime", data)
 
+    def test_update_config_with_runtime_null_worker_environment_variables_is_noop(self):
+        """PATCH /api/config should treat null runtime worker env vars as a no-op."""
+        client, app, mock_db = _make_config_admin_client()
+
+        with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
+            with patch(
+                "app.api.config_runtime.replace_worker_environment_variables",
+                new=AsyncMock(),
+            ) as mock_replace:
+                response = client.patch("/api/config", json={
+                    "runtime": {
+                        "worker_environment_variables": None,
+                    }
+                })
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        mock_replace.assert_not_awaited()
+
+    def test_update_config_with_runtime_internal_value_error_returns_500(self):
+        """PATCH /api/config should not report unrelated runtime ValueErrors as 400."""
+        client, app, mock_db = _make_config_admin_client()
+
+        with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
+            with patch(
+                "app.api.config_runtime.save_runtime_config_override",
+                new=AsyncMock(side_effect=ValueError("unexpected failure")),
+            ):
+                response = client.patch("/api/config", json={
+                    "runtime": {
+                        "max_concurrency": 3,
+                    }
+                })
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 500)
+
     def test_update_config_with_auth_update(self):
         """PATCH /api/config with auth changes should save overrides and return config."""
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock, patch
         client, app, mock_db = _make_config_admin_client()
 
         with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
@@ -573,8 +619,8 @@ class UpdateConfigIntegrationTests(unittest.TestCase):
         client, app, mock_db = _make_config_admin_client()
 
         with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
-            with patch("app.runtime_config.save_runtime_config_override", new=AsyncMock()):
-                with patch("app.runtime_config.reset_runtime_config_override", new=AsyncMock()):
+            with patch("app.api.config_runtime.save_runtime_config_override", new=AsyncMock()):
+                with patch("app.api.config_runtime.reset_runtime_config_override", new=AsyncMock()):
                     response = client.patch("/api/config", json={
                         "runtime": {
                             "clear_alert_webhook_url": True,

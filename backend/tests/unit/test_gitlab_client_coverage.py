@@ -28,10 +28,9 @@ Covers functionality NOT tested by test_gitlab_client_access.py:
 
 import asyncio
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from gitlab.exceptions import GitlabGetError
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -94,7 +93,7 @@ class TestGitLabClientInit(unittest.TestCase):
              patch('app.core.gitlab_client.get_ssl_verify', return_value=True):
             mock_get.return_value = _make_settings()
             from app.core.gitlab_client import GitLabClient
-            client = GitLabClient(settings=None)
+            GitLabClient(settings=None)
             mock_get.assert_called_once()
 
 
@@ -250,7 +249,7 @@ class TestCreateMergeRequest(unittest.TestCase):
         mock_project.mergerequests.create.return_value = mock_mr
         client.gl.projects.get.return_value = mock_project
 
-        result = client.create_merge_request(
+        client.create_merge_request(
             project_id=42,
             source_branch="fix",
             target_branch="main",
@@ -616,12 +615,14 @@ class TestGetProjects(unittest.TestCase):
         mock_p1.name = "project-a"
         mock_p1.path_with_namespace = "group/project-a"
         mock_p1.default_branch = "main"
+        mock_p1.marked_for_deletion_at = None
 
         mock_p2 = MagicMock()
         mock_p2.id = 2
         mock_p2.name = "project-b"
         mock_p2.path_with_namespace = "group/project-b"
         mock_p2.default_branch = None
+        mock_p2.marked_for_deletion_at = None
 
         client.gl.projects.list.return_value = [mock_p1, mock_p2]
 
@@ -633,14 +634,42 @@ class TestGetProjects(unittest.TestCase):
         self.assertEqual(result[0]["default_branch"], "main")
         self.assertIsNone(result[1]["default_branch"])
 
+    def test_filters_deletion_pending_projects(self):
+        """Projects with marked_for_deletion_at are excluded from results."""
+        client = _make_client()
+        mock_active = MagicMock()
+        mock_active.id = 1
+        mock_active.name = "active"
+        mock_active.path_with_namespace = "group/active"
+        mock_active.default_branch = "main"
+        mock_active.marked_for_deletion_at = None
+
+        mock_pending = MagicMock()
+        mock_pending.id = 2
+        mock_pending.name = "deleted"
+        mock_pending.path_with_namespace = "group/deleted-deletion_scheduled-1"
+        mock_pending.default_branch = "main"
+        mock_pending.marked_for_deletion_at = "2026-05-15T00:00:00.000Z"
+
+        client.gl.projects.list.return_value = [mock_active, mock_pending]
+
+        result = client.get_projects()
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["id"], 1)
+
     def test_custom_per_page(self):
-        """Passes per_page to API — line 367."""
+        """Passes per_page to all three queries — membership, internal, public."""
         client = _make_client()
         client.gl.projects.list.return_value = []
 
         client.get_projects(per_page=50)
 
-        client.gl.projects.list.assert_called_once_with(per_page=50, membership=True)
+        self.assertEqual(client.gl.projects.list.call_count, 3)
+        calls = client.gl.projects.list.call_args_list
+        self.assertIn({"per_page": 50, "all": True, "membership": True}, [c.kwargs for c in calls])
+        self.assertIn({"per_page": 50, "all": True, "visibility": "internal"}, [c.kwargs for c in calls])
+        self.assertIn({"per_page": 50, "all": True, "visibility": "public"}, [c.kwargs for c in calls])
 
 
 # ===================================================================
@@ -822,7 +851,7 @@ class TestGetGitlabClient(unittest.TestCase):
         settings = _make_settings()
         mock_get_settings.return_value = settings
 
-        result = mod.get_gitlab_client()
+        mod.get_gitlab_client()
 
         MockClient.assert_called_once_with(settings=settings)
 
@@ -851,10 +880,10 @@ class TestGetGitlabClient(unittest.TestCase):
         settings2 = _make_settings(gitlab_url="http://new.example.com/", gitlab_bot_token="token-2")
 
         mock_get_settings.return_value = settings1
-        client1 = mod.get_gitlab_client()
+        mod.get_gitlab_client()
 
         mock_get_settings.return_value = settings2
-        client2 = mod.get_gitlab_client()
+        mod.get_gitlab_client()
 
         # Should have created two different clients
         self.assertEqual(MockClient.call_count, 2)
@@ -930,8 +959,9 @@ class TestGetCachedProjects(unittest.TestCase):
 
     def test_fresh_cache_returns_immediately(self):
         """Fresh cache returns without refresh — lines 521-523."""
-        import app.core.gitlab_client as mod
         import time
+
+        import app.core.gitlab_client as mod
 
         mod._project_list_cache = [{"id": 1}]
         mod._project_list_cache_expires_at = time.time() + 300  # far future
@@ -944,8 +974,9 @@ class TestGetCachedProjects(unittest.TestCase):
 
     def test_stale_cache_returns_stale_and_triggers_refresh(self):
         """Stale cache returns old data and kicks off background refresh — lines 525-529."""
-        import app.core.gitlab_client as mod
         import time
+
+        import app.core.gitlab_client as mod
 
         mod._project_list_cache = [{"id": 99}]
         mod._project_list_cache_expires_at = time.time() - 10  # expired
@@ -985,6 +1016,7 @@ class TestCreateSudoGl(unittest.TestCase):
             private_token="glpat-admin-token",
             ssl_verify=True,
             keep_base_url=True,
+            timeout=30,
         )
         self.assertEqual(mock_instance.headers["Sudo"], "42")
         self.assertEqual(result, mock_instance)

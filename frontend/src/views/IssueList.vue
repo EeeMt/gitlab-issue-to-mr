@@ -1,7 +1,7 @@
 <template>
   <div class="issue-list" data-testid="issue-list-page">
     <n-spin :show="initialLoading" :description="t('common.loadingTasks')">
-      <n-space vertical :size="16">
+      <div class="page-hero">
         <PageHeader
           data-testid="issue-list-header"
           root-class="issue-list__hero"
@@ -31,6 +31,8 @@
             <SummaryCard
               :label="item.label"
               :value="item.value"
+              :icon="item.icon"
+              :accent="item.accent"
               data-testid="issue-summary-card"
               card-class="issue-summary-card"
               label-class="issue-summary-card__label"
@@ -38,7 +40,8 @@
             />
           </n-gi>
         </n-grid>
-
+      </div>
+      <n-space vertical :size="16">
         <FilterToolbar
           :config="filterConfig"
           :filters="filterState.filters.value"
@@ -56,20 +59,37 @@
           @toggle-column="filterState.toggleColumn"
           @reset-columns="filterState.resetColumns"
           @search="onSearch"
-        />
+        >
+          <template v-if="currentUsername" #quick-filters>
+            <n-button
+              size="small"
+              :type="isMyFilterActive ? 'primary' : 'default'"
+              :secondary="!isMyFilterActive"
+              @click="toggleMyFilter"
+            >
+              <template #icon>
+                <n-icon size="14"><PersonOutline /></n-icon>
+              </template>
+              {{ t('filter.mine') }}
+            </n-button>
+          </template>
+        </FilterToolbar>
 
         <n-card class="issue-list__table-card" :bordered="false" data-testid="issue-list-table-card">
-          <n-data-table
-            data-testid="issue-list-table"
-            :columns="columns"
-            :data="issues"
-            :loading="tableLoading"
-            :row-key="(row: Issue) => row.id"
-            :row-props="issueRowProps"
-            :pagination="pagination"
-            remote
-            :bordered="false"
-          />
+          <div class="issue-list__table-shell">
+            <n-data-table
+              data-testid="issue-list-table"
+              :columns="columns"
+              :data="issues"
+              :loading="tableLoading"
+              :row-key="(row: Issue) => row.id"
+              :row-props="issueRowProps"
+              :pagination="pagination"
+              :scroll-x="tableScrollX"
+              remote
+              :bordered="false"
+            />
+          </div>
         </n-card>
       </n-space>
     </n-spin>
@@ -78,19 +98,22 @@
 
 <script setup lang="ts">
 import { ref, onMounted, h, watch, computed } from 'vue'
-import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, useMessage, type DataTableColumns } from 'naive-ui'
-import { useRouter } from 'vue-router'
+import { NButton, NSpace, NCard, NDataTable, NTag, NGrid, NGi, NSpin, NIcon, useMessage, type DataTableColumns } from 'naive-ui'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getIssues, getProjects, getStats, type Issue, type IssueStatus, type Project } from '../api'
+import { authState } from '../auth'
 import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
 import FilterToolbar from '../components/filter/FilterToolbar.vue'
 import { useFilterSort, type FilterSortConfig } from '../composables/useFilterSort'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact } from '../utils/datetime'
-import { EllipseOutline, FolderOpenOutline, CalendarOutline, PersonOutline, GitMergeOutline } from '@vicons/ionicons5'
+import { formatDurationSec } from '../utils/format'
+import { EllipseOutline, FolderOpenOutline, CalendarOutline, PersonOutline, GitMergeOutline, DocumentTextOutline, AlertCircleOutline, SyncOutline, CheckmarkCircleOutline } from '@vicons/ionicons5'
 
 const router = useRouter()
+const route = useRoute()
 const message = useMessage()
 const { t } = useI18n()
 const { isMobile } = useBreakpoints()
@@ -107,10 +130,10 @@ const statsInProgress = ref(0)
 const statsCompleted = ref(0)
 
 const summaryItems = computed(() => [
-  { label: t('issue.totalIssues'), value: String(statsTotal.value) },
-  { label: t('issue.openCount'), value: String(statsOpen.value) },
-  { label: t('issue.inProgressCount'), value: String(statsInProgress.value) },
-  { label: t('issue.completedCount'), value: String(statsCompleted.value) },
+  { label: t('issue.totalIssues'), value: String(statsTotal.value), icon: DocumentTextOutline, accent: 'blue' as const },
+  { label: t('issue.openCount'), value: String(statsOpen.value), icon: AlertCircleOutline, accent: 'red' as const },
+  { label: t('issue.inProgressCount'), value: String(statsInProgress.value), icon: SyncOutline, accent: 'amber' as const },
+  { label: t('issue.completedCount'), value: String(statsCompleted.value), icon: CheckmarkCircleOutline, accent: 'green' as const },
 ])
 
 const currentPage = ref(1)
@@ -174,6 +197,7 @@ const filterConfig: FilterSortConfig = {
     { key: 'status', label: 'filter.sortStatus' },
     { key: 'total_changes', label: 'filter.sortChanges' },
     { key: 'total_input_tokens', label: 'filter.sortTokens' },
+    { key: 'duration', label: 'filter.sortDuration' },
   ],
   columns: [
     { key: 'id', label: 'dashboard.id', defaultVisible: true, alwaysVisible: true },
@@ -181,8 +205,10 @@ const filterConfig: FilterSortConfig = {
     { key: 'project_id', label: 'issue.field.project', defaultVisible: true },
     { key: 'status', label: 'common.status', defaultVisible: true },
     { key: 'task_count', label: 'issue.field.tasks', defaultVisible: true },
+    { key: 'branch_name', label: 'issue.field.branch', defaultVisible: true },
     { key: 'merge_request', label: 'filter.hasMr', defaultVisible: true },
     { key: 'total_changes', label: 'common.changes', defaultVisible: true },
+    { key: 'duration', label: 'dashboard.duration', defaultVisible: true },
     { key: 'total_tokens', label: 'analytics.tokens', defaultVisible: true },
     { key: 'initiator_username', label: 'issue.field.creator', defaultVisible: false },
     { key: 'created_at', label: 'issue.field.createdAt', defaultVisible: true },
@@ -190,8 +216,32 @@ const filterConfig: FilterSortConfig = {
   defaultSort: { field: 'created_at', order: 'desc' },
 }
 
-const filterState = useFilterSort(filterConfig)
+function getInitialFiltersFromQuery(): Record<string, any> {
+  const filters: Record<string, any> = {}
+  const { status, initiator_username, project_id } = route.query
+  if (status) filters.status = String(status).split(',')
+  if (initiator_username) filters.initiator_username = String(initiator_username).split(',')
+  if (project_id) filters.project_id = String(project_id).split(',').map(Number)
+  return filters
+}
+
+const filterState = useFilterSort(filterConfig, getInitialFiltersFromQuery())
 const searchTerm = ref('')
+
+const currentUsername = computed(() => authState.user?.username ?? null)
+
+const isMyFilterActive = computed(() => {
+  const val = filterState.filters.value['initiator_username']
+  return Array.isArray(val) && val.length === 1 && val[0] === currentUsername.value
+})
+
+function toggleMyFilter() {
+  if (isMyFilterActive.value) {
+    filterState.removeFilter('initiator_username')
+  } else if (currentUsername.value) {
+    filterState.addFilter('initiator_username', [currentUsername.value])
+  }
+}
 
 function onSearch(term: string) {
   searchTerm.value = term
@@ -238,6 +288,18 @@ const statusColors: Record<IssueStatus, 'default' | 'info' | 'warning' | 'succes
 function getProjectName(projectId: number): string {
   const project = projects.value.find((p) => p.id === projectId)
   return project ? project.path_with_namespace : `Project #${projectId}`
+}
+
+function getProjectWebUrl(projectId: number): string | null {
+  const project = projects.value.find((p) => p.id === projectId)
+  return project?.web_url ?? null
+}
+
+function issueBranchUrl(projectId: number, branchName: string | null | undefined): string | null {
+  if (!branchName) return null
+  const webUrl = getProjectWebUrl(projectId)
+  if (!webUrl) return null
+  return `${webUrl}/-/tree/${encodeURIComponent(branchName)}`
 }
 
 function formatCompactDateTime(value?: string | null): string {
@@ -301,6 +363,26 @@ const allColumns = computed<DataTableColumns<Issue>>(() => [
     render: (row) => String(row.task_count ?? 0),
   },
   {
+    title: t('issue.field.branch'),
+    key: 'branch_name',
+    width: 180,
+    ellipsis: { tooltip: true },
+    render: (row) => {
+      if (!row.branch_name) return '—'
+      const url = issueBranchUrl(row.project_id, row.branch_name)
+      if (url) {
+        return h('a', {
+          href: url,
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          class: 'app-link',
+          onClick: (e: MouseEvent) => e.stopPropagation(),
+        }, row.branch_name)
+      }
+      return row.branch_name
+    },
+  },
+  {
     title: t('filter.hasMr'),
     key: 'merge_request',
     width: 80,
@@ -324,6 +406,16 @@ const allColumns = computed<DataTableColumns<Issue>>(() => [
         h('div', String(totals.total_changes)),
         h('div', { style: secondaryTextStyle }, t('analytics.changeBreakdown', { additions: totals.additions, deletions: totals.deletions })),
       ])
+    },
+  },
+  {
+    title: t('dashboard.duration'),
+    key: 'duration',
+    width: 100,
+    render: (row) => {
+      const durationSeconds = row.totals?.duration_seconds ?? 0
+      if (durationSeconds <= 0) return '—'
+      return formatDurationSec(durationSeconds)
     },
   },
   {
@@ -359,6 +451,14 @@ const allColumns = computed<DataTableColumns<Issue>>(() => [
 const columns = computed<DataTableColumns<Issue>>(() => {
   const visible = filterState.visibleColumns.value
   return allColumns.value.filter((col) => 'key' in col && visible.includes(col.key as string))
+})
+
+const tableScrollX = computed(() => {
+  const width = columns.value.reduce((total, col) => {
+    const columnWidth = 'width' in col && typeof col.width === 'number' ? col.width : 160
+    return total + columnWidth
+  }, 0)
+  return Math.max(width, isMobile.value ? 360 : 960)
 })
 
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
@@ -437,6 +537,18 @@ onMounted(() => {
 
 .issue-list__table-card {
   border-radius: var(--app-card-radius);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.issue-list__table-card :deep(.n-card__content) {
+  min-width: 0;
+}
+
+.issue-list__table-shell {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .issue-summary-card {

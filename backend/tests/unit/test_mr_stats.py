@@ -5,11 +5,11 @@ Test: MR Change Stats - Get and save MR change statistics after commit.
 
 import os
 import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
-from unittest.mock import MagicMock, patch, AsyncMock
-from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class MockContainer:
@@ -38,7 +38,7 @@ def _make_mock_issue(**overrides):
     return mock_issue
 
 
-def create_mock_db(task, issue=None):
+def create_mock_db(task, issue=None, *, worker_finalization_metadata=None):
     """Create a properly configured mock database session."""
     mock_db = MagicMock()
 
@@ -49,8 +49,20 @@ def create_mock_db(task, issue=None):
     delete_result.rowcount = 0
 
     call_count = [0]
+    task_log_query_count = [0]
 
     async def mock_execute(query, *args, **kwargs):
+        query_str = str(query)
+        if "FROM task_logs" in query_str:
+            task_log_query_count[0] += 1
+            result = MagicMock()
+            if task_log_query_count[0] != 3 or worker_finalization_metadata is None:
+                result.scalar_one_or_none.return_value = None
+            else:
+                log_entry = MagicMock()
+                log_entry.log_metadata = worker_finalization_metadata
+                result.scalar_one_or_none.return_value = log_entry
+            return result
         call_count[0] += 1
         if call_count[0] == 1:
             return task_result
@@ -65,9 +77,9 @@ def create_mock_db(task, issue=None):
 
 
 def test_worker_saves_mr_stats_after_completion():
-    """Test that worker uses CODIFY_DIFF log line (primary) for MR change stats."""
+    """Test that worker uses structured finalization diff for MR change stats."""
     print("\n" + "=" * 60)
-    print("Testing: Worker saves MR stats from CODIFY_DIFF log line (primary path)")
+    print("Testing: Worker saves MR stats from structured finalization diff")
     print("=" * 60)
 
     mock_settings = MagicMock()
@@ -108,38 +120,43 @@ def test_worker_saves_mr_stats_after_completion():
         )
 
         mock_issue = _make_mock_issue(branch_name="codify-3-p123-i456", target_branch="main")
-        mock_db = create_mock_db(task, issue=mock_issue)
+        mock_db = create_mock_db(
+            task,
+            issue=mock_issue,
+            worker_finalization_metadata=(
+                '{"commit_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",'
+                '"diff":{"additions":100,"deletions":50,"total":150},'
+                '"commit_message":"Structured title"}'
+            ),
+        )
 
-        # Simulate logs that contain CODIFY_DIFF and an MR URL
+        # Simulate logs that contain an MR URL; change stats come from structured metadata.
         fake_logs = (
             "Cloning repo...\n"
             "Running claude...\n"
             "http://gitlab.example.com/project/-/merge_requests/42\n"
-            "CODIFY_DIFF:+100-50\n"
-            "CODIFY_STATS:{\"input_tokens\":1000,\"output_tokens\":200}\n"
         )
 
         async def run_test():
-            with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
-                await worker.execute_task(mock_db, task.id)
+            await worker._parse_task_result(task, fake_logs, mock_db, exit_code=0, issue=mock_issue)
 
         asyncio.run(run_test())
 
-        # CODIFY_DIFF is present → no API call needed
+        # Structured diff is present → no API call needed
         mock_gitlab.get_merge_request_stats.assert_not_called()
 
         assert task.additions == 100, f"Expected additions=100, got {task.additions}"
         assert task.deletions == 50, f"Expected deletions=50, got {task.deletions}"
         assert task.total_changes == 150, f"Expected total_changes=150, got {task.total_changes}"
 
-        print("✓ Worker saves MR stats from CODIFY_DIFF log line")
+        print("✓ Worker saves MR stats from structured finalization diff")
         print(f"  - Additions: +{task.additions}")
         print(f"  - Deletions: -{task.deletions}")
         print(f"  - Total: {task.total_changes}")
 
 
 def test_worker_handles_missing_mr_stats():
-    """Test fallback to GitLab API when CODIFY_DIFF is absent; None API result leaves stats at 0."""
+    """Test fallback to GitLab API when structured diff is absent; None API result leaves stats at 0."""
     print("\n" + "=" * 60)
     print("Testing: Worker falls back to GitLab API when CODIFY_DIFF absent")
     print("=" * 60)
@@ -184,18 +201,20 @@ def test_worker_handles_missing_mr_stats():
 
         # target_branch=None skips MR creation; MR iid comes from log parsing
         mock_issue = _make_mock_issue(branch_name="codify-4-p123-i456", target_branch=None)
-        mock_db = create_mock_db(task, issue=mock_issue)
+        mock_db = create_mock_db(
+            task,
+            issue=mock_issue,
+            worker_finalization_metadata='{"commit_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","commit_message":""}',
+        )
 
-        # Logs without CODIFY_DIFF → fallback to GitLab API
+        # Logs with MR URL; commit SHA comes from structured metadata, diff falls back to API.
         fake_logs = (
             "Cloning repo...\n"
             "http://gitlab.example.com/project/-/merge_requests/42\n"
-            "CODIFY_STATS:{\"input_tokens\":500,\"output_tokens\":100}\n"
         )
 
         async def run_test():
-            with patch.object(worker, '_stream_logs_to_db', new=AsyncMock(return_value=(0, fake_logs, 1))):
-                await worker.execute_task(mock_db, task.id)
+            await worker._parse_task_result(task, fake_logs, mock_db, exit_code=0, issue=mock_issue)
 
         asyncio.run(run_test())
 
@@ -215,8 +234,6 @@ if __name__ == "__main__":
     print("Running MR Change Stats Tests")
     print("=" * 60)
 
-    test_gitlab_get_mr_stats_with_changes_count()
-    test_gitlab_get_mr_stats_from_diff()
     test_worker_saves_mr_stats_after_completion()
     test_worker_handles_missing_mr_stats()
 

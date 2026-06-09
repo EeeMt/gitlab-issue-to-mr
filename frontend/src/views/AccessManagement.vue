@@ -1,6 +1,6 @@
 <template>
   <div class="access-page" data-testid="access-management-page">
-    <n-space vertical :size="16">
+    <div class="page-hero">
       <PageHeader
         data-testid="access-management-header"
         :title="t('accessManagement.title')"
@@ -16,14 +16,11 @@
         </template>
       </PageHeader>
 
-      <n-alert type="info" :show-icon="false" class="user-management__intro">
-        {{ t('accessManagement.intro') }}
-      </n-alert>
-
       <n-grid
-        v-if="hasLoadedOnce"
         data-testid="access-management-summary"
         :cols="isMobile ? 2 : 4"
+        class="access-summary-grid"
+        :class="{ 'access-summary-grid--visible': hasLoadedOnce }"
         :x-gap="16"
         :y-gap="16"
       >
@@ -31,6 +28,8 @@
           <SummaryCard
             :label="item.label"
             :value="item.value"
+            :icon="item.icon"
+            :accent="item.accent"
             data-testid="access-management-summary-card"
             card-class="access-summary-card"
             label-class="access-summary-card__label"
@@ -38,6 +37,11 @@
           />
         </n-gi>
       </n-grid>
+    </div>
+    <n-space vertical :size="16">
+      <n-alert type="info" :show-icon="false" class="user-management__intro">
+        {{ t('accessManagement.intro') }}
+      </n-alert>
 
       <n-card class="access-card" :bordered="false" data-testid="access-management-card">
         <div class="user-management__toolbar">
@@ -216,6 +220,7 @@ import PageHeader from '../components/PageHeader.vue'
 import SummaryCard from '../components/SummaryCard.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeLocal } from '../utils/datetime'
+import { PeopleOutline, ShieldCheckmarkOutline, CloseCircleOutline, FlashOutline } from '@vicons/ionicons5'
 
 type AdminUserDraft = {
   platform_role: string
@@ -262,10 +267,10 @@ const summaryItems = computed(() => {
   const disabledUsers = users.value.filter((user) => user.state === 'disabled').length
   const activeSessions = users.value.reduce((total, user) => total + user.active_session_count, 0)
   return [
-    { label: t('accessManagement.knownUsers'), value: String(users.value.length) },
-    { label: t('accessManagement.platformAdmins'), value: String(adminUsers) },
-    { label: t('accessManagement.disabledUsers'), value: String(disabledUsers) },
-    { label: t('accessManagement.activeSessions'), value: String(activeSessions) }
+    { label: t('accessManagement.knownUsers'), value: String(users.value.length), icon: PeopleOutline, accent: 'blue' as const },
+    { label: t('accessManagement.platformAdmins'), value: String(adminUsers), icon: ShieldCheckmarkOutline, accent: 'purple' as const },
+    { label: t('accessManagement.disabledUsers'), value: String(disabledUsers), icon: CloseCircleOutline, accent: 'red' as const },
+    { label: t('accessManagement.activeSessions'), value: String(activeSessions), icon: FlashOutline, accent: 'green' as const }
   ]
 })
 
@@ -430,12 +435,7 @@ onMounted(() => {
   max-width: var(--app-page-max-width);
 }
 
-.access-summary-card {
-  border-radius: var(--app-card-radius);
-}
-
 .access-summary-card__value {
-  font-size: 20px;
   word-break: break-word;
 }
 
@@ -443,8 +443,18 @@ onMounted(() => {
   border-radius: 18px;
 }
 
+.access-summary-grid {
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.access-summary-grid--visible {
+  opacity: 1;
+}
+
 .user-management__intro {
   margin-bottom: 0;
+  border-radius: 12px !important;
 }
 
 .user-management__toolbar {

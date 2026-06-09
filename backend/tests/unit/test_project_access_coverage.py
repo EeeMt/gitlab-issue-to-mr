@@ -22,7 +22,6 @@ from fastapi import HTTPException
 from app.dependencies.auth import AuthContext
 from app.dependencies.project_access import (
     ProjectAccessScope,
-    _ACCESS_CACHE_TTL_SECONDS,
     _fetch_and_cache_projects,
     _project_access_cache,
     _project_access_refresh_tasks,
@@ -94,6 +93,17 @@ _PATCH_SETTINGS = "app.dependencies.project_access.get_effective_settings"
 _PATCH_FETCH_PROJECTS = "app.dependencies.project_access.get_accessible_projects_for_oauth_token"
 _PATCH_EXCHANGE_REFRESH = "app.dependencies.project_access.exchange_refresh_token"
 _PATCH_UPDATE_SESSION = "app.dependencies.project_access.update_session_gitlab_tokens"
+_PATCH_ASYNC_SESSION = "app.dependencies.project_access.AsyncSessionLocal"
+
+
+def _make_mock_db_session():
+    """Return (mock_asl_patch_target_value, mock_db) for mocking AsyncSessionLocal."""
+    mock_db = MagicMock()
+    mock_db.commit = AsyncMock()
+    mock_asl = MagicMock()
+    mock_asl.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+    mock_asl.return_value.__aexit__ = AsyncMock(return_value=None)
+    return mock_asl, mock_db
 
 
 class TestProjectAccessScopeDataclass(unittest.TestCase):
@@ -225,7 +235,7 @@ class TestRequireProjectAccessScopeCachePaths(unittest.IsolatedAsyncioTestCase):
         _project_access_refresh_tasks["sess-dedup"] = existing_task
 
         with patch(_PATCH_SETTINGS, return_value=_settings()), \
-             patch(_PATCH_FETCH_PROJECTS, AsyncMock(return_value=[])) as mock_fetch:
+             patch(_PATCH_FETCH_PROJECTS, AsyncMock(return_value=[])):
             scope = await require_project_access_scope(ctx)
 
         # Should return stale data and NOT replace the in-flight task
@@ -244,7 +254,7 @@ class TestRequireProjectAccessScopeCachePaths(unittest.IsolatedAsyncioTestCase):
 
         with patch(_PATCH_SETTINGS, return_value=_settings()), \
              patch(_PATCH_FETCH_PROJECTS, AsyncMock(return_value=[])):
-            scope = await require_project_access_scope(ctx)
+            await require_project_access_scope(ctx)
             await asyncio.sleep(0.05)
 
         # A new task should have been created (replacing the done one)
@@ -282,6 +292,7 @@ class TestRequireProjectAccessScopeErrorPaths(unittest.IsolatedAsyncioTestCase):
         """
         ctx = _make_auth_context(session_id="sess-retry-ok", refresh_token="rt")
         projects = [{"id": 50}]
+        mock_asl, mock_db = _make_mock_db_session()
 
         call_count = 0
 
@@ -297,8 +308,9 @@ class TestRequireProjectAccessScopeErrorPaths(unittest.IsolatedAsyncioTestCase):
              patch(_PATCH_EXCHANGE_REFRESH, AsyncMock(return_value={
                  "access_token": "new-token", "refresh_token": "new-rt", "expires_in": "3600",
              })), \
-             patch(_PATCH_UPDATE_SESSION, AsyncMock()):
-            scope = await require_project_access_scope(ctx, db=AsyncMock())
+             patch(_PATCH_UPDATE_SESSION, AsyncMock()), \
+             patch(_PATCH_ASYNC_SESSION, mock_asl):
+            scope = await require_project_access_scope(ctx)
 
         self.assertFalse(scope.is_unrestricted)
         self.assertEqual(scope.accessible_projects, projects)
@@ -306,15 +318,17 @@ class TestRequireProjectAccessScopeErrorPaths(unittest.IsolatedAsyncioTestCase):
     async def test_cold_cache_403_retry_fails_401_raises_unauthorized(self) -> None:
         """Lines 128-133: Cold cache → 403 → refresh → retry → 401 → 401 HTTPException."""
         ctx = _make_auth_context(session_id="sess-retry-401", refresh_token="rt")
+        mock_asl, mock_db = _make_mock_db_session()
 
         with patch(_PATCH_SETTINGS, return_value=_settings()), \
              patch(_PATCH_FETCH_PROJECTS, AsyncMock(side_effect=_http_status_error(403))), \
              patch(_PATCH_EXCHANGE_REFRESH, AsyncMock(return_value={
                  "access_token": "new-token", "expires_in": "3600",
              })), \
-             patch(_PATCH_UPDATE_SESSION, AsyncMock()):
+             patch(_PATCH_UPDATE_SESSION, AsyncMock()), \
+             patch(_PATCH_ASYNC_SESSION, mock_asl):
             with self.assertRaises(HTTPException) as exc_ctx:
-                await require_project_access_scope(ctx, db=AsyncMock())
+                await require_project_access_scope(ctx)
 
         self.assertEqual(exc_ctx.exception.status_code, 401)
         self.assertIn("refresh failed", exc_ctx.exception.detail)
@@ -322,6 +336,7 @@ class TestRequireProjectAccessScopeErrorPaths(unittest.IsolatedAsyncioTestCase):
     async def test_cold_cache_401_retry_fails_500_raises_502(self) -> None:
         """Lines 134-137: Cold cache → 401 → refresh → retry → 500 → 502 HTTPException."""
         ctx = _make_auth_context(session_id="sess-retry-500", refresh_token="rt")
+        mock_asl, mock_db = _make_mock_db_session()
 
         call_count = 0
 
@@ -337,15 +352,17 @@ class TestRequireProjectAccessScopeErrorPaths(unittest.IsolatedAsyncioTestCase):
              patch(_PATCH_EXCHANGE_REFRESH, AsyncMock(return_value={
                  "access_token": "new-token", "expires_in": "3600",
              })), \
-             patch(_PATCH_UPDATE_SESSION, AsyncMock()):
+             patch(_PATCH_UPDATE_SESSION, AsyncMock()), \
+             patch(_PATCH_ASYNC_SESSION, mock_asl):
             with self.assertRaises(HTTPException) as exc_ctx:
-                await require_project_access_scope(ctx, db=AsyncMock())
+                await require_project_access_scope(ctx)
 
         self.assertEqual(exc_ctx.exception.status_code, 502)
 
     async def test_cold_cache_401_retry_fails_network_error_raises_502(self) -> None:
         """Lines 138-142: Cold cache → 401 → refresh → retry → HTTPError → 502."""
         ctx = _make_auth_context(session_id="sess-retry-net", refresh_token="rt")
+        mock_asl, mock_db = _make_mock_db_session()
 
         call_count = 0
 
@@ -361,9 +378,10 @@ class TestRequireProjectAccessScopeErrorPaths(unittest.IsolatedAsyncioTestCase):
              patch(_PATCH_EXCHANGE_REFRESH, AsyncMock(return_value={
                  "access_token": "new-token", "expires_in": "3600",
              })), \
-             patch(_PATCH_UPDATE_SESSION, AsyncMock()):
+             patch(_PATCH_UPDATE_SESSION, AsyncMock()), \
+             patch(_PATCH_ASYNC_SESSION, mock_asl):
             with self.assertRaises(HTTPException) as exc_ctx:
-                await require_project_access_scope(ctx, db=AsyncMock())
+                await require_project_access_scope(ctx)
 
         self.assertEqual(exc_ctx.exception.status_code, 502)
         self.assertIn("refreshing project access", exc_ctx.exception.detail)
@@ -375,7 +393,7 @@ class TestRequireProjectAccessScopeErrorPaths(unittest.IsolatedAsyncioTestCase):
         with patch(_PATCH_SETTINGS, return_value=_settings()), \
              patch(_PATCH_FETCH_PROJECTS, AsyncMock(side_effect=_http_status_error(401))):
             with self.assertRaises(HTTPException) as exc_ctx:
-                await require_project_access_scope(ctx, db=AsyncMock())
+                await require_project_access_scope(ctx)
 
         self.assertEqual(exc_ctx.exception.status_code, 401)
         self.assertIn("refresh is unavailable", exc_ctx.exception.detail)
@@ -387,7 +405,7 @@ class TestRequireProjectAccessScopeErrorPaths(unittest.IsolatedAsyncioTestCase):
         with patch(_PATCH_SETTINGS, return_value=_settings()), \
              patch(_PATCH_FETCH_PROJECTS, AsyncMock(side_effect=_http_status_error(500))):
             with self.assertRaises(HTTPException) as exc_ctx:
-                await require_project_access_scope(ctx, db=AsyncMock())
+                await require_project_access_scope(ctx)
 
         self.assertEqual(exc_ctx.exception.status_code, 502)
         self.assertIn("Failed to resolve", exc_ctx.exception.detail)
@@ -399,7 +417,7 @@ class TestRequireProjectAccessScopeErrorPaths(unittest.IsolatedAsyncioTestCase):
         with patch(_PATCH_SETTINGS, return_value=_settings()), \
              patch(_PATCH_FETCH_PROJECTS, AsyncMock(side_effect=httpx.ConnectError("timeout"))):
             with self.assertRaises(HTTPException) as exc_ctx:
-                await require_project_access_scope(ctx, db=AsyncMock())
+                await require_project_access_scope(ctx)
 
         self.assertEqual(exc_ctx.exception.status_code, 502)
         self.assertIn("Failed to reach GitLab", exc_ctx.exception.detail)
@@ -419,7 +437,6 @@ class TestRequireProjectAccessScopeSlowLogging(unittest.IsolatedAsyncioTestCase)
         ctx = _make_auth_context(session_id="sess-slow")
         projects = [{"id": 1}]
 
-        original_time = time.time
 
         call_count = 0
 
@@ -454,52 +471,49 @@ class TestRefreshAuthContextTokens(unittest.IsolatedAsyncioTestCase):
     async def test_no_refresh_token_returns_false(self) -> None:
         """Line 181-187: If no refresh token is available, return False early."""
         ctx = _make_auth_context(refresh_token=None)
-        db = AsyncMock()
-        result = await _refresh_auth_context_tokens(ctx, db)
+        result = await _refresh_auth_context_tokens(ctx)
         self.assertFalse(result)
-        db.flush.assert_not_awaited()
 
     async def test_unexpected_http_status_error_is_reraised(self) -> None:
         """Lines 203-209: HTTPStatusError with non-400/401/403 status is reraised."""
         ctx = _make_auth_context(session_id="sess-reraise", refresh_token="rt")
-        db = AsyncMock()
         error = _http_status_error(500)
 
         with patch(_PATCH_EXCHANGE_REFRESH, AsyncMock(side_effect=error)):
             with self.assertRaises(httpx.HTTPStatusError) as exc_ctx:
-                await _refresh_auth_context_tokens(ctx, db)
+                await _refresh_auth_context_tokens(ctx)
 
         self.assertEqual(exc_ctx.exception.response.status_code, 500)
 
     async def test_generic_http_error_is_reraised(self) -> None:
         """Lines 210-216: Generic HTTPError (network error) is reraised."""
         ctx = _make_auth_context(session_id="sess-http-err", refresh_token="rt")
-        db = AsyncMock()
 
         with patch(_PATCH_EXCHANGE_REFRESH, AsyncMock(side_effect=httpx.ConnectError("DNS failure"))):
             with self.assertRaises(httpx.ConnectError):
-                await _refresh_auth_context_tokens(ctx, db)
+                await _refresh_auth_context_tokens(ctx)
 
     async def test_exchange_returns_no_access_token_revokes_session(self) -> None:
         """Lines 218-228: Exchange succeeds but returns no access_token → revoke session."""
         ctx = _make_auth_context(session_id="sess-no-at", refresh_token="rt")
-        db = AsyncMock()
+        mock_asl, mock_db = _make_mock_db_session()
 
         # Seed cache to verify it gets cleared
         _project_access_cache["sess-no-at"] = (time.time() + 600, [{"id": 1}])
 
-        with patch(_PATCH_EXCHANGE_REFRESH, AsyncMock(return_value={"refresh_token": "rt2"})):
-            result = await _refresh_auth_context_tokens(ctx, db)
+        with patch(_PATCH_EXCHANGE_REFRESH, AsyncMock(return_value={"refresh_token": "rt2"})), \
+             patch(_PATCH_ASYNC_SESSION, mock_asl):
+            result = await _refresh_auth_context_tokens(ctx)
 
         self.assertFalse(result)
         self.assertIsNotNone(ctx.session.revoked_at)
-        db.flush.assert_awaited_once()
+        mock_db.commit.assert_awaited_once()
         self.assertNotIn("sess-no-at", _project_access_cache)
 
     async def test_successful_refresh_updates_tokens_and_clears_cache(self) -> None:
         """Lines 230-246: Successful token refresh updates context and session."""
         ctx = _make_auth_context(session_id="sess-ok", refresh_token="old-rt")
-        db = AsyncMock()
+        mock_asl, mock_db = _make_mock_db_session()
 
         # Seed cache to verify it gets cleared
         _project_access_cache["sess-ok"] = (time.time() + 600, [{"id": 1}])
@@ -511,8 +525,9 @@ class TestRefreshAuthContextTokens(unittest.IsolatedAsyncioTestCase):
         }
 
         with patch(_PATCH_EXCHANGE_REFRESH, AsyncMock(return_value=tokens_response)), \
-             patch(_PATCH_UPDATE_SESSION, AsyncMock()) as mock_update:
-            result = await _refresh_auth_context_tokens(ctx, db)
+             patch(_PATCH_UPDATE_SESSION, AsyncMock()) as mock_update, \
+             patch(_PATCH_ASYNC_SESSION, mock_asl):
+            result = await _refresh_auth_context_tokens(ctx)
 
         self.assertTrue(result)
         self.assertEqual(ctx.gitlab_access_token, "new-at")
@@ -524,12 +539,12 @@ class TestRefreshAuthContextTokens(unittest.IsolatedAsyncioTestCase):
         call_kwargs = mock_update.call_args
         self.assertEqual(call_kwargs.kwargs["gitlab_access_token"], "new-at")
         self.assertEqual(call_kwargs.kwargs["gitlab_refresh_token"], "new-rt")
-        self.assertIsNotNone(call_kwargs.kwargs["max_expires_at"])
+        self.assertNotIn("max_expires_at", call_kwargs.kwargs)
 
     async def test_successful_refresh_without_new_refresh_token_keeps_old(self) -> None:
         """Line 230: When exchange doesn't return refresh_token, keep old one."""
         ctx = _make_auth_context(session_id="sess-keep-rt", refresh_token="old-rt")
-        db = AsyncMock()
+        mock_asl, mock_db = _make_mock_db_session()
 
         tokens_response = {
             "access_token": "new-at",
@@ -538,8 +553,9 @@ class TestRefreshAuthContextTokens(unittest.IsolatedAsyncioTestCase):
         }
 
         with patch(_PATCH_EXCHANGE_REFRESH, AsyncMock(return_value=tokens_response)), \
-             patch(_PATCH_UPDATE_SESSION, AsyncMock()) as mock_update:
-            result = await _refresh_auth_context_tokens(ctx, db)
+             patch(_PATCH_UPDATE_SESSION, AsyncMock()) as mock_update, \
+             patch(_PATCH_ASYNC_SESSION, mock_asl):
+            result = await _refresh_auth_context_tokens(ctx)
 
         self.assertTrue(result)
         # Should keep old refresh token
@@ -547,10 +563,10 @@ class TestRefreshAuthContextTokens(unittest.IsolatedAsyncioTestCase):
         mock_update.assert_awaited_once()
         self.assertEqual(mock_update.call_args.kwargs["gitlab_refresh_token"], "old-rt")
 
-    async def test_successful_refresh_without_expires_in_passes_none(self) -> None:
-        """Lines 231-235: When expires_in is missing, max_expires_at should be None."""
+    async def test_successful_refresh_without_expires_in(self) -> None:
+        """Successful token refresh without expires_in should still update tokens."""
         ctx = _make_auth_context(session_id="sess-no-exp", refresh_token="rt")
-        db = AsyncMock()
+        mock_asl, mock_db = _make_mock_db_session()
 
         tokens_response = {
             "access_token": "new-at",
@@ -558,35 +574,39 @@ class TestRefreshAuthContextTokens(unittest.IsolatedAsyncioTestCase):
         }
 
         with patch(_PATCH_EXCHANGE_REFRESH, AsyncMock(return_value=tokens_response)), \
-             patch(_PATCH_UPDATE_SESSION, AsyncMock()) as mock_update:
-            result = await _refresh_auth_context_tokens(ctx, db)
+             patch(_PATCH_UPDATE_SESSION, AsyncMock()) as mock_update, \
+             patch(_PATCH_ASYNC_SESSION, mock_asl):
+            result = await _refresh_auth_context_tokens(ctx)
 
         self.assertTrue(result)
-        self.assertIsNone(mock_update.call_args.kwargs["max_expires_at"])
+        mock_update.assert_awaited_once()
+        self.assertNotIn("max_expires_at", mock_update.call_args.kwargs)
 
     async def test_refresh_on_400_revokes_session(self) -> None:
         """Lines 191-201: HTTPStatusError with 400 status revokes session."""
         ctx = _make_auth_context(session_id="sess-400", refresh_token="rt")
-        db = AsyncMock()
+        mock_asl, mock_db = _make_mock_db_session()
         error = _http_status_error(400)
 
-        with patch(_PATCH_EXCHANGE_REFRESH, AsyncMock(side_effect=error)):
-            result = await _refresh_auth_context_tokens(ctx, db)
+        with patch(_PATCH_EXCHANGE_REFRESH, AsyncMock(side_effect=error)), \
+             patch(_PATCH_ASYNC_SESSION, mock_asl):
+            result = await _refresh_auth_context_tokens(ctx)
 
         self.assertFalse(result)
         self.assertIsNotNone(ctx.session.revoked_at)
-        db.flush.assert_awaited_once()
+        mock_db.commit.assert_awaited_once()
 
     async def test_refresh_on_403_revokes_session(self) -> None:
         """Lines 191-201: HTTPStatusError with 403 status revokes session."""
         ctx = _make_auth_context(session_id="sess-403", refresh_token="rt")
-        db = AsyncMock()
+        mock_asl, mock_db = _make_mock_db_session()
         error = _http_status_error(403)
 
         _project_access_cache["sess-403"] = (time.time() + 600, [{"id": 1}])
 
-        with patch(_PATCH_EXCHANGE_REFRESH, AsyncMock(side_effect=error)):
-            result = await _refresh_auth_context_tokens(ctx, db)
+        with patch(_PATCH_EXCHANGE_REFRESH, AsyncMock(side_effect=error)), \
+             patch(_PATCH_ASYNC_SESSION, mock_asl):
+            result = await _refresh_auth_context_tokens(ctx)
 
         self.assertFalse(result)
         self.assertIsNotNone(ctx.session.revoked_at)
@@ -623,7 +643,7 @@ class TestRequireProjectAccessScopeTokenRefreshOnMissing(unittest.IsolatedAsynci
         """Lines 78-80: When access token is missing but refresh succeeds, proceed."""
         ctx = _make_auth_context(session_id="sess-refresh-ok", access_token=None, refresh_token="rt")
 
-        async def mock_refresh(auth_ctx, db) -> bool:
+        async def mock_refresh(auth_ctx) -> bool:
             auth_ctx.gitlab_access_token = "refreshed-token"
             return True
 
@@ -633,7 +653,7 @@ class TestRequireProjectAccessScopeTokenRefreshOnMissing(unittest.IsolatedAsynci
              patch("app.dependencies.project_access._refresh_auth_context_tokens",
                    AsyncMock(side_effect=mock_refresh)), \
              patch(_PATCH_FETCH_PROJECTS, AsyncMock(return_value=projects)):
-            scope = await require_project_access_scope(ctx, db=AsyncMock())
+            scope = await require_project_access_scope(ctx)
 
         self.assertEqual(scope.accessible_project_ids, {99})
 

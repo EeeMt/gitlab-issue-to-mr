@@ -13,9 +13,8 @@ Tests for the Dashboard overview page (/dashboard) including:
 """
 
 import pytest
+from conftest import _get_cookies, api_create_issue, api_get_first_project
 from playwright.sync_api import Page, expect
-from conftest import api_create_issue, api_get_first_project, _get_cookies
-
 
 # ---------------------------------------------------------------------------
 # 1. Page layout (read-only, class_page)
@@ -198,11 +197,11 @@ class TestDashboardRefactoredFeatures:
         """Metric cards should have proper title and value structure."""
         class_page.goto("/dashboard")
         class_page.wait_for_selector("[data-testid='dashboard-summary']", timeout=10000)
-        
+
         # Check that cards have the dashboard-metric-card class
         cards = class_page.locator(".dashboard-metric-card")
         expect(cards.first).to_be_visible()
-        
+
         # Check that first card has metric-title and metric-body
         first_card = cards.first
         expect(first_card.locator(".metric-title")).to_be_visible()

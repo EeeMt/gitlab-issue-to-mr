@@ -13,7 +13,6 @@ Prerequisites:
     docker-compose -f backend/tests/mock_integration/docker-compose.mock-test.yml up -d
 """
 
-import json
 import logging
 
 import httpx
@@ -244,7 +243,7 @@ class TestMRTitleParsing:
         backend_url: str,
         admin_auth_headers: dict,
     ):
-        """merge_request_title should be parsed from CODIFY_MR_TITLE marker."""
+        """commit_message should be parsed from CODIFY_MR_TITLE marker."""
         issue, task = await create_issue_and_task(
             http_client, backend_url, admin_auth_headers,
             title="MR title parsing test",
@@ -262,61 +261,8 @@ class TestMRTitleParsing:
 
         # entrypoint.sh calls `claude -p` to generate MR title, emits as CODIFY_MR_TITLE
         # fake-claude-binary outputs "chore: AI-generated code changes..."
-        mr_title = task.get("merge_request_title")
-        assert mr_title is not None, "merge_request_title should be parsed from CODIFY_MR_TITLE"
-        assert len(mr_title) > 0, "merge_request_title should not be empty"
+        mr_title = task.get("commit_message")
+        assert mr_title is not None, "commit_message should be parsed from CODIFY_MR_TITLE"
+        assert len(mr_title) > 0, "commit_message should not be empty"
 
         logger.info(f"✅ MR title: {mr_title}")
-
-
-class TestToolCallsJSON:
-    """Verify CODIFY_TOOL_CALLS structured data is stored as a log entry."""
-
-    async def test_tool_calls_json_stored(
-        self,
-        http_client: httpx.AsyncClient,
-        backend_url: str,
-        admin_auth_headers: dict,
-    ):
-        """CODIFY_TOOL_CALLS should be stored as a 'tool_calls_json' log entry."""
-        issue, task = await create_issue_and_task(
-            http_client, backend_url, admin_auth_headers,
-            title="Tool calls JSON test",
-            prompt="Create files for tool calls JSON test",
-        )
-        task_id = task["id"]
-
-        task = await wait_for_task_status(
-            http_client, backend_url, task_id,
-            target_statuses=["completed"],
-            auth_headers=admin_auth_headers,
-            timeout=120,
-        )
-        assert task["status"] == "completed"
-
-        # Fetch logs and find tool_calls_json entry
-        resp = await http_client.get(
-            f"{backend_url}/api/tasks/{task_id}/logs",
-            headers=admin_auth_headers,
-        )
-        assert resp.status_code == 200
-        logs = resp.json()
-
-        tc_json_logs = [l for l in logs if l.get("log_type") == "tool_calls_json"]
-        assert len(tc_json_logs) >= 1, (
-            f"Expected tool_calls_json log entry, got types: "
-            f"{[l.get('log_type') for l in logs if l.get('log_type')]}"
-        )
-
-        # Verify it's valid JSON with tool call entries
-        metadata = tc_json_logs[0].get("metadata", "[]")
-        tool_calls = json.loads(metadata) if isinstance(metadata, str) else metadata
-        assert isinstance(tool_calls, list), f"tool_calls should be a list: {type(tool_calls)}"
-        assert len(tool_calls) >= 1, f"Expected at least 1 tool call, got {len(tool_calls)}"
-
-        # Verify tool call structure
-        for tc in tool_calls:
-            assert "name" in tc, f"Tool call should have 'name': {tc}"
-
-        tool_names = [tc["name"] for tc in tool_calls]
-        logger.info(f"✅ tool_calls_json stored: {len(tool_calls)} calls — {tool_names}")
