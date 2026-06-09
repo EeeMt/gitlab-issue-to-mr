@@ -17,13 +17,14 @@ describe('TaskResultPanel', () => {
     expect(commitStats).toContain('font-variant-numeric: tabular-nums;')
   })
 
-  it('execution summary card is guarded by v-if="lastAssistantLog" and uses result-card--summary-text class', () => {
-    expect(taskResultPanelSource).toContain('v-if="lastAssistantLog"')
+  it('execution summary card is guarded by selectedSummaryLog and uses result-card--summary-text class', () => {
+    expect(taskResultPanelSource).toContain('v-if="selectedSummaryLog"')
+    expect(taskResultPanelSource).toContain('props.deliverySummaryLog ?? props.lastAssistantLog ?? null')
     expect(taskResultPanelSource).toContain('result-card--summary-text')
     // Both must appear together on the same element
     const summaryCardIndex = taskResultPanelSource.indexOf('result-card--summary-text')
     const nearbySource = taskResultPanelSource.slice(Math.max(0, summaryCardIndex - 60), summaryCardIndex + 60)
-    expect(nearbySource).toContain('lastAssistantLog')
+    expect(nearbySource).toContain('selectedSummaryLog')
   })
 
   it('summary panel starts collapsed (summaryExpanded initialised to ref(false))', () => {

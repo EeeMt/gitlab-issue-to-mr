@@ -26,6 +26,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
+RUN mkdir -p /opt/codify-mermaid \
+    && cd /opt/codify-mermaid \
+    && npm init -y >/dev/null \
+    && npm install --omit=dev mermaid@11.15.0 jsdom@25.0.1 >/dev/null
+
 RUN useradd --create-home --shell /bin/bash --uid 1000 codify \
     && mkdir -p /home/codify/.m2/repository \
     && chown -R codify:codify /home/codify/.m2
@@ -42,6 +47,7 @@ RUN claude --version
 # Copy entrypoint scripts
 COPY deploy/entrypoint.worker.sh /entrypoint.sh
 COPY deploy/ci-claude.sh /usr/local/bin/ci-claude.sh
-RUN chmod +x /entrypoint.sh /usr/local/bin/ci-claude.sh
+COPY deploy/scripts/validate_mermaid_summary.mjs /opt/codify-mermaid/validate_mermaid_summary.mjs
+RUN chmod +x /entrypoint.sh /usr/local/bin/ci-claude.sh /opt/codify-mermaid/validate_mermaid_summary.mjs
 
 ENTRYPOINT ["/entrypoint.sh"]

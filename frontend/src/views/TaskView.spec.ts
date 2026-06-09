@@ -1262,6 +1262,23 @@ describe('TaskView', () => {
       expect(wrapper.vm.lastAssistantLog).not.toBeNull()
       expect(wrapper.vm.lastAssistantLog.message).toBe('Last summary')
     })
+
+    it('deliverySummaryLog returns the latest delivery_summary log', async () => {
+      await mountComponent({ status: 'completed' })
+
+      ;(mockApi.getTaskLogs as Mock).mockResolvedValue([
+        createMockTaskLog({ log_type: 'delivery_summary', message: 'Old delivery summary' }),
+        createMockTaskLog({ log_type: 'assistant_text', message: 'Raw assistant summary' }),
+        createMockTaskLog({ log_type: 'delivery_summary', message: 'Final delivery summary' })
+      ])
+
+      await wrapper.vm.refreshTask()
+      await flushPromises()
+      await nextTick()
+
+      expect(wrapper.vm.deliverySummaryLog).not.toBeNull()
+      expect(wrapper.vm.deliverySummaryLog.message).toBe('Final delivery summary')
+    })
   })
 
   describe('refreshTask', () => {

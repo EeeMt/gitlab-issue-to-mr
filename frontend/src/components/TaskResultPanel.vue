@@ -5,8 +5,8 @@
     </template>
 
     <div class="result-body">
-      <!-- AI delivery summary (last assistant text event, collapsed by default) -->
-      <div v-if="lastAssistantLog" ref="summaryCardRef" class="result-card result-card--summary-text">
+      <!-- AI delivery summary (collapsed by default) -->
+      <div v-if="selectedSummaryLog" ref="summaryCardRef" class="result-card result-card--summary-text">
         <button
           type="button"
           class="result-card__title summary-header-button"
@@ -316,6 +316,7 @@ const props = defineProps<{
   task: Task
   contextCompactCount?: number
   skillUsageStats?: SkillUsageStat[]
+  deliverySummaryLog?: TaskLog | null
   lastAssistantLog?: TaskLog | null
 }>()
 
@@ -332,7 +333,7 @@ const overrideTargetStatus = ref<'completed' | 'failed' | null>(null)
 const overrideReason = ref('')
 const overrideLoading = ref(false)
 
-// Execution summary (last assistant text event)
+// Delivery summary, falling back to the last assistant text event for older tasks.
 const summaryExpanded = ref(false)
 const summaryPayloadText = ref('')
 const summaryPayloadLoading = ref(false)
@@ -366,8 +367,12 @@ let mermaidViewerDrag: {
   scrollTop: number
 } | null = null
 
+const selectedSummaryLog = computed(() =>
+  props.deliverySummaryLog ?? props.lastAssistantLog ?? null
+)
+
 const summaryEntry = computed(() =>
-  props.lastAssistantLog ? parseTextEntry(props.lastAssistantLog.metadata) : null
+  selectedSummaryLog.value ? parseTextEntry(selectedSummaryLog.value.metadata) : null
 )
 
 const summaryText = computed(() =>
@@ -481,6 +486,19 @@ watch([summaryExpanded, mermaidViewerVisible, summaryRenderedHtml], async () => 
 
 watch(mermaidViewerVisible, (visible) => {
   if (!visible) stopMermaidViewerDrag()
+})
+
+watch(() => selectedSummaryLog.value?.id ?? null, async () => {
+  summaryPayloadText.value = ''
+  summaryPayloadLoading.value = false
+  summaryPayloadLoaded.value = false
+  summaryRenderedHtml.value = ''
+  summaryRenderedSource.value = ''
+  summaryMermaidDiagrams.value = []
+  resetMermaidViewer()
+  if (summaryExpanded.value) {
+    await loadSummaryPayloadIfNeeded()
+  }
 })
 
 function applyMermaidViewerSvgStyle(svg: string, width: string): string {
@@ -719,10 +737,7 @@ function syncSummaryRender() {
   void renderSummaryMermaidDiagrams(renderRun)
 }
 
-async function toggleSummary() {
-  summaryExpanded.value = !summaryExpanded.value
-  if (!summaryExpanded.value) return
-
+async function loadSummaryPayloadIfNeeded() {
   const entry = summaryEntry.value
   if (!entry) return
 
@@ -743,6 +758,12 @@ async function toggleSummary() {
       summaryPayloadLoading.value = false
     }
   }
+}
+
+async function toggleSummary() {
+  summaryExpanded.value = !summaryExpanded.value
+  if (!summaryExpanded.value) return
+  await loadSummaryPayloadIfNeeded()
 }
 
 function handleSummaryContentClick(event: MouseEvent) {

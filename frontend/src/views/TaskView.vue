@@ -228,6 +228,7 @@
             :task="task"
             :context-compact-count="contextCompactCount"
             :skill-usage-stats="skillUsageStats"
+            :delivery-summary-log="deliverySummaryLog"
             :last-assistant-log="lastAssistantLog"
             @status-overridden="refreshTask"
           />
@@ -397,6 +398,10 @@ const skillUsageStats = computed(() =>
 
 const lastAssistantLog = computed(() =>
   [...taskLogs.value].reverse().find(l => l.log_type === 'assistant_text') ?? null
+)
+
+const deliverySummaryLog = computed(() =>
+  [...taskLogs.value].reverse().find(l => l.log_type === 'delivery_summary') ?? null
 )
 
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {

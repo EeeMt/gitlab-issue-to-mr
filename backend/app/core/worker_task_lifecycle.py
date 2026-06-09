@@ -11,6 +11,7 @@ from gitlab import Gitlab
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.task_log_payloads import create_payload
 from app.core.utcnow import utcnow
 from app.core.worker_environment_variables import (
     build_worker_environment_map,
@@ -22,6 +23,86 @@ from app.models import Issue, Task, TaskLog, TaskStatus
 logger = logging.getLogger(__name__)
 
 _CONTAINER_METADATA_PATH = "/tmp/codify-runtime/task-metadata.json"
+_CONTAINER_DELIVERY_SUMMARY_PATH = "/tmp/codify-runtime/delivery-summary.md"
+_CONTAINER_DELIVERY_SUMMARY_VALIDATION_PATH = "/tmp/codify-runtime/delivery-summary-validation.json"
+
+
+def _build_delivery_summary_preview(text: str, limit: int = 120) -> tuple[str, bool]:
+    preview = " ".join(text.split())[:limit]
+    return preview, len(" ".join(text.split())) > limit
+
+
+async def _save_delivery_summary_from_container(
+    worker,
+    container: Any,
+    task: Task,
+    db: AsyncSession,
+) -> None:
+    """Persist Codify's final delivery summary separately from raw Claude assistant text."""
+    try:
+        raw = worker.docker.read_file_from_container(container, _CONTAINER_DELIVERY_SUMMARY_PATH)
+        if not raw:
+            logger.info(
+                f"[Task {task.id}] delivery-summary.md could not be read from container at "
+                f"{_CONTAINER_DELIVERY_SUMMARY_PATH!r}; falling back to assistant_text logs"
+            )
+            return
+
+        summary_text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+        summary = worker._sanitize_sensitive_data(summary_text).strip()
+        if not summary:
+            logger.info(f"[Task {task.id}] delivery-summary.md was empty after sanitization")
+            return
+
+        validation: dict[str, Any] | None = None
+        validation_raw = worker.docker.read_file_from_container(
+            container,
+            _CONTAINER_DELIVERY_SUMMARY_VALIDATION_PATH,
+        )
+        if validation_raw:
+            try:
+                validation_text = (
+                    validation_raw.decode("utf-8", errors="replace")
+                    if isinstance(validation_raw, bytes)
+                    else str(validation_raw)
+                )
+                parsed_validation = json.loads(validation_text)
+                if isinstance(parsed_validation, dict):
+                    validation = parsed_validation
+            except Exception:
+                logger.debug(f"[Task {task.id}] Failed to parse delivery summary validation JSON")
+
+        payload = await create_payload(
+            db,
+            task_id=task.id,
+            payload_kind="delivery_summary",
+            text=summary,
+        )
+        preview, truncated = _build_delivery_summary_preview(summary)
+        metadata = {
+            "payload_id": payload.id,
+            "char_count": len(summary),
+            "preview": preview,
+            "truncated": truncated,
+        }
+        if validation is not None:
+            metadata["validation"] = validation
+
+        db.add(
+            TaskLog(
+                task_id=task.id,
+                log_level="INFO",
+                message="",
+                log_type="delivery_summary",
+                log_metadata=json.dumps(metadata, ensure_ascii=False),
+            )
+        )
+        logger.info(
+            f"[Task {task.id}] delivery summary persisted "
+            f"(chars={len(summary)}, validation_ok={validation.get('ok') if validation else 'unknown'})"
+        )
+    except Exception as exc:
+        logger.warning(f"[Task {task.id}] Could not persist delivery summary: {exc}")
 
 
 def _save_task_metadata_from_container(worker, container: Any, task: Task, issue: Any) -> None:
@@ -548,6 +629,8 @@ async def monitor_container_run(
         await db.refresh(issue)
 
     await worker._parse_task_result(task, logs, db, exit_code, issue=issue)
+    if exit_code == 0:
+        await _save_delivery_summary_from_container(worker, container, task, db)
 
     if issue and hasattr(task, "_extracted_session_id") and task._extracted_session_id:
         if not issue.claude_session_id:

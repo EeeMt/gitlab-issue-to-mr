@@ -29,6 +29,11 @@ export CODIFY_RUNTIME_DIR
 mkdir -p "${CODIFY_RUNTIME_DIR}"
 chown -R codify:codify "${CODIFY_RUNTIME_DIR}"
 CONSOLE_LOG="${CODIFY_RUNTIME_DIR}/console.log"
+DELIVERY_SUMMARY_FILE="${CODIFY_RUNTIME_DIR}/delivery-summary.md"
+DELIVERY_SUMMARY_VALIDATION_FILE="${CODIFY_RUNTIME_DIR}/delivery-summary-validation.json"
+MERMAID_SUMMARY_VALIDATE="${MERMAID_SUMMARY_VALIDATE:-true}"
+MERMAID_SUMMARY_REPAIR_ATTEMPTS="${MERMAID_SUMMARY_REPAIR_ATTEMPTS:-2}"
+MERMAID_SUMMARY_STRICT="${MERMAID_SUMMARY_STRICT:-false}"
 touch "${CONSOLE_LOG}"
 chown codify:codify "${CONSOLE_LOG}"
 
@@ -307,6 +312,186 @@ sanitize_summary_content() {
         /可按需提交/ { next }
         { print }
     '
+}
+
+normalize_delivery_summary_response() {
+    local raw_summary="$1"
+
+    printf '%s' "${raw_summary}" | python3 -c 'import re, sys; text = sys.stdin.read(); text = re.sub(r"\r$", "", text, flags=re.MULTILINE); text = re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL); text = re.sub(r"</?think\b[^>]*>", "", text, flags=re.IGNORECASE); text = re.sub(r"^```(?:markdown)?\s*", "", text.strip(), flags=re.IGNORECASE); text = re.sub(r"\s*```$", "", text).strip(); print(text, end="")'
+}
+
+annotate_delivery_summary_validation() {
+    local attempts="$1"
+    local repaired="$2"
+
+    if [ ! -f "${DELIVERY_SUMMARY_VALIDATION_FILE}" ]; then
+        return 0
+    fi
+
+    local tmp_file="${DELIVERY_SUMMARY_VALIDATION_FILE}.tmp"
+    jq \
+        --argjson attempts "${attempts}" \
+        --argjson repaired "${repaired}" \
+        '. + {repairAttempts: $attempts, repaired: $repaired}' \
+        "${DELIVERY_SUMMARY_VALIDATION_FILE}" > "${tmp_file}" 2>/dev/null && mv "${tmp_file}" "${DELIVERY_SUMMARY_VALIDATION_FILE}" || rm -f "${tmp_file}"
+}
+
+run_mermaid_summary_validation() {
+    local summary_file="$1"
+    local output_file="$2"
+    local validator="/opt/codify-mermaid/validate_mermaid_summary.mjs"
+
+    if [ "${MERMAID_SUMMARY_VALIDATE}" != "true" ]; then
+        jq -nc '{ok: true, diagramCount: 0, errors: [], skipped: true, reason: "disabled"}' > "${output_file}"
+        return 0
+    fi
+
+    if [ ! -f "${validator}" ] || ! command -v node >/dev/null 2>&1; then
+        jq -nc '{ok: false, diagramCount: 0, errors: [{index: null, message: "Mermaid validator unavailable", source: ""}], skipped: true, reason: "validator_unavailable"}' > "${output_file}"
+        return 1
+    fi
+
+    local tmp_file="${output_file}.tmp"
+    local err_file="${output_file}.stderr"
+    set +e
+    node "${validator}" "${summary_file}" > "${tmp_file}" 2> "${err_file}"
+    local validation_status=$?
+    set -e
+
+    if [ ${validation_status} -ne 0 ]; then
+        local validator_error
+        validator_error="$(cat "${err_file}" 2>/dev/null || true)"
+        jq -nc \
+            --arg message "${validator_error:-Mermaid validator failed}" \
+            '{ok: false, diagramCount: 0, errors: [{index: null, message: $message, source: ""}], validatorError: $message}' \
+            > "${output_file}"
+        rm -f "${tmp_file}" "${err_file}"
+        return 1
+    fi
+
+    mv "${tmp_file}" "${output_file}"
+    rm -f "${err_file}"
+    jq -e '.ok == true' "${output_file}" >/dev/null 2>&1
+}
+
+build_mermaid_repair_prompt() {
+    local summary_file="$1"
+    local validation_file="$2"
+    local prompt_file="$3"
+
+    {
+        printf '%s\n' '下面是一段 Codify 最终交付摘要，其中 Mermaid 图表无法渲染。'
+        printf '%s\n' '请只修复 Markdown 中的 mermaid fenced code block，保留其它文字和业务结论。'
+        printf '%s\n' '不要调用工具，不要修改文件，不要添加解释、标题或前后缀；只输出修复后的完整 Markdown 摘要。'
+        printf '\n%s\n' 'Mermaid 校验错误 JSON：'
+        cat "${validation_file}"
+        printf '\n%s\n' '原始交付摘要：'
+        cat "${summary_file}"
+    } > "${prompt_file}"
+}
+
+prepare_delivery_summary() {
+    local raw_summary="$1"
+    local current_summary
+    current_summary="$(normalize_delivery_summary_response "${raw_summary}")"
+
+    local summary_check_file="/tmp/delivery-summary-check.md"
+    local repair_prompt_file="/tmp/delivery-summary-repair-prompt.md"
+    local attempts=0
+    local repaired=false
+
+    printf '%s' "${current_summary}" > "${summary_check_file}"
+    if run_mermaid_summary_validation "${summary_check_file}" "${DELIVERY_SUMMARY_VALIDATION_FILE}"; then
+        echo "Delivery summary Mermaid validation passed" >&2
+        annotate_delivery_summary_validation "${attempts}" "${repaired}"
+        printf '%s' "${current_summary}"
+        return 0
+    fi
+
+    local diagram_count error_count
+    diagram_count="$(jq -r '.diagramCount // 0' "${DELIVERY_SUMMARY_VALIDATION_FILE}" 2>/dev/null || echo 0)"
+    error_count="$(jq -r '(.errors // []) | length' "${DELIVERY_SUMMARY_VALIDATION_FILE}" 2>/dev/null || echo 0)"
+    echo "Delivery summary Mermaid validation failed (diagrams=${diagram_count}, errors=${error_count})" >&2
+
+    while [ "${attempts}" -lt "${MERMAID_SUMMARY_REPAIR_ATTEMPTS}" ]; do
+        attempts=$((attempts + 1))
+        echo "Repairing delivery summary Mermaid diagrams (attempt ${attempts}/${MERMAID_SUMMARY_REPAIR_ATTEMPTS})" >&2
+        build_mermaid_repair_prompt "${summary_check_file}" "${DELIVERY_SUMMARY_VALIDATION_FILE}" "${repair_prompt_file}"
+
+        set +e
+        local repaired_summary
+        repaired_summary=$(env HOME=/home/codify timeout 60 su -m -s /bin/bash codify -c 'cd /tmp && /usr/local/bin/claude -p --bare --tools "" --permission-mode plan --no-session-persistence --output-format text --max-turns 3 --model "${ANTHROPIC_MODEL}" < /tmp/delivery-summary-repair-prompt.md' 2>/dev/null)
+        local repair_status=$?
+        set -e
+
+        if [ ${repair_status} -ne 0 ]; then
+            echo "Delivery summary Mermaid repair failed with exit code ${repair_status}" >&2
+            continue
+        fi
+
+        repaired_summary="$(normalize_delivery_summary_response "${repaired_summary}")"
+        if [ -z "${repaired_summary}" ]; then
+            echo "Delivery summary Mermaid repair returned empty output" >&2
+            continue
+        fi
+
+        current_summary="${repaired_summary}"
+        printf '%s' "${current_summary}" > "${summary_check_file}"
+        if run_mermaid_summary_validation "${summary_check_file}" "${DELIVERY_SUMMARY_VALIDATION_FILE}"; then
+            echo "Delivery summary Mermaid repair succeeded" >&2
+            repaired=true
+            annotate_delivery_summary_validation "${attempts}" "${repaired}"
+            printf '%s' "${current_summary}"
+            return 0
+        fi
+    done
+
+    echo "Delivery summary Mermaid validation still failed after ${attempts} repair attempt(s)" >&2
+    annotate_delivery_summary_validation "${attempts}" "${repaired}"
+    if [ "${MERMAID_SUMMARY_STRICT}" = "true" ]; then
+        return 1
+    fi
+
+    printf '%s' "${current_summary}"
+}
+
+write_delivery_summary_artifacts() {
+    local summary_text="$1"
+
+    printf '%s\n' "${summary_text}" > "${DELIVERY_SUMMARY_FILE}"
+    chmod 644 "${DELIVERY_SUMMARY_FILE}" "${DELIVERY_SUMMARY_VALIDATION_FILE}" 2>/dev/null || true
+    chown codify:codify "${DELIVERY_SUMMARY_FILE}" "${DELIVERY_SUMMARY_VALIDATION_FILE}" 2>/dev/null || true
+    echo "Delivery summary written to ${DELIVERY_SUMMARY_FILE} (${#summary_text} chars)"
+}
+
+write_plan_task_metadata() {
+    local summary_text="$1"
+    local summary_truncated="${summary_text:0:3000}"
+    local task_metadata
+
+    task_metadata=$(jq -nc \
+        --argjson task_id "${TASK_ID:-0}" \
+        --arg prompt "${USER_PROMPT:-}" \
+        --arg execution_summary "${summary_truncated}" \
+        --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{
+            task_id: $task_id,
+            prompt: $prompt,
+            commit_sha: "",
+            commit_message: "",
+            overall_summary: "",
+            execution_summary: $execution_summary,
+            new_files: [],
+            modified_files: [],
+            deleted_files: [],
+            additions: 0,
+            deletions: 0,
+            timestamp: $timestamp
+        }')
+    printf '%s\n' "${task_metadata}" > "${CODIFY_RUNTIME_DIR}/task-metadata.json"
+    chmod 644 "${CODIFY_RUNTIME_DIR}/task-metadata.json" 2>/dev/null || true
+    chown codify:codify "${CODIFY_RUNTIME_DIR}/task-metadata.json" 2>/dev/null || true
+    echo "Plan task metadata written to ${CODIFY_RUNTIME_DIR}/task-metadata.json"
 }
 
 describe_file_path() {
@@ -595,7 +780,10 @@ create_runtime_archive() {
     local archive_path="${CODIFY_RUNTIME_DIR}/${archive_name}"
 
     if [ -f "${CODIFY_RUNTIME_DIR}/event.jsonl" ] && [ -f "${CODIFY_RUNTIME_DIR}/runtime.json" ]; then
-        tar -czf "${archive_path}" -C "${CODIFY_RUNTIME_DIR}" event.jsonl runtime.json console.log 2>/dev/null || true
+        local archive_files=(event.jsonl runtime.json console.log)
+        [ -f "${DELIVERY_SUMMARY_FILE}" ] && archive_files+=(delivery-summary.md)
+        [ -f "${DELIVERY_SUMMARY_VALIDATION_FILE}" ] && archive_files+=(delivery-summary-validation.json)
+        tar -czf "${archive_path}" -C "${CODIFY_RUNTIME_DIR}" "${archive_files[@]}" 2>/dev/null || true
         echo "Archive created: ${archive_path}"
         RUNTIME_ARCHIVE_CREATED=1
     fi
@@ -644,11 +832,15 @@ if [ $RESULT -ne 0 ]; then
     exit $RESULT
 fi
 
+FINAL_SUMMARY_CONTENT="$(prepare_delivery_summary "${FINAL_SUMMARY_CONTENT}")"
+write_delivery_summary_artifacts "${FINAL_SUMMARY_CONTENT}"
+
 # Plan mode: discard any accidental workspace changes and exit successfully
 if [ "${TASK_MODE}" = "plan" ]; then
     echo "Plan mode: discarding any workspace changes..."
     git checkout -- . 2>/dev/null || true
     git clean -fd 2>/dev/null || true
+    write_plan_task_metadata "${FINAL_SUMMARY_CONTENT}"
     create_runtime_archive
     echo "========================================"
     echo "Plan task completed successfully!"

@@ -639,6 +639,53 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn("必须使用 Markdown 的 mermaid fenced code block", plan_prompt)
         self.assertIn("不要使用 ASCII 图、图片链接或其它图表格式", plan_prompt)
 
+    def test_entrypoint_validates_and_persists_delivery_summary(self):
+        root = Path(__file__).resolve().parents[3]
+        script = root / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('DELIVERY_SUMMARY_FILE="${CODIFY_RUNTIME_DIR}/delivery-summary.md"', content)
+        self.assertIn('DELIVERY_SUMMARY_VALIDATION_FILE="${CODIFY_RUNTIME_DIR}/delivery-summary-validation.json"', content)
+        self.assertIn('prepare_delivery_summary "${FINAL_SUMMARY_CONTENT}"', content)
+        self.assertIn('write_delivery_summary_artifacts "${FINAL_SUMMARY_CONTENT}"', content)
+        self.assertIn('/opt/codify-mermaid/validate_mermaid_summary.mjs', content)
+        self.assertIn('reason: "validator_unavailable"', content)
+        self.assertIn('ok: false, diagramCount: 0', content)
+        self.assertIn('cd /tmp && /usr/local/bin/claude -p --bare --tools "" --permission-mode plan', content)
+        self.assertNotIn("cd /workspace && /usr/local/bin/claude -p --dangerously-skip-permissions --no-session-persistence --output-format text --max-turns 3 --model \"${ANTHROPIC_MODEL}\" < /tmp/delivery-summary-repair-prompt.md", content)
+        self.assertIn('delivery-summary.md', content)
+        self.assertIn('delivery-summary-validation.json', content)
+
+        dockerfile = (root / "deploy" / "Dockerfile.worker").read_text()
+        self.assertIn("npm install --omit=dev mermaid@11.15.0 jsdom@25.0.1", dockerfile)
+        self.assertIn("deploy/scripts/validate_mermaid_summary.mjs", dockerfile)
+
+        lifecycle = (root / "backend" / "app" / "core" / "worker_task_lifecycle.py").read_text()
+        self.assertIn('_CONTAINER_DELIVERY_SUMMARY_PATH = "/tmp/codify-runtime/delivery-summary.md"', lifecycle)
+        self.assertIn('payload_kind="delivery_summary"', lifecycle)
+        self.assertIn('log_type="delivery_summary"', lifecycle)
+        self.assertIn('await _save_delivery_summary_from_container(worker, container, task, db)', lifecycle)
+
+    def test_entrypoint_writes_plan_task_metadata_for_previous_summaries(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+        function_definition = self._extract_shell_function(content, "write_plan_task_metadata")
+        plan_exit_block = content.split('if [ "${TASK_MODE}" = "plan" ]; then', 2)[2].split(
+            "fi",
+            1,
+        )[0]
+
+        self.assertIn('printf \'%s\\n\' "${task_metadata}" > "${CODIFY_RUNTIME_DIR}/task-metadata.json"', function_definition)
+        self.assertIn('execution_summary: $execution_summary', function_definition)
+        self.assertIn('commit_sha: ""', function_definition)
+        self.assertIn('commit_message: ""', function_definition)
+        self.assertIn('new_files: []', function_definition)
+        self.assertIn('write_plan_task_metadata "${FINAL_SUMMARY_CONTENT}"', plan_exit_block)
+        self.assertLess(
+            plan_exit_block.index('write_plan_task_metadata "${FINAL_SUMMARY_CONTENT}"'),
+            plan_exit_block.index("create_runtime_archive"),
+        )
+
     def test_entrypoint_generates_overall_summary_with_claude_cli(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = script.read_text()
@@ -753,7 +800,10 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('CI_CLAUDE_DISABLE_CONSOLE_TEE=1', content)
         self.assertIn('ARTIFACT_DIR="${CODIFY_RUNTIME_DIR}" CI_CLAUDE_DISABLE_CONSOLE_TEE=1 PROMPT_FILE=/tmp/claude_prompt.txt', content)
         self.assertIn('local archive_path="${CODIFY_RUNTIME_DIR}/${archive_name}"', content)
-        self.assertIn('tar -czf "${archive_path}" -C "${CODIFY_RUNTIME_DIR}" event.jsonl runtime.json console.log', content)
+        self.assertIn('local archive_files=(event.jsonl runtime.json console.log)', content)
+        self.assertIn('[ -f "${DELIVERY_SUMMARY_FILE}" ] && archive_files+=(delivery-summary.md)', content)
+        self.assertIn('[ -f "${DELIVERY_SUMMARY_VALIDATION_FILE}" ] && archive_files+=(delivery-summary-validation.json)', content)
+        self.assertIn('tar -czf "${archive_path}" -C "${CODIFY_RUNTIME_DIR}" "${archive_files[@]}"', content)
         self.assertNotIn('[ -f "/workspace/event.jsonl" ]', content)
         self.assertNotIn('/workspace/.codify-archive', content)
 
