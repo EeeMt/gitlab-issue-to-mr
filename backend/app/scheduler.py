@@ -271,7 +271,6 @@ class Scheduler:
                 select(Task.issue_id).where(
                     Task.status == TaskStatus.QUEUED,
                     Task.issue_id != None,
-                    Task.task_mode != "plan",
                 ).distinct()
             )
             issue_ids = [row[0] for row in queued_issue_result]
@@ -364,8 +363,8 @@ class Scheduler:
             if task.issue_id is not None:
                 self._running_issues.add(task.issue_id)
 
-            # Auto-transition issue to IN_PROGRESS (skip for plan tasks)
-            if task.issue_id is not None and task.task_mode != "plan":
+            # Any active task means the issue is currently in progress.
+            if task.issue_id is not None:
                 await self._transition_issue_to_in_progress(db, task.issue_id)
 
             # Execute via worker in a thread pool WITHOUT waiting

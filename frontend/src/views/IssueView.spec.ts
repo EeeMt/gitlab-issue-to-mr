@@ -557,6 +557,20 @@ describe('IssueView', () => {
     it('aligns issue metadata values after the widest field label', () => {
       expect(issueViewSource).toContain('grid-template-columns: max-content minmax(0, 1fr);')
       expect(issueViewSource).toContain('display: contents;')
+      expect(issueViewSource).toContain(`.metadata-body {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 14px;
+  align-items: center;
+}`)
+      expect(issueViewSource).not.toContain(`.metadata-body {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 14px;
+  align-items: baseline;
+}`)
       expect(issueViewSource).not.toContain('min-width: 90px;')
     })
 

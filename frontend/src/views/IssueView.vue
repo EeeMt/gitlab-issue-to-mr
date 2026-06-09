@@ -1339,7 +1339,7 @@ onMounted(() => {
   grid-template-columns: max-content minmax(0, 1fr);
   column-gap: 12px;
   row-gap: 14px;
-  align-items: baseline;
+  align-items: center;
 }
 
 .metadata-row {

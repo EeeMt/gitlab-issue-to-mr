@@ -5,6 +5,20 @@ describe('TaskMetadataPanel', () => {
   it('aligns metadata values after the widest field label', () => {
     expect(taskMetadataPanelSource).toContain('grid-template-columns: max-content minmax(0, 1fr);')
     expect(taskMetadataPanelSource).toContain('display: contents;')
+    expect(taskMetadataPanelSource).toContain(`.metadata-body {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 14px;
+  align-items: center;
+}`)
+    expect(taskMetadataPanelSource).not.toContain(`.metadata-body {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 14px;
+  align-items: baseline;
+}`)
     expect(taskMetadataPanelSource).not.toContain('min-width: 90px;')
   })
 

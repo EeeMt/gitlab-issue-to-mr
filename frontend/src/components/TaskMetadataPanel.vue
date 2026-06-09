@@ -79,6 +79,15 @@
         </span>
       </div>
 
+      <!-- Task mode -->
+      <div class="metadata-row">
+        <span class="metadata-label">
+          <n-icon size="14" class="metadata-label-icon"><PlayOutline /></n-icon>
+          {{ t('taskView.taskMode') }}
+        </span>
+        <span class="metadata-value">{{ formatTaskMode(task.task_mode) }}</span>
+      </div>
+
       <!-- Branch flow -->
       <div class="metadata-row">
         <span class="metadata-label">
@@ -176,7 +185,8 @@ import {
   TimeOutline,
   GitPullRequest,
   RefreshOutline,
-  ServerOutline
+  ServerOutline,
+  PlayOutline
 } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import type { Task } from '../api'
@@ -203,6 +213,10 @@ function branchUrl(branchName: string): string | null {
 
 function formatDate(dateStr: string): string {
   return formatDateTimeUtc8(dateStr)
+}
+
+function formatTaskMode(mode?: Task['task_mode'] | null): string {
+  return mode === 'plan' ? t('taskView.taskModePlan') : t('taskView.taskModeExecute')
 }
 
 function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean {
@@ -244,7 +258,7 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
   grid-template-columns: max-content minmax(0, 1fr);
   column-gap: 12px;
   row-gap: 14px;
-  align-items: baseline;
+  align-items: center;
 }
 
 .metadata-row {

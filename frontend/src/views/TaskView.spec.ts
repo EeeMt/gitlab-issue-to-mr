@@ -567,7 +567,7 @@ describe('TaskView', () => {
     })
 
     it('should display task summary and header actions', async () => {
-      await mountComponent()
+      await mountComponent({ task_mode: 'plan' })
 
       await vi.waitFor(() => {
         return wrapper.find('[data-testid="task-actions"]').exists()
@@ -575,6 +575,8 @@ describe('TaskView', () => {
 
       // Header carries compact actions; the detail card is only rendered when an action needs extra context.
       expect(wrapper.find('.task-metadata-panel').exists()).toBe(true)
+      expect(wrapper.find('.task-metadata-panel').text()).toContain('taskView.taskMode')
+      expect(wrapper.find('.task-metadata-panel').text()).toContain('taskView.taskModePlan')
       expect(wrapper.find('[data-testid="task-actions"]').exists()).toBe(true)
       expect(wrapper.find('[data-testid="task-actions-card"]').exists()).toBe(false)
     })

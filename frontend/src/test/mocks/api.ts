@@ -40,6 +40,10 @@ export const createMockTask = (overrides = {}): Task => ({
   output_tokens: null,
   model_name: null,
   commit_message: null,
+  require_changes: true,
+  task_mode: 'execute',
+  provider_id: null,
+  provider_name: null,
   created_at: '2026-03-31T10:00:00Z',
   updated_at: '2026-03-31T10:00:00Z',
   started_at: null,
@@ -50,6 +54,7 @@ export const createMockTask = (overrides = {}): Task => ({
     branch_name: 'codify/issue-1',
     base_branch: 'main',
     target_branch: 'main',
+    merge_request_iid: null,
     merge_request_url: null,
   },
   ...overrides
