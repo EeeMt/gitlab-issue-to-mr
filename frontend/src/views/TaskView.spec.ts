@@ -408,6 +408,7 @@ vi.mock('@vicons/ionicons5', () => {
   const icon = (name: string) => ({ name, render: () => null })
   return {
     AlertCircleOutline: icon('AlertCircleOutline'),
+    AddCircleOutline: icon('AddCircleOutline'),
     ArrowDownCircleOutline: icon('ArrowDownCircleOutline'),
     ArrowBackOutline: icon('ArrowBackOutline'),
     BulbOutline: icon('BulbOutline'),
@@ -417,6 +418,7 @@ vi.mock('@vicons/ionicons5', () => {
     CheckmarkCircleOutline: icon('CheckmarkCircleOutline'),
     CloseCircleOutline: icon('CloseCircleOutline'),
     CloseOutline: icon('CloseOutline'),
+    CodeSlashOutline: icon('CodeSlashOutline'),
     CodeOutline: icon('CodeOutline'),
     CreateOutline: icon('CreateOutline'),
     CubeOutline: icon('CubeOutline'),
@@ -1621,6 +1623,67 @@ describe('TaskView', () => {
       expect(wrapper.vm.logs).toBe('')
       expect(wrapper.vm.containerLogs).toBe('')
       expect(mockEventSourceInstance.close).toHaveBeenCalled()
+    })
+  })
+
+  describe('append follow-up shortcut', () => {
+    it('opens the create task drawer from the result panel for the latest issue task', async () => {
+      await mountComponent({
+        id: 1,
+        issue_id: 10,
+        status: 'completed',
+        created_at: '2026-04-01T10:00:00Z',
+        completed_at: '2026-04-01T10:05:00Z'
+      })
+
+      wrapper.vm.issueTasks = [
+        createMockTask({ id: 1, issue_id: 10, created_at: '2026-04-01T10:00:00Z' }),
+        createMockTask({ id: 2, issue_id: 10, created_at: '2026-04-01T09:00:00Z' })
+      ]
+      wrapper.vm.issueDescription = 'Issue context for follow-up'
+      wrapper.vm.issueStatus = 'open'
+      await nextTick()
+
+      const resultPanel = wrapper.findComponent({ name: 'TaskResultPanel' })
+      expect(resultPanel.exists()).toBe(true)
+      expect(resultPanel.props('canAppendFollowupTask')).toBe(true)
+
+      resultPanel.vm.$emit('append-followup-task')
+      await nextTick()
+
+      expect(wrapper.vm.showCreateDrawer).toBe(true)
+      const createDrawer = wrapper
+        .findAllComponents({ name: 'TaskFormDrawer' })
+        .find((drawer) => drawer.props('mode') === 'create')
+      expect(createDrawer).toBeTruthy()
+      expect(createDrawer!.props('show')).toBe(true)
+      expect(createDrawer!.props('issueId')).toBe(10)
+      expect(createDrawer!.props('issueDescription')).toBe('Issue context for follow-up')
+
+      createDrawer!.vm.$emit('created', createMockTask({ id: 99, issue_id: 10 }))
+      await flushPromises()
+      expect(router.currentRoute.value.path).toBe('/tasks/99')
+    })
+
+    it('does not enable the append shortcut when a newer issue task exists', async () => {
+      await mountComponent({
+        id: 1,
+        issue_id: 10,
+        status: 'completed',
+        created_at: '2026-04-01T10:00:00Z',
+        completed_at: '2026-04-01T10:05:00Z'
+      })
+
+      wrapper.vm.issueTasks = [
+        createMockTask({ id: 1, issue_id: 10, created_at: '2026-04-01T10:00:00Z' }),
+        createMockTask({ id: 2, issue_id: 10, created_at: '2026-04-01T11:00:00Z' })
+      ]
+      wrapper.vm.issueStatus = 'open'
+      await nextTick()
+
+      const resultPanel = wrapper.findComponent({ name: 'TaskResultPanel' })
+      expect(resultPanel.exists()).toBe(true)
+      expect(resultPanel.props('canAppendFollowupTask')).toBe(false)
     })
   })
 

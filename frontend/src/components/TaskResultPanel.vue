@@ -159,20 +159,39 @@
       <div v-if="['completed', 'failed'].includes(task.status) && task.issue_id" class="result-card result-card--continue">
         <div class="result-card__title">
           <n-icon size="16" class="result-card__icon result-card__icon--continue"><ChatbubbleEllipsesOutline /></n-icon>
-          {{ t('taskView.continueGuideTitle') }}
+          {{ canAppendFollowupTask ? t('taskView.appendFollowupTitle') : t('taskView.continueGuideTitle') }}
         </div>
         <div class="result-card__content continue-body">
-          <p class="continue-hint">{{ t('taskView.continueGuideHint') }}</p>
-          <n-button
-            type="primary"
-            size="small"
-            secondary
-            strong
-            @click="goToIssue"
-          >
-            <template #icon><n-icon :component="ArrowBackOutline" /></template>
-            {{ t('taskView.backToIssue') }}
-          </n-button>
+          <p class="continue-hint">
+            {{ canAppendFollowupTask ? t('taskView.appendFollowupHint') : t('taskView.continueGuideHint') }}
+          </p>
+          <div class="continue-actions">
+            <n-button
+              :type="canAppendFollowupTask ? 'default' : 'primary'"
+              size="small"
+              secondary
+              strong
+              @click="goToIssue"
+            >
+              <template #icon>
+                <n-icon :component="ArrowBackOutline" />
+              </template>
+              {{ t('taskView.backToIssue') }}
+            </n-button>
+            <n-button
+              v-if="canAppendFollowupTask"
+              type="primary"
+              size="small"
+              secondary
+              strong
+              @click="emit('append-followup-task')"
+            >
+              <template #icon>
+                <n-icon :component="AddCircleOutline" />
+              </template>
+              {{ t('taskView.appendFollowupTask') }}
+            </n-button>
+          </div>
         </div>
       </div>
 
@@ -295,7 +314,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { CSSProperties } from 'vue'
 import { NCard, NIcon, NButton, NModal, NInput, NSpace, NTag, NScrollbar, useMessage } from 'naive-ui'
-import { AlertCircleOutline, TimeOutline, GitCommitOutline, OpenOutline, ChatbubbleEllipsesOutline, ArrowBackOutline, CheckmarkCircleOutline, CloseCircleOutline, ShieldCheckmarkOutline, ChevronForward, ChatboxOutline } from '@vicons/ionicons5'
+import { AddCircleOutline, AlertCircleOutline, TimeOutline, GitCommitOutline, OpenOutline, ChatbubbleEllipsesOutline, ArrowBackOutline, CheckmarkCircleOutline, CloseCircleOutline, ShieldCheckmarkOutline, ChevronForward, ChatboxOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { formatLargeNumber } from '../utils/usageLimits'
@@ -318,10 +337,12 @@ const props = defineProps<{
   skillUsageStats?: SkillUsageStat[]
   deliverySummaryLog?: TaskLog | null
   lastAssistantLog?: TaskLog | null
+  canAppendFollowupTask?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'status-overridden'): void
+  (e: 'append-followup-task'): void
 }>()
 
 const { t } = useI18n()
@@ -1088,6 +1109,14 @@ const skillUsageBreakdown = computed(() =>
   line-height: 1.5;
   flex: 1;
   min-width: 0;
+}
+
+.continue-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .app-link {

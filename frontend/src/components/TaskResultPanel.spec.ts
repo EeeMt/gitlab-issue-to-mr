@@ -89,6 +89,19 @@ describe('TaskResultPanel', () => {
     expect(taskResultPanelSource).toContain('skillUsageStats.length > 0')
   })
 
+  it('turns the continue guidance card into an append shortcut when allowed', () => {
+    expect(taskResultPanelSource).toContain('canAppendFollowupTask?: boolean')
+    expect(taskResultPanelSource).toContain("(e: 'append-followup-task'): void")
+    expect(taskResultPanelSource).toContain("canAppendFollowupTask ? t('taskView.appendFollowupTitle') : t('taskView.continueGuideTitle')")
+    expect(taskResultPanelSource).toContain("canAppendFollowupTask ? t('taskView.appendFollowupHint') : t('taskView.continueGuideHint')")
+    expect(taskResultPanelSource).toContain('v-if="canAppendFollowupTask"')
+    expect(taskResultPanelSource).toContain("@click=\"emit('append-followup-task')\"")
+    expect(taskResultPanelSource).toContain(':type="canAppendFollowupTask ? \'default\' : \'primary\'"')
+    expect(taskResultPanelSource).toContain('@click="goToIssue"')
+    expect(taskResultPanelSource).toContain("{{ t('taskView.appendFollowupTask') }}")
+    expect(taskResultPanelSource).toContain("{{ t('taskView.backToIssue') }}")
+  })
+
   it('adds Mermaid rendering only to the AI delivery summary panel', () => {
     expect(taskResultPanelSource).toContain("await import('mermaid')")
     expect(taskResultPanelSource).not.toContain("import mermaid from 'mermaid'")

@@ -230,6 +230,8 @@
             :skill-usage-stats="skillUsageStats"
             :delivery-summary-log="deliverySummaryLog"
             :last-assistant-log="lastAssistantLog"
+            :can-append-followup-task="canAppendFollowupTask"
+            @append-followup-task="showCreateDrawer = true"
             @status-overridden="refreshTask"
           />
         </div>
@@ -296,6 +298,15 @@
     @updated="task = $event"
   />
 
+  <TaskFormDrawer
+    v-model:show="showCreateDrawer"
+    mode="create"
+    :issue-id="task?.issue_id ?? undefined"
+    :issue-description="issueDescription"
+    data-testid="task-view-create-task-drawer"
+    @created="handleAppendTaskCreated"
+  />
+
   <RescheduleDrawer
     v-model:show="showRescheduleDrawer"
     :task="task ?? undefined"
@@ -309,7 +320,7 @@ import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin, NDatePicker, NDrawer, NDrawerContent, NIcon, NScrollbar, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, streamTaskLogs, getScheduledTasks, getConfig, getIssue, getTaskArchive, downloadTaskArchive, type Task, type TaskLog } from '../api'
+import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, streamTaskLogs, getScheduledTasks, getConfig, getIssue, getTaskArchive, downloadTaskArchive, type Issue, type Task, type TaskLog } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
 import { renderMarkdown, summarizeSkillUsage } from '../components/task-process/taskProcessUtils'
 import PageHeader from '../components/PageHeader.vue'
@@ -355,6 +366,7 @@ const taskRequestInFlight = ref(false)
 const retryScheduleDatetime = ref<number | null>(null)
 const showScheduleDrawer = ref(false)
 const showEditDrawer = ref(false)
+const showCreateDrawer = ref(false)
 const showRescheduleDrawer = ref(false)
 const scheduledTasksForPreview = ref<Task[]>([])
 const scheduledTasksLoading = ref(false)
@@ -363,6 +375,8 @@ const slotEnforce = ref(false)
 const taskLogs = ref<TaskLog[]>([])
 const activeRetryTask = ref<Task | null>(null)
 const issueTasks = ref<Task[]>([])
+const issueDescription = ref<string | undefined>(undefined)
+const issueStatus = ref<Issue['status'] | null>(null)
 const archiveMetadata = ref<{ archive_name: string; archive_size_bytes: number; created_at: string; file_exists: boolean } | null>(null)
 const archiveDownloadLoading = ref(false)
 let pollTimer: number | null = null
@@ -462,6 +476,27 @@ const showFollowupReplayHint = computed(() => {
   return currentIndex > 0
 })
 
+const latestIssueTask = computed(() => {
+  return issueTasks.value.reduce<Task | null>((latest, item) => {
+    if (!latest) return item
+    const createdDelta = new Date(item.created_at).getTime() - new Date(latest.created_at).getTime()
+    if (createdDelta !== 0) return createdDelta > 0 ? item : latest
+    return item.id > latest.id ? item : latest
+  }, null)
+})
+
+const isLatestIssueTask = computed(() =>
+  !!task.value?.issue_id && latestIssueTask.value?.id === task.value.id
+)
+
+const canAppendFollowupTask = computed(() =>
+  !!task.value?.issue_id
+  && isTerminal.value
+  && isLatestIssueTask.value
+  && issueStatus.value !== 'closed'
+  && canManageTask.value
+)
+
 
 function isScheduledDateDisabled(timestamp: number): boolean {
   const candidate = new Date(timestamp)
@@ -506,13 +541,19 @@ async function refreshIssueTasks() {
   const issueId = task.value?.issue_id ?? task.value?.issue?.id
   if (!issueId) {
     issueTasks.value = []
+    issueDescription.value = undefined
+    issueStatus.value = null
     return
   }
   try {
     const issueData = await getIssue(issueId)
     issueTasks.value = issueData.tasks ?? []
+    issueDescription.value = issueData.description ?? undefined
+    issueStatus.value = issueData.status ?? null
   } catch {
     issueTasks.value = []
+    issueDescription.value = undefined
+    issueStatus.value = null
   }
 }
 
@@ -861,6 +902,11 @@ function handleScheduleHeatmapCellClick(startMs: number) {
   retryScheduleDatetime.value = startMs
 }
 
+function handleAppendTaskCreated(created: Task) {
+  showCreateDrawer.value = false
+  router.push(`/tasks/${created.id}`)
+}
+
 onMounted(async () => {
   await initializeAuth()
   await fetchTask()
@@ -889,7 +935,10 @@ watch(
       task.value = null
       activeRetryTask.value = null
       issueTasks.value = []
+      issueDescription.value = undefined
+      issueStatus.value = null
       archiveMetadata.value = null
+      showCreateDrawer.value = false
       showRescheduleDrawer.value = false
       showScheduleDrawer.value = false
       hasLoadedOnce.value = false
