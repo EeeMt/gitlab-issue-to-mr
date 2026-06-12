@@ -82,10 +82,15 @@
       <!-- Task mode -->
       <div class="metadata-row">
         <span class="metadata-label">
-          <n-icon size="14" class="metadata-label-icon"><PlayOutline /></n-icon>
+          <n-icon :component="taskModeMeta.icon" size="14" class="metadata-label-icon" />
           {{ t('taskView.taskMode') }}
         </span>
-        <span class="metadata-value">{{ formatTaskMode(task.task_mode) }}</span>
+        <span class="metadata-value">
+          <span class="task-mode-chip" :class="taskModeMeta.modifierClass">
+            <n-icon :component="taskModeMeta.icon" size="15" class="task-mode-chip__icon" />
+            <span>{{ taskModeMeta.label }}</span>
+          </span>
+        </span>
       </div>
 
       <!-- Branch flow -->
@@ -186,7 +191,8 @@ import {
   GitPullRequest,
   RefreshOutline,
   ServerOutline,
-  PlayOutline
+  CodeSlashOutline,
+  BulbOutline
 } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import type { Task } from '../api'
@@ -215,9 +221,15 @@ function formatDate(dateStr: string): string {
   return formatDateTimeUtc8(dateStr)
 }
 
-function formatTaskMode(mode?: Task['task_mode'] | null): string {
-  return mode === 'plan' ? t('taskView.taskModePlan') : t('taskView.taskModeExecute')
-}
+const taskModeMeta = computed(() => {
+  const isPlan = props.task.task_mode === 'plan'
+
+  return {
+    icon: isPlan ? BulbOutline : CodeSlashOutline,
+    label: isPlan ? t('taskView.taskModePlan') : t('taskView.taskModeExecute'),
+    modifierClass: isPlan ? 'task-mode-chip--plan' : 'task-mode-chip--execute'
+  }
+})
 
 function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean {
   try {
@@ -286,6 +298,37 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 
 .metadata-manual {
   color: var(--n-text-color-2, #666);
+}
+
+.task-mode-chip {
+  --task-mode-chip-accent: var(--n-text-color-3, #8a8f98);
+
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 9px;
+  border: 1px solid rgba(128, 128, 128, 0.14);
+  border-radius: 999px;
+  background: rgba(128, 128, 128, 0.07);
+  color: var(--n-text-color-2, #666);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  vertical-align: middle;
+}
+
+.task-mode-chip__icon {
+  flex: 0 0 auto;
+  color: var(--task-mode-chip-accent);
+}
+
+.task-mode-chip--execute {
+  --task-mode-chip-accent: #64748b;
+}
+
+.task-mode-chip--plan {
+  --task-mode-chip-accent: #78716c;
 }
 
 .branch-flow {
