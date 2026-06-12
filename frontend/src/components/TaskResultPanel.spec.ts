@@ -109,6 +109,14 @@ describe('TaskResultPanel', () => {
     expect(taskResultPanelSource).toContain('resetMermaidViewer()')
   })
 
+  it('keeps Mermaid temporary render artifacts inside the summary canvas', () => {
+    expect(taskResultPanelSource).toContain('function cleanupMermaidRenderArtifacts(renderId: string)')
+    expect(taskResultPanelSource).toContain('document.getElementById(`d${renderId}`)?.remove()')
+    expect(taskResultPanelSource).toContain('document.getElementById(`i${renderId}`)?.remove()')
+    expect(taskResultPanelSource).toContain('await mermaid.render(renderId, diagram.source, canvas)')
+    expect(taskResultPanelSource).toContain('cleanupMermaidRenderArtifacts(renderId)')
+  })
+
   it('provides a larger Mermaid diagram viewer for summary diagrams', () => {
     const mermaidViewerSvg = cssBlock(':global(.summary-mermaid-modal__canvas svg)')
     const mermaidModalHeader = cssBlock(':global(.summary-mermaid-modal .n-card-header)')

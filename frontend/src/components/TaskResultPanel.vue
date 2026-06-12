@@ -674,6 +674,11 @@ function markMermaidDiagramError(
   container.dataset.summaryMermaidState = 'error'
 }
 
+function cleanupMermaidRenderArtifacts(renderId: string) {
+  document.getElementById(`d${renderId}`)?.remove()
+  document.getElementById(`i${renderId}`)?.remove()
+}
+
 async function renderSummaryMermaidDiagrams(renderRun: number) {
   const diagrams = summaryMermaidDiagrams.value
   if (diagrams.length === 0) return
@@ -702,7 +707,8 @@ async function renderSummaryMermaidDiagrams(renderRun: number) {
 
     try {
       const renderId = `summary-mermaid-${props.task.id}-${renderRun}-${index}`
-      const { svg, bindFunctions } = await mermaid.render(renderId, diagram.source)
+      cleanupMermaidRenderArtifacts(renderId)
+      const { svg, bindFunctions } = await mermaid.render(renderId, diagram.source, canvas)
       if (renderRun !== summaryMermaidRenderRun) return
       diagram.svg = svg
       diagram.error = ''
@@ -712,6 +718,9 @@ async function renderSummaryMermaidDiagrams(renderRun: number) {
     } catch (error) {
       if (renderRun !== summaryMermaidRenderRun) return
       markMermaidDiagramError(root, diagrams, index, error)
+    } finally {
+      const renderId = `summary-mermaid-${props.task.id}-${renderRun}-${index}`
+      cleanupMermaidRenderArtifacts(renderId)
     }
   }))
 
