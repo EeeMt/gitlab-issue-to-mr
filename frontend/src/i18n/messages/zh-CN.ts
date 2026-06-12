@@ -426,7 +426,7 @@ const zhCN = {
     taskModeExecute: '执行模式',
     taskModeExecuteDesc: 'Codify 直接实施代码修改并提交',
     taskModePlan: '计划模式',
-    taskModePlanDesc: 'Codify 只分析需求并输出实施方案，不修改任何文件',
+    taskModePlanDesc: 'Codify 只分析需求并输出实施方案或分析报告，不修改任何文件',
     pleaseSelectTaskMode: '请选择任务模式',
     taskModeRequiredFeedback: '请选择任务模式：执行模式会修改并提交代码，计划模式只输出方案。',
     totalTaskDuration: '总耗时',

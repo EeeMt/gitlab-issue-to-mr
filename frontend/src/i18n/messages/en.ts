@@ -428,7 +428,7 @@ const en = {
     taskModeExecute: 'Execute',
     taskModeExecuteDesc: 'Codify implements code changes and commits them',
     taskModePlan: 'Plan',
-    taskModePlanDesc: 'Codify analyses the requirement and outputs a proposal only — no files are modified',
+    taskModePlanDesc: 'Codify analyses the requirement and outputs a proposal or analysis report only — no files are modified',
     pleaseSelectTaskMode: 'Please select a task mode',
     taskModeRequiredFeedback: 'Select a task mode: Execute modifies and commits code; Plan only outputs an implementation proposal.',
     totalTaskDuration: 'Total Duration',
