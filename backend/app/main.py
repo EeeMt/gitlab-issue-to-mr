@@ -203,6 +203,7 @@ from app.api import (
     admin_users,
     announcement,
     auth,
+    ci_failures,
     config,
     config_integration,
     config_runtime,
@@ -316,6 +317,12 @@ app.include_router(
     usage_limits.router,
     prefix="/api",
     tags=["usage-limits"],
+    dependencies=[Depends(require_authenticated_user)],
+)
+app.include_router(
+    ci_failures.router,
+    prefix="/api",
+    tags=["ci-failures"],
     dependencies=[Depends(require_authenticated_user)],
 )
 app.include_router(

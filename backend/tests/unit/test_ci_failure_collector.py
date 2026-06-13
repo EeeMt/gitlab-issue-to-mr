@@ -1,0 +1,224 @@
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
+
+from app.models import Base, CIFailureJob, CIFailureRun, CIFailureRunLog, Issue, Task, TaskStatus
+
+
+class FakeGitLabClient:
+    def __init__(self, *, mr=None, jobs=None, traces=None):
+        self.mr = mr or {
+            "source_branch": "codify/issue-1",
+            "target_branch": "main",
+            "sha": "abc123",
+        }
+        self.jobs = jobs or []
+        self.traces = traces or {}
+
+    def get_merge_request_details(self, project_id, mr_iid):
+        return self.mr
+
+    def get_pipeline_jobs(self, project_id, pipeline_id):
+        return self.jobs
+
+    def get_job_trace(self, project_id, job_id):
+        return self.traces[job_id]
+
+
+class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.workspace_root = Path(self.tempdir.name)
+        self.engine = create_async_engine(
+            "sqlite+aiosqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        self.Session = async_sessionmaker(self.engine, expire_on_commit=False)
+
+    async def asyncTearDown(self):
+        await self.engine.dispose()
+        self.tempdir.cleanup()
+
+    def _settings(self, **overrides):
+        values = {
+            "ci_auto_repair_max_attempts": 2,
+            "worker_workspace_host_path": str(self.workspace_root),
+        }
+        values.update(overrides)
+        return SimpleNamespace(**values)
+
+    async def _seed_issue_and_run(self, session, *, enabled=True, sha="abc123"):
+        issue = Issue(
+            id=1,
+            title="Repair CI",
+            project_id=42,
+            status="in_review",
+            branch_name="codify/issue-1",
+            target_branch="main",
+            merge_request_iid=7,
+            ci_auto_repair_enabled=enabled,
+            initiator_user_id=9,
+            initiator_username="alice",
+        )
+        session.add(issue)
+        session.add(
+            Task(
+                id=10,
+                issue_id=1,
+                project_id=42,
+                user_prompt="Original task",
+                status=TaskStatus.COMPLETED,
+                priority=1,
+                provider_id=3,
+                task_mode="execute",
+            )
+        )
+        run = CIFailureRun(
+            id=91,
+            project_id=42,
+            merge_request_iid=7,
+            pipeline_id=678,
+            pipeline_sha=sha,
+            pipeline_ref="codify/issue-1",
+            pipeline_status="failed",
+            pipeline_url="https://gitlab.example.com/group/project/-/pipelines/678",
+            status="collecting",
+        )
+        session.add(run)
+        await session.commit()
+        return issue, run
+
+    async def test_disabled_issue_records_ignored_reason_without_task(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+
+        async with self.Session() as session:
+            _, run = await self._seed_issue_and_run(session, enabled=False)
+
+            await process_ci_failure_run(
+                session,
+                run.id,
+                gitlab_client=FakeGitLabClient(),
+                settings=self._settings(),
+                collector_id="test",
+            )
+
+            refreshed = await session.get(CIFailureRun, run.id)
+            self.assertEqual(refreshed.status, "ignored")
+            self.assertEqual(refreshed.ignored_reason, "ci_auto_repair_disabled")
+            tasks = (await session.execute(select(Task).where(Task.trigger_source == "ci_auto_repair"))).scalars().all()
+            self.assertEqual(tasks, [])
+            logs = (await session.execute(select(CIFailureRunLog))).scalars().all()
+            self.assertTrue(any(log.step == "auto_repair_gate_checked" and log.status == "skipped" for log in logs))
+
+    async def test_code_failure_writes_sanitized_bundle_and_creates_repair_task(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+
+        jobs = [
+            {
+                "id": 12345,
+                "name": "build",
+                "stage": "build",
+                "status": "failed",
+                "failure_reason": "script_failure",
+                "allow_failure": False,
+                "web_url": "https://gitlab.example.com/job/12345",
+                "created_at": "2026-06-13T09:59:00Z",
+                "started_at": "2026-06-13T10:00:00Z",
+            },
+            {
+                "id": 12346,
+                "name": "unit-test",
+                "stage": "test",
+                "status": "failed",
+                "failure_reason": "script_failure",
+                "allow_failure": False,
+                "web_url": "https://gitlab.example.com/job/12346",
+                "created_at": "2026-06-13T10:01:00Z",
+                "started_at": "2026-06-13T10:02:00Z",
+            },
+        ]
+        traces = {
+            12345: "running build\nnpm test failed\nglpat-secret-token\n",
+            12346: "downstream failure\n",
+        }
+
+        async with self.Session() as session:
+            _, run = await self._seed_issue_and_run(session, enabled=True)
+
+            await process_ci_failure_run(
+                session,
+                run.id,
+                gitlab_client=FakeGitLabClient(jobs=jobs, traces=traces),
+                settings=self._settings(),
+                collector_id="test",
+            )
+
+            refreshed = await session.get(CIFailureRun, run.id)
+            self.assertEqual(refreshed.status, "task_created")
+            self.assertIsNotNone(refreshed.repair_task_id)
+            self.assertTrue(Path(refreshed.bundle_path).exists())
+
+            repair_task = await session.get(Task, refreshed.repair_task_id)
+            self.assertEqual(repair_task.trigger_source, "ci_auto_repair")
+            self.assertEqual(repair_task.ci_failure_run_id, run.id)
+            self.assertEqual(repair_task.issue_id, 1)
+            self.assertEqual(repair_task.provider_id, 3)
+            self.assertEqual(repair_task.priority, 1)
+            self.assertEqual(repair_task.task_mode, "execute")
+            self.assertTrue(repair_task.require_changes)
+            self.assertIn("/tmp/codify-runtime/ci-failure", repair_task.user_prompt)
+
+            rows = (await session.execute(select(CIFailureJob).order_by(CIFailureJob.gitlab_job_id))).scalars().all()
+            self.assertEqual(len(rows), 2)
+            self.assertTrue(rows[0].is_root_cause)
+            self.assertFalse(rows[0].is_downstream_suppressed)
+            self.assertFalse(rows[1].is_root_cause)
+            self.assertTrue(rows[1].is_downstream_suppressed)
+
+            trace_path = Path(refreshed.bundle_path) / rows[0].trace_path
+            trace_text = trace_path.read_text(encoding="utf-8")
+            self.assertIn("[REDACTED]", trace_text)
+            self.assertNotIn("glpat-secret-token", trace_text)
+
+            steps = [(log.step, log.status) for log in (await session.execute(select(CIFailureRunLog))).scalars().all()]
+            self.assertIn(("repair_task_created", "succeeded"), steps)
+
+    async def test_infra_failure_is_ignored_without_downloading_trace(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+
+        jobs = [
+            {
+                "id": 20001,
+                "name": "deploy",
+                "stage": "deploy",
+                "status": "failed",
+                "failure_reason": "runner_system_failure",
+                "allow_failure": False,
+            }
+        ]
+        fake_client = FakeGitLabClient(jobs=jobs, traces={})
+
+        async with self.Session() as session:
+            _, run = await self._seed_issue_and_run(session, enabled=True)
+
+            await process_ci_failure_run(
+                session,
+                run.id,
+                gitlab_client=fake_client,
+                settings=self._settings(),
+                collector_id="test",
+            )
+
+            refreshed = await session.get(CIFailureRun, run.id)
+            self.assertEqual(refreshed.status, "ignored")
+            self.assertEqual(refreshed.ignored_reason, "infra_failure_detected")
+            tasks = (await session.execute(select(Task).where(Task.trigger_source == "ci_auto_repair"))).scalars().all()
+            self.assertEqual(tasks, [])

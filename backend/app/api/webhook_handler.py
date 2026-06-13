@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.issues import _try_delete_issue_branch
 from app.config import get_effective_settings
 from app.database import get_db
-from app.models import Issue, IssueStatus, WebhookEvent
+from app.models import CIFailureRun, Issue, IssueStatus, WebhookEvent
 from app.project_webhook_config import get_project_webhook_secret
 from app.runtime_config import load_runtime_config_from_db
 
@@ -69,6 +69,10 @@ def _extract_payload_summary(payload: dict[str, Any]) -> dict[str, Any]:
         summary["state"] = attrs.get("state")
         summary["source_branch"] = attrs.get("source_branch")
         summary["target_branch"] = attrs.get("target_branch")
+        summary["pipeline_id"] = attrs.get("id")
+        summary["pipeline_status"] = attrs.get("status")
+        summary["pipeline_sha"] = attrs.get("sha")
+        summary["pipeline_ref"] = attrs.get("ref")
     return summary
 
 
@@ -84,7 +88,7 @@ async def _log_event(
     result: str,
     result_detail: str | None = None,
     payload_summary: dict[str, Any] | None = None,
-) -> None:
+) -> WebhookEvent:
     """Persist a webhook event record."""
     event = WebhookEvent(
         event_type=event_type,
@@ -99,6 +103,25 @@ async def _log_event(
     )
     db.add(event)
     await db.flush()
+    return event
+
+
+def _extract_pipeline_mr(payload: dict[str, Any]) -> dict[str, Any]:
+    mr = payload.get("merge_request")
+    if isinstance(mr, dict):
+        return mr
+    merge_requests = payload.get("merge_requests")
+    if isinstance(merge_requests, list) and merge_requests and isinstance(merge_requests[0], dict):
+        return merge_requests[0]
+    return {}
+
+
+def _pipeline_id(attrs: dict[str, Any]) -> int | None:
+    raw_id = attrs.get("id") or attrs.get("pipeline_id")
+    try:
+        return int(raw_id) if raw_id is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 @webhook_router.post("/webhook/gitlab", response_model=WebhookResponse)
@@ -154,6 +177,100 @@ async def receive_gitlab_webhook(
         raise HTTPException(status_code=401, detail="Invalid webhook token")
 
     # --- Event routing ---
+    if event_type == "pipeline":
+        if not isinstance(attrs, dict):
+            attrs = {}
+        pipeline_status = str(attrs.get("status") or "")
+        pipeline_id = _pipeline_id(attrs)
+        pipeline_sha = str(attrs.get("sha") or "")
+        pipeline_ref = attrs.get("ref")
+        pipeline_url = attrs.get("url") or attrs.get("web_url")
+        mr = _extract_pipeline_mr(payload)
+        pipeline_mr_iid = mr.get("iid") or attrs.get("merge_request_iid")
+        source_branch = mr.get("source_branch") or attrs.get("source_branch")
+        target_branch = mr.get("target_branch") or attrs.get("target_branch")
+
+        if pipeline_status != "failed":
+            await _log_event(
+                db,
+                event_type=event_type,
+                event_action=pipeline_status,
+                project_id=project_id,
+                merge_request_iid=int(pipeline_mr_iid) if pipeline_mr_iid else None,
+                issue_id=None,
+                source_ip=source_ip,
+                result="ignored_action",
+                result_detail=f"Pipeline status '{pipeline_status}' ignored",
+                payload_summary=summary,
+            )
+            await db.commit()
+            return WebhookResponse(
+                result="ignored_action",
+                detail=f"Pipeline status '{pipeline_status}' ignored",
+            )
+
+        if pipeline_id is None or not pipeline_sha:
+            await _log_event(
+                db,
+                event_type=event_type,
+                event_action=pipeline_status,
+                project_id=project_id,
+                merge_request_iid=int(pipeline_mr_iid) if pipeline_mr_iid else None,
+                issue_id=None,
+                source_ip=source_ip,
+                result="no_match",
+                result_detail="Pipeline ID or SHA missing from payload",
+                payload_summary=summary,
+            )
+            await db.commit()
+            return WebhookResponse(result="no_match", detail="Pipeline ID or SHA missing")
+
+        event = await _log_event(
+            db,
+            event_type=event_type,
+            event_action=pipeline_status,
+            project_id=project_id,
+            merge_request_iid=int(pipeline_mr_iid) if pipeline_mr_iid else None,
+            issue_id=None,
+            source_ip=source_ip,
+            result="ci_failure_collecting",
+            result_detail=f"Pipeline {pipeline_id} failed; CI failure collection queued",
+            payload_summary=summary,
+        )
+        duplicate_result = await db.execute(
+            select(CIFailureRun).where(
+                CIFailureRun.project_id == project_id,
+                CIFailureRun.pipeline_id == pipeline_id,
+            )
+        )
+        existing_run = duplicate_result.scalar_one_or_none()
+        if isinstance(existing_run, CIFailureRun):
+            event.result = "duplicate"
+            event.result_detail = f"CI failure run {existing_run.id} already exists"
+            await db.commit()
+            return WebhookResponse(result="duplicate", detail=event.result_detail)
+
+        db.add(
+            CIFailureRun(
+                webhook_event_id=event.id,
+                project_id=project_id,
+                merge_request_iid=int(pipeline_mr_iid) if pipeline_mr_iid else None,
+                source_branch=str(source_branch) if source_branch else None,
+                target_branch=str(target_branch) if target_branch else None,
+                pipeline_id=pipeline_id,
+                pipeline_sha=pipeline_sha,
+                pipeline_ref=str(pipeline_ref) if pipeline_ref else None,
+                pipeline_status=pipeline_status,
+                pipeline_url=str(pipeline_url) if pipeline_url else None,
+                status="collecting",
+            )
+        )
+        await db.commit()
+        return WebhookResponse(
+            result="ci_failure_collecting",
+            detail=f"Pipeline {pipeline_id} failed; CI failure collection queued",
+        )
+
     if event_type != "merge_request":
         await _log_event(
             db,

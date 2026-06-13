@@ -96,6 +96,38 @@
         </div>
 
         <div class="config-form__section">
+          <div class="config-form__section-title">{{ t('config.ciAutoRepair') }}</div>
+          <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+            <n-gi>
+              <n-form-item :label="t('config.ciAutoRepairMaxAttempts')" path="ci_auto_repair_max_attempts">
+                <n-input-number
+                  v-model:value="formValue.ci_auto_repair_max_attempts"
+                  :min="0"
+                  :max="10"
+                  class="config-form__input"
+                />
+                <template #feedback>
+                  {{ t('config.ciAutoRepairMaxAttemptsHint') }}
+                </template>
+              </n-form-item>
+            </n-gi>
+            <n-gi>
+              <n-form-item :label="t('config.ciFailureBundleRetentionDays')" path="ci_failure_bundle_retention_days">
+                <n-input-number
+                  v-model:value="formValue.ci_failure_bundle_retention_days"
+                  :min="0"
+                  :max="365"
+                  class="config-form__input"
+                />
+                <template #feedback>
+                  {{ t('config.ciFailureBundleRetentionDaysHint') }}
+                </template>
+              </n-form-item>
+            </n-gi>
+          </n-grid>
+        </div>
+
+        <div class="config-form__section">
           <div class="config-form__section-title">{{ t('config.retryAndAlerts') }}</div>
           <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
             <n-gi>

@@ -67,11 +67,13 @@ const mockConfig = {
     anthropic_api_key_configured: true,
     anthropic_model: 'claude-3-5-sonnet',
     claude_max_turns: 10,
-    allow_monitor_for_users: true,
-    allow_schedule_overview_for_users: false,
-    allow_analytics_for_users: false,
-    allow_oidc_diagnostics_for_users: false
-  },
+	    allow_monitor_for_users: true,
+	    allow_schedule_overview_for_users: false,
+	    allow_analytics_for_users: false,
+	    allow_oidc_diagnostics_for_users: false,
+	    ci_auto_repair_max_attempts: 4,
+	    ci_failure_bundle_retention_days: 45
+	  },
   auth: {
     oidc_enabled: true,
     oidc_issuer_url: 'https://gitlab.example.com',
@@ -124,9 +126,11 @@ describe('useConfigForm', () => {
       expect(configForm.formValue.value.scheduler_interval).toBe(5)
       expect(configForm.formValue.value.default_target_branch).toBe('main')
       expect(configForm.formValue.value.max_retries).toBe(0)
-      expect(configForm.formValue.value.retry_delay).toBe(60)
-      expect(configForm.formValue.value.alert_on_failure).toBe(false)
-      expect(configForm.formValue.value.oidc_enabled).toBe(false)
+	      expect(configForm.formValue.value.retry_delay).toBe(60)
+	      expect(configForm.formValue.value.alert_on_failure).toBe(false)
+	      expect(configForm.formValue.value.ci_auto_repair_max_attempts).toBe(2)
+	      expect(configForm.formValue.value.ci_failure_bundle_retention_days).toBe(30)
+	      expect(configForm.formValue.value.oidc_enabled).toBe(false)
       expect(configForm.formValue.value.gitlab_url).toBe('')
     })
 
@@ -164,9 +168,11 @@ describe('useConfigForm', () => {
       expect(configForm.formValue.value.task_timeout).toBe(3600)
       expect(configForm.formValue.value.scheduler_interval).toBe(10)
       expect(configForm.formValue.value.default_target_branch).toBe('develop')
-      expect(configForm.formValue.value.max_retries).toBe(3)
-      expect(configForm.formValue.value.retry_delay).toBe(120)
-      expect(configForm.formValue.value.alert_on_failure).toBe(true)
+	      expect(configForm.formValue.value.max_retries).toBe(3)
+	      expect(configForm.formValue.value.retry_delay).toBe(120)
+	      expect(configForm.formValue.value.alert_on_failure).toBe(true)
+	      expect(configForm.formValue.value.ci_auto_repair_max_attempts).toBe(4)
+	      expect(configForm.formValue.value.ci_failure_bundle_retention_days).toBe(45)
     })
 
     it('should sync auth values from config', async () => {
@@ -335,11 +341,13 @@ describe('useConfigForm', () => {
 
       expect(mockApi.updateConfig).toHaveBeenCalledWith({
         runtime: expect.objectContaining({
-          max_concurrency: 10,
-          task_timeout: 3600,
-          scheduler_interval: 10
-        })
-      })
+	          max_concurrency: 10,
+	          task_timeout: 3600,
+	          scheduler_interval: 10,
+	          ci_auto_repair_max_attempts: 4,
+	          ci_failure_bundle_retention_days: 45
+	        })
+	      })
     })
 
     it('should set sectionSaving to true during save', async () => {
@@ -372,11 +380,13 @@ describe('useConfigForm', () => {
         max_concurrency: 5,
         task_timeout: 3600,
         scheduler_interval: 10,
-        default_target_branch: 'develop',
-        max_retries: 3,
-        retry_delay: 120,
-        alert_on_failure: true
-      }))
+	        default_target_branch: 'develop',
+	        max_retries: 3,
+	        retry_delay: 120,
+	        alert_on_failure: true,
+	        ci_auto_repair_max_attempts: 4,
+	        ci_failure_bundle_retention_days: 45
+	      }))
     })
 
     it('should build correct payload for sharedPages section', async () => {

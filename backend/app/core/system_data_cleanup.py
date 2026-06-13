@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.ci_failure_collector import cleanup_expired_ci_failure_bundles
 from app.core.docker_client import get_docker_client
 from app.core.utcnow import utcnow
 from app.models import (
@@ -45,6 +46,7 @@ class SystemDataCleanupResult:
     deleted_archives: int = 0
     missing_archives: int = 0
     deleted_workspaces: int = 0
+    deleted_ci_failure_bundles: int = 0
     container_cleanup_errors: list[dict[str, Any]] = field(default_factory=list)
     file_cleanup_errors: list[dict[str, Any]] = field(default_factory=list)
 
@@ -57,6 +59,7 @@ class SystemDataCleanupResult:
             "deleted_archives": self.deleted_archives,
             "missing_archives": self.missing_archives,
             "deleted_workspaces": self.deleted_workspaces,
+            "deleted_ci_failure_bundles": self.deleted_ci_failure_bundles,
             "container_cleanup_errors": self.container_cleanup_errors,
             "file_cleanup_errors": self.file_cleanup_errors,
         }
@@ -245,3 +248,8 @@ async def cleanup_system_data(
     _cleanup_archive_files(archive_paths, result)
     _cleanup_workspaces(workspace_paths, result)
     return result
+
+
+def cleanup_ci_failure_bundles(workspace_root: str, *, retention_days: int) -> int:
+    """Remove expired sanitized CI failure bundles."""
+    return cleanup_expired_ci_failure_bundles(workspace_root, retention_days=retention_days)

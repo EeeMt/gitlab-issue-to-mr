@@ -230,6 +230,17 @@
                     </span>
                   </n-space>
                 </n-form-item>
+                <n-form-item :label="t('issue.ciAutoRepair')" path="ci_auto_repair_enabled">
+                  <n-space align="center" :size="8">
+                    <n-switch
+                      v-model:value="formValue.ci_auto_repair_enabled"
+                      :disabled="!formValue.create_mr"
+                    />
+                    <span style="font-size: 13px; color: var(--n-text-color-2)">
+                      {{ formValue.ci_auto_repair_enabled ? t('issue.ciAutoRepairEnabled') : t('issue.ciAutoRepairDisabled') }}
+                    </span>
+                  </n-space>
+                </n-form-item>
               </div>
             </div>
 
@@ -409,6 +420,7 @@ function createInitialFormValue(): {
   target_branch: string | undefined
   create_mr: boolean
   delete_branch_on_close: boolean
+  ci_auto_repair_enabled: boolean
 } {
   return {
     title: '',
@@ -418,6 +430,7 @@ function createInitialFormValue(): {
     target_branch: undefined,
     create_mr: true,
     delete_branch_on_close: true,
+    ci_auto_repair_enabled: false,
   }
 }
 
@@ -605,6 +618,9 @@ watch(
         formValue.value.target_branch = defaultBranch
       }
     }
+    if (!enabled) {
+      formValue.value.ci_auto_repair_enabled = false
+    }
   }
 )
 
@@ -688,6 +704,7 @@ async function handleSubmit() {
       base_branch: formValue.value.base_branch,
       target_branch: formValue.value.create_mr ? formValue.value.target_branch || undefined : undefined,
       delete_branch_on_close: formValue.value.delete_branch_on_close,
+      ci_auto_repair_enabled: formValue.value.create_mr ? formValue.value.ci_auto_repair_enabled : false,
     }
 
     const issue = await createIssue(request)

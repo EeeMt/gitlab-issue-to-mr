@@ -2,6 +2,8 @@
 
 import logging
 import os
+import shutil
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -250,6 +252,22 @@ def build_container_volumes(
             volumes[host_path] = {"bind": container_path, "mode": mode}
 
     return volumes if volumes else {}
+
+
+def materialize_ci_failure_bundle(task: Task, runtime_path: str | os.PathLike[str]) -> None:
+    """Copy a prepared CI failure bundle into one task's runtime directory."""
+    if getattr(task, "trigger_source", "manual") != "ci_auto_repair":
+        return
+
+    run = getattr(task, "ci_failure_run", None)
+    bundle_path = getattr(run, "bundle_path", None) if run is not None else None
+    if not bundle_path or not os.path.isdir(bundle_path):
+        raise RuntimeError("CI failure bundle is not available for this repair task")
+
+    dest = Path(runtime_path) / "ci-failure"
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(bundle_path, dest)
 
 
 def get_container_name(task: Task) -> str:

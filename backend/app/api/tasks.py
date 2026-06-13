@@ -1110,6 +1110,7 @@ async def retry_task(
         scheduled_at=scheduled_at,
         is_retry=True,
         retry_source_task_id=original_task.id,
+        trigger_source="retry",
         provider_id=provider_id,
         initiator_user_id=current_user.id if current_user is not None else None,
         initiator_gitlab_user_id=current_user.gitlab_user_id if current_user is not None else None,

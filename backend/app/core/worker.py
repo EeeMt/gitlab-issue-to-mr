@@ -46,6 +46,7 @@ from app.core.worker_runtime import (
     build_container_env,
     build_container_volumes,
     get_container_name,
+    materialize_ci_failure_bundle,
     resolve_commit_author,
     resolve_provider,
 )
@@ -173,6 +174,7 @@ class WorkerExecutor:
             '_find_existing_mr': lambda task, issue: find_existing_mr(task, issue, self.gitlab),
             '_create_new_mr': lambda task, issue, sudo_gl=None: create_new_mr(task, issue, self.gitlab, sudo_gl=sudo_gl),
             '_build_container_volumes': lambda *args, **kwargs: build_container_volumes(*args, **kwargs),
+            '_materialize_ci_failure_bundle': lambda *args, **kwargs: materialize_ci_failure_bundle(*args, **kwargs),
             '_get_container_name': lambda task: get_container_name(task),
         }
         if name in sync_wrappers:

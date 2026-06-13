@@ -197,14 +197,15 @@ class ConfigApiHelperTests(unittest.TestCase):
             target_webhook_url="https://bot.example.com/api/webhook/gitlab",
             managed_secret_configured=True,
             global_secret_fallback_configured=False,
-            matched_hook={
-                "id": 12,
-                "url": "https://bot.example.com/api/webhook/gitlab",
-                "note_events": True,
-                "enable_ssl_verification": True,
-                "merge_requests_events": True,
-            },
-        )
+	            matched_hook={
+	                "id": 12,
+	                "url": "https://bot.example.com/api/webhook/gitlab",
+	                "note_events": True,
+	                "enable_ssl_verification": True,
+	                "merge_requests_events": True,
+	                "pipeline_events": True,
+	            },
+	        )
 
         self.assertEqual(response.status, "configured")
         self.assertIsNone(response.status_detail)
@@ -221,11 +222,12 @@ class ConfigApiHelperTests(unittest.TestCase):
             global_secret_fallback_configured=True,
             matched_hook={
                 "id": 12,
-                "url": "https://bot.example.com/api/webhook/gitlab",
-                "enable_ssl_verification": False,
-                "merge_requests_events": True,
-            },
-        )
+	                "url": "https://bot.example.com/api/webhook/gitlab",
+	                "enable_ssl_verification": False,
+	                "merge_requests_events": True,
+	                "pipeline_events": True,
+	            },
+	        )
 
         self.assertEqual(response.status, "needs_attention")
         self.assertEqual(response.status_detail, "SSL verification disabled")

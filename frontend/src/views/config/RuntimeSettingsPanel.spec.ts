@@ -144,10 +144,12 @@ const mockConfigForm = {
     allow_monitor_for_users: true,
     allow_schedule_overview_for_users: false,
     allow_analytics_for_users: false,
-    allow_oidc_diagnostics_for_users: false,
-    slot_max_tasks: 0,
-    slot_max_tasks_enforce: false
-  }),
+	    allow_oidc_diagnostics_for_users: false,
+	    slot_max_tasks: 0,
+	    slot_max_tasks_enforce: false,
+	    ci_auto_repair_max_attempts: 2,
+	    ci_failure_bundle_retention_days: 30
+	  }),
   sectionSaving: {
     runtime: false,
     sharedPages: false,
@@ -228,12 +230,20 @@ describe('RuntimeSettingsPanel', () => {
     expect(sectionTitles.some(el => el.text() === 'config.slotCapacity')).toBe(true)
   })
 
-  it('should render slot_max_tasks input and enforce switch', () => {
-    const wrapper = mountComponent()
-    // slot_max_tasks input is an n-input-number, slot_max_tasks_enforce is an n-switch
-    const inputs = wrapper.findAll('.n-input-number')
-    const switches = wrapper.findAll('.n-switch')
-    expect(inputs.length).toBeGreaterThanOrEqual(1)
-    expect(switches.length).toBeGreaterThanOrEqual(1)
-  })
-})
+	  it('should render slot_max_tasks input and enforce switch', () => {
+	    const wrapper = mountComponent()
+	    // slot_max_tasks input is an n-input-number, slot_max_tasks_enforce is an n-switch
+	    const inputs = wrapper.findAll('.n-input-number')
+	    const switches = wrapper.findAll('.n-switch')
+	    expect(inputs.length).toBeGreaterThanOrEqual(1)
+	    expect(switches.length).toBeGreaterThanOrEqual(1)
+	  })
+
+	  it('should render CI auto-repair runtime controls', () => {
+	    const wrapper = mountComponent()
+	    const text = wrapper.text()
+	    expect(text).toContain('config.ciAutoRepair')
+	    expect(text).toContain('config.ciAutoRepairMaxAttempts')
+	    expect(text).toContain('config.ciFailureBundleRetentionDays')
+	  })
+	})

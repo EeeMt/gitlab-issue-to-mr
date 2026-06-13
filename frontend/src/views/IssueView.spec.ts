@@ -21,9 +21,12 @@ const { mockApi, resetMockApi, mockMessage, mockDialog } = vi.hoisted(() => {
     getScheduledTasks: vi.fn<() => Promise<any[]>>(),
     getSlotCapacity: vi.fn<() => Promise<any>>(),
     getConfig: vi.fn<() => Promise<any>>(),
-    getProjects: vi.fn<() => Promise<any[]>>(),
-    getProviders: vi.fn<() => Promise<any[]>>(),
-  }
+	    getProjects: vi.fn<() => Promise<any[]>>(),
+	    getProviders: vi.fn<() => Promise<any[]>>(),
+	    getIssueCIFailures: vi.fn<() => Promise<any>>(),
+	    getCIFailureLogs: vi.fn<() => Promise<any>>(),
+	    getIssueWebhookEvents: vi.fn<() => Promise<any>>(),
+	  }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => fn.mockReset())
   }
@@ -70,10 +73,13 @@ vi.mock('../api', () => ({
   getPromptTemplates: mockApi.getPromptTemplates,
   getScheduledTasks: mockApi.getScheduledTasks,
   getSlotCapacity: mockApi.getSlotCapacity,
-  getConfig: mockApi.getConfig,
-  getProjects: mockApi.getProjects,
-  getProviders: mockApi.getProviders,
-}))
+	  getConfig: mockApi.getConfig,
+	  getProjects: mockApi.getProjects,
+	  getProviders: mockApi.getProviders,
+	  getIssueCIFailures: mockApi.getIssueCIFailures,
+	  getCIFailureLogs: mockApi.getCIFailureLogs,
+	  getIssueWebhookEvents: mockApi.getIssueWebhookEvents,
+	}))
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
@@ -215,14 +221,14 @@ vi.mock('naive-ui', () => ({
       return () => h('div', { class: 'n-gi' }, slots.default?.())
     },
   },
-  NTag: {
-    name: 'NTag',
-    props: ['type', 'size', 'round'],
-    setup(_p: any, { slots }: any) {
-      return () => h('span', { class: 'n-tag' }, slots.default?.())
-    },
-  },
-  NIcon: {
+	  NTag: {
+	    name: 'NTag',
+	    props: ['type', 'size', 'round'],
+	    setup(_p: any, { slots }: any) {
+	      return () => h('span', { class: 'n-tag' }, slots.default?.())
+	    },
+	  },
+	  NIcon: {
     name: 'NIcon',
     props: ['size', 'component'],
     setup(props: any) {
@@ -422,9 +428,10 @@ function createMockIssue(overrides: Record<string, any> = {}): any {
     branch_name: 'codify/issue-1',
     base_branch: 'main',
     target_branch: 'main',
-    merge_request_iid: 42,
-    merge_request_url: 'https://gitlab.example.com/mr/42',
-    claude_session_id: 'session-abc',
+	    merge_request_iid: 42,
+	    merge_request_url: 'https://gitlab.example.com/mr/42',
+	    ci_auto_repair_enabled: false,
+	    claude_session_id: 'session-abc',
     initiator_user_id: null,
     initiator_username: 'testuser',
     created_at: '2024-01-01T10:00:00Z',
@@ -433,14 +440,16 @@ function createMockIssue(overrides: Record<string, any> = {}): any {
     tasks: [
       {
         id: 1, issue_id: 1, project_id: 1, user_prompt: 'Fix the login bug',
-        status: 'completed', priority: 1, is_retry: false, retry_source_task_id: null,
+	        status: 'completed', priority: 1, is_retry: false, retry_source_task_id: null,
+	        trigger_source: 'manual', ci_failure_run_id: null,
         created_at: '2024-01-01T10:00:00Z', updated_at: '2024-01-01T10:00:00Z',
         additions: 10, deletions: 5, input_tokens: 100, output_tokens: 50,
         initiator_username: 'testuser',
       },
       {
         id: 2, issue_id: 1, project_id: 1, user_prompt: 'Add unit tests',
-        status: 'failed', priority: 1, is_retry: false, retry_source_task_id: null,
+	        status: 'failed', priority: 1, is_retry: false, retry_source_task_id: null,
+	        trigger_source: 'manual', ci_failure_run_id: null,
         created_at: '2024-01-01T11:00:00Z', updated_at: '2024-01-01T11:00:00Z',
         additions: 0, deletions: 0, input_tokens: 50, output_tokens: 25,
         initiator_username: 'testuser',
@@ -482,11 +491,14 @@ function setupDefaultMocks(issueOverrides: Record<string, any> = {}) {
   mockApi.getProjects.mockResolvedValue(mockProjects)
   mockApi.getPromptTemplates.mockResolvedValue(mockPromptTemplates)
   mockApi.getScheduledTasks.mockResolvedValue([])
-  mockApi.getSlotCapacity.mockResolvedValue(null)
-  mockApi.getConfig.mockResolvedValue({ runtime: { slot_max_tasks: 5, slot_max_tasks_enforce: false } })
-  mockApi.getProviders.mockResolvedValue(mockProviders)
-  return issue
-}
+	  mockApi.getSlotCapacity.mockResolvedValue(null)
+	  mockApi.getConfig.mockResolvedValue({ runtime: { slot_max_tasks: 5, slot_max_tasks_enforce: false } })
+	  mockApi.getProviders.mockResolvedValue(mockProviders)
+	  mockApi.getIssueCIFailures.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 })
+	  mockApi.getCIFailureLogs.mockResolvedValue({ items: [] })
+	  mockApi.getIssueWebhookEvents.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 })
+	  return issue
+	}
 
 async function mountComponent(issueId = 1) {
   await router.push(`/issues/${issueId}`)
@@ -587,18 +599,127 @@ describe('IssueView', () => {
       expect(wrapper.find('[data-testid="issue-description-card"]').exists()).toBe(false)
     })
 
-    it('renders task table with task rows', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const taskCard = wrapper.find('[data-testid="issue-tasks-card"]')
-      expect(taskCard.exists()).toBe(true)
-      const rows = wrapper.findAll('.n-data-table-row')
-      expect(rows).toHaveLength(2)
-    })
+	    it('renders task table with task rows', async () => {
+	      setupDefaultMocks()
+	      wrapper = await mountComponent()
+	      const taskCard = wrapper.find('[data-testid="issue-tasks-card"]')
+	      expect(taskCard.exists()).toBe(true)
+	      const rows = wrapper.findAll('.n-data-table-row')
+	      expect(rows).toHaveLength(2)
+	    })
 
-    it('shows create task button for open issue (owner)', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
+	    it('renders CI automation opt-in and empty state', async () => {
+	      setupDefaultMocks({ ci_auto_repair_enabled: true })
+	      wrapper = await mountComponent()
+
+	      const automationCard = wrapper.find('[data-testid="issue-ci-failures-card"]')
+	      expect(automationCard.exists()).toBe(true)
+	      expect(automationCard.text()).toContain('issue.ciAutomation')
+	      expect(automationCard.text()).toContain('issue.ciAutoRepairOn')
+	      expect(automationCard.text()).toContain('issue.noCiAutomationEvents')
+	    })
+
+	    it('renders CI failure runs, collector logs, repair task link, and webhook events', async () => {
+	      setupDefaultMocks({ ci_auto_repair_enabled: true })
+	      mockApi.getIssueCIFailures.mockResolvedValue({
+	        items: [
+	          {
+	            id: 9,
+	            webhook_event_id: 3,
+	            project_id: 1,
+	            issue_id: 1,
+	            merge_request_iid: 42,
+	            source_branch: 'codify/issue-1',
+	            target_branch: 'main',
+	            pipeline_id: 1001,
+	            pipeline_sha: 'abc123',
+	            pipeline_ref: 'codify/issue-1',
+	            pipeline_status: 'failed',
+	            pipeline_url: 'https://gitlab.example.com/pipelines/1001',
+	            status: 'task_created',
+	            root_cause_strategy: 'first_failed_stage',
+	            bundle_available: true,
+	            repair_task_id: 77,
+	            ignored_reason: null,
+	            error_message: null,
+	            collection_attempts: 1,
+	            created_at: '2024-01-03T10:00:00Z',
+	            updated_at: '2024-01-03T10:01:00Z',
+	            jobs: [
+	              {
+	                id: 4,
+	                gitlab_job_id: 555,
+	                name: 'unit-test',
+	                stage: 'test',
+	                status: 'failed',
+	                failure_reason: 'script_failure',
+	                allow_failure: false,
+	                web_url: 'https://gitlab.example.com/jobs/555',
+	                trace_path: null,
+	                trace_size_bytes: 128,
+	                is_root_cause: true,
+	                is_downstream_suppressed: false,
+	                classification: 'code',
+	                created_at: '2024-01-03T10:00:00Z',
+	              },
+	            ],
+	          },
+	        ],
+	        total: 1,
+	        page: 1,
+	        page_size: 20,
+	      })
+	      mockApi.getCIFailureLogs.mockResolvedValue({
+	        items: [
+	          {
+	            id: 11,
+	            ci_failure_run_id: 9,
+	            issue_id: 1,
+	            task_id: 77,
+	            step: 'repair_task_created',
+	            status: 'success',
+	            message: 'Created repair task #77',
+	            details: null,
+	            created_at: '2024-01-03T10:01:00Z',
+	          },
+	        ],
+	      })
+	      mockApi.getIssueWebhookEvents.mockResolvedValue({
+	        items: [
+	          {
+	            id: 3,
+	            event_type: 'pipeline',
+	            event_action: 'failed',
+	            project_id: 1,
+	            merge_request_iid: 42,
+	            issue_id: 1,
+	            source_ip: null,
+	            result: 'ci_failure_collecting',
+	            result_detail: null,
+	            payload_summary: { pipeline_id: 1001 },
+	            created_at: '2024-01-03T10:00:00Z',
+	          },
+	        ],
+	        total: 1,
+	        page: 1,
+	        page_size: 20,
+	      })
+
+	      wrapper = await mountComponent()
+
+	      const automationCard = wrapper.find('[data-testid="issue-ci-failures-card"]')
+	      expect(automationCard.text()).toContain('issue.pipelineLabel')
+	      expect(automationCard.text()).toContain('unit-test · code')
+	      expect(automationCard.text()).toContain('repair_task_created')
+	      expect(automationCard.text()).toContain('Created repair task #77')
+	      expect(automationCard.text()).toContain('issue.viewRepairTask')
+	      expect(automationCard.text()).toContain('pipeline')
+	      expect(automationCard.text()).toContain('ci_failure_collecting')
+	    })
+
+	    it('shows create task button for open issue (owner)', async () => {
+	      setupDefaultMocks()
+	      wrapper = await mountComponent()
       const btn = wrapper.find('[data-testid="issue-toggle-create-task"]')
       expect(btn.exists()).toBe(true)
     })
@@ -984,10 +1105,11 @@ describe('IssueView', () => {
       await saveBtn.trigger('click')
       await flushPromises()
 
-      expect(mockApi.updateIssue).toHaveBeenCalledWith(1, {
-        title: 'Test Issue',
-        description: 'Test description',
-      })
+	      expect(mockApi.updateIssue).toHaveBeenCalledWith(1, {
+	        title: 'Test Issue',
+	        description: 'Test description',
+	        ci_auto_repair_enabled: false,
+	      })
       expect(mockMessage.success).toHaveBeenCalledWith('issue.updateSuccess')
     })
 

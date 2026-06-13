@@ -509,7 +509,7 @@ class GitLabClient:
             "push_events": False,
             "tag_push_events": False,
             "job_events": False,
-            "pipeline_events": False,
+            "pipeline_events": True,
             "wiki_page_events": False,
         }
 
@@ -542,6 +542,35 @@ class GitLabClient:
             "action": "created",
             "hook": created_hook,
         }
+
+    def get_merge_request_details(self, project_id: int, mr_iid: int) -> dict[str, Any] | None:
+        """Get merge request branch and head SHA details used by CI repair gates."""
+        mr = self.get_merge_request(project_id, mr_iid)
+        if not mr:
+            return None
+        diff_refs = getattr(mr, "diff_refs", None) or {}
+        sha = getattr(mr, "sha", None) or diff_refs.get("head_sha")
+        return {
+            "source_branch": getattr(mr, "source_branch", None),
+            "target_branch": getattr(mr, "target_branch", None),
+            "sha": sha,
+            "web_url": self.normalize_web_url(getattr(mr, "web_url", None)),
+            "state": getattr(mr, "state", None),
+        }
+
+    def get_pipeline_jobs(self, project_id: int, pipeline_id: int) -> list[dict[str, Any]]:
+        """List GitLab jobs for one pipeline."""
+        return list(
+            self.gl.http_list(
+                f"/projects/{project_id}/pipelines/{pipeline_id}/jobs",
+                per_page=100,
+                get_all=True,
+            )
+        )
+
+    def get_job_trace(self, project_id: int, job_id: int) -> str:
+        """Fetch raw GitLab CI job trace text."""
+        return str(self.gl.http_get(f"/projects/{project_id}/jobs/{job_id}/trace"))
 
     def close(self) -> None:
         """Close GitLab client."""

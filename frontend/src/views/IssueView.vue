@@ -379,6 +379,94 @@
           :bordered="false"
         />
       </n-card>
+
+      <n-card class="issue-card" :bordered="false" data-testid="issue-ci-failures-card">
+        <template #header>
+          <div class="issue-card__header">
+            <div class="issue-card__title">{{ t('issue.ciAutomation') }}</div>
+            <n-tag size="small" round :type="issue.ci_auto_repair_enabled ? 'success' : 'default'">
+              {{ issue.ci_auto_repair_enabled ? t('issue.ciAutoRepairOn') : t('issue.ciAutoRepairOff') }}
+            </n-tag>
+          </div>
+        </template>
+
+        <div v-if="ciFailuresLoading" class="issue-automation-empty">
+          {{ t('common.loading') }}
+        </div>
+        <div v-else-if="ciFailures.length === 0 && issueWebhookEvents.length === 0" class="issue-automation-empty">
+          {{ t('issue.noCiAutomationEvents') }}
+        </div>
+        <div v-else class="issue-automation">
+          <div v-for="run in ciFailures" :key="run.id" class="ci-failure-run">
+            <div class="ci-failure-run__top">
+              <div>
+                <a
+                  v-if="run.pipeline_url"
+                  :href="run.pipeline_url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="app-link"
+                >
+                  {{ t('issue.pipelineLabel', { id: run.pipeline_id }) }}
+                </a>
+                <span v-else>{{ t('issue.pipelineLabel', { id: run.pipeline_id }) }}</span>
+                <div class="ci-failure-run__meta">
+                  {{ formatCompactDateTime(run.created_at) }}
+                  <span v-if="run.pipeline_ref"> · {{ run.pipeline_ref }}</span>
+                </div>
+              </div>
+              <n-space :size="6">
+                <n-tag size="small" round :type="ciRunStatusTagType(run.status)">
+                  {{ ciRunStatusLabel(run.status) }}
+                </n-tag>
+                <n-tag v-if="run.ignored_reason" size="small" round>
+                  {{ ignoredReasonLabel(run.ignored_reason) }}
+                </n-tag>
+                <n-button
+                  v-if="run.repair_task_id"
+                  size="tiny"
+                  text
+                  type="primary"
+                  @click="router.push({ name: 'TaskView', params: { id: run.repair_task_id } })"
+                >
+                  {{ t('issue.viewRepairTask', { id: run.repair_task_id }) }}
+                </n-button>
+              </n-space>
+            </div>
+
+            <div v-if="run.jobs?.length" class="ci-job-list">
+              <n-tag
+                v-for="job in run.jobs"
+                :key="job.id"
+                size="small"
+                round
+                :type="job.is_root_cause ? (job.classification === 'infra' ? 'warning' : 'error') : 'default'"
+              >
+                {{ job.name }} · {{ job.classification }}
+              </n-tag>
+            </div>
+
+            <div v-if="ciFailureLogs[run.id]?.length" class="ci-run-timeline">
+              <div v-for="log in ciFailureLogs[run.id]" :key="log.id" class="ci-run-timeline__item">
+                <span class="ci-run-timeline__time">{{ formatCompactDateTime(log.created_at) }}</span>
+                <span class="ci-run-timeline__step">{{ log.step }}</span>
+                <n-tag size="tiny" round>{{ log.status }}</n-tag>
+                <span v-if="log.message" class="ci-run-timeline__message">{{ log.message }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="issueWebhookEvents.length" class="issue-webhook-events">
+            <div class="issue-webhook-events__title">{{ t('issue.webhookEvents') }}</div>
+            <div v-for="event in issueWebhookEvents" :key="event.id" class="issue-webhook-event">
+              <span>{{ formatCompactDateTime(event.created_at) }}</span>
+              <n-tag size="tiny" round>{{ event.event_type }}</n-tag>
+              <span>{{ event.result }}</span>
+              <span v-if="event.result_detail" class="metadata-muted">{{ event.result_detail }}</span>
+            </div>
+          </div>
+        </div>
+      </n-card>
     </n-space>
 
     <!-- Close Modal -->
@@ -434,6 +522,14 @@
             type="textarea"
             :rows="6"
           />
+        </n-form-item>
+        <n-form-item :label="t('issue.ciAutoRepair')">
+          <n-space align="center" :size="8">
+            <n-switch v-model:value="editForm.ci_auto_repair_enabled" />
+            <span class="metadata-muted">
+              {{ editForm.ci_auto_repair_enabled ? t('issue.ciAutoRepairEnabled') : t('issue.ciAutoRepairDisabled') }}
+            </span>
+          </n-space>
         </n-form-item>
       </n-form>
       <template #action>
@@ -545,7 +641,7 @@ import {
   NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin,
   NIcon, NDataTable, NInput, NDrawer, NDrawerContent,
   NRadio, NRadioGroup, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NTooltip, NScrollbar,
-  useMessage,
+  NSwitch, useMessage,
   type DataTableColumns
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -567,8 +663,8 @@ import TaskFormDrawer from '../components/TaskFormDrawer.vue'
 import RescheduleDrawer from '../components/RescheduleDrawer.vue'
 import {
   getIssue, updateIssue, closeIssue, retryTask, deleteIssueBranch,
-  getScheduledTasks, getConfig, getProjects,
-  type Issue, type Task, type Project
+  getScheduledTasks, getConfig, getProjects, getIssueCIFailures, getCIFailureLogs, getIssueWebhookEvents,
+  type Issue, type Task, type Project, type CIFailureRun, type CIFailureRunLog, type WebhookEvent
 } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
@@ -621,6 +717,10 @@ const closingIssue = ref(false)
 const showCloseModal = ref(false)
 let pollTimer: number | null = null
 const projects = ref<Project[]>([])
+const ciFailures = ref<CIFailureRun[]>([])
+const ciFailureLogs = ref<Record<number, CIFailureRunLog[]>>({})
+const issueWebhookEvents = ref<WebhookEvent[]>([])
+const ciFailuresLoading = ref(false)
 
 const renderedDescription = computed(() => renderMarkdown(issue.value?.description ?? ''))
 const renderedRetryPrompt = computed(() => renderMarkdown(retryTargetTask.value?.user_prompt ?? ''))
@@ -663,7 +763,8 @@ const showEditModal = ref(false)
 const editLoading = ref(false)
 const editForm = reactive({
   title: '',
-  description: ''
+  description: '',
+  ci_auto_repair_enabled: false,
 })
 
 // --- Constants ---
@@ -857,6 +958,23 @@ function formatNumber(value: number | null | undefined): string {
   return Math.round(value).toLocaleString()
 }
 
+function ciRunStatusLabel(status: string): string {
+  const key = `issue.ciFailureStatus.${status}`
+  return t(key)
+}
+
+function ciRunStatusTagType(status: string): 'default' | 'info' | 'warning' | 'success' | 'error' {
+  if (status === 'task_created') return 'success'
+  if (status === 'failed') return 'error'
+  if (status === 'ignored') return 'warning'
+  if (status === 'collecting' || status === 'collected') return 'info'
+  return 'default'
+}
+
+function ignoredReasonLabel(reason: string): string {
+  return t(`issue.ciIgnoredReason.${reason}`)
+}
+
 function isScheduleDateDisabled(timestamp: number): boolean {
   const candidate = new Date(timestamp)
   const today = new Date()
@@ -930,10 +1048,35 @@ async function fetchIssue() {
   loading.value = true
   try {
     issue.value = await getIssue(issueId.value)
+    await fetchIssueAutomation()
   } catch {
     message.error(t('issue.loadFailed'))
   } finally {
     loading.value = false
+  }
+}
+
+async function fetchIssueAutomation() {
+  ciFailuresLoading.value = true
+  try {
+    const [failureResponse, webhookResponse] = await Promise.all([
+      getIssueCIFailures(issueId.value, { page_size: 5 }),
+      getIssueWebhookEvents(issueId.value, { page_size: 5 }),
+    ])
+    ciFailures.value = failureResponse.items
+    issueWebhookEvents.value = webhookResponse.items
+    const logs: Record<number, CIFailureRunLog[]> = {}
+    await Promise.all(ciFailures.value.map(async (run) => {
+      const response = await getCIFailureLogs(run.id)
+      logs[run.id] = response.items
+    }))
+    ciFailureLogs.value = logs
+  } catch {
+    ciFailures.value = []
+    ciFailureLogs.value = {}
+    issueWebhookEvents.value = []
+  } finally {
+    ciFailuresLoading.value = false
   }
 }
 
@@ -979,7 +1122,8 @@ async function handleSaveEdit() {
   try {
     issue.value = await updateIssue(issueId.value, {
       title: editForm.title,
-      description: editForm.description
+      description: editForm.description,
+      ci_auto_repair_enabled: editForm.ci_auto_repair_enabled,
     })
     showEditModal.value = false
     message.success(t('issue.updateSuccess'))
@@ -1039,6 +1183,7 @@ function openEditModal() {
   if (!issue.value) return
   editForm.title = issue.value.title
   editForm.description = issue.value.description || ''
+  editForm.ci_auto_repair_enabled = issue.value.ci_auto_repair_enabled
   showEditModal.value = true
 }
 
@@ -1489,6 +1634,86 @@ onMounted(() => {
 }
 .app-link:hover {
   text-decoration: underline;
+}
+
+.issue-automation {
+  display: grid;
+  gap: 16px;
+}
+
+.issue-automation-empty {
+  color: var(--n-text-color-3);
+  font-size: 13px;
+}
+
+.ci-failure-run {
+  display: grid;
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.ci-failure-run:last-child {
+  border-bottom: 0;
+}
+
+.ci-failure-run__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ci-failure-run__meta,
+.ci-run-timeline__time {
+  color: var(--n-text-color-3);
+  font-size: 12px;
+}
+
+.ci-job-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ci-run-timeline {
+  display: grid;
+  gap: 6px;
+}
+
+.ci-run-timeline__item,
+.issue-webhook-event {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.ci-run-timeline__step {
+  font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
+  color: var(--n-text-color-2);
+}
+
+.ci-run-timeline__message {
+  min-width: 0;
+  color: var(--n-text-color-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue-webhook-events {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.issue-webhook-events__title {
+  color: var(--n-text-color-2);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 @media (max-width: 768px) {

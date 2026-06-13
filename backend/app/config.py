@@ -57,6 +57,8 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "worker_failed_workspace_retention_days": int,
     "slot_max_tasks": int,  # Max tasks per 1-hour slot (0 = unlimited)
     "slot_max_tasks_enforce": bool,  # Enforce slot limit (True = hard reject, False = soft warning)
+    "ci_auto_repair_max_attempts": int,
+    "ci_failure_bundle_retention_days": int,
     "session_storage_root": str,
     "announcement_enabled": bool,
     "announcement_text": str,
@@ -185,6 +187,8 @@ class Settings(BaseSettings):
     # Slot Capacity Configuration
     slot_max_tasks: int = Field(default=0)  # Max tasks per 1-hour slot (0 = unlimited)
     slot_max_tasks_enforce: bool = Field(default=False)  # True = hard reject, False = soft warning
+    ci_auto_repair_max_attempts: int = Field(default=2)
+    ci_failure_bundle_retention_days: int = Field(default=30)
 
     # Announcement Configuration
     announcement_enabled: bool = Field(default=False)

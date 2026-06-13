@@ -76,6 +76,8 @@ class RuntimeConfigSection(BaseModel):
     maven_settings_host_path: str
     slot_max_tasks: int
     slot_max_tasks_enforce: bool
+    ci_auto_repair_max_attempts: int
+    ci_failure_bundle_retention_days: int
     announcement_enabled: bool
     announcement_text: str
     announcement_level: str
@@ -112,6 +114,8 @@ class RuntimeConfigUpdate(BaseModel):
     maven_settings_host_path: str | None = None
     slot_max_tasks: int | None = None
     slot_max_tasks_enforce: bool | None = None
+    ci_auto_repair_max_attempts: int | None = None
+    ci_failure_bundle_retention_days: int | None = None
     announcement_enabled: bool | None = None
     announcement_text: str | None = None
     announcement_level: str | None = None
@@ -147,6 +151,8 @@ def _serialize_runtime_config(
         maven_settings_host_path=settings.maven_settings_host_path,
         slot_max_tasks=settings.slot_max_tasks,
         slot_max_tasks_enforce=settings.slot_max_tasks_enforce,
+        ci_auto_repair_max_attempts=settings.ci_auto_repair_max_attempts,
+        ci_failure_bundle_retention_days=settings.ci_failure_bundle_retention_days,
         announcement_enabled=settings.announcement_enabled,
         announcement_text=settings.announcement_text,
         announcement_level=settings.announcement_level,
@@ -241,6 +247,14 @@ def _validate_config_value(key: str, value: object) -> object:
             )
         return value
 
+    if key == "ci_auto_repair_max_attempts":
+        if not isinstance(value, int) or value < 0 or value > 10:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="ci_auto_repair_max_attempts must be between 0 and 10",
+            )
+        return value
+
     if key == "worker_workspace_host_path":
         if not isinstance(value, str):
             raise HTTPException(
@@ -255,7 +269,11 @@ def _validate_config_value(key: str, value: object) -> object:
             )
         return stripped
 
-    if key in {"worker_workspace_retention_days", "worker_failed_workspace_retention_days"}:
+    if key in {
+        "worker_workspace_retention_days",
+        "worker_failed_workspace_retention_days",
+        "ci_failure_bundle_retention_days",
+    }:
         if not isinstance(value, int) or value < 0 or value > 365:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

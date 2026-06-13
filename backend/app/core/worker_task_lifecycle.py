@@ -11,14 +11,16 @@ from gitlab import Gitlab
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.ci_failure_logs import append_ci_failure_log
 from app.core.task_log_payloads import create_payload
 from app.core.utcnow import utcnow
 from app.core.worker_environment_variables import (
     build_worker_environment_map,
     list_worker_environment_variables,
 )
+from app.core.worker_workspace import build_issue_workspace_paths
 from app.database import AsyncSessionLocal
-from app.models import Issue, Task, TaskLog, TaskStatus
+from app.models import CIFailureRun, Issue, Task, TaskLog, TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -324,6 +326,25 @@ async def create_execute_container(
 
     if issue:
         await worker._write_previous_task_summaries_file(db, settings, issue, task)
+
+    if issue and getattr(task, "trigger_source", None) == "ci_auto_repair":
+        paths = build_issue_workspace_paths(settings, issue, task)
+        if paths is None:
+            raise RuntimeError("worker_workspace_host_path is required for CI auto-repair tasks")
+        run = await db.get(CIFailureRun, task.ci_failure_run_id) if task.ci_failure_run_id else None
+        if run is None:
+            raise RuntimeError("CI failure run is not available for this repair task")
+        task.ci_failure_run = run
+        worker._materialize_ci_failure_bundle(task, paths.runtime_path)
+        await append_ci_failure_log(
+            db,
+            run,
+            step="bundle_materialized_for_worker",
+            status="succeeded",
+            message=f"Materialized CI failure bundle for task #{task.id}",
+            task_id=task.id,
+        )
+        await db.flush()
 
     environment, _target_branch = await worker._prepare_container_inputs(db, task, issue, mr_iid)
     volumes = worker._build_container_volumes(settings, issue, task=task)

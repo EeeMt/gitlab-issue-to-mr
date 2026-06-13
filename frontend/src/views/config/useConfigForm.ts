@@ -64,6 +64,8 @@ export type ConfigForm = {
   oidc_client_secret_input: string
   slot_max_tasks: number
   slot_max_tasks_enforce: boolean
+  ci_auto_repair_max_attempts: number
+  ci_failure_bundle_retention_days: number
 }
 
 export type ConfigSectionKey = 'runtime' | 'sharedPages' | 'gitlab' | 'oidc' | 'session'
@@ -82,7 +84,9 @@ export const runtimeSectionFields: readonly (keyof ConfigForm)[] = [
   'alert_on_failure',
   'alert_webhook_url_input',
   'slot_max_tasks',
-  'slot_max_tasks_enforce'
+  'slot_max_tasks_enforce',
+  'ci_auto_repair_max_attempts',
+  'ci_failure_bundle_retention_days'
 ]
 
 export const sharedPagesSectionFields: readonly (keyof ConfigForm)[] = [
@@ -173,7 +177,9 @@ function createDefaultFormValue(): ConfigForm {
     oidc_client_secret_configured: false,
     oidc_client_secret_input: '',
     slot_max_tasks: 0,
-    slot_max_tasks_enforce: false
+    slot_max_tasks_enforce: false,
+    ci_auto_repair_max_attempts: 2,
+    ci_failure_bundle_retention_days: 30
   }
 }
 
@@ -307,7 +313,9 @@ function createConfigForm(): UseConfigFormReturn {
       oidc_client_secret_configured: config.auth.oidc_client_secret_configured,
       oidc_client_secret_input: '',
       slot_max_tasks: config.runtime.slot_max_tasks,
-      slot_max_tasks_enforce: config.runtime.slot_max_tasks_enforce
+      slot_max_tasks_enforce: config.runtime.slot_max_tasks_enforce,
+      ci_auto_repair_max_attempts: config.runtime.ci_auto_repair_max_attempts,
+      ci_failure_bundle_retention_days: config.runtime.ci_failure_bundle_retention_days
     }
     lastLoadedValue.value = { ...formValue.value }
   }
@@ -336,7 +344,9 @@ function createConfigForm(): UseConfigFormReturn {
       retry_delay: formValue.value.retry_delay,
       alert_on_failure: formValue.value.alert_on_failure,
       slot_max_tasks: formValue.value.slot_max_tasks,
-      slot_max_tasks_enforce: formValue.value.slot_max_tasks_enforce
+      slot_max_tasks_enforce: formValue.value.slot_max_tasks_enforce,
+      ci_auto_repair_max_attempts: formValue.value.ci_auto_repair_max_attempts,
+      ci_failure_bundle_retention_days: formValue.value.ci_failure_bundle_retention_days
     }
 
     if (formValue.value.alert_webhook_url_input.trim()) {

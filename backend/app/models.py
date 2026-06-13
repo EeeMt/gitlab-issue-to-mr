@@ -85,6 +85,9 @@ class Issue(Base):
     )
     merge_request_iid: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     merge_request_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    ci_auto_repair_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
 
     # Claude session persistence
     claude_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -171,6 +174,12 @@ class Task(Base):
     retry_source_task_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("tasks.id"), nullable=True
     )
+    trigger_source: Mapped[str] = mapped_column(
+        String(32), default="manual", server_default=text("'manual'"), nullable=False, index=True
+    )
+    ci_failure_run_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("ci_failure_runs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     # Status
     status: Mapped[TaskStatus] = mapped_column(
@@ -233,12 +242,18 @@ class Task(Base):
         "Task", remote_side="Task.id", foreign_keys=[retry_source_task_id]
     )
     provider: Mapped[Optional["AIProvider"]] = relationship("AIProvider", back_populates="tasks")
+    ci_failure_run: Mapped[Optional["CIFailureRun"]] = relationship(
+        "CIFailureRun",
+        foreign_keys=[ci_failure_run_id],
+        back_populates="repair_tasks",
+    )
 
     # Indexes for querying tasks
     __table_args__ = (
         Index("ix_tasks_status_created", "status", "created_at"),
         Index("ix_tasks_status_priority", "status", "priority", "scheduled_at"),
         Index("ix_tasks_issue_id_status", "issue_id", "status"),
+        Index("ix_tasks_issue_trigger_source", "issue_id", "trigger_source"),
         Index("ix_tasks_created_at_project", "created_at", "project_id"),
         Index("ix_tasks_created_at_status", "created_at", "status"),
     )
@@ -623,6 +638,127 @@ class WebhookEvent(Base):
     __table_args__ = (
         Index("ix_webhook_events_project_created", "project_id", "created_at"),
     )
+
+
+class CIFailureRun(Base):
+    """Durable record for one failed GitLab pipeline accepted for CI evidence collection."""
+
+    __tablename__ = "ci_failure_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    webhook_event_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("webhook_events.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    issue_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("issues.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    merge_request_iid: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    source_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    target_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    pipeline_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    pipeline_sha: Mapped[str] = mapped_column(String(40), nullable=False)
+    pipeline_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    pipeline_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    pipeline_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="collecting", index=True)
+    root_cause_strategy: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="first_failed_stage"
+    )
+    bundle_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    repair_task_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    ignored_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    collection_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    locked_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+    repair_task: Mapped[Optional["Task"]] = relationship(
+        "Task",
+        foreign_keys=[repair_task_id],
+        post_update=True,
+    )
+    repair_tasks: Mapped[list["Task"]] = relationship(
+        "Task",
+        foreign_keys="Task.ci_failure_run_id",
+        back_populates="ci_failure_run",
+    )
+    jobs: Mapped[list["CIFailureJob"]] = relationship(
+        "CIFailureJob",
+        back_populates="ci_failure_run",
+        cascade="all, delete-orphan",
+    )
+    logs: Mapped[list["CIFailureRunLog"]] = relationship(
+        "CIFailureRunLog",
+        back_populates="ci_failure_run",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "pipeline_id", name="uq_ci_failure_runs_project_pipeline"),
+        Index("ix_ci_failure_runs_status_locked", "status", "locked_at"),
+        Index("ix_ci_failure_runs_issue_created", "issue_id", "created_at"),
+    )
+
+
+class CIFailureJob(Base):
+    """Failed or relevant GitLab CI job captured for a CI failure run."""
+
+    __tablename__ = "ci_failure_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ci_failure_run_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("ci_failure_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    gitlab_job_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    stage: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    failure_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    allow_failure: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    web_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    trace_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    trace_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_root_cause: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_downstream_suppressed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    classification: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+    ci_failure_run: Mapped["CIFailureRun"] = relationship("CIFailureRun", back_populates="jobs")
+
+    __table_args__ = (
+        UniqueConstraint("ci_failure_run_id", "gitlab_job_id", name="uq_ci_failure_jobs_run_job"),
+    )
+
+
+class CIFailureRunLog(Base):
+    """Product-visible structured timeline entry for CI failure collection."""
+
+    __tablename__ = "ci_failure_run_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ci_failure_run_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("ci_failure_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    issue_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("issues.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    task_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    step: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+    ci_failure_run: Mapped["CIFailureRun"] = relationship("CIFailureRun", back_populates="logs")
 
 
 class TaskRunArchive(Base):

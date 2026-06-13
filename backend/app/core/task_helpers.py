@@ -42,6 +42,8 @@ def _serialize_task(
         "initiator_username": task.initiator_username,
         "is_retry": task.is_retry,
         "retry_source_task_id": task.retry_source_task_id,
+        "trigger_source": task.trigger_source,
+        "ci_failure_run_id": task.ci_failure_run_id,
         "status": task.status.value,
         "priority": task.priority,
         "scheduled_at": task.scheduled_at.isoformat() if task.scheduled_at else None,

@@ -174,6 +174,7 @@ export interface Issue {
   // New fields for branch deletion handling
   delete_branch_on_close: boolean
   branch_deleted: boolean
+  ci_auto_repair_enabled: boolean
 }
 
 export interface CreateIssueRequest {
@@ -184,6 +185,7 @@ export interface CreateIssueRequest {
   target_branch?: string
   // Option to delete branch when a webhook auto-closes the issue
   delete_branch_on_close?: boolean
+  ci_auto_repair_enabled?: boolean
 }
 
 export interface CloseIssueRequest {
@@ -214,6 +216,8 @@ export interface Task {
   priority: number
   is_retry: boolean
   retry_source_task_id: number | null
+  trigger_source: 'manual' | 'retry' | 'follow_up' | 'ci_auto_repair' | string
+  ci_failure_run_id: number | null
   scheduled_at: string | null
   container_id: string | null
   container_name: string | null
@@ -579,6 +583,8 @@ export interface RuntimeConfig {
   maven_settings_host_path: string
   slot_max_tasks: number
   slot_max_tasks_enforce: boolean
+  ci_auto_repair_max_attempts: number
+  ci_failure_bundle_retention_days: number
   announcement_enabled: boolean
   announcement_text: string
   announcement_level: string
@@ -787,6 +793,7 @@ export interface GitLabProjectWebhookStatusResult {
   note_events: boolean | null
   enable_ssl_verification: boolean | null
   merge_requests_events: boolean | null
+  pipeline_events: boolean | null
   managed_secret_configured: boolean
   global_secret_fallback_configured: boolean
   secret_mode: 'project' | 'global_fallback' | 'none' | string
@@ -811,6 +818,71 @@ export interface WebhookEventsResponse {
   total: number
   page: number
   page_size: number
+}
+
+export interface CIFailureJob {
+  id: number
+  gitlab_job_id: number
+  name: string
+  stage: string | null
+  status: string
+  failure_reason: string | null
+  allow_failure: boolean
+  web_url: string | null
+  trace_path: string | null
+  trace_size_bytes: number
+  is_root_cause: boolean
+  is_downstream_suppressed: boolean
+  classification: 'code' | 'infra' | 'unknown' | string
+  created_at: string | null
+}
+
+export interface CIFailureRun {
+  id: number
+  webhook_event_id: number | null
+  project_id: number
+  issue_id: number | null
+  merge_request_iid: number | null
+  source_branch: string | null
+  target_branch: string | null
+  pipeline_id: number
+  pipeline_sha: string
+  pipeline_ref: string | null
+  pipeline_status: string
+  pipeline_url: string | null
+  status: 'collecting' | 'collected' | 'task_created' | 'ignored' | 'failed' | string
+  root_cause_strategy: string
+  bundle_available: boolean
+  repair_task_id: number | null
+  ignored_reason: string | null
+  error_message: string | null
+  collection_attempts: number
+  created_at: string | null
+  updated_at: string | null
+  jobs: CIFailureJob[] | null
+}
+
+export interface CIFailureRunLog {
+  id: number
+  ci_failure_run_id: number
+  issue_id: number | null
+  task_id: number | null
+  step: string
+  status: string
+  message: string | null
+  details: Record<string, unknown> | null
+  created_at: string | null
+}
+
+export interface CIFailureRunsResponse {
+  items: CIFailureRun[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface CIFailureRunLogsResponse {
+  items: CIFailureRunLog[]
 }
 
 export interface OidcDiagnosticsCheck {
@@ -1295,6 +1367,27 @@ export async function getWebhookEvents(params: {
   return response.data
 }
 
+export async function getIssueWebhookEvents(
+  issueId: number,
+  params: { page?: number; page_size?: number } = {},
+): Promise<WebhookEventsResponse> {
+  const response = await api.get(`/issues/${issueId}/webhook-events`, { params })
+  return response.data
+}
+
+export async function getIssueCIFailures(
+  issueId: number,
+  params: { page?: number; page_size?: number } = {},
+): Promise<CIFailureRunsResponse> {
+  const response = await api.get(`/issues/${issueId}/ci-failures`, { params })
+  return response.data
+}
+
+export async function getCIFailureLogs(ciFailureRunId: number): Promise<CIFailureRunLogsResponse> {
+  const response = await api.get(`/ci-failures/${ciFailureRunId}/logs`)
+  return response.data
+}
+
 export async function getOidcDiagnostics(): Promise<OidcDiagnosticsResult> {
   const response = await api.get('/config/oidc/diagnostics', {
     // Skip global 401 interceptor redirect for OIDC diagnostics
@@ -1523,6 +1616,7 @@ export async function updateIssue(id: number, data: Partial<{
   title: string
   description: string
   status: string
+  ci_auto_repair_enabled: boolean
 }>): Promise<Issue> {
   const response = await api.patch(`/issues/${id}`, data)
   return response.data

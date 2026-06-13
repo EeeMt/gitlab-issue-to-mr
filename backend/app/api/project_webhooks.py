@@ -55,6 +55,7 @@ class GitLabProjectWebhookStatusResponse(BaseModel):
     hook_url: str | None = None
     note_events: bool | None = None
     merge_requests_events: bool | None = None
+    pipeline_events: bool | None = None
     enable_ssl_verification: bool | None = None
     managed_secret_configured: bool
     global_secret_fallback_configured: bool
@@ -100,6 +101,7 @@ def _build_gitlab_project_webhook_status_response(
     hook_found = matched_hook is not None
     note_events = bool(matched_hook.get("note_events")) if matched_hook is not None else None
     merge_requests_events = bool(matched_hook.get("merge_requests_events")) if matched_hook is not None else None
+    pipeline_events = bool(matched_hook.get("pipeline_events")) if matched_hook is not None else None
     enable_ssl_verification = bool(matched_hook.get("enable_ssl_verification")) if matched_hook is not None else None
 
     if inspection_error:
@@ -108,7 +110,7 @@ def _build_gitlab_project_webhook_status_response(
     elif not hook_found:
         status_value = "missing"
         status_detail = "No webhook matches the configured callback URL"
-    elif enable_ssl_verification and merge_requests_events:
+    elif enable_ssl_verification and merge_requests_events and pipeline_events:
         status_value = "configured"
         status_detail = None
     else:
@@ -118,6 +120,8 @@ def _build_gitlab_project_webhook_status_response(
             issues.append("SSL verification disabled")
         if not merge_requests_events:
             issues.append("MR events disabled")
+        if not pipeline_events:
+            issues.append("Pipeline events missing")
         status_detail = ", ".join(issues) if issues else "Webhook settings need attention"
 
     return GitLabProjectWebhookStatusResponse(
@@ -132,6 +136,7 @@ def _build_gitlab_project_webhook_status_response(
         hook_url=str(matched_hook.get("url", "")) if matched_hook is not None else None,
         note_events=note_events,
         merge_requests_events=merge_requests_events,
+        pipeline_events=pipeline_events,
         enable_ssl_verification=enable_ssl_verification,
         managed_secret_configured=managed_secret_configured,
         global_secret_fallback_configured=global_secret_fallback_configured,

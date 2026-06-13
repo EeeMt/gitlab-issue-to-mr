@@ -60,6 +60,25 @@ def _build_note_payload(project_id=42):
     }
 
 
+def _build_pipeline_payload(project_id=42, pipeline_id=678, status="failed", sha="abc123"):
+    return {
+        "object_kind": "pipeline",
+        "project": {"id": project_id, "path_with_namespace": "group/project"},
+        "object_attributes": {
+            "id": pipeline_id,
+            "status": status,
+            "sha": sha,
+            "ref": "codify/issue-1",
+            "url": "https://gitlab.example.com/group/project/-/pipelines/678",
+        },
+        "merge_request": {
+            "iid": 7,
+            "source_branch": "codify/issue-1",
+            "target_branch": "main",
+        },
+    }
+
+
 class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
     """Tests for POST /api/webhook/gitlab."""
 
@@ -227,6 +246,48 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["result"], "unsupported_event")
+
+    def test_pipeline_failed_event_creates_ci_failure_run(self):
+        from app.models import CIFailureRun, WebhookEvent
+
+        duplicate_result = MagicMock()
+        duplicate_result.scalar_one_or_none.return_value = None
+        self.mock_db.execute = AsyncMock(return_value=duplicate_result)
+
+        payload = _build_pipeline_payload(project_id=42, pipeline_id=678)
+        resp = self.client.post(
+            "/api/webhook/gitlab",
+            json=payload,
+            headers={"X-Gitlab-Token": "global-secret"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["result"], "ci_failure_collecting")
+
+        added = [call.args[0] for call in self.mock_db.add.call_args_list]
+        event = next(item for item in added if isinstance(item, WebhookEvent))
+        run = next(item for item in added if isinstance(item, CIFailureRun))
+        self.assertEqual(event.event_type, "pipeline")
+        self.assertEqual(event.result, "ci_failure_collecting")
+        self.assertEqual(event.payload_summary["pipeline_id"], 678)
+        self.assertEqual(event.payload_summary["pipeline_status"], "failed")
+        self.assertEqual(run.project_id, 42)
+        self.assertEqual(run.pipeline_id, 678)
+        self.assertEqual(run.pipeline_sha, "abc123")
+        self.assertEqual(run.merge_request_iid, 7)
+        self.assertEqual(run.status, "collecting")
+
+    def test_pipeline_success_event_is_logged_and_ignored(self):
+        payload = _build_pipeline_payload(status="success")
+        resp = self.client.post(
+            "/api/webhook/gitlab",
+            json=payload,
+            headers={"X-Gitlab-Token": "global-secret"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["result"], "ignored_action")
+        self.assertIn("Pipeline status 'success' ignored", data["detail"])
 
     def test_missing_project_id_returns_400(self):
         payload = {"object_kind": "merge_request", "object_attributes": {"action": "merge", "iid": 1}}

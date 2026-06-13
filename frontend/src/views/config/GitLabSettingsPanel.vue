@@ -503,6 +503,7 @@ const webhookColumns = computed<DataTableColumns<GitLabProjectWebhookStatusResul
         h('span', `${t('config.webhookHookIdShort')}: ${row.hook_id ?? '-'}`),
         h('span', `${t('config.webhookNoteEventsShort')}: ${row.note_events === null ? '-' : row.note_events ? t('common.enabled') : t('common.disabled')}`),
         h('span', `${t('config.webhookMrEventsShort')}: ${row.merge_requests_events === null ? '-' : row.merge_requests_events ? t('common.enabled') : t('common.disabled')}`),
+        h('span', `${t('config.webhookPipelineEventsShort')}: ${row.pipeline_events === null ? '-' : row.pipeline_events ? t('common.enabled') : t('common.disabled')}`),
         h('span', `${t('config.webhookSslShort')}: ${row.enable_ssl_verification === null ? '-' : row.enable_ssl_verification ? t('common.enabled') : t('common.disabled')}`)
       ])
   },

@@ -28,6 +28,8 @@ export const createMockTask = (overrides = {}): Task => ({
   priority: 1,
   is_retry: false,
   retry_source_task_id: null,
+  trigger_source: 'manual',
+  ci_failure_run_id: null,
   scheduled_at: null,
   container_id: null,
   container_name: null,

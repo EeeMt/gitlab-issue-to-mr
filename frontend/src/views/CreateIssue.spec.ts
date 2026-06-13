@@ -709,9 +709,10 @@ describe('CreateIssue', () => {
       await wrapper.vm.handleSubmit()
       await flushPromises()
 
-      const call = (mockApi.createIssue as Mock).mock.calls[0][0]
-      expect(call.target_branch).toBeUndefined()
-    })
+	      const call = (mockApi.createIssue as Mock).mock.calls[0][0]
+	      expect(call.target_branch).toBeUndefined()
+	      expect(call.ci_auto_repair_enabled).toBe(false)
+	    })
 
     it('should send target_branch when create_mr is true', async () => {
       await mountComponent()
@@ -725,9 +726,26 @@ describe('CreateIssue', () => {
       await wrapper.vm.handleSubmit()
       await flushPromises()
 
-      const call = (mockApi.createIssue as Mock).mock.calls[0][0]
-      expect(call.target_branch).toBe('develop')
-    })
+	      const call = (mockApi.createIssue as Mock).mock.calls[0][0]
+	      expect(call.target_branch).toBe('develop')
+	    })
+
+	    it('should send ci_auto_repair_enabled only when MR creation is enabled', async () => {
+	      await mountComponent()
+
+	      wrapper.vm.formValue.title = 'Test Issue'
+	      wrapper.vm.formValue.project_id = 1
+	      wrapper.vm.formValue.base_branch = 'main'
+	      wrapper.vm.formValue.target_branch = 'develop'
+	      wrapper.vm.formValue.create_mr = true
+	      wrapper.vm.formValue.ci_auto_repair_enabled = true
+
+	      await wrapper.vm.handleSubmit()
+	      await flushPromises()
+
+	      const call = (mockApi.createIssue as Mock).mock.calls[0][0]
+	      expect(call.ci_auto_repair_enabled).toBe(true)
+	    })
 
     it('should send description as undefined when empty', async () => {
       await mountComponent()
@@ -861,18 +879,20 @@ describe('CreateIssue', () => {
       wrapper.vm.formValue.description = 'Some desc'
       wrapper.vm.formValue.project_id = 1
       wrapper.vm.formValue.base_branch = 'main'
-      wrapper.vm.formValue.target_branch = 'develop'
-      wrapper.vm.formValue.create_mr = true
+	      wrapper.vm.formValue.target_branch = 'develop'
+	      wrapper.vm.formValue.create_mr = true
+	      wrapper.vm.formValue.ci_auto_repair_enabled = true
 
-      await wrapper.vm.handleReset()
+	      await wrapper.vm.handleReset()
 
       expect(wrapper.vm.formValue.title).toBe('')
       expect(wrapper.vm.formValue.description).toBe('')
       expect(wrapper.vm.formValue.project_id).toBeUndefined()
       expect(wrapper.vm.formValue.base_branch).toBeUndefined()
-      expect(wrapper.vm.formValue.target_branch).toBeUndefined()
-      expect(wrapper.vm.formValue.create_mr).toBe(true)
-    })
+	      expect(wrapper.vm.formValue.target_branch).toBeUndefined()
+	      expect(wrapper.vm.formValue.create_mr).toBe(true)
+	      expect(wrapper.vm.formValue.ci_auto_repair_enabled).toBe(false)
+	    })
 
     it('should clear branches on reset', async () => {
       await mountComponent()
@@ -1248,20 +1268,25 @@ describe('CreateIssue', () => {
     })
 
   // ── Delete Branch on Close Toggle ────────────────────────────
-  describe('delete_branch_on_close toggle', () => {
-    it('should default delete_branch_on_close to true', async () => {
-      await mountComponent()
+	  describe('delete_branch_on_close toggle', () => {
+	    it('should default delete_branch_on_close to true', async () => {
+	      await mountComponent()
 
-      expect(wrapper.vm.formValue.delete_branch_on_close).toBe(true)
-    })
+	      expect(wrapper.vm.formValue.delete_branch_on_close).toBe(true)
+	    })
 
-    it('should render delete branch toggle alongside MR toggle', async () => {
-      await mountComponent()
+	    it('should default ci_auto_repair_enabled to false', async () => {
+	      await mountComponent()
 
-      const switches = wrapper.findAll('button.n-switch')
-      // Expect one for create_mr and one for delete_branch_on_close
-      expect(switches.length).toBeGreaterThanOrEqual(2)
-    })
+	      expect(wrapper.vm.formValue.ci_auto_repair_enabled).toBe(false)
+	    })
+
+	    it('should render delete branch and CI auto-repair toggles alongside MR toggle', async () => {
+	      await mountComponent()
+
+	      const switches = wrapper.findAll('button.n-switch')
+	      expect(switches.length).toBeGreaterThanOrEqual(3)
+	    })
 
     it('should toggle delete_branch_on_close when switch clicked', async () => {
       await mountComponent()
@@ -1288,9 +1313,22 @@ describe('CreateIssue', () => {
       await flushPromises()
 
       const call = (mockApi.createIssue as Mock).mock.calls[0][0]
-      expect(call.delete_branch_on_close).toBe(true)
-    })
-  })
+	      expect(call.delete_branch_on_close).toBe(true)
+	    })
+
+	    it('should reset CI auto-repair when MR creation is disabled', async () => {
+	      await mountComponent()
+
+	      wrapper.vm.formValue.create_mr = true
+	      wrapper.vm.formValue.ci_auto_repair_enabled = true
+	      await nextTick()
+
+	      wrapper.vm.formValue.create_mr = false
+	      await nextTick()
+
+	      expect(wrapper.vm.formValue.ci_auto_repair_enabled).toBe(false)
+	    })
+	  })
 
   // ── Recent Titles Autocomplete ────────────────────────────────
   describe('recent titles autocomplete', () => {

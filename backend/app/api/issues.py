@@ -42,6 +42,7 @@ class CreateIssueRequest(BaseModel):
     base_branch: str | None = None
     target_branch: str | None = None
     delete_branch_on_close: bool = True
+    ci_auto_repair_enabled: bool = False
 
 
 class UpdateIssueRequest(BaseModel):
@@ -50,6 +51,7 @@ class UpdateIssueRequest(BaseModel):
     title: str | None = None
     description: str | None = None
     status: str | None = None
+    ci_auto_repair_enabled: bool | None = None
 
 
 class CloseIssueRequest(BaseModel):
@@ -87,6 +89,7 @@ def _serialize_issue(issue: Issue, task_count: int | None = None) -> dict:
         "merge_request_url": issue.merge_request_url,
         "delete_branch_on_close": issue.delete_branch_on_close,
         "branch_deleted": issue.branch_deleted,
+        "ci_auto_repair_enabled": issue.ci_auto_repair_enabled,
         "claude_session_id": issue.claude_session_id,
         "session_storage_path": issue.session_storage_path,
         "initiator_user_id": issue.initiator_user_id,
@@ -124,6 +127,8 @@ def _serialize_issue_detail(issue: Issue) -> dict:
             "scheduled_at": t.scheduled_at.isoformat() if t.scheduled_at else None,
             "is_retry": t.is_retry,
             "retry_source_task_id": t.retry_source_task_id,
+            "trigger_source": t.trigger_source,
+            "ci_failure_run_id": t.ci_failure_run_id,
             "container_id": t.container_id,
             "commit_sha": t.commit_sha,
             "error_message": t.error_message,
@@ -199,6 +204,7 @@ async def create_issue(
         base_branch=body.base_branch,
         target_branch=body.target_branch,
         delete_branch_on_close=body.delete_branch_on_close,
+        ci_auto_repair_enabled=body.ci_auto_repair_enabled,
         initiator_user_id=current_user.id if current_user else None,
         initiator_username=current_user.username if current_user else None,
     )
@@ -507,6 +513,8 @@ async def update_issue(
                 detail=f"Invalid status: {body.status}. Must be one of: {[s.value for s in IssueStatus]}",
             )
         issue.status = body.status
+    if body.ci_auto_repair_enabled is not None:
+        issue.ci_auto_repair_enabled = body.ci_auto_repair_enabled
 
     await db.commit()
     await db.refresh(issue, attribute_names=["tasks"])

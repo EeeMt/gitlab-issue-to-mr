@@ -48,8 +48,16 @@ describe('TaskMetadataPanel', () => {
     expect(taskMetadataPanelSource).not.toContain('.metadata-initiator')
   })
 
-  it('source row does not contain an inline initiator suffix', () => {
-    // The .metadata-initiator class must not appear anywhere in the template
-    expect(taskMetadataPanelSource).not.toContain('metadata-initiator')
-  })
-})
+	  it('source row does not contain an inline initiator suffix', () => {
+	    // The .metadata-initiator class must not appear anywhere in the template
+	    expect(taskMetadataPanelSource).not.toContain('metadata-initiator')
+	  })
+
+	  it('shows non-manual trigger sources beside the source row', () => {
+	    expect(taskMetadataPanelSource).toContain('triggerSourceMeta')
+	    expect(taskMetadataPanelSource).toContain('task.trigger_source')
+	    expect(taskMetadataPanelSource).toContain("ci_auto_repair: 'error'")
+	    expect(taskMetadataPanelSource).toContain("t(`taskView.triggerSource.${source}`)")
+	    expect(taskMetadataPanelSource).toContain('class="trigger-source-tag"')
+	  })
+	})

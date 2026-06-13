@@ -39,9 +39,15 @@
               <span class="task-issue-link__id">#{{ task.issue.id }}</span>
               <span class="task-issue-link__title">{{ task.issue.title }}</span>
             </router-link>
+            <n-tag v-if="triggerSourceMeta" size="small" round :type="triggerSourceMeta.type" class="trigger-source-tag">
+              {{ triggerSourceMeta.label }}
+            </n-tag>
           </template>
           <template v-else>
             <span class="metadata-manual">{{ t('taskView.manualCreation') }}</span>
+            <n-tag v-if="triggerSourceMeta" size="small" round :type="triggerSourceMeta.type" class="trigger-source-tag">
+              {{ triggerSourceMeta.label }}
+            </n-tag>
           </template>
         </span>
       </div>
@@ -231,6 +237,22 @@ const taskModeMeta = computed(() => {
   }
 })
 
+const triggerSourceMeta = computed(() => {
+  const source = props.task.trigger_source || 'manual'
+  if (source === 'manual') return null
+
+  const typeMap: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
+    retry: 'warning',
+    follow_up: 'info',
+    ci_auto_repair: 'error'
+  }
+
+  return {
+    type: typeMap[source] ?? 'default',
+    label: t(`taskView.triggerSource.${source}`)
+  }
+})
+
 function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean {
   try {
     const diff = Math.abs(new Date(scheduledAt).getTime() - new Date(createdAt).getTime())
@@ -294,6 +316,11 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
   font-size: 14px;
   color: var(--n-text-color-1);
   word-break: break-word;
+}
+
+.trigger-source-tag {
+  margin-left: 8px;
+  vertical-align: middle;
 }
 
 .metadata-manual {
