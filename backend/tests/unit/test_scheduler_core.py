@@ -872,6 +872,53 @@ class SchedulerExecuteTaskTests(unittest.IsolatedAsyncioTestCase):
         mock_db.commit.assert_not_called()
         mock_create_task.assert_not_called()
 
+    async def test_execute_task_lock_denied_does_not_read_expired_task_state(self) -> None:
+        """_execute_task should not touch ORM attributes after lock rollback expires them."""
+        from sqlalchemy.exc import MissingGreenlet
+
+        from app.models import TaskStatus
+        from app.scheduler import Scheduler
+
+        class ExpiringTask:
+            def __init__(self) -> None:
+                self._id = 17
+                self._issue_id = 44
+                self.expired = False
+                self.status = TaskStatus.QUEUED
+
+            def _read(self, value):
+                if self.expired:
+                    raise MissingGreenlet("expired attribute access would lazy-load")
+                return value
+
+            @property
+            def id(self):
+                return self._read(self._id)
+
+            @property
+            def issue_id(self):
+                return self._read(self._issue_id)
+
+        scheduler = Scheduler()
+        task = ExpiringTask()
+
+        mock_db = MagicMock()
+        mock_db.commit = AsyncMock()
+
+        async def deny_lock(_db, current_task):
+            current_task.expired = True
+            return False
+
+        with patch("app.scheduler.acquire_issue_execution_lock", new=deny_lock):
+            with patch("app.scheduler.asyncio.create_task") as mock_create_task:
+                await scheduler._execute_task(mock_db, task)
+
+        self.assertEqual(task.status, TaskStatus.QUEUED)
+        self.assertNotIn(17, scheduler._running_tasks)
+        self.assertNotIn(44, scheduler._running_issues)
+        mock_db.commit.assert_not_called()
+        mock_create_task.assert_not_called()
+
     async def test_execute_task_releases_db_lock_when_commit_fails_after_acquire(self) -> None:
         """_execute_task should release DB issue lock if marking RUNNING fails."""
         from app.models import TaskStatus

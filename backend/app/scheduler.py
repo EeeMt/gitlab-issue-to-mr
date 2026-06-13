@@ -321,11 +321,13 @@ class Scheduler:
 
     async def _execute_task(self, db: AsyncSession, task: Task) -> None:
         """Execute a task in a separate thread to avoid blocking the event loop."""
-        logger.info(f"Executing task {task.id} for issue {task.issue_id}")
+        task_id = task.id
+        issue_id = task.issue_id
+        logger.info("Executing task %s for issue %s", task_id, issue_id)
 
         lock_acquired = await acquire_issue_execution_lock(db, task)
         if not lock_acquired:
-            logger.debug("Issue %s locked; task %s remains queued", task.issue_id, task.id)
+            logger.debug("Issue %s locked; task %s remains queued", issue_id, task_id)
             return
 
         try:
@@ -340,16 +342,16 @@ class Scheduler:
                 except UsageLimitExceeded as exc:
                     logger.info(
                         "Task %s blocked by usage limits before execution",
-                        task.id,
+                        task_id,
                     )
                     task.status = TaskStatus.FAILED
                     task.error_message = json.dumps(usage_limit_exceeded_detail(exc))
                     task.completed_at = utcnow()
                     await db.commit()
-                    if task.issue_id is not None:
-                        await release_issue_execution_lock(db, issue_id=task.issue_id)
+                    if issue_id is not None:
+                        await release_issue_execution_lock(db, issue_id=issue_id)
                         await db.commit()
-                        await maybe_update_issue_status(db, task.issue_id)
+                        await maybe_update_issue_status(db, issue_id)
                     return
 
             # Update status to RUNNING
@@ -359,33 +361,33 @@ class Scheduler:
 
             # Track in memory AFTER the DB commit so _reconcile_running_state
             # (which queries for RUNNING tasks) doesn't race with the update.
-            self._running_tasks.add(task.id)
-            if task.issue_id is not None:
-                self._running_issues.add(task.issue_id)
+            self._running_tasks.add(task_id)
+            if issue_id is not None:
+                self._running_issues.add(issue_id)
 
             # Any active task means the issue is currently in progress.
-            if task.issue_id is not None:
-                await self._transition_issue_to_in_progress(db, task.issue_id)
+            if issue_id is not None:
+                await self._transition_issue_to_in_progress(db, issue_id)
 
             # Execute via worker in a thread pool WITHOUT waiting
-            asyncio.create_task(self._run_task_background(task.id))
-            logger.info(f"Task {task.id} submitted to thread pool")
+            asyncio.create_task(self._run_task_background(task_id))
+            logger.info("Task %s submitted to thread pool", task_id)
 
         except Exception as e:
-            logger.exception(f"Task {task.id} failed with exception")
+            logger.exception("Task %s failed with exception", task_id)
             task.status = TaskStatus.FAILED
             task.error_message = str(e)[:500]
             task.completed_at = utcnow()
-            await release_issue_execution_lock(db, issue_id=task.issue_id)
+            await release_issue_execution_lock(db, issue_id=issue_id)
             try:
                 await db.commit()
             except Exception:
-                logger.exception("Failed to persist failure state for task %s", task.id)
+                logger.exception("Failed to persist failure state for task %s", task_id)
 
             # Clean up tracking (may not have been added yet, discard is idempotent)
-            self._running_tasks.discard(task.id)
-            if task.issue_id is not None:
-                self._running_issues.discard(task.issue_id)
+            self._running_tasks.discard(task_id)
+            if issue_id is not None:
+                self._running_issues.discard(issue_id)
 
     async def _transition_issue_to_in_progress(self, db: AsyncSession, issue_id: int) -> None:
         """Auto-transition issue OPEN/COMPLETED → IN_PROGRESS when a task starts running."""
