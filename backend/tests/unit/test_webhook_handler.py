@@ -269,6 +269,51 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.merge_request_iid, 7)
         self.assertEqual(run.status, "collecting")
 
+    def test_pipeline_duplicate_blocks_active_run(self):
+        from app.models import CIFailureRun
+
+        existing_run = MagicMock(spec=CIFailureRun)
+        existing_run.id = 1
+        existing_run.status = "collecting"
+        duplicate_result = MagicMock()
+        duplicate_result.scalar_one_or_none.return_value = existing_run
+        self.mock_db.execute = AsyncMock(return_value=duplicate_result)
+
+        payload = _build_pipeline_payload(project_id=42, pipeline_id=678)
+        resp = self.client.post(
+            "/api/webhook/gitlab",
+            json=payload,
+            headers={"X-Gitlab-Token": "project-secret"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["result"], "duplicate")
+
+    def test_pipeline_reprocesses_ignored_run(self):
+        from app.models import CIFailureRun
+
+        existing_run = MagicMock(spec=CIFailureRun)
+        existing_run.id = 1
+        existing_run.status = "ignored"
+        existing_run.merge_request_iid = None
+        existing_run.source_branch = None
+        existing_run.target_branch = None
+        existing_run.pipeline_ref = None
+        duplicate_result = MagicMock()
+        duplicate_result.scalar_one_or_none.return_value = existing_run
+        self.mock_db.execute = AsyncMock(return_value=duplicate_result)
+
+        payload = _build_pipeline_payload(project_id=42, pipeline_id=678)
+        resp = self.client.post(
+            "/api/webhook/gitlab",
+            json=payload,
+            headers={"X-Gitlab-Token": "project-secret"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["result"], "ci_failure_collecting")
+        self.assertEqual(existing_run.status, "collecting")
+        self.assertIsNone(existing_run.ignored_reason)
+        self.assertEqual(existing_run.collection_attempts, 0)
+
     def test_pipeline_success_event_is_logged_and_ignored(self):
         payload = _build_pipeline_payload(status="success")
         resp = self.client.post(

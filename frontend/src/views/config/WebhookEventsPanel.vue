@@ -104,11 +104,15 @@ const resultOptions = computed(() => [
   { label: t('config.webhookEventsResultUnsupported'), value: 'unsupported_event' },
   { label: t('config.webhookEventsResultIgnoredAction'), value: 'ignored_action' },
   { label: t('config.webhookEventsResultAuthFailed'), value: 'auth_failed' },
+  { label: t('config.webhookEventsResultCIFailureCollecting'), value: 'ci_failure_collecting' },
+  { label: t('config.webhookEventsResultDuplicate'), value: 'duplicate' },
 ])
 
 function getResultTagType(result: string): 'success' | 'warning' | 'error' | 'default' {
   if (result === 'issue_closed') return 'success'
+  if (result === 'ci_failure_collecting') return 'success'
   if (result === 'no_match') return 'warning'
+  if (result === 'duplicate') return 'warning'
   if (result === 'auth_failed') return 'error'
   return 'default'
 }
@@ -121,6 +125,8 @@ function getResultLabel(result: string): string {
     unsupported_event: t('config.webhookEventsResultUnsupported'),
     ignored_action: t('config.webhookEventsResultIgnoredAction'),
     auth_failed: t('config.webhookEventsResultAuthFailed'),
+    ci_failure_collecting: t('config.webhookEventsResultCIFailureCollecting'),
+    duplicate: t('config.webhookEventsResultDuplicate'),
   }
   return map[result] || result
 }

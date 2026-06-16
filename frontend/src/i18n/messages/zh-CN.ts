@@ -1341,6 +1341,8 @@ const zhCN = {
     webhookEventsResultUnsupported: '不支持的事件',
     webhookEventsResultIgnoredAction: '已忽略的操作',
     webhookEventsResultAuthFailed: '认证失败',
+    webhookEventsResultCIFailureCollecting: 'CI 失败采集中',
+    webhookEventsResultDuplicate: '重复事件',
     webhookStatusConfigured: '已配置',
     webhookStatusNeedsAttention: '需关注',
     webhookStatusMissing: '缺失',

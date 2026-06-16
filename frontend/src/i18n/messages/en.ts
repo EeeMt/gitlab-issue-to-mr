@@ -1362,6 +1362,8 @@ const en = {
       webhookEventsResultUnsupported: 'Unsupported event',
       webhookEventsResultIgnoredAction: 'Ignored action',
       webhookEventsResultAuthFailed: 'Auth failed',
+      webhookEventsResultCIFailureCollecting: 'CI failure collecting',
+      webhookEventsResultDuplicate: 'Duplicate',
       webhookStatusConfigured: 'Configured',
       webhookStatusNeedsAttention: 'Needs attention',
       webhookStatusMissing: 'Missing',

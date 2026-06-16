@@ -236,10 +236,32 @@ async def receive_gitlab_webhook(
         )
         existing_run = duplicate_result.scalar_one_or_none()
         if isinstance(existing_run, CIFailureRun):
-            event.result = "duplicate"
-            event.result_detail = f"CI failure run {existing_run.id} already exists"
+            if existing_run.status in ("collecting", "collected", "task_created"):
+                event.result = "duplicate"
+                event.result_detail = f"CI failure run {existing_run.id} already exists ({existing_run.status})"
+                await db.commit()
+                return WebhookResponse(result="duplicate", detail=event.result_detail)
+            # Re-process previously ignored/failed runs
+            event.result_detail = f"Pipeline {pipeline_id} failed; re-processing CI failure run {existing_run.id}"
+            existing_run.status = "collecting"
+            existing_run.ignored_reason = None
+            existing_run.error_message = None
+            existing_run.locked_at = None
+            existing_run.locked_by = None
+            existing_run.collection_attempts = 0
+            existing_run.webhook_event_id = event.id
+            existing_run.merge_request_iid = int(pipeline_mr_iid) if pipeline_mr_iid else existing_run.merge_request_iid
+            existing_run.source_branch = str(source_branch) if source_branch else existing_run.source_branch
+            existing_run.target_branch = str(target_branch) if target_branch else existing_run.target_branch
+            existing_run.pipeline_sha = pipeline_sha
+            existing_run.pipeline_ref = str(pipeline_ref) if pipeline_ref else existing_run.pipeline_ref
+            existing_run.pipeline_status = pipeline_status
+            existing_run.pipeline_url = str(pipeline_url) if pipeline_url else existing_run.pipeline_url
             await db.commit()
-            return WebhookResponse(result="duplicate", detail=event.result_detail)
+            return WebhookResponse(
+                result="ci_failure_collecting",
+                detail=f"Pipeline {pipeline_id} failed; re-processing CI failure run {existing_run.id}",
+            )
 
         db.add(
             CIFailureRun(

@@ -191,6 +191,73 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
             steps = [(log.step, log.status) for log in (await session.execute(select(CIFailureRunLog))).scalars().all()]
             self.assertIn(("repair_task_created", "succeeded"), steps)
 
+    async def test_pipeline_ref_fallback_matches_issue_by_branch_name(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+
+        jobs = [
+            {
+                "id": 30001,
+                "name": "build",
+                "stage": "build",
+                "status": "failed",
+                "failure_reason": "script_failure",
+                "allow_failure": False,
+                "web_url": "https://gitlab.example.com/job/30001",
+            },
+        ]
+
+        async with self.Session() as session:
+            issue = Issue(
+                id=2,
+                title="Fix pipeline",
+                project_id=42,
+                status="in_review",
+                branch_name="codify/issue-66",
+                target_branch="main",
+                ci_auto_repair_enabled=True,
+                initiator_user_id=9,
+                initiator_username="alice",
+            )
+            session.add(issue)
+            session.add(
+                Task(
+                    id=20,
+                    issue_id=2,
+                    project_id=42,
+                    user_prompt="Original task",
+                    status=TaskStatus.COMPLETED,
+                    priority=1,
+                    provider_id=3,
+                    task_mode="execute",
+                )
+            )
+            run = CIFailureRun(
+                id=92,
+                project_id=42,
+                merge_request_iid=None,
+                source_branch=None,
+                pipeline_id=700,
+                pipeline_sha="def456",
+                pipeline_ref="codify/issue-66",
+                pipeline_status="failed",
+                pipeline_url="https://gitlab.example.com/group/project/-/pipelines/700",
+                status="collecting",
+            )
+            session.add(run)
+            await session.commit()
+
+            await process_ci_failure_run(
+                session,
+                run.id,
+                gitlab_client=FakeGitLabClient(mr={}, jobs=jobs, traces={30001: "build failed\n"}),
+                settings=self._settings(),
+                collector_id="test",
+            )
+
+            refreshed = await session.get(CIFailureRun, run.id)
+            self.assertEqual(refreshed.issue_id, 2)
+            self.assertEqual(refreshed.status, "task_created")
+
     async def test_infra_failure_is_ignored_without_downloading_trace(self):
         from app.core.ci_failure_collector import process_ci_failure_run
 

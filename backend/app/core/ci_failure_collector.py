@@ -216,6 +216,17 @@ async def _match_issue(db: AsyncSession, run: CIFailureRun, mr_details: Any | No
         issues = result.scalars().all()
         if len(issues) == 1:
             return issues[0]
+
+    if run.pipeline_ref:
+        result = await db.execute(
+            select(Issue).where(
+                Issue.project_id == run.project_id,
+                Issue.branch_name == run.pipeline_ref,
+            )
+        )
+        issues = result.scalars().all()
+        if len(issues) == 1:
+            return issues[0]
     return None
 
 
@@ -342,7 +353,8 @@ async def process_ci_failure_run(
 
         mr_source_branch = _value(mr_details, "source_branch")
         mr_head_sha = _value(mr_details, "sha") or _value(mr_details, "head_sha")
-        if not issue.branch_name or not run.merge_request_iid or (mr_source_branch and mr_source_branch != issue.branch_name):
+        matched_by_ref = not run.merge_request_iid and run.pipeline_ref and run.pipeline_ref == issue.branch_name
+        if not issue.branch_name or (not matched_by_ref and not run.merge_request_iid) or (mr_source_branch and mr_source_branch != issue.branch_name):
             await _ignore_run(
                 db,
                 run,
