@@ -152,144 +152,86 @@
         </div>
       </template>
 
-      <n-form :model="formValue" label-placement="top">
-        <div class="config-form__section">
-          <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
-            <n-gi>
-              <n-form-item :label="t('config.gitlabWebhookSecretStatus')">
-                <n-tag :type="formValue.gitlab_webhook_secret_configured ? 'success' : 'warning'" round>
-                  {{ formValue.gitlab_webhook_secret_configured ? t('config.configured') : t('config.missing') }}
-                </n-tag>
-                <template #feedback>
-                  {{ t('config.gitlabWebhookSecretStatusHint') }}
-                </template>
-              </n-form-item>
-            </n-gi>
-            <n-gi :span="isMobile ? 1 : 2">
-              <n-form-item :label="t('config.gitlabWebhookSecret')">
-                <n-input
-                  v-model:value="formValue.gitlab_webhook_secret_input"
-                  type="password"
-                  show-password-on="click"
-                  :placeholder="
-                    formValue.gitlab_webhook_secret_configured
-                      ? t('config.configuredEnterNew')
-                      : t('config.enterGitlabWebhookSecret')
-                  "
-                  class="config-form__input"
-                />
-                <template #feedback>
-                  {{ t('config.gitlabWebhookSecretHint') }}
-                </template>
-              </n-form-item>
-            </n-gi>
-          </n-grid>
-        </div>
-
-        <div class="config-form__section">
-          <div class="config-card-header config-card-header--stacked">
-            <div>
-              <div class="config-card-header__title">{{ t('config.webhookOverview') }}</div>
-              <div class="config-card-header__subtitle">{{ t('config.webhookOverviewSubtitle') }}</div>
-            </div>
-            <n-space :size="8">
-              <n-input
-                v-model:value="webhookSearch"
-                clearable
-                :placeholder="t('config.webhookOverviewSearchPlaceholder')"
-                style="width: 200px"
-              />
-              <n-button
-                @click="fetchWebhookStatuses"
-                :loading="webhookStatusLoading"
-                :disabled="isGitLabBusy"
-              >
-                {{ t('config.refreshWebhookStatuses') }}
-              </n-button>
-            </n-space>
+      <div class="config-form__section">
+        <div class="config-card-header config-card-header--stacked">
+          <div>
+            <div class="config-card-header__title">{{ t('config.webhookOverview') }}</div>
+            <div class="config-card-header__subtitle">{{ t('config.webhookOverviewSubtitle') }}</div>
           </div>
-
-          <n-grid v-if="webhookSummaryItems.length" :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16" class="config-webhook-summary">
-            <n-gi v-for="item in webhookSummaryItems" :key="item.label">
-              <n-card size="small" class="config-summary-card" :bordered="false">
-                <div class="config-summary-card__label">{{ item.label }}</div>
-                <div class="config-summary-card__value">{{ item.value }}</div>
-              </n-card>
-            </n-gi>
-          </n-grid>
-
-          <div v-if="!isMobile" class="config-table-wrapper">
-            <n-data-table
-              :columns="webhookColumns"
-              :data="filteredWebhookStatuses"
-              :loading="webhookStatusLoading"
-              :bordered="false"
-              :pagination="{ pageSize: 10 }"
-              :scroll-x="1100"
-              :row-key="(row: GitLabProjectWebhookStatusResult) => row.project_id"
+          <n-space :size="8">
+            <n-input
+              v-model:value="webhookSearch"
+              clearable
+              :placeholder="t('config.webhookOverviewSearchPlaceholder')"
+              style="width: 200px"
             />
-          </div>
-          <n-spin v-else :show="webhookStatusLoading">
-            <div v-if="!webhookStatusLoading && filteredWebhookStatuses.length === 0" class="config-webhook-mobile__empty">
-              {{ t('config.noWebhookData') }}
-            </div>
-            <div
-              v-for="row in filteredWebhookStatuses"
-              :key="row.project_id"
-              class="config-webhook-mobile__item"
+            <n-button
+              @click="fetchWebhookStatuses"
+              :loading="webhookStatusLoading"
+              :disabled="isGitLabBusy"
             >
-              <div class="config-webhook-mobile__item-top">
-                <div class="config-webhook-project">
-                  <div class="config-webhook-project__name">{{ row.project_path_with_namespace || row.project_name || `#${row.project_id}` }}</div>
-                  <div class="config-webhook-project__meta">#{{ row.project_id }}</div>
-                </div>
-                <n-button
-                  size="small"
-                  :type="row.status === 'configured' ? 'default' : 'primary'"
-                  :secondary="row.status !== 'configured'"
-                  :loading="webhookActionProjectId === row.project_id"
-                  :disabled="isGitLabBusy && webhookActionProjectId !== row.project_id"
-                  @click="handleSetupProjectWebhook(row.project_id)"
-                >
-                  {{ t('config.setupProjectWebhook') }}
-                </n-button>
-              </div>
-              <div class="config-webhook-mobile__item-tags">
-                <n-tag :type="getWebhookStatusTagType(row.status)" size="small" round>{{ getWebhookStatusLabel(row.status) }}</n-tag>
-                <n-tag size="small" round>{{ getWebhookSecretLabel(row.secret_mode) }}</n-tag>
-              </div>
-              <div v-if="row.status_detail || row.hook_url || row.target_webhook_url" class="config-webhook-mobile__item-detail">
-                {{ row.status_detail || row.hook_url || row.target_webhook_url }}
-              </div>
-            </div>
-          </n-spin>
+              {{ t('config.refreshWebhookStatuses') }}
+            </n-button>
+          </n-space>
         </div>
-      </n-form>
+
+        <n-grid v-if="webhookSummaryItems.length" :cols="isMobile ? 2 : 4" :x-gap="16" :y-gap="16" class="config-webhook-summary">
+          <n-gi v-for="item in webhookSummaryItems" :key="item.label">
+            <n-card size="small" class="config-summary-card" :bordered="false">
+              <div class="config-summary-card__label">{{ item.label }}</div>
+              <div class="config-summary-card__value">{{ item.value }}</div>
+            </n-card>
+          </n-gi>
+        </n-grid>
+
+        <div v-if="!isMobile" class="config-table-wrapper">
+          <n-data-table
+            :columns="webhookColumns"
+            :data="filteredWebhookStatuses"
+            :loading="webhookStatusLoading"
+            :bordered="false"
+            :pagination="{ pageSize: 10 }"
+            :scroll-x="1100"
+            :row-key="(row: GitLabProjectWebhookStatusResult) => row.project_id"
+          />
+        </div>
+        <n-spin v-else :show="webhookStatusLoading">
+          <div v-if="!webhookStatusLoading && filteredWebhookStatuses.length === 0" class="config-webhook-mobile__empty">
+            {{ t('config.noWebhookData') }}
+          </div>
+          <div
+            v-for="row in filteredWebhookStatuses"
+            :key="row.project_id"
+            class="config-webhook-mobile__item"
+          >
+            <div class="config-webhook-mobile__item-top">
+              <div class="config-webhook-project">
+                <div class="config-webhook-project__name">{{ row.project_path_with_namespace || row.project_name || `#${row.project_id}` }}</div>
+                <div class="config-webhook-project__meta">#{{ row.project_id }}</div>
+              </div>
+              <n-button
+                size="small"
+                :type="row.status === 'configured' ? 'default' : 'primary'"
+                :secondary="row.status !== 'configured'"
+                :loading="webhookActionProjectId === row.project_id"
+                :disabled="isGitLabBusy && webhookActionProjectId !== row.project_id"
+                @click="handleSetupProjectWebhook(row.project_id)"
+              >
+                {{ t('config.setupProjectWebhook') }}
+              </n-button>
+            </div>
+            <div class="config-webhook-mobile__item-tags">
+              <n-tag :type="getWebhookStatusTagType(row.status)" size="small" round>{{ getWebhookStatusLabel(row.status) }}</n-tag>
+              <n-tag size="small" round>{{ getWebhookSecretLabel(row.secret_mode) }}</n-tag>
+            </div>
+            <div v-if="row.status_detail || row.hook_url || row.target_webhook_url" class="config-webhook-mobile__item-detail">
+              {{ row.status_detail || row.hook_url || row.target_webhook_url }}
+            </div>
+          </div>
+        </n-spin>
+      </div>
 
       <div class="config-card-actions">
-        <n-space :size="12" wrap>
-          <n-button
-            type="primary"
-            @click="handleSaveSection('gitlab')"
-            :loading="sectionSaving.gitlab"
-            :disabled="isGitLabBusy || !isSectionDirty('gitlab')"
-          >
-            {{ t('config.saveChanges') }}
-          </n-button>
-          <n-button
-            secondary
-            @click="resetSection('gitlab')"
-            :disabled="isGitLabBusy || !isSectionDirty('gitlab')"
-          >
-            {{ t('config.revertChanges') }}
-          </n-button>
-          <n-button
-            @click="handleClearSecret('gitlab_webhook_secret')"
-            :disabled="isGitLabBusy || !formValue.gitlab_webhook_secret_configured"
-          >
-            {{ t('config.clearGitlabWebhookSecret') }}
-          </n-button>
-        </n-space>
         <n-alert
           v-if="webhookSetupState"
           :type="webhookSetupState.type"
@@ -430,9 +372,6 @@ const webhookSummaryItems = computed(() => {
 function getWebhookSecretLabel(secretMode: GitLabProjectWebhookStatusResult['secret_mode']) {
   if (secretMode === 'project') {
     return t('config.webhookSecretModeProject')
-  }
-  if (secretMode === 'global_fallback') {
-    return t('config.webhookSecretModeGlobalFallback')
   }
   return t('config.webhookSecretModeNone')
 }

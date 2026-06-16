@@ -586,15 +586,6 @@ class IntegrationConfigHelperTests(unittest.TestCase):
         )
         self.assertEqual(result["gitlab_admin_token"], "admin-tok")
 
-    def test_normalize_strips_webhook_secret(self):
-        """gitlab_webhook_secret is stripped and accepted (lines 93-95)."""
-        from app.api.config_integration import _normalize_integration_updates
-
-        result = _normalize_integration_updates(
-            {"gitlab_webhook_secret": " secret123 "}
-        )
-        self.assertEqual(result["gitlab_webhook_secret"], "secret123")
-
     def test_normalize_rejects_empty_token(self):
         """Empty token strings are omitted (lines 93-95)."""
         from app.api.config_integration import _normalize_integration_updates
@@ -639,12 +630,10 @@ class IntegrationConfigHelperTests(unittest.TestCase):
             {
                 "clear_gitlab_bot_token": 1,
                 "clear_gitlab_admin_token": 0,
-                "clear_gitlab_webhook_secret": True,
             }
         )
         self.assertTrue(result["clear_gitlab_bot_token"])
         self.assertFalse(result["clear_gitlab_admin_token"])
-        self.assertTrue(result["clear_gitlab_webhook_secret"])
 
     # ── _validate_gitlab_integration (lines 101-107) ────────────────
 
@@ -716,7 +705,6 @@ class IntegrationEndpointCoverageTests(unittest.TestCase):
         mock_settings.gitlab_url = "https://gitlab.example.com"
         mock_settings.gitlab_bot_token = "glpat-validtoken"
         mock_settings.gitlab_admin_token = ""
-        mock_settings.gitlab_webhook_secret = ""
         settings_dump = get_settings().model_dump()
         settings_dump.update({
             "gitlab_url": "https://gitlab.example.com",
@@ -757,7 +745,6 @@ class IntegrationEndpointCoverageTests(unittest.TestCase):
         mock_settings.gitlab_url = "https://gitlab.example.com"
         mock_settings.gitlab_bot_token = "glpat-validtoken"
         mock_settings.gitlab_admin_token = ""
-        mock_settings.gitlab_webhook_secret = ""
         settings_dump = get_settings().model_dump()
         settings_dump.update({
             "gitlab_url": "https://gitlab.example.com",
@@ -797,7 +784,6 @@ class IntegrationEndpointCoverageTests(unittest.TestCase):
         mock_settings.gitlab_url = "https://gitlab.example.com"
         mock_settings.gitlab_bot_token = "glpat-validtoken"
         mock_settings.gitlab_admin_token = ""
-        mock_settings.gitlab_webhook_secret = ""
         settings_dump = get_settings().model_dump()
         settings_dump.update({
             "gitlab_url": "https://gitlab.example.com",

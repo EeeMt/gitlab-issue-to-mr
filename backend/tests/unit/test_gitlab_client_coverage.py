@@ -671,6 +671,18 @@ class TestGetProjects(unittest.TestCase):
         self.assertIn({"per_page": 50, "all": True, "visibility": "internal"}, [c.kwargs for c in calls])
         self.assertIn({"per_page": 50, "all": True, "visibility": "public"}, [c.kwargs for c in calls])
 
+    def test_raises_when_all_project_queries_fail(self):
+        """All project-list queries failing should not be reported as an empty list."""
+        client = _make_client()
+        client.gl.projects.list.side_effect = [
+            GitlabGetError("401: invalid_token"),
+            GitlabGetError("401: invalid_token"),
+            GitlabGetError("401: invalid_token"),
+        ]
+
+        with self.assertRaises(GitlabGetError):
+            client.get_projects()
+
 
 # ===================================================================
 # get_branches

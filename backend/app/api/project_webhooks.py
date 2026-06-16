@@ -58,7 +58,6 @@ class GitLabProjectWebhookStatusResponse(BaseModel):
     pipeline_events: bool | None = None
     enable_ssl_verification: bool | None = None
     managed_secret_configured: bool
-    global_secret_fallback_configured: bool
     secret_mode: str
 
 
@@ -93,11 +92,10 @@ def _build_gitlab_project_webhook_status_response(
     project_path_with_namespace: str,
     target_webhook_url: str,
     managed_secret_configured: bool,
-    global_secret_fallback_configured: bool,
     matched_hook: dict[str, Any] | None = None,
     inspection_error: str | None = None,
 ) -> GitLabProjectWebhookStatusResponse:
-    secret_mode = "project" if managed_secret_configured else "global_fallback" if global_secret_fallback_configured else "none"
+    secret_mode = "project" if managed_secret_configured else "none"
     hook_found = matched_hook is not None
     note_events = bool(matched_hook.get("note_events")) if matched_hook is not None else None
     merge_requests_events = bool(matched_hook.get("merge_requests_events")) if matched_hook is not None else None
@@ -139,7 +137,6 @@ def _build_gitlab_project_webhook_status_response(
         pipeline_events=pipeline_events,
         enable_ssl_verification=enable_ssl_verification,
         managed_secret_configured=managed_secret_configured,
-        global_secret_fallback_configured=global_secret_fallback_configured,
         secret_mode=secret_mode,
     )
 
@@ -226,7 +223,6 @@ async def get_gitlab_project_webhook_status(
         target_webhook_url=target_webhook_url,
         matched_hook=matched_hook,
         managed_secret_configured=await has_project_webhook_secret(db, project_id),
-        global_secret_fallback_configured=bool(settings.gitlab_webhook_secret.strip()),
     )
 
 
@@ -288,8 +284,6 @@ async def list_gitlab_project_webhook_statuses(
         client.close()
 
     statuses: list[GitLabProjectWebhookStatusResponse] = []
-    global_secret_fallback_configured = bool(settings.gitlab_webhook_secret.strip())
-
     for snapshot in snapshots:
         statuses.append(
             _build_gitlab_project_webhook_status_response(
@@ -300,7 +294,6 @@ async def list_gitlab_project_webhook_statuses(
                 matched_hook=snapshot["matched_hook"],
                 inspection_error=snapshot["inspection_error"],
                 managed_secret_configured=await has_project_webhook_secret(db, int(snapshot["project_id"])),
-                global_secret_fallback_configured=global_secret_fallback_configured,
             )
         )
 

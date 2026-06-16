@@ -619,7 +619,6 @@ export interface IntegrationConfig {
   gitlab_url: string
   gitlab_bot_token_configured: boolean
   gitlab_admin_token_configured: boolean
-  gitlab_webhook_secret_configured: boolean
 }
 
 export interface Config {
@@ -742,15 +741,13 @@ export interface IntegrationConfigUpdate
   extends Partial<
     Omit<
       IntegrationConfig,
-      'gitlab_bot_token_configured' | 'gitlab_admin_token_configured' | 'gitlab_webhook_secret_configured'
+      'gitlab_bot_token_configured' | 'gitlab_admin_token_configured'
     >
   > {
   gitlab_bot_token?: string
   clear_gitlab_bot_token?: boolean
   gitlab_admin_token?: string
   clear_gitlab_admin_token?: boolean
-  gitlab_webhook_secret?: string
-  clear_gitlab_webhook_secret?: boolean
 }
 
 export interface ConfigUpdate {
@@ -799,8 +796,7 @@ export interface GitLabProjectWebhookStatusResult {
   merge_requests_events: boolean | null
   pipeline_events: boolean | null
   managed_secret_configured: boolean
-  global_secret_fallback_configured: boolean
-  secret_mode: 'project' | 'global_fallback' | 'none' | string
+  secret_mode: 'project' | 'none' | string
 }
 
 export interface WebhookEvent {

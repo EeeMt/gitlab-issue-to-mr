@@ -29,14 +29,12 @@ def _make_mock_settings(
     backend_url="https://backend.example.com",
     gitlab_url="https://gitlab.example.com",
     gitlab_admin_token="glpat-test-token",
-    gitlab_webhook_secret="test-webhook-secret",
 ):
     """Build a mock Settings object with the given fields."""
     settings = MagicMock()
     settings.backend_url = backend_url
     settings.gitlab_url = gitlab_url
     settings.gitlab_admin_token = gitlab_admin_token
-    settings.gitlab_webhook_secret = gitlab_webhook_secret
     return settings
 
 
@@ -237,7 +235,6 @@ class BuildStatusResponseEdgeCaseTests(unittest.TestCase):
             project_path_with_namespace="group/test",
             target_webhook_url="https://url.example.com/api/webhook/gitlab",
             managed_secret_configured=False,
-            global_secret_fallback_configured=False,
         )
         defaults.update(overrides)
         return _build_gitlab_project_webhook_status_response(**defaults)
@@ -271,16 +268,6 @@ class BuildStatusResponseEdgeCaseTests(unittest.TestCase):
         self.assertIn("MR events disabled", resp.status_detail)
         self.assertIn("SSL verification disabled", resp.status_detail)
         self.assertEqual(resp.secret_mode, "none")
-
-    def test_global_secret_fallback_mode(self):
-        """Secret mode should be global_fallback when only global secret is configured."""
-        resp = self._build(
-            managed_secret_configured=False,
-            global_secret_fallback_configured=True,
-            matched_hook=None,
-        )
-        self.assertEqual(resp.secret_mode, "global_fallback")
-        self.assertEqual(resp.status, "missing")
 
     def test_inspection_error_takes_precedence(self):
         """Inspection error should result in 'error' status even with no matched hook."""
@@ -570,32 +557,6 @@ class GetGitlabProjectWebhookStatusTests(unittest.TestCase):
         self.assertIn("GitLab webhook status lookup failed", response.json()["detail"])
         mock_client_instance.close.assert_called_once()
 
-    def test_status_global_fallback_secret_mode(self):
-        """No managed secret but global secret should show secret_mode=global_fallback."""
-        client, app, mock_db = _get_test_client()
-
-        mock_settings = _make_mock_settings(gitlab_webhook_secret="global-secret")
-        mock_project = _make_mock_project()
-        target_url = "https://backend.example.com/api/webhook/gitlab"
-
-        mock_client_instance = MagicMock()
-        mock_client_instance.get_project.return_value = mock_project
-        mock_client_instance.get_project_hooks.return_value = [
-            {"id": 10, "url": target_url, "note_events": True, "enable_ssl_verification": True},
-        ]
-
-        with patch("app.api.project_webhooks.load_runtime_config_from_db", new=AsyncMock()):
-            with patch("app.api.project_webhooks.get_effective_settings", return_value=mock_settings):
-                with patch("app.api.project_webhooks.GitLabClient") as MockClientClass:
-                    MockClientClass.return_value = mock_client_instance
-                    MockClientClass._normalize_hook_url = lambda url: url.rstrip("/")
-                    with patch("app.api.project_webhooks.has_project_webhook_secret", new=AsyncMock(return_value=False)):
-                        response = client.get("/api/config/gitlab/projects/42/webhook")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["secret_mode"], "global_fallback")
-
-
 # ---------------------------------------------------------------------------
 # list_gitlab_project_webhook_statuses endpoint (GET all)
 # ---------------------------------------------------------------------------
@@ -730,7 +691,7 @@ class ListGitlabProjectWebhookStatusesTests(unittest.TestCase):
         """Project with managed secret should show secret_mode=project."""
         client, app, mock_db = _get_test_client()
 
-        mock_settings = _make_mock_settings(gitlab_webhook_secret="")
+        mock_settings = _make_mock_settings()
         target_url = "https://backend.example.com/api/webhook/gitlab"
 
         mock_client_instance = MagicMock()

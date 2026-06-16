@@ -90,11 +90,6 @@ def _validate_config_value(key: str, value: object) -> object:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="gitlab_admin_token cannot be empty")
         return value.strip()
 
-    if key == "gitlab_webhook_secret":
-        if not isinstance(value, str) or not value.strip():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="gitlab_webhook_secret cannot be empty")
-        return value.strip()
-
     # === Mattermost validation ===
     if key == "mattermost_server_url":
         if not isinstance(value, str) or not value.strip() or not _is_valid_http_url(value.strip()):
@@ -161,7 +156,7 @@ def _normalize_updates(raw_updates: dict) -> dict:
             normalized[key] = bool(raw_updates[key])
 
     # Handle integration clear flags
-    for key in ("clear_gitlab_bot_token", "clear_gitlab_admin_token", "clear_gitlab_webhook_secret", "clear_mattermost_bot_token"):
+    for key in ("clear_gitlab_bot_token", "clear_gitlab_admin_token", "clear_mattermost_bot_token"):
         if key in raw_updates:
             normalized[key] = bool(raw_updates[key])
 

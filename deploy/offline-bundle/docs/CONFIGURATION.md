@@ -33,7 +33,6 @@ If the environment is fully offline, both endpoints must exist inside the intran
 - `GITLAB_URL`: base URL of the GitLab instance
 - `GITLAB_BOT_TOKEN`: token used for webhook handling, repository clone/push, issue comments, and MR creation
 - `GITLAB_ADMIN_TOKEN`: token used for managed webhook setup / status checks
-- `GITLAB_WEBHOOK_SECRET`: shared secret for GitLab webhooks
 
 ### Claude-compatible API
 

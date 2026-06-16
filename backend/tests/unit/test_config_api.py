@@ -46,7 +46,6 @@ class ConfigApiHelperTests(unittest.TestCase):
             "gitlab_url": "https://gitlab-configured.example.com",
             "gitlab_bot_token": "stored-gitlab-token",
             "gitlab_admin_token": "stored-admin-token",
-            "gitlab_webhook_secret": "stored-webhook-secret",
         })
 
         response = _serialize_effective_config()
@@ -61,7 +60,7 @@ class ConfigApiHelperTests(unittest.TestCase):
         self.assertEqual(response.integration.gitlab_url, "https://gitlab-configured.example.com")
         self.assertTrue(response.integration.gitlab_bot_token_configured)
         self.assertTrue(response.integration.gitlab_admin_token_configured)
-        self.assertTrue(response.integration.gitlab_webhook_secret_configured)
+        self.assertFalse(hasattr(response.integration, "gitlab_webhook_secret_configured"))
 
     def test_validate_config_value_accepts_new_runtime_fields(self) -> None:
         self.assertEqual(_validate_config_value("max_retries", 2), 2)
@@ -83,7 +82,6 @@ class ConfigApiHelperTests(unittest.TestCase):
         )
         self.assertEqual(_validate_config_value("gitlab_bot_token", "glpat-test"), "glpat-test")
         self.assertEqual(_validate_config_value("gitlab_admin_token", "glpat-admin"), "glpat-admin")
-        self.assertEqual(_validate_config_value("gitlab_webhook_secret", "secret-123"), "secret-123")
         self.assertEqual(
             _validate_config_value("mattermost_server_url", "https://mattermost.example.com"),
             "https://mattermost.example.com",
@@ -113,9 +111,6 @@ class ConfigApiHelperTests(unittest.TestCase):
             _validate_config_value("gitlab_admin_token", " ")
 
         with self.assertRaises(HTTPException):
-            _validate_config_value("gitlab_webhook_secret", " ")
-
-        with self.assertRaises(HTTPException):
             _validate_config_value("mattermost_server_url", "not-a-url")
 
         with self.assertRaises(HTTPException):
@@ -127,7 +122,6 @@ class ConfigApiHelperTests(unittest.TestCase):
             "clear_anthropic_api_key": 0,
             "clear_gitlab_bot_token": 1,
             "clear_gitlab_admin_token": 1,
-            "clear_gitlab_webhook_secret": 0,
             "clear_mattermost_bot_token": 0,
         })
 
@@ -138,7 +132,6 @@ class ConfigApiHelperTests(unittest.TestCase):
                 "clear_anthropic_api_key": False,
                 "clear_gitlab_bot_token": True,
                 "clear_gitlab_admin_token": True,
-                "clear_gitlab_webhook_secret": False,
                 "clear_mattermost_bot_token": False,
             },
         )
@@ -196,16 +189,15 @@ class ConfigApiHelperTests(unittest.TestCase):
             project_path_with_namespace="group/demo",
             target_webhook_url="https://bot.example.com/api/webhook/gitlab",
             managed_secret_configured=True,
-            global_secret_fallback_configured=False,
-	            matched_hook={
-	                "id": 12,
-	                "url": "https://bot.example.com/api/webhook/gitlab",
-	                "note_events": True,
-	                "enable_ssl_verification": True,
-	                "merge_requests_events": True,
-	                "pipeline_events": True,
-	            },
-	        )
+            matched_hook={
+                "id": 12,
+                "url": "https://bot.example.com/api/webhook/gitlab",
+                "note_events": True,
+                "enable_ssl_verification": True,
+                "merge_requests_events": True,
+                "pipeline_events": True,
+            },
+        )
 
         self.assertEqual(response.status, "configured")
         self.assertIsNone(response.status_detail)
@@ -219,19 +211,18 @@ class ConfigApiHelperTests(unittest.TestCase):
             project_path_with_namespace="group/demo",
             target_webhook_url="https://bot.example.com/api/webhook/gitlab",
             managed_secret_configured=False,
-            global_secret_fallback_configured=True,
             matched_hook={
                 "id": 12,
-	                "url": "https://bot.example.com/api/webhook/gitlab",
-	                "enable_ssl_verification": False,
-	                "merge_requests_events": True,
-	                "pipeline_events": True,
-	            },
-	        )
+                "url": "https://bot.example.com/api/webhook/gitlab",
+                "enable_ssl_verification": False,
+                "merge_requests_events": True,
+                "pipeline_events": True,
+            },
+        )
 
         self.assertEqual(response.status, "needs_attention")
         self.assertEqual(response.status_detail, "SSL verification disabled")
-        self.assertEqual(response.secret_mode, "global_fallback")
+        self.assertEqual(response.secret_mode, "none")
 
     def test_build_gitlab_project_webhook_status_response_marks_missing_and_error(self) -> None:
         missing_response = _build_gitlab_project_webhook_status_response(
@@ -240,7 +231,6 @@ class ConfigApiHelperTests(unittest.TestCase):
             project_path_with_namespace="group/demo",
             target_webhook_url="https://bot.example.com/api/webhook/gitlab",
             managed_secret_configured=False,
-            global_secret_fallback_configured=False,
         )
         error_response = _build_gitlab_project_webhook_status_response(
             project_id=1,
@@ -248,7 +238,6 @@ class ConfigApiHelperTests(unittest.TestCase):
             project_path_with_namespace="group/demo",
             target_webhook_url="https://bot.example.com/api/webhook/gitlab",
             managed_secret_configured=False,
-            global_secret_fallback_configured=False,
             inspection_error="forbidden",
         )
 

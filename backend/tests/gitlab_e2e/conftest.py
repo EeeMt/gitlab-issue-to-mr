@@ -28,8 +28,7 @@ if _POSTGRES_URL.startswith("postgresql+asyncpg://"):
 _TEST_PASSWORD = "SecurePass123!"
 _ALL_TEST_USERS = [
     "test_admin_manual_e2e",   # test_manual_task.py
-    "test_admin_gitlab_e2e",   # test_scheduled_at.py, test_task_execution.py
-    "test_admin_slot_e2e",     # test_slot_capacity_e2e.py
+    "test_admin_gitlab_e2e",   # test_task_execution.py
 ]
 
 

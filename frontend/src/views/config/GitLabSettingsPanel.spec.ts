@@ -150,9 +150,7 @@ const mockConfigForm = {
     gitlab_bot_token_input: '',
     gitlab_bot_token_configured: true,
     gitlab_admin_token_input: '',
-    gitlab_admin_token_configured: true,
-    gitlab_webhook_secret_input: '',
-    gitlab_webhook_secret_configured: false
+    gitlab_admin_token_configured: true
   }),
   sectionSaving: {
     gitlab: false

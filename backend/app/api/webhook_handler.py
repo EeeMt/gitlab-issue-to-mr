@@ -12,11 +12,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.issues import _try_delete_issue_branch
-from app.config import get_effective_settings
 from app.database import get_db
 from app.models import CIFailureRun, Issue, IssueStatus, WebhookEvent
 from app.project_webhook_config import get_project_webhook_secret
-from app.runtime_config import load_runtime_config_from_db
 
 logger = logging.getLogger(__name__)
 
@@ -151,14 +149,7 @@ async def receive_gitlab_webhook(
 
     # --- Token verification ---
     token = request.headers.get("X-Gitlab-Token", "")
-    await load_runtime_config_from_db(db)
-    settings = get_effective_settings()
-
     expected_secret = await get_project_webhook_secret(db, project_id)
-    if not expected_secret:
-        expected_secret = (
-            settings.gitlab_webhook_secret.strip() if settings.gitlab_webhook_secret else ""
-        )
 
     if not expected_secret or not hmac.compare_digest(token, expected_secret):
         await _log_event(

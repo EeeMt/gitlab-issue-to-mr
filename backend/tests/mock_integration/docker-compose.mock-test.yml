@@ -48,7 +48,6 @@ services:
       DATABASE_URL: postgresql+asyncpg://codify:codify_password@postgres:5432/codify
       GITLAB_URL: http://mock-services:9000
       GITLAB_BOT_TOKEN: mock-token-12345
-      GITLAB_WEBHOOK_SECRET: mock-webhook-secret
       ANTHROPIC_BASE_URL: http://mock-services:9000/anthropic
       ANTHROPIC_API_KEY: mock-api-key
       ANTHROPIC_MODEL: fake-claude-1.0
@@ -87,7 +86,6 @@ services:
       DATABASE_URL: postgresql+asyncpg://codify:codify_password@postgres:5432/codify
       GITLAB_URL: http://mock-services:9000
       GITLAB_BOT_TOKEN: mock-token-12345
-      GITLAB_WEBHOOK_SECRET: mock-webhook-secret
       ANTHROPIC_BASE_URL: http://mock-services:9000/anthropic
       ANTHROPIC_API_KEY: mock-api-key
       ANTHROPIC_MODEL: fake-claude-1.0

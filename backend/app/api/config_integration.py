@@ -27,7 +27,6 @@ class IntegrationConfigSection(BaseModel):
     gitlab_url: str
     gitlab_bot_token_configured: bool
     gitlab_admin_token_configured: bool
-    gitlab_webhook_secret_configured: bool
 
 
 class IntegrationConfigUpdate(BaseModel):
@@ -37,8 +36,6 @@ class IntegrationConfigUpdate(BaseModel):
     clear_gitlab_bot_token: bool = False
     gitlab_admin_token: str | None = None
     clear_gitlab_admin_token: bool = False
-    gitlab_webhook_secret: str | None = None
-    clear_gitlab_webhook_secret: bool = False
 
 
 class GitLabConfigTestRequest(BaseModel):
@@ -56,7 +53,6 @@ def _serialize_integration_config(settings: Settings) -> IntegrationConfigSectio
         gitlab_url=settings.gitlab_url,
         gitlab_bot_token_configured=bool(settings.gitlab_bot_token),
         gitlab_admin_token_configured=bool(settings.gitlab_admin_token),
-        gitlab_webhook_secret_configured=bool(settings.gitlab_webhook_secret),
     )
 
 
@@ -81,14 +77,13 @@ def _normalize_integration_updates(raw_updates: dict) -> dict:
         if key in {
             "clear_gitlab_bot_token",
             "clear_gitlab_admin_token",
-            "clear_gitlab_webhook_secret",
         }:
             normalized[key] = bool(value)
             continue
         if key == "gitlab_url":
             if isinstance(value, str) and value.strip() and _is_valid_http_url(value.strip()):
                 normalized[key] = value.strip()
-        elif key in ("gitlab_bot_token", "gitlab_admin_token", "gitlab_webhook_secret"):
+        elif key in ("gitlab_bot_token", "gitlab_admin_token"):
             if isinstance(value, str) and value.strip():
                 normalized[key] = value.strip()
     return normalized
@@ -122,7 +117,6 @@ async def test_gitlab_config(
     )
     integration_updates.pop("clear_gitlab_bot_token", None)
     integration_updates.pop("clear_gitlab_admin_token", None)
-    integration_updates.pop("clear_gitlab_webhook_secret", None)
 
     preview_settings = _build_preview_settings_with_integration(
         integration_updates, base_settings

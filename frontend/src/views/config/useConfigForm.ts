@@ -47,8 +47,6 @@ export type ConfigForm = {
   gitlab_bot_token_input: string
   gitlab_admin_token_configured: boolean
   gitlab_admin_token_input: string
-  gitlab_webhook_secret_configured: boolean
-  gitlab_webhook_secret_input: string
   oidc_enabled: boolean
   oidc_issuer_url: string
   oidc_client_id: string
@@ -99,8 +97,7 @@ export const sharedPagesSectionFields: readonly (keyof ConfigForm)[] = [
 export const gitlabSectionFields: readonly (keyof ConfigForm)[] = [
   'gitlab_url',
   'gitlab_bot_token_input',
-  'gitlab_admin_token_input',
-  'gitlab_webhook_secret_input'
+  'gitlab_admin_token_input'
 ]
 
 export const oidcSectionFields: readonly (keyof ConfigForm)[] = [
@@ -161,8 +158,6 @@ function createDefaultFormValue(): ConfigForm {
     gitlab_bot_token_input: '',
     gitlab_admin_token_configured: false,
     gitlab_admin_token_input: '',
-    gitlab_webhook_secret_configured: false,
-    gitlab_webhook_secret_input: '',
     oidc_enabled: false,
     oidc_issuer_url: '',
     oidc_client_id: '',
@@ -206,7 +201,7 @@ export interface UseConfigFormReturn {
 
   // Save Operations
   handleSaveSection: (section: ConfigSectionKey) => Promise<void>
-  handleClearSecret: (key: 'oidc_client_secret' | 'anthropic_api_key' | 'alert_webhook_url' | 'gitlab_bot_token' | 'gitlab_admin_token' | 'gitlab_webhook_secret') => Promise<void>
+  handleClearSecret: (key: 'oidc_client_secret' | 'anthropic_api_key' | 'alert_webhook_url' | 'gitlab_bot_token' | 'gitlab_admin_token') => Promise<void>
   handleReload: () => Promise<void>
   handleReset: () => Promise<void>
 
@@ -297,8 +292,6 @@ function createConfigForm(): UseConfigFormReturn {
       gitlab_bot_token_input: '',
       gitlab_admin_token_configured: config.integration.gitlab_admin_token_configured,
       gitlab_admin_token_input: '',
-      gitlab_webhook_secret_configured: config.integration.gitlab_webhook_secret_configured,
-      gitlab_webhook_secret_input: '',
       oidc_enabled: config.auth.oidc_enabled,
       oidc_issuer_url: config.auth.oidc_issuer_url,
       oidc_client_id: config.auth.oidc_client_id,
@@ -378,10 +371,6 @@ function createConfigForm(): UseConfigFormReturn {
       update.gitlab_admin_token = formValue.value.gitlab_admin_token_input.trim()
     }
 
-    if (formValue.value.gitlab_webhook_secret_input.trim()) {
-      update.gitlab_webhook_secret = formValue.value.gitlab_webhook_secret_input.trim()
-    }
-
     return update
   }
 
@@ -459,10 +448,10 @@ function createConfigForm(): UseConfigFormReturn {
   }
 
   async function handleClearSecret(
-    key: 'oidc_client_secret' | 'anthropic_api_key' | 'alert_webhook_url' | 'gitlab_bot_token' | 'gitlab_admin_token' | 'gitlab_webhook_secret'
+    key: 'oidc_client_secret' | 'anthropic_api_key' | 'alert_webhook_url' | 'gitlab_bot_token' | 'gitlab_admin_token'
   ): Promise<void> {
     const section: ConfigSectionKey =
-      key === 'gitlab_bot_token' || key === 'gitlab_admin_token' || key === 'gitlab_webhook_secret'
+      key === 'gitlab_bot_token' || key === 'gitlab_admin_token'
         ? 'gitlab'
         : key === 'oidc_client_secret'
           ? 'oidc'
@@ -476,9 +465,6 @@ function createConfigForm(): UseConfigFormReturn {
       } else if (key === 'gitlab_admin_token') {
         syncForm(await updateConfig({ integration: { clear_gitlab_admin_token: true } }))
         message.success(t('config.gitlabAdminTokenCleared'))
-      } else if (key === 'gitlab_webhook_secret') {
-        syncForm(await updateConfig({ integration: { clear_gitlab_webhook_secret: true } }))
-        message.success(t('config.gitlabWebhookSecretCleared'))
       } else if (key === 'oidc_client_secret') {
         syncForm(await resetConfigKey(key))
         message.success(t('config.oidcSecretCleared'))

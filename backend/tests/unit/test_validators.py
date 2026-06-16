@@ -673,11 +673,10 @@ class NormalizeUpdatesOidcTests(unittest.TestCase):
             "clear_anthropic_api_key": 0,
             "clear_gitlab_bot_token": 1,
             "clear_gitlab_admin_token": 0,
-            "clear_gitlab_webhook_secret": 1,
             "clear_mattermost_bot_token": 0,
             "clear_oidc_client_secret": 1,
         })
-        self.assertEqual(len(result), 7)
+        self.assertEqual(len(result), 6)
         self.assertTrue(result["clear_oidc_client_secret"])
         self.assertFalse(result["clear_anthropic_api_key"])
 

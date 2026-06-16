@@ -23,12 +23,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from fastapi.testclient import TestClient
 
 
-def _make_mock_settings(gitlab_webhook_secret="global-secret"):
-    settings = MagicMock()
-    settings.gitlab_webhook_secret = gitlab_webhook_secret
-    return settings
-
-
 def _build_mr_merge_payload(project_id=42, mr_iid=7):
     """Build a minimal GitLab MR merge webhook payload."""
     return {
@@ -93,25 +87,11 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         async def override_db():
             yield self.mock_db
 
-        # Patch settings
-        self.settings_patcher = patch(
-            "app.api.webhook_handler.get_effective_settings",
-            return_value=_make_mock_settings(),
-        )
-        self.mock_settings = self.settings_patcher.start()
-
-        # Patch load_runtime_config_from_db
-        self.runtime_patcher = patch(
-            "app.api.webhook_handler.load_runtime_config_from_db",
-            new_callable=AsyncMock,
-        )
-        self.runtime_patcher.start()
-
         # Patch project webhook secret lookup
         self.secret_patcher = patch(
             "app.api.webhook_handler.get_project_webhook_secret",
             new_callable=AsyncMock,
-            return_value=None,  # No per-project secret by default → use global
+            return_value="project-secret",
         )
         self.mock_get_secret = self.secret_patcher.start()
 
@@ -122,8 +102,6 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         self.client = TestClient(app)
 
     def tearDown(self):
-        self.settings_patcher.stop()
-        self.runtime_patcher.stop()
         self.secret_patcher.stop()
         from app.database import get_db
         from app.main import app
@@ -143,8 +121,8 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(resp.status_code, 401)
 
-    def test_correct_global_token_accepted(self):
-        # Mock no matching issues
+    def test_legacy_global_token_is_not_accepted(self):
+        self.mock_get_secret.return_value = None
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = []
         self.mock_db.execute = AsyncMock(return_value=mock_result)
@@ -154,6 +132,20 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
             "/api/webhook/gitlab",
             json=payload,
             headers={"X-Gitlab-Token": "global-secret"},
+        )
+        self.assertEqual(resp.status_code, 401)
+
+    def test_correct_project_token_accepted(self):
+        # Mock no matching issues
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        self.mock_db.execute = AsyncMock(return_value=mock_result)
+
+        payload = _build_mr_merge_payload()
+        resp = self.client.post(
+            "/api/webhook/gitlab",
+            json=payload,
+            headers={"X-Gitlab-Token": "project-secret"},
         )
         self.assertEqual(resp.status_code, 200)
 
@@ -196,7 +188,7 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         resp = self.client.post(
             "/api/webhook/gitlab",
             json=payload,
-            headers={"X-Gitlab-Token": "global-secret"},
+            headers={"X-Gitlab-Token": "project-secret"},
         )
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(mock_issue.status, "closed")
@@ -217,7 +209,7 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         resp = self.client.post(
             "/api/webhook/gitlab",
             json=payload,
-            headers={"X-Gitlab-Token": "global-secret"},
+            headers={"X-Gitlab-Token": "project-secret"},
         )
         self.assertEqual(resp.status_code, 200)
         # Status should still be closed — not changed
@@ -230,7 +222,7 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         resp = self.client.post(
             "/api/webhook/gitlab",
             json=payload,
-            headers={"X-Gitlab-Token": "global-secret"},
+            headers={"X-Gitlab-Token": "project-secret"},
         )
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
@@ -241,7 +233,7 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         resp = self.client.post(
             "/api/webhook/gitlab",
             json=payload,
-            headers={"X-Gitlab-Token": "global-secret"},
+            headers={"X-Gitlab-Token": "project-secret"},
         )
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
@@ -258,7 +250,7 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         resp = self.client.post(
             "/api/webhook/gitlab",
             json=payload,
-            headers={"X-Gitlab-Token": "global-secret"},
+            headers={"X-Gitlab-Token": "project-secret"},
         )
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
@@ -282,7 +274,7 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         resp = self.client.post(
             "/api/webhook/gitlab",
             json=payload,
-            headers={"X-Gitlab-Token": "global-secret"},
+            headers={"X-Gitlab-Token": "project-secret"},
         )
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
@@ -294,12 +286,12 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         resp = self.client.post(
             "/api/webhook/gitlab",
             json=payload,
-            headers={"X-Gitlab-Token": "global-secret"},
+            headers={"X-Gitlab-Token": "project-secret"},
         )
         self.assertEqual(resp.status_code, 400)
 
     def test_no_secrets_configured_returns_401(self):
-        self.mock_settings.return_value = _make_mock_settings(gitlab_webhook_secret="")
+        self.mock_get_secret.return_value = None
         payload = _build_mr_merge_payload()
         resp = self.client.post(
             "/api/webhook/gitlab",
@@ -330,7 +322,7 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         resp = self.client.post(
             "/api/webhook/gitlab",
             json=payload,
-            headers={"X-Gitlab-Token": "global-secret"},
+            headers={"X-Gitlab-Token": "project-secret"},
         )
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(issue1.status, "closed")
@@ -358,7 +350,7 @@ class TestWebhookReceiver(unittest.IsolatedAsyncioTestCase):
         resp = self.client.post(
             "/api/webhook/gitlab",
             json=payload,
-            headers={"X-Gitlab-Token": "global-secret"},
+            headers={"X-Gitlab-Token": "project-secret"},
         )
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(mock_issue.status, "closed")

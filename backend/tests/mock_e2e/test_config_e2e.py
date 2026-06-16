@@ -613,7 +613,6 @@ class TestGetAggregatedConfig:
         assert "gitlab_url" in integration
         assert "gitlab_bot_token_configured" in integration
         assert "gitlab_admin_token_configured" in integration
-        assert "gitlab_webhook_secret_configured" in integration
 
 
 # ═══════════════════════════════════════════════════════════════════════════

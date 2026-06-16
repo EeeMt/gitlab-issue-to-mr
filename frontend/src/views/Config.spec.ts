@@ -198,8 +198,7 @@ const mockConfig = {
   integration: {
     gitlab_url: 'https://gitlab.example.com',
     gitlab_bot_token_configured: true,
-    gitlab_admin_token_configured: false,
-    gitlab_webhook_secret_configured: true
+    gitlab_admin_token_configured: false
   }
 }
 

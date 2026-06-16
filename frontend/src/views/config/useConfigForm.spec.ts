@@ -90,8 +90,7 @@ const mockConfig = {
   integration: {
     gitlab_url: 'https://gitlab.example.com',
     gitlab_bot_token_configured: true,
-    gitlab_admin_token_configured: false,
-    gitlab_webhook_secret_configured: false
+    gitlab_admin_token_configured: false
   }
 }
 
@@ -199,6 +198,7 @@ describe('useConfigForm', () => {
       expect(configForm.formValue.value.gitlab_url).toBe('https://gitlab.example.com')
       expect(configForm.formValue.value.gitlab_bot_token_configured).toBe(true)
       expect(configForm.formValue.value.gitlab_admin_token_configured).toBe(false)
+      expect('gitlab_webhook_secret_input' in configForm.formValue.value).toBe(false)
     })
 
     it('should reset lastLoadedValue after sync', async () => {
@@ -222,7 +222,6 @@ describe('useConfigForm', () => {
       expect(configForm.formValue.value.alert_webhook_url_input).toBe('')
       expect(configForm.formValue.value.gitlab_bot_token_input).toBe('')
       expect(configForm.formValue.value.gitlab_admin_token_input).toBe('')
-      expect(configForm.formValue.value.gitlab_webhook_secret_input).toBe('')
       expect(configForm.formValue.value.oidc_client_secret_input).toBe('')
     })
   })
@@ -693,21 +692,6 @@ describe('useConfigForm — extended coverage', () => {
       })
     })
 
-    it('should clear gitlab_webhook_secret', async () => {
-      mockApi.updateConfig.mockResolvedValue(mockConfig)
-
-      const wrapper = mount(TestComponent)
-      await flushPromises()
-      const configForm = (wrapper.vm as any).configForm
-
-      await configForm.handleClearSecret('gitlab_webhook_secret')
-      await flushPromises()
-
-      expect(mockApi.updateConfig).toHaveBeenCalledWith({
-        integration: { clear_gitlab_webhook_secret: true }
-      })
-    })
-
     it('should clear oidc_client_secret using resetConfigKey', async () => {
       mockApi.resetConfigKey.mockResolvedValue(mockConfig)
 
@@ -881,18 +865,16 @@ describe('useConfigForm — extended coverage', () => {
       expect(payload.alert_webhook_url).toBe('https://hooks.example.com')
     })
 
-    it('buildGitlabSectionUpdate includes admin_token and webhook_secret when non-empty', async () => {
+    it('buildGitlabSectionUpdate includes admin_token when non-empty', async () => {
       const wrapper = mount(TestComponent)
       await flushPromises()
       const configForm = (wrapper.vm as any).configForm
 
       configForm.syncForm(mockConfig)
       configForm.formValue.value.gitlab_admin_token_input = 'admin-token-123'
-      configForm.formValue.value.gitlab_webhook_secret_input = 'secret-456'
 
       const payload = configForm.buildGitlabSectionUpdate()
       expect(payload.gitlab_admin_token).toBe('admin-token-123')
-      expect(payload.gitlab_webhook_secret).toBe('secret-456')
     })
 
     it('buildGitlabSectionUpdate omits empty token fields', async () => {
@@ -906,7 +888,6 @@ describe('useConfigForm — extended coverage', () => {
       const payload = configForm.buildGitlabSectionUpdate()
       expect(payload).not.toHaveProperty('gitlab_bot_token')
       expect(payload).not.toHaveProperty('gitlab_admin_token')
-      expect(payload).not.toHaveProperty('gitlab_webhook_secret')
     })
 
     it('buildOidcSectionUpdate includes client_secret when non-empty', async () => {

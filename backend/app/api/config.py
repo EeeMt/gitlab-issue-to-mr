@@ -195,9 +195,8 @@ async def update_config(
         )
         clear_gitlab_bot_token = bool(integration_updates.pop("clear_gitlab_bot_token", False))
         clear_gitlab_admin_token = bool(integration_updates.pop("clear_gitlab_admin_token", False))
-        clear_gitlab_webhook_secret = bool(integration_updates.pop("clear_gitlab_webhook_secret", False))
 
-        if integration_updates or clear_gitlab_bot_token or clear_gitlab_admin_token or clear_gitlab_webhook_secret:
+        if integration_updates or clear_gitlab_bot_token or clear_gitlab_admin_token:
             from app.core.config_crypto import ConfigEncryptionError
             from app.runtime_config import (
                 reset_runtime_config_override,
@@ -215,10 +214,6 @@ async def update_config(
                 if clear_gitlab_admin_token and "gitlab_admin_token" not in integration_updates:
                     await reset_runtime_config_override(db, "gitlab_admin_token")
                     logger.info("Cleared stored GitLab admin token")
-
-                if clear_gitlab_webhook_secret and "gitlab_webhook_secret" not in integration_updates:
-                    await reset_runtime_config_override(db, "gitlab_webhook_secret")
-                    logger.info("Cleared stored GitLab webhook secret")
             except ConfigEncryptionError as exc:
                 from fastapi import HTTPException, status
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc

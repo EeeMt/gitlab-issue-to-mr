@@ -9,7 +9,7 @@ from urllib.parse import urlsplit, urlunsplit
 import gitlab
 import httpx
 from gitlab import Gitlab
-from gitlab.exceptions import GitlabCreateError, GitlabDeleteError, GitlabGetError
+from gitlab.exceptions import GitlabCreateError, GitlabDeleteError, GitlabError, GitlabGetError
 from gitlab.v4.objects import MergeRequest, Project
 
 from app.config import Settings, get_effective_settings
@@ -438,6 +438,8 @@ class GitLabClient:
         """
         logger.info("Fetching accessible projects")
         projects_by_id: dict[int, Any] = {}
+        successful_queries = 0
+        first_error: Exception | None = None
 
         for query_kwargs in [
             {"membership": True},
@@ -446,13 +448,21 @@ class GitLabClient:
         ]:
             try:
                 page_results = self.gl.projects.list(per_page=per_page, all=True, **query_kwargs)
+                successful_queries += 1
                 for p in page_results:
                     if getattr(p, "marked_for_deletion_at", None):
                         logger.debug("Skipping project pending deletion: %s", p.path_with_namespace)
                         continue
                     projects_by_id[p.id] = p
             except Exception as exc:
+                if first_error is None:
+                    first_error = exc
                 logger.warning("Failed to fetch projects with kwargs %s: %s", query_kwargs, exc)
+
+        if successful_queries == 0 and first_error is not None:
+            if isinstance(first_error, (GitlabError, httpx.HTTPError)):
+                raise first_error
+            raise GitlabError(f"Failed to fetch GitLab projects: {first_error}") from first_error
 
         result = []
         for p in projects_by_id.values():

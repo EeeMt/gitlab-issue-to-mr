@@ -17,7 +17,6 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "gitlab_url": str,
     "gitlab_bot_token": str,
     "gitlab_admin_token": str,
-    "gitlab_webhook_secret": str,
     "max_concurrency": int,
     "task_timeout": int,
     "scheduler_interval": int,
@@ -71,7 +70,6 @@ SECRET_CONFIG_KEYS = {
     "oidc_client_secret",
     "gitlab_bot_token",
     "gitlab_admin_token",
-    "gitlab_webhook_secret",
     "alert_webhook_url",
     "mattermost_bot_token",
     "anthropic_api_key",
@@ -92,7 +90,6 @@ class Settings(BaseSettings):
     gitlab_url: str = Field(default="https://gitlab.example.com")
     gitlab_bot_token: str = Field(default="")
     gitlab_admin_token: str = Field(default="")
-    gitlab_webhook_secret: str = Field(default="")
 
     # Claude CLI Configuration (passed to Worker)
     anthropic_base_url: str = Field(default="http://localhost:11434/v1")
