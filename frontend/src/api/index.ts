@@ -578,6 +578,8 @@ export interface RuntimeConfig {
   allow_analytics_for_users: boolean
   allow_oidc_diagnostics_for_users: boolean
   worker_volume_mounts: string
+  worker_pre_script: string
+  worker_post_script: string
   worker_environment_variables: WorkerEnvironmentVariable[]
   maven_cache_host_path: string
   maven_settings_host_path: string
@@ -717,6 +719,8 @@ export interface RuntimeConfigUpdate
   anthropic_api_key?: string
   clear_anthropic_api_key?: boolean
   worker_volume_mounts?: string
+  worker_pre_script?: string
+  worker_post_script?: string
   worker_environment_variables?: WorkerEnvironmentVariableUpdate[]
   maven_cache_host_path?: string
   maven_settings_host_path?: string

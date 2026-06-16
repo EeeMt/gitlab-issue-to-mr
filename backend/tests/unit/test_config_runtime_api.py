@@ -110,6 +110,38 @@ class ConfigRuntimeAPITests(unittest.TestCase):
         self.assertEqual(result.worker_workspace_retention_days, 14)
         self.assertEqual(result.worker_failed_workspace_retention_days, 30)
 
+    def test_serialize_runtime_config_includes_worker_custom_scripts(self):
+        from app.api.config_runtime import _serialize_runtime_config
+        from app.config import Settings
+
+        settings = Settings(
+            worker_pre_script="echo pre",
+            worker_post_script="echo post",
+        )
+
+        result = _serialize_runtime_config(settings)
+
+        self.assertEqual(result.worker_pre_script, "echo pre")
+        self.assertEqual(result.worker_post_script, "echo post")
+
+    def test_patch_runtime_config_accepts_worker_custom_scripts(self):
+        """PATCH /config/runtime should persist worker custom script fields."""
+        with patch(
+            "app.api.config_runtime.save_runtime_config_override",
+            new=AsyncMock(),
+        ) as mock_save:
+            response = self.client.patch(
+                "/api/config/runtime",
+                json={
+                    "worker_pre_script": "echo pre\nnpm ci",
+                    "worker_post_script": "npm test\necho post",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_save.assert_any_await(self.mock_db, "worker_pre_script", "echo pre\nnpm ci")
+        mock_save.assert_any_await(self.mock_db, "worker_post_script", "npm test\necho post")
+
     def test_validate_worker_workspace_retention_days_bounds(self):
         from fastapi import HTTPException
 

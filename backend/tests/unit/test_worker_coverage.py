@@ -28,6 +28,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import textwrap
 import unittest
 from pathlib import Path
@@ -488,6 +489,40 @@ class TestBuildContainerEnv(unittest.TestCase):
         self.assertEqual(env["CUSTOM_CA_BUNDLE"], "/etc/ssl/custom-ca.crt")
 
     @patch('app.core.worker.get_settings')
+    def test_env_does_not_inline_worker_custom_script_content(self, mock_get_settings):
+        """Worker scripts are materialized as files instead of inlined into env."""
+        mock_get_settings.return_value = _make_settings(
+            worker_pre_script="echo pre\nnpm ci",
+            worker_post_script="npm test\necho post",
+        )
+        worker = _make_worker()
+        task = _make_task()
+        issue = task.issue
+
+        env = worker._build_container_env(task, issue, mr_iid=None, target_branch="main")
+
+        self.assertNotIn("CODIFY_WORKER_PRE_SCRIPT", env)
+        self.assertNotIn("CODIFY_WORKER_POST_SCRIPT", env)
+
+    def test_materialize_worker_custom_scripts_writes_runtime_files(self):
+        from app.core.worker_runtime import materialize_worker_custom_scripts
+
+        settings = _make_settings(
+            worker_pre_script="echo pre\nnpm ci",
+            worker_post_script="npm test\necho post",
+        )
+
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            materialize_worker_custom_scripts(settings, runtime_dir)
+
+            pre_script = Path(runtime_dir) / "worker-pre-script.sh"
+            post_script = Path(runtime_dir) / "worker-post-script.sh"
+            self.assertEqual(pre_script.read_text(), "echo pre\nnpm ci\n")
+            self.assertEqual(post_script.read_text(), "npm test\necho post\n")
+            self.assertEqual(oct(pre_script.stat().st_mode & 0o777), "0o700")
+            self.assertEqual(oct(post_script.stat().st_mode & 0o777), "0o700")
+
+    @patch('app.core.worker.get_settings')
     def test_env_merges_custom_environment_values(self, mock_get_settings):
         """Custom environment values are validated and merged, including empty strings."""
         mock_get_settings.return_value = _make_settings()
@@ -854,6 +889,27 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('WORKSPACE_CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD', content)
         self.assertIn('Workspace has uncommitted changes on branch', content)
         self.assertIn('git clone "${GIT_REPO_URL}" /workspace', content)
+
+    def test_entrypoint_runs_worker_custom_scripts_around_claude(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('CODIFY_WORKER_PRE_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-pre-script.sh"', content)
+        self.assertIn('CODIFY_WORKER_POST_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-post-script.sh"', content)
+        self.assertIn('run_worker_script "pre" "${CODIFY_WORKER_PRE_SCRIPT_FILE}"', content)
+        self.assertIn('run_worker_script "post" "${CODIFY_WORKER_POST_SCRIPT_FILE}"', content)
+        self.assertIn('su -m -s /bin/bash codify -c "cd /workspace && bash ${script_path}"', content)
+        self.assertNotIn('echo "${CODIFY_WORKER_PRE_SCRIPT}"', content)
+        self.assertNotIn('echo "${CODIFY_WORKER_POST_SCRIPT}"', content)
+
+        pre_index = content.index('run_worker_script "pre" "${CODIFY_WORKER_PRE_SCRIPT_FILE}"')
+        claude_index = content.index('echo "Starting Claude CLI (streaming mode)..."')
+        post_index = content.index('run_worker_script "post" "${CODIFY_WORKER_POST_SCRIPT_FILE}"')
+        changes_index = content.index('CHANGES=$(git status --porcelain || true)')
+
+        self.assertLess(pre_index, claude_index)
+        self.assertGreater(post_index, claude_index)
+        self.assertLess(post_index, changes_index)
 
 
     def test_entrypoint_no_changes_uses_require_changes_not_target_branch(self):
@@ -1920,6 +1976,52 @@ class TestExecuteTask(unittest.TestCase):
             mock_build_container_env.call_args.kwargs["custom_environment"],
             custom_environment,
         )
+
+    @patch('app.core.worker.get_settings')
+    @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)
+    def test_execute_task_materializes_worker_custom_scripts_before_container_create(
+        self,
+        mock_notify,
+        mock_get_settings,
+    ):
+        with tempfile.TemporaryDirectory() as workspace_root:
+            mock_get_settings.return_value = _make_settings(
+                worker_workspace_host_path=workspace_root,
+                worker_pre_script="echo pre",
+                worker_post_script="echo post",
+            )
+            mock_gitlab = MagicMock()
+            mock_gitlab.normalize_web_url.side_effect = lambda x: x
+            mock_gitlab.create_note = MagicMock()
+            mock_gitlab.create_mr_note = MagicMock()
+
+            mock_docker = MagicMock()
+            mock_docker.create_container.return_value = MagicMock(id="ctr-custom-scripts")
+
+            worker = _make_worker(mock_gitlab=mock_gitlab, mock_docker=mock_docker)
+            task = _make_task(target_branch="main", merge_request_iid=None)
+            db = _make_db(task)
+
+            with patch.object(
+                worker,
+                '_stream_logs_to_db',
+                new=AsyncMock(return_value=(0, "CODIFY_DIFF:+1-0\n", 1, False)),
+            ):
+                result = asyncio.run(worker.execute_task(db, task.id))
+
+            runtime_dir = (
+                Path(workspace_root)
+                / f"project-{task.issue.project_id}"
+                / f"issue-{task.issue.id}"
+                / "runtime"
+                / f"task-{task.id}"
+            )
+            self.assertTrue(result)
+            self.assertEqual((runtime_dir / "worker-pre-script.sh").read_text(), "echo pre\n")
+            self.assertEqual((runtime_dir / "worker-post-script.sh").read_text(), "echo post\n")
+            container_env = mock_docker.create_container.call_args.kwargs["environment"]
+            self.assertNotIn("CODIFY_WORKER_PRE_SCRIPT", container_env)
+            self.assertNotIn("CODIFY_WORKER_POST_SCRIPT", container_env)
 
     @patch('app.core.worker.get_settings')
     @patch('app.core.worker.notify_task_event', new_callable=AsyncMock)

@@ -69,6 +69,8 @@ class RuntimeConfigSection(BaseModel):
     allow_analytics_for_users: bool
     allow_oidc_diagnostics_for_users: bool
     worker_volume_mounts: str
+    worker_pre_script: str
+    worker_post_script: str
     worker_workspace_host_path: str
     worker_workspace_retention_days: int
     worker_failed_workspace_retention_days: int
@@ -107,6 +109,8 @@ class RuntimeConfigUpdate(BaseModel):
     allow_analytics_for_users: bool | None = None
     allow_oidc_diagnostics_for_users: bool | None = None
     worker_volume_mounts: str | None = None
+    worker_pre_script: str | None = None
+    worker_post_script: str | None = None
     worker_workspace_host_path: str | None = None
     worker_workspace_retention_days: int | None = None
     worker_failed_workspace_retention_days: int | None = None
@@ -144,6 +148,8 @@ def _serialize_runtime_config(
         allow_analytics_for_users=settings.allow_analytics_for_users,
         allow_oidc_diagnostics_for_users=settings.allow_oidc_diagnostics_for_users,
         worker_volume_mounts=settings.worker_volume_mounts,
+        worker_pre_script=settings.worker_pre_script,
+        worker_post_script=settings.worker_post_script,
         worker_workspace_host_path=settings.worker_workspace_host_path,
         worker_workspace_retention_days=settings.worker_workspace_retention_days,
         worker_failed_workspace_retention_days=settings.worker_failed_workspace_retention_days,
@@ -268,6 +274,19 @@ def _validate_config_value(key: str, value: object) -> object:
                 detail="worker_workspace_host_path must be empty or an absolute path",
             )
         return stripped
+
+    if key in {"worker_pre_script", "worker_post_script"}:
+        if not isinstance(value, str):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{key} must be a string",
+            )
+        if len(value) > 20000:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{key} must be 20000 characters or fewer",
+            )
+        return value if value.strip() else ""
 
     if key in {
         "worker_workspace_retention_days",

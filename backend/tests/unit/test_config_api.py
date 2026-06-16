@@ -486,6 +486,28 @@ class UpdateConfigEndpointTests(unittest.TestCase):
         data = response.json()
         self.assertIn("runtime", data)
 
+    def test_update_config_with_worker_custom_scripts(self):
+        """PATCH /api/config should persist worker pre/post script runtime fields."""
+        client, app, mock_db = _make_config_admin_client()
+
+        with patch("app.api.config.load_runtime_config_from_db", new=AsyncMock()):
+            with patch(
+                "app.api.config_runtime.save_runtime_config_override",
+                new=AsyncMock(),
+            ) as mock_save:
+                response = client.patch("/api/config", json={
+                    "runtime": {
+                        "worker_pre_script": "echo pre\nnpm ci",
+                        "worker_post_script": "npm test\necho post",
+                    }
+                })
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        mock_save.assert_any_await(mock_db, "worker_pre_script", "echo pre\nnpm ci")
+        mock_save.assert_any_await(mock_db, "worker_post_script", "npm test\necho post")
+
     def test_update_config_with_runtime_null_worker_environment_variables_is_noop(self):
         """PATCH /api/config should treat null runtime worker env vars as a no-op."""
         client, app, mock_db = _make_config_admin_client()

@@ -18,6 +18,10 @@ from app.core.worker_environment_variables import (
     build_worker_environment_map,
     list_worker_environment_variables,
 )
+from app.core.worker_runtime import (
+    materialize_worker_custom_scripts,
+    worker_custom_scripts_configured,
+)
 from app.core.worker_workspace import build_issue_workspace_paths
 from app.database import AsyncSessionLocal
 from app.models import CIFailureRun, Issue, Task, TaskLog, TaskStatus
@@ -324,18 +328,24 @@ async def create_execute_container(
 
     await persist_issue_mr_if_changed(db, issue, mr_iid, mr_web_url)
 
+    workspace_paths = build_issue_workspace_paths(settings, issue, task) if issue else None
+
     if issue:
         await worker._write_previous_task_summaries_file(db, settings, issue, task)
 
+    if worker_custom_scripts_configured(settings):
+        if workspace_paths is None:
+            raise RuntimeError("worker_workspace_host_path is required for worker custom scripts")
+        materialize_worker_custom_scripts(settings, workspace_paths.runtime_path)
+
     if issue and getattr(task, "trigger_source", None) == "ci_auto_repair":
-        paths = build_issue_workspace_paths(settings, issue, task)
-        if paths is None:
+        if workspace_paths is None:
             raise RuntimeError("worker_workspace_host_path is required for CI auto-repair tasks")
         run = await db.get(CIFailureRun, task.ci_failure_run_id) if task.ci_failure_run_id else None
         if run is None:
             raise RuntimeError("CI failure run is not available for this repair task")
         task.ci_failure_run = run
-        worker._materialize_ci_failure_bundle(task, paths.runtime_path)
+        worker._materialize_ci_failure_bundle(task, workspace_paths.runtime_path)
         await append_ci_failure_log(
             db,
             run,

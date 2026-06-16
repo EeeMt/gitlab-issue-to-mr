@@ -205,11 +205,13 @@ class TestGetRuntimeConfig:
             "anthropic_model", "claude_max_turns",
             "allow_monitor_for_users", "allow_schedule_overview_for_users",
             "allow_analytics_for_users", "allow_oidc_diagnostics_for_users",
-            "worker_volume_mounts", "maven_cache_host_path",
+            "worker_volume_mounts", "worker_pre_script", "worker_post_script",
+            "maven_cache_host_path",
             "maven_settings_host_path", "slot_max_tasks", "slot_max_tasks_enforce",
             "worker_environment_variables",
             "worker_workspace_host_path", "worker_workspace_retention_days",
             "worker_failed_workspace_retention_days",
+            "ci_auto_repair_max_attempts", "ci_failure_bundle_retention_days",
             "announcement_enabled", "announcement_level", "announcement_text",
         }
         assert expected_keys == set(data.keys())

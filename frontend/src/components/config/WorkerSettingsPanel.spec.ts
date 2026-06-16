@@ -24,7 +24,9 @@ function createRuntimeConfig() {
         is_secret: false,
         value_configured: true
       }
-    ]
+    ],
+    worker_pre_script: 'echo pre',
+    worker_post_script: 'echo post'
   }
 }
 
@@ -176,6 +178,48 @@ describe('WorkerSettingsPanel', () => {
     })
   })
 
+  it('does not render the legacy AI provider redirect card in worker settings', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('config.workerSettings')
+    expect(wrapper.text()).not.toContain('config.aiProvider')
+    expect(wrapper.text()).not.toContain('config.providers.movedNotice')
+  })
+
+  it('loads and saves worker custom scripts', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    expect(vm.workerFormValue.worker_pre_script).toBe('echo pre')
+    expect(vm.workerFormValue.worker_post_script).toBe('echo post')
+
+    vm.workerFormValue.worker_pre_script = 'npm ci'
+    vm.workerFormValue.worker_post_script = 'npm test'
+
+    await vm.handleSaveWorker()
+
+    expect(mockUpdateConfig).toHaveBeenCalledWith({
+      runtime: expect.objectContaining({
+        worker_pre_script: 'npm ci',
+        worker_post_script: 'npm test'
+      })
+    })
+  })
+
   it('loads configured secret environment variables without exposing stored values', async () => {
     const wrapper = mount(WorkerSettingsPanel, {
       props: {
@@ -225,6 +269,8 @@ describe('WorkerSettingsPanel', () => {
     expect(mockUpdateConfig).toHaveBeenCalledWith({
       runtime: {
         worker_volume_mounts: '[{"host_path":"/host/cache","container_path":"/container/cache","mode":"rw"}]',
+        worker_pre_script: 'echo pre',
+        worker_post_script: 'echo post',
         maven_cache_host_path: '/data/.m2/repository',
         maven_settings_host_path: '/data/.m2/settings.xml',
         worker_environment_variables: [
@@ -300,6 +346,8 @@ describe('WorkerSettingsPanel', () => {
       runtime: {
         worker_volume_mounts:
           '[{"host_path":"/host/cache","container_path":"/container/cache","mode":"rw"}]',
+        worker_pre_script: 'echo pre',
+        worker_post_script: 'echo post',
         maven_cache_host_path: '/data/.m2/repository',
         maven_settings_host_path: '/data/.m2/settings.xml',
         worker_environment_variables: [
@@ -380,6 +428,8 @@ describe('WorkerSettingsPanel', () => {
     expect(mockUpdateConfig).toHaveBeenCalledWith({
       runtime: {
         worker_volume_mounts: '[{"host_path":"/host/cache","container_path":"/container/cache","mode":"rw"}]',
+        worker_pre_script: 'echo pre',
+        worker_post_script: 'echo post',
         maven_cache_host_path: '/data/.m2/repository',
         maven_settings_host_path: '/data/.m2/settings.xml',
         worker_environment_variables: [

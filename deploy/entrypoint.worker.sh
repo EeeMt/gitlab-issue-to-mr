@@ -25,6 +25,8 @@ ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}"
 APPEND_SYSTEM_PROMPT="${APPEND_SYSTEM_PROMPT:-}"
 CODIFY_RUNTIME_DIR="${CODIFY_RUNTIME_DIR:-/tmp/codify-runtime}"
+CODIFY_WORKER_PRE_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-pre-script.sh"
+CODIFY_WORKER_POST_SCRIPT_FILE="${CODIFY_RUNTIME_DIR}/worker-post-script.sh"
 export CODIFY_RUNTIME_DIR
 mkdir -p "${CODIFY_RUNTIME_DIR}"
 chown -R codify:codify "${CODIFY_RUNTIME_DIR}"
@@ -64,6 +66,8 @@ echo "Model:          ${ANTHROPIC_MODEL}"
 echo "Max Turns:      ${CLAUDE_MAX_TURNS:-20}"
 echo "API Key set:    $([ -n "$ANTHROPIC_API_KEY" ] && echo 'yes' || echo 'no')"
 echo "System Prompt:  $([ -n "$APPEND_SYSTEM_PROMPT" ] && echo "set (${#APPEND_SYSTEM_PROMPT} chars)" || echo 'none')"
+echo "Pre Script:     $([ -s "$CODIFY_WORKER_PRE_SCRIPT_FILE" ] && echo 'set' || echo 'none')"
+echo "Post Script:    $([ -s "$CODIFY_WORKER_POST_SCRIPT_FILE" ] && echo 'set' || echo 'none')"
 echo "GitLab Token:   $([ -n "$GITLAB_TOKEN" ] && echo 'set' || echo 'missing')"
 echo "========================================"
 
@@ -800,7 +804,33 @@ append_runtime_event() {
     fi
 }
 
+run_worker_script() {
+    local phase="$1"
+    local script_path="$2"
+
+    if [ ! -s "${script_path}" ]; then
+        return 0
+    fi
+
+    echo "Running custom ${phase} script..."
+
+    set +e
+    env HOME=/home/codify su -m -s /bin/bash codify -c "cd /workspace && bash ${script_path}"
+    local script_result=$?
+    set -e
+
+    if [ ${script_result} -ne 0 ]; then
+        echo "Custom ${phase} script failed with exit code: ${script_result}"
+        return ${script_result}
+    fi
+
+    echo "Custom ${phase} script completed successfully"
+    return 0
+}
+
 trap create_runtime_archive EXIT
+
+run_worker_script "pre" "${CODIFY_WORKER_PRE_SCRIPT_FILE}"
 
 echo "Claude CLI version: $(/usr/local/bin/claude --version)"
 echo "Updating MR with execution status..."
@@ -835,6 +865,8 @@ if [ $RESULT -ne 0 ]; then
     create_runtime_archive
     exit $RESULT
 fi
+
+run_worker_script "post" "${CODIFY_WORKER_POST_SCRIPT_FILE}"
 
 FINAL_SUMMARY_CONTENT="$(prepare_delivery_summary "${FINAL_SUMMARY_CONTENT}")"
 write_delivery_summary_artifacts "${FINAL_SUMMARY_CONTENT}"

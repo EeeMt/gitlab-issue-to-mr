@@ -25,6 +25,8 @@ _WORKSPACE_CONTAINER_PATH = "/workspace"
 _RUNTIME_CONTAINER_PATH = "/tmp/codify-runtime"
 _CLAUDE_CONTAINER_PATH = "/home/codify/.claude"
 _SHARED_CONTAINER_PATH = "/opt/codify-issue-shared"
+_WORKER_PRE_SCRIPT_FILENAME = "worker-pre-script.sh"
+_WORKER_POST_SCRIPT_FILENAME = "worker-post-script.sh"
 
 
 async def resolve_provider(db: AsyncSession, task: Task) -> AIProvider:
@@ -162,6 +164,34 @@ def _build_container_env_with_settings(
         environment.update(custom_environment)
 
     return environment
+
+
+def worker_custom_scripts_configured(settings: Any) -> bool:
+    """Return whether runtime settings contain custom worker scripts."""
+    return any(
+        isinstance(getattr(settings, key, ""), str) and getattr(settings, key, "").strip()
+        for key in ("worker_pre_script", "worker_post_script")
+    )
+
+
+def materialize_worker_custom_scripts(settings: Any, runtime_path: str | os.PathLike[str]) -> None:
+    """Write configured worker scripts into the task runtime directory."""
+    runtime_dir = Path(runtime_path)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    script_specs = (
+        ("worker_pre_script", runtime_dir / _WORKER_PRE_SCRIPT_FILENAME),
+        ("worker_post_script", runtime_dir / _WORKER_POST_SCRIPT_FILENAME),
+    )
+    for setting_key, script_path in script_specs:
+        script_content = getattr(settings, setting_key, "")
+        if not isinstance(script_content, str) or not script_content.strip():
+            script_path.unlink(missing_ok=True)
+            continue
+
+        script_text = script_content if script_content.endswith("\n") else f"{script_content}\n"
+        script_path.write_text(script_text, encoding="utf-8")
+        script_path.chmod(0o700)
 
 
 def _resolve_provider_environment_values(

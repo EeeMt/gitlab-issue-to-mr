@@ -176,6 +176,8 @@ const mockConfig = {
     allow_analytics_for_users: true,
     allow_oidc_diagnostics_for_users: false,
     worker_volume_mounts: '',
+    worker_pre_script: '',
+    worker_post_script: '',
     worker_environment_variables: [],
     maven_cache_host_path: '',
     maven_settings_host_path: ''

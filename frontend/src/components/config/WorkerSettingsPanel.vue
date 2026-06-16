@@ -5,20 +5,6 @@
         <template #header>
           <div class="config-card-header">
             <div>
-              <div class="config-card-header__title">{{ t('config.aiProvider') }}</div>
-              <div class="config-card-header__subtitle">{{ t('config.aiProviderSubtitle') }}</div>
-            </div>
-          </div>
-        </template>
-        <n-alert type="info" :show-icon="true">
-          {{ t('config.providers.movedNotice') }}
-        </n-alert>
-      </n-card>
-
-      <n-card class="config-form-card" :bordered="false">
-        <template #header>
-          <div class="config-card-header">
-            <div>
               <div class="config-card-header__title">{{ t('config.workerSettings') }}</div>
               <div class="config-card-header__subtitle">{{ t('config.workerSettingsSubtitle') }}</div>
             </div>
@@ -167,6 +153,40 @@
             </div>
           </div>
 
+          <div class="config-form__section config-scripts-section">
+            <div class="config-form__section-title">{{ t('config.workerCustomScripts') }}</div>
+            <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+              <n-gi>
+                <n-form-item :label="t('config.workerPreScript')">
+                  <n-input
+                    v-model:value="workerFormValue.worker_pre_script"
+                    type="textarea"
+                    :placeholder="t('config.workerPreScriptPlaceholder')"
+                    :autosize="{ minRows: 5, maxRows: 12 }"
+                    class="config-form__input config-form__textarea"
+                  />
+                  <template #feedback>
+                    {{ t('config.workerPreScriptHint') }}
+                  </template>
+                </n-form-item>
+              </n-gi>
+              <n-gi>
+                <n-form-item :label="t('config.workerPostScript')">
+                  <n-input
+                    v-model:value="workerFormValue.worker_post_script"
+                    type="textarea"
+                    :placeholder="t('config.workerPostScriptPlaceholder')"
+                    :autosize="{ minRows: 5, maxRows: 12 }"
+                    class="config-form__input config-form__textarea"
+                  />
+                  <template #feedback>
+                    {{ t('config.workerPostScriptHint') }}
+                  </template>
+                </n-form-item>
+              </n-gi>
+            </n-grid>
+          </div>
+
           <div class="config-form__section config-maven-section">
             <div class="config-form__section-title">{{ t('config.mavenSettings') }}</div>
             <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
@@ -221,7 +241,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import {
-  NAlert,
   NButton,
   NCard,
   NForm,
@@ -253,6 +272,8 @@ type MountItem = {
 type WorkerFormValue = {
   mounts: MountItem[]
   environment_variables: EnvironmentVariableFormItem[]
+  worker_pre_script: string
+  worker_post_script: string
   maven_cache_host_path: string
   maven_settings_host_path: string
 }
@@ -289,6 +310,8 @@ const environmentVariableTypeOptions = [
 const workerFormValue = ref<WorkerFormValue>({
   mounts: [],
   environment_variables: [],
+  worker_pre_script: '',
+  worker_post_script: '',
   maven_cache_host_path: '',
   maven_settings_host_path: ''
 })
@@ -356,6 +379,8 @@ function mapRuntimeConfigToWorkerFormValue(runtime?: Partial<RuntimeConfig>): Wo
   return {
     mounts: parseMounts(runtime?.worker_volume_mounts ?? ''),
     environment_variables: parseEnvironmentVariables(runtime?.worker_environment_variables),
+    worker_pre_script: runtime?.worker_pre_script || '',
+    worker_post_script: runtime?.worker_post_script || '',
     maven_cache_host_path: runtime?.maven_cache_host_path || '',
     maven_settings_host_path: runtime?.maven_settings_host_path || ''
   }
@@ -367,6 +392,8 @@ function cloneWorkerFormValue(value: WorkerFormValue): WorkerFormValue {
     environment_variables: value.environment_variables.map((environmentVariable) => ({
       ...environmentVariable
     })),
+    worker_pre_script: value.worker_pre_script,
+    worker_post_script: value.worker_post_script,
     maven_cache_host_path: value.maven_cache_host_path,
     maven_settings_host_path: value.maven_settings_host_path
   }
@@ -406,6 +433,8 @@ function createEmptyWorkerFormValue(): WorkerFormValue {
   return {
     mounts: [],
     environment_variables: [],
+    worker_pre_script: '',
+    worker_post_script: '',
     maven_cache_host_path: '',
     maven_settings_host_path: ''
   }
@@ -428,6 +457,8 @@ async function handleSaveWorker() {
         worker_environment_variables: serializeEnvironmentVariables(
           workerFormValue.value.environment_variables
         ),
+        worker_pre_script: workerFormValue.value.worker_pre_script,
+        worker_post_script: workerFormValue.value.worker_post_script,
         maven_cache_host_path: workerFormValue.value.maven_cache_host_path.trim(),
         maven_settings_host_path: workerFormValue.value.maven_settings_host_path.trim()
       }
@@ -461,6 +492,10 @@ watch(() => props.reloadKey, () => {
 }
 
 .config-environment-section {
+  margin-top: 20px;
+}
+
+.config-scripts-section {
   margin-top: 20px;
 }
 
