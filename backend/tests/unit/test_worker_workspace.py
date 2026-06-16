@@ -20,6 +20,7 @@ def test_build_issue_workspace_paths():
     assert paths.repo_path == "/opt/codify-workspaces/project-123/issue-456/repo"
     assert paths.claude_path == "/opt/codify-workspaces/project-123/issue-456/claude"
     assert paths.runtime_path == "/opt/codify-workspaces/project-123/issue-456/runtime/task-789"
+    assert paths.shared_path == "/opt/codify-workspaces/project-123/issue-456/shared"
 
 
 def test_build_issue_workspace_paths_disabled_when_root_empty():

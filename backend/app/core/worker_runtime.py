@@ -24,6 +24,7 @@ _MAVEN_SETTINGS_CONTAINER_PATH = "/home/codify/.m2/settings.xml"
 _WORKSPACE_CONTAINER_PATH = "/workspace"
 _RUNTIME_CONTAINER_PATH = "/tmp/codify-runtime"
 _CLAUDE_CONTAINER_PATH = "/home/codify/.claude"
+_SHARED_CONTAINER_PATH = "/opt/codify-issue-shared"
 
 
 async def resolve_provider(db: AsyncSession, task: Task) -> AIProvider:
@@ -222,6 +223,7 @@ def build_container_volumes(
             workspace_paths.repo_path,
             workspace_paths.claude_path,
             workspace_paths.runtime_path,
+            workspace_paths.shared_path,
         ):
             try:
                 os.makedirs(path, exist_ok=True)
@@ -230,6 +232,7 @@ def build_container_volumes(
         volumes[workspace_paths.repo_path] = {"bind": _WORKSPACE_CONTAINER_PATH, "mode": "rw"}
         volumes[workspace_paths.claude_path] = {"bind": _CLAUDE_CONTAINER_PATH, "mode": "rw"}
         volumes[workspace_paths.runtime_path] = {"bind": _RUNTIME_CONTAINER_PATH, "mode": "rw"}
+        volumes[workspace_paths.shared_path] = {"bind": _SHARED_CONTAINER_PATH, "mode": "rw"}
     elif issue and issue.session_storage_path:
         os.makedirs(issue.session_storage_path, exist_ok=True)
         volumes[issue.session_storage_path] = {

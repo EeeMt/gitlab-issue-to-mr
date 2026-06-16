@@ -4,7 +4,7 @@
 
 Worker 容器有三种挂载来源：
 
-1. **Persistent Workspace** — 跨任务持久化的 Git 仓库和运行时目录
+1. **Persistent Workspace** — 跨任务持久化的 Git 仓库、运行时目录和 issue 级共享目录
 2. **Session Storage** — Claude 会话文件持久化
 3. **静态/自定义挂载** — Maven 缓存、CA 证书、用户自定义 volume
 
@@ -18,7 +18,7 @@ Worker 容器有三种挂载来源：
 
 | 配置项 | 环境变量 | 默认值 | 说明 |
 |--------|----------|--------|------|
-| `worker_workspace_host_path` | `WORKER_WORKSPACE_HOST_PATH` | `""` (空) | 宿主机根路径（绝对路径）；设为空字符串可关闭持久 workspace |
+| `worker_workspace_host_path` | `WORKER_WORKSPACE_HOST_PATH` | `/opt/codify-workspaces` | 宿主机根路径（绝对路径）；设为空字符串可关闭持久 workspace |
 | `worker_workspace_retention_days` | `WORKER_WORKSPACE_RETENTION_DAYS` | `14` | 正常任务 workspace 保留天数 |
 | `worker_failed_workspace_retention_days` | `WORKER_FAILED_WORKSPACE_RETENTION_DAYS` | `30` | 失败任务 workspace 保留天数（配置已定义，清理逻辑尚未区分） |
 
@@ -34,8 +34,9 @@ Worker 容器有三种挂载来源：
     └── issue-{issue_id}/
         ├── repo/                  → 容器内 /workspace
         ├── claude/                → 容器内 /home/codify/.claude
-        └── runtime/
-            └── task-{task_id}/    → 容器内 /tmp/codify-runtime
+        ├── runtime/
+        │   └── task-{task_id}/    → 容器内 /tmp/codify-runtime
+        └── shared/                → 容器内 /opt/codify-issue-shared
 ```
 
 ### 挂载映射
@@ -45,6 +46,18 @@ Worker 容器有三种挂载来源：
 | `.../issue-{id}/repo` | `/workspace` | `rw` | Git 仓库，跨任务复用 |
 | `.../issue-{id}/claude` | `/home/codify/.claude` | `rw` | Claude CLI 会话状态，跨任务复用 |
 | `.../issue-{id}/runtime/task-{id}` | `/tmp/codify-runtime` | `rw` | 任务运行时产物（event.jsonl、runtime.json、console.log） |
+| `.../issue-{id}/shared` | `/opt/codify-issue-shared` | `rw` | 同一 issue 内多个 task 共享的通用可变空间 |
+
+### Shared 目录
+
+`shared/` 只提供 issue 级共享挂载，不内置任何语言或包管理器语义。需要使用 pip、npm 等缓存时，通过已有 Worker environment variables 配置显式指定路径，例如：
+
+```text
+PIP_CACHE_DIR=/opt/codify-issue-shared/cache/pip
+NPM_CONFIG_CACHE=/opt/codify-issue-shared/cache/npm
+```
+
+环境变量值不会做 shell 展开，建议直接写完整绝对路径。现有环境变量 key 校验只允许大写，因此 npm 使用 `NPM_CONFIG_CACHE`。
 
 ### 容器内行为（`entrypoint.worker.sh`）
 
@@ -124,6 +137,7 @@ fi
 - `repo/` 存放 Git 仓库和未提交状态
 - `runtime/task-{task_id}/` 存放单个任务的运行时文件
 - `claude/` 存放 Claude CLI 会话状态
+- `shared/` 存放同一 issue 内跨 task 复用的用户配置缓存或工具状态
 - 清理 issue workspace 也会删除 Claude resume context
 
 当 `worker_workspace_host_path` 为空时，不创建 issue workspace，Session Storage 使用 `{session_storage_root}/{issue_id}/claude` legacy 路径：
@@ -275,17 +289,18 @@ build_container_volumes(settings, issue, task=task)
 ├─ maven_settings_host_path 非空?
 │   └─ YES → volumes[host_path] = {bind: /home/codify/.m2/settings.xml, mode: ro}
 │
-├─ worker_volume_mounts_parsed (含 CA cert 自动注入)
-│   └─ 遍历每个 mount → volumes[host_path] = {bind: container_path, mode}
-│
 ├─ worker_workspace_host_path 非空 && issue && task?
 │   └─ YES → build_issue_workspace_paths()
 │       ├─ volumes[repo_path]    = {bind: /workspace,          mode: rw}
 │       ├─ volumes[claude_path]  = {bind: /home/codify/.claude, mode: rw}
-│       └─ volumes[runtime_path] = {bind: /tmp/codify-runtime, mode: rw}
+│       ├─ volumes[runtime_path] = {bind: /tmp/codify-runtime, mode: rw}
+│       └─ volumes[shared_path]  = {bind: /opt/codify-issue-shared, mode: rw}
 │
-└─ worker_workspace_host_path 为空 && issue.session_storage_path 非空?
-    └─ YES → volumes[session_storage_path] = {bind: /home/codify/.claude, mode: rw}
+├─ worker_workspace_host_path 为空 && issue.session_storage_path 非空?
+│   └─ YES → volumes[session_storage_path] = {bind: /home/codify/.claude, mode: rw}
+│
+└─ worker_volume_mounts_parsed (含 CA cert 自动注入)
+    └─ 遍历每个 mount → volumes[host_path] = {bind: container_path, mode}
 ```
 
 ---

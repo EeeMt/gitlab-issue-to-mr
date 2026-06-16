@@ -15,6 +15,7 @@ class IssueWorkspacePaths:
     repo_path: str
     claude_path: str
     runtime_path: str
+    shared_path: str
 
 
 def build_issue_workspace_paths(settings: Any, issue: Any, task: Any) -> IssueWorkspacePaths | None:
@@ -32,6 +33,7 @@ def build_issue_workspace_paths(settings: Any, issue: Any, task: Any) -> IssueWo
         repo_path=os.path.join(issue_root, "repo"),
         claude_path=os.path.join(issue_root, "claude"),
         runtime_path=os.path.join(issue_root, "runtime", f"task-{task.id}"),
+        shared_path=os.path.join(issue_root, "shared"),
     )
 
 

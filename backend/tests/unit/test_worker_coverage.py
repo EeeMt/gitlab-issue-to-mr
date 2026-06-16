@@ -789,6 +789,14 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('printf \'%s\' "${APPEND_SYSTEM_PROMPT}" > "${CLAUDE_SYSTEM_PROMPT_FILE}"', content)
         self.assertIn('APPEND_SYSTEM_PROMPT_FILE="${CLAUDE_SYSTEM_PROMPT_FILE}"', content)
 
+    def test_entrypoint_makes_issue_shared_dir_writable_without_traversing_cache_contents(self):
+        script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
+        content = script.read_text()
+
+        self.assertIn('if [ -d /opt/codify-issue-shared ]; then', content)
+        self.assertIn('chown codify:codify /opt/codify-issue-shared', content)
+        self.assertNotIn('chown -R codify:codify /opt/codify-issue-shared', content)
+
     def test_entrypoint_keeps_runtime_artifacts_outside_worktree_until_after_commit(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = script.read_text()
@@ -929,7 +937,7 @@ class TestBuildContainerVolumes(unittest.TestCase):
         self.assertEqual(volumes, {})
 
     def test_issue_workspace_and_task_runtime_volumes_enabled(self):
-        """Persistent workspace mounts issue repo, Claude state, and task runtime."""
+        """Persistent workspace mounts issue repo, Claude state, task runtime, and shared dir."""
         settings = _make_settings(worker_workspace_host_path="/opt/codify-workspaces")
         worker = _make_worker()
         issue = MagicMock()
@@ -942,9 +950,10 @@ class TestBuildContainerVolumes(unittest.TestCase):
         repo_path = "/opt/codify-workspaces/project-123/issue-456/repo"
         claude_path = "/opt/codify-workspaces/project-123/issue-456/claude"
         runtime_path = "/opt/codify-workspaces/project-123/issue-456/runtime/task-789"
+        shared_path = "/opt/codify-workspaces/project-123/issue-456/shared"
 
         with patch("app.core.worker_runtime.os.makedirs") as makedirs:
-            makedirs.side_effect = [None, OSError("claude unavailable"), None]
+            makedirs.side_effect = [None, OSError("claude unavailable"), None, None]
 
             volumes = worker._build_container_volumes(settings, issue, task=task)
 
@@ -954,10 +963,13 @@ class TestBuildContainerVolumes(unittest.TestCase):
         self.assertEqual(volumes[claude_path]["mode"], "rw")
         self.assertEqual(volumes[runtime_path]["bind"], "/tmp/codify-runtime")
         self.assertEqual(volumes[runtime_path]["mode"], "rw")
+        self.assertEqual(volumes[shared_path]["bind"], "/opt/codify-issue-shared")
+        self.assertEqual(volumes[shared_path]["mode"], "rw")
         self.assertNotIn("/var/codify/sessions/456/claude", volumes)
         makedirs.assert_any_call(repo_path, exist_ok=True)
         makedirs.assert_any_call(claude_path, exist_ok=True)
         makedirs.assert_any_call(runtime_path, exist_ok=True)
+        makedirs.assert_any_call(shared_path, exist_ok=True)
 
     def test_issue_workspace_volumes_disabled_when_setting_empty(self):
         settings = _make_settings(worker_workspace_host_path="")
@@ -969,6 +981,7 @@ class TestBuildContainerVolumes(unittest.TestCase):
 
         self.assertNotIn("/workspace", [v["bind"] for v in volumes.values()])
         self.assertNotIn("/tmp/codify-runtime", [v["bind"] for v in volumes.values()])
+        self.assertNotIn("/opt/codify-issue-shared", [v["bind"] for v in volumes.values()])
 
     def test_legacy_session_storage_mount_used_when_workspace_disabled(self):
         settings = _make_settings(worker_workspace_host_path="")

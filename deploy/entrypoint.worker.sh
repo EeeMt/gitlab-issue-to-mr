@@ -739,6 +739,10 @@ fi
 
 chmod 644 /tmp/claude_prompt.txt
 chown -R codify:codify /workspace /tmp/claude_prompt.txt
+# Ensure issue-scoped shared storage is writable by the codify user
+if [ -d /opt/codify-issue-shared ]; then
+    chown codify:codify /opt/codify-issue-shared
+fi
 # Ensure session storage directory is writable by the codify user
 if [ -d /home/codify/.claude ]; then
     chown -R codify:codify /home/codify/.claude
