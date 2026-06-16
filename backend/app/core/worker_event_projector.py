@@ -613,6 +613,7 @@ class WorkerEventProjector:
         )
         cursor.last_offset = len(full_text.encode("utf-8"))
         cursor.last_sequence_no += 1
+        await db.commit()
 
     async def tail_console_log(self, *, task_id: int, container: Any, db: AsyncSession) -> None:
         """Read newly appended bytes from console.log and persist as raw log chunks."""

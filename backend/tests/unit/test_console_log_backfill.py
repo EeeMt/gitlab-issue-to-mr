@@ -6,6 +6,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -113,7 +114,7 @@ class TestConsoleLogBackfill(unittest.IsolatedAsyncioTestCase):
             await db.commit()
 
         # Patch archive path
-        with unittest.mock.patch(
+        with mock.patch(
             "app.core.worker_event_projector._ARCHIVE_STORE", self.temp_dir
         ):
             async with self.session_factory() as db:
@@ -121,6 +122,56 @@ class TestConsoleLogBackfill(unittest.IsolatedAsyncioTestCase):
                     task_id=task_id, db=db
                 )
                 await db.commit()
+
+        async with self.session_factory() as db:
+            result = await db.execute(
+                select(TaskRawLogChunk)
+                .where(TaskRawLogChunk.task_id == task_id)
+                .order_by(TaskRawLogChunk.sequence_no.asc())
+            )
+            chunks = result.scalars().all()
+            text = "".join(c.content.decode("utf-8") for c in chunks)
+            assert len(chunks) == 2
+            assert text == console_content
+
+    async def test_backfill_commits_missing_console_chunk(self):
+        from sqlalchemy import select
+
+        from app.core.task_log_payloads import append_raw_log_chunk
+        from app.core.worker_event_projector import WorkerEventProjector
+        from app.models import TaskIngestCursor, TaskRawLogChunk
+
+        task_id = 45
+        already_ingested = "response body\n"
+        missing_tail = (
+            "Delivery summary Mermaid validation passed\n"
+            "Delivery summary written to /tmp/codify-runtime/delivery-summary.md (42 chars)\n"
+        )
+        console_content = already_ingested + missing_tail
+
+        _create_archive(self.temp_dir, task_id, console_content)
+
+        projector = WorkerEventProjector(sanitize_sensitive_data=lambda x: x)
+
+        async with self.session_factory() as db:
+            await append_raw_log_chunk(
+                db, task_id=task_id, sequence_no=1, text=already_ingested
+            )
+            db.add(TaskIngestCursor(
+                task_id=task_id,
+                stream_name="console_log",
+                last_offset=len(already_ingested.encode("utf-8")),
+                last_sequence_no=1,
+            ))
+            await db.commit()
+
+        with mock.patch(
+            "app.core.worker_event_projector._ARCHIVE_STORE", self.temp_dir
+        ):
+            async with self.session_factory() as db:
+                await projector.backfill_console_log_from_archive(
+                    task_id=task_id, db=db
+                )
 
         async with self.session_factory() as db:
             result = await db.execute(
@@ -160,7 +211,7 @@ class TestConsoleLogBackfill(unittest.IsolatedAsyncioTestCase):
             db.add(cursor)
             await db.commit()
 
-        with unittest.mock.patch(
+        with mock.patch(
             "app.core.worker_event_projector._ARCHIVE_STORE", self.temp_dir
         ):
             async with self.session_factory() as db:
@@ -197,7 +248,7 @@ class TestConsoleLogBackfill(unittest.IsolatedAsyncioTestCase):
             db.add(cursor)
             await db.commit()
 
-        with unittest.mock.patch(
+        with mock.patch(
             "app.core.worker_event_projector._ARCHIVE_STORE", self.temp_dir
         ):
             async with self.session_factory() as db:
@@ -262,7 +313,7 @@ class TestEventJsonlBackfill(unittest.IsolatedAsyncioTestCase):
             db.add(cursor)
             await db.commit()
 
-        with unittest.mock.patch(
+        with mock.patch(
             "app.core.worker_event_projector._ARCHIVE_STORE", self.temp_dir
         ):
             async with self.session_factory() as db:
@@ -307,7 +358,7 @@ class TestEventJsonlBackfill(unittest.IsolatedAsyncioTestCase):
             db.add(cursor)
             await db.commit()
 
-        with unittest.mock.patch(
+        with mock.patch(
             "app.core.worker_event_projector._ARCHIVE_STORE", self.temp_dir
         ):
             async with self.session_factory() as db:
@@ -360,7 +411,7 @@ class TestEventJsonlBackfill(unittest.IsolatedAsyncioTestCase):
             db.add(cursor)
             await db.commit()
 
-        with unittest.mock.patch(
+        with mock.patch(
             "app.core.worker_event_projector._ARCHIVE_STORE", self.temp_dir
         ):
             async with self.session_factory() as db:
@@ -398,7 +449,7 @@ class TestEventJsonlBackfill(unittest.IsolatedAsyncioTestCase):
             db.add(cursor)
             await db.commit()
 
-        with unittest.mock.patch(
+        with mock.patch(
             "app.core.worker_event_projector._ARCHIVE_STORE", self.temp_dir
         ):
             async with self.session_factory() as db:
