@@ -461,7 +461,7 @@
             <div v-for="event in issueWebhookEvents" :key="event.id" class="issue-webhook-event">
               <span>{{ formatCompactDateTime(event.created_at) }}</span>
               <n-tag size="tiny" round>{{ event.event_type }}</n-tag>
-              <span>{{ event.result }}</span>
+              <n-tag size="tiny" round :type="getWebhookResultTagType(event.result)">{{ getWebhookResultLabel(event.result) }}</n-tag>
               <span v-if="event.result_detail" class="metadata-muted">{{ event.result_detail }}</span>
             </div>
           </div>
@@ -940,6 +940,27 @@ function formatCompactDateTime(value?: string | null): string {
   return formatDateTimeUtc8Compact(value)
 }
 
+function getWebhookResultLabel(result: string): string {
+  const map: Record<string, string> = {
+    issue_closed: t('config.webhookEventsResultIssueClosed'),
+    ignored_already_closed: t('config.webhookEventsResultIgnoredAlreadyClosed'),
+    no_match: t('config.webhookEventsResultNoMatch'),
+    unsupported_event: t('config.webhookEventsResultUnsupported'),
+    ignored_action: t('config.webhookEventsResultIgnoredAction'),
+    auth_failed: t('config.webhookEventsResultAuthFailed'),
+    ci_failure_collecting: t('config.webhookEventsResultCIFailureCollecting'),
+    duplicate: t('config.webhookEventsResultDuplicate'),
+  }
+  return map[result] || result
+}
+
+function getWebhookResultTagType(result: string): 'success' | 'warning' | 'error' | 'default' {
+  if (result === 'issue_closed' || result === 'ci_failure_collecting') return 'success'
+  if (result === 'no_match' || result === 'duplicate') return 'warning'
+  if (result === 'auth_failed') return 'error'
+  return 'default'
+}
+
 function formatTaskDuration(task: Pick<Task, 'started_at' | 'completed_at'>): string {
   if (!task.started_at) return '—'
   const started = parseUtcDate(task.started_at).getTime()
@@ -1056,21 +1077,23 @@ async function fetchIssue() {
   }
 }
 
+let automationLoaded = false
 async function fetchIssueAutomation() {
-  ciFailuresLoading.value = true
+  if (!automationLoaded) ciFailuresLoading.value = true
   try {
     const [failureResponse, webhookResponse] = await Promise.all([
       getIssueCIFailures(issueId.value, { page_size: 5 }),
       getIssueWebhookEvents(issueId.value, { page_size: 5 }),
     ])
-    ciFailures.value = failureResponse.items
-    issueWebhookEvents.value = webhookResponse.items
+    const failures = failureResponse.items
     const logs: Record<number, CIFailureRunLog[]> = {}
-    await Promise.all(ciFailures.value.map(async (run) => {
+    await Promise.all(failures.map(async (run) => {
       const response = await getCIFailureLogs(run.id)
       logs[run.id] = response.items
     }))
+    ciFailures.value = failures
     ciFailureLogs.value = logs
+    issueWebhookEvents.value = webhookResponse.items
   } catch {
     ciFailures.value = []
     ciFailureLogs.value = {}
