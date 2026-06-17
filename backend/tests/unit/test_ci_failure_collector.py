@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -96,6 +97,34 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
         await session.commit()
         return issue, run
 
+    def _code_failure_jobs(self):
+        jobs = [
+            {
+                "id": 40001,
+                "name": "unit-test",
+                "stage": "test",
+                "status": "failed",
+                "failure_reason": "script_failure",
+                "allow_failure": False,
+                "web_url": "https://gitlab.example.com/job/40001",
+            }
+        ]
+        return jobs, {40001: "pytest failed\n"}
+
+    def _prior_ci_repair_task(self, task_id: int, created_at: datetime) -> Task:
+        return Task(
+            id=task_id,
+            issue_id=1,
+            project_id=42,
+            user_prompt="Prior CI repair",
+            status=TaskStatus.COMPLETED,
+            priority=1,
+            task_mode="execute",
+            trigger_source="ci_auto_repair",
+            created_at=created_at,
+            completed_at=created_at,
+        )
+
     async def test_disabled_issue_records_ignored_reason_without_task(self):
         from app.core.ci_failure_collector import process_ci_failure_run
 
@@ -190,6 +219,131 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
 
             steps = [(log.step, log.status) for log in (await session.execute(select(CIFailureRunLog))).scalars().all()]
             self.assertIn(("repair_task_created", "succeeded"), steps)
+
+    async def test_max_attempts_reached_blocks_without_manual_execute_reset(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+
+        async with self.Session() as session:
+            _, run = await self._seed_issue_and_run(session, enabled=True)
+            session.add_all(
+                [
+                    self._prior_ci_repair_task(11, datetime(2026, 6, 17, 10, 0, 0)),
+                    self._prior_ci_repair_task(12, datetime(2026, 6, 17, 10, 1, 0)),
+                ]
+            )
+            await session.commit()
+
+            await process_ci_failure_run(
+                session,
+                run.id,
+                gitlab_client=FakeGitLabClient(),
+                settings=self._settings(ci_auto_repair_max_attempts=2),
+                collector_id="test",
+            )
+
+            refreshed = await session.get(CIFailureRun, run.id)
+            self.assertEqual(refreshed.status, "ignored")
+            self.assertEqual(refreshed.ignored_reason, "max_attempts_exceeded")
+
+            logs = (
+                await session.execute(
+                    select(CIFailureRunLog).where(CIFailureRunLog.step == "auto_repair_gate_checked")
+                )
+            ).scalars().all()
+            self.assertEqual(logs[-1].details["attempts"], 2)
+            self.assertNotIn("reset_after_task_id", logs[-1].details)
+
+    async def test_successful_manual_execute_resets_ci_auto_repair_attempt_budget(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+
+        jobs, traces = self._code_failure_jobs()
+        async with self.Session() as session:
+            _, run = await self._seed_issue_and_run(session, enabled=True)
+            session.add_all(
+                [
+                    self._prior_ci_repair_task(11, datetime(2026, 6, 17, 10, 0, 0)),
+                    self._prior_ci_repair_task(12, datetime(2026, 6, 17, 10, 1, 0)),
+                    Task(
+                        id=13,
+                        issue_id=1,
+                        project_id=42,
+                        user_prompt="Manual verification fix",
+                        status=TaskStatus.COMPLETED,
+                        priority=1,
+                        task_mode="execute",
+                        trigger_source="manual",
+                        created_at=datetime(2026, 6, 17, 10, 2, 0),
+                        completed_at=datetime(2026, 6, 17, 10, 5, 0),
+                    ),
+                ]
+            )
+            await session.commit()
+
+            await process_ci_failure_run(
+                session,
+                run.id,
+                gitlab_client=FakeGitLabClient(jobs=jobs, traces=traces),
+                settings=self._settings(ci_auto_repair_max_attempts=2),
+                collector_id="test",
+            )
+
+            refreshed = await session.get(CIFailureRun, run.id)
+            self.assertEqual(refreshed.status, "task_created")
+            self.assertIsNotNone(refreshed.repair_task_id)
+
+            logs = (
+                await session.execute(
+                    select(CIFailureRunLog).where(CIFailureRunLog.step == "auto_repair_gate_checked")
+                )
+            ).scalars().all()
+            self.assertEqual(logs[-1].status, "succeeded")
+            self.assertEqual(logs[-1].details["attempts"], 0)
+            self.assertEqual(logs[-1].details["reset_after_task_id"], 13)
+
+    async def test_successful_manual_plan_does_not_reset_ci_auto_repair_attempt_budget(self):
+        from app.core.ci_failure_collector import process_ci_failure_run
+
+        async with self.Session() as session:
+            _, run = await self._seed_issue_and_run(session, enabled=True)
+            session.add_all(
+                [
+                    self._prior_ci_repair_task(11, datetime(2026, 6, 17, 10, 0, 0)),
+                    self._prior_ci_repair_task(12, datetime(2026, 6, 17, 10, 1, 0)),
+                    Task(
+                        id=13,
+                        issue_id=1,
+                        project_id=42,
+                        user_prompt="Manual plan only",
+                        status=TaskStatus.COMPLETED,
+                        priority=1,
+                        task_mode="plan",
+                        trigger_source="manual",
+                        created_at=datetime(2026, 6, 17, 10, 2, 0),
+                        completed_at=datetime(2026, 6, 17, 10, 5, 0),
+                    ),
+                ]
+            )
+            await session.commit()
+
+            await process_ci_failure_run(
+                session,
+                run.id,
+                gitlab_client=FakeGitLabClient(),
+                settings=self._settings(ci_auto_repair_max_attempts=2),
+                collector_id="test",
+            )
+
+            refreshed = await session.get(CIFailureRun, run.id)
+            self.assertEqual(refreshed.status, "ignored")
+            self.assertEqual(refreshed.ignored_reason, "max_attempts_exceeded")
+
+            logs = (
+                await session.execute(
+                    select(CIFailureRunLog).where(CIFailureRunLog.step == "auto_repair_gate_checked")
+                )
+            ).scalars().all()
+            self.assertEqual(logs[-1].details["attempts"], 2)
+            self.assertNotIn("reset_after_task_id", logs[-1].details)
 
     async def test_pipeline_ref_fallback_matches_issue_by_branch_name(self):
         from app.core.ci_failure_collector import process_ci_failure_run

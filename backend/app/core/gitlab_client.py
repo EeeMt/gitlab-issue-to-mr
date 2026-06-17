@@ -580,7 +580,16 @@ class GitLabClient:
 
     def get_job_trace(self, project_id: int, job_id: int) -> str:
         """Fetch raw GitLab CI job trace text."""
-        return str(self.gl.http_get(f"/projects/{project_id}/jobs/{job_id}/trace"))
+        response = self.gl.http_get(f"/projects/{project_id}/jobs/{job_id}/trace", raw=True)
+        if isinstance(response, bytes):
+            return response.decode("utf-8", errors="replace")
+        content = getattr(response, "content", None)
+        if isinstance(content, bytes):
+            return content.decode("utf-8", errors="replace")
+        text = getattr(response, "text", None)
+        if isinstance(text, str):
+            return text
+        return str(response)
 
     def close(self) -> None:
         """Close GitLab client."""

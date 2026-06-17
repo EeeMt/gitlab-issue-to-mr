@@ -230,6 +230,38 @@ async def _match_issue(db: AsyncSession, run: CIFailureRun, mr_details: Any | No
     return None
 
 
+async def _count_ci_auto_repair_attempts(db: AsyncSession, issue_id: int) -> tuple[int, dict[str, Any]]:
+    reset_row = (
+        await db.execute(
+            select(Task.id, Task.completed_at)
+            .where(
+                Task.issue_id == issue_id,
+                Task.trigger_source == "manual",
+                Task.task_mode == "execute",
+                Task.status == TaskStatus.COMPLETED,
+                Task.completed_at.is_not(None),
+            )
+            .order_by(Task.completed_at.desc(), Task.id.desc())
+            .limit(1)
+        )
+    ).first()
+
+    query = select(func.count(Task.id)).where(
+        Task.issue_id == issue_id,
+        Task.trigger_source == "ci_auto_repair",
+    )
+    details: dict[str, Any] = {}
+    if reset_row is not None:
+        reset_task_id, reset_at = reset_row
+        query = query.where(Task.created_at > reset_at)
+        details = {
+            "reset_after_task_id": reset_task_id,
+            "reset_after_completed_at": reset_at.isoformat() if reset_at else None,
+        }
+
+    return int(await db.scalar(query) or 0), details
+
+
 async def process_ci_failure_run(
     db: AsyncSession,
     run_id: int,
@@ -299,21 +331,16 @@ async def process_ci_failure_run(
             )
             return run
 
-        attempts = await db.scalar(
-            select(func.count(Task.id)).where(
-                Task.issue_id == issue.id,
-                Task.trigger_source == "ci_auto_repair",
-            )
-        )
+        attempts, attempt_details = await _count_ci_auto_repair_attempts(db, issue.id)
         max_attempts = int(getattr(settings, "ci_auto_repair_max_attempts", 2))
-        if int(attempts or 0) >= max_attempts:
+        if attempts >= max_attempts:
             await _ignore_run(
                 db,
                 run,
                 reason="max_attempts_exceeded",
                 step="auto_repair_gate_checked",
                 message="CI auto-repair attempt limit reached",
-                details={"attempts": int(attempts or 0), "max_attempts": max_attempts},
+                details={"attempts": attempts, "max_attempts": max_attempts, **attempt_details},
             )
             return run
         await append_ci_failure_log(
@@ -321,7 +348,7 @@ async def process_ci_failure_run(
             run,
             step="auto_repair_gate_checked",
             status="succeeded",
-            details={"enabled": True, "attempts": int(attempts or 0), "max_attempts": max_attempts},
+            details={"enabled": True, "attempts": attempts, "max_attempts": max_attempts, **attempt_details},
         )
 
         active_task = (

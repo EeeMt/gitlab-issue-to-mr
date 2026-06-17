@@ -567,6 +567,26 @@ class TestGetFileContent(unittest.TestCase):
 
 
 # ===================================================================
+# get_job_trace
+# ===================================================================
+
+class TestGetJobTrace(unittest.TestCase):
+    """Tests for get_job_trace."""
+
+    def test_returns_response_body_text(self):
+        """Returns raw trace response body instead of response object repr."""
+        client = _make_client()
+        response = MagicMock()
+        response.content = b"running tests\nFAILED tests/test_example.py\n"
+        client.gl.http_get.return_value = response
+
+        result = client.get_job_trace(42, 76)
+
+        self.assertEqual(result, "running tests\nFAILED tests/test_example.py\n")
+        client.gl.http_get.assert_called_once_with("/projects/42/jobs/76/trace", raw=True)
+
+
+# ===================================================================
 # get_issue
 # ===================================================================
 
