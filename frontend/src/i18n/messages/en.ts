@@ -484,6 +484,7 @@ const en = {
     noCiAutomationEvents: 'No CI automation events recorded yet.',
     pipelineLabel: 'Pipeline #{id}',
     viewRepairTask: 'Task #{id}',
+    ciWebhookReceived: 'Webhook received',
     webhookEvents: 'Webhook events',
     ciFailureStatus: {
       collecting: 'Collecting',

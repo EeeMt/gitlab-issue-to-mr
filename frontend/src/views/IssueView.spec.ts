@@ -710,11 +710,11 @@ describe('IssueView', () => {
 	      const automationCard = wrapper.find('[data-testid="issue-ci-failures-card"]')
 	      expect(automationCard.text()).toContain('issue.pipelineLabel')
 	      expect(automationCard.text()).toContain('unit-test · code')
-	      expect(automationCard.text()).toContain('repair_task_created')
+	      expect(automationCard.text()).toContain('issue.ciFailureStatus.task_created')
 	      expect(automationCard.text()).toContain('Created repair task #77')
 	      expect(automationCard.text()).toContain('issue.viewRepairTask')
 	      expect(automationCard.text()).toContain('pipeline')
-	      expect(automationCard.text()).toContain('ci_failure_collecting')
+	      expect(automationCard.text()).toContain('config.webhookEventsResultCIFailureCollecting')
 	    })
 
 	    it('shows create task button for open issue (owner)', async () => {

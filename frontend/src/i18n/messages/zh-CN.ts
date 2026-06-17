@@ -482,6 +482,7 @@ const zhCN = {
     noCiAutomationEvents: '暂无 CI 自动化事件。',
     pipelineLabel: '流水线 #{id}',
     viewRepairTask: '任务 #{id}',
+    ciWebhookReceived: '收到 Webhook',
     webhookEvents: 'Webhook 事件',
     ciFailureStatus: {
       collecting: '收集中',

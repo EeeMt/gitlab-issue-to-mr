@@ -446,7 +446,17 @@
               </n-tag>
             </div>
 
-            <div v-if="ciFailureLogs[run.id]?.length" class="ci-run-timeline">
+            <div v-if="webhookEventsByRun[run.id] || ciFailureLogs[run.id]?.length" class="ci-run-timeline">
+              <div v-if="webhookEventsByRun[run.id]" class="ci-run-timeline__item ci-failure-run__webhook-step">
+                <span class="ci-run-timeline__time">{{ formatCompactDateTime(webhookEventsByRun[run.id].created_at) }}</span>
+                <span class="ci-run-timeline__step">{{ t('issue.ciWebhookReceived') }}</span>
+                <n-tag size="tiny" round :type="getWebhookResultTagType(webhookEventsByRun[run.id].result)">
+                  {{ getWebhookResultLabel(webhookEventsByRun[run.id].result) }}
+                </n-tag>
+                <span v-if="webhookEventsByRun[run.id].result_detail" class="ci-run-timeline__message">
+                  {{ webhookEventsByRun[run.id].result_detail }}
+                </span>
+              </div>
               <div v-for="log in ciFailureLogs[run.id]" :key="log.id" class="ci-run-timeline__item">
                 <span class="ci-run-timeline__time">{{ formatCompactDateTime(log.created_at) }}</span>
                 <span class="ci-run-timeline__step">{{ log.step }}</span>
@@ -456,9 +466,9 @@
             </div>
           </div>
 
-          <div v-if="issueWebhookEvents.length" class="issue-webhook-events">
+          <div v-if="ungroupedWebhookEvents.length" class="issue-webhook-events">
             <div class="issue-webhook-events__title">{{ t('issue.webhookEvents') }}</div>
-            <div v-for="event in issueWebhookEvents" :key="event.id" class="issue-webhook-event">
+            <div v-for="event in ungroupedWebhookEvents" :key="event.id" class="issue-webhook-event">
               <span>{{ formatCompactDateTime(event.created_at) }}</span>
               <n-tag size="tiny" round>{{ event.event_type }}</n-tag>
               <n-tag size="tiny" round :type="getWebhookResultTagType(event.result)">{{ getWebhookResultLabel(event.result) }}</n-tag>
@@ -721,6 +731,23 @@ const ciFailures = ref<CIFailureRun[]>([])
 const ciFailureLogs = ref<Record<number, CIFailureRunLog[]>>({})
 const issueWebhookEvents = ref<WebhookEvent[]>([])
 const ciFailuresLoading = ref(false)
+
+const webhookEventsByRun = computed(() => {
+  const eventById = new Map(issueWebhookEvents.value.map(e => [e.id, e]))
+  const map: Record<number, WebhookEvent> = {}
+  for (const run of ciFailures.value) {
+    if (run.webhook_event_id) {
+      const event = eventById.get(run.webhook_event_id)
+      if (event) map[run.id] = event
+    }
+  }
+  return map
+})
+
+const ungroupedWebhookEvents = computed(() => {
+  const linkedIds = new Set(Object.values(webhookEventsByRun.value).map(e => e.id))
+  return issueWebhookEvents.value.filter(e => !linkedIds.has(e.id))
+})
 
 const renderedDescription = computed(() => renderMarkdown(issue.value?.description ?? ''))
 const renderedRetryPrompt = computed(() => renderMarkdown(retryTargetTask.value?.user_prompt ?? ''))
@@ -1018,6 +1045,10 @@ watch(showRescheduleDrawer, (val) => {
   }
 })
 
+watch(issueId, () => {
+  automationLoaded = false
+})
+
 onUnmounted(() => {
   if (pollTimer !== null) {
     clearInterval(pollTimer)
@@ -1069,7 +1100,7 @@ async function fetchIssue() {
   loading.value = true
   try {
     issue.value = await getIssue(issueId.value)
-    await fetchIssueAutomation()
+    if (!automationLoaded) await fetchIssueAutomation()
   } catch {
     message.error(t('issue.loadFailed'))
   } finally {
@@ -1083,7 +1114,7 @@ async function fetchIssueAutomation() {
   try {
     const [failureResponse, webhookResponse] = await Promise.all([
       getIssueCIFailures(issueId.value, { page_size: 5 }),
-      getIssueWebhookEvents(issueId.value, { page_size: 5 }),
+      getIssueWebhookEvents(issueId.value, { page_size: 50 }),
     ])
     const failures = failureResponse.items
     const logs: Record<number, CIFailureRunLog[]> = {}
@@ -1094,6 +1125,7 @@ async function fetchIssueAutomation() {
     ciFailures.value = failures
     ciFailureLogs.value = logs
     issueWebhookEvents.value = webhookResponse.items
+    automationLoaded = true
   } catch {
     ciFailures.value = []
     ciFailureLogs.value = {}
@@ -1725,6 +1757,12 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ci-failure-run__webhook-step {
+  padding-bottom: 6px;
+  border-bottom: 1px dashed rgba(148, 163, 184, 0.15);
+  margin-bottom: 2px;
 }
 
 .issue-webhook-events {
