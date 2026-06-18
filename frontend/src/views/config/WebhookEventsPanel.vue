@@ -40,7 +40,7 @@
           :data="events"
           :loading="loading"
           :bordered="false"
-          :scroll-x="1000"
+          :scroll-x="1120"
           :row-key="(row: WebhookEvent) => row.id"
         >
           <template #empty>
@@ -131,6 +131,12 @@ function getResultLabel(result: string): string {
   return map[result] || result
 }
 
+function getPipelineId(row: WebhookEvent): string {
+  const pipelineId = row.payload_summary?.pipeline_id
+  if (pipelineId == null || pipelineId === '') return '-'
+  return String(pipelineId)
+}
+
 const columns = computed<DataTableColumns<WebhookEvent>>(() => [
   {
     title: t('config.webhookEventsColTime'),
@@ -162,6 +168,12 @@ const columns = computed<DataTableColumns<WebhookEvent>>(() => [
     key: 'merge_request_iid',
     width: 80,
     render: (row) => (row.merge_request_iid != null ? `!${row.merge_request_iid}` : '-'),
+  },
+  {
+    title: t('config.webhookEventsColPipelineId'),
+    key: 'pipeline_id',
+    width: 110,
+    render: (row) => getPipelineId(row),
   },
   {
     title: t('config.webhookEventsColIssue'),

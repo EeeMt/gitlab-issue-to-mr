@@ -1340,6 +1340,7 @@ const zhCN = {
     webhookEventsColEventType: '事件类型',
     webhookEventsColAction: '操作',
     webhookEventsColMrIid: 'MR IID',
+    webhookEventsColPipelineId: '流水线 ID',
     webhookEventsColIssue: 'Issue',
     webhookEventsColResult: '结果',
     webhookEventsColDetail: '详情',

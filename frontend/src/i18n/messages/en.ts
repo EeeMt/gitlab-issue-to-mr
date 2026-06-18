@@ -1361,6 +1361,7 @@ const en = {
       webhookEventsColEventType: 'Event Type',
       webhookEventsColAction: 'Action',
       webhookEventsColMrIid: 'MR IID',
+      webhookEventsColPipelineId: 'Pipeline ID',
       webhookEventsColIssue: 'Issue',
       webhookEventsColResult: 'Result',
       webhookEventsColDetail: 'Detail',
