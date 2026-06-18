@@ -380,7 +380,7 @@
         />
       </n-card>
 
-      <n-card class="issue-card" :bordered="false" data-testid="issue-ci-failures-card">
+      <n-card class="issue-card issue-card--ci-automation" :bordered="false" data-testid="issue-ci-failures-card">
         <template #header>
           <div class="issue-card__header">
             <div class="issue-card__title">{{ t('issue.ciAutomation') }}</div>
@@ -393,88 +393,131 @@
         <div v-if="ciFailuresLoading" class="issue-automation-empty">
           {{ t('common.loading') }}
         </div>
-        <div v-else-if="ciFailures.length === 0 && issueWebhookEvents.length === 0" class="issue-automation-empty">
+        <div v-else-if="ciFailures.length === 0" class="issue-automation-empty">
           {{ t('issue.noCiAutomationEvents') }}
         </div>
         <div v-else class="issue-automation">
-          <div v-for="run in ciFailures" :key="run.id" class="ci-failure-run">
-            <div class="ci-failure-run__top">
-              <div>
-                <a
-                  v-if="run.pipeline_url"
-                  :href="run.pipeline_url"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="app-link"
-                >
-                  {{ t('issue.pipelineLabel', { id: run.pipeline_id }) }}
-                </a>
-                <span v-else>{{ t('issue.pipelineLabel', { id: run.pipeline_id }) }}</span>
-                <div class="ci-failure-run__meta">
-                  {{ formatCompactDateTime(run.created_at) }}
-                  <span v-if="run.pipeline_ref"> · {{ run.pipeline_ref }}</span>
+          <div class="ci-automation-summary" aria-live="polite">
+            <div class="ci-automation-summary__item">
+              <span>{{ t('issue.ciFailuresDetected') }}</span>
+              <strong>{{ ciFailureTotal || ciFailures.length }}</strong>
+            </div>
+            <div class="ci-automation-summary__item">
+              <span>{{ t('issue.ciLatestStatus') }}</span>
+              <strong>{{ latestCiFailure ? ciRunStatusLabel(latestCiFailure.status) : '-' }}</strong>
+            </div>
+            <div class="ci-automation-summary__item">
+              <span>{{ t('issue.ciRepairTasks') }}</span>
+              <strong>{{ ciRepairTaskCount }}</strong>
+            </div>
+            <div class="ci-automation-summary__item">
+              <span>{{ t('issue.ciRootCauseJobs') }}</span>
+              <strong>{{ ciRootCauseJobCount }}</strong>
+            </div>
+          </div>
+
+          <n-scrollbar
+            class="issue-ci-automation-scrollbar"
+            trigger="hover"
+            content-style="padding-right: 10px;"
+          >
+            <div class="ci-run-list">
+              <article v-for="run in ciFailures" :key="run.id" class="ci-failure-run">
+                <div class="ci-failure-run__header">
+                  <div class="ci-failure-run__identity">
+                    <span class="ci-failure-run__time">{{ formatCompactDateTime(run.created_at) }}</span>
+                    <a
+                      v-if="run.pipeline_url"
+                      :href="run.pipeline_url"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="ci-failure-run__pipeline app-link"
+                    >
+                      {{ t('issue.pipelineLabel', { id: run.pipeline_id }) }}
+                    </a>
+                    <span v-else class="ci-failure-run__pipeline">
+                      {{ t('issue.pipelineLabel', { id: run.pipeline_id }) }}
+                    </span>
+                    <span class="ci-failure-run__ref">
+                      {{ run.pipeline_ref || run.source_branch || '-' }}
+                      <template v-if="run.pipeline_sha"> · {{ shortSha(run.pipeline_sha) }}</template>
+                    </span>
+                  </div>
+
+                  <div class="ci-failure-run__actions">
+                    <n-tag size="small" round :type="ciRunStatusTagType(run.status)">
+                      {{ ciRunStatusLabel(run.status) }}
+                    </n-tag>
+                    <n-tag v-if="run.ignored_reason" size="small" round>
+                      {{ ignoredReasonLabel(run.ignored_reason) }}
+                    </n-tag>
+                    <span class="ci-failure-run__attempts">
+                      {{ t('issue.ciCollectionAttempts', { count: run.collection_attempts }) }}
+                    </span>
+                    <n-button
+                      v-if="run.repair_task_id"
+                      size="tiny"
+                      text
+                      type="primary"
+                      @click="router.push({ name: 'TaskView', params: { id: run.repair_task_id } })"
+                    >
+                      {{ t('issue.viewRepairTask', { id: run.repair_task_id }) }}
+                    </n-button>
+                  </div>
                 </div>
-              </div>
-              <n-space :size="6">
-                <n-tag size="small" round :type="ciRunStatusTagType(run.status)">
-                  {{ ciRunStatusLabel(run.status) }}
-                </n-tag>
-                <n-tag v-if="run.ignored_reason" size="small" round>
-                  {{ ignoredReasonLabel(run.ignored_reason) }}
-                </n-tag>
-                <n-button
-                  v-if="run.repair_task_id"
-                  size="tiny"
-                  text
-                  type="primary"
-                  @click="router.push({ name: 'TaskView', params: { id: run.repair_task_id } })"
-                >
-                  {{ t('issue.viewRepairTask', { id: run.repair_task_id }) }}
-                </n-button>
-              </n-space>
-            </div>
 
-            <div v-if="run.jobs?.length" class="ci-job-list">
-              <n-tag
-                v-for="job in run.jobs"
-                :key="job.id"
-                size="small"
-                round
-                :type="job.is_root_cause ? (job.classification === 'infra' ? 'warning' : 'error') : 'default'"
-              >
-                {{ job.name }} · {{ job.classification }}
-              </n-tag>
-            </div>
+                <div class="ci-failure-run__body">
+                  <section class="ci-run-section">
+                    <div class="ci-run-section__title">{{ t('issue.ciFailedJobs') }}</div>
+                    <div v-if="run.jobs?.length" class="ci-job-list">
+                      <component
+                        :is="job.web_url ? 'a' : 'span'"
+                        v-for="job in sortedCiJobs(run)"
+                        :key="job.id"
+                        :href="job.web_url || undefined"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="ci-job-chip"
+                        :class="{
+                          'ci-job-chip--root': job.is_root_cause,
+                          'ci-job-chip--infra': job.is_root_cause && job.classification === 'infra',
+                        }"
+                      >
+                        <span class="ci-job-chip__name">{{ job.name }} · {{ job.classification }}</span>
+                        <span v-if="job.stage" class="ci-job-chip__meta">{{ job.stage }}</span>
+                      </component>
+                    </div>
+                    <div v-else class="ci-run-section__empty">{{ t('issue.ciNoFailedJobs') }}</div>
+                  </section>
 
-            <div v-if="webhookEventsByRun[run.id] || ciFailureLogs[run.id]?.length" class="ci-run-timeline">
-              <div v-if="webhookEventsByRun[run.id]" class="ci-run-timeline__item ci-failure-run__webhook-step">
-                <span class="ci-run-timeline__time">{{ formatCompactDateTime(webhookEventsByRun[run.id].created_at) }}</span>
-                <span class="ci-run-timeline__step">{{ t('issue.ciWebhookReceived') }}</span>
-                <n-tag size="tiny" round :type="getWebhookResultTagType(webhookEventsByRun[run.id].result)">
-                  {{ getWebhookResultLabel(webhookEventsByRun[run.id].result) }}
-                </n-tag>
-                <span v-if="webhookEventsByRun[run.id].result_detail" class="ci-run-timeline__message">
-                  {{ webhookEventsByRun[run.id].result_detail }}
-                </span>
-              </div>
-              <div v-for="log in ciFailureLogs[run.id]" :key="log.id" class="ci-run-timeline__item">
-                <span class="ci-run-timeline__time">{{ formatCompactDateTime(log.created_at) }}</span>
-                <span class="ci-run-timeline__step">{{ log.step }}</span>
-                <n-tag size="tiny" round>{{ log.status }}</n-tag>
-                <span v-if="log.message" class="ci-run-timeline__message">{{ log.message }}</span>
-              </div>
-            </div>
-          </div>
+                  <section class="ci-run-section">
+                    <div class="ci-run-section__title">{{ t('issue.ciProcessingTimeline') }}</div>
+                    <div v-if="hasCiRunTimeline(run)" class="ci-run-timeline">
+                      <div v-if="webhookEventsByRun[run.id]" class="ci-run-timeline__item ci-failure-run__webhook-step">
+                        <span class="ci-run-timeline__time">{{ formatTimelineTime(webhookEventsByRun[run.id].created_at) }}</span>
+                        <span class="ci-run-timeline__step">{{ t('issue.ciWebhookReceived') }}</span>
+                        <span v-if="webhookEventsByRun[run.id].result_detail" class="ci-run-timeline__message">
+                          {{ webhookEventsByRun[run.id].result_detail }}
+                        </span>
+                      </div>
+                      <div v-for="log in ciFailureLogs[run.id]" :key="log.id" class="ci-run-timeline__item">
+                        <span class="ci-run-timeline__time">{{ formatTimelineTime(log.created_at) }}</span>
+                        <span class="ci-run-timeline__step">{{ log.step }}</span>
+                        <n-tag size="tiny" round>{{ log.status }}</n-tag>
+                        <span v-if="log.message" class="ci-run-timeline__message">{{ log.message }}</span>
+                      </div>
+                    </div>
+                    <div v-else class="ci-run-section__empty">{{ t('issue.ciNoTimeline') }}</div>
+                  </section>
+                </div>
 
-          <div v-if="ungroupedWebhookEvents.length" class="issue-webhook-events">
-            <div class="issue-webhook-events__title">{{ t('issue.webhookEvents') }}</div>
-            <div v-for="event in ungroupedWebhookEvents" :key="event.id" class="issue-webhook-event">
-              <span>{{ formatCompactDateTime(event.created_at) }}</span>
-              <n-tag size="tiny" round>{{ event.event_type }}</n-tag>
-              <n-tag size="tiny" round :type="getWebhookResultTagType(event.result)">{{ getWebhookResultLabel(event.result) }}</n-tag>
-              <span v-if="event.result_detail" class="metadata-muted">{{ event.result_detail }}</span>
+                <div v-if="run.error_message" class="ci-run-error">
+                  <span>{{ t('issue.ciCollectorError') }}</span>
+                  <strong>{{ run.error_message }}</strong>
+                </div>
+              </article>
             </div>
-          </div>
+          </n-scrollbar>
         </div>
       </n-card>
     </n-space>
@@ -678,7 +721,7 @@ import {
 } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
-import { formatDateTimeUtc8Compact, parseUtcDate } from '../utils/datetime'
+import { formatDateTimeUtc8Compact, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
 import { formatDurationMs, formatDurationSec } from '../utils/format'
 import { extractSlotErrorMessage } from '../utils/slotError'
 import { authState, isAdmin } from '../auth'
@@ -731,6 +774,7 @@ const ciFailures = ref<CIFailureRun[]>([])
 const ciFailureLogs = ref<Record<number, CIFailureRunLog[]>>({})
 const issueWebhookEvents = ref<WebhookEvent[]>([])
 const ciFailuresLoading = ref(false)
+const ciFailureTotal = ref(0)
 
 const webhookEventsByRun = computed(() => {
   const eventById = new Map(issueWebhookEvents.value.map(e => [e.id, e]))
@@ -744,10 +788,19 @@ const webhookEventsByRun = computed(() => {
   return map
 })
 
-const ungroupedWebhookEvents = computed(() => {
-  const linkedIds = new Set(Object.values(webhookEventsByRun.value).map(e => e.id))
-  return issueWebhookEvents.value.filter(e => !linkedIds.has(e.id))
+const latestCiFailure = computed(() => ciFailures.value[0] ?? null)
+const ciRepairTaskCount = computed(() => {
+  const tasks = issue.value?.tasks
+  if (tasks?.length) {
+    return tasks.filter(task => task.trigger_source === 'ci_auto_repair').length
+  }
+  return ciFailures.value.filter(run => run.repair_task_id).length
 })
+const ciRootCauseJobCount = computed(() =>
+  ciFailures.value.reduce((total, run) => (
+    total + (run.jobs?.filter(job => job.is_root_cause).length ?? 0)
+  ), 0)
+)
 
 const renderedDescription = computed(() => renderMarkdown(issue.value?.description ?? ''))
 const renderedRetryPrompt = computed(() => renderMarkdown(retryTargetTask.value?.user_prompt ?? ''))
@@ -967,25 +1020,9 @@ function formatCompactDateTime(value?: string | null): string {
   return formatDateTimeUtc8Compact(value)
 }
 
-function getWebhookResultLabel(result: string): string {
-  const map: Record<string, string> = {
-    issue_closed: t('config.webhookEventsResultIssueClosed'),
-    ignored_already_closed: t('config.webhookEventsResultIgnoredAlreadyClosed'),
-    no_match: t('config.webhookEventsResultNoMatch'),
-    unsupported_event: t('config.webhookEventsResultUnsupported'),
-    ignored_action: t('config.webhookEventsResultIgnoredAction'),
-    auth_failed: t('config.webhookEventsResultAuthFailed'),
-    ci_failure_collecting: t('config.webhookEventsResultCIFailureCollecting'),
-    duplicate: t('config.webhookEventsResultDuplicate'),
-  }
-  return map[result] || result
-}
-
-function getWebhookResultTagType(result: string): 'success' | 'warning' | 'error' | 'default' {
-  if (result === 'issue_closed' || result === 'ci_failure_collecting') return 'success'
-  if (result === 'no_match' || result === 'duplicate') return 'warning'
-  if (result === 'auth_failed') return 'error'
-  return 'default'
+function formatTimelineTime(value?: string | null): string {
+  if (!value) return '-'
+  return formatTimeUtc8(value)
 }
 
 function formatTaskDuration(task: Pick<Task, 'started_at' | 'completed_at'>): string {
@@ -1021,6 +1058,18 @@ function ciRunStatusTagType(status: string): 'default' | 'info' | 'warning' | 's
 
 function ignoredReasonLabel(reason: string): string {
   return t(`issue.ciIgnoredReason.${reason}`)
+}
+
+function sortedCiJobs(run: CIFailureRun) {
+  return [...(run.jobs ?? [])].sort((a, b) => Number(b.is_root_cause) - Number(a.is_root_cause))
+}
+
+function hasCiRunTimeline(run: CIFailureRun): boolean {
+  return Boolean(webhookEventsByRun.value[run.id] || ciFailureLogs.value[run.id]?.length)
+}
+
+function shortSha(value: string): string {
+  return value.slice(0, 8)
 }
 
 function isScheduleDateDisabled(timestamp: number): boolean {
@@ -1100,7 +1149,7 @@ async function fetchIssue() {
   loading.value = true
   try {
     issue.value = await getIssue(issueId.value)
-    if (!automationLoaded) await fetchIssueAutomation()
+    await fetchIssueAutomation()
   } catch {
     message.error(t('issue.loadFailed'))
   } finally {
@@ -1110,7 +1159,8 @@ async function fetchIssue() {
 
 let automationLoaded = false
 async function fetchIssueAutomation() {
-  if (!automationLoaded) ciFailuresLoading.value = true
+  const showInitialLoading = !automationLoaded
+  if (showInitialLoading) ciFailuresLoading.value = true
   try {
     const [failureResponse, webhookResponse] = await Promise.all([
       getIssueCIFailures(issueId.value, { page_size: 5 }),
@@ -1123,15 +1173,19 @@ async function fetchIssueAutomation() {
       logs[run.id] = response.items
     }))
     ciFailures.value = failures
+    ciFailureTotal.value = failureResponse.total
     ciFailureLogs.value = logs
     issueWebhookEvents.value = webhookResponse.items
     automationLoaded = true
   } catch {
-    ciFailures.value = []
-    ciFailureLogs.value = {}
-    issueWebhookEvents.value = []
+    if (!automationLoaded) {
+      ciFailures.value = []
+      ciFailureTotal.value = 0
+      ciFailureLogs.value = {}
+      issueWebhookEvents.value = []
+    }
   } finally {
-    ciFailuresLoading.value = false
+    if (showInitialLoading) ciFailuresLoading.value = false
   }
 }
 
@@ -1356,6 +1410,22 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.issue-card--ci-automation {
+  min-height: 360px;
+  max-height: 744px;
+}
+
+.issue-card--ci-automation :deep(.n-card-content) {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.issue-ci-automation-scrollbar {
+  flex: 1;
+  min-height: 0;
+  max-height: 516px;
 }
 
 .stat-add {
@@ -1693,26 +1763,71 @@ onMounted(() => {
 
 .issue-automation {
   display: grid;
-  gap: 16px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
 }
 
 .issue-automation-empty {
+  display: flex;
+  align-items: center;
+  min-height: 96px;
   color: var(--n-text-color-3);
   font-size: 13px;
 }
 
-.ci-failure-run {
+.ci-automation-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ci-automation-summary__item {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 6px;
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.ci-automation-summary__item span {
+  min-width: 0;
+  color: var(--n-text-color-3);
+  font-size: 12px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ci-automation-summary__item strong {
+  min-width: 0;
+  color: rgba(15, 23, 42, 0.86);
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ci-run-list {
   display: grid;
   gap: 10px;
-  padding: 12px 0;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
 }
 
-.ci-failure-run:last-child {
-  border-bottom: 0;
+.ci-failure-run {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
 }
 
-.ci-failure-run__top {
+.ci-failure-run__header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -1720,8 +1835,72 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
-.ci-failure-run__meta,
+.ci-failure-run__identity {
+  display: grid;
+  gap: 3px;
+  min-width: 180px;
+}
+
+.ci-failure-run__pipeline {
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.ci-failure-run__time,
+.ci-failure-run__ref,
+.ci-failure-run__attempts,
 .ci-run-timeline__time {
+  color: var(--n-text-color-3);
+  font-size: 12px;
+}
+
+.ci-failure-run__ref {
+  max-width: 440px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ci-failure-run__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: 1 1 260px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.ci-failure-run__attempts {
+  line-height: 22px;
+  white-space: nowrap;
+}
+
+.ci-failure-run__body {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.ci-run-section {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.ci-run-section__title {
+  color: rgba(15, 23, 42, 0.68);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.ci-run-section__empty {
+  min-height: 30px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.025);
   color: var(--n-text-color-3);
   font-size: 12px;
 }
@@ -1732,28 +1911,92 @@ onMounted(() => {
   gap: 6px;
 }
 
-.ci-run-timeline {
-  display: grid;
+.ci-job-chip {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 999px;
+  background: rgba(248, 250, 252, 0.86);
+  color: rgba(51, 65, 85, 0.9);
+  font-size: 12px;
+  line-height: 1.2;
+  text-decoration: none;
 }
 
-.ci-run-timeline__item,
-.issue-webhook-event {
-  display: flex;
+.ci-job-chip--root {
+  border-color: rgba(208, 48, 80, 0.26);
+  background: rgba(208, 48, 80, 0.06);
+  color: #9f1d38;
+}
+
+.ci-job-chip--infra {
+  border-color: rgba(240, 160, 32, 0.32);
+  background: rgba(240, 160, 32, 0.08);
+  color: #8a5a00;
+}
+
+.ci-job-chip__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ci-job-chip__meta {
+  flex: 0 0 auto;
+  color: var(--n-text-color-3);
+}
+
+.ci-run-timeline {
+  display: grid;
+  gap: 5px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.025);
+}
+
+.ci-run-timeline__item {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) max-content;
   align-items: center;
-  gap: 8px;
+  column-gap: 8px;
+  row-gap: 2px;
   min-width: 0;
   font-size: 12px;
+  line-height: 1.35;
+}
+
+.ci-run-timeline__time {
+  grid-column: 1;
+  align-self: start;
+  padding-top: 1px;
+  white-space: nowrap;
 }
 
 .ci-run-timeline__step {
+  grid-column: 2;
+  min-width: 0;
   font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
   color: var(--n-text-color-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ci-run-timeline__item :deep(.n-tag) {
+  grid-column: 3;
+  justify-self: end;
+  max-width: 86px;
 }
 
 .ci-run-timeline__message {
+  grid-column: 2 / 4;
   min-width: 0;
-  color: var(--n-text-color-2);
+  color: var(--n-text-color-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1761,20 +2004,30 @@ onMounted(() => {
 
 .ci-failure-run__webhook-step {
   padding-bottom: 6px;
-  border-bottom: 1px dashed rgba(148, 163, 184, 0.15);
-  margin-bottom: 2px;
+  border-bottom: 1px dashed rgba(148, 163, 184, 0.22);
+  margin-bottom: 3px;
 }
 
-.issue-webhook-events {
+.ci-run-error {
   display: grid;
-  gap: 8px;
-  padding-top: 4px;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(208, 48, 80, 0.06);
+  color: #9f1d38;
+  font-size: 12px;
 }
 
-.issue-webhook-events__title {
-  color: var(--n-text-color-2);
-  font-size: 13px;
-  font-weight: 600;
+.ci-run-error span {
+  font-weight: 650;
+}
+
+.ci-run-error strong {
+  min-width: 0;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 768px) {
@@ -1796,6 +2049,22 @@ onMounted(() => {
   .issue-card__header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .issue-card--ci-automation {
+    max-height: none;
+  }
+
+  .issue-ci-automation-scrollbar {
+    max-height: 624px;
+  }
+
+  .ci-automation-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ci-failure-run__body {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

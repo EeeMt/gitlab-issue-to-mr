@@ -619,8 +619,57 @@ describe('IssueView', () => {
 	      expect(automationCard.text()).toContain('issue.noCiAutomationEvents')
 	    })
 
-	    it('renders CI failure runs, collector logs, repair task link, and webhook events', async () => {
-	      setupDefaultMocks({ ci_auto_repair_enabled: true })
+	    it('renders CI failure runs, collector logs, repair task link, and webhook receipt', async () => {
+	      setupDefaultMocks({
+	        ci_auto_repair_enabled: true,
+	        tasks: [
+	          {
+	            id: 77,
+	            issue_id: 1,
+	            project_id: 1,
+	            user_prompt: 'Repair CI failure',
+	            status: 'completed',
+	            priority: 1,
+	            is_retry: false,
+	            retry_source_task_id: null,
+	            trigger_source: 'ci_auto_repair',
+	            ci_failure_run_id: 9,
+	            created_at: '2024-01-03T10:01:00Z',
+	            updated_at: '2024-01-03T10:02:00Z',
+	            initiator_username: 'testuser',
+	          },
+	          {
+	            id: 78,
+	            issue_id: 1,
+	            project_id: 1,
+	            user_prompt: 'Repair CI failure again',
+	            status: 'completed',
+	            priority: 1,
+	            is_retry: false,
+	            retry_source_task_id: null,
+	            trigger_source: 'ci_auto_repair',
+	            ci_failure_run_id: 10,
+	            created_at: '2024-01-03T11:01:00Z',
+	            updated_at: '2024-01-03T11:02:00Z',
+	            initiator_username: 'testuser',
+	          },
+	          {
+	            id: 79,
+	            issue_id: 1,
+	            project_id: 1,
+	            user_prompt: 'Manual follow-up',
+	            status: 'completed',
+	            priority: 1,
+	            is_retry: false,
+	            retry_source_task_id: null,
+	            trigger_source: 'manual',
+	            ci_failure_run_id: null,
+	            created_at: '2024-01-03T12:01:00Z',
+	            updated_at: '2024-01-03T12:02:00Z',
+	            initiator_username: 'testuser',
+	          },
+	        ],
+	      })
 	      mockApi.getIssueCIFailures.mockResolvedValue({
 	        items: [
 	          {
@@ -699,8 +748,21 @@ describe('IssueView', () => {
 	            payload_summary: { pipeline_id: 1001 },
 	            created_at: '2024-01-03T10:00:00Z',
 	          },
+	          {
+	            id: 4,
+	            event_type: 'merge_request',
+	            event_action: 'merge',
+	            project_id: 1,
+	            merge_request_iid: 42,
+	            issue_id: 1,
+	            source_ip: null,
+	            result: 'issue_closed',
+	            result_detail: 'Issue closed by MR merge',
+	            payload_summary: { mr_title: 'Fix bug' },
+	            created_at: '2024-01-03T10:02:00Z',
+	          },
 	        ],
-	        total: 1,
+	        total: 2,
 	        page: 1,
 	        page_size: 20,
 	      })
@@ -713,8 +775,52 @@ describe('IssueView', () => {
 	      expect(automationCard.text()).toContain('issue.ciFailureStatus.task_created')
 	      expect(automationCard.text()).toContain('Created repair task #77')
 	      expect(automationCard.text()).toContain('issue.viewRepairTask')
-	      expect(automationCard.text()).toContain('pipeline')
-	      expect(automationCard.text()).toContain('config.webhookEventsResultCIFailureCollecting')
+	      expect(automationCard.text()).toContain('issue.ciWebhookReceived')
+	      const repairTaskSummary = automationCard.findAll('.ci-automation-summary__item')
+	        .find(item => item.text().includes('issue.ciRepairTasks'))
+	      expect(repairTaskSummary?.text()).toContain('2')
+	      expect(automationCard.text()).not.toContain('config.webhookEventsResultCIFailureCollecting')
+	      expect(automationCard.text()).not.toContain('issue.webhookEvents')
+	      expect(automationCard.text()).not.toContain('Issue closed by MR merge')
+	    })
+
+	    it('refreshes CI automation data when the issue is refreshed', async () => {
+	      setupDefaultMocks({ ci_auto_repair_enabled: true })
+	      mockApi.getIssueCIFailures.mockResolvedValue({
+	        items: [
+	          {
+	            id: 9,
+	            webhook_event_id: null,
+	            pipeline_id: 1001,
+	            pipeline_url: null,
+	            pipeline_ref: null,
+	            status: 'collecting',
+	            ignored_reason: null,
+	            repair_task_id: null,
+	            jobs: [],
+	            created_at: '2024-01-03T10:00:00Z',
+	          },
+	        ],
+	        total: 1,
+	        page: 1,
+	        page_size: 20,
+	      })
+	      wrapper = await mountComponent()
+
+	      expect(mockApi.getIssueCIFailures).toHaveBeenCalledTimes(1)
+	      mockApi.getIssueCIFailures.mockClear()
+	      mockApi.getIssueWebhookEvents.mockClear()
+	      mockApi.getCIFailureLogs.mockClear()
+
+	      const refreshButton = wrapper.findAll('button')
+	        .find(button => button.text().includes('common.refresh'))
+	      expect(refreshButton).toBeDefined()
+	      await refreshButton!.trigger('click')
+	      await flushPromises()
+
+	      expect(mockApi.getIssueCIFailures).toHaveBeenCalledWith(1, { page_size: 5 })
+	      expect(mockApi.getIssueWebhookEvents).toHaveBeenCalledWith(1, { page_size: 50 })
+	      expect(mockApi.getCIFailureLogs).toHaveBeenCalledWith(9)
 	    })
 
 	    it('shows create task button for open issue (owner)', async () => {
