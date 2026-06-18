@@ -234,10 +234,18 @@
                   <n-space align="center" :size="8">
                     <n-switch
                       v-model:value="formValue.ci_auto_repair_enabled"
-                      :disabled="!formValue.create_mr"
+                      :disabled="!formValue.create_mr || !ciAutoRepairAvailable"
+                      data-testid="ci-auto-repair-switch"
                     />
-                    <span style="font-size: 13px; color: var(--n-text-color-2)">
-                      {{ formValue.ci_auto_repair_enabled ? t('issue.ciAutoRepairEnabled') : t('issue.ciAutoRepairDisabled') }}
+                    <span
+                      class="ci-auto-repair-status"
+                      :class="{
+                        'ci-auto-repair-status--unavailable':
+                          selectedProject && !ciAutoRepairStatusLoading && !ciAutoRepairAvailable,
+                      }"
+                      data-testid="ci-auto-repair-status"
+                    >
+                      {{ ciAutoRepairStatusText }}
                     </span>
                   </n-space>
                 </n-form-item>
@@ -357,7 +365,18 @@ import {
 import { DocumentTextOutline, WarningOutline, CloseOutline, GitBranchOutline, SparklesOutline, GitMergeOutline, SearchOutline, CheckmarkOutline } from '@vicons/ionicons5'
 import PageHeader from '../components/PageHeader.vue'
 import VariableEditor from '../components/VariableEditor.vue'
-import { createIssue, getProjects, getBranches, getPromptTemplates, type Project, type Branch, type CreateIssueRequest, type PromptTemplate } from '../api'
+import {
+  createIssue,
+  getBranches,
+  getProjectCIAutoRepairAvailability,
+  getProjects,
+  getPromptTemplates,
+  type Branch,
+  type CreateIssueRequest,
+  type Project,
+  type ProjectCIAutoRepairAvailability,
+  type PromptTemplate,
+} from '../api'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import {
   filterPromptTemplatesByTags,
@@ -374,12 +393,14 @@ const { isMobile } = useBreakpoints()
 const loading = ref(false)
 const projectsLoading = ref(true)   // start true so we show skeleton, not empty state
 const branchesLoading = ref(false)
+const ciAutoRepairStatusLoading = ref(false)
 const submitting = ref(false)
 const promptTemplatesLoading = ref(false)
 
 // Data
 const projects = ref<Project[]>([])
 const branches = ref<Branch[]>([])
+const ciAutoRepairAvailability = ref<ProjectCIAutoRepairAvailability | null>(null)
 const promptTemplates = ref<PromptTemplate[]>([])
 
 // Template picker state
@@ -462,6 +483,38 @@ const branchOptions = computed(() =>
     value: b.name,
   }))
 )
+
+const selectedProject = computed(() =>
+  projects.value.find(project => project.id === formValue.value.project_id) ?? null
+)
+
+const ciAutoRepairAvailable = computed(
+  () =>
+    ciAutoRepairAvailability.value?.project_id === formValue.value.project_id
+    && ciAutoRepairAvailability.value?.ci_auto_repair_available === true
+)
+
+const ciAutoRepairUnavailableReason = computed(() => {
+  const issues = ciAutoRepairAvailability.value?.webhook_status_issues
+  const issueCodes = issues?.length ? issues : ['webhook_status_unavailable']
+  return issueCodes
+    .map(issue => t(`issue.ciAutoRepairWebhookIssues.${issue}`))
+    .join(t('issue.ciAutoRepairReasonSeparator'))
+})
+
+const ciAutoRepairStatusText = computed(() => {
+  if (selectedProject.value && ciAutoRepairStatusLoading.value) {
+    return t('issue.ciAutoRepairCheckingWebhook')
+  }
+  if (selectedProject.value && !ciAutoRepairAvailable.value) {
+    return t('issue.ciAutoRepairUnavailable', {
+      reason: ciAutoRepairUnavailableReason.value,
+    })
+  }
+  return formValue.value.ci_auto_repair_enabled
+    ? t('issue.ciAutoRepairEnabled')
+    : t('issue.ciAutoRepairDisabled')
+})
 
 // Project card picker state
 const RECENT_PROJECTS_KEY = 'codify:recent_projects'
@@ -599,11 +652,47 @@ async function fetchBranches(projectId: number) {
   }
 }
 
+let ciAutoRepairStatusRequestId = 0
+
+async function fetchCIAutoRepairAvailability(projectId: number) {
+  const requestId = ++ciAutoRepairStatusRequestId
+  ciAutoRepairStatusLoading.value = true
+  ciAutoRepairAvailability.value = null
+  formValue.value.ci_auto_repair_enabled = false
+
+  try {
+    const availability = await getProjectCIAutoRepairAvailability(projectId)
+    if (
+      requestId === ciAutoRepairStatusRequestId
+      && formValue.value.project_id === projectId
+    ) {
+      ciAutoRepairAvailability.value = availability
+    }
+  } catch {
+    if (
+      requestId === ciAutoRepairStatusRequestId
+      && formValue.value.project_id === projectId
+    ) {
+      ciAutoRepairAvailability.value = {
+        project_id: projectId,
+        webhook_status: 'error',
+        webhook_status_issues: ['webhook_status_unavailable'],
+        ci_auto_repair_available: false,
+      }
+    }
+  } finally {
+    if (requestId === ciAutoRepairStatusRequestId) {
+      ciAutoRepairStatusLoading.value = false
+    }
+  }
+}
+
 function handleProjectChange(projectId: number) {
   if (projectId) {
     formValue.value.base_branch = undefined
     formValue.value.target_branch = undefined
     fetchBranches(projectId)
+    fetchCIAutoRepairAvailability(projectId)
   }
 }
 
@@ -674,6 +763,9 @@ function cancelTemplateOverwrite() {
 }
 
 async function handleReset() {
+  ciAutoRepairStatusRequestId += 1
+  ciAutoRepairStatusLoading.value = false
+  ciAutoRepairAvailability.value = null
   branches.value = []
   projectSearch.value = ''
   Object.assign(formValue.value, createInitialFormValue())
@@ -704,7 +796,10 @@ async function handleSubmit() {
       base_branch: formValue.value.base_branch,
       target_branch: formValue.value.create_mr ? formValue.value.target_branch || undefined : undefined,
       delete_branch_on_close: formValue.value.delete_branch_on_close,
-      ci_auto_repair_enabled: formValue.value.create_mr ? formValue.value.ci_auto_repair_enabled : false,
+      ci_auto_repair_enabled:
+        formValue.value.create_mr && ciAutoRepairAvailable.value
+          ? formValue.value.ci_auto_repair_enabled
+          : false,
     }
 
     const issue = await createIssue(request)
@@ -772,6 +867,15 @@ onMounted(() => {
   gap: 4px;
   color: #f0a020;
   font-size: 12px;
+}
+
+.ci-auto-repair-status {
+  font-size: 13px;
+  color: var(--n-text-color-2);
+}
+
+.ci-auto-repair-status--unavailable {
+  color: var(--n-text-color-3);
 }
 
 .prompt-template-dropdown__empty {

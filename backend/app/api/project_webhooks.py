@@ -141,6 +141,27 @@ def _build_gitlab_project_webhook_status_response(
     )
 
 
+def get_ci_auto_repair_webhook_issues(
+    webhook_status: GitLabProjectWebhookStatusResponse,
+) -> list[str]:
+    """Return stable issue codes explaining why CI auto-repair is unavailable."""
+    if webhook_status.status == "error":
+        return ["webhook_status_unavailable"]
+    if not webhook_status.hook_found:
+        return ["webhook_missing"]
+
+    issues: list[str] = []
+    if not webhook_status.managed_secret_configured:
+        issues.append("managed_secret_missing")
+    if not webhook_status.enable_ssl_verification:
+        issues.append("ssl_verification_disabled")
+    if not webhook_status.merge_requests_events:
+        issues.append("merge_request_events_disabled")
+    if not webhook_status.pipeline_events:
+        issues.append("pipeline_events_disabled")
+    return issues
+
+
 @router.post("/config/gitlab/projects/{project_id}/webhook", response_model=GitLabProjectWebhookSetupResponse)
 async def setup_gitlab_project_webhook(
     project_id: int,

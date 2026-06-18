@@ -52,6 +52,7 @@ import {
   executeTask,
   getStats,
   getProjects,
+  getProjectCIAutoRepairAvailability,
   getBranches,
   getAuthStatus,
   downloadTaskArchive,
@@ -314,6 +315,23 @@ describe('API functions', () => {
 
       expect(result).toEqual(mockProjects)
       expect(mockAxiosGet).toHaveBeenCalledWith('/projects')
+    })
+
+    it('should request CI auto-repair availability for one project', async () => {
+      const availability = {
+        project_id: 42,
+        webhook_status: 'configured',
+        webhook_status_issues: [],
+        ci_auto_repair_available: true,
+      }
+      mockAxiosGet.mockResolvedValue({ data: availability })
+
+      const result = await getProjectCIAutoRepairAvailability(42)
+
+      expect(result).toEqual(availability)
+      expect(mockAxiosGet).toHaveBeenCalledWith(
+        '/projects/42/ci-auto-repair-availability'
+      )
     })
   })
 

@@ -9,6 +9,7 @@ import { createMockProject, createMockBranch, createMockPromptTemplate } from '.
 const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
   const mock = {
     getProjects: vi.fn<() => Promise<any[]>>(),
+    getProjectCIAutoRepairAvailability: vi.fn<(projectId: number) => Promise<any>>(),
     getBranches: vi.fn<() => Promise<any[]>>(),
     createIssue: vi.fn<() => Promise<any>>(),
     getPromptTemplates: vi.fn<() => Promise<any[]>>(),
@@ -39,6 +40,7 @@ vi.mock('../utils/datetime', () => ({
 // Mock dependencies
 vi.mock('../api', () => ({
   getProjects: mockApi.getProjects,
+  getProjectCIAutoRepairAvailability: mockApi.getProjectCIAutoRepairAvailability,
   getBranches: mockApi.getBranches,
   createIssue: mockApi.createIssue,
   getPromptTemplates: mockApi.getPromptTemplates,
@@ -159,8 +161,11 @@ vi.mock('naive-ui', () => ({
       return () => h('button', {
         class: 'n-switch',
         role: 'switch',
+        disabled: props.disabled,
         'aria-checked': props.value,
-        onClick: () => emit('update:value', !props.value)
+        onClick: () => {
+          if (!props.disabled) emit('update:value', !props.value)
+        }
       })
     }
   },
@@ -263,9 +268,33 @@ const router = createRouter({
 
 // Mock data
 const mockProjects = [
-  createMockProject({ id: 1, name: 'Project 1', path_with_namespace: 'group/project-1', default_branch: 'main' }),
-  createMockProject({ id: 2, name: 'Project 2', path_with_namespace: 'group/project-2', default_branch: 'develop' }),
+  createMockProject({
+    id: 1,
+    name: 'Project 1',
+    path_with_namespace: 'group/project-1',
+    default_branch: 'main',
+  }),
+  createMockProject({
+    id: 2,
+    name: 'Project 2',
+    path_with_namespace: 'group/project-2',
+    default_branch: 'develop',
+  }),
 ]
+
+const configuredCIAutoRepairAvailability = {
+  project_id: 1,
+  webhook_status: 'configured',
+  webhook_status_issues: [],
+  ci_auto_repair_available: true,
+}
+
+const unavailableCIAutoRepairAvailability = {
+  project_id: 2,
+  webhook_status: 'needs_attention',
+  webhook_status_issues: ['pipeline_events_disabled'],
+  ci_auto_repair_available: false,
+}
 
 const mockBranches = [
   createMockBranch({ name: 'main' }),
@@ -315,6 +344,12 @@ describe('CreateIssue', () => {
 
   const mountComponent = async () => {
     ;(mockApi.getProjects as Mock).mockResolvedValue(mockProjects)
+    ;(mockApi.getProjectCIAutoRepairAvailability as Mock).mockImplementation(
+      async (projectId: number) => ({
+        ...configuredCIAutoRepairAvailability,
+        project_id: projectId,
+      })
+    )
     ;(mockApi.getPromptTemplates as Mock).mockResolvedValue(mockTemplates)
     ;(mockApi.createIssue as Mock).mockResolvedValue(mockCreatedIssue)
     ;(mockApi.getBranches as Mock).mockResolvedValue(mockBranches)
@@ -341,6 +376,13 @@ describe('CreateIssue', () => {
       await mountComponent()
 
       expect(wrapper.find('.create-issue-page').exists()).toBe(true)
+    })
+
+    it('should load the project list without webhook status expansion', async () => {
+      await mountComponent()
+
+      expect(mockApi.getProjects).toHaveBeenCalledWith()
+      expect(mockApi.getProjectCIAutoRepairAvailability).not.toHaveBeenCalled()
     })
 
     it('should render the form', async () => {
@@ -733,8 +775,9 @@ describe('CreateIssue', () => {
 	    it('should send ci_auto_repair_enabled only when MR creation is enabled', async () => {
 	      await mountComponent()
 
+	      wrapper.vm.selectProject(mockProjects[0])
+	      await flushPromises()
 	      wrapper.vm.formValue.title = 'Test Issue'
-	      wrapper.vm.formValue.project_id = 1
 	      wrapper.vm.formValue.base_branch = 'main'
 	      wrapper.vm.formValue.target_branch = 'develop'
 	      wrapper.vm.formValue.create_mr = true
@@ -1328,6 +1371,80 @@ describe('CreateIssue', () => {
 
 	      expect(wrapper.vm.formValue.ci_auto_repair_enabled).toBe(false)
 	    })
+
+      it('should enable CI auto-repair for a project with a configured webhook', async () => {
+        await mountComponent()
+
+        wrapper.vm.selectProject(mockProjects[0])
+        await flushPromises()
+
+        expect(mockApi.getProjectCIAutoRepairAvailability).toHaveBeenCalledWith(1)
+        const switches = wrapper.findAllComponents({ name: 'NSwitch' })
+        expect(switches[2].props('disabled')).toBe(false)
+      })
+
+      it('should disable CI auto-repair and show the webhook reason', async () => {
+        await mountComponent()
+
+        mockApi.getProjectCIAutoRepairAvailability.mockResolvedValueOnce(
+          unavailableCIAutoRepairAvailability
+        )
+
+        wrapper.vm.formValue.ci_auto_repair_enabled = true
+        wrapper.vm.selectProject(mockProjects[1])
+        await flushPromises()
+
+        const switches = wrapper.findAllComponents({ name: 'NSwitch' })
+        expect(switches[2].props('disabled')).toBe(true)
+        expect(wrapper.vm.formValue.ci_auto_repair_enabled).toBe(false)
+        expect(wrapper.vm.ciAutoRepairUnavailableReason).toContain(
+          'issue.ciAutoRepairWebhookIssues.pipeline_events_disabled'
+        )
+        expect(wrapper.find('[data-testid="ci-auto-repair-status"]').text()).toBe(
+          'issue.ciAutoRepairUnavailable'
+        )
+      })
+
+      it('should submit CI auto-repair as disabled for an unavailable project', async () => {
+        await mountComponent()
+
+        mockApi.getProjectCIAutoRepairAvailability.mockResolvedValueOnce(
+          unavailableCIAutoRepairAvailability
+        )
+
+        wrapper.vm.selectProject(mockProjects[1])
+        await flushPromises()
+        wrapper.vm.formValue.title = 'Test Issue'
+        wrapper.vm.formValue.base_branch = 'develop'
+        wrapper.vm.formValue.ci_auto_repair_enabled = true
+
+        await wrapper.vm.handleSubmit()
+        await flushPromises()
+
+        const call = (mockApi.createIssue as Mock).mock.calls[0][0]
+        expect(call.ci_auto_repair_enabled).toBe(false)
+      })
+
+      it('should ignore a stale webhook response after switching projects', async () => {
+        await mountComponent()
+
+        let resolveFirst!: (value: any) => void
+        let resolveSecond!: (value: any) => void
+        mockApi.getProjectCIAutoRepairAvailability
+          .mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve }))
+          .mockImplementationOnce(() => new Promise(resolve => { resolveSecond = resolve }))
+
+        wrapper.vm.selectProject(mockProjects[0])
+        wrapper.vm.selectProject(mockProjects[1])
+        resolveSecond(unavailableCIAutoRepairAvailability)
+        await flushPromises()
+        resolveFirst(configuredCIAutoRepairAvailability)
+        await flushPromises()
+
+        expect(wrapper.vm.formValue.project_id).toBe(2)
+        expect(wrapper.vm.ciAutoRepairAvailable).toBe(false)
+        expect(wrapper.vm.ciAutoRepairAvailability.project_id).toBe(2)
+      })
 	  })
 
   // ── Recent Titles Autocomplete ────────────────────────────────

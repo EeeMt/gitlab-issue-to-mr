@@ -261,6 +261,13 @@ export interface Project {
   description?: string | null
 }
 
+export interface ProjectCIAutoRepairAvailability {
+  project_id: number
+  webhook_status: 'configured' | 'missing' | 'needs_attention' | 'error' | string
+  webhook_status_issues: string[]
+  ci_auto_repair_available: boolean
+}
+
 export interface Branch {
   name: string
 }
@@ -1517,6 +1524,13 @@ export async function logout(): Promise<void> {
 // Manual task creation APIs
 export async function getProjects(): Promise<Project[]> {
   const response = await api.get('/projects')
+  return response.data
+}
+
+export async function getProjectCIAutoRepairAvailability(
+  projectId: number,
+): Promise<ProjectCIAutoRepairAvailability> {
+  const response = await api.get(`/projects/${projectId}/ci-auto-repair-availability`)
   return response.data
 }
 

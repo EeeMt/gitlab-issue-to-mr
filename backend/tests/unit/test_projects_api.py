@@ -61,6 +61,8 @@ def _make_test_client(*, is_unrestricted=True, accessible_projects=None):
             scalars=MagicMock(all=MagicMock(return_value=[]))
         )
     )
+    mock_db.get = AsyncMock(return_value=None)
+    mock_db.commit = AsyncMock()
 
     async def override_db():
         yield mock_db
@@ -165,6 +167,154 @@ class ListProjectsTests(unittest.TestCase):
         self.assertEqual(len(data), 2)
         mock_get_client.assert_called_once()
         mock_gitlab.get_projects.assert_called_once()
+
+    def test_project_ci_auto_repair_availability_configured(self):
+        """The selected-project endpoint reports a configured webhook."""
+        client, app, mock_db = _make_test_client(is_unrestricted=True)
+
+        settings = MagicMock(
+            backend_url="https://backend.example.com",
+            gitlab_url="https://gitlab.example.com",
+            gitlab_admin_token="glpat-test",
+        )
+        target_url = "https://backend.example.com/api/webhook/gitlab"
+        mock_gitlab = MagicMock()
+
+        def get_project_hooks(project_id):
+            self.assertEqual(mock_db.commit.await_count, 1)
+            return [
+                {
+                    "id": 10,
+                    "url": target_url,
+                    "enable_ssl_verification": True,
+                    "merge_requests_events": True,
+                    "pipeline_events": True,
+                }
+            ]
+
+        mock_gitlab.get_project_hooks.side_effect = get_project_hooks
+
+        with patch(
+            "app.api.projects.load_runtime_config_from_db",
+            new=AsyncMock(),
+        ):
+            with patch(
+                "app.api.projects.get_effective_settings",
+                return_value=settings,
+            ):
+                with patch(
+                    "app.api.projects.has_project_webhook_secret",
+                    new=AsyncMock(return_value=True),
+                ):
+                    with patch("app.api.projects.GitLabClient") as mock_client_class:
+                        mock_client_class.return_value = mock_gitlab
+                        mock_client_class._normalize_hook_url = lambda url: url.rstrip("/")
+                        response = client.get(
+                            "/api/projects/1/ci-auto-repair-availability"
+                        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["project_id"], 1)
+        self.assertTrue(data["ci_auto_repair_available"])
+        self.assertEqual(data["webhook_status"], "configured")
+        self.assertEqual(data["webhook_status_issues"], [])
+        mock_gitlab.get_project_hooks.assert_called_once_with(1)
+        mock_db.commit.assert_awaited_once()
+        mock_gitlab.close.assert_called_once()
+
+    def test_project_ci_auto_repair_availability_needs_attention(self):
+        """Missing pipeline events disable CI auto-repair for the selected project."""
+        client, app, mock_db = _make_test_client(is_unrestricted=True)
+
+        settings = MagicMock(
+            backend_url="https://backend.example.com",
+            gitlab_url="https://gitlab.example.com",
+            gitlab_admin_token="glpat-test",
+        )
+        target_url = "https://backend.example.com/api/webhook/gitlab"
+        mock_gitlab = MagicMock()
+        mock_gitlab.get_project_hooks.return_value = [
+            {
+                "id": 20,
+                "url": target_url,
+                "enable_ssl_verification": True,
+                "merge_requests_events": True,
+                "pipeline_events": False,
+            }
+        ]
+
+        with patch(
+            "app.api.projects.load_runtime_config_from_db",
+            new=AsyncMock(),
+        ):
+            with patch(
+                "app.api.projects.get_effective_settings",
+                return_value=settings,
+            ):
+                with patch(
+                    "app.api.projects.has_project_webhook_secret",
+                    new=AsyncMock(return_value=True),
+                ):
+                    with patch("app.api.projects.GitLabClient") as mock_client_class:
+                        mock_client_class.return_value = mock_gitlab
+                        mock_client_class._normalize_hook_url = lambda url: url.rstrip("/")
+                        response = client.get(
+                            "/api/projects/2/ci-auto-repair-availability"
+                        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertFalse(data["ci_auto_repair_available"])
+        self.assertEqual(data["webhook_status"], "needs_attention")
+        self.assertEqual(
+            data["webhook_status_issues"],
+            ["pipeline_events_disabled"],
+        )
+        mock_gitlab.close.assert_called_once()
+
+    def test_project_ci_auto_repair_availability_unavailable(self):
+        """Invalid system webhook settings fail closed."""
+        client, app, _ = _make_test_client(is_unrestricted=True)
+        settings = MagicMock(
+            backend_url="",
+            gitlab_url="",
+            gitlab_admin_token="",
+        )
+
+        with patch(
+            "app.api.projects.load_runtime_config_from_db",
+            new=AsyncMock(),
+        ):
+            with patch(
+                "app.api.projects.get_effective_settings",
+                return_value=settings,
+            ):
+                response = client.get(
+                    "/api/projects/1/ci-auto-repair-availability"
+                )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertFalse(data["ci_auto_repair_available"])
+        self.assertEqual(data["webhook_status"], "error")
+        self.assertEqual(
+            data["webhook_status_issues"],
+            ["webhook_status_unavailable"],
+        )
+
+    def test_project_ci_auto_repair_availability_requires_project_access(self):
+        """Users cannot inspect webhook status for inaccessible projects."""
+        client, app, _ = _make_test_client(
+            is_unrestricted=False,
+            accessible_projects=[
+                {"id": 99, "name": "other", "path_with_namespace": "group/other"}
+            ],
+        )
+
+        response = client.get("/api/projects/1/ci-auto-repair-availability")
+
+        self.assertEqual(response.status_code, 403)
 
 
 class ListBranchesTests(unittest.TestCase):
