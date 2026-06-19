@@ -83,6 +83,7 @@
   <n-drawer v-model:show="showProxy" :width="isMobile ? '100%' : 640" placement="right" :data-testid="drawerTestId">
     <n-drawer-content
       :title="mode === 'edit' ? t('taskView.editTask') : t('issue.createTask')"
+      :native-scrollbar="false"
       closable
     >
       <n-form label-placement="top" class="task-form-drawer__form">
@@ -199,14 +200,25 @@
           </div>
         </n-form-item>
 
-        <details class="run-instruction-advanced">
-          <summary class="run-instruction-advanced__summary">
+        <details
+          class="run-instruction-advanced"
+          :class="{ 'run-instruction-advanced--disabled': taskMode === null }"
+        >
+          <summary
+            class="run-instruction-advanced__summary"
+            :aria-disabled="taskMode === null"
+            @click="handleRunInstructionSummaryClick"
+          >
             <span class="run-instruction-advanced__icon">
               <n-icon :component="OptionsOutline" size="16" />
             </span>
             <span class="run-instruction-advanced__copy">
               <span class="run-instruction-advanced__title">{{ t('runInstruction.advanced') }}</span>
-              <span class="run-instruction-advanced__hint">{{ t('runInstruction.advancedHint') }}</span>
+              <span class="run-instruction-advanced__hint">
+                {{ taskMode === null
+                  ? t('runInstruction.selectModeHint')
+                  : t('runInstruction.advancedHint') }}
+              </span>
             </span>
             <span class="run-instruction-advanced__chevron" aria-hidden="true">›</span>
           </summary>
@@ -503,8 +515,8 @@ const providerOptions = computed(() =>
   }))
 )
 const currentAvailablePlaceholders = computed(() => {
-  if (!runInstructionDefaults.value) return []
-  return runInstructionDefaults.value[taskMode.value ?? 'execute'].available_placeholders
+  if (!runInstructionDefaults.value || !taskMode.value) return []
+  return runInstructionDefaults.value[taskMode.value].available_placeholders
 })
 const knownRunInstructionPlaceholders = computed(() => [
   ...new Set(runInstructionDefaults.value?.execute.known_placeholders ?? [
@@ -562,9 +574,8 @@ watch(() => props.show, (val) => {
         prompt.value = props.issueDescription
       }
       taskMode.value = null
-      const defaultTemplate = runInstructionDefaults.value?.execute.content ?? ''
-      runInstructionTemplate.value = defaultTemplate
-      initialRunInstructionTemplate.value = defaultTemplate
+      runInstructionTemplate.value = ''
+      initialRunInstructionTemplate.value = ''
       runInstructionDirty.value = false
       requireChanges.value = true
       scheduleType.value = 'now'
@@ -605,8 +616,8 @@ async function loadRunInstructionDefaults() {
       runInstructionTemplate.value = snapshot
       initialRunInstructionTemplate.value = snapshot
     }
-    if (props.show && props.mode === 'create' && !runInstructionTemplate.value) {
-      runInstructionTemplate.value = runInstructionDefaults.value[taskMode.value ?? 'execute'].content
+    if (props.show && props.mode === 'create' && taskMode.value && !runInstructionTemplate.value) {
+      runInstructionTemplate.value = runInstructionDefaults.value[taskMode.value].content
       initialRunInstructionTemplate.value = runInstructionTemplate.value
     }
   } catch {
@@ -687,9 +698,13 @@ function handleRunInstructionInput(value: string) {
   previewError.value = ''
 }
 
+function handleRunInstructionSummaryClick(event: MouseEvent) {
+  if (taskMode.value === null) event.preventDefault()
+}
+
 function restoreRunInstructionDefault() {
-  if (!runInstructionDefaults.value) return
-  runInstructionTemplate.value = runInstructionDefaults.value[taskMode.value ?? 'execute'].content
+  if (!runInstructionDefaults.value || !taskMode.value) return
+  runInstructionTemplate.value = runInstructionDefaults.value[taskMode.value].content
   runInstructionDirty.value = true
   previewResult.value = ''
   previewError.value = ''
@@ -966,6 +981,12 @@ onUnmounted(() => {
   box-shadow: 0 0 0 2px rgba(99, 226, 183, 0.06);
 }
 
+.run-instruction-advanced--disabled {
+  border-color: var(--n-border-color);
+  background: var(--n-color-disabled);
+  box-shadow: none;
+}
+
 .run-instruction-advanced__summary {
   display: flex;
   align-items: center;
@@ -981,6 +1002,10 @@ onUnmounted(() => {
   display: none;
 }
 
+.run-instruction-advanced--disabled .run-instruction-advanced__summary {
+  cursor: not-allowed;
+}
+
 .run-instruction-advanced__icon {
   display: inline-flex;
   align-items: center;
@@ -991,6 +1016,11 @@ onUnmounted(() => {
   border-radius: 7px;
   color: var(--n-primary-color);
   background: rgba(99, 226, 183, 0.1);
+}
+
+.run-instruction-advanced--disabled .run-instruction-advanced__icon {
+  color: var(--n-text-color-disabled);
+  background: var(--n-action-color);
 }
 
 .run-instruction-advanced__copy {
@@ -1017,6 +1047,12 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
+.run-instruction-advanced--disabled .run-instruction-advanced__title,
+.run-instruction-advanced--disabled .run-instruction-advanced__hint,
+.run-instruction-advanced--disabled .run-instruction-advanced__chevron {
+  color: var(--n-text-color-disabled);
+}
+
 .run-instruction-advanced__chevron {
   color: var(--n-text-color-3);
   font-size: 22px;
@@ -1037,7 +1073,7 @@ onUnmounted(() => {
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .run-instruction-advanced:not([open]):hover {
+  .run-instruction-advanced:not([open], .run-instruction-advanced--disabled):hover {
     border-color: var(--n-primary-color);
   }
 }

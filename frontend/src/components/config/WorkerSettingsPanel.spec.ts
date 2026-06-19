@@ -108,6 +108,15 @@ vi.mock('naive-ui', () => ({
       return () => h('div', { class: 'n-grid' }, slots.default?.())
     }
   },
+  NIcon: {
+    name: 'NIcon',
+    props: ['component', 'size'],
+    setup(props: any, { slots }: any) {
+      return () => h('span', { class: 'n-icon' }, [
+        props.component ? h(props.component) : slots.default?.()
+      ])
+    }
+  },
   NInput: {
     name: 'NInput',
     props: ['value', 'type', 'placeholder', 'showPasswordOn'],
