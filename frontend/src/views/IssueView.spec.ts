@@ -694,6 +694,19 @@ describe('IssueView', () => {
 	            collection_attempts: 1,
 	            created_at: '2024-01-03T10:00:00Z',
 	            updated_at: '2024-01-03T10:01:00Z',
+	            logs: [
+	              {
+	                id: 11,
+	                ci_failure_run_id: 9,
+	                issue_id: 1,
+	                task_id: 77,
+	                step: 'repair_task_created',
+	                status: 'success',
+	                message: 'Created repair task #77',
+	                details: null,
+	                created_at: '2024-01-03T10:01:00Z',
+	              },
+	            ],
 	            jobs: [
 	              {
 	                id: 4,
@@ -717,21 +730,6 @@ describe('IssueView', () => {
 	        total: 1,
 	        page: 1,
 	        page_size: 20,
-	      })
-	      mockApi.getCIFailureLogs.mockResolvedValue({
-	        items: [
-	          {
-	            id: 11,
-	            ci_failure_run_id: 9,
-	            issue_id: 1,
-	            task_id: 77,
-	            step: 'repair_task_created',
-	            status: 'success',
-	            message: 'Created repair task #77',
-	            details: null,
-	            created_at: '2024-01-03T10:01:00Z',
-	          },
-	        ],
 	      })
 	      mockApi.getIssueWebhookEvents.mockResolvedValue({
 	        items: [
@@ -797,6 +795,7 @@ describe('IssueView', () => {
 	            status: 'collecting',
 	            ignored_reason: null,
 	            repair_task_id: null,
+	            logs: [],
 	            jobs: [],
 	            created_at: '2024-01-03T10:00:00Z',
 	          },
@@ -820,7 +819,32 @@ describe('IssueView', () => {
 
 	      expect(mockApi.getIssueCIFailures).toHaveBeenCalledWith(1, { page_size: 5 })
 	      expect(mockApi.getIssueWebhookEvents).toHaveBeenCalledWith(1, { page_size: 50 })
-	      expect(mockApi.getCIFailureLogs).toHaveBeenCalledWith(9)
+	      expect(mockApi.getCIFailureLogs).not.toHaveBeenCalled()
+	    })
+
+	    it('does not overlap issue polling while a refresh is still running', async () => {
+	      vi.useFakeTimers()
+	      setupDefaultMocks({ ci_auto_repair_enabled: true })
+	      wrapper = await mountComponent()
+
+	      mockApi.getIssue.mockClear()
+	      let resolveIssue: ((issue: any) => void) | undefined
+	      mockApi.getIssue.mockImplementation(() => new Promise((resolve) => {
+	        resolveIssue = resolve
+	      }))
+
+	      try {
+	        await vi.advanceTimersByTimeAsync(5000)
+	        expect(mockApi.getIssue).toHaveBeenCalledTimes(1)
+
+	        await vi.advanceTimersByTimeAsync(20_000)
+	        expect(mockApi.getIssue).toHaveBeenCalledTimes(1)
+	      } finally {
+	        resolveIssue?.(createMockIssue({ ci_auto_repair_enabled: true }))
+	        await flushPromises()
+	        wrapper.unmount()
+	        vi.useRealTimers()
+	      }
 	    })
 
 	    it('shows create task button for open issue (owner)', async () => {

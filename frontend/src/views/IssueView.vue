@@ -500,7 +500,7 @@
                           {{ webhookEventsByRun[run.id].result_detail }}
                         </span>
                       </div>
-                      <div v-for="log in ciFailureLogs[run.id]" :key="log.id" class="ci-run-timeline__item">
+                      <div v-for="log in run.logs ?? []" :key="log.id" class="ci-run-timeline__item">
                         <span class="ci-run-timeline__time">{{ formatTimelineTime(log.created_at) }}</span>
                         <span class="ci-run-timeline__step">{{ log.step }}</span>
                         <n-tag size="tiny" round>{{ log.status }}</n-tag>
@@ -716,8 +716,8 @@ import TaskFormDrawer from '../components/TaskFormDrawer.vue'
 import RescheduleDrawer from '../components/RescheduleDrawer.vue'
 import {
   getIssue, updateIssue, closeIssue, retryTask, deleteIssueBranch,
-  getScheduledTasks, getConfig, getProjects, getIssueCIFailures, getCIFailureLogs, getIssueWebhookEvents,
-  type Issue, type Task, type Project, type CIFailureRun, type CIFailureRunLog, type WebhookEvent
+  getScheduledTasks, getConfig, getProjects, getIssueCIFailures, getIssueWebhookEvents,
+  type Issue, type Task, type Project, type CIFailureRun, type WebhookEvent
 } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
@@ -771,7 +771,6 @@ const showCloseModal = ref(false)
 let pollTimer: number | null = null
 const projects = ref<Project[]>([])
 const ciFailures = ref<CIFailureRun[]>([])
-const ciFailureLogs = ref<Record<number, CIFailureRunLog[]>>({})
 const issueWebhookEvents = ref<WebhookEvent[]>([])
 const ciFailuresLoading = ref(false)
 const ciFailureTotal = ref(0)
@@ -1065,7 +1064,7 @@ function sortedCiJobs(run: CIFailureRun) {
 }
 
 function hasCiRunTimeline(run: CIFailureRun): boolean {
-  return Boolean(webhookEventsByRun.value[run.id] || ciFailureLogs.value[run.id]?.length)
+  return Boolean(webhookEventsByRun.value[run.id] || run.logs?.length)
 }
 
 function shortSha(value: string): string {
@@ -1167,21 +1166,14 @@ async function fetchIssueAutomation() {
       getIssueWebhookEvents(issueId.value, { page_size: 50 }),
     ])
     const failures = failureResponse.items
-    const logs: Record<number, CIFailureRunLog[]> = {}
-    await Promise.all(failures.map(async (run) => {
-      const response = await getCIFailureLogs(run.id)
-      logs[run.id] = response.items
-    }))
     ciFailures.value = failures
     ciFailureTotal.value = failureResponse.total
-    ciFailureLogs.value = logs
     issueWebhookEvents.value = webhookResponse.items
     automationLoaded = true
   } catch {
     if (!automationLoaded) {
       ciFailures.value = []
       ciFailureTotal.value = 0
-      ciFailureLogs.value = {}
       issueWebhookEvents.value = []
     }
   } finally {
@@ -1303,6 +1295,7 @@ onMounted(() => {
   })
   pollTimer = window.setInterval(() => {
     if (document.visibilityState !== 'visible') return
+    if (loading.value) return
     if (issue.value?.status !== 'closed') {
       fetchIssue()
     }

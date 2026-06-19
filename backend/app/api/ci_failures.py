@@ -39,7 +39,11 @@ def _serialize_job(job: CIFailureJob) -> dict[str, Any]:
     }
 
 
-def _serialize_run(run: CIFailureRun, jobs: list[CIFailureJob] | None = None) -> dict[str, Any]:
+def _serialize_run(
+    run: CIFailureRun,
+    jobs: list[CIFailureJob] | None = None,
+    logs: list[CIFailureRunLog] | None = None,
+) -> dict[str, Any]:
     return {
         "id": run.id,
         "webhook_event_id": run.webhook_event_id,
@@ -63,6 +67,7 @@ def _serialize_run(run: CIFailureRun, jobs: list[CIFailureJob] | None = None) ->
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "updated_at": run.updated_at.isoformat() if run.updated_at else None,
         "jobs": [_serialize_job(job) for job in jobs] if jobs is not None else None,
+        "logs": [_serialize_log(log) for log in logs] if logs is not None else None,
     }
 
 
@@ -135,6 +140,7 @@ async def list_issue_ci_failures(
 
     run_ids = [run.id for run in runs]
     jobs_by_run: dict[int, list[CIFailureJob]] = {run_id: [] for run_id in run_ids}
+    logs_by_run: dict[int, list[CIFailureRunLog]] = {run_id: [] for run_id in run_ids}
     if run_ids:
         jobs = (
             await db.execute(
@@ -146,8 +152,25 @@ async def list_issue_ci_failures(
         for job in jobs:
             jobs_by_run.setdefault(job.ci_failure_run_id, []).append(job)
 
+        logs = (
+            await db.execute(
+                select(CIFailureRunLog)
+                .where(CIFailureRunLog.ci_failure_run_id.in_(run_ids))
+                .order_by(CIFailureRunLog.created_at.asc(), CIFailureRunLog.id.asc())
+            )
+        ).scalars().all()
+        for log in logs:
+            logs_by_run.setdefault(log.ci_failure_run_id, []).append(log)
+
     return {
-        "items": [_serialize_run(run, jobs_by_run.get(run.id, [])) for run in runs],
+        "items": [
+            _serialize_run(
+                run,
+                jobs_by_run.get(run.id, []),
+                logs_by_run.get(run.id, []),
+            )
+            for run in runs
+        ],
         "total": count,
         "page": page,
         "page_size": page_size,

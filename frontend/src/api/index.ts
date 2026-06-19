@@ -867,6 +867,7 @@ export interface CIFailureRun {
   created_at: string | null
   updated_at: string | null
   jobs: CIFailureJob[] | null
+  logs: CIFailureRunLog[] | null
 }
 
 export interface CIFailureRunLog {
