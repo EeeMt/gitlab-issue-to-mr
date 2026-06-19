@@ -163,19 +163,40 @@
               <n-card class="task-card task-card--equal" :bordered="false" data-testid="task-prompt-card">
                 <template #header>
                   <div class="task-card__header">
-                    <div class="task-prompt-view-switch">
-                      <n-button
-                        :type="promptView === 'user' ? 'primary' : 'default'"
+                    <div
+                      class="task-prompt-view-switch"
+                      role="tablist"
+                      :aria-label="`${t('taskView.userPrompt')} / ${t('taskView.finalRunPrompt')}`"
+                    >
+                      <button
+                        id="task-prompt-user-tab"
+                        type="button"
+                        class="task-prompt-view-switch__button"
+                        :class="{ 'task-prompt-view-switch__button--active': promptView === 'user' }"
+                        role="tab"
+                        :aria-selected="promptView === 'user'"
+                        aria-controls="task-prompt-panel"
                         @click="promptView = 'user'"
-                      >{{ t('taskView.userPrompt') }}</n-button>
-                      <n-button
-                        :type="promptView === 'final' ? 'primary' : 'default'"
+                      >{{ t('taskView.userPrompt') }}</button>
+                      <button
+                        id="task-prompt-final-tab"
+                        type="button"
+                        class="task-prompt-view-switch__button"
+                        :class="{ 'task-prompt-view-switch__button--active': promptView === 'final' }"
+                        role="tab"
+                        :aria-selected="promptView === 'final'"
+                        aria-controls="task-prompt-panel"
                         @click="promptView = 'final'"
-                      >{{ t('taskView.finalRunPrompt') }}</n-button>
+                      >{{ t('taskView.finalRunPrompt') }}</button>
                     </div>
                   </div>
                 </template>
-                <div class="task-prompt-wrap">
+                <div
+                  id="task-prompt-panel"
+                  class="task-prompt-wrap"
+                  role="tabpanel"
+                  :aria-labelledby="promptView === 'user' ? 'task-prompt-user-tab' : 'task-prompt-final-tab'"
+                >
                   <n-scrollbar trigger="hover" style="position: absolute; top: 0; right: 0; bottom: 0; left: 0;">
                     <div class="task-prompt-content markdown-content" v-html="renderedSelectedPrompt"></div>
                   </n-scrollbar>
@@ -1035,6 +1056,47 @@ onBeforeUnmount(() => {
   flex: 1;
   position: relative;
   min-height: 0;
+}
+
+.task-prompt-view-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 7px;
+  background: rgba(148, 163, 184, 0.1);
+}
+
+.task-prompt-view-switch__button {
+  min-height: 24px;
+  padding: 3px 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: rgba(15, 23, 42, 0.58);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.task-prompt-view-switch__button:hover {
+  color: rgba(15, 23, 42, 0.84);
+}
+
+.task-prompt-view-switch__button--active {
+  background: rgba(255, 255, 255, 0.92);
+  color: rgba(15, 23, 42, 0.88);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1);
+}
+
+.task-prompt-view-switch__button:focus-visible {
+  outline: 2px solid rgba(32, 128, 240, 0.32);
+  outline-offset: 1px;
 }
 
 .task-prompt-content {

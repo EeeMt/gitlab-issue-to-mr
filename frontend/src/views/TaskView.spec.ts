@@ -557,12 +557,19 @@ describe('TaskView', () => {
   it('switches the existing prompt card to the persisted final prompt', async () => {
     await mountComponent({ rendered_prompt: 'Final **rendered** prompt' })
     const card = wrapper.find('[data-testid="task-prompt-card"]')
+    const switcher = card.find('[role="tablist"]')
+    const userButton = card.find('#task-prompt-user-tab')
     expect(card.text()).toContain('taskView.userPrompt')
+    expect(switcher.classes()).toContain('task-prompt-view-switch')
+    expect(userButton.attributes('aria-selected')).toBe('true')
     const finalButton = card.findAll('button').find((button) =>
       button.text().includes('taskView.finalRunPrompt')
     )
     await finalButton!.trigger('click')
     expect(wrapper.vm.promptView).toBe('final')
+    expect(userButton.attributes('aria-selected')).toBe('false')
+    expect(finalButton!.attributes('aria-selected')).toBe('true')
+    expect(finalButton!.classes()).toContain('task-prompt-view-switch__button--active')
     expect(card.html()).toContain('Final')
   })
 
