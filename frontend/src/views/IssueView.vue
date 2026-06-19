@@ -1896,6 +1896,8 @@ onMounted(() => {
   background: rgba(15, 23, 42, 0.025);
   color: var(--n-text-color-3);
   font-size: 12px;
+  display: flex;
+  align-items: center;
 }
 
 .ci-job-list {
