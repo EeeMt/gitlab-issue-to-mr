@@ -136,7 +136,7 @@ vi.mock('naive-ui', () => ({
   },
   NInput: {
     name: 'NInput',
-    props: ['value', 'type', 'placeholder', 'showPasswordOn'],
+    props: ['value', 'type', 'placeholder', 'showPasswordOn', 'size'],
     emits: ['update:value'],
     setup(props: any, { emit }: any) {
       return () =>
@@ -158,7 +158,7 @@ vi.mock('naive-ui', () => ({
   },
   NSelect: {
     name: 'NSelect',
-    props: ['value', 'options'],
+    props: ['value', 'options', 'size'],
     emits: ['update:value'],
     setup(props: any, { emit }: any) {
       return () =>
@@ -191,7 +191,7 @@ vi.mock('naive-ui', () => ({
   },
   NTag: {
     name: 'NTag',
-    props: ['type', 'round'],
+    props: ['type', 'round', 'size', 'bordered'],
     setup(props: any, { slots }: any) {
       return () => h('span', { class: ['n-tag', `n-tag--${props.type || 'default'}`] }, slots.default?.())
     }
@@ -234,6 +234,53 @@ describe('WorkerSettingsPanel', () => {
     expect(wrapper.text()).toContain('config.workerSettings')
     expect(wrapper.text()).not.toContain('config.aiProvider')
     expect(wrapper.text()).not.toContain('config.providers.movedNotice')
+  })
+
+  it('renders mounts and environment variables as compact table rows', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.findAll('.config-compact-table')).toHaveLength(2)
+    expect(wrapper.findAll('.config-compact-row--mount')).toHaveLength(1)
+    expect(wrapper.findAll('.config-compact-row--environment')).toHaveLength(2)
+    expect(wrapper.find('.config-compact-row--mount .n-form-item').exists()).toBe(false)
+    expect(wrapper.find('.config-compact-row--environment .n-form-item').exists()).toBe(false)
+    expect(wrapper.text().match(/config\.environmentVariableSecretHint/g)).toHaveLength(1)
+  })
+
+  it('adds new mounts and environment variables at the top of each list', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    vm.addMount()
+    vm.addEnvironmentVariable()
+
+    expect(vm.workerFormValue.mounts[0]).toEqual({
+      host_path: '',
+      container_path: '',
+      mode: 'ro'
+    })
+    expect(vm.workerFormValue.mounts[1].host_path).toBe('/host/cache')
+    expect(vm.workerFormValue.environment_variables[0]).toEqual({
+      key: '',
+      value: '',
+      is_secret: false,
+      value_configured: false
+    })
+    expect(vm.workerFormValue.environment_variables[1].key).toBe('SECRET_TOKEN')
   })
 
   it('loads and saves worker custom scripts', async () => {

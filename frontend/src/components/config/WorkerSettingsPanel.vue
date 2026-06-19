@@ -12,57 +12,66 @@
         </template>
 
         <n-form :model="workerFormValue" label-placement="top" class="config-section-form">
-          <div class="config-form__section">
+          <div class="config-form__section config-collection-section">
             <div class="config-form__section-header">
-              <div class="config-form__section-title">{{ t('config.volumeMounts') }}</div>
-              <n-button size="small" @click="addMount">
+              <div class="config-collection-heading">
+                <div class="config-form__section-title">{{ t('config.volumeMounts') }}</div>
+                <n-tag size="small" round :bordered="false">
+                  {{ workerFormValue.mounts.length }}
+                </n-tag>
+              </div>
+              <n-button size="small" secondary @click="addMount">
                 {{ t('config.addVolumeMount') }}
               </n-button>
             </div>
-            <div v-if="workerFormValue.mounts.length === 0" class="config-empty">
+            <div v-if="workerFormValue.mounts.length === 0" class="config-empty config-compact-empty">
               {{ t('config.noVolumeMounts') }}
             </div>
-            <div v-else class="config-mounts-list">
+            <div v-else class="config-compact-table config-compact-table--mounts">
+              <div class="config-compact-table__header" aria-hidden="true">
+                <span>{{ t('config.hostPath') }}</span>
+                <span>{{ t('config.containerPath') }}</span>
+                <span>{{ t('config.mountMode') }}</span>
+                <span></span>
+              </div>
               <div
                 v-for="(mount, index) in workerFormValue.mounts"
                 :key="index"
-                class="config-mount-item"
+                class="config-compact-row config-compact-row--mount"
               >
-                <n-grid :cols="isMobile ? 1 : 3" :x-gap="12" :y-gap="8">
-                  <n-gi>
-                    <n-form-item :label="t('config.hostPath')" size="small">
-                      <n-input
-                        v-model:value="mount.host_path"
-                        :placeholder="t('config.hostPathPlaceholder')"
-                        class="config-form__input"
-                      />
-                    </n-form-item>
-                  </n-gi>
-                  <n-gi>
-                    <n-form-item :label="t('config.containerPath')" size="small">
-                      <n-input
-                        v-model:value="mount.container_path"
-                        :placeholder="t('config.containerPathPlaceholder')"
-                        class="config-form__input"
-                      />
-                    </n-form-item>
-                  </n-gi>
-                  <n-gi>
-                    <n-form-item :label="t('config.mountMode')" size="small">
-                      <n-select
-                        v-model:value="mount.mode"
-                        :options="mountModeOptions"
-                        class="config-form__input"
-                      />
-                    </n-form-item>
-                  </n-gi>
-                </n-grid>
+                <label class="config-compact-field">
+                  <span class="config-compact-field__label">{{ t('config.hostPath') }}</span>
+                  <n-input
+                    v-model:value="mount.host_path"
+                    size="small"
+                    :placeholder="t('config.hostPathPlaceholder')"
+                    class="config-form__input"
+                  />
+                </label>
+                <label class="config-compact-field">
+                  <span class="config-compact-field__label">{{ t('config.containerPath') }}</span>
+                  <n-input
+                    v-model:value="mount.container_path"
+                    size="small"
+                    :placeholder="t('config.containerPathPlaceholder')"
+                    class="config-form__input"
+                  />
+                </label>
+                <label class="config-compact-field">
+                  <span class="config-compact-field__label">{{ t('config.mountMode') }}</span>
+                  <n-select
+                    v-model:value="mount.mode"
+                    size="small"
+                    :options="mountModeOptions"
+                    class="config-form__input"
+                  />
+                </label>
                 <n-button
-                  size="tiny"
+                  size="small"
                   type="error"
                   quaternary
                   @click="removeMount(index)"
-                  class="config-mount-remove"
+                  class="config-compact-row__remove"
                 >
                   {{ t('config.remove') }}
                 </n-button>
@@ -70,82 +79,103 @@
             </div>
           </div>
 
-          <div class="config-form__section config-environment-section">
+          <div class="config-form__section config-collection-section">
             <div class="config-form__section-header">
-              <div class="config-form__section-title">{{ t('config.environmentVariables') }}</div>
-              <n-button size="small" @click="addEnvironmentVariable">
+              <div class="config-collection-heading">
+                <div class="config-form__section-title">{{ t('config.environmentVariables') }}</div>
+                <n-tag size="small" round :bordered="false">
+                  {{ workerFormValue.environment_variables.length }}
+                </n-tag>
+                <span class="config-collection-heading__hint">
+                  {{ t('config.environmentVariableSecretHint') }}
+                </span>
+              </div>
+              <n-button size="small" secondary @click="addEnvironmentVariable">
                 {{ t('config.addEnvironmentVariable') }}
               </n-button>
             </div>
-            <div v-if="workerFormValue.environment_variables.length === 0" class="config-empty">
+            <div
+              v-if="workerFormValue.environment_variables.length === 0"
+              class="config-empty config-compact-empty"
+            >
               {{ t('config.noEnvironmentVariables') }}
             </div>
-            <div v-else class="config-mounts-list">
+            <div v-else class="config-compact-table config-compact-table--environment">
+              <div class="config-compact-table__header" aria-hidden="true">
+                <span>{{ t('config.environmentVariableKey') }}</span>
+                <span>{{ t('config.environmentVariableType') }}</span>
+                <span>{{ t('config.environmentVariableValue') }}</span>
+                <span></span>
+              </div>
               <div
                 v-for="(environmentVariable, index) in workerFormValue.environment_variables"
                 :key="environmentVariable.id ?? `env-${index}`"
-                class="config-mount-item"
+                class="config-compact-row config-compact-row--environment"
               >
-                <n-grid :cols="isMobile ? 1 : 3" :x-gap="12" :y-gap="8">
-                  <n-gi>
-                    <n-form-item :label="t('config.environmentVariableKey')" size="small">
-                      <n-input
-                        v-model:value="environmentVariable.key"
-                        :placeholder="t('config.environmentVariableKeyPlaceholder')"
-                        class="config-form__input"
-                      />
-                    </n-form-item>
-                  </n-gi>
-                  <n-gi>
-                    <n-form-item :label="t('config.environmentVariableType')" size="small">
-                      <n-select
-                        :value="environmentVariable.is_secret ? 'secret' : 'plain_text'"
-                        :options="environmentVariableTypeOptions"
-                        @update:value="
-                          (value) => {
-                            environmentVariable.is_secret = value === 'secret'
-                          }
-                        "
-                        class="config-form__input"
-                      />
-                    </n-form-item>
-                  </n-gi>
-                  <n-gi>
-                    <n-form-item :label="t('config.environmentVariableValue')" size="small">
-                      <n-input
-                        v-model:value="environmentVariable.value"
-                        :type="environmentVariable.is_secret ? 'password' : 'text'"
-                        :placeholder="
-                          environmentVariable.is_secret && environmentVariable.value_configured
-                            ? t('config.configuredEnterNew')
-                            : t('config.environmentVariableValuePlaceholder')
-                        "
-                        class="config-form__input"
-                      />
-                      <template v-if="environmentVariable.is_secret" #feedback>
-                        <div class="config-secret-feedback">
-                          <n-tag
-                            :type="environmentVariable.value_configured ? 'success' : 'warning'"
-                            round
-                          >
-                            {{
-                              environmentVariable.value_configured
-                                ? t('config.configured')
-                                : t('config.missing')
-                            }}
-                          </n-tag>
-                          <span>{{ t('config.environmentVariableSecretHint') }}</span>
-                        </div>
-                      </template>
-                    </n-form-item>
-                  </n-gi>
-                </n-grid>
+                <label class="config-compact-field">
+                  <span class="config-compact-field__label">
+                    {{ t('config.environmentVariableKey') }}
+                  </span>
+                  <n-input
+                    v-model:value="environmentVariable.key"
+                    size="small"
+                    :placeholder="t('config.environmentVariableKeyPlaceholder')"
+                    class="config-form__input"
+                  />
+                </label>
+                <label class="config-compact-field">
+                  <span class="config-compact-field__label">
+                    {{ t('config.environmentVariableType') }}
+                  </span>
+                  <n-select
+                    :value="environmentVariable.is_secret ? 'secret' : 'plain_text'"
+                    size="small"
+                    :options="environmentVariableTypeOptions"
+                    @update:value="
+                      (value) => {
+                        environmentVariable.is_secret = value === 'secret'
+                      }
+                    "
+                    class="config-form__input"
+                  />
+                </label>
+                <label class="config-compact-field config-compact-field--value">
+                  <span class="config-compact-field__label">
+                    {{ t('config.environmentVariableValue') }}
+                  </span>
+                  <div class="config-compact-value">
+                    <n-input
+                      v-model:value="environmentVariable.value"
+                      size="small"
+                      :type="environmentVariable.is_secret ? 'password' : 'text'"
+                      :placeholder="
+                        environmentVariable.is_secret && environmentVariable.value_configured
+                          ? t('config.configuredEnterNew')
+                          : t('config.environmentVariableValuePlaceholder')
+                      "
+                      class="config-form__input"
+                    />
+                    <n-tag
+                      v-if="environmentVariable.is_secret"
+                      size="small"
+                      :type="environmentVariable.value_configured ? 'success' : 'warning'"
+                      round
+                      :bordered="false"
+                    >
+                      {{
+                        environmentVariable.value_configured
+                          ? t('config.configured')
+                          : t('config.missing')
+                      }}
+                    </n-tag>
+                  </div>
+                </label>
                 <n-button
-                  size="tiny"
+                  size="small"
                   type="error"
                   quaternary
                   @click="removeEnvironmentVariable(index)"
-                  class="config-mount-remove"
+                  class="config-compact-row__remove"
                 >
                   {{ t('config.remove') }}
                 </n-button>
@@ -476,7 +506,7 @@ async function fetchConfig() {
 }
 
 function addMount() {
-  workerFormValue.value.mounts.push({
+  workerFormValue.value.mounts.unshift({
     host_path: '',
     container_path: '',
     mode: 'ro'
@@ -484,7 +514,7 @@ function addMount() {
 }
 
 function addEnvironmentVariable() {
-  workerFormValue.value.environment_variables.push({
+  workerFormValue.value.environment_variables.unshift({
     key: '',
     value: '',
     is_secret: false,
@@ -567,24 +597,124 @@ watch(() => props.reloadKey, () => {
 </script>
 
 <style scoped>
-.config-maven-section {
-  margin-top: 20px;
+.config-collection-section {
+  gap: 8px;
 }
 
-.config-environment-section {
-  margin-top: 20px;
-}
-
-.config-scripts-section {
-  margin-top: 20px;
-}
-
-.config-run-instructions-section { margin-top: 20px; }
-
-.config-secret-feedback {
+.config-collection-heading {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.config-collection-heading__hint {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.48);
+}
+
+.config-compact-empty {
+  padding: 12px 16px;
+  border-radius: 10px;
+}
+
+.config-compact-table {
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.config-compact-table__header,
+.config-compact-row {
+  display: grid;
+  align-items: center;
+  column-gap: 10px;
+}
+
+.config-compact-table--mounts .config-compact-table__header,
+.config-compact-row--mount {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 132px 52px;
+}
+
+.config-compact-table--environment .config-compact-table__header,
+.config-compact-row--environment {
+  grid-template-columns: minmax(140px, 0.8fr) 120px minmax(220px, 1.2fr) 52px;
+}
+
+.config-compact-table__header {
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: rgba(15, 23, 42, 0.48);
+  background: rgba(15, 23, 42, 0.025);
+}
+
+.config-compact-row {
+  min-height: 48px;
+  padding: 7px 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+.config-compact-field {
+  display: block;
+  min-width: 0;
+}
+
+.config-compact-field__label {
+  display: none;
+}
+
+.config-compact-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.config-compact-value .n-tag {
+  flex: 0 0 auto;
+}
+
+.config-compact-row__remove {
+  justify-self: end;
+}
+
+@media (max-width: 767px) {
+  .config-collection-heading {
+    flex-wrap: wrap;
+  }
+
+  .config-collection-heading__hint {
+    flex-basis: 100%;
+  }
+
+  .config-compact-table__header {
+    display: none;
+  }
+
+  .config-compact-row--mount,
+  .config-compact-row--environment {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .config-compact-table__header + .config-compact-row {
+    border-top: 0;
+  }
+
+  .config-compact-field__label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(15, 23, 42, 0.52);
+  }
+
+  .config-compact-row__remove {
+    justify-self: start;
+  }
 }
 </style>
