@@ -343,7 +343,11 @@ async def create_execute_container(
             raise RuntimeError("worker_workspace_host_path is required for worker custom scripts")
         materialize_worker_custom_scripts(settings, workspace_paths.runtime_path)
 
-    if issue and getattr(task, "trigger_source", None) == "ci_auto_repair":
+    is_ci_failure_task = (
+        getattr(task, "trigger_source", None) == "ci_auto_repair"
+        or getattr(task, "ci_failure_run_id", None) is not None
+    )
+    if issue and is_ci_failure_task:
         if workspace_paths is None:
             raise RuntimeError("worker_workspace_host_path is required for CI auto-repair tasks")
         run = await db.get(CIFailureRun, task.ci_failure_run_id) if task.ci_failure_run_id else None

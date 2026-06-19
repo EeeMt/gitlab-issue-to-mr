@@ -3,6 +3,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -129,6 +130,31 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
             created_at=created_at,
             completed_at=created_at,
         )
+
+    async def test_collector_refreshes_runtime_config_before_reading_settings(self):
+        from app.core.ci_failure_collector import run_ci_failure_collector_once
+
+        events: list[str] = []
+        refresh = AsyncMock(side_effect=lambda *_args, **_kwargs: events.append("refresh"))
+        claim = AsyncMock(return_value=[])
+
+        def get_settings():
+            self.assertEqual(events, ["refresh"])
+            events.append("settings")
+            return self._settings()
+
+        with (
+            patch("app.core.ci_failure_collector.AsyncSessionLocal", self.Session),
+            patch("app.core.ci_failure_collector.refresh_runtime_config_if_stale", refresh),
+            patch("app.core.ci_failure_collector.get_effective_settings", side_effect=get_settings),
+            patch("app.core.ci_failure_collector.claim_collecting_runs", claim),
+        ):
+            processed = await run_ci_failure_collector_once(collector_id="test")
+
+        self.assertEqual(processed, 0)
+        self.assertEqual(events, ["refresh", "settings"])
+        refresh.assert_awaited_once()
+        self.assertEqual(refresh.await_args.kwargs, {"min_check_interval": 0.0})
 
     async def test_disabled_issue_records_ignored_reason_without_task(self):
         from app.core.ci_failure_collector import process_ci_failure_run

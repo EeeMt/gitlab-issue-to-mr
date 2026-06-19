@@ -217,7 +217,9 @@ def build_task_prompt_context(
             else (previous_task_summaries_path or "")
         ),
         "ci_failure_context_path": (
-            CI_FAILURE_CONTEXT_PATH if task.trigger_source == "ci_auto_repair" else ""
+            CI_FAILURE_CONTEXT_PATH
+            if task.trigger_source == "ci_auto_repair" or task.ci_failure_run_id is not None
+            else ""
         ),
     }
 
@@ -267,11 +269,13 @@ async def backfill_active_task_prompts(
 
     project_lookup = await build_project_lookup()
     for task in tasks:
-        template = task.run_instruction_template or select_run_instruction_template(
-            settings,
-            task_mode=task.task_mode or "execute",
-            trigger_source=task.trigger_source or "manual",
-        )
+        template = task.run_instruction_template
+        if template is None:
+            template = select_run_instruction_template(
+                settings,
+                task_mode=task.task_mode or "execute",
+                trigger_source=task.trigger_source or "manual",
+            )
         render_and_store_task_prompt(
             task,
             task.issue,

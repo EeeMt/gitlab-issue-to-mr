@@ -31,6 +31,7 @@ from app.models import (
     TaskStatus,
     WebhookEvent,
 )
+from app.runtime_config import refresh_runtime_config_if_stale
 
 logger = logging.getLogger(__name__)
 
@@ -674,8 +675,9 @@ async def claim_collecting_runs(
 async def run_ci_failure_collector_once(*, collector_id: str | None = None, limit: int = 5) -> int:
     """Claim and process a batch of CI failure runs."""
     collector_id = collector_id or f"ci-collector-{uuid.uuid4()}"
-    settings = get_effective_settings()
     async with AsyncSessionLocal() as db:
+        await refresh_runtime_config_if_stale(db, min_check_interval=0.0)
+        settings = get_effective_settings()
         run_ids = await claim_collecting_runs(db, collector_id=collector_id, limit=limit)
 
     processed = 0

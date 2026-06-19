@@ -50,6 +50,23 @@ vi.mock('vue-i18n', () => ({
 }))
 
 vi.mock('naive-ui', () => ({
+  useThemeVars: () => ({
+    value: {
+      cardColor: '#fff',
+      popoverColor: '#fff',
+      actionColor: '#f5f5f5',
+      hoverColor: '#eee',
+      codeColor: '#f5f5f5',
+      borderColor: '#ddd',
+      dividerColor: '#ddd',
+      textColor1: '#111',
+      textColor2: '#333',
+      textColor3: '#666',
+      primaryColor: '#18a058',
+      boxShadow2: 'none',
+      fontFamilyMono: 'monospace'
+    }
+  }),
   NAlert: {
     name: 'NAlert',
     setup(_props: any, { slots }: any) {
@@ -130,6 +147,13 @@ vi.mock('naive-ui', () => ({
           placeholder: props.placeholder,
           onInput: (event: Event) => emit('update:value', (event.target as HTMLInputElement).value)
         })
+    }
+  },
+  NPopover: {
+    name: 'NPopover',
+    props: ['show'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-popover' }, [slots.trigger?.(), slots.default?.()])
     }
   },
   NSelect: {

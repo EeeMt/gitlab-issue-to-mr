@@ -316,7 +316,10 @@ def build_container_volumes(
 
 def materialize_ci_failure_bundle(task: Task, runtime_path: str | os.PathLike[str]) -> None:
     """Copy a prepared CI failure bundle into one task's runtime directory."""
-    if getattr(task, "trigger_source", "manual") != "ci_auto_repair":
+    if (
+        getattr(task, "trigger_source", "manual") != "ci_auto_repair"
+        and getattr(task, "ci_failure_run_id", None) is None
+    ):
         return
 
     run = getattr(task, "ci_failure_run", None)

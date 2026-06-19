@@ -400,6 +400,7 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.rendered_prompt = None
     task.rendered_prompt_at = None
     task.trigger_source = "manual"
+    task.ci_failure_run_id = None
     task.initiator_user_id = None
     task.initiator_gitlab_user_id = None
     task.initiator_username = None
@@ -869,6 +870,63 @@ class RetryTaskAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         created_task = mock_db.add.call_args.args[0]
         self.assertEqual(created_task.provider_id, 23)
+
+    def test_retry_task_preserves_ci_failure_context(self):
+        """Retrying a CI repair keeps the bundle provenance and renders its stable path."""
+        from app.core.task_prompt import BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE
+        from app.models import Issue, Task
+
+        task = _make_serializable_task(task_status=TaskStatus.FAILED)
+        task.id = 8
+        task.project_id = 42
+        task.provider_id = 23
+        task.task_mode = "execute"
+        task.require_changes = True
+        task.trigger_source = "ci_auto_repair"
+        task.ci_failure_run_id = 91
+        task.run_instruction_template = BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE
+
+        issue = Issue(id=1, title="Repair CI", project_id=42, status="in_review")
+        mock_result_task = MagicMock()
+        mock_result_task.scalar_one_or_none.return_value = task
+        mock_result_no_retry = MagicMock()
+        mock_result_no_retry.scalar_one_or_none.return_value = None
+        mock_result_issue = MagicMock()
+        mock_result_issue.scalar_one_or_none.return_value = issue
+
+        now = datetime(2024, 1, 1, 12, 0, 0)
+
+        async def fake_refresh(obj):
+            if isinstance(obj, Task):
+                obj.id = 108
+                obj.status = TaskStatus.PENDING
+                obj.created_at = now
+                obj.updated_at = now
+
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(
+            side_effect=[mock_result_task, mock_result_no_retry, mock_result_issue]
+        )
+        mock_db.get = AsyncMock(return_value=_make_mock_provider(id=23))
+        mock_db.add = MagicMock()
+        mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
+        mock_db.refresh = AsyncMock(side_effect=fake_refresh)
+
+        client, app = _make_app_client_with_db(mock_db)
+        with (
+            patch("app.api.task_operations.notify_task_retried", new=AsyncMock()),
+            patch("app.core.task_helpers._require_task_operator", return_value=None),
+            patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+        ):
+            response = client.post("/api/tasks/8/retry")
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        created_task = mock_db.add.call_args.args[0]
+        self.assertEqual(created_task.trigger_source, "retry")
+        self.assertEqual(created_task.ci_failure_run_id, 91)
+        self.assertIn("/tmp/codify-runtime/ci-failure", created_task.rendered_prompt)
 
     def test_retry_task_rejects_disabled_original_provider(self):
         """POST /api/tasks/{id}/retry should reject an explicitly disabled provider."""

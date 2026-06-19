@@ -994,5 +994,35 @@ describe('TaskFormDrawer', () => {
         expect.objectContaining({ run_instruction_template: 'Changed snapshot' })
       )
     })
+
+    it('ignores a preview response after the template changes', async () => {
+      let resolvePreview!: (value: any) => void
+      mockApi.previewRunInstructionTemplate.mockImplementation(() => new Promise((resolve) => {
+        resolvePreview = resolve
+      }))
+      await mountDrawer()
+      await openDrawer()
+      wrapper.vm.selectTaskMode('execute')
+
+      const previewPromise = wrapper.vm.handleRunInstructionPreview()
+      await nextTick()
+      expect(wrapper.vm.previewLoading).toBe(true)
+
+      wrapper.vm.handleRunInstructionInput('Changed while previewing')
+      expect(wrapper.vm.previewLoading).toBe(false)
+      expect(wrapper.vm.previewResult).toBe('')
+
+      resolvePreview({
+        rendered_prompt: 'Stale rendered prompt',
+        used_placeholders: ['user_prompt'],
+        unused_known_placeholders: []
+      })
+      await previewPromise
+      await flushPromises()
+
+      expect(wrapper.vm.previewResult).toBe('')
+      expect(wrapper.vm.previewError).toBe('')
+      expect(wrapper.vm.previewLoading).toBe(false)
+    })
   })
 })

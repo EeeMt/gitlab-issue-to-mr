@@ -149,6 +149,46 @@ async def test_create_persists_snapshot_and_rendered_prompt_before_commit() -> N
     db.commit.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_create_rejects_explicitly_blank_run_instruction_template() -> None:
+    issue = Issue(id=5, title="Login", project_id=9, status="open")
+    provider = AIProvider(
+        id=3,
+        name="provider",
+        base_url="http://provider",
+        model="model",
+        max_turns=10,
+        is_default=True,
+        is_disabled=False,
+    )
+    db = MagicMock()
+
+    async def get_model(model, _id):
+        return issue if model is Issue else provider
+
+    db.get = AsyncMock(side_effect=get_model)
+    db.add = MagicMock()
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+    request = CreateTaskRequest(
+        issue_id=5,
+        user_prompt="Implement auth",
+        provider_id=3,
+        run_instruction_template="",
+    )
+
+    with (
+        patch("app.api.tasks.get_project_metadata", new=AsyncMock(return_value={})),
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await create_task(request, db, None, _scope())
+
+    assert exc_info.value.status_code == 422
+    db.rollback.assert_awaited_once()
+    db.commit.assert_not_awaited()
+
+
 def test_built_in_constants_remain_nonempty() -> None:
     assert BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE.strip()
     assert BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE.strip()

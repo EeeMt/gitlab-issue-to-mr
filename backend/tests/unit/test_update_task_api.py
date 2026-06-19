@@ -96,6 +96,7 @@ def _mock_db_for_task(task):
     mock_db.execute = AsyncMock(return_value=mock_result)
     mock_db.get = AsyncMock(return_value=None)   # default: provider not found
     mock_db.commit = AsyncMock()
+    mock_db.rollback = AsyncMock()
     mock_db.refresh = AsyncMock()
     mock_db.flush = AsyncMock()
     return mock_db
@@ -137,6 +138,10 @@ class UpdateTaskHappyPathTests(unittest.TestCase):
         resp, task = self._patch(1, {"require_changes": False})
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(task.require_changes)
+
+    def test_update_rejects_explicitly_blank_run_instruction_template(self):
+        resp, _task = self._patch(1, {"run_instruction_template": ""})
+        self.assertEqual(resp.status_code, 422)
 
     def test_update_provider_id_to_null_clears_provider(self):
         """provider_id: null removes the provider assignment."""

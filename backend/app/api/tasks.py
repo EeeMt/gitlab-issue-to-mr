@@ -1016,11 +1016,13 @@ async def update_task(
     )
     if render_context_changed:
         issue = await db.get(Issue, task.issue_id) if task.issue_id is not None else None
-        template = task.run_instruction_template or select_run_instruction_template(
-            get_effective_settings(),
-            task_mode=task.task_mode or "execute",
-            trigger_source=task.trigger_source or "manual",
-        )
+        template = task.run_instruction_template
+        if template is None:
+            template = select_run_instruction_template(
+                get_effective_settings(),
+                task_mode=task.task_mode or "execute",
+                trigger_source=task.trigger_source or "manual",
+            )
         try:
             render_and_store_task_prompt(
                 task,
@@ -1219,6 +1221,7 @@ async def retry_task(
         is_retry=True,
         retry_source_task_id=original_task.id,
         trigger_source="retry",
+        ci_failure_run_id=original_task.ci_failure_run_id,
         provider_id=provider_id,
         initiator_user_id=current_user.id if current_user is not None else None,
         initiator_gitlab_user_id=current_user.gitlab_user_id if current_user is not None else None,
@@ -1429,11 +1432,13 @@ async def create_task(
     )
     db.add(task)
     await db.flush()
-    template = request.run_instruction_template or select_run_instruction_template(
-        get_effective_settings(),
-        task_mode=task.task_mode,
-        trigger_source=task.trigger_source or "manual",
-    )
+    template = request.run_instruction_template
+    if template is None:
+        template = select_run_instruction_template(
+            get_effective_settings(),
+            task_mode=task.task_mode,
+            trigger_source=task.trigger_source or "manual",
+        )
     try:
         render_and_store_task_prompt(
             task,

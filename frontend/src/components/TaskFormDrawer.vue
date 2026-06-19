@@ -480,6 +480,7 @@ const slotCapacity = ref<SlotCapacityInfo | null>(null)
 const slotCapacityLoading = ref(false)
 let slotCheckTimeout: ReturnType<typeof setTimeout> | undefined
 let slotCheckGeneration = 0
+let previewRequestGeneration = 0
 
 const priorityOptions = [
   { label: 'P0', value: 0, desc: t('createTask.priorityP0Desc') },
@@ -547,15 +548,21 @@ watch(scheduledAt, () => {
 })
 
 watch(taskMode, (val) => {
+  invalidateRunInstructionPreview()
   if (val !== null) {
     taskModeErrorVisible.value = false
     if (!runInstructionTemplate.value && runInstructionDefaults.value) {
       runInstructionTemplate.value = runInstructionDefaults.value[val].content
     }
   }
-})
+}, { flush: 'sync' })
+
+watch([prompt, requireChanges], () => {
+  invalidateRunInstructionPreview()
+}, { flush: 'sync' })
 
 watch(() => props.show, (val) => {
+  invalidateRunInstructionPreview()
   if (val) {
     if (props.mode === 'edit' && props.task) {
       prompt.value = props.task.user_prompt ?? ''
@@ -584,8 +591,6 @@ watch(() => props.show, (val) => {
     }
     usageLimitDetail.value = null
     taskModeErrorVisible.value = false
-    previewResult.value = ''
-    previewError.value = ''
   }
 })
 
@@ -687,15 +692,12 @@ function selectTaskMode(mode: 'execute' | 'plan') {
     runInstructionTemplate.value = nextDefault
   }
   taskMode.value = mode
-  previewResult.value = ''
-  previewError.value = ''
 }
 
 function handleRunInstructionInput(value: string) {
   runInstructionTemplate.value = value
   runInstructionDirty.value = true
-  previewResult.value = ''
-  previewError.value = ''
+  invalidateRunInstructionPreview()
 }
 
 function handleRunInstructionSummaryClick(event: MouseEvent) {
@@ -706,6 +708,12 @@ function restoreRunInstructionDefault() {
   if (!runInstructionDefaults.value || !taskMode.value) return
   runInstructionTemplate.value = runInstructionDefaults.value[taskMode.value].content
   runInstructionDirty.value = true
+  invalidateRunInstructionPreview()
+}
+
+function invalidateRunInstructionPreview() {
+  previewRequestGeneration += 1
+  previewLoading.value = false
   previewResult.value = ''
   previewError.value = ''
 }
@@ -713,6 +721,7 @@ function restoreRunInstructionDefault() {
 async function handleRunInstructionPreview() {
   if (!props.issueId && !props.task?.issue_id) return
   if (!taskMode.value) return
+  const requestGeneration = ++previewRequestGeneration
   previewLoading.value = true
   previewError.value = ''
   try {
@@ -723,11 +732,13 @@ async function handleRunInstructionPreview() {
       run_instruction_template: runInstructionTemplate.value,
       require_changes: taskMode.value === 'plan' ? false : requireChanges.value
     })
+    if (requestGeneration !== previewRequestGeneration) return
     previewResult.value = result.rendered_prompt
   } catch (error: any) {
+    if (requestGeneration !== previewRequestGeneration) return
     previewError.value = error?.response?.data?.detail || error?.apiError?.detail || String(error)
   } finally {
-    previewLoading.value = false
+    if (requestGeneration === previewRequestGeneration) previewLoading.value = false
   }
 }
 
