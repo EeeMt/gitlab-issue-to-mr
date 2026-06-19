@@ -634,7 +634,7 @@ watch(() => props.reloadKey, () => {
 
 .config-compact-table--mounts .config-compact-table__header,
 .config-compact-row--mount {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 132px 52px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 158px 52px;
 }
 
 .config-compact-table--environment .config-compact-table__header,

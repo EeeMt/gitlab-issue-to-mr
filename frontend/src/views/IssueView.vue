@@ -1764,7 +1764,8 @@ onMounted(() => {
 .issue-automation-empty {
   display: flex;
   align-items: center;
-  min-height: 96px;
+  justify-content: center;
+  flex: 1;
   color: var(--n-text-color-3);
   font-size: 13px;
 }

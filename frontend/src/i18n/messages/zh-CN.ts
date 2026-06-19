@@ -491,7 +491,7 @@ const zhCN = {
     ciAutoRepairOn: 'CI 自动修复已开启',
     ciAutoRepairOff: 'CI 自动修复已关闭',
     ciAutomation: 'CI 自动化',
-    noCiAutomationEvents: '暂无 CI 自动化事件。',
+    noCiAutomationEvents: '暂无 CI 自动化事件',
     pipelineLabel: '流水线 #{id}',
     viewRepairTask: '任务 #{id}',
     ciWebhookReceived: '收到 Webhook',
