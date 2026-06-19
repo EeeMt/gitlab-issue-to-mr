@@ -701,7 +701,6 @@ const zhCN = {
       ci_failure_context_path: 'CI 失败上下文目录的运行时路径',
     },
     preview: '最终提示词预览',
-    previewReady: '已生成 · {count} 个字符',
     unknownPlaceholders: '未知占位符：{names}',
     userPromptMissing: '当前运行指令不会自动包含需求内容。',
     advanced: '高级',

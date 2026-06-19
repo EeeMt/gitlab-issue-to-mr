@@ -711,7 +711,6 @@ const en = {
       ci_failure_context_path: 'Runtime path to the CI failure context directory',
     },
     preview: 'Final Prompt Preview',
-    previewReady: 'Generated · {count} characters',
     unknownPlaceholders: 'Unknown placeholders: {names}',
     userPromptMissing: 'The current run instruction will not automatically include the requirement.',
     advanced: 'Advanced',
