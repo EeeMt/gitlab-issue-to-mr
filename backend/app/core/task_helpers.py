@@ -18,6 +18,8 @@ def _serialize_task(
     task: Task,
     project_metadata: dict[str, Any] | None = None,
     settings: Any | None = None,
+    *,
+    include_prompt_details: bool = False,
 ) -> dict[str, Any]:
     """Serialize a task row for API responses.
 
@@ -73,6 +75,16 @@ def _serialize_task(
         "is_manually_overridden": task.is_manually_overridden,
         "override_reason": task.override_reason,
     }
+    if include_prompt_details:
+        data.update(
+            {
+                "run_instruction_template": task.run_instruction_template,
+                "rendered_prompt": task.rendered_prompt,
+                "rendered_prompt_at": (
+                    task.rendered_prompt_at.isoformat() if task.rendered_prompt_at else None
+                ),
+            }
+        )
     # Safely check if issue relationship is loaded (avoid lazy load / MissingGreenlet)
     issue = None
     try:

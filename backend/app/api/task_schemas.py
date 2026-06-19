@@ -3,9 +3,10 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.scheduling import normalize_scheduled_datetime
+from app.core.task_prompt import MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH
 from app.core.utcnow import utcnow
 
 _VALID_TASK_MODES = ("execute", "plan")
@@ -59,6 +60,9 @@ class UpdateTaskRequest(BaseModel):
     provider_id: int | None = None  # None = system default / clear
     require_changes: bool | None = None
     task_mode: Literal["execute", "plan"] | None = None
+    run_instruction_template: str | None = Field(
+        default=None, max_length=MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH
+    )
 
     @field_validator("user_prompt", mode="before")
     @classmethod
@@ -81,6 +85,15 @@ class UpdateTaskRequest(BaseModel):
             raise ValueError("task_mode cannot be null; omit the key to leave it unchanged")
         return v
 
+    @field_validator("run_instruction_template", mode="before")
+    @classmethod
+    def run_instruction_template_not_null(cls, v: Any) -> Any:
+        if v is None:
+            raise ValueError(
+                "run_instruction_template cannot be null; omit the key to leave it unchanged"
+            )
+        return v
+
 
 class CreateTaskRequest(BaseModel):
     """Request model for creating a task under an Issue."""
@@ -93,6 +106,9 @@ class CreateTaskRequest(BaseModel):
     provider_id: int
     require_changes: bool | None = True
     task_mode: Literal["execute", "plan"] = "execute"
+    run_instruction_template: str | None = Field(
+        default=None, max_length=MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH
+    )
 
     @model_validator(mode="after")
     def validate_schedule_is_future(self) -> "CreateTaskRequest":
@@ -115,3 +131,13 @@ class CreateTaskRequest(BaseModel):
         if self.task_mode == "plan":
             return False
         return self.require_changes if self.require_changes is not None else True
+
+
+class RunInstructionTemplatePreviewRequest(BaseModel):
+    """Prospective task context used to preview a run-instruction template."""
+
+    issue_id: int
+    task_mode: Literal["execute", "plan"] = "execute"
+    user_prompt: str
+    run_instruction_template: str = Field(max_length=MAX_RUN_INSTRUCTION_TEMPLATE_LENGTH)
+    require_changes: bool = True

@@ -209,6 +209,9 @@ export interface Task {
   project_path_with_namespace?: string | null
   project_url?: string | null
   user_prompt: string
+  run_instruction_template?: string | null
+  rendered_prompt?: string | null
+  rendered_prompt_at?: string | null
   initiator_user_id?: number | null
   initiator_gitlab_user_id?: number | null
   initiator_username?: string | null
@@ -319,6 +322,7 @@ export interface CreateTaskRequest {
   provider_id?: number | null
   require_changes?: boolean
   task_mode?: 'execute' | 'plan'
+  run_instruction_template?: string
 }
 
 export interface RescheduleTaskRequest {
@@ -597,6 +601,9 @@ export interface RuntimeConfig {
   announcement_enabled: boolean
   announcement_text: string
   announcement_level: string
+  default_execute_run_instruction_template: string
+  default_plan_run_instruction_template: string
+  ci_auto_repair_run_instruction_template: string
 }
 
 export interface WorkerEnvironmentVariable {
@@ -1545,6 +1552,52 @@ export async function createTask(request: CreateTaskRequest): Promise<Task> {
   return response.data
 }
 
+export interface RunInstructionTemplateMetadata {
+  content: string
+  available_placeholders: string[]
+  known_placeholders?: string[]
+}
+
+export interface RunInstructionTemplateDefaults {
+  execute: RunInstructionTemplateMetadata
+  plan: RunInstructionTemplateMetadata
+}
+
+export interface RunInstructionTemplateBuiltIns extends RunInstructionTemplateDefaults {
+  ci_auto_repair: RunInstructionTemplateMetadata
+}
+
+export interface RunInstructionTemplatePreviewRequest {
+  issue_id: number
+  task_mode: 'execute' | 'plan'
+  user_prompt: string
+  run_instruction_template: string
+  require_changes?: boolean
+}
+
+export interface RunInstructionTemplatePreview {
+  rendered_prompt: string
+  used_placeholders: string[]
+  unused_known_placeholders: string[]
+}
+
+export async function getRunInstructionTemplateDefaults(): Promise<RunInstructionTemplateDefaults> {
+  const response = await api.get('/tasks/run-instruction-template-defaults')
+  return response.data
+}
+
+export async function previewRunInstructionTemplate(
+  request: RunInstructionTemplatePreviewRequest
+): Promise<RunInstructionTemplatePreview> {
+  const response = await api.post('/tasks/render-run-instruction-template-preview', request)
+  return response.data
+}
+
+export async function getRunInstructionTemplateBuiltIns(): Promise<RunInstructionTemplateBuiltIns> {
+  const response = await api.get('/config/run-instruction-template-built-ins')
+  return response.data
+}
+
 export async function rescheduleTask(taskId: number, request: RescheduleTaskRequest): Promise<Task> {
   const response = await api.patch(`/tasks/${taskId}/schedule`, request)
   return response.data
@@ -1556,6 +1609,7 @@ export interface UpdateTaskRequest {
   provider_id?: number | null
   require_changes?: boolean
   task_mode?: 'execute' | 'plan'
+  run_instruction_template?: string
 }
 
 export async function updateTask(taskId: number, request: UpdateTaskRequest): Promise<Task> {

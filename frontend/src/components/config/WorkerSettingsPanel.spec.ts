@@ -26,12 +26,16 @@ function createRuntimeConfig() {
       }
     ],
     worker_pre_script: 'echo pre',
-    worker_post_script: 'echo post'
+    worker_post_script: 'echo post',
+    default_execute_run_instruction_template: 'Execute {{user_prompt}}',
+    default_plan_run_instruction_template: 'Plan {{user_prompt}}',
+    ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}'
   }
 }
 
-const { mockGetConfig, mockUpdateConfig, mockMessage } = vi.hoisted(() => ({
+const { mockGetConfig, mockGetBuiltIns, mockUpdateConfig, mockMessage } = vi.hoisted(() => ({
   mockGetConfig: vi.fn(),
+  mockGetBuiltIns: vi.fn(),
   mockUpdateConfig: vi.fn(),
   mockMessage: {
     success: vi.fn(),
@@ -164,6 +168,7 @@ vi.mock('naive-ui', () => ({
 
 vi.mock('../../api', () => ({
   getConfig: mockGetConfig,
+  getRunInstructionTemplateBuiltIns: mockGetBuiltIns,
   updateConfig: mockUpdateConfig
 }))
 
@@ -172,6 +177,11 @@ describe('WorkerSettingsPanel', () => {
     vi.clearAllMocks()
     mockGetConfig.mockResolvedValue({
       runtime: createRuntimeConfig()
+    })
+    mockGetBuiltIns.mockResolvedValue({
+      execute: { content: 'Execute {{user_prompt}}', available_placeholders: ['user_prompt'] },
+      plan: { content: 'Plan {{user_prompt}}', available_placeholders: ['user_prompt'] },
+      ci_auto_repair: { content: 'Repair {{issue_title}}', available_placeholders: ['issue_title'] }
     })
     mockUpdateConfig.mockResolvedValue({
       runtime: createRuntimeConfig()
@@ -273,6 +283,9 @@ describe('WorkerSettingsPanel', () => {
         worker_post_script: 'echo post',
         maven_cache_host_path: '/data/.m2/repository',
         maven_settings_host_path: '/data/.m2/settings.xml',
+        default_execute_run_instruction_template: 'Execute {{user_prompt}}',
+        default_plan_run_instruction_template: 'Plan {{user_prompt}}',
+        ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}',
         worker_environment_variables: [
           {
             id: 7,
@@ -350,6 +363,9 @@ describe('WorkerSettingsPanel', () => {
         worker_post_script: 'echo post',
         maven_cache_host_path: '/data/.m2/repository',
         maven_settings_host_path: '/data/.m2/settings.xml',
+        default_execute_run_instruction_template: 'Execute {{user_prompt}}',
+        default_plan_run_instruction_template: 'Plan {{user_prompt}}',
+        ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}',
         worker_environment_variables: [
           {
             id: 7,
@@ -432,6 +448,9 @@ describe('WorkerSettingsPanel', () => {
         worker_post_script: 'echo post',
         maven_cache_host_path: '/data/.m2/repository',
         maven_settings_host_path: '/data/.m2/settings.xml',
+        default_execute_run_instruction_template: 'Execute {{user_prompt}}',
+        default_plan_run_instruction_template: 'Plan {{user_prompt}}',
+        ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}',
         worker_environment_variables: [
           {
             id: 7,
@@ -453,6 +472,31 @@ describe('WorkerSettingsPanel', () => {
           }
         ]
       }
+    })
+  })
+
+  it('loads, restores, and saves independent run instruction templates', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: { isMobile: false, reloadKey: 0 }
+    })
+    await flushPromises()
+    const vm = wrapper.vm as any
+    expect(vm.workerFormValue.default_execute_run_instruction_template).toBe(
+      'Execute {{user_prompt}}'
+    )
+    vm.workerFormValue.default_execute_run_instruction_template = 'Custom execute'
+    vm.restoreBuiltIn('execute')
+    expect(vm.workerFormValue.default_execute_run_instruction_template).toBe(
+      'Execute {{user_prompt}}'
+    )
+    vm.workerFormValue.default_plan_run_instruction_template = 'Custom plan'
+    await vm.handleSaveWorker()
+    expect(mockUpdateConfig).toHaveBeenCalledWith({
+      runtime: expect.objectContaining({
+        default_execute_run_instruction_template: 'Execute {{user_prompt}}',
+        default_plan_run_instruction_template: 'Custom plan',
+        ci_auto_repair_run_instruction_template: 'Repair {{issue_title}}'
+      })
     })
   })
 })

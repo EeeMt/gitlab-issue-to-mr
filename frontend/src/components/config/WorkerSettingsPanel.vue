@@ -187,6 +187,35 @@
             </n-grid>
           </div>
 
+          <div class="config-form__section config-run-instructions-section">
+            <div class="config-form__section-title">{{ t('config.runInstructions') }}</div>
+            <n-form-item :label="t('config.defaultExecuteRunInstruction')">
+              <RunInstructionTemplateEditor
+                v-model="workerFormValue.default_execute_run_instruction_template"
+                :available-placeholders="builtIns?.execute.available_placeholders ?? []"
+                :known-placeholders="knownPromptPlaceholders"
+                @restore-default="restoreBuiltIn('execute')"
+              />
+            </n-form-item>
+            <n-form-item :label="t('config.defaultPlanRunInstruction')">
+              <RunInstructionTemplateEditor
+                v-model="workerFormValue.default_plan_run_instruction_template"
+                :available-placeholders="builtIns?.plan.available_placeholders ?? []"
+                :known-placeholders="knownPromptPlaceholders"
+                @restore-default="restoreBuiltIn('plan')"
+              />
+            </n-form-item>
+            <n-form-item :label="t('config.ciAutoRepairRunInstruction')">
+              <RunInstructionTemplateEditor
+                v-model="workerFormValue.ci_auto_repair_run_instruction_template"
+                :available-placeholders="builtIns?.ci_auto_repair.available_placeholders ?? []"
+                :known-placeholders="knownPromptPlaceholders"
+                :warn-when-user-prompt-missing="false"
+                @restore-default="restoreBuiltIn('ci_auto_repair')"
+              />
+            </n-form-item>
+          </div>
+
           <div class="config-form__section config-maven-section">
             <div class="config-form__section-title">{{ t('config.mavenSettings') }}</div>
             <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
@@ -257,11 +286,14 @@ import {
 import { useI18n } from 'vue-i18n'
 import {
   getConfig,
+  getRunInstructionTemplateBuiltIns,
   updateConfig,
+  type RunInstructionTemplateBuiltIns,
   type RuntimeConfig,
   type WorkerEnvironmentVariable,
   type WorkerEnvironmentVariableUpdate
 } from '../../api'
+import RunInstructionTemplateEditor from '../RunInstructionTemplateEditor.vue'
 
 type MountItem = {
   host_path: string
@@ -276,6 +308,9 @@ type WorkerFormValue = {
   worker_post_script: string
   maven_cache_host_path: string
   maven_settings_host_path: string
+  default_execute_run_instruction_template: string
+  default_plan_run_instruction_template: string
+  ci_auto_repair_run_instruction_template: string
 }
 
 type EnvironmentVariableFormItem = {
@@ -296,6 +331,14 @@ const { t } = useI18n()
 
 const loading = ref(false)
 const workerSaving = ref(false)
+const builtIns = ref<RunInstructionTemplateBuiltIns | null>(null)
+const knownPromptPlaceholders = computed(() => [
+  ...new Set(builtIns.value?.execute.known_placeholders ?? [
+    ...(builtIns.value?.execute.available_placeholders ?? []),
+    ...(builtIns.value?.plan.available_placeholders ?? []),
+    ...(builtIns.value?.ci_auto_repair.available_placeholders ?? [])
+  ])
+])
 
 const mountModeOptions = [
   { label: 'Read-only (ro)', value: 'ro' },
@@ -313,7 +356,10 @@ const workerFormValue = ref<WorkerFormValue>({
   worker_pre_script: '',
   worker_post_script: '',
   maven_cache_host_path: '',
-  maven_settings_host_path: ''
+  maven_settings_host_path: '',
+  default_execute_run_instruction_template: '',
+  default_plan_run_instruction_template: '',
+  ci_auto_repair_run_instruction_template: ''
 })
 
 const lastLoadedWorker = ref<WorkerFormValue>(createEmptyWorkerFormValue())
@@ -382,7 +428,13 @@ function mapRuntimeConfigToWorkerFormValue(runtime?: Partial<RuntimeConfig>): Wo
     worker_pre_script: runtime?.worker_pre_script || '',
     worker_post_script: runtime?.worker_post_script || '',
     maven_cache_host_path: runtime?.maven_cache_host_path || '',
-    maven_settings_host_path: runtime?.maven_settings_host_path || ''
+    maven_settings_host_path: runtime?.maven_settings_host_path || '',
+    default_execute_run_instruction_template:
+      runtime?.default_execute_run_instruction_template || '',
+    default_plan_run_instruction_template:
+      runtime?.default_plan_run_instruction_template || '',
+    ci_auto_repair_run_instruction_template:
+      runtime?.ci_auto_repair_run_instruction_template || ''
   }
 }
 
@@ -395,14 +447,25 @@ function cloneWorkerFormValue(value: WorkerFormValue): WorkerFormValue {
     worker_pre_script: value.worker_pre_script,
     worker_post_script: value.worker_post_script,
     maven_cache_host_path: value.maven_cache_host_path,
-    maven_settings_host_path: value.maven_settings_host_path
+    maven_settings_host_path: value.maven_settings_host_path,
+    default_execute_run_instruction_template: value.default_execute_run_instruction_template,
+    default_plan_run_instruction_template: value.default_plan_run_instruction_template,
+    ci_auto_repair_run_instruction_template: value.ci_auto_repair_run_instruction_template
   }
 }
 
 async function fetchConfig() {
   loading.value = true
   try {
-    const config = await getConfig()
+    const [configResult, builtInsResult] = await Promise.allSettled([
+      getConfig(),
+      getRunInstructionTemplateBuiltIns()
+    ])
+    if (configResult.status === 'rejected') throw configResult.reason
+    const config = configResult.value
+    if (builtInsResult.status === 'fulfilled') {
+      builtIns.value = builtInsResult.value
+    }
     workerFormValue.value = mapRuntimeConfigToWorkerFormValue(config.runtime)
     lastLoadedWorker.value = cloneWorkerFormValue(workerFormValue.value)
   } catch {
@@ -436,7 +499,10 @@ function createEmptyWorkerFormValue(): WorkerFormValue {
     worker_pre_script: '',
     worker_post_script: '',
     maven_cache_host_path: '',
-    maven_settings_host_path: ''
+    maven_settings_host_path: '',
+    default_execute_run_instruction_template: '',
+    default_plan_run_instruction_template: '',
+    ci_auto_repair_run_instruction_template: ''
   }
 }
 
@@ -460,7 +526,10 @@ async function handleSaveWorker() {
         worker_pre_script: workerFormValue.value.worker_pre_script,
         worker_post_script: workerFormValue.value.worker_post_script,
         maven_cache_host_path: workerFormValue.value.maven_cache_host_path.trim(),
-        maven_settings_host_path: workerFormValue.value.maven_settings_host_path.trim()
+        maven_settings_host_path: workerFormValue.value.maven_settings_host_path.trim(),
+        default_execute_run_instruction_template: workerFormValue.value.default_execute_run_instruction_template,
+        default_plan_run_instruction_template: workerFormValue.value.default_plan_run_instruction_template,
+        ci_auto_repair_run_instruction_template: workerFormValue.value.ci_auto_repair_run_instruction_template
       }
     })
     workerFormValue.value = mapRuntimeConfigToWorkerFormValue(savedConfig.runtime)
@@ -475,6 +544,17 @@ async function handleSaveWorker() {
 
 function resetWorker() {
   workerFormValue.value = cloneWorkerFormValue(lastLoadedWorker.value)
+}
+
+function restoreBuiltIn(kind: keyof RunInstructionTemplateBuiltIns) {
+  if (!builtIns.value) return
+  if (kind === 'execute') {
+    workerFormValue.value.default_execute_run_instruction_template = builtIns.value.execute.content
+  } else if (kind === 'plan') {
+    workerFormValue.value.default_plan_run_instruction_template = builtIns.value.plan.content
+  } else {
+    workerFormValue.value.ci_auto_repair_run_instruction_template = builtIns.value.ci_auto_repair.content
+  }
 }
 
 onMounted(() => {
@@ -498,6 +578,8 @@ watch(() => props.reloadKey, () => {
 .config-scripts-section {
   margin-top: 20px;
 }
+
+.config-run-instructions-section { margin-top: 20px; }
 
 .config-secret-feedback {
   display: flex;

@@ -18,6 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_effective_settings
 from app.core.ci_failure_logs import append_ci_failure_log
 from app.core.gitlab_client import get_gitlab_client
+from app.core.projects import get_project_metadata
+from app.core.task_prompt import render_and_store_task_prompt, select_run_instruction_template
 from app.core.utcnow import utcnow
 from app.database import AsyncSessionLocal
 from app.models import (
@@ -32,19 +34,7 @@ from app.models import (
 
 logger = logging.getLogger(__name__)
 
-REPAIR_PROMPT = """The GitLab pipeline for this MR failed.
-
-Use the local CI failure bundle:
-- /tmp/codify-runtime/ci-failure/pipeline.json
-- /tmp/codify-runtime/ci-failure/failed-jobs.json
-- /tmp/codify-runtime/ci-failure/jobs/
-
-Inspect the root-cause job logs before changing files.
-Fix only the CI failure on the current MR branch.
-Do not broaden the original task scope.
-Do not modify unrelated files.
-Leave the workspace changes for the worker finalization process; do not run git commit or git push.
-"""
+CI_AUTO_REPAIR_DISPLAY_PROMPT = "修复当前 MR 的 CI 失败"
 
 INFRA_FAILURE_REASONS = {
     "runner_system_failure",
@@ -590,7 +580,7 @@ async def process_ci_failure_run(
         repair_task = Task(
             issue_id=issue.id,
             project_id=issue.project_id,
-            user_prompt=REPAIR_PROMPT,
+            user_prompt=CI_AUTO_REPAIR_DISPLAY_PROMPT,
             initiator_user_id=issue.initiator_user_id,
             initiator_username=issue.initiator_username,
             priority=priority,
@@ -599,6 +589,16 @@ async def process_ci_failure_run(
             require_changes=True,
             trigger_source="ci_auto_repair",
             ci_failure_run_id=run.id,
+        )
+        render_and_store_task_prompt(
+            repair_task,
+            issue,
+            await get_project_metadata(issue.project_id),
+            select_run_instruction_template(
+                settings,
+                task_mode="execute",
+                trigger_source="ci_auto_repair",
+            ),
         )
         db.add(repair_task)
         await db.flush()

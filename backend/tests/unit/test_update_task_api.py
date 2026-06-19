@@ -26,6 +26,10 @@ def _make_task(task_id=1, project_id=1, status=TaskStatus.PENDING):
     task.issue_iid = 10
     task.note_id = 1000
     task.user_prompt = "Original prompt"
+    task.run_instruction_template = "Do {{user_prompt}}"
+    task.rendered_prompt = "Do Original prompt"
+    task.rendered_prompt_at = datetime(2024, 1, 1, 12, 0, 0)
+    task.trigger_source = "manual"
     task.priority = 1
     task.require_changes = True
     task.provider_id = None
@@ -93,6 +97,7 @@ def _mock_db_for_task(task):
     mock_db.get = AsyncMock(return_value=None)   # default: provider not found
     mock_db.commit = AsyncMock()
     mock_db.refresh = AsyncMock()
+    mock_db.flush = AsyncMock()
     return mock_db
 
 

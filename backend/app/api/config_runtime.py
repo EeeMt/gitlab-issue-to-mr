@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api._validators import _is_valid_http_url
 from app.config import Settings, get_effective_settings, get_runtime_config_types, get_settings
 from app.core.config_crypto import ConfigEncryptionError
+from app.core.task_prompt import TaskPromptValidationError, validate_run_instruction_template
 from app.core.worker_environment_variables import (
     list_worker_environment_variables,
     replace_worker_environment_variables,
@@ -80,6 +81,9 @@ class RuntimeConfigSection(BaseModel):
     slot_max_tasks_enforce: bool
     ci_auto_repair_max_attempts: int
     ci_failure_bundle_retention_days: int
+    default_execute_run_instruction_template: str
+    default_plan_run_instruction_template: str
+    ci_auto_repair_run_instruction_template: str
     announcement_enabled: bool
     announcement_text: str
     announcement_level: str
@@ -120,6 +124,9 @@ class RuntimeConfigUpdate(BaseModel):
     slot_max_tasks_enforce: bool | None = None
     ci_auto_repair_max_attempts: int | None = None
     ci_failure_bundle_retention_days: int | None = None
+    default_execute_run_instruction_template: str | None = None
+    default_plan_run_instruction_template: str | None = None
+    ci_auto_repair_run_instruction_template: str | None = None
     announcement_enabled: bool | None = None
     announcement_text: str | None = None
     announcement_level: str | None = None
@@ -159,6 +166,11 @@ def _serialize_runtime_config(
         slot_max_tasks_enforce=settings.slot_max_tasks_enforce,
         ci_auto_repair_max_attempts=settings.ci_auto_repair_max_attempts,
         ci_failure_bundle_retention_days=settings.ci_failure_bundle_retention_days,
+        default_execute_run_instruction_template=(
+            settings.default_execute_run_instruction_template
+        ),
+        default_plan_run_instruction_template=settings.default_plan_run_instruction_template,
+        ci_auto_repair_run_instruction_template=settings.ci_auto_repair_run_instruction_template,
         announcement_enabled=settings.announcement_enabled,
         announcement_text=settings.announcement_text,
         announcement_level=settings.announcement_level,
@@ -197,6 +209,19 @@ def _build_preview_settings(runtime_updates: dict[str, Any], base_settings: Sett
 
 def _validate_config_value(key: str, value: object) -> object:
     """Validate a single configuration value."""
+    if key in {
+        "default_execute_run_instruction_template",
+        "default_plan_run_instruction_template",
+        "ci_auto_repair_run_instruction_template",
+    }:
+        try:
+            return validate_run_instruction_template(value)  # type: ignore[arg-type]
+        except TaskPromptValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+
     if key == "max_concurrency":
         if not isinstance(value, int) or value < 1 or value > 20:
             raise HTTPException(

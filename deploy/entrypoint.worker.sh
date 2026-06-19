@@ -10,6 +10,7 @@ GITLAB_TOKEN="${GITLAB_TOKEN:?Missing GITLAB_TOKEN}"
 PROJECT_ID="${PROJECT_ID:?Missing PROJECT_ID}"
 BRANCH_NAME="${BRANCH_NAME:?Missing BRANCH_NAME}"
 USER_PROMPT="${USER_PROMPT:?Missing USER_PROMPT}"
+CODIFY_TASK_PROMPT_FILE="${CODIFY_TASK_PROMPT_FILE:?Missing CODIFY_TASK_PROMPT_FILE}"
 
 # Optional environment variables
 # ISSUE_IID - required for webhook-triggered tasks, optional for manual tasks
@@ -689,48 +690,15 @@ normalize_model_overall_summary() {
 
 TASK_MODE="${TASK_MODE:-execute}"
 
-if [ "${TASK_MODE}" = "plan" ]; then
-cat > /tmp/claude_prompt.txt <<EOF
-请分析下面的需求，给出详细的实施方案。不要修改任何文件，不要执行任何写操作（包括 git commit、git push、创建 MR）。
-
-需求:
-${USER_PROMPT}
-
-上下文:
-- 仓库路径: ${PROJECT_PATH}
-
-要求:
-1. 检查代码库，理解现有结构和约束。
-2. 给出清晰、可操作的实施方案，包含：
-    - 需要新增或修改哪些文件，以及具体的改动思路
-    - 为什么这么设计
-    - 潜在风险或需要注意的地方
-3. 不要修改任何文件，不要执行任何写操作。
-4. 如果方案需要表达流程、架构、时序、状态转换等图表，必须使用 Markdown 的 mermaid fenced code block（语言标记为 mermaid），不要使用 ASCII 图、图片链接或其它图表格式。
-5. 不要要求人工确认。
-EOF
-else
-cat > /tmp/claude_prompt.txt <<EOF
-请直接完成下面的需求，不要先输出规划或步骤清单。
-
-需求:
-${USER_PROMPT}
-
-上下文:
-- 仓库路径: ${PROJECT_PATH}
-
-要求:
-1. 直接检查代码库并实施修改。
-2. 仅在当前仓库内工作，优先做精确修改，不要引入无关改动。
-3. 完成后运行相关验证命令；如果仓库里没有对应命令，就明确说明。
-4. 最终输出简短执行摘要，至少包含：
-    - 做了什么，为什么这么做
-    - 运行了哪些验证
-5. 如果执行摘要需要表达流程、架构、时序、状态转换等图表，必须使用 Markdown 的 mermaid fenced code block（语言标记为 mermaid），不要使用 ASCII 图、图片链接或其它图表格式。
-6. 不要描述"未跟踪文件""待提交""可按需提交"这类提交前状态，默认以已经完成并准备提交的口吻总结结果。
-7. 不要要求人工确认，除非你真的被阻塞。
-EOF
+if [ ! -f "${CODIFY_TASK_PROMPT_FILE}" ]; then
+    echo "Task prompt file does not exist: ${CODIFY_TASK_PROMPT_FILE}" >&2
+    exit 1
 fi
+if [ ! -s "${CODIFY_TASK_PROMPT_FILE}" ]; then
+    echo "Task prompt file is empty: ${CODIFY_TASK_PROMPT_FILE}" >&2
+    exit 1
+fi
+cp "${CODIFY_TASK_PROMPT_FILE}" /tmp/claude_prompt.txt
 
 CLAUDE_SYSTEM_PROMPT_FILE="/tmp/claude_system_prompt.txt"
 if [ -n "${APPEND_SYSTEM_PROMPT}" ]; then

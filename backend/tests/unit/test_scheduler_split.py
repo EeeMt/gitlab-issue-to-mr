@@ -60,6 +60,10 @@ async def test_scheduler_service_lifecycle() -> None:
         "app.scheduler_service.load_runtime_config_from_db",
         new_callable=AsyncMock,
     ) as load_runtime_config_mock, patch(
+        "app.scheduler_service.backfill_active_task_prompts",
+        new_callable=AsyncMock,
+        return_value=0,
+    ) as backfill_mock, patch(
         "app.scheduler_service.start_scheduler", side_effect=fake_start_scheduler
     ) as start_scheduler_mock, patch(
         "app.scheduler_service.stop_scheduler", side_effect=fake_stop_scheduler
@@ -71,6 +75,7 @@ async def test_scheduler_service_lifecycle() -> None:
         run_migrations_mock.assert_called_once()
         init_db_mock.assert_awaited_once()
         load_runtime_config_mock.assert_awaited_once()
+        backfill_mock.assert_awaited_once()
         close_db_mock.assert_awaited_once()
         start_scheduler_mock.assert_called_once()
         stop_scheduler_mock.assert_called_once()

@@ -27,6 +27,8 @@ _CLAUDE_CONTAINER_PATH = "/home/codify/.claude"
 _SHARED_CONTAINER_PATH = "/opt/codify-issue-shared"
 _WORKER_PRE_SCRIPT_FILENAME = "worker-pre-script.sh"
 _WORKER_POST_SCRIPT_FILENAME = "worker-post-script.sh"
+_TASK_PROMPT_FILENAME = "task-prompt.md"
+_TASK_PROMPT_CONTAINER_PATH = f"{_RUNTIME_CONTAINER_PATH}/{_TASK_PROMPT_FILENAME}"
 
 
 async def resolve_provider(db: AsyncSession, task: Task) -> AIProvider:
@@ -139,6 +141,7 @@ def _build_container_env_with_settings(
         "GIT_AUTHOR_EMAIL": author_email or (getattr(task, "initiator_email", None) or "codify-task@codify.local"),
         "CODIFY_COAUTHOR_NAME": "Codify",
         "CODIFY_COAUTHOR_EMAIL": "codify@codify.local",
+        "CODIFY_TASK_PROMPT_FILE": _TASK_PROMPT_CONTAINER_PATH,
     }
 
     if provider and provider.system_prompt:
@@ -192,6 +195,30 @@ def materialize_worker_custom_scripts(settings: Any, runtime_path: str | os.Path
         script_text = script_content if script_content.endswith("\n") else f"{script_content}\n"
         script_path.write_text(script_text, encoding="utf-8")
         script_path.chmod(0o700)
+
+
+def materialize_task_prompt(task: Task, runtime_path: str | os.PathLike[str]) -> Path:
+    """Write the persisted rendered prompt into the mounted task runtime directory."""
+    rendered_prompt = getattr(task, "rendered_prompt", None)
+    if not isinstance(rendered_prompt, str) or not rendered_prompt.strip():
+        raise RuntimeError(f"Task {task.id} has no persisted rendered prompt")
+    if not runtime_path:
+        raise RuntimeError(f"Task {task.id} runtime path is unavailable")
+
+    runtime_dir = Path(runtime_path)
+    try:
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        prompt_path = runtime_dir / _TASK_PROMPT_FILENAME
+        prompt_path.write_bytes(rendered_prompt.encode("utf-8"))
+    except OSError as exc:
+        raise RuntimeError(f"Could not materialize task {task.id} prompt: {exc}") from exc
+    logger.info(
+        "[Task %s] Materialized persisted prompt at %s (%s characters)",
+        task.id,
+        prompt_path,
+        len(rendered_prompt),
+    )
+    return prompt_path
 
 
 def _resolve_provider_environment_values(

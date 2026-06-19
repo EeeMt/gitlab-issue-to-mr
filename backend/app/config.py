@@ -9,6 +9,12 @@ from typing import Union
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.task_prompt import (
+    BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE,
+    BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE,
+    BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE,
+)
+
 logger = logging.getLogger(__name__)
 
 RuntimeConfigValue = Union[int, str, bool]
@@ -60,6 +66,9 @@ PERSISTED_CONFIG_TYPES: dict[str, type[RuntimeConfigValue]] = {
     "slot_max_tasks_enforce": bool,  # Enforce slot limit (True = hard reject, False = soft warning)
     "ci_auto_repair_max_attempts": int,
     "ci_failure_bundle_retention_days": int,
+    "default_execute_run_instruction_template": str,
+    "default_plan_run_instruction_template": str,
+    "ci_auto_repair_run_instruction_template": str,
     "session_storage_root": str,
     "announcement_enabled": bool,
     "announcement_text": str,
@@ -161,6 +170,15 @@ class Settings(BaseSettings):
     worker_workspace_host_path: str = Field(default="/opt/codify-workspaces")
     worker_workspace_retention_days: int = Field(default=14)
     worker_failed_workspace_retention_days: int = Field(default=30)
+    default_execute_run_instruction_template: str = Field(
+        default=BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE
+    )
+    default_plan_run_instruction_template: str = Field(
+        default=BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE
+    )
+    ci_auto_repair_run_instruction_template: str = Field(
+        default=BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE
+    )
 
     # Session storage for Claude session persistence (Issue→Task model)
     session_storage_root: str = Field(default="/var/codify/sessions")

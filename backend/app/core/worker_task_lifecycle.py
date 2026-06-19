@@ -19,6 +19,7 @@ from app.core.worker_environment_variables import (
     list_worker_environment_variables,
 )
 from app.core.worker_runtime import (
+    materialize_task_prompt,
     materialize_worker_custom_scripts,
     worker_custom_scripts_configured,
 )
@@ -329,6 +330,10 @@ async def create_execute_container(
     await persist_issue_mr_if_changed(db, issue, mr_iid, mr_web_url)
 
     workspace_paths = build_issue_workspace_paths(settings, issue, task) if issue else None
+
+    if workspace_paths is None:
+        raise RuntimeError("worker_workspace_host_path is required for persisted task prompts")
+    materialize_task_prompt(task, workspace_paths.runtime_path)
 
     if issue:
         await worker._write_previous_task_summaries_file(db, settings, issue, task)

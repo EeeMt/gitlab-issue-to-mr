@@ -12,6 +12,8 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     getScheduledTasks: vi.fn<() => Promise<any[]>>(),
     getSlotCapacity: vi.fn<() => Promise<any>>(),
     getConfig: vi.fn<() => Promise<any>>(),
+    getRunInstructionTemplateDefaults: vi.fn<() => Promise<any>>(),
+    previewRunInstructionTemplate: vi.fn<() => Promise<any>>(),
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => fn.mockReset())
@@ -47,6 +49,28 @@ vi.mock('../api', () => ({
   getScheduledTasks: mockApi.getScheduledTasks,
   getSlotCapacity: mockApi.getSlotCapacity,
   getConfig: mockApi.getConfig,
+  getRunInstructionTemplateDefaults: mockApi.getRunInstructionTemplateDefaults,
+  previewRunInstructionTemplate: mockApi.previewRunInstructionTemplate,
+}))
+
+vi.mock('./RunInstructionTemplateEditor.vue', () => ({
+  default: {
+    name: 'RunInstructionTemplateEditor',
+    props: ['modelValue', 'availablePlaceholders', 'previewResult', 'previewError'],
+    emits: ['update:modelValue', 'restore-default', 'preview'],
+    setup(props: any, { emit }: any) {
+      return () => h('div', { class: 'run-instruction-editor-mock' }, [
+        h('textarea', {
+          value: props.modelValue,
+          onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLTextAreaElement).value)
+        }),
+        h('button', { class: 'restore-run-instruction', onClick: () => emit('restore-default') }, 'restore'),
+        h('button', { class: 'preview-run-instruction', onClick: () => emit('preview') }, 'preview'),
+        props.previewResult ? h('pre', props.previewResult) : null,
+        props.previewError ? h('span', props.previewError) : null
+      ])
+    }
+  }
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -217,6 +241,7 @@ vi.mock('@vicons/ionicons5', () => {
     CheckmarkCircleOutline: icon('CheckmarkCircleOutline'),
     DocumentTextOutline: icon('DocumentTextOutline'),
     InformationCircleOutline: icon('InformationCircleOutline'),
+    OptionsOutline: icon('OptionsOutline'),
     WarningOutline: icon('WarningOutline'),
   }
 })
@@ -272,6 +297,15 @@ describe('TaskFormDrawer', () => {
     mockApi.getScheduledTasks.mockResolvedValue([])
     mockApi.getSlotCapacity.mockResolvedValue(null)
     mockApi.getConfig.mockResolvedValue({ runtime: { slot_max_tasks: 5, slot_max_tasks_enforce: false } })
+    mockApi.getRunInstructionTemplateDefaults.mockResolvedValue({
+      execute: { content: 'Execute {{user_prompt}}', available_placeholders: ['user_prompt'] },
+      plan: { content: 'Plan {{user_prompt}}', available_placeholders: ['user_prompt'] }
+    })
+    mockApi.previewRunInstructionTemplate.mockResolvedValue({
+      rendered_prompt: 'Rendered prompt',
+      used_placeholders: ['user_prompt'],
+      unused_known_placeholders: []
+    })
     mockApi.createTask.mockResolvedValue({ id: 10 })
     mockApi.updateTask.mockResolvedValue({ id: 10 })
   })
@@ -872,6 +906,74 @@ describe('TaskFormDrawer', () => {
       await flushPromises()
 
       expect(mockMessage.error).toHaveBeenCalledWith('taskView.failedToUpdateTask')
+    })
+  })
+
+  describe('run instruction templates', () => {
+    it('pre-fills the execute instruction before a task mode is selected', async () => {
+      await mountDrawer()
+      await openDrawer()
+
+      expect(wrapper.vm.taskMode).toBeNull()
+      expect(wrapper.vm.runInstructionTemplate).toBe('Execute {{user_prompt}}')
+      expect(wrapper.find('.run-instruction-advanced__title').text()).toBe(
+        'runInstruction.advanced'
+      )
+      expect(wrapper.find('.run-instruction-advanced__hint').text()).toBe(
+        'runInstruction.advancedHint'
+      )
+    })
+
+    it('submits the execute default even when Advanced is never opened', async () => {
+      await mountDrawer()
+      await openDrawer()
+      wrapper.vm.selectTaskMode('execute')
+      await submitCreate()
+      expect(mockApi.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({ run_instruction_template: 'Execute {{user_prompt}}' })
+      )
+      expect(wrapper.find('details.run-instruction-advanced').attributes('open')).toBeUndefined()
+    })
+
+    it('keeps an edited template when mode replacement is declined', async () => {
+      await mountDrawer()
+      await openDrawer()
+      wrapper.vm.selectTaskMode('execute')
+      wrapper.vm.handleRunInstructionInput('Custom instruction')
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+      wrapper.vm.selectTaskMode('plan')
+      expect(confirm).toHaveBeenCalled()
+      expect(wrapper.vm.taskMode).toBe('plan')
+      expect(wrapper.vm.runInstructionTemplate).toBe('Custom instruction')
+      confirm.mockRestore()
+    })
+
+    it('uses the stored snapshot in edit mode and patches changed content', async () => {
+      await mountDrawer({
+        mode: 'edit',
+        issueId: undefined,
+        issueDescription: undefined,
+        task: {
+          id: 42,
+          issue_id: 1,
+          user_prompt: 'Original prompt',
+          priority: 1,
+          require_changes: true,
+          provider_id: 7,
+          task_mode: 'execute',
+          run_instruction_template: 'Stored snapshot'
+        }
+      })
+      await openDrawer()
+      expect(wrapper.vm.runInstructionTemplate).toBe('Stored snapshot')
+      expect(wrapper.vm.runInstructionDirty).toBe(false)
+      wrapper.vm.handleRunInstructionInput('Changed snapshot')
+      await wrapper.find('[data-testid="task-form-save-button"]').trigger('click')
+      await flushPromises()
+      expect(mockApi.updateTask).toHaveBeenCalledWith(
+        42,
+        expect.objectContaining({ run_instruction_template: 'Changed snapshot' })
+      )
     })
   })
 })

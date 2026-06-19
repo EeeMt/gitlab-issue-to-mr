@@ -199,6 +199,40 @@
           </div>
         </n-form-item>
 
+        <details class="run-instruction-advanced">
+          <summary class="run-instruction-advanced__summary">
+            <span class="run-instruction-advanced__icon">
+              <n-icon :component="OptionsOutline" size="16" />
+            </span>
+            <span class="run-instruction-advanced__copy">
+              <span class="run-instruction-advanced__title">{{ t('runInstruction.advanced') }}</span>
+              <span class="run-instruction-advanced__hint">{{ t('runInstruction.advancedHint') }}</span>
+            </span>
+            <span class="run-instruction-advanced__chevron" aria-hidden="true">›</span>
+          </summary>
+          <div class="run-instruction-advanced__content">
+            <n-spin :show="defaultsLoading">
+              <n-alert v-if="defaultsError" type="error" :bordered="false">
+                {{ defaultsError }}
+              </n-alert>
+              <n-form-item :label="t('runInstruction.template')">
+                <RunInstructionTemplateEditor
+                  :model-value="runInstructionTemplate"
+                  :available-placeholders="currentAvailablePlaceholders"
+                  :known-placeholders="knownRunInstructionPlaceholders"
+                  preview-enabled
+                  :preview-loading="previewLoading"
+                  :preview-result="previewResult"
+                  :preview-error="previewError"
+                  @update:model-value="handleRunInstructionInput"
+                  @restore-default="restoreRunInstructionDefault"
+                  @preview="handleRunInstructionPreview"
+                />
+              </n-form-item>
+            </n-spin>
+          </div>
+        </details>
+
         <!-- Priority cards -->
         <n-form-item :label="t('common.priority')">
           <n-radio-group v-model:value="priority" class="priority-selector">
@@ -336,13 +370,17 @@ import {
   InformationCircleOutline,
   CodeSlashOutline,
   BulbOutline,
-  CheckmarkCircleOutline
+  CheckmarkCircleOutline,
+  OptionsOutline
 } from '@vicons/ionicons5'
 import VariableEditor from './VariableEditor.vue'
 import HeatmapChart from './HeatmapChart.vue'
+import RunInstructionTemplateEditor from './RunInstructionTemplateEditor.vue'
 import {
   createTask, updateTask, getPromptTemplates, getProviders, getScheduledTasks, getSlotCapacity, getConfig,
-  type Task, type PromptTemplate, type SlotCapacityInfo, type AIProvider, type UpdateTaskRequest
+  getRunInstructionTemplateDefaults, previewRunInstructionTemplate,
+  type Task, type PromptTemplate, type SlotCapacityInfo, type AIProvider, type UpdateTaskRequest,
+  type RunInstructionTemplateDefaults
 } from '../api'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import { formatDateTimeUtc8Compact, formatTimeUtc8 } from '../utils/datetime'
@@ -398,6 +436,15 @@ const scheduleType = ref<'now' | 'scheduled'>('now')
 const scheduledAt = ref<number | null>(null)
 const submitLoading = ref(false)
 const usageLimitDetail = ref<UsageLimitExceededDetail | null>(null)
+const runInstructionTemplate = ref('')
+const initialRunInstructionTemplate = ref('')
+const runInstructionDirty = ref(false)
+const runInstructionDefaults = ref<RunInstructionTemplateDefaults | null>(null)
+const defaultsLoading = ref(false)
+const defaultsError = ref('')
+const previewLoading = ref(false)
+const previewResult = ref('')
+const previewError = ref('')
 
 // Template picker state
 const showTemplateDrawer = ref(false)
@@ -455,6 +502,16 @@ const providerOptions = computed(() =>
     disabled: p.is_disabled,
   }))
 )
+const currentAvailablePlaceholders = computed(() => {
+  if (!runInstructionDefaults.value) return []
+  return runInstructionDefaults.value[taskMode.value ?? 'execute'].available_placeholders
+})
+const knownRunInstructionPlaceholders = computed(() => [
+  ...new Set(runInstructionDefaults.value?.execute.known_placeholders ?? [
+    ...(runInstructionDefaults.value?.execute.available_placeholders ?? []),
+    ...(runInstructionDefaults.value?.plan.available_placeholders ?? [])
+  ])
+])
 
 const activePromptTemplates = computed(() => getActivePromptTemplates(promptTemplates.value))
 const templateTagOptions = computed(() =>
@@ -478,7 +535,12 @@ watch(scheduledAt, () => {
 })
 
 watch(taskMode, (val) => {
-  if (val !== null) taskModeErrorVisible.value = false
+  if (val !== null) {
+    taskModeErrorVisible.value = false
+    if (!runInstructionTemplate.value && runInstructionDefaults.value) {
+      runInstructionTemplate.value = runInstructionDefaults.value[val].content
+    }
+  }
 })
 
 watch(() => props.show, (val) => {
@@ -489,11 +551,21 @@ watch(() => props.show, (val) => {
       requireChanges.value = props.task.require_changes ?? true
       taskMode.value = (props.task.task_mode as 'execute' | 'plan') ?? 'execute'
       selectedProviderId.value = props.task.provider_id ?? null
+      const snapshot = props.task.run_instruction_template
+        ?? runInstructionDefaults.value?.[taskMode.value].content
+        ?? ''
+      runInstructionTemplate.value = snapshot
+      initialRunInstructionTemplate.value = snapshot
+      runInstructionDirty.value = false
     } else if (props.mode === 'create') {
       if (!prompt.value && props.issueDescription) {
         prompt.value = props.issueDescription
       }
       taskMode.value = null
+      const defaultTemplate = runInstructionDefaults.value?.execute.content ?? ''
+      runInstructionTemplate.value = defaultTemplate
+      initialRunInstructionTemplate.value = defaultTemplate
+      runInstructionDirty.value = false
       requireChanges.value = true
       scheduleType.value = 'now'
       scheduledAt.value = null
@@ -501,6 +573,8 @@ watch(() => props.show, (val) => {
     }
     usageLimitDetail.value = null
     taskModeErrorVisible.value = false
+    previewResult.value = ''
+    previewError.value = ''
   }
 })
 
@@ -517,6 +591,28 @@ async function loadTemplates() {
     promptTemplates.value = await getPromptTemplates()
   } catch { /* non-critical */ } finally {
     promptTemplatesLoading.value = false
+  }
+}
+
+async function loadRunInstructionDefaults() {
+  defaultsLoading.value = true
+  defaultsError.value = ''
+  try {
+    runInstructionDefaults.value = await getRunInstructionTemplateDefaults()
+    if (props.show && props.mode === 'edit' && props.task && !runInstructionTemplate.value) {
+      const mode = (props.task.task_mode ?? 'execute') as 'execute' | 'plan'
+      const snapshot = props.task.run_instruction_template ?? runInstructionDefaults.value[mode].content
+      runInstructionTemplate.value = snapshot
+      initialRunInstructionTemplate.value = snapshot
+    }
+    if (props.show && props.mode === 'create' && !runInstructionTemplate.value) {
+      runInstructionTemplate.value = runInstructionDefaults.value[taskMode.value ?? 'execute'].content
+      initialRunInstructionTemplate.value = runInstructionTemplate.value
+    }
+  } catch {
+    defaultsError.value = t('runInstruction.defaultsLoadFailed')
+  } finally {
+    defaultsLoading.value = false
   }
 }
 
@@ -571,7 +667,53 @@ function handleHeatmapCellClick(startMs: number) {
 }
 
 function selectTaskMode(mode: 'execute' | 'plan') {
+  if (taskMode.value === mode) return
+  const nextDefault = runInstructionDefaults.value?.[mode].content ?? ''
+  if (runInstructionDirty.value && runInstructionTemplate.value) {
+    const replace = window.confirm(t('runInstruction.modeSwitchConfirm'))
+    if (replace) runInstructionTemplate.value = nextDefault
+  } else {
+    runInstructionTemplate.value = nextDefault
+  }
   taskMode.value = mode
+  previewResult.value = ''
+  previewError.value = ''
+}
+
+function handleRunInstructionInput(value: string) {
+  runInstructionTemplate.value = value
+  runInstructionDirty.value = true
+  previewResult.value = ''
+  previewError.value = ''
+}
+
+function restoreRunInstructionDefault() {
+  if (!runInstructionDefaults.value) return
+  runInstructionTemplate.value = runInstructionDefaults.value[taskMode.value ?? 'execute'].content
+  runInstructionDirty.value = true
+  previewResult.value = ''
+  previewError.value = ''
+}
+
+async function handleRunInstructionPreview() {
+  if (!props.issueId && !props.task?.issue_id) return
+  if (!taskMode.value) return
+  previewLoading.value = true
+  previewError.value = ''
+  try {
+    const result = await previewRunInstructionTemplate({
+      issue_id: props.issueId ?? props.task!.issue_id!,
+      task_mode: taskMode.value,
+      user_prompt: prompt.value.trim() || props.issueDescription || '',
+      run_instruction_template: runInstructionTemplate.value,
+      require_changes: taskMode.value === 'plan' ? false : requireChanges.value
+    })
+    previewResult.value = result.rendered_prompt
+  } catch (error: any) {
+    previewError.value = error?.response?.data?.detail || error?.apiError?.detail || String(error)
+  } finally {
+    previewLoading.value = false
+  }
 }
 
 function handleTemplateTagFilterUpdate(tags: string[] | null) {
@@ -623,6 +765,13 @@ async function handleCreate() {
     message.warning(t('issue.pleaseSelectTaskMode'))
     return
   }
+  if (!runInstructionTemplate.value && runInstructionDefaults.value) {
+    runInstructionTemplate.value = runInstructionDefaults.value[taskMode.value].content
+  }
+  if (!runInstructionTemplate.value.trim()) {
+    message.warning(defaultsError.value || t('runInstruction.defaultsLoadFailed'))
+    return
+  }
   if (scheduleType.value === 'scheduled') {
     if (!scheduledAt.value) {
       message.warning(t('createTask.pleaseSelectScheduledTime'))
@@ -640,7 +789,8 @@ async function handleCreate() {
     const req: Parameters<typeof createTask>[0] = {
       issue_id: props.issueId!,
       priority: priority.value,
-      require_changes: taskMode.value === 'plan' ? false : requireChanges.value
+      require_changes: taskMode.value === 'plan' ? false : requireChanges.value,
+      run_instruction_template: runInstructionTemplate.value
     }
     if (taskMode.value !== null) req.task_mode = taskMode.value
     if (prompt.value.trim()) req.user_prompt = prompt.value.trim()
@@ -691,13 +841,16 @@ async function handleEdit() {
     payload.provider_id = selectedProviderId.value
   }
   if (requireChanges.value !== orig.require_changes) payload.require_changes = requireChanges.value
-  if (taskMode.value !== null && taskMode.value !== (orig.task_mode ?? 'execute')) {
+    if (taskMode.value !== null && taskMode.value !== (orig.task_mode ?? 'execute')) {
     payload.task_mode = taskMode.value
     // Switching to plan forces require_changes=false; switching back to execute
     // restores whatever the toggle says (already captured above if changed).
     if (taskMode.value === 'plan' && orig.require_changes !== false) {
       payload.require_changes = false
     }
+  }
+  if (runInstructionTemplate.value !== initialRunInstructionTemplate.value) {
+    payload.run_instruction_template = runInstructionTemplate.value
   }
 
   if (Object.keys(payload).length === 0) {
@@ -727,6 +880,7 @@ async function handleEdit() {
 onMounted(() => {
   void loadProviders()
   void loadTemplates()
+  void loadRunInstructionDefaults()
 })
 
 onUnmounted(() => {
@@ -795,6 +949,104 @@ onUnmounted(() => {
   flex-direction: column;
   width: 100%;
   gap: 0;
+}
+
+.run-instruction-advanced {
+  width: 100%;
+  margin-bottom: 16px;
+  overflow: hidden;
+  border: 1px solid var(--n-border-color);
+  border-radius: 10px;
+  background: var(--n-color);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.run-instruction-advanced[open] {
+  border-color: var(--n-primary-color);
+  box-shadow: 0 0 0 2px rgba(99, 226, 183, 0.06);
+}
+
+.run-instruction-advanced__summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 12px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.run-instruction-advanced__summary::-webkit-details-marker {
+  display: none;
+}
+
+.run-instruction-advanced__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 7px;
+  color: var(--n-primary-color);
+  background: rgba(99, 226, 183, 0.1);
+}
+
+.run-instruction-advanced__copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.run-instruction-advanced__title {
+  color: var(--n-text-color);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.run-instruction-advanced__hint {
+  overflow: hidden;
+  color: var(--n-text-color-3);
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-instruction-advanced__chevron {
+  color: var(--n-text-color-3);
+  font-size: 22px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.run-instruction-advanced[open] .run-instruction-advanced__chevron {
+  color: var(--n-primary-color);
+  transform: rotate(90deg);
+}
+
+.run-instruction-advanced__content {
+  padding: 12px 12px 4px;
+  border-top: 1px solid var(--n-border-color);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .run-instruction-advanced:not([open]):hover {
+    border-color: var(--n-primary-color);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-instruction-advanced,
+  .run-instruction-advanced__chevron {
+    transition: none;
+  }
 }
 
 .task-mode-selector {

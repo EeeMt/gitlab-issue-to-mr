@@ -49,9 +49,14 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
         self.tempdir.cleanup()
 
     def _settings(self, **overrides):
+        from app.core.task_prompt import BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE
+
         values = {
             "ci_auto_repair_max_attempts": 2,
             "worker_workspace_host_path": str(self.workspace_root),
+            "ci_auto_repair_run_instruction_template": (
+                BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE
+            ),
         }
         values.update(overrides)
         return SimpleNamespace(**values)
@@ -203,7 +208,8 @@ class CIFailureCollectorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(repair_task.priority, 1)
             self.assertEqual(repair_task.task_mode, "execute")
             self.assertTrue(repair_task.require_changes)
-            self.assertIn("/tmp/codify-runtime/ci-failure", repair_task.user_prompt)
+            self.assertEqual(repair_task.user_prompt, "修复当前 MR 的 CI 失败")
+            self.assertIn("/tmp/codify-runtime/ci-failure", repair_task.rendered_prompt)
 
             rows = (await session.execute(select(CIFailureJob).order_by(CIFailureJob.gitlab_job_id))).scalars().all()
             self.assertEqual(len(rows), 2)

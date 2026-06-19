@@ -161,6 +161,9 @@ class Task(Base):
 
     # Task details
     user_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    run_instruction_template: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rendered_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rendered_prompt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     initiator_user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )

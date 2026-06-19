@@ -4,9 +4,10 @@ import asyncio
 import logging
 import signal
 
-from app.config import get_settings
+from app.config import get_effective_settings, get_settings
 from app.core.ci_failure_collector import start_ci_failure_collector
-from app.database import close_db, init_db
+from app.core.task_prompt import backfill_active_task_prompts
+from app.database import AsyncSessionLocal, close_db, init_db
 from app.migrations import run_migrations
 from app.runtime_config import load_runtime_config_from_db
 from app.scheduler import start_scheduler, stop_scheduler
@@ -31,6 +32,9 @@ async def run_scheduler_service() -> None:
 
     await init_db()
     await load_runtime_config_from_db()
+    async with AsyncSessionLocal() as db:
+        backfilled = await backfill_active_task_prompts(db, get_effective_settings())
+    logger.info("Active task prompt backfill completed: %s task(s)", backfilled)
     stop_event = asyncio.Event()
 
     loop = asyncio.get_running_loop()

@@ -30,6 +30,7 @@ from app.api.task_schemas import (
     CreateTaskRequest,
     RescheduleTaskRequest,
     RetryTaskRequest,
+    RunInstructionTemplatePreviewRequest,
     UpdateTaskRequest,
 )
 from app.config import get_effective_settings
@@ -38,6 +39,15 @@ from app.core.issue_execution_locks import release_issue_execution_lock
 from app.core.projects import build_project_lookup, get_project_metadata
 from app.core.scheduling import resolve_scheduled_at
 from app.core.task_helpers import _serialize_task, maybe_update_issue_status
+from app.core.task_prompt import (
+    NORMAL_PLACEHOLDER_NAMES,
+    PLACEHOLDER_NAMES,
+    TaskPromptValidationError,
+    build_task_prompt_context,
+    render_and_store_task_prompt,
+    render_run_instruction_template,
+    select_run_instruction_template,
+)
 from app.core.usage_limits import (
     UsageLimitExceeded,
     get_usage_quota_service,
@@ -370,6 +380,72 @@ async def get_slot_capacity(
     }
 
 
+@router.get("/tasks/run-instruction-template-defaults")
+async def get_run_instruction_template_defaults(
+    _access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Return effective execute and plan templates for task operators."""
+    settings = get_effective_settings()
+    placeholders = list(NORMAL_PLACEHOLDER_NAMES)
+    return {
+        "execute": {
+            "content": settings.default_execute_run_instruction_template,
+            "available_placeholders": placeholders,
+            "known_placeholders": list(PLACEHOLDER_NAMES),
+        },
+        "plan": {
+            "content": settings.default_plan_run_instruction_template,
+            "available_placeholders": placeholders,
+            "known_placeholders": list(PLACEHOLDER_NAMES),
+        },
+    }
+
+
+@router.post("/tasks/render-run-instruction-template-preview")
+async def preview_run_instruction_template(
+    request: RunInstructionTemplatePreviewRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Render unsaved task editor content without mutating the database."""
+    issue = await db.get(Issue, request.issue_id)
+    if not issue:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Issue not found")
+    require_project_access(issue.project_id, access_scope)
+    from app.core.task_helpers import _require_issue_operator
+
+    _require_issue_operator(issue, current_user)
+    prospective_task = Task(
+        issue_id=issue.id,
+        project_id=issue.project_id,
+        user_prompt=request.user_prompt,
+        task_mode=request.task_mode,
+        require_changes=False if request.task_mode == "plan" else request.require_changes,
+        trigger_source="manual",
+    )
+    try:
+        result = render_run_instruction_template(
+            request.run_instruction_template,
+            build_task_prompt_context(
+                prospective_task,
+                issue,
+                await get_project_metadata(issue.project_id),
+            ),
+            available_placeholders=NORMAL_PLACEHOLDER_NAMES,
+        )
+    except TaskPromptValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    return {
+        "rendered_prompt": result.rendered_prompt,
+        "used_placeholders": list(result.used_placeholders),
+        "unused_known_placeholders": list(result.unused_known_placeholders),
+    }
+
+
 @router.get("/tasks/{task_id}")
 async def get_task(
     task_id: int,
@@ -404,7 +480,7 @@ async def get_task(
     t2 = time.time()
     metadata = await get_project_metadata(task.project_id)
     t3 = time.time()
-    result_data = _serialize_task(task, metadata)
+    result_data = _serialize_task(task, metadata, include_prompt_details=True)
     t4 = time.time()
 
     total = t4 - t0
@@ -910,6 +986,9 @@ async def update_task(
     if "task_mode" in updated_fields:
         task.task_mode = request.task_mode  # type: ignore[assignment]  # null rejected by schema
 
+    if "run_instruction_template" in updated_fields:
+        task.run_instruction_template = request.run_instruction_template
+
     # Enforce invariant: plan tasks must never have require_changes=True,
     # regardless of whether task_mode or require_changes was the field being updated.
     if task.task_mode == "plan":
@@ -920,7 +999,7 @@ async def update_task(
     # concurrent worker *before* this transaction acquired its FOR UPDATE lock.
     # This prevents a successful PATCH on a task whose status was already advanced
     # to RUNNING (or beyond) by the time we are ready to write.
-    await db.refresh(task)
+    await db.refresh(task, attribute_names=["status"])
     if task.status not in (TaskStatus.PENDING, TaskStatus.QUEUED):
         await db.rollback()
         raise HTTPException(
@@ -931,6 +1010,31 @@ async def update_task(
             ),
         )
 
+    render_context_changed = bool(
+        updated_fields
+        & {"user_prompt", "run_instruction_template", "task_mode", "require_changes"}
+    )
+    if render_context_changed:
+        issue = await db.get(Issue, task.issue_id) if task.issue_id is not None else None
+        template = task.run_instruction_template or select_run_instruction_template(
+            get_effective_settings(),
+            task_mode=task.task_mode or "execute",
+            trigger_source=task.trigger_source or "manual",
+        )
+        try:
+            render_and_store_task_prompt(
+                task,
+                issue,
+                await get_project_metadata(task.project_id),
+                template,
+            )
+        except TaskPromptValidationError as exc:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+
     await db.commit()
     await db.refresh(task)
 
@@ -938,7 +1042,11 @@ async def update_task(
         "Task %s updated via PATCH: fields=%s", task_id, sorted(updated_fields)
     )
 
-    return _serialize_task(task, await get_project_metadata(task.project_id))
+    return _serialize_task(
+        task,
+        await get_project_metadata(task.project_id),
+        include_prompt_details=True,
+    )
 
 
 @router.post("/tasks/{task_id}/cancel")
@@ -1121,17 +1229,45 @@ async def retry_task(
         require_changes=original_task.require_changes,
     )
     db.add(new_task)
+    await db.flush()
+    issue = None
+    if new_task.issue_id is not None:
+        issue = (
+            await db.execute(select(Issue).where(Issue.id == new_task.issue_id))
+        ).scalar_one_or_none()
+    retry_template = select_run_instruction_template(
+        get_effective_settings(),
+        task_mode=new_task.task_mode,
+        trigger_source=original_task.trigger_source or "manual",
+        retry_snapshot=original_task.run_instruction_template,
+    )
+    try:
+        render_and_store_task_prompt(
+            new_task,
+            issue,
+            await get_project_metadata(new_task.project_id),
+            retry_template,
+        )
+    except TaskPromptValidationError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     await db.commit()
     await db.refresh(new_task)
     # Eagerly set the issue relationship for serialization
-    result = await db.execute(select(Issue).where(Issue.id == new_task.issue_id))
-    new_task.issue = result.scalar_one_or_none()
+    new_task.issue = issue
 
     await notify_task_retried(new_task, None, scheduled_at)
     action = f"scheduled for retry at {scheduled_at}" if scheduled_at else "created as retry"
     logger.info(f"Task {new_task.id} {action} (retry of task {task_id})")
 
-    return _serialize_task(new_task, await get_project_metadata(new_task.project_id))
+    return _serialize_task(
+        new_task,
+        await get_project_metadata(new_task.project_id),
+        include_prompt_details=True,
+    )
 
 
 @router.post("/tasks/{task_id}/execute")
@@ -1190,7 +1326,11 @@ async def reschedule_task(
     await notify_task_rescheduled(task, previous_scheduled_at, normalized_scheduled)
     logger.info("Task %s rescheduled to %s via API", task_id, normalized_scheduled.isoformat())
 
-    return _serialize_task(task, await get_project_metadata(task.project_id))
+    return _serialize_task(
+        task,
+        await get_project_metadata(task.project_id),
+        include_prompt_details=True,
+    )
 
 
 @router.post("/tasks")
@@ -1288,6 +1428,25 @@ async def create_task(
         require_changes=request.effective_require_changes,
     )
     db.add(task)
+    await db.flush()
+    template = request.run_instruction_template or select_run_instruction_template(
+        get_effective_settings(),
+        task_mode=task.task_mode,
+        trigger_source=task.trigger_source or "manual",
+    )
+    try:
+        render_and_store_task_prompt(
+            task,
+            issue,
+            await get_project_metadata(issue.project_id),
+            template,
+        )
+    except TaskPromptValidationError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     await db.commit()
     await db.refresh(task)
     task.issue = issue  # ensure nested issue is included in serialization
@@ -1297,7 +1456,11 @@ async def create_task(
         f"priority={request.priority}, delay={request.delay_seconds}"
     )
 
-    response = _serialize_task(task, await get_project_metadata(issue.project_id))
+    response = _serialize_task(
+        task,
+        await get_project_metadata(issue.project_id),
+        include_prompt_details=True,
+    )
     if slot_warning:
         response["slot_warning"] = slot_warning
     return response

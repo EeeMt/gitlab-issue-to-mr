@@ -396,6 +396,10 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.project_id = project_id
     task.issue_id = 1
     task.user_prompt = "Test prompt"
+    task.run_instruction_template = None
+    task.rendered_prompt = None
+    task.rendered_prompt_at = None
+    task.trigger_source = "manual"
     task.initiator_user_id = None
     task.initiator_gitlab_user_id = None
     task.initiator_username = None
@@ -756,6 +760,7 @@ class RetryTaskAPITests(unittest.TestCase):
         mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_default_provider, mock_result_issue])
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
 
         client, app = _make_app_client_with_db(mock_db)
@@ -803,6 +808,7 @@ class RetryTaskAPITests(unittest.TestCase):
         mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_default_provider, mock_result_issue])
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
 
         client, app = _make_app_client_with_db(mock_db)
@@ -848,6 +854,7 @@ class RetryTaskAPITests(unittest.TestCase):
         mock_db.get = AsyncMock(return_value=_make_mock_provider(id=23))
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
 
         client, app = _make_app_client_with_db(mock_db)
@@ -1206,6 +1213,7 @@ class CreateTaskAPITests(unittest.TestCase):
         mock_db = MagicMock()
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
 
         async def override_db():
@@ -1531,6 +1539,7 @@ class RetryTaskWithScheduleTests(unittest.TestCase):
         mock_db.execute = AsyncMock(side_effect=[mock_result_task, mock_result_no_retry, mock_result_default, mock_result_default_provider, mock_result_issue])
         mock_db.add = MagicMock()
         mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
         mock_db.refresh = AsyncMock(side_effect=fake_refresh)
 
         client, app = _make_app_client_with_db(mock_db)

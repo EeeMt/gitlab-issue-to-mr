@@ -45,7 +45,7 @@ Worker 容器有三种挂载来源：
 |-----------|-----------|------|------|
 | `.../issue-{id}/repo` | `/workspace` | `rw` | Git 仓库，跨任务复用 |
 | `.../issue-{id}/claude` | `/home/codify/.claude` | `rw` | Claude CLI 会话状态，跨任务复用 |
-| `.../issue-{id}/runtime/task-{id}` | `/tmp/codify-runtime` | `rw` | 任务运行时产物（event.jsonl、runtime.json、console.log） |
+| `.../issue-{id}/runtime/task-{id}` | `/tmp/codify-runtime` | `rw` | 任务运行时产物（包括 `task-prompt.md`、event.jsonl、runtime.json、console.log） |
 | `.../issue-{id}/shared` | `/opt/codify-issue-shared` | `rw` | 同一 issue 内多个 task 共享的通用可变空间 |
 
 ### Shared 目录
@@ -91,7 +91,25 @@ fi
 
 ### 启用条件
 
-`worker_workspace_host_path` 非空 **且** task 和 issue 均存在。否则不创建 workspace volume，容器仍可正常运行（使用临时文件系统）。
+`worker_workspace_host_path` 非空 **且** task 和 issue 均存在。运行任务现在必须满足该条件：Backend 在创建容器前需要把数据库中的 `rendered_prompt` 写入 task runtime，缺少 workspace/runtime 路径会在 Docker 容器创建前直接失败。
+
+### 持久化主提示词
+
+每个新任务在数据库事务内保存运行指令模板快照和最终渲染提示词。Worker 准备容器时将最终内容逐字节写入：
+
+```text
+runtime/task-{task_id}/task-prompt.md
+```
+
+该文件随 runtime volume 映射为：
+
+```text
+/tmp/codify-runtime/task-prompt.md
+```
+
+容器环境变量 `CODIFY_TASK_PROMPT_FILE` 只携带上述稳定路径。`entrypoint.worker.sh` 要求文件存在且非空，然后复制到 `/tmp/claude_prompt.txt` 供 `ci-claude.sh` 使用；不会根据 `USER_PROMPT` 或 `TASK_MODE` 回退拼装主提示词。`USER_PROMPT` 仍保留用于任务元数据、MR 描述和后处理。
+
+这项协议要求 Backend/Scheduler 与匹配的 Worker image 作为一个兼容版本协同部署。Scheduler 必须先完成 pending/queued 历史任务的提示词回填，再允许新 Worker 执行任务。
 
 ---
 

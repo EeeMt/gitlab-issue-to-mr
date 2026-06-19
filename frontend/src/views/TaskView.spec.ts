@@ -554,6 +554,18 @@ describe('TaskView', () => {
     await nextTick()
   }
 
+  it('switches the existing prompt card to the persisted final prompt', async () => {
+    await mountComponent({ rendered_prompt: 'Final **rendered** prompt' })
+    const card = wrapper.find('[data-testid="task-prompt-card"]')
+    expect(card.text()).toContain('taskView.userPrompt')
+    const finalButton = card.findAll('button').find((button) =>
+      button.text().includes('taskView.finalRunPrompt')
+    )
+    await finalButton!.trigger('click')
+    expect(wrapper.vm.promptView).toBe('final')
+    expect(card.html()).toContain('Final')
+  })
+
   describe('basic rendering', () => {
     it('should render task details', async () => {
       await mountComponent()

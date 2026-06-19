@@ -9,6 +9,14 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_effective_settings
+from app.core.task_prompt import (
+    BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE,
+    BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE,
+    BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE,
+    CI_PLACEHOLDER_NAMES,
+    NORMAL_PLACEHOLDER_NAMES,
+    PLACEHOLDER_NAMES,
+)
 from app.database import get_db
 from app.dependencies.auth import require_admin_user
 from app.runtime_config import (
@@ -136,6 +144,30 @@ async def get_config(
     """Get current configuration (all sections)."""
     await load_runtime_config_from_db(db)
     return await _serialize_effective_config_response(db)
+
+
+@router.get("/config/run-instruction-template-built-ins")
+async def get_run_instruction_template_built_ins(
+    _current_user=Depends(require_admin_user),
+):
+    """Return immutable application-owned run-instruction template metadata."""
+    return {
+        "execute": {
+            "content": BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE,
+            "available_placeholders": list(NORMAL_PLACEHOLDER_NAMES),
+            "known_placeholders": list(PLACEHOLDER_NAMES),
+        },
+        "plan": {
+            "content": BUILT_IN_PLAN_RUN_INSTRUCTION_TEMPLATE,
+            "available_placeholders": list(NORMAL_PLACEHOLDER_NAMES),
+            "known_placeholders": list(PLACEHOLDER_NAMES),
+        },
+        "ci_auto_repair": {
+            "content": BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE,
+            "available_placeholders": list(CI_PLACEHOLDER_NAMES),
+            "known_placeholders": list(PLACEHOLDER_NAMES),
+        },
+    }
 
 
 @router.patch("/config")

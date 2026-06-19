@@ -60,7 +60,7 @@ def _make_settings(**overrides):
     s.maven_cache_host_path = ""
     s.maven_settings_host_path = ""
     s.worker_volume_mounts_parsed = []
-    s.worker_workspace_host_path = ""
+    s.worker_workspace_host_path = "/tmp/codify-worker-tests"
     s.alert_on_failure = False
     s.alert_webhook_url = None
     s.claude_max_turns = 20
@@ -93,6 +93,7 @@ def _make_task(**kwargs):
     defaults = dict(
         id=1, project_id=100, issue_id=1,
         user_prompt="Fix the bug",
+        rendered_prompt="Persisted task prompt",
         priority=0, status=TaskStatus.PENDING,
         is_retry=False, retry_source_task_id=None,
         additions=0, deletions=0, total_changes=0,
@@ -654,25 +655,20 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         self.assertIn('commit_message:$commit_message', content)
         self.assertIn('--arg commit_message "${FINAL_COMMIT_MESSAGE:-}"', content)
 
-    def test_entrypoint_prompts_execution_summary_diagrams_as_mermaid(self):
+    def test_entrypoint_consumes_persisted_main_prompt(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = script.read_text()
 
-        self.assertIn("最终输出简短执行摘要", content)
-        self.assertIn("必须使用 Markdown 的 mermaid fenced code block", content)
-        self.assertIn("不要使用 ASCII 图、图片链接或其它图表格式", content)
+        self.assertIn('CODIFY_TASK_PROMPT_FILE="${CODIFY_TASK_PROMPT_FILE:?Missing CODIFY_TASK_PROMPT_FILE}"', content)
+        self.assertIn('cp "${CODIFY_TASK_PROMPT_FILE}" /tmp/claude_prompt.txt', content)
+        self.assertNotIn("请直接完成下面的需求", content)
 
-    def test_entrypoint_plan_prompt_diagrams_as_mermaid(self):
+    def test_entrypoint_has_no_plan_main_prompt_fallback(self):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = script.read_text()
-        plan_prompt = content.split('if [ "${TASK_MODE}" = "plan" ]; then', 1)[1].split(
-            "else",
-            1,
-        )[0]
-
-        self.assertIn("给出详细的实施方案", plan_prompt)
-        self.assertIn("必须使用 Markdown 的 mermaid fenced code block", plan_prompt)
-        self.assertIn("不要使用 ASCII 图、图片链接或其它图表格式", plan_prompt)
+        self.assertNotIn("请分析下面的需求，给出详细的实施方案", content)
+        self.assertIn('Task prompt file does not exist', content)
+        self.assertIn('Task prompt file is empty', content)
 
     def test_entrypoint_validates_and_persists_delivery_summary(self):
         root = Path(__file__).resolve().parents[3]
@@ -705,7 +701,7 @@ class TestEntrypointCommitAttribution(unittest.TestCase):
         script = Path(__file__).resolve().parents[3] / "deploy" / "entrypoint.worker.sh"
         content = script.read_text()
         function_definition = self._extract_shell_function(content, "write_plan_task_metadata")
-        plan_exit_block = content.split('if [ "${TASK_MODE}" = "plan" ]; then', 2)[2].split(
+        plan_exit_block = content.split('if [ "${TASK_MODE}" = "plan" ]; then', 1)[1].split(
             "fi",
             1,
         )[0]

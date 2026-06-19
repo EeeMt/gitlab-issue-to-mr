@@ -86,6 +86,57 @@ class ConfigRuntimeAPITests(unittest.TestCase):
         self.assertIn("worker_workspace_retention_days", data)
         self.assertIn("worker_failed_workspace_retention_days", data)
 
+    def test_runtime_config_includes_run_instruction_defaults(self):
+        from app.core.task_prompt import BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE
+
+        response = self.client.get("/api/config/runtime")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(
+            data["default_execute_run_instruction_template"],
+            BUILT_IN_EXECUTE_RUN_INSTRUCTION_TEMPLATE,
+        )
+        self.assertIn("default_plan_run_instruction_template", data)
+        self.assertIn("ci_auto_repair_run_instruction_template", data)
+
+    def test_patch_run_instruction_template_independently(self):
+        with patch(
+            "app.api.config_runtime.load_runtime_config_from_db",
+            new=AsyncMock(return_value=None),
+        ):
+            response = self.client.patch(
+                "/api/config/runtime",
+                json={"default_execute_run_instruction_template": "Execute {{user_prompt}}"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["default_execute_run_instruction_template"],
+            "Execute {{user_prompt}}",
+        )
+
+    def test_invalid_run_instruction_template_is_not_persisted(self):
+        for value in ("{{unknown}}", " \n", "x" * 50_001):
+            with self.subTest(value_length=len(value)):
+                self.mock_db.add.reset_mock()
+                response = self.client.patch(
+                    "/api/config/runtime",
+                    json={"default_plan_run_instruction_template": value},
+                )
+                self.assertEqual(response.status_code, 422)
+                self.mock_db.add.assert_not_called()
+
+    def test_run_instruction_built_ins_are_admin_readable(self):
+        from app.core.task_prompt import BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE
+
+        response = self.client.get("/api/config/run-instruction-template-built-ins")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(
+            data["ci_auto_repair"]["content"],
+            BUILT_IN_CI_AUTO_REPAIR_RUN_INSTRUCTION_TEMPLATE,
+        )
+        self.assertNotIn("user_prompt", data["ci_auto_repair"]["available_placeholders"])
+
     def test_worker_workspace_host_path_defaults_to_issue_workspace_root(self):
         """Persistent issue workspace should be enabled by default."""
         from app.config import Settings

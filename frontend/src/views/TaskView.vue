@@ -163,12 +163,21 @@
               <n-card class="task-card task-card--equal" :bordered="false" data-testid="task-prompt-card">
                 <template #header>
                   <div class="task-card__header">
-                    <div class="task-card__title">{{ t('taskView.userPrompt') }}</div>
+                    <div class="task-prompt-view-switch">
+                      <n-button
+                        :type="promptView === 'user' ? 'primary' : 'default'"
+                        @click="promptView = 'user'"
+                      >{{ t('taskView.userPrompt') }}</n-button>
+                      <n-button
+                        :type="promptView === 'final' ? 'primary' : 'default'"
+                        @click="promptView = 'final'"
+                      >{{ t('taskView.finalRunPrompt') }}</n-button>
+                    </div>
                   </div>
                 </template>
                 <div class="task-prompt-wrap">
                   <n-scrollbar trigger="hover" style="position: absolute; top: 0; right: 0; bottom: 0; left: 0;">
-                    <div class="task-prompt-content markdown-content" v-html="renderedUserPrompt"></div>
+                    <div class="task-prompt-content markdown-content" v-html="renderedSelectedPrompt"></div>
                   </n-scrollbar>
                 </div>
               </n-card>
@@ -352,7 +361,11 @@ const { t } = useI18n()
 const { isMobile } = useBreakpoints()
 
 const taskId = computed(() => Number(route.params.id))
-const renderedUserPrompt = computed(() => renderMarkdown(task.value?.user_prompt ?? ''))
+const promptView = ref<'user' | 'final'>('user')
+const renderedSelectedPrompt = computed(() => {
+  if (promptView.value === 'user') return renderMarkdown(task.value?.user_prompt ?? '')
+  return renderMarkdown(task.value?.rendered_prompt?.trim() || t('taskView.noFinalRunPrompt'))
+})
 
 const task = ref<Task | null>(null)
 const logs = ref('')
@@ -388,6 +401,9 @@ let structuredLogSse: EventSource | null = null
 // O(n²) array copies when hundreds of SSE events arrive in rapid succession.
 let _pendingLogBuffer: TaskLog[] = []
 let _logFlushScheduled = false
+watch(taskId, () => {
+  promptView.value = 'user'
+})
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
 const terminalLogHtml = computed(() => {
