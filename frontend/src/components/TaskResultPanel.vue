@@ -92,7 +92,7 @@
             </n-scrollbar>
           </div>
         </div>
-        <div v-if="summaryExpanded && !mermaidViewerVisible" class="summary-collapse-footer">
+        <div v-if="summaryExpanded && !mermaidViewerVisible && !summaryViewerVisible" class="summary-collapse-footer">
           <n-button class="summary-collapse-button" size="small" secondary round @click="toggleSummary">
             <template #icon>
               <n-icon size="14" class="summary-collapse-button__icon"><ChevronForward /></n-icon>
@@ -101,7 +101,7 @@
           </n-button>
         </div>
         <div
-          v-if="summaryExpanded && !mermaidViewerVisible"
+          v-if="summaryExpanded && !mermaidViewerVisible && !summaryViewerVisible"
           class="summary-collapse-float"
           :style="summaryCollapseFloatStyle"
         >
@@ -347,7 +347,7 @@ const mermaidViewerScrollbarKey = computed(() =>
 function updateSummaryCollapseFloat() {
   summaryCollapseFloatRaf = 0
   const card = summaryCardRef.value
-  if (!summaryExpanded.value || mermaidViewerVisible.value || !card) {
+  if (!summaryExpanded.value || mermaidViewerVisible.value || summaryViewerVisible.value || !card) {
     summaryCollapseFloatStyle.value = hiddenSummaryCollapseFloatStyle
     return
   }
@@ -388,7 +388,7 @@ onBeforeUnmount(() => {
   stopMermaidViewerDrag()
 })
 
-watch([summaryExpanded, mermaidViewerVisible, summaryRenderedHtml], async () => {
+watch([summaryExpanded, mermaidViewerVisible, summaryViewerVisible, summaryRenderedHtml], async () => {
   await nextTick()
   scheduleSummaryCollapseFloatUpdate()
 })
