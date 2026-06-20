@@ -34,9 +34,9 @@
               <span v-if="summaryPayloadLoading" class="badge-spin-ring badge-spin-ring--accent"></span>
               <n-icon v-else size="18" class="summary-trigger__icon"><ChatboxOutline /></n-icon>
             </div>
-            <div class="summary-trigger__text">
+            <div class="summary-trigger__text" :class="{ 'summary-trigger__text--has-preview': summaryPreview }">
               <span class="summary-trigger__title">{{ t('taskView.aiDeliverySummary') }}</span>
-              <span v-if="summaryPreview && !summaryExpanded" class="summary-trigger__preview">{{ summaryPreview }}</span>
+              <span class="summary-trigger__preview">{{ summaryPreview }}</span>
             </div>
           </div>
           <div class="summary-trigger__actions">
@@ -961,10 +961,8 @@ const hasChanges = computed(() =>
 
 .summary-trigger--expanded {
   border-color: rgba(2, 132, 199, 0.22);
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-  border-bottom: 1px solid rgba(2, 132, 199, 0.08);
   background: rgba(2, 132, 199, 0.04);
+  box-shadow: 0 1px 4px rgba(2, 132, 199, 0.06);
 }
 
 .summary-trigger__leading {
@@ -991,10 +989,19 @@ const hasChanges = computed(() =>
 }
 
 .summary-trigger__text {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto 0fr;
   gap: 2px;
   min-width: 0;
+  transition: grid-template-rows 0.2s ease;
+}
+
+.summary-trigger__text--has-preview {
+  grid-template-rows: auto 1fr;
+}
+
+.summary-trigger--expanded .summary-trigger__text--has-preview {
+  grid-template-rows: auto 0fr;
 }
 
 .summary-trigger__title {
@@ -1014,6 +1021,7 @@ const hasChanges = computed(() =>
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-height: 0;
 }
 
 .summary-trigger__actions {
@@ -1079,16 +1087,11 @@ const hasChanges = computed(() =>
   display: grid;
   grid-template-rows: 0fr;
   transition: grid-template-rows 0.25s ease;
-  border: 1px solid transparent;
-  border-top: 0;
-  border-radius: 0 0 8px 8px;
-  margin-top: -1px;
 }
 
 .summary-expand-track--open {
   grid-template-rows: 1fr;
-  border-color: rgba(2, 132, 199, 0.14);
-  background: rgba(2, 132, 199, 0.02);
+  margin-top: 8px;
 }
 
 .summary-expand-body {
@@ -1099,7 +1102,7 @@ const hasChanges = computed(() =>
 .summary-content-scrollbar {
   width: 100%;
   max-width: 100%;
-  border-radius: 0 0 7px 7px;
+  border-radius: 7px;
 }
 
 .summary-content {
