@@ -739,6 +739,7 @@ const en = {
   runInstruction: {
     template: 'Run Instruction Template',
     templatePlaceholder: 'Enter the complete run instruction template...',
+    usePromptOnly: 'Prompt Only',
     restoreDefault: 'Restore Default Run Instruction',
     restoreBuiltIn: 'Restore Built-in',
     insertVariable: 'Insert variable',

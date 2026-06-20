@@ -242,6 +242,7 @@
                   :preview-result="previewResult"
                   :preview-error="previewError"
                   @update:model-value="handleRunInstructionInput"
+                  @use-prompt-only="usePromptOnly"
                   @restore-default="restoreRunInstructionDefault"
                   @preview="handleRunInstructionPreview"
                 />
@@ -713,6 +714,12 @@ function handleRunInstructionSummaryClick(event: MouseEvent) {
 function restoreRunInstructionDefault() {
   if (!runInstructionDefaults.value || !taskMode.value) return
   runInstructionTemplate.value = runInstructionDefaults.value[taskMode.value].content
+  runInstructionDirty.value = true
+  invalidateRunInstructionPreview()
+}
+
+function usePromptOnly() {
+  runInstructionTemplate.value = '{{user_prompt}}'
   runInstructionDirty.value = true
   invalidateRunInstructionPreview()
 }

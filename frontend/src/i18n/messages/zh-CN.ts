@@ -729,6 +729,7 @@ const zhCN = {
   runInstruction: {
     template: '运行指令模板',
     templatePlaceholder: '输入完整的运行指令模板...',
+    usePromptOnly: '仅用提示词',
     restoreDefault: '恢复默认运行指令',
     restoreBuiltIn: '恢复内置默认',
     insertVariable: '插入变量',

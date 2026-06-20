@@ -72,6 +72,9 @@
           </div>
         </div>
       </n-popover>
+      <n-button size="tiny" quaternary @click="emit('use-prompt-only')">
+        {{ t('runInstruction.usePromptOnly') }}
+      </n-button>
       <n-button size="tiny" quaternary @click="emit('restore-default')">
         {{ t('runInstruction.restoreDefault') }}
       </n-button>
@@ -154,6 +157,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   'update:modelValue': [value: string]
   'restore-default': []
+  'use-prompt-only': []
   preview: []
 }>()
 
