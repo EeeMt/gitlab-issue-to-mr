@@ -9,7 +9,6 @@
         <div class="process-header__meta">
           <span class="panel-title">{{ t('taskView.taskProcess') }}</span>
           <n-tag v-if="isActive" type="success" size="small" round :class="{ 'live-badge--pulse': isActive }">{{ t('taskView.realTime') }}</n-tag>
-          <span v-if="showFollowupReplayHint" class="followup-replay-hint">{{ t('taskView.followupReplayHint') }}</span>
           <span v-if="isActive && elapsedDisplay" class="elapsed-time">{{ elapsedDisplay }}</span>
         </div>
         <n-tabs v-model:value="activeTab" type="segment" size="small" class="process-tabs process-tabs--header">
@@ -117,10 +116,8 @@ const props = withDefaults(defineProps<{
   isActive: boolean
   terminalHtml: string
   taskStatus: string
-  showFollowupReplayHint?: boolean
 }>(), {
   taskLogs: () => [],
-  showFollowupReplayHint: false,
 })
 
 const emit = defineEmits<{
@@ -376,16 +373,6 @@ defineExpose({ onCollapseChange, activeTab })
   align-items: center;
   gap: 8px;
   min-width: 0;
-}
-.followup-replay-hint {
-  min-width: 0;
-  color: var(--n-text-color-3, #6b7280);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.4;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .elapsed-time {
   flex: 0 0 auto;

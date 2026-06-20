@@ -370,7 +370,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, h, onMounted, onUnmounted, reactive, watch } from 'vue'
+import { ref, computed, h, onMounted, onUnmounted, reactive, watch, type VNodeChild } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NSpace, NCard, NTag, NSpin,
@@ -382,6 +382,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import {
   AddOutline,
+  CalendarOutline,
   CloseCircleOutline,
   CreateOutline,
   RefreshOutline,
@@ -567,156 +568,171 @@ function taskRowProps(row: Task) {
 
 // --- Task Table Columns ---
 const taskColumns = computed<DataTableColumns<Task>>(() => {
-  const statusColumn = {
-    title: t('common.status'),
-    key: 'status',
-    width: isMobile.value ? 76 : 84,
-    render: (row: Task) =>
-      h(NTag, { type: taskStatusColors[row.status], size: 'tiny', round: true }, () => t(`status.${row.status}`))
-  }
+  return [
+    {
+      title: t('issue.executionHistory'),
+      key: 'task_record',
+      render: (row: Task) => renderTaskRecord(row),
+    },
+  ]
+})
 
-  const descriptionColumn = {
-    title: t('issue.field.description'),
-    key: 'user_prompt',
-    render: (row: Task) => {
-      const prompt = row.user_prompt || ''
-      const display = prompt.length > 80 ? prompt.slice(0, 80) + '…' : prompt
-      const children = [
-        h('span', { class: 'task-prompt-link__id' }, `#${row.id}`),
-        ...(row.is_retry
-          ? [h(NTag, { class: 'task-prompt-link__retry-badge', size: 'tiny', round: true }, () => t('common.retry'))]
-          : []),
-        h('span', { class: 'task-prompt-link__text' }, display)
-      ]
-      const trigger = h(
-        'a',
+function renderStatusTag(row: Task): VNodeChild {
+  return h(
+    NTag,
+    { type: taskStatusColors[row.status], size: 'tiny', round: true },
+    () => t(`status.${row.status}`)
+  )
+}
+
+function renderTaskPrompt(row: Task): VNodeChild {
+  const prompt = row.user_prompt || ''
+  const display = prompt.length > 96 ? prompt.slice(0, 96) + '…' : prompt
+  const children = [
+    h('span', { class: 'task-prompt-link__id' }, `#${row.id}`),
+    ...(row.is_retry
+      ? [h(NTag, { class: 'task-prompt-link__retry-badge', size: 'tiny', round: true }, () => t('common.retry'))]
+      : []),
+    h('span', { class: 'task-prompt-link__text' }, display)
+  ]
+  const trigger = h(
+    'a',
+    {
+      class: 'task-prompt-link',
+      onClick: (event: MouseEvent) => {
+        event.stopPropagation()
+        openTask(row.id)
+      }
+    },
+    children
+  )
+  return h(
+    NTooltip,
+    {
+      placement: 'top-start',
+      trigger: 'hover',
+      contentStyle: issueDetailTooltipContentStyle,
+      themeOverrides: issueDetailTooltipThemeOverrides
+    },
+    {
+      trigger: () => trigger,
+      default: () => h('div', { class: 'task-description-tooltip' }, prompt || '—')
+    }
+  )
+}
+
+function renderTaskTime(row: Task): VNodeChild {
+  return h(
+    NTooltip,
+    {
+      placement: 'top',
+      trigger: 'hover',
+      contentStyle: issueDetailTooltipContentStyle,
+      themeOverrides: issueDetailTooltipThemeOverrides
+    },
+    {
+      trigger: () => h(
+        'span',
+        { class: 'task-table__time task-record__meta-value' },
+        formatCompactDateTime(row.scheduled_at || row.created_at)
+      ),
+      default: () => h('div', { class: 'task-time-tooltip' }, [
+        h('div', `${t('common.created')} · ${formatCompactDateTime(row.created_at)}`),
+        ...(row.scheduled_at
+          ? [h('div', `${t('dashboard.scheduled')} · ${formatCompactDateTime(row.scheduled_at)}`)]
+          : [])
+      ])
+    }
+  )
+}
+
+function renderTaskAction(row: Task): VNodeChild | null {
+  const retryTask = retriedTaskMap.value.get(row.id)
+  if (retryTask) {
+    return h('span', { class: 'task-record__retried-as' }, [
+      t('issue.retriedAs'),
+      ' ',
+      h(
+        NButton,
         {
-          class: 'task-prompt-link',
+          text: true,
+          type: 'primary',
+          size: 'tiny',
           onClick: (event: MouseEvent) => {
             event.stopPropagation()
-            openTask(row.id)
+            openTask(retryTask.id)
           }
         },
-        children
+        () => `Task #${retryTask.id}`
       )
-      return h(
-        NTooltip,
-        {
-          placement: 'top-start',
-          trigger: 'hover',
-          contentStyle: issueDetailTooltipContentStyle,
-          themeOverrides: issueDetailTooltipThemeOverrides
-        },
-        {
-          trigger: () => trigger,
-          default: () => h('div', { class: 'task-description-tooltip' }, prompt || '—')
-        }
-      )
-    }
+    ])
   }
-
-  const durationColumn = {
-    title: t('dashboard.duration'),
-    key: 'duration',
-    width: 64,
-    render: (row: Task) => h('span', { class: 'task-table__time' }, formatTaskDuration(row))
-  }
-
-  const timeColumn = {
-    title: t('issue.executionTime'),
-    key: 'execution_time',
-    width: 112,
-    render: (row: Task) => h(
-      NTooltip,
+  if (!canManageIssueTask(row)) return null
+  if (canRescheduleIssueTask(row)) {
+    return h(
+      NButton,
       {
-        placement: 'top',
-        trigger: 'hover',
-        contentStyle: issueDetailTooltipContentStyle,
-        themeOverrides: issueDetailTooltipThemeOverrides
+        size: 'tiny',
+        secondary: true,
+        strong: true,
+        round: true,
+        type: 'info',
+        onClick: (event: MouseEvent) => {
+          event.stopPropagation()
+          void openRescheduleDrawer(row)
+        }
       },
       {
-        trigger: () => h(
-          'span',
-          { class: 'task-table__time' },
-          formatCompactDateTime(row.scheduled_at || row.created_at)
-        ),
-        default: () => h('div', { class: 'task-time-tooltip' }, [
-          h('div', `${t('common.created')} · ${formatCompactDateTime(row.created_at)}`),
-          ...(row.scheduled_at
-            ? [h('div', `${t('dashboard.scheduled')} · ${formatCompactDateTime(row.scheduled_at)}`)]
-            : [])
-        ])
+        icon: () => h(NIcon, { component: CalendarOutline }),
+        default: () => t('taskView.rescheduleTask'),
       }
     )
   }
-
-  const actionsColumn = {
-    title: '',
-    key: 'actions',
-    width: isMobile.value ? 84 : 96,
-    render: (row: Task) => {
-      const retryTask = retriedTaskMap.value.get(row.id)
-      if (retryTask) {
-        return h('span', { style: 'font-size: 11px; color: var(--n-text-color-3)' }, [
-          t('issue.retriedAs'),
-          ' ',
-          h(
-            NButton,
-            {
-              text: true,
-              type: 'primary',
-              size: 'tiny',
-              onClick: (event: MouseEvent) => {
-                event.stopPropagation()
-                openTask(retryTask.id)
-              }
-            },
-            () => `Task #${retryTask.id}`
-          )
-        ])
+  if (!['failed', 'cancelled'].includes(row.status)) return null
+  return h(
+    NButton,
+    {
+      size: 'tiny',
+      secondary: true,
+      strong: true,
+      round: true,
+      type: 'default',
+      onClick: (event: MouseEvent) => {
+        event.stopPropagation()
+        void openRetryDrawer(row)
       }
-      if (!canManageIssueTask(row)) return ''
-      if (canRescheduleIssueTask(row)) {
-        return h(
-          NButton,
-          {
-            size: 'tiny',
-            secondary: true,
-            strong: true,
-            round: true,
-            type: 'info',
-            onClick: (event: MouseEvent) => {
-              event.stopPropagation()
-              void openRescheduleDrawer(row)
-            }
-          },
-          () => t('taskView.rescheduleTask')
-        )
-      }
-      if (!['failed', 'cancelled'].includes(row.status)) return ''
-      return h(
-        NButton,
-        {
-          size: 'tiny',
-          secondary: true,
-          strong: true,
-          round: true,
-          type: 'default',
-          onClick: (event: MouseEvent) => {
-            event.stopPropagation()
-            void openRetryDrawer(row)
-          }
-        },
-        () => t('issue.retryTask')
-      )
+    },
+    {
+      icon: () => h(NIcon, { component: RefreshOutline }),
+      default: () => t('issue.retryTask'),
     }
-  }
+  )
+}
 
-  if (isMobile.value) {
-    return [statusColumn, descriptionColumn, actionsColumn]
-  }
-  return [statusColumn, descriptionColumn, durationColumn, timeColumn, actionsColumn]
-})
+function renderTaskRecord(row: Task): VNodeChild {
+  const action = renderTaskAction(row)
+  const timeLabel = row.scheduled_at ? t('dashboard.scheduled') : t('issue.executionCreatedAt')
+
+  return h('div', { class: 'task-record' }, [
+    h('div', { class: 'task-record__main' }, [
+      renderStatusTag(row),
+      renderTaskPrompt(row),
+    ]),
+    h('div', { class: 'task-record__details' }, [
+      h('div', { class: 'task-record__meta' }, [
+        h('span', { class: 'task-record__meta-item' }, [
+          h('span', { class: 'task-record__meta-label' }, timeLabel),
+          renderTaskTime(row),
+        ]),
+        h('span', { class: 'task-record__meta-item' }, [
+          h('span', { class: 'task-record__meta-label' }, t('dashboard.duration')),
+          h('span', { class: 'task-table__time task-record__meta-value' }, formatTaskDuration(row)),
+        ]),
+      ]),
+      action ? h('div', { class: 'task-record__actions' }, [action]) : null,
+    ]),
+  ])
+}
 
 // --- Helpers ---
 function formatCompactDateTime(value?: string | null): string {
@@ -1116,10 +1132,95 @@ onMounted(() => {
   font-size: 13px;
 }
 
+.issue-view :deep(.task-record) {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 0;
+}
+
+.issue-view :deep(.task-record__main) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.issue-view :deep(.task-record__main > .n-tag) {
+  flex: 0 0 auto;
+}
+
+.issue-view :deep(.task-record__details) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.issue-view :deep(.task-record__meta) {
+  display: flex;
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 240px;
+  flex-wrap: wrap;
+}
+
+.issue-view :deep(.task-record__meta-item) {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.issue-view :deep(.task-record__meta-label) {
+  color: var(--n-text-color-3);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.issue-view :deep(.task-record__meta-value) {
+  min-width: 0;
+}
+
+.issue-view :deep(.task-record__actions) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 1 auto;
+  margin-left: auto;
+}
+
+.issue-view :deep(.task-record__actions .n-button) {
+  max-width: 100%;
+}
+
+.issue-view :deep(.task-record__retried-as) {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--n-text-color-3);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .issue-view :deep(.task-prompt-link) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
@@ -1148,6 +1249,7 @@ onMounted(() => {
 .issue-view :deep(.task-prompt-link__text) {
   min-width: 0;
   overflow: hidden;
+  overflow-wrap: anywhere;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1383,6 +1485,16 @@ onMounted(() => {
   .issue-card__header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .issue-view :deep(.task-record__details) {
+    align-items: flex-start;
+  }
+
+  .issue-view :deep(.task-record__actions) {
+    justify-content: flex-start;
+    width: 100%;
+    margin-left: 0;
   }
 }
 </style>

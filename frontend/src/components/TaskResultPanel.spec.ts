@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import taskResultPanelSource from './TaskResultPanel.vue?raw'
+import taskRunMetricsSource from './TaskRunMetrics.vue?raw'
+import taskContinuationPanelSource from './TaskContinuationPanel.vue?raw'
 
 function cssBlock(selector: string): string {
   const start = taskResultPanelSource.indexOf(`${selector} {`)
@@ -36,6 +38,16 @@ describe('TaskResultPanel', () => {
     expect(taskResultPanelSource).toContain(':aria-expanded="summaryExpanded"')
     expect(taskResultPanelSource).toContain('taskView.summaryExpand')
     expect(taskResultPanelSource).toContain('taskView.summaryCollapse')
+  })
+
+  it('opens the complete delivery summary in a large mixed-content viewer', () => {
+    expect(taskResultPanelSource).toContain('class="summary-open-large-button"')
+    expect(taskResultPanelSource).toContain(':aria-label="t(\'taskView.summaryOpenLarge\')"')
+    expect(taskResultPanelSource).toContain('@click="openSummaryViewer"')
+    expect(taskResultPanelSource).toContain('class="summary-content-modal"')
+    expect(taskResultPanelSource).toContain('ref="summaryViewerContentRef"')
+    expect(taskResultPanelSource).toContain('function hydrateSummaryViewerMermaid()')
+    expect(taskResultPanelSource).toContain('canvas.innerHTML = diagram.svg')
   })
 
   it('shows a floating collapse action while the summary is expanded', () => {
@@ -79,27 +91,36 @@ describe('TaskResultPanel', () => {
     expect(summaryPreview).toContain('white-space: nowrap;')
   })
 
-  it('context compact count item is guarded by v-if="contextCompactCount != null"', () => {
-    expect(taskResultPanelSource).toContain('v-if="contextCompactCount != null"')
+  it('moves run statistics into the dedicated sidebar component', () => {
+    expect(taskResultPanelSource).not.toContain('v-if="contextCompactCount != null"')
+    expect(taskRunMetricsSource).toContain('v-if="contextCompactCount != null"')
+    expect(taskRunMetricsSource).toContain('taskView.runStatistics')
   })
 
-  it('renders skill usage stats in the run statistics card', () => {
-    expect(taskResultPanelSource).toContain('skillUsageStats?: SkillUsageStat[]')
-    expect(taskResultPanelSource).toContain('taskView.skillUsage')
-    expect(taskResultPanelSource).toContain('skillUsageStats.length > 0')
+  it('renders skill usage stats in the dedicated run statistics component', () => {
+    expect(taskRunMetricsSource).toContain('skillUsageStats?: SkillUsageStat[]')
+    expect(taskRunMetricsSource).toContain('taskView.skillUsage')
+    expect(taskRunMetricsSource).toContain('skillUsageStats.length > 0')
   })
 
-  it('turns the continue guidance card into an append shortcut when allowed', () => {
-    expect(taskResultPanelSource).toContain('canAppendFollowupTask?: boolean')
-    expect(taskResultPanelSource).toContain("(e: 'append-followup-task'): void")
-    expect(taskResultPanelSource).toContain("canAppendFollowupTask ? t('taskView.appendFollowupTitle') : t('taskView.continueGuideTitle')")
-    expect(taskResultPanelSource).toContain("canAppendFollowupTask ? t('taskView.appendFollowupHint') : t('taskView.continueGuideHint')")
-    expect(taskResultPanelSource).toContain('v-if="canAppendFollowupTask"')
-    expect(taskResultPanelSource).toContain("@click=\"emit('append-followup-task')\"")
-    expect(taskResultPanelSource).toContain(':type="canAppendFollowupTask ? \'default\' : \'primary\'"')
-    expect(taskResultPanelSource).toContain('@click="goToIssue"')
-    expect(taskResultPanelSource).toContain("{{ t('taskView.appendFollowupTask') }}")
-    expect(taskResultPanelSource).toContain("{{ t('taskView.backToIssue') }}")
+  it('keeps input and output token counts inside the metrics grid', () => {
+    const metricsGridStart = taskRunMetricsSource.indexOf('<div class="metrics-grid">')
+    const metricsGridEnd = taskRunMetricsSource.indexOf('</div>\n\n    <div v-if="skillUsageStats.length', metricsGridStart)
+    const metricsGridSource = taskRunMetricsSource.slice(metricsGridStart, metricsGridEnd)
+
+    expect(metricsGridSource).toContain("t('taskView.inputTokens')")
+    expect(metricsGridSource).toContain("t('taskView.outputTokens')")
+    expect(taskRunMetricsSource).not.toContain("t('taskView.tokenBreakdown'")
+  })
+
+  it('keeps issue continuation in a dedicated sidebar component', () => {
+    expect(taskResultPanelSource).not.toContain('canAppendFollowupTask?: boolean')
+    expect(taskContinuationPanelSource).toContain('canAppendFollowupTask?: boolean')
+    expect(taskContinuationPanelSource).toContain("(event: 'append-followup-task'): void")
+    expect(taskContinuationPanelSource).toContain("canAppendFollowupTask ? t('taskView.appendFollowupTitle') : t('taskView.continueGuideTitle')")
+    expect(taskContinuationPanelSource).toContain('v-if="canAppendFollowupTask"')
+    expect(taskContinuationPanelSource).toContain("@click=\"emit('append-followup-task')\"")
+    expect(taskContinuationPanelSource).toContain('@click="goToIssue"')
   })
 
   it('adds Mermaid rendering only to the AI delivery summary panel', () => {

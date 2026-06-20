@@ -19,6 +19,8 @@
       :row-key="(row: Task) => row.id"
       :row-props="rowProps"
       :bordered="false"
+      :show-header="false"
+      :single-line="false"
       size="small"
     />
   </n-card>
@@ -100,9 +102,10 @@ const { t } = useI18n()
 }
 
 .issue-task-panel__table :deep(.n-data-table-td) {
-  padding: 7px 9px;
+  padding: 8px 9px;
   font-size: 12px;
-  line-height: 1.3;
+  line-height: 1.35;
+  vertical-align: middle;
 }
 
 .issue-task-panel__table :deep(.n-data-table-tr:hover .n-data-table-td) {

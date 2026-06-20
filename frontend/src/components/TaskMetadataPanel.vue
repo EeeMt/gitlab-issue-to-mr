@@ -2,9 +2,12 @@
   <n-card class="task-metadata-panel" :bordered="false">
     <template #header>
       <div class="panel-header">
-        <span class="panel-title">{{ t('taskView.taskMetadata') }}</span>
+        <div>
+          <div class="panel-eyebrow">{{ t('taskView.executionContext') }}</div>
+          <div class="panel-title">{{ t('taskView.taskOverview') }}</div>
+        </div>
         <div class="panel-badges">
-          <n-tag type="default" round size="small">{{ formatPriority(task.priority) }}</n-tag>
+          <n-tag type="default" size="small" :bordered="false">{{ formatPriority(task.priority) }}</n-tag>
         </div>
       </div>
     </template>
@@ -101,27 +104,40 @@
 
       <!-- Branch flow -->
       <div class="metadata-row">
-        <span class="metadata-label">
+        <span class="metadata-label metadata-label--top">
           <n-icon size="14" class="metadata-label-icon"><GitBranchOutline /></n-icon>
           {{ t('taskView.branchFlow') }}
         </span>
         <span class="metadata-value">
-          <span class="branch-flow">
-            <template v-if="task.issue?.base_branch">
-              <a v-if="branchUrl(task.issue.base_branch)" :href="branchUrl(task.issue.base_branch)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--base app-link">{{ task.issue.base_branch }}</a>
-              <span v-else class="branch-item branch-item--base">{{ task.issue.base_branch }}</span>
-            </template>
-            <span v-if="task.issue?.base_branch && task.issue?.branch_name" class="branch-arrow">➜</span>
-            <template v-if="task.issue?.branch_name">
-              <a v-if="branchUrl(task.issue.branch_name)" :href="branchUrl(task.issue.branch_name)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--work app-link">{{ task.issue.branch_name }}</a>
-              <span v-else class="branch-item branch-item--work">{{ task.issue.branch_name }}</span>
-            </template>
-            <span v-if="task.issue?.branch_name && task.issue?.target_branch" class="branch-arrow">➜</span>
-            <template v-if="task.issue?.target_branch">
-              <a v-if="branchUrl(task.issue.target_branch)" :href="branchUrl(task.issue.target_branch)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--target app-link">{{ task.issue.target_branch }}</a>
-              <span v-else class="branch-item branch-item--target">{{ task.issue.target_branch }}</span>
-            </template>
-            <span v-if="!task.issue?.branch_name" class="branch-item branch-item--direct">{{ t('taskView.directPush') }}</span>
+          <span
+            class="branch-flow"
+            :class="{ 'branch-flow--direct-only': !task.issue?.base_branch && !task.issue?.branch_name && !task.issue?.target_branch }"
+          >
+            <span v-if="task.issue?.base_branch" class="branch-flow__stage">
+              <span class="branch-flow__marker branch-flow__marker--base" aria-hidden="true"></span>
+              <span class="branch-flow__content">
+                <span class="branch-flow__label">{{ t('taskView.branchBase') }}</span>
+                <a v-if="branchUrl(task.issue.base_branch)" :href="branchUrl(task.issue.base_branch)!" target="_blank" rel="noopener noreferrer" class="branch-flow__name app-link">{{ task.issue.base_branch }}</a>
+                <span v-else class="branch-flow__name">{{ task.issue.base_branch }}</span>
+              </span>
+            </span>
+            <span v-if="!task.issue?.branch_name" class="branch-flow__mode">{{ t('taskView.directPush') }}</span>
+            <span v-if="task.issue?.branch_name" class="branch-flow__stage">
+              <span class="branch-flow__marker branch-flow__marker--work" aria-hidden="true"></span>
+              <span class="branch-flow__content">
+                <span class="branch-flow__label">{{ t('taskView.branchWork') }}</span>
+                <a v-if="branchUrl(task.issue.branch_name)" :href="branchUrl(task.issue.branch_name)!" target="_blank" rel="noopener noreferrer" class="branch-flow__name app-link">{{ task.issue.branch_name }}</a>
+                <span v-else class="branch-flow__name">{{ task.issue.branch_name }}</span>
+              </span>
+            </span>
+            <span v-if="task.issue?.target_branch" class="branch-flow__stage">
+              <span class="branch-flow__marker branch-flow__marker--target" aria-hidden="true"></span>
+              <span class="branch-flow__content">
+                <span class="branch-flow__label">{{ t('taskView.branchTarget') }}</span>
+                <a v-if="branchUrl(task.issue.target_branch)" :href="branchUrl(task.issue.target_branch)!" target="_blank" rel="noopener noreferrer" class="branch-flow__name app-link">{{ task.issue.target_branch }}</a>
+                <span v-else class="branch-flow__name">{{ task.issue.target_branch }}</span>
+              </span>
+            </span>
           </span>
         </span>
       </div>
@@ -139,7 +155,7 @@
             </a>
           </template>
           <template v-else-if="task.issue?.target_branch">
-            <span class="mr-pending">{{ t('taskView.mrWillBeCreated') }} → <span class="branch-item branch-item--target" style="display:inline">{{ task.issue.target_branch }}</span></span>
+            <span class="mr-pending">{{ t('taskView.mrWillBeCreated') }} → <span class="mr-target-branch">{{ task.issue.target_branch }}</span></span>
           </template>
           <template v-else>
             <span class="mr-none">{{ t('taskView.mrNotCreated') }}</span>
@@ -149,36 +165,39 @@
 
       <!-- Time axis -->
       <div class="metadata-row">
-        <span class="metadata-label">
+        <span class="metadata-label metadata-label--top">
           <n-icon size="14" class="metadata-label-icon"><TimeOutline /></n-icon>
           {{ t('common.timeline') }}
         </span>
-        <div class="time-axis">
+        <div class="time-axis" :class="{ 'time-axis--single': !hasAdditionalTimelinePoint }">
           <div class="time-point">
-            <span class="time-point__label">{{ t('common.created') }}</span>
-            <span class="time-point__value">{{ formatDate(task.created_at) }}</span>
+            <span class="time-point__marker" aria-hidden="true"></span>
+            <span class="time-point__content">
+              <span class="time-point__label">{{ t('common.created') }}</span>
+              <time class="time-point__value" :datetime="task.created_at">{{ formatDate(task.created_at) }}</time>
+            </span>
           </div>
-          <template v-if="task.scheduled_at && isSignificantSchedule(task.scheduled_at, task.created_at)">
-            <div class="time-axis__sep">→</div>
-            <div class="time-point">
+          <div v-if="task.scheduled_at && isSignificantSchedule(task.scheduled_at, task.created_at)" class="time-point">
+            <span class="time-point__marker time-point__marker--scheduled" aria-hidden="true"></span>
+            <span class="time-point__content">
               <span class="time-point__label">{{ t('common.scheduledAt') }}</span>
-              <span class="time-point__value">{{ formatDate(task.scheduled_at) }}</span>
-            </div>
-          </template>
-          <template v-if="task.started_at">
-            <div class="time-axis__sep">→</div>
-            <div class="time-point">
+              <time class="time-point__value" :datetime="task.scheduled_at">{{ formatDate(task.scheduled_at) }}</time>
+            </span>
+          </div>
+          <div v-if="task.started_at" class="time-point">
+            <span class="time-point__marker time-point__marker--active" aria-hidden="true"></span>
+            <span class="time-point__content">
               <span class="time-point__label">{{ t('common.started') }}</span>
-              <span class="time-point__value">{{ formatDate(task.started_at) }}</span>
-            </div>
-          </template>
-          <template v-if="task.completed_at">
-            <div class="time-axis__sep">→</div>
-            <div class="time-point">
+              <time class="time-point__value" :datetime="task.started_at">{{ formatDate(task.started_at) }}</time>
+            </span>
+          </div>
+          <div v-if="task.completed_at" class="time-point">
+            <span class="time-point__marker time-point__marker--complete" aria-hidden="true"></span>
+            <span class="time-point__content">
               <span class="time-point__label">{{ t('taskView.completedAt') }}</span>
-              <span class="time-point__value">{{ formatDate(task.completed_at) }}</span>
-            </div>
-          </template>
+              <time class="time-point__value" :datetime="task.completed_at">{{ formatDate(task.completed_at) }}</time>
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -253,6 +272,15 @@ const triggerSourceMeta = computed(() => {
   }
 })
 
+const hasAdditionalTimelinePoint = computed(() =>
+  !!props.task.started_at
+  || !!props.task.completed_at
+  || (
+    !!props.task.scheduled_at
+    && isSignificantSchedule(props.task.scheduled_at, props.task.created_at)
+  )
+)
+
 function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean {
   try {
     const diff = Math.abs(new Date(scheduledAt).getTime() - new Date(createdAt).getTime())
@@ -271,14 +299,24 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 
 .panel-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 10px;
-  flex-wrap: wrap;
+}
+
+.panel-eyebrow {
+  margin-bottom: 3px;
+  color: var(--n-text-color-3, #8a8f98);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .panel-title {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
+  line-height: 1.35;
 }
 
 .panel-badges {
@@ -290,8 +328,8 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 .metadata-body {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  column-gap: 12px;
-  row-gap: 14px;
+  column-gap: 10px;
+  row-gap: 12px;
   align-items: center;
 }
 
@@ -305,6 +343,11 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
   font-size: 13px;
   color: var(--n-text-color-3, #999);
   white-space: nowrap;
+}
+
+.metadata-label--top {
+  align-self: start;
+  padding-top: 3px;
 }
 
 .metadata-row > :last-child {
@@ -359,90 +402,167 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 }
 
 .branch-flow {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  position: relative;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 0;
 }
 
-.branch-item {
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 12px;
+.branch-flow::before {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 4px;
+  width: 1px;
+  background: rgba(100, 116, 139, 0.24);
+  content: '';
+}
+
+.branch-flow--direct-only::before {
+  display: none;
+}
+
+.branch-flow__stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+.branch-flow__marker {
+  z-index: 1;
+  box-sizing: border-box;
+  width: 9px;
+  height: 9px;
+  margin-top: 4px;
+  border: 2px solid var(--n-color, #fff);
+  border-radius: 50%;
+  background: #64748b;
+  box-shadow: 0 0 0 1px rgba(100, 116, 139, 0.28);
+}
+
+.branch-flow__marker--work {
+  background: #059669;
+}
+
+.branch-flow__marker--target {
+  background: #2563eb;
+}
+
+.branch-flow__content {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.branch-flow__label {
+  color: var(--n-text-color-3, #8a8f98);
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.branch-flow__name {
+  min-width: 0;
+  color: var(--n-text-color-2);
   font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
-  background: rgba(128, 128, 128, 0.08);
-}
-
-.branch-item--base {
-  background: rgba(2, 132, 199, 0.08);
-  color: #0284c7;
-}
-
-.branch-item--work {
-  background: rgba(5, 150, 105, 0.08);
-  color: #059669;
-}
-
-.branch-item--target {
-  background: rgba(124, 58, 237, 0.08);
-  color: #7c3aed;
-}
-
-.branch-item--direct {
-  background: rgba(128, 128, 128, 0.08);
-  color: var(--n-text-color-3, #999);
-  font-style: italic;
-  font-family: inherit;
-}
-
-.branch-arrow {
-  color: var(--n-text-color-3, #999);
   font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.branch-flow__mode {
+  width: fit-content;
+  margin-left: 18px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(100, 116, 139, 0.08);
+  color: var(--n-text-color-3, #8a8f98);
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 .time-axis {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  flex-wrap: wrap;
-  gap: 6px 8px;
+  position: relative;
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  padding: 2px 0;
 }
 
-.time-axis__sep {
-  color: var(--n-text-color-3, #999);
-  margin-top: 2px;
-  flex-shrink: 0;
+.time-axis::before {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 4px;
+  width: 1px;
+  background: rgba(100, 116, 139, 0.22);
+  content: '';
+}
+
+.time-axis--single::before {
+  display: none;
 }
 
 .time-point {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 0 0 auto;
+  position: relative;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+.time-point__marker {
+  z-index: 1;
+  box-sizing: border-box;
+  width: 9px;
+  height: 9px;
+  margin-top: 4px;
+  border: 2px solid var(--n-color, #fff);
+  border-radius: 50%;
+  background: #94a3b8;
+  box-shadow: 0 0 0 1px rgba(100, 116, 139, 0.24);
+}
+
+.time-point__marker--scheduled {
+  background: #0284c7;
+}
+
+.time-point__marker--active {
+  background: #d97706;
+}
+
+.time-point__marker--complete {
+  background: #059669;
+}
+
+.time-point__content {
+  display: grid;
+  grid-template-columns: minmax(54px, max-content) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
   min-width: 0;
 }
 
 .time-point__label {
-  font-size: 11px;
   color: var(--n-text-color-3, #999);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 10px;
+  letter-spacing: 0;
+  line-height: 1.4;
 }
 
 .time-point__value {
-  font-size: 13px;
   color: var(--n-text-color-2);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 600px) {
-  .time-point__value {
-    font-size: 11px;
-  }
-  .time-point {
-    padding: 2px 0;
-  }
-  .time-axis__sep {
-    display: none;
+  .time-point__content {
+    grid-template-columns: 1fr;
+    gap: 1px;
   }
 }
 
@@ -465,10 +585,11 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
   align-items: baseline;
   gap: 6px;
   max-width: 100%;
-  padding: 3px 10px;
+  padding: 2px 0;
   border: 1px solid var(--task-issue-link-border);
-  border-radius: 999px;
-  background: var(--task-issue-link-bg);
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: transparent;
   color: var(--task-issue-link-color);
   font-weight: 400;
   line-height: 1.45;
@@ -481,7 +602,7 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 
 .task-issue-link:hover {
   border-color: var(--task-issue-link-hover-border);
-  background: var(--task-issue-link-hover-bg);
+  background: transparent;
   text-decoration: none;
 }
 
@@ -510,6 +631,12 @@ function isSignificantSchedule(scheduledAt: string, createdAt: string): boolean 
 .mr-pending {
   font-size: 13px;
   color: var(--n-text-color-2);
+}
+
+.mr-target-branch {
+  color: var(--n-text-color-2);
+  font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
+  font-size: 12px;
 }
 
 .mr-none {

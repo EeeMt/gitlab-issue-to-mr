@@ -8,8 +8,8 @@ describe('TaskMetadataPanel', () => {
     expect(taskMetadataPanelSource).toContain(`.metadata-body {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  column-gap: 12px;
-  row-gap: 14px;
+  column-gap: 10px;
+  row-gap: 12px;
   align-items: center;
 }`)
     expect(taskMetadataPanelSource).not.toContain(`.metadata-body {
@@ -22,11 +22,12 @@ describe('TaskMetadataPanel', () => {
     expect(taskMetadataPanelSource).not.toContain('min-width: 90px;')
   })
 
-  it('styles the issue link as a prominent chip', () => {
+  it('styles the issue link as a compact inline reference', () => {
     expect(taskMetadataPanelSource).toContain('class="app-link task-issue-link"')
     expect(taskMetadataPanelSource).toContain('.task-issue-link {')
     expect(taskMetadataPanelSource).toContain('--task-issue-link-color: #3b82f6;')
-    expect(taskMetadataPanelSource).toContain('border-radius: 999px;')
+    expect(taskMetadataPanelSource).toContain('border-width: 0 0 1px;')
+    expect(taskMetadataPanelSource).toContain('border-radius: 0;')
     expect(taskMetadataPanelSource).toContain('font-weight: 400;')
     expect(taskMetadataPanelSource).toContain('.task-issue-link__id {\n  flex: 0 0 auto;\n  font-family: var(--n-font-family-mono, \'JetBrains Mono\', monospace);\n  font-size: 12px;\n  font-weight: 500;')
   })
@@ -39,6 +40,24 @@ describe('TaskMetadataPanel', () => {
     expect(taskMetadataPanelSource).toContain("modifierClass: isPlan ? 'task-mode-chip--plan' : 'task-mode-chip--execute'")
     expect(taskMetadataPanelSource).toContain('.task-mode-chip--execute {')
     expect(taskMetadataPanelSource).toContain('.task-mode-chip--plan {')
+  })
+
+  it('renders branch configuration as a labeled vertical flow', () => {
+    expect(taskMetadataPanelSource).toContain('class="branch-flow__stage"')
+    expect(taskMetadataPanelSource).toContain("t('taskView.branchBase')")
+    expect(taskMetadataPanelSource).toContain("t('taskView.branchWork')")
+    expect(taskMetadataPanelSource).toContain("t('taskView.branchTarget')")
+    expect(taskMetadataPanelSource).toContain('.branch-flow::before {')
+    expect(taskMetadataPanelSource).not.toContain('class="branch-arrow"')
+  })
+
+  it('renders timeline values on a compact vertical track', () => {
+    expect(taskMetadataPanelSource).toContain('class="time-point__marker"')
+    expect(taskMetadataPanelSource).toContain('class="time-point__content"')
+    expect(taskMetadataPanelSource).toContain('<time class="time-point__value" :datetime="task.created_at">')
+    expect(taskMetadataPanelSource).toContain('.time-axis::before {')
+    expect(taskMetadataPanelSource).toContain('.time-point__marker {\n  z-index: 1;\n  box-sizing: border-box;')
+    expect(taskMetadataPanelSource).not.toContain('class="time-axis__sep"')
   })
 
   it('renders initiator as a dedicated metadata row guarded by v-if', () => {

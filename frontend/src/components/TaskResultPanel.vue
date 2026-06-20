@@ -1,36 +1,68 @@
 <template>
   <n-card class="task-result-panel" :bordered="false">
     <template #header>
-      <span class="panel-title">{{ t('taskView.taskResult') }}</span>
+      <div class="panel-heading">
+        <div class="panel-eyebrow">{{ t('taskView.executionConclusion') }}</div>
+        <div class="panel-title">{{ t('taskView.taskResult') }}</div>
+      </div>
     </template>
 
     <div class="result-body">
+      <!-- Failed tasks lead with the blocking error. -->
+      <div v-if="task.status === 'failed' && task.error_message" class="result-card result-card--error">
+        <div class="result-card__title">
+          <n-icon size="16" class="result-card__icon result-card__icon--error"><AlertCircleOutline /></n-icon>
+          {{ t('taskView.error') }}
+        </div>
+        <div class="result-card__content">
+          <pre class="error-message">{{ task.error_message }}</pre>
+        </div>
+      </div>
+
       <!-- AI delivery summary (collapsed by default) -->
       <div v-if="selectedSummaryLog" ref="summaryCardRef" class="result-card result-card--summary-text">
-        <button
-          type="button"
-          class="result-card__title summary-header-button"
-          :class="{ 'summary-header-button--open': summaryExpanded }"
-          :disabled="summaryPayloadLoading"
-          :aria-expanded="summaryExpanded"
-          @click="toggleSummary"
-        >
-          <n-icon size="16" class="result-card__icon result-card__icon--summary"><ChatboxOutline /></n-icon>
-          <span class="summary-title-label">{{ t('taskView.aiDeliverySummary') }}</span>
-          <span v-if="summaryPreview && !summaryExpanded" class="summary-preview">{{ summaryPreview }}</span>
-          <span
-            class="summary-toggle"
-            :class="{ 'summary-toggle--active': summaryExpanded, 'summary-toggle--loading': summaryPayloadLoading }"
+        <div class="summary-header-row">
+          <button
+            type="button"
+            class="result-card__title summary-header-button"
+            :class="{ 'summary-header-button--open': summaryExpanded }"
+            :disabled="summaryPayloadLoading"
+            :aria-expanded="summaryExpanded"
+            @click="toggleSummary"
           >
-            <span class="summary-toggle__label">
-              {{ summaryExpanded ? t('taskView.summaryCollapse') : t('taskView.summaryExpand') }}
+            <n-icon size="16" class="result-card__icon result-card__icon--summary"><ChatboxOutline /></n-icon>
+            <span class="summary-title-label">{{ t('taskView.aiDeliverySummary') }}</span>
+            <span v-if="summaryPreview && !summaryExpanded" class="summary-preview">{{ summaryPreview }}</span>
+            <span
+              class="summary-toggle"
+              :class="{ 'summary-toggle--active': summaryExpanded, 'summary-toggle--loading': summaryPayloadLoading }"
+            >
+              <span class="summary-toggle__label">
+                {{ summaryExpanded ? t('taskView.summaryCollapse') : t('taskView.summaryExpand') }}
+              </span>
+              <span v-if="summaryPayloadLoading" class="badge-spin-ring"></span>
+              <n-icon v-else size="11" class="badge-chevron" :class="{ 'badge-chevron--open': summaryExpanded }">
+                <ChevronForward />
+              </n-icon>
             </span>
-            <span v-if="summaryPayloadLoading" class="badge-spin-ring"></span>
-            <n-icon v-else size="11" class="badge-chevron" :class="{ 'badge-chevron--open': summaryExpanded }">
-              <ChevronForward />
-            </n-icon>
-          </span>
-        </button>
+          </button>
+          <n-tooltip trigger="hover">
+            <template #trigger>
+              <n-button
+                class="summary-open-large-button"
+                size="small"
+                secondary
+                circle
+                :disabled="summaryPayloadLoading"
+                :aria-label="t('taskView.summaryOpenLarge')"
+                @click="openSummaryViewer"
+              >
+                <template #icon><n-icon :component="ExpandOutline" /></template>
+              </n-button>
+            </template>
+            {{ t('taskView.summaryOpenLarge') }}
+          </n-tooltip>
+        </div>
         <div class="summary-expand-track" :class="{ 'summary-expand-track--open': summaryExpanded }">
           <div class="summary-expand-body">
             <n-scrollbar
@@ -108,167 +140,39 @@
         </div>
       </div>
 
-      <!-- Error Card (for failed tasks) -->
-      <div v-if="task.status === 'failed' && task.error_message" class="result-card result-card--error">
-        <div class="result-card__title">
-          <n-icon size="16" class="result-card__icon result-card__icon--error"><AlertCircleOutline /></n-icon>
-          {{ t('taskView.error') }}
-        </div>
-        <div class="result-card__content">
-          <pre class="error-message">{{ task.error_message }}</pre>
-        </div>
-      </div>
-
-      <!-- Run statistics -->
-      <div class="result-card result-card--summary">
-        <div class="result-card__title">
-          <n-icon size="16" class="result-card__icon"><TimeOutline /></n-icon>
-          {{ t('taskView.runStatistics') }}
-        </div>
-        <div class="result-card__content summary-grid">
-          <div class="summary-item">
-            <span class="summary-label">{{ t('taskView.modelName') }}</span>
-            <span class="summary-value">{{ task.model_name || '-' }}</span>
-          </div>
-          <div class="summary-item">
-            <span class="summary-label">{{ t('taskView.totalTokens') }}</span>
-            <span class="summary-value">{{ totalTokens != null ? formatLargeNumber(totalTokens) : '-' }}</span>
-            <span v-if="task.input_tokens != null && task.output_tokens != null" class="summary-item__sub">
-              {{ t('taskView.tokenBreakdown', { input: formatLargeNumber(task.input_tokens), output: formatLargeNumber(task.output_tokens) }) }}
-            </span>
-          </div>
-          <div class="summary-item">
-            <span class="summary-label">{{ t('taskView.duration') }}</span>
-            <span class="summary-value">{{ executionDuration }}</span>
-          </div>
-          <div v-if="contextCompactCount != null" class="summary-item">
-            <span class="summary-label">{{ t('taskView.contextCompactCount') }}</span>
-            <span class="summary-value">{{ t('taskView.contextCompactMetric', { count: contextCompactCount }) }}</span>
-          </div>
-          <div class="summary-item summary-item--skills">
-            <span class="summary-label">{{ t('taskView.skillUsage') }}</span>
-            <span class="summary-value">{{ skillUsageTotal > 0 ? t('taskView.skillUsageCount', { count: skillUsageTotal }) : '-' }}</span>
-            <span v-if="skillUsageStats.length > 0" class="summary-item__sub skill-usage-list">
-              {{ skillUsageBreakdown }}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Continue Guidance (only for terminal tasks linked to an issue) -->
-      <div v-if="['completed', 'failed'].includes(task.status) && task.issue_id" class="result-card result-card--continue">
-        <div class="result-card__title">
-          <n-icon size="16" class="result-card__icon result-card__icon--continue"><ChatbubbleEllipsesOutline /></n-icon>
-          {{ canAppendFollowupTask ? t('taskView.appendFollowupTitle') : t('taskView.continueGuideTitle') }}
-        </div>
-        <div class="result-card__content continue-body">
-          <p class="continue-hint">
-            {{ canAppendFollowupTask ? t('taskView.appendFollowupHint') : t('taskView.continueGuideHint') }}
-          </p>
-          <div class="continue-actions">
-            <n-button
-              :type="canAppendFollowupTask ? 'default' : 'primary'"
-              size="small"
-              secondary
-              strong
-              @click="goToIssue"
-            >
-              <template #icon>
-                <n-icon :component="ArrowBackOutline" />
-              </template>
-              {{ t('taskView.backToIssue') }}
-            </n-button>
-            <n-button
-              v-if="canAppendFollowupTask"
-              type="primary"
-              size="small"
-              secondary
-              strong
-              @click="emit('append-followup-task')"
-            >
-              <template #icon>
-                <n-icon :component="AddCircleOutline" />
-              </template>
-              {{ t('taskView.appendFollowupTask') }}
-            </n-button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Manual Override Card -->
-      <div v-if="['completed', 'failed'].includes(task.status)" class="result-card result-card--override">
-        <div class="result-card__title">
-          <n-icon size="16" class="result-card__icon result-card__icon--override"><ShieldCheckmarkOutline /></n-icon>
-          {{ t('taskView.manualOverride') }}
-          <n-tag v-if="task.is_manually_overridden" size="tiny" type="warning" :bordered="false" style="margin-left: 6px">
-            {{ t('taskView.manuallyOverridden') }}
-          </n-tag>
-        </div>
-        <div class="result-card__content override-body">
-          <p class="override-hint">{{ task.is_manually_overridden ? t('taskView.overrideHintAlreadyOverridden', { reason: task.override_reason || t('taskView.overrideNoReason') }) : t('taskView.overrideHint') }}</p>
-          <div class="override-actions">
-            <n-button
-              v-if="task.status === 'completed'"
-              size="small"
-              type="error"
-              secondary
-              @click="openOverrideModal('failed')"
-            >
-              <template #icon><n-icon :component="CloseCircleOutline" /></template>
-              {{ t('taskView.markAsFailed') }}
-            </n-button>
-            <n-button
-              v-if="task.status === 'failed'"
-              size="small"
-              type="success"
-              secondary
-              @click="openOverrideModal('completed')"
-            >
-              <template #icon><n-icon :component="CheckmarkCircleOutline" /></template>
-              {{ t('taskView.markAsCompleted') }}
-            </n-button>
-          </div>
-        </div>
-      </div>
     </div>
   </n-card>
 
-  <!-- Override confirmation modal -->
+  <!-- Full summary viewer for long mixed text and diagrams. -->
   <n-modal
-    v-model:show="showOverrideModal"
+    v-model:show="summaryViewerVisible"
     preset="card"
-    class="config-editor-modal"
-    :style="{ width: '480px' }"
-    :closable="!overrideLoading"
-    :mask-closable="!overrideLoading"
+    class="summary-content-modal"
+    :style="{ width: 'min(1120px, calc(100vw - 32px))', height: 'calc(100vh - 32px)', maxWidth: 'none' }"
   >
     <template #header>
-      <span>{{ overrideTargetStatus === 'failed' ? t('taskView.markAsFailed') : t('taskView.markAsCompleted') }}</span>
-    </template>
-    <n-space vertical :size="16">
-      <p style="margin: 0; font-size: 14px; line-height: 1.6; color: var(--n-text-color-2);">
-        {{ overrideTargetStatus === 'failed' ? t('taskView.markAsFailedConfirm') : t('taskView.markAsCompletedConfirm') }}
-      </p>
-      <n-input
-        v-model:value="overrideReason"
-        type="textarea"
-        :rows="3"
-        :placeholder="t('taskView.overrideReasonPlaceholder')"
-        :disabled="overrideLoading"
-      />
-      <div style="display: flex; justify-content: flex-end; gap: 8px;">
-        <n-button secondary :disabled="overrideLoading" @click="showOverrideModal = false">
-          {{ t('common.cancel') }}
-        </n-button>
-        <n-button
-          :type="overrideTargetStatus === 'failed' ? 'error' : 'success'"
-          :loading="overrideLoading"
-          @click="confirmOverride"
-        >
-          {{ t('common.confirm') }}
-        </n-button>
+      <div class="summary-content-modal__title">
+        <n-icon size="18"><ChatboxOutline /></n-icon>
+        <span>{{ t('taskView.aiDeliverySummary') }}</span>
       </div>
-    </n-space>
+    </template>
+    <n-scrollbar
+      class="summary-content-modal__viewport"
+      x-scrollable
+      trigger="hover"
+      content-style="min-width: 100%; padding: 4px 20px 28px; box-sizing: border-box;"
+    >
+      <div
+        v-if="summaryRenderedHtml"
+        ref="summaryViewerContentRef"
+        class="summary-content summary-content--viewer markdown-content"
+        @click="handleSummaryContentClick"
+        v-html="summaryRenderedHtml"
+      ></div>
+      <div v-else class="summary-content summary-content--empty">
+        {{ t('taskView.emptyContent') }}
+      </div>
+    </n-scrollbar>
   </n-modal>
 
   <!-- Mermaid diagram viewer -->
@@ -313,15 +217,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { CSSProperties } from 'vue'
-import { NCard, NIcon, NButton, NModal, NInput, NSpace, NTag, NScrollbar, useMessage } from 'naive-ui'
-import { AddCircleOutline, AlertCircleOutline, TimeOutline, GitCommitOutline, OpenOutline, ChatbubbleEllipsesOutline, ArrowBackOutline, CheckmarkCircleOutline, CloseCircleOutline, ShieldCheckmarkOutline, ChevronForward, ChatboxOutline } from '@vicons/ionicons5'
+import { NCard, NIcon, NButton, NModal, NScrollbar, NTooltip } from 'naive-ui'
+import { AlertCircleOutline, GitCommitOutline, OpenOutline, ChevronForward, ChatboxOutline, ExpandOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
-import { formatLargeNumber } from '../utils/usageLimits'
 import type { Task, TaskLog } from '../api'
-import { overrideTaskStatus, getTaskPayload } from '../api'
+import { getTaskPayload } from '../api'
 import { parseTextEntry, renderMarkdown } from './task-process/taskProcessUtils'
-import type { SkillUsageStat } from './task-process/taskProcessUtils'
 
 type MermaidZoom = 'fit' | '100' | '150' | '200' | '300' | '400'
 
@@ -333,26 +234,11 @@ interface SummaryMermaidDiagram {
 
 const props = defineProps<{
   task: Task
-  contextCompactCount?: number
-  skillUsageStats?: SkillUsageStat[]
   deliverySummaryLog?: TaskLog | null
   lastAssistantLog?: TaskLog | null
-  canAppendFollowupTask?: boolean
-}>()
-
-const emit = defineEmits<{
-  (e: 'status-overridden'): void
-  (e: 'append-followup-task'): void
 }>()
 
 const { t } = useI18n()
-const router = useRouter()
-const message = useMessage()
-
-const showOverrideModal = ref(false)
-const overrideTargetStatus = ref<'completed' | 'failed' | null>(null)
-const overrideReason = ref('')
-const overrideLoading = ref(false)
 
 // Delivery summary, falling back to the last assistant text event for older tasks.
 const summaryExpanded = ref(false)
@@ -363,6 +249,8 @@ const summaryRenderedHtml = ref('')
 const summaryRenderedSource = ref('')
 const summaryCardRef = ref<HTMLElement | null>(null)
 const summaryContentRef = ref<HTMLElement | null>(null)
+const summaryViewerContentRef = ref<HTMLElement | null>(null)
+const summaryViewerVisible = ref(false)
 const summaryMermaidDiagrams = ref<SummaryMermaidDiagram[]>([])
 const mermaidViewerVisible = ref(false)
 const activeMermaidIndex = ref<number | null>(null)
@@ -509,6 +397,12 @@ watch(mermaidViewerVisible, (visible) => {
   if (!visible) stopMermaidViewerDrag()
 })
 
+watch([summaryViewerVisible, summaryRenderedHtml, summaryMermaidDiagrams], async () => {
+  if (!summaryViewerVisible.value) return
+  await nextTick()
+  hydrateSummaryViewerMermaid()
+})
+
 watch(() => selectedSummaryLog.value?.id ?? null, async () => {
   summaryPayloadText.value = ''
   summaryPayloadLoading.value = false
@@ -516,6 +410,7 @@ watch(() => selectedSummaryLog.value?.id ?? null, async () => {
   summaryRenderedHtml.value = ''
   summaryRenderedSource.value = ''
   summaryMermaidDiagrams.value = []
+  summaryViewerVisible.value = false
   resetMermaidViewer()
   if (summaryExpanded.value) {
     await loadSummaryPayloadIfNeeded()
@@ -695,6 +590,25 @@ function markMermaidDiagramError(
   container.dataset.summaryMermaidState = 'error'
 }
 
+function hydrateSummaryViewerMermaid() {
+  const root = summaryViewerContentRef.value
+  if (!root) return
+
+  summaryMermaidDiagrams.value.forEach((diagram, index) => {
+    const container = root.querySelector<HTMLElement>(`[data-summary-mermaid-index="${index}"]`)
+    const canvas = root.querySelector<HTMLElement>(`[data-summary-mermaid-canvas="${index}"]`)
+    if (!container || !canvas) return
+
+    if (diagram.svg) {
+      canvas.innerHTML = diagram.svg
+      container.dataset.summaryMermaidState = 'ready'
+    } else if (diagram.error) {
+      canvas.innerHTML = renderMermaidError(diagram.source, diagram.error)
+      container.dataset.summaryMermaidState = 'error'
+    }
+  })
+}
+
 function cleanupMermaidRenderArtifacts(renderId: string) {
   document.getElementById(`d${renderId}`)?.remove()
   document.getElementById(`i${renderId}`)?.remove()
@@ -796,6 +710,11 @@ async function toggleSummary() {
   await loadSummaryPayloadIfNeeded()
 }
 
+async function openSummaryViewer() {
+  await loadSummaryPayloadIfNeeded()
+  summaryViewerVisible.value = true
+}
+
 function handleSummaryContentClick(event: MouseEvent) {
   const target = event.target
   if (!(target instanceof HTMLElement)) return
@@ -812,32 +731,6 @@ function handleSummaryContentClick(event: MouseEvent) {
   mermaidViewerVisible.value = true
 }
 
-function openOverrideModal(targetStatus: 'completed' | 'failed') {
-  overrideTargetStatus.value = targetStatus
-  overrideReason.value = ''
-  showOverrideModal.value = true
-}
-
-async function confirmOverride() {
-  if (!overrideTargetStatus.value) return
-  overrideLoading.value = true
-  try {
-    await overrideTaskStatus(props.task.id, overrideTargetStatus.value, overrideReason.value || undefined)
-    showOverrideModal.value = false
-    emit('status-overridden')
-  } catch {
-    message.error(t('taskView.failedToOverrideStatus'))
-  } finally {
-    overrideLoading.value = false
-  }
-}
-
-function goToIssue() {
-  if (props.task.issue_id) {
-    router.push(`/issues/${props.task.issue_id}`)
-  }
-}
-
 const commitUrl = computed(() => {
   if (!props.task.commit_sha || !props.task.project_url) return null
   return `${props.task.project_url}/-/commit/${props.task.commit_sha}`
@@ -847,39 +740,6 @@ const hasChanges = computed(() =>
   props.task.additions !== undefined || props.task.deletions !== undefined
 )
 
-const executionDuration = computed(() => {
-  if (!props.task.started_at || !props.task.completed_at) return '-'
-  try {
-    const startMs = new Date(props.task.started_at).getTime()
-    const endMs = new Date(props.task.completed_at).getTime()
-    const diffSeconds = Math.max(0, Math.round((endMs - startMs) / 1000))
-    if (diffSeconds < 60) return `${diffSeconds}s`
-    const minutes = Math.floor(diffSeconds / 60)
-    const seconds = diffSeconds % 60
-    return seconds > 0 ? `${minutes}m${seconds}s` : `${minutes}m`
-  } catch {
-    return '-'
-  }
-})
-
-const totalTokens = computed(() => {
-  const i = props.task.input_tokens
-  const o = props.task.output_tokens
-  if (i == null && o == null) return null
-  return (i ?? 0) + (o ?? 0)
-})
-
-const skillUsageStats = computed(() => props.skillUsageStats ?? [])
-
-const skillUsageTotal = computed(() =>
-  skillUsageStats.value.reduce((total, skill) => total + skill.count, 0)
-)
-
-const skillUsageBreakdown = computed(() =>
-  skillUsageStats.value
-    .map(skill => `${skill.name}: ${t('taskView.skillUsageCount', { count: skill.count })}`)
-    .join(' · ')
-)
 </script>
 
 <style scoped>
@@ -887,36 +747,58 @@ const skillUsageBreakdown = computed(() =>
   border-radius: var(--app-card-radius);
 }
 
-.panel-title {
-  font-size: 18px;
+.panel-heading {
+  display: grid;
+  gap: 3px;
+}
+
+.panel-eyebrow {
+  color: var(--n-text-color-3, #8a8f98);
+  font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.panel-title {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .result-body {
   display: grid;
-  gap: 14px;
+  gap: 0;
   min-width: 0;
 }
 
 .result-card {
-  padding: 14px 16px;
-  border-radius: 12px;
-  border: 1px solid rgba(128, 128, 128, 0.1);
-  background: rgba(128, 128, 128, 0.03);
+  padding: 16px 0;
+  border: 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 0;
+  background: transparent;
+}
+
+.result-card:first-child {
+  padding-top: 2px;
+}
+
+.result-card:last-child {
+  padding-bottom: 2px;
+  border-bottom: 0;
 }
 
 .result-card--commit {
-  border-color: rgba(59, 130, 246, 0.2);
-  background: rgba(59, 130, 246, 0.04);
+  background: transparent;
 }
 
 .result-card--error {
-  border-color: rgba(239, 68, 68, 0.2);
-  background: rgba(239, 68, 68, 0.04);
-}
-
-.result-card--summary {
-  border-color: rgba(128, 128, 128, 0.12);
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid rgba(208, 48, 80, 0.18);
+  border-radius: 6px;
+  background: rgba(208, 48, 80, 0.045);
 }
 
 .result-card__title {
@@ -1040,131 +922,10 @@ const skillUsageBreakdown = computed(() =>
   background: transparent;
 }
 
-.summary-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 10px;
-}
-
-.summary-item {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.summary-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--n-text-color-3, #999);
-}
-
-.summary-value {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--n-text-color-1);
-  word-break: break-word;
-}
-
-.summary-value--mono {
-  font-family: var(--n-font-family-mono, monospace);
-}
-
-.summary-item__sub {
-  font-size: 12px;
-  color: var(--n-text-color-3, #999);
-  margin-top: 2px;
-}
-
-.summary-item--skills {
-  min-width: 0;
-}
-
-.skill-usage-list {
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-
-.result-card--continue {
-  border-color: rgba(24, 160, 88, 0.2);
-  background: rgba(24, 160, 88, 0.04);
-}
-
-.result-card__icon--continue {
-  color: #18a058;
-}
-
-.continue-body {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.continue-hint {
-  margin: 0;
-  font-size: 13px;
-  color: var(--n-text-color-2, #555);
-  line-height: 1.5;
-  flex: 1;
-  min-width: 0;
-}
-
-.continue-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.app-link {
-  color: var(--n-primary-color, #18a058);
-  text-decoration: none;
-}
-.app-link:hover {
-  text-decoration: underline;
-}
-
-.result-card--override {
-  border-color: rgba(128, 128, 128, 0.15);
-  background: rgba(128, 128, 128, 0.03);
-}
-
-.result-card__icon--override {
-  color: var(--n-text-color-3, #999);
-}
-
-.override-body {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.override-hint {
-  margin: 0;
-  font-size: 13px;
-  color: var(--n-text-color-2, #555);
-  line-height: 1.5;
-  flex: 1;
-  min-width: 0;
-}
-
-.override-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
 /* Execution summary card */
 .result-card--summary-text {
-  border-color: rgba(2, 132, 199, 0.18);
-  background: rgba(2, 132, 199, 0.03);
   min-width: 0;
-  padding-bottom: 18px;
+  padding-bottom: 16px;
   overflow-anchor: none;
 }
 
@@ -1177,8 +938,16 @@ const skillUsageBreakdown = computed(() =>
   color: #0284c7;
 }
 
+.summary-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .summary-header-button {
-  width: 100%;
+  flex: 1 1 auto;
+  width: auto;
   min-width: 0;
   box-sizing: border-box;
   padding: 2px 2px 2px 0;
@@ -1189,6 +958,14 @@ const skillUsageBreakdown = computed(() =>
   text-align: left;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
+}
+
+.summary-open-large-button {
+  flex: 0 0 auto;
+  --n-height: 28px !important;
+  --n-width: 28px !important;
+  --n-padding: 0 !important;
+  --n-border-radius: 6px !important;
 }
 
 .summary-header-button:hover {
@@ -1328,6 +1105,29 @@ const skillUsageBreakdown = computed(() =>
   opacity: 0.4;
 }
 
+.summary-content--viewer {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.summary-content-modal__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.summary-content-modal__viewport {
+  flex: 1 1 auto;
+  height: 0;
+  min-height: 0;
+}
+
 .summary-collapse-footer {
   display: flex;
   justify-content: center;
@@ -1465,6 +1265,26 @@ const skillUsageBreakdown = computed(() =>
   flex-direction: column;
   max-width: none;
   position: relative;
+}
+
+:global(.summary-content-modal) {
+  display: flex;
+  flex-direction: column;
+  max-width: none;
+}
+
+:global(.summary-content-modal .n-card-header) {
+  flex: 0 0 auto;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+:global(.summary-content-modal .n-card-content) {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px 0 0;
+  overflow: hidden;
 }
 
 :global(.summary-mermaid-modal .n-card-header) {

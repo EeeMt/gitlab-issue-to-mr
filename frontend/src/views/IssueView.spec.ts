@@ -248,7 +248,7 @@ vi.mock('naive-ui', () => ({
   },
   NDataTable: {
     name: 'NDataTable',
-    props: ['columns', 'data', 'row-key', 'row-props', 'bordered'],
+    props: ['columns', 'data', 'row-key', 'row-props', 'bordered', 'show-header', 'single-line'],
     setup(props: any) {
       return () => h(
         'div',
@@ -1750,30 +1750,69 @@ describe('IssueView', () => {
   // Task column render functions
   // =========================================================================
   describe('taskColumns render functions', () => {
-    it('renders status column with a status tag only', async () => {
+    function taskRecordColumn(vm: any) {
+      const column = vm.taskColumns.find((c: any) => c.key === 'task_record')
+      expect(column).toBeDefined()
+      return column
+    }
+
+    function renderTaskRecord(vm: any, row: Record<string, any>) {
+      return taskRecordColumn(vm).render({
+        id: 1,
+        status: 'completed',
+        user_prompt: 'Fix a bug',
+        created_at: '2024-01-01T10:00:00Z',
+        scheduled_at: null,
+        started_at: null,
+        completed_at: null,
+        is_retry: false,
+        retry_source_task_id: null,
+        ...row,
+      })
+    }
+
+    function promptTooltip(record: any) {
+      return record.children[0].children[1]
+    }
+
+    function promptTrigger(record: any) {
+      return promptTooltip(record).children.trigger()
+    }
+
+    function actionVNode(record: any) {
+      return record.children[1].children[1]?.children?.[0] ?? null
+    }
+
+    it('renders execution history as a single responsive record column', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const statusCol = columns.find((c: any) => c.key === 'status')
-      expect(statusCol).toBeDefined()
-      const vnode = statusCol.render({ status: 'completed', is_retry: true })
-      expect(vnode).toBeDefined()
-      expect(vnode.type).toBeDefined()
-      expect(vnode.props.type).toBe('success')
-      expect(vnode.props.size).toBe('tiny')
+
+      const columns = (wrapper.vm as any).taskColumns
+      expect(columns.map((column: any) => column.key)).toEqual(['task_record'])
+      expect(columns[0].width).toBeUndefined()
+      expect(issueTaskPanelSource).toContain(':show-header="false"')
+      expect(issueTaskPanelSource).toContain(':single-line="false"')
+      expect(issueViewSource).toContain('.issue-view :deep(.task-record__details)')
+      expect(issueViewSource).toContain('.issue-view :deep(.task-record__actions)')
     })
 
-    it('renders retry badge before prompt text in the description column', async () => {
+    it('renders status, retry badge, and prompt text in the first line', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const descCol = columns.find((c: any) => c.key === 'user_prompt')
+      const record = renderTaskRecord(vm, {
+        id: 2,
+        status: 'completed',
+        user_prompt: 'Retry me',
+        is_retry: true,
+      })
+      const status = record.children[0].children[0]
+      const tooltip = promptTooltip(record)
+      const vnode = promptTrigger(record)
 
-      const tooltip = descCol.render({ id: 2, user_prompt: 'Retry me', is_retry: true })
-      const vnode = tooltip.children.trigger()
-
+      expect(record.props.class).toBe('task-record')
+      expect(status.props.type).toBe('success')
+      expect(status.props.size).toBe('tiny')
       expect(tooltip.props.contentStyle.fontSize).toBe('12px')
       expect(tooltip.props.themeOverrides).toMatchObject({ color: '#111827', textColor: '#fff' })
       expect(vnode.props.class).toBe('task-prompt-link')
@@ -1794,75 +1833,57 @@ describe('IssueView', () => {
       expect(issueViewSource).toContain('--n-text-color: #4338ca')
     })
 
-    it('renders description column with truncation for long text', async () => {
+    it('renders prompt text with truncation for long text', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const descCol = columns.find((c: any) => c.key === 'user_prompt')
-      expect(descCol).toBeDefined()
 
-      const longPrompt = 'A'.repeat(100)
-      const tooltip = descCol.render({ id: 1, user_prompt: longPrompt, is_retry: false })
-      const vnode = tooltip.children.trigger()
-      // Should truncate to 80 chars + '…'
+      const longPrompt = 'A'.repeat(120)
+      const record = renderTaskRecord(vm, { id: 1, user_prompt: longPrompt })
+      const vnode = promptTrigger(record)
+
       expect(vnode).toBeDefined()
-      expect(vnode.children.at(-1).children).toBe('A'.repeat(80) + '…')
+      expect(vnode.children.at(-1).children).toBe('A'.repeat(96) + '…')
     })
 
-    it('renders description column without truncation for short text', async () => {
+    it('renders prompt text without truncation for short text', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const descCol = columns.find((c: any) => c.key === 'user_prompt')
 
       const shortPrompt = 'Fix a bug'
-      const tooltip = descCol.render({ id: 1, user_prompt: shortPrompt, is_retry: false })
-      const vnode = tooltip.children.trigger()
+      const record = renderTaskRecord(vm, { id: 1, user_prompt: shortPrompt })
+      const tooltip = promptTooltip(record)
+      const vnode = promptTrigger(record)
+
       expect(vnode.children.at(-1).children).toBe('Fix a bug')
       expect(tooltip.children.default().children).toBe('Fix a bug')
     })
 
-    it('keeps a compact column set without separate id or schedule columns', async () => {
+    it('does not render separate status, retry, time, or action columns', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const columns = (wrapper.vm as any).taskColumns
 
-      expect(columns.map((column: any) => column.key)).toEqual([
-        'status',
-        'user_prompt',
-        'duration',
-        'execution_time',
-        'actions',
-      ])
-      expect(columns.find((column: any) => column.key === 'status').width).toBe(84)
-      expect(columns.find((column: any) => column.key === 'execution_time').width).toBe(112)
-      expect(columns.find((column: any) => column.key === 'duration').width).toBe(64)
+      expect(columns.find((c: any) => c.key === 'status')).toBeUndefined()
+      expect(columns.find((c: any) => c.key === 'is_retry')).toBeUndefined()
+      expect(columns.find((c: any) => c.key === 'execution_time')).toBeUndefined()
+      expect(columns.find((c: any) => c.key === 'actions')).toBeUndefined()
     })
 
-    it('does not render a separate retry column', async () => {
+    it('renders created time as the primary execution time in the detail line', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const retryCol = columns.find((c: any) => c.key === 'is_retry')
-      expect(retryCol).toBeUndefined()
-    })
+      const record = renderTaskRecord(vm, { created_at: '2024-01-01T10:00:00Z', scheduled_at: null })
+      const timeItem = record.children[1].children[0].children[0]
+      const result = timeItem.children[1]
 
-    it('renders created time as the primary execution time', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const timeCol = columns.find((c: any) => c.key === 'execution_time')
-      expect(timeCol).toBeDefined()
-
-      const result = timeCol.render({ created_at: '2024-01-01T10:00:00Z', scheduled_at: null })
+      expect(timeItem.children[0].children).toBe('issue.executionCreatedAt')
       expect(result.props.contentStyle.fontSize).toBe('12px')
       expect(result.props.themeOverrides).toMatchObject({ color: '#111827', textColor: '#fff' })
       const trigger = result.children.trigger()
-      expect(trigger.props.class).toBe('task-table__time')
+      expect(trigger.props.class).toBe('task-table__time task-record__meta-value')
       expect(trigger.children).toBe('formatted-2024-01-01T10:00:00Z')
     })
 
@@ -1870,13 +1891,14 @@ describe('IssueView', () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const timeCol = columns.find((c: any) => c.key === 'execution_time')
-
-      const result = timeCol.render({
+      const record = renderTaskRecord(vm, {
         created_at: '2024-01-01T10:00:00Z',
         scheduled_at: '2024-01-03T09:30:00Z',
       })
+      const timeItem = record.children[1].children[0].children[0]
+      const result = timeItem.children[1]
+
+      expect(timeItem.children[0].children).toBe('dashboard.scheduled')
       expect(result.children.trigger().children).toBe('formatted-2024-01-03T09:30:00Z')
       const tooltip = result.children.default()
       expect(tooltip.children).toHaveLength(2)
@@ -1884,63 +1906,57 @@ describe('IssueView', () => {
       expect(tooltip.children[1].children).toContain('formatted-2024-01-03T09:30:00Z')
     })
 
-    it('renders duration column from task start and completion time', async () => {
+    it('renders duration from task start and completion time', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const durationCol = columns.find((c: any) => c.key === 'duration')
-      expect(durationCol).toBeDefined()
-
-      const result = durationCol.render({
+      const record = renderTaskRecord(vm, {
         started_at: '2024-01-01T10:00:00Z',
         completed_at: '2024-01-01T10:05:00Z',
       })
-      expect(result.props.class).toBe('task-table__time')
+      const result = record.children[1].children[0].children[1].children[1]
+
+      expect(result.props.class).toBe('task-table__time task-record__meta-value')
       expect(result.children).toBe('5m 0s')
     })
 
-    it('renders duration column with dash when task has not started', async () => {
+    it('renders duration with dash when task has not started', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const durationCol = columns.find((c: any) => c.key === 'duration')
-      expect(durationCol).toBeDefined()
+      const record = renderTaskRecord(vm, { started_at: null, completed_at: null })
+      const result = record.children[1].children[0].children[1].children[1]
 
-      expect(durationCol.render({ started_at: null, completed_at: null }).children).toBe('—')
+      expect(result.children).toBe('—')
     })
 
-    it('renders actions column with retry button for failed task when isOwner', async () => {
+    it('renders retry action for failed task when isOwner', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const actionsCol = columns.find((c: any) => c.key === 'actions')
-      expect(actionsCol).toBeDefined()
-
-      const vnode = actionsCol.render({
+      const record = renderTaskRecord(vm, {
         id: 99, status: 'failed', is_retry: false, retry_source_task_id: null,
       })
-      // Should be an h(NButton, ...) vnode
+      const vnode = actionVNode(record)
+
       expect(vnode).toBeDefined()
       expect(vnode.type).toBeDefined()
+      expect(vnode.children.default()).toBe('issue.retryTask')
+      expect(vnode.children.icon().props.component.name).toBe('RefreshOutline')
     })
 
-    it('renders actions column with empty string for completed task', async () => {
+    it('renders no action for completed task', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const actionsCol = columns.find((c: any) => c.key === 'actions')
-
-      const vnode = actionsCol.render({
+      const record = renderTaskRecord(vm, {
         id: 1, status: 'completed', is_retry: false, retry_source_task_id: null,
       })
-      expect(vnode).toBe('')
+
+      expect(actionVNode(record)).toBeNull()
     })
 
-    it('renders actions column with "retried as" link when retry task exists', async () => {
+    it('renders "retried as" link when retry task exists', async () => {
       const tasks = [
         {
           id: 1, issue_id: 1, project_id: 1, user_prompt: 'Fix bug',
@@ -1958,46 +1974,39 @@ describe('IssueView', () => {
       setupDefaultMocks({ tasks })
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const actionsCol = columns.find((c: any) => c.key === 'actions')
+      const record = renderTaskRecord(vm, tasks[0])
+      const vnode = actionVNode(record)
 
-      // Row id=1 has been retried as task id=3
-      const vnode = actionsCol.render(tasks[0])
       expect(vnode).toBeDefined()
-      // Should be an h('span', ...) with children including the retry task link
       expect(vnode.type).toBe('span')
+      expect(vnode.props.class).toBe('task-record__retried-as')
     })
 
-    it('renders actions column empty for failed task when not owner', async () => {
+    it('renders no action for failed task when not owner', async () => {
       const { authState } = await import('../auth')
       authState.oidcEnabled = true
       authState.user = { id: 99 } as any
       setupDefaultMocks({ initiator_user_id: 5 })
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const actionsCol = columns.find((c: any) => c.key === 'actions')
 
-      const vnode = actionsCol.render({
+      const record = renderTaskRecord(vm, {
         id: 99, status: 'failed', is_retry: false, retry_source_task_id: null,
       })
-      expect(vnode).toBe('')
+      expect(actionVNode(record)).toBeNull()
 
       // Restore
       authState.oidcEnabled = false
       authState.user = null
     })
 
-    it('description column render onClick navigates to task', async () => {
+    it('prompt link onClick navigates to task', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const descCol = columns.find((c: any) => c.key === 'user_prompt')
+      const record = renderTaskRecord(vm, { id: 42, user_prompt: 'test' })
+      const vnode = promptTrigger(record)
 
-      const tooltip = descCol.render({ id: 42, user_prompt: 'test' })
-      const vnode = tooltip.children.trigger()
-      // Invoke the onClick handler
       const mockEvent = { stopPropagation: vi.fn() }
       vnode.props.onClick(mockEvent)
       await flushPromises()
@@ -2007,18 +2016,17 @@ describe('IssueView', () => {
       expect(router.currentRoute.value.params.id).toBe('42')
     })
 
-    it('actions column retry button onClick opens retry drawer', async () => {
+    it('retry action onClick opens retry drawer', async () => {
       setupDefaultMocks()
       mockApi.retryTask.mockResolvedValue(undefined)
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const actionsCol = columns.find((c: any) => c.key === 'actions')
 
-      const vnode = actionsCol.render({
+      const record = renderTaskRecord(vm, {
         id: 7, status: 'failed', is_retry: false, retry_source_task_id: null,
       })
-      // Trigger the onClick
+      const vnode = actionVNode(record)
+
       const mockEvent = { stopPropagation: vi.fn() }
       vnode.props.onClick(mockEvent)
       await flushPromises()
@@ -2029,20 +2037,22 @@ describe('IssueView', () => {
       expect(vm.retryTargetTask?.id).toBe(7)
     })
 
-    it('actions column reschedule button opens reschedule drawer for pending scheduled task', async () => {
+    it('reschedule action opens reschedule drawer for pending scheduled task', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const actionsCol = columns.find((c: any) => c.key === 'actions')
 
-      const vnode = actionsCol.render({
+      const record = renderTaskRecord(vm, {
         id: 8,
         status: 'pending',
         scheduled_at: '2024-01-01T12:00:00Z',
         is_retry: false,
         retry_source_task_id: null,
       })
+      const vnode = actionVNode(record)
+
+      expect(vnode.children.default()).toBe('taskView.rescheduleTask')
+      expect(vnode.children.icon().props.component.name).toBe('CalendarOutline')
       const mockEvent = { stopPropagation: vi.fn() }
       vnode.props.onClick(mockEvent)
       await flushPromises()
@@ -2059,10 +2069,8 @@ describe('IssueView', () => {
       setupDefaultMocks({ initiator_user_id: 5 })
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const actionsCol = columns.find((c: any) => c.key === 'actions')
 
-      const vnode = actionsCol.render({
+      const record = renderTaskRecord(vm, {
         id: 8,
         status: 'pending',
         scheduled_at: '2024-01-01T12:00:00Z',
@@ -2072,39 +2080,36 @@ describe('IssueView', () => {
         initiator_gitlab_user_id: null,
       })
 
-      expect(vnode).not.toBe('')
+      expect(actionVNode(record)).not.toBeNull()
 
       authState.oidcEnabled = false
       authState.user = null
     })
 
-    it('actions column reschedule button opens reschedule drawer for queued task', async () => {
+    it('renders reschedule action for queued task', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const actionsCol = columns.find((c: any) => c.key === 'actions')
 
-      const vnode = actionsCol.render({
+      const record = renderTaskRecord(vm, {
         id: 9,
         status: 'queued',
         scheduled_at: null,
         is_retry: false,
         retry_source_task_id: null,
       })
+      const vnode = actionVNode(record)
 
       expect(vnode).toBeDefined()
       expect(vnode.type).toBeDefined()
     })
 
-    it('actions column does not render reschedule for unscheduled pending task', async () => {
+    it('does not render reschedule for unscheduled pending task', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const actionsCol = columns.find((c: any) => c.key === 'actions')
 
-      const vnode = actionsCol.render({
+      const record = renderTaskRecord(vm, {
         id: 10,
         status: 'pending',
         scheduled_at: null,
@@ -2112,10 +2117,10 @@ describe('IssueView', () => {
         retry_source_task_id: null,
       })
 
-      expect(vnode).toBe('')
+      expect(actionVNode(record)).toBeNull()
     })
 
-    it('actions column "retried as" button navigates to retry task', async () => {
+    it('"retried as" button navigates to retry task', async () => {
       const tasks = [
         {
           id: 1, issue_id: 1, project_id: 1, user_prompt: 'Fix bug',
@@ -2133,10 +2138,9 @@ describe('IssueView', () => {
       setupDefaultMocks({ tasks })
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const actionsCol = columns.find((c: any) => c.key === 'actions')
 
-      const vnode = actionsCol.render(tasks[0])
+      const record = renderTaskRecord(vm, tasks[0])
+      const vnode = actionVNode(record)
       // children[2] is the NButton vnode for "Task #5"
       const btnVnode = vnode.children[2]
       const mockEvent = { stopPropagation: vi.fn() }

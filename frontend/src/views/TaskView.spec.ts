@@ -22,7 +22,8 @@ const { mockApi, resetMockApi, mockMessage } = vi.hoisted(() => {
     getConfig: vi.fn<() => Promise<any>>(),
     getIssue: vi.fn<() => Promise<any>>(),
     getTaskArchive: vi.fn<() => Promise<any>>(),
-    downloadTaskArchive: vi.fn<() => Promise<any>>()
+    downloadTaskArchive: vi.fn<() => Promise<any>>(),
+    overrideTaskStatus: vi.fn<() => Promise<any>>()
   }
   const resetMockApi = () => {
     Object.values(mock).forEach(fn => {
@@ -76,7 +77,8 @@ vi.mock('../api', () => ({
   getConfig: mockApi.getConfig,
   getIssue: mockApi.getIssue,
   getTaskArchive: mockApi.getTaskArchive,
-  downloadTaskArchive: mockApi.downloadTaskArchive
+  downloadTaskArchive: mockApi.downloadTaskArchive,
+  overrideTaskStatus: mockApi.overrideTaskStatus
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -274,6 +276,20 @@ vi.mock('naive-ui', () => ({
     },
     template: '<div class="n-popover"><slot name="trigger" /><slot /></div>'
   },
+  NTooltip: {
+    name: 'NTooltip',
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-tooltip' }, [slots.trigger?.(), slots.default?.()])
+    }
+  },
+  NDropdown: {
+    name: 'NDropdown',
+    props: ['options'],
+    emits: ['select'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-dropdown' }, slots.default?.())
+    }
+  },
   NIcon: {
     name: 'NIcon',
     props: ['component', 'size'],
@@ -417,6 +433,8 @@ vi.mock('@vicons/ionicons5', () => {
     ArrowBackOutline: icon('ArrowBackOutline'),
     BulbOutline: icon('BulbOutline'),
     CalendarOutline: icon('CalendarOutline'),
+    ChevronDownOutline: icon('ChevronDownOutline'),
+    ChevronUpOutline: icon('ChevronUpOutline'),
     ChatbubbleEllipsesOutline: icon('ChatbubbleEllipsesOutline'),
     ChatbubbleOutline: icon('ChatbubbleOutline'),
     CheckmarkCircleOutline: icon('CheckmarkCircleOutline'),
@@ -428,16 +446,20 @@ vi.mock('@vicons/ionicons5', () => {
     CubeOutline: icon('CubeOutline'),
     DocumentTextOutline: icon('DocumentTextOutline'),
     DownloadOutline: icon('DownloadOutline'),
+    EllipsisHorizontalOutline: icon('EllipsisHorizontalOutline'),
+    ExpandOutline: icon('ExpandOutline'),
     FolderOpenOutline: icon('FolderOpenOutline'),
     GitBranchOutline: icon('GitBranchOutline'),
     GitCommitOutline: icon('GitCommitOutline'),
     GitMergeOutline: icon('GitMergeOutline'),
     GitPullRequest: icon('GitPullRequest'),
+    GitCompareOutline: icon('GitCompareOutline'),
     InformationCircleOutline: icon('InformationCircleOutline'),
     LogoGitlab: icon('LogoGitlab'),
     OpenOutline: icon('OpenOutline'),
     PersonOutline: icon('PersonOutline'),
     PlayOutline: icon('PlayOutline'),
+    PulseOutline: icon('PulseOutline'),
     RefreshOutline: icon('RefreshOutline'),
     SearchOutline: icon('SearchOutline'),
     ShieldCheckmarkOutline: icon('ShieldCheckmarkOutline'),
@@ -578,6 +600,21 @@ describe('TaskView', () => {
     expect(finalButton!.attributes('aria-selected')).toBe('true')
     expect(finalButton!.classes()).toContain('task-prompt-view-switch__button--active')
     expect(card.html()).toContain('Final')
+    expect(card.find('#task-prompt-panel').isVisible()).toBe(true)
+    expect(card.find('.task-prompt-card__toggle').exists()).toBe(false)
+    const processPanel = wrapper.find('.task-process-panel')
+    expect(card.element.compareDocumentPosition(processPanel.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    const heightToggle = card.find('.task-prompt-height-toggle')
+    const promptPanel = card.find('#task-prompt-panel')
+    expect(heightToggle.text()).toContain('taskView.fullHeight')
+    expect(heightToggle.find('.n-icon').attributes('data-icon')).toBe('ChevronDownOutline')
+    expect(promptPanel.classes()).not.toContain('task-prompt-wrap--full')
+    await heightToggle.trigger('click')
+    expect(wrapper.vm.promptFullHeight).toBe(true)
+    expect(heightToggle.text()).toContain('taskView.halfHeight')
+    expect(heightToggle.find('.n-icon').attributes('data-icon')).toBe('ChevronUpOutline')
+    expect(promptPanel.classes()).toContain('task-prompt-wrap--full')
   })
 
   describe('basic rendering', () => {
@@ -662,7 +699,7 @@ describe('TaskView', () => {
       expect(retryLink!.find('.n-icon').attributes('data-icon')).toBe('OpenOutline')
     })
 
-    it('orders retry actions before runtime archive and refresh actions', async () => {
+    it('keeps common retry actions visible in the header toolbar', async () => {
       await mountComponent({ status: 'failed' })
       wrapper.vm.archiveMetadata = {
         archive_name: 'task-1-runtime-archive.tar.gz',
@@ -676,13 +713,11 @@ describe('TaskView', () => {
         .find('.task-actions__toolbar')
         .findAll('button.n-button')
         .map(button => button.text())
-
-      expect(actionLabels).toEqual([
-        'common.retry',
-        'taskView.retryWithSchedule',
-        'taskView.downloadRuntimeArchive',
-        'common.refresh',
-      ])
+      expect(actionLabels).toContain('common.retry')
+      expect(actionLabels).toContain('taskView.retryWithSchedule')
+      expect(actionLabels).toContain('taskView.downloadRuntimeArchive')
+      expect(actionLabels).toContain('taskView.markAsCompleted')
+      expect(actionLabels).not.toContain('taskView.moreActions')
     })
 
     it('should open scheduled retry drawer from the header action', async () => {
@@ -696,7 +731,6 @@ describe('TaskView', () => {
         .findAll('button')
         .find((button) => button.text().includes('taskView.retryWithSchedule'))
       expect(scheduleRetryButton).toBeTruthy()
-
       await scheduleRetryButton!.trigger('click')
       await flushPromises()
 
@@ -762,7 +796,7 @@ describe('TaskView', () => {
       await nextTick()
 
       expect(mockApi.getTaskArchive).toHaveBeenCalledWith(1)
-      expect(wrapper.text()).toContain('taskView.downloadRuntimeArchive')
+      expect(wrapper.find('.task-actions__toolbar').text()).toContain('taskView.downloadRuntimeArchive')
     })
 
     it('shows expired badge and disables download when archive file was cleaned up', async () => {
@@ -777,12 +811,11 @@ describe('TaskView', () => {
       await wrapper.vm.fetchArchiveMetadata()
       await nextTick()
 
-      expect(wrapper.text()).toContain('taskView.downloadRuntimeArchive')
+      expect(wrapper.find('.task-actions__toolbar').text()).toContain('taskView.downloadRuntimeArchive')
       expect(wrapper.text()).toContain('taskView.archiveFileExpired')
-      const buttons = wrapper.findAllComponents({ name: 'NButton' })
-      const downloadButton = buttons.find(
-        (b) => b.text() === 'taskView.downloadRuntimeArchive',
-      )
+      const downloadButton = wrapper
+        .findAllComponents({ name: 'NButton' })
+        .find((button) => button.text() === 'taskView.downloadRuntimeArchive')
       expect(downloadButton).toBeTruthy()
       expect(downloadButton!.props('disabled')).toBe(true)
     })
@@ -917,7 +950,6 @@ describe('TaskView', () => {
         .findAll('button')
         .find((button) => button.text().includes('taskView.rescheduleTask'))
       expect(rescheduleButton).toBeTruthy()
-
       await rescheduleButton!.trigger('click')
       await nextTick()
 
@@ -1245,7 +1277,7 @@ describe('TaskView', () => {
       expect(wrapper.vm.hasActions).toBe(true)
 
       await mountComponent({ status: 'completed' })
-      expect(wrapper.vm.hasActions).toBe(false)
+      expect(wrapper.vm.hasActions).toBe(true)
     })
 
     it('contextCompactCount returns 0 when there are no context_compact logs', async () => {
@@ -1703,11 +1735,12 @@ describe('TaskView', () => {
   })
 
   describe('no actions display', () => {
-    it('should show empty state for completed tasks', async () => {
+    it('keeps completed-task status override visible in the header', async () => {
       await mountComponent({ status: 'completed' })
 
-      expect(wrapper.vm.hasActions).toBe(false)
-      expect(wrapper.find('.task-actions__empty').exists()).toBe(true)
+      expect(wrapper.vm.hasActions).toBe(true)
+      expect(wrapper.find('.task-actions__toolbar').text()).toContain('taskView.markAsFailed')
+      expect(wrapper.find('.task-actions__empty').exists()).toBe(false)
     })
 
     it('should not show cancel button for completed tasks', async () => {
@@ -1812,11 +1845,11 @@ describe('TaskView', () => {
       wrapper.vm.issueStatus = 'open'
       await nextTick()
 
-      const resultPanel = wrapper.findComponent({ name: 'TaskResultPanel' })
-      expect(resultPanel.exists()).toBe(true)
-      expect(resultPanel.props('canAppendFollowupTask')).toBe(true)
+      const continuationPanel = wrapper.findComponent({ name: 'TaskContinuationPanel' })
+      expect(continuationPanel.exists()).toBe(true)
+      expect(continuationPanel.props('canAppendFollowupTask')).toBe(true)
 
-      resultPanel.vm.$emit('append-followup-task')
+      continuationPanel.vm.$emit('append-followup-task')
       await nextTick()
 
       expect(wrapper.vm.showCreateDrawer).toBe(true)
@@ -1849,9 +1882,9 @@ describe('TaskView', () => {
       wrapper.vm.issueStatus = 'open'
       await nextTick()
 
-      const resultPanel = wrapper.findComponent({ name: 'TaskResultPanel' })
-      expect(resultPanel.exists()).toBe(true)
-      expect(resultPanel.props('canAppendFollowupTask')).toBe(false)
+      const continuationPanel = wrapper.findComponent({ name: 'TaskContinuationPanel' })
+      expect(continuationPanel.exists()).toBe(true)
+      expect(continuationPanel.props('canAppendFollowupTask')).toBe(false)
     })
   })
 

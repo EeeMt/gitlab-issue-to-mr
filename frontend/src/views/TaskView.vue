@@ -6,11 +6,31 @@
         root-class="task-view__hero"
         subtitle-class="task-view__subtitle"
         actions-class="task-view__actions"
-        :subtitle="t('taskView.subtitle')"
       >
         <template #title>
           <h2 class="task-view__title">{{ t('taskView.title', { id: taskId }) }}</h2>
           <n-tag v-if="task" :type="statusColors[task.status]" round>{{ t(`status.${task.status}`) }}</n-tag>
+        </template>
+        <template v-if="task" #subtitle>
+          <div class="task-view__context">
+            <a
+              v-if="task.project_url"
+              :href="task.project_url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="app-link"
+            >{{ taskProjectName }}</a>
+            <span v-else>{{ taskProjectName }}</span>
+            <span aria-hidden="true">·</span>
+            <router-link v-if="task.issue" :to="`/issues/${task.issue.id}`" class="app-link">
+              #{{ task.issue.id }} {{ task.issue.title }}
+            </router-link>
+            <span v-else>{{ t('taskView.manualTask') }}</span>
+            <span aria-hidden="true">·</span>
+            <span>{{ taskModeLabel }}</span>
+            <span aria-hidden="true">·</span>
+            <span>{{ t('common.created') }} {{ formatDateTimeUtc8(task.created_at) }}</span>
+          </div>
         </template>
         <template #actions>
           <div class="task-actions task-actions--header" data-testid="task-actions">
@@ -48,8 +68,7 @@
               <n-button
                 v-if="task && ['failed', 'cancelled'].includes(task.status) && !activeRetryTask"
                 class="task-actions__command task-actions__command--retry"
-                type="warning"
-                secondary
+                type="primary"
                 strong
                 @click="handleRetry"
                 :title="t('taskView.retryTaskDescription')"
@@ -63,7 +82,6 @@
               <n-button
                 v-if="task && ['failed', 'cancelled'].includes(task.status) && !activeRetryTask"
                 class="task-actions__command task-actions__command--primary"
-                :class="{ 'task-actions__command--active': showScheduleDrawer }"
                 type="info"
                 secondary
                 strong
@@ -90,10 +108,9 @@
               </n-button>
 
               <n-button
-                v-if="task && task.status === 'pending'"
+                v-if="task?.status === 'pending'"
                 class="task-actions__command task-actions__command--primary"
-                type="info"
-                secondary
+                type="primary"
                 strong
                 @click="handleExecute"
                 :title="t('taskView.executeNowDescription')"
@@ -107,7 +124,6 @@
               <n-button
                 v-if="task && ['pending', 'queued'].includes(task.status)"
                 class="task-actions__command task-actions__command--neutral"
-                type="default"
                 secondary
                 strong
                 @click="showEditDrawer = true"
@@ -121,7 +137,6 @@
               <n-button
                 v-if="archiveMetadata"
                 class="task-actions__command task-actions__command--neutral"
-                type="primary"
                 secondary
                 strong
                 :disabled="!archiveMetadata.file_exists"
@@ -133,20 +148,48 @@
                 {{ t('taskView.downloadRuntimeArchive') }}
               </n-button>
 
-              <span v-if="task && !hasActions" class="task-actions__empty task-actions__empty--header">
-                {{ t('taskView.noManualAction') }}
-              </span>
-
               <n-button
-                class="task-actions__command task-actions__command--neutral task-actions__command--refresh"
+                v-if="task?.status === 'completed'"
+                class="task-actions__command task-actions__command--danger"
+                type="error"
                 secondary
                 strong
-                @click="refreshTask"
-                :loading="loading"
+                :disabled="!canManageTask"
+                @click="openOverrideModal('failed')"
               >
-                <template #icon><n-icon :component="RefreshOutline" /></template>
-                {{ t('common.refresh') }}
+                <template #icon><n-icon :component="CloseCircleOutline" /></template>
+                {{ t('taskView.markAsFailed') }}
               </n-button>
+
+              <n-button
+                v-if="task?.status === 'failed'"
+                class="task-actions__command task-actions__command--neutral"
+                type="success"
+                secondary
+                strong
+                :disabled="!canManageTask"
+                @click="openOverrideModal('completed')"
+              >
+                <template #icon><n-icon :component="CheckmarkCircleOutline" /></template>
+                {{ t('taskView.markAsCompleted') }}
+              </n-button>
+
+              <n-tooltip trigger="hover">
+                <template #trigger>
+                  <n-button
+                    class="task-actions__command task-actions__command--neutral task-actions__command--refresh"
+                    circle
+                    secondary
+                    strong
+                    :aria-label="t('common.refresh')"
+                    @click="refreshTask"
+                    :loading="loading"
+                  >
+                    <template #icon><n-icon :component="RefreshOutline" /></template>
+                  </n-button>
+                </template>
+                {{ t('common.refresh') }}
+              </n-tooltip>
             </div>
           </div>
         </template>
@@ -154,120 +197,200 @@
 
       <n-spin :show="initialLoading">
         <div class="task-view__content">
-          <!-- Top row: Metadata Panel + User Prompt side-by-side -->
-          <n-grid :cols="task?.user_prompt ? (isMobile ? 1 : 2) : 1" :x-gap="16" :y-gap="16">
-            <n-gi>
-              <TaskMetadataPanel v-if="task" :task="task" />
-            </n-gi>
-            <n-gi v-if="task?.user_prompt">
-              <n-card class="task-card task-card--equal" :bordered="false" data-testid="task-prompt-card">
+          <div class="task-workbench">
+            <main class="task-workbench__main">
+              <n-card
+                v-if="task && !isTerminal"
+                class="task-card task-execution-overview"
+                :class="`task-execution-overview--${task.status}`"
+                :bordered="false"
+                data-testid="task-execution-overview"
+              >
+                <div class="execution-overview__content">
+                  <div class="execution-overview__status-line">
+                    <span class="execution-overview__pulse" aria-hidden="true"></span>
+                    <span>{{ t('taskView.currentExecution') }}</span>
+                  </div>
+                  <h3>{{ executionStateTitle }}</h3>
+                  <p>{{ executionStateDescription }}</p>
+                  <div v-if="executionStateTime" class="execution-overview__meta">
+                    <n-icon :component="TimeOutline" size="14" />
+                    <span>{{ executionStateTime }}</span>
+                  </div>
+                </div>
+              </n-card>
+
+              <TaskResultPanel
+                v-if="task && isTerminal"
+                :task="task"
+                :delivery-summary-log="deliverySummaryLog"
+                :last-assistant-log="lastAssistantLog"
+              />
+
+              <n-card
+                v-if="task?.user_prompt"
+                class="task-card task-prompt-card"
+                :bordered="false"
+                data-testid="task-prompt-card"
+              >
                 <template #header>
                   <div class="task-card__header">
-                    <div
-                      class="task-prompt-view-switch"
-                      role="tablist"
-                      :aria-label="`${t('taskView.userPrompt')} / ${t('taskView.finalRunPrompt')}`"
-                    >
-                      <button
-                        id="task-prompt-user-tab"
-                        type="button"
-                        class="task-prompt-view-switch__button"
-                        :class="{ 'task-prompt-view-switch__button--active': promptView === 'user' }"
-                        role="tab"
-                        :aria-selected="promptView === 'user'"
-                        aria-controls="task-prompt-panel"
-                        @click="promptView = 'user'"
-                      >{{ t('taskView.userPrompt') }}</button>
-                      <button
-                        id="task-prompt-final-tab"
-                        type="button"
-                        class="task-prompt-view-switch__button"
-                        :class="{ 'task-prompt-view-switch__button--active': promptView === 'final' }"
-                        role="tab"
-                        :aria-selected="promptView === 'final'"
-                        aria-controls="task-prompt-panel"
-                        @click="promptView = 'final'"
-                      >{{ t('taskView.finalRunPrompt') }}</button>
+                    <div>
+                      <div class="task-card__eyebrow">{{ t('taskView.executionInput') }}</div>
+                      <div class="task-card__title">{{ t('taskView.runInstruction') }}</div>
+                    </div>
+                    <div class="task-prompt-card__controls">
+                      <div
+                        class="task-prompt-view-switch"
+                        role="tablist"
+                        :aria-label="`${t('taskView.userPrompt')} / ${t('taskView.finalRunPrompt')}`"
+                      >
+                        <button
+                          id="task-prompt-user-tab"
+                          type="button"
+                          class="task-prompt-view-switch__button"
+                          :class="{ 'task-prompt-view-switch__button--active': promptView === 'user' }"
+                          role="tab"
+                          :aria-selected="promptView === 'user'"
+                          aria-controls="task-prompt-panel"
+                          @click="promptView = 'user'"
+                        >{{ t('taskView.userPrompt') }}</button>
+                        <button
+                          id="task-prompt-final-tab"
+                          type="button"
+                          class="task-prompt-view-switch__button"
+                          :class="{ 'task-prompt-view-switch__button--active': promptView === 'final' }"
+                          role="tab"
+                          :aria-selected="promptView === 'final'"
+                          aria-controls="task-prompt-panel"
+                          @click="promptView = 'final'"
+                        >{{ t('taskView.finalRunPrompt') }}</button>
+                      </div>
+                      <n-button
+                        class="task-prompt-height-toggle"
+                        size="small"
+                        secondary
+                        @click="promptFullHeight = !promptFullHeight"
+                      >
+                        <template #icon>
+                          <n-icon :component="promptFullHeight ? ChevronUpOutline : ChevronDownOutline" />
+                        </template>
+                        {{ promptFullHeight ? t('taskView.halfHeight') : t('taskView.fullHeight') }}
+                      </n-button>
                     </div>
                   </div>
                 </template>
                 <div
                   id="task-prompt-panel"
                   class="task-prompt-wrap"
+                  :class="{ 'task-prompt-wrap--full': promptFullHeight }"
                   role="tabpanel"
                   :aria-labelledby="promptView === 'user' ? 'task-prompt-user-tab' : 'task-prompt-final-tab'"
                 >
-                  <n-scrollbar trigger="hover" style="position: absolute; top: 0; right: 0; bottom: 0; left: 0;">
+                  <n-scrollbar trigger="hover">
                     <div class="task-prompt-content markdown-content" v-html="renderedSelectedPrompt"></div>
                   </n-scrollbar>
                 </div>
               </n-card>
-            </n-gi>
-          </n-grid>
 
-          <!-- Action detail panel: only shown when an action needs extra context or inline inputs. -->
-          <n-card v-if="hasActionDetails" class="task-card task-card--actions" :bordered="false" data-testid="task-actions-card">
-            <div class="task-actions task-actions--details">
-              <div v-if="hasActions && !canManageTask" class="task-actions__permission-note">
-                {{ t('taskView.actionPermissionHint') }}
-              </div>
+              <TaskProcessPanel
+                :task="task ?? null"
+                :task-logs="taskLogs"
+                :is-active="isActiveTaskStatus(task?.status)"
+                :terminal-html="terminalLogHtml"
+                :task-status="task?.status ?? ''"
+                @raw-tab-open="onRawTabOpen"
+                @raw-tab-close="onRawTabClose"
+              />
+            </main>
 
-              <div
-                v-if="archiveMetadata && !archiveMetadata.file_exists"
-                class="task-actions__state-note task-actions__state-note--warning"
+            <aside class="task-workbench__aside">
+              <TaskMetadataPanel v-if="task" :task="task" />
+
+              <TaskRunMetrics
+                v-if="task && isTerminal"
+                :task="task"
+                :context-compact-count="contextCompactCount"
+                :skill-usage-stats="skillUsageStats"
+              />
+
+              <n-card
+                v-if="hasActionDetails"
+                class="task-card task-card--actions"
+                :bordered="false"
+                data-testid="task-actions-card"
               >
-                <n-tag type="warning" size="small" :bordered="false">
-                  {{ t('taskView.archiveFileExpired') }}
-                </n-tag>
-                <span>{{ t('taskView.archiveFileExpiredDescription') }}</span>
-              </div>
+                <div class="task-actions task-actions--details">
+                  <div v-if="hasActions && !canManageTask" class="task-actions__permission-note">
+                    {{ t('taskView.actionPermissionHint') }}
+                  </div>
+                  <div
+                    v-if="archiveMetadata && !archiveMetadata.file_exists"
+                    class="task-actions__state-note task-actions__state-note--warning"
+                  >
+                    <n-tag type="warning" size="small" :bordered="false">
+                      {{ t('taskView.archiveFileExpired') }}
+                    </n-tag>
+                    <span>{{ t('taskView.archiveFileExpiredDescription') }}</span>
+                  </div>
+                  <div
+                    v-if="task && ['failed', 'cancelled'].includes(task.status) && activeRetryTask"
+                    class="task-actions__state-note"
+                  >
+                    <span>{{ t('taskView.retryExistsDescription') }}</span>
+                  </div>
+                </div>
+              </n-card>
 
-              <div
-                v-if="task && task.status === 'queued'"
-                class="task-actions__state-note"
-              >
-                <n-tag type="info" size="small" :bordered="false">{{ t('status.queued') }}</n-tag>
-                <span>{{ t('taskView.queuedStatusDescription') }}</span>
-              </div>
-
-              <div
-                v-if="task && ['failed', 'cancelled'].includes(task.status) && activeRetryTask"
-                class="task-actions__state-note"
-              >
-                <span>{{ t('taskView.retryExistsDescription') }}</span>
-              </div>
-
-            </div>
-          </n-card>
-
-          <!-- Process Panel -->
-          <TaskProcessPanel
-            :task="task ?? null"
-            :task-logs="taskLogs"
-            :is-active="isActiveTaskStatus(task?.status)"
-            :terminal-html="terminalLogHtml"
-            :task-status="task?.status ?? ''"
-            :show-followup-replay-hint="showFollowupReplayHint"
-            @raw-tab-open="onRawTabOpen"
-            @raw-tab-close="onRawTabClose"
-          />
-
-          <!-- Result Panel (only for terminal tasks) -->
-          <TaskResultPanel
-            v-if="task && isTerminal"
-            :task="task"
-            :context-compact-count="contextCompactCount"
-            :skill-usage-stats="skillUsageStats"
-            :delivery-summary-log="deliverySummaryLog"
-            :last-assistant-log="lastAssistantLog"
-            :can-append-followup-task="canAppendFollowupTask"
-            @append-followup-task="showCreateDrawer = true"
-            @status-overridden="refreshTask"
-          />
+              <TaskContinuationPanel
+                v-if="task && isTerminal && task.issue_id"
+                :task="task"
+                :can-append-followup-task="canAppendFollowupTask"
+                @append-followup-task="showCreateDrawer = true"
+              />
+            </aside>
+          </div>
         </div>
       </n-spin>
     </n-space>
   </div>
+
+  <n-modal
+    v-model:show="showOverrideModal"
+    preset="card"
+    class="config-editor-modal"
+    :style="{ width: '480px', maxWidth: 'calc(100vw - 32px)' }"
+    :closable="!overrideLoading"
+    :mask-closable="!overrideLoading"
+  >
+    <template #header>
+      <span>{{ overrideTargetStatus === 'failed' ? t('taskView.markAsFailed') : t('taskView.markAsCompleted') }}</span>
+    </template>
+    <n-space vertical :size="16">
+      <p class="task-override-modal__description">
+        {{ overrideTargetStatus === 'failed' ? t('taskView.markAsFailedConfirm') : t('taskView.markAsCompletedConfirm') }}
+      </p>
+      <n-input
+        v-model:value="overrideReason"
+        type="textarea"
+        :rows="3"
+        :placeholder="t('taskView.overrideReasonPlaceholder')"
+        :disabled="overrideLoading"
+      />
+      <div class="task-override-modal__actions">
+        <n-button secondary :disabled="overrideLoading" @click="showOverrideModal = false">
+          {{ t('common.cancel') }}
+        </n-button>
+        <n-button
+          :type="overrideTargetStatus === 'failed' ? 'error' : 'success'"
+          :loading="overrideLoading"
+          @click="confirmOverride"
+        >
+          {{ t('common.confirm') }}
+        </n-button>
+      </div>
+    </n-space>
+  </n-modal>
 
   <!-- Schedule Drawer (retry with schedule) -->
   <n-drawer v-model:show="showScheduleDrawer" :width="isMobile ? '100%' : 680" placement="right">
@@ -348,18 +471,23 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin, NDatePicker, NDrawer, NDrawerContent, NIcon, NScrollbar, useMessage } from 'naive-ui'
+import { NButton, NSpace, NCard, NTag, NSpin, NDatePicker, NDrawer, NDrawerContent, NIcon, NInput, NModal, NScrollbar, NTooltip, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, streamTaskLogs, getScheduledTasks, getConfig, getIssue, getTaskArchive, downloadTaskArchive, type Issue, type Task, type TaskLog } from '../api'
+import { getTask, getTaskLogs, getTaskContainerLogs, cancelTask, retryTask, executeTask, streamTaskLogs, getScheduledTasks, getConfig, getIssue, getTaskArchive, downloadTaskArchive, overrideTaskStatus, type Issue, type Task, type TaskLog } from '../api'
 import { authState, isAdmin, initializeAuth } from '../auth'
 import { renderMarkdown, summarizeSkillUsage } from '../components/task-process/taskProcessUtils'
 import PageHeader from '../components/PageHeader.vue'
 import TaskMetadataPanel from '../components/TaskMetadataPanel.vue'
 import TaskProcessPanel from '../components/TaskProcessPanel.vue'
 import TaskResultPanel from '../components/TaskResultPanel.vue'
+import TaskRunMetrics from '../components/TaskRunMetrics.vue'
+import TaskContinuationPanel from '../components/TaskContinuationPanel.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
 import {
   CalendarOutline,
+  CheckmarkCircleOutline,
+  ChevronDownOutline,
+  ChevronUpOutline,
   CloseCircleOutline,
   CreateOutline,
   DownloadOutline,
@@ -372,6 +500,7 @@ import HeatmapChart from '../components/HeatmapChart.vue'
 import TaskFormDrawer from '../components/TaskFormDrawer.vue'
 import RescheduleDrawer from '../components/RescheduleDrawer.vue'
 import AnsiToHtml from 'ansi-to-html'
+import { formatDateTimeUtc8 } from '../utils/datetime'
 
 const ansiConverter = new AnsiToHtml({ escapeXML: true })
 
@@ -383,6 +512,7 @@ const { isMobile } = useBreakpoints()
 
 const taskId = computed(() => Number(route.params.id))
 const promptView = ref<'user' | 'final'>('user')
+const promptFullHeight = ref(false)
 const renderedSelectedPrompt = computed(() => {
   if (promptView.value === 'user') return renderMarkdown(task.value?.user_prompt ?? '')
   return renderMarkdown(task.value?.rendered_prompt?.trim() || t('taskView.noFinalRunPrompt'))
@@ -402,6 +532,10 @@ const showScheduleDrawer = ref(false)
 const showEditDrawer = ref(false)
 const showCreateDrawer = ref(false)
 const showRescheduleDrawer = ref(false)
+const showOverrideModal = ref(false)
+const overrideTargetStatus = ref<'completed' | 'failed' | null>(null)
+const overrideReason = ref('')
+const overrideLoading = ref(false)
 const scheduledTasksForPreview = ref<Task[]>([])
 const scheduledTasksLoading = ref(false)
 const slotMaxTasks = ref(0)
@@ -430,6 +564,7 @@ let _pendingLogBuffer: TaskLog[] = []
 let _logFlushScheduled = false
 watch(taskId, () => {
   promptView.value = 'user'
+  promptFullHeight.value = false
 })
 const initialLoading = computed(() => loading.value && !hasLoadedOnce.value)
 
@@ -461,6 +596,43 @@ const deliverySummaryLog = computed(() =>
   [...taskLogs.value].reverse().find(l => l.log_type === 'delivery_summary') ?? null
 )
 
+const taskProjectName = computed(() => {
+  if (!task.value) return '-'
+  return task.value.project_path_with_namespace
+    || task.value.project_name
+    || `Project #${task.value.project_id}`
+})
+
+const taskModeLabel = computed(() =>
+  task.value?.task_mode === 'plan'
+    ? t('taskView.taskModePlan')
+    : t('taskView.taskModeExecute')
+)
+
+const executionStateTitle = computed(() => {
+  if (!task.value) return ''
+  return t(`taskView.executionState.${task.value.status}Title`)
+})
+
+const executionStateDescription = computed(() => {
+  if (!task.value) return ''
+  return t(`taskView.executionState.${task.value.status}Description`)
+})
+
+const executionStateTime = computed(() => {
+  if (!task.value) return ''
+  if (task.value.status === 'pending' && task.value.scheduled_at) {
+    return `${t('common.scheduledAt')} ${formatDateTimeUtc8(task.value.scheduled_at)}`
+  }
+  if (task.value.status === 'running' && task.value.started_at) {
+    return `${t('common.started')} ${formatDateTimeUtc8(task.value.started_at)}`
+  }
+  if (task.value.status === 'cancelled' && task.value.completed_at) {
+    return `${t('common.completed')} ${formatDateTimeUtc8(task.value.completed_at)}`
+  }
+  return ''
+})
+
 const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
   pending: 'default',
   queued: 'info',
@@ -473,7 +645,7 @@ const statusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 
 const hasActions = computed(() => {
   if (!task.value) return false
   if (archiveMetadata.value) return true
-  return ['pending', 'queued', 'running', 'failed', 'cancelled'].includes(task.value.status)
+  return ['pending', 'queued', 'running', 'completed', 'failed', 'cancelled'].includes(task.value.status)
 })
 
 const hasActionDetails = computed(() => {
@@ -484,7 +656,6 @@ const hasActionDetails = computed(() => {
   return (
     (hasActions.value && !canManageTask.value) ||
     (!!archiveMetadata.value && !archiveMetadata.value.file_exists) ||
-    task.value.status === 'queued' ||
     retryHasContext
   )
 })
@@ -509,15 +680,25 @@ const canManageTask = computed(() => {
   )
 })
 
-const showFollowupReplayHint = computed(() => {
-  if (!task.value?.issue_id) return false
-  const tasks = [...issueTasks.value].sort((a, b) => {
-    const createdDelta = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-    return createdDelta !== 0 ? createdDelta : a.id - b.id
-  })
-  const currentIndex = tasks.findIndex((item) => item.id === task.value?.id)
-  return currentIndex > 0
-})
+function openOverrideModal(targetStatus: 'completed' | 'failed') {
+  overrideTargetStatus.value = targetStatus
+  overrideReason.value = ''
+  showOverrideModal.value = true
+}
+
+async function confirmOverride() {
+  if (!overrideTargetStatus.value || !task.value) return
+  overrideLoading.value = true
+  try {
+    await overrideTaskStatus(task.value.id, overrideTargetStatus.value, overrideReason.value || undefined)
+    showOverrideModal.value = false
+    await refreshTask()
+  } catch {
+    message.error(t('taskView.failedToOverrideStatus'))
+  } finally {
+    overrideLoading.value = false
+  }
+}
 
 const latestIssueTask = computed(() => {
   return issueTasks.value.reduce<Task | null>((latest, item) => {
@@ -1074,7 +1255,7 @@ onBeforeUnmount(() => {
   background: #1e1e1e;
   color: #d4d4d4;
   padding: 16px;
-  border-radius: 12px;
+  border-radius: 8px;
   max-height: 400px;
   overflow: auto;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji';
@@ -1087,6 +1268,26 @@ onBeforeUnmount(() => {
   max-width: var(--app-page-max-width);
 }
 
+.task-view__context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  color: var(--app-page-subtitle-color, rgba(15, 23, 42, 0.58));
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.app-link {
+  color: var(--n-primary-color, #18a058);
+  text-decoration: none;
+}
+
+.app-link:hover {
+  text-decoration: underline;
+}
+
 .task-view__actions {
   display: inline-flex;
   align-items: center;
@@ -1097,8 +1298,7 @@ onBeforeUnmount(() => {
 }
 
 .task-view__content {
-  display: grid;
-  gap: 20px;
+  min-width: 0;
 }
 
 .task-view__title {
@@ -1111,26 +1311,124 @@ onBeforeUnmount(() => {
   border-radius: var(--app-card-radius);
 }
 
-.task-card--equal {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
+.task-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+  gap: 16px;
+  align-items: start;
 }
 
-.task-card--equal :deep(.n-card-content) {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
+.task-workbench__main,
+.task-workbench__aside {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.task-workbench__main > *,
+.task-workbench__aside > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.task-workbench__aside {
+  position: sticky;
+  top: 16px;
+}
+
+.task-execution-overview {
+  --execution-accent: #64748b;
+
+  position: relative;
   overflow: hidden;
+}
+
+.task-execution-overview::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--execution-accent);
+  content: '';
+}
+
+.task-execution-overview--queued {
+  --execution-accent: #0284c7;
+}
+
+.task-execution-overview--running {
+  --execution-accent: #d97706;
+}
+
+.task-execution-overview--cancelled {
+  --execution-accent: #94a3b8;
+}
+
+.execution-overview__content {
+  padding: 2px 2px 2px 4px;
+}
+
+.execution-overview__status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--execution-accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.execution-overview__pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.task-execution-overview--running .execution-overview__pulse {
+  animation: execution-pulse 1.8s ease-in-out infinite;
+}
+
+.execution-overview__content h3 {
+  margin: 10px 0 6px;
+  color: var(--n-text-color-1);
+  font-size: 20px;
+  line-height: 1.35;
+}
+
+.execution-overview__content p {
+  margin: 0;
+  color: var(--n-text-color-2);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.execution-overview__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 12px;
+  color: var(--n-text-color-3, #8a8f98);
+  font-size: 12px;
+}
+
+@keyframes execution-pulse {
+  0%, 100% { opacity: 0.42; transform: scale(0.88); }
+  50% { opacity: 1; transform: scale(1); }
 }
 
 .task-prompt-wrap {
   background: rgba(15, 23, 42, 0.035);
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
-  flex: 1;
-  position: relative;
-  min-height: 0;
+  height: min(260px, 38vh);
+}
+
+.task-prompt-wrap--full {
+  height: min(560px, 68vh);
+}
+
+.task-prompt-wrap :deep(.n-scrollbar) {
+  height: 100%;
 }
 
 .task-prompt-view-switch {
@@ -1224,13 +1522,23 @@ onBeforeUnmount(() => {
 .task-card__header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
 }
 
 .task-card__title {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
+  line-height: 1.35;
+}
+
+.task-card__eyebrow {
+  margin-bottom: 3px;
+  color: var(--n-text-color-3, #8a8f98);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .task-card__subtitle {
@@ -1239,12 +1547,17 @@ onBeforeUnmount(() => {
   color: rgba(15, 23, 42, 0.58);
 }
 
-.task-card--actions :deep(.n-card-content) {
-  padding: 12px 24px;
+.task-prompt-card__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.task-card--actions {
-  order: -1;
+.task-prompt-height-toggle {
+  flex: 0 0 auto;
+  --n-height: 28px !important;
+  --n-border-radius: 6px !important;
+  --n-font-size: 12px !important;
 }
 
 .task-actions {
@@ -1270,7 +1583,7 @@ onBeforeUnmount(() => {
   --n-height: 34px !important;
   --n-padding: 0 12px !important;
   --n-font-weight: 400 !important;
-  --n-border-radius: 10px !important;
+  --n-border-radius: 8px !important;
   --n-ripple-color: rgba(37, 99, 235, 0.18) !important;
 }
 
@@ -1293,22 +1606,8 @@ onBeforeUnmount(() => {
 }
 
 .task-actions__command--primary {
-  --n-color: rgba(32, 128, 240, 0.08) !important;
-  --n-color-hover: rgba(32, 128, 240, 0.12) !important;
-  --n-color-focus: rgba(32, 128, 240, 0.12) !important;
-  --n-color-pressed: rgba(32, 128, 240, 0.16) !important;
-  --n-color-disabled: rgba(32, 128, 240, 0.05) !important;
-  --n-text-color: #1d4ed8 !important;
-  --n-text-color-hover: #1e40af !important;
-  --n-text-color-focus: #1e40af !important;
-  --n-text-color-pressed: #1e3a8a !important;
-  --n-text-color-disabled: rgba(29, 78, 216, 0.42) !important;
-  --n-border: 1px solid rgba(32, 128, 240, 0.18) !important;
-  --n-border-hover: 1px solid rgba(32, 128, 240, 0.28) !important;
-  --n-border-focus: 1px solid rgba(32, 128, 240, 0.32) !important;
-  --n-border-pressed: 1px solid rgba(32, 128, 240, 0.36) !important;
-  --n-border-disabled: 1px solid rgba(32, 128, 240, 0.1) !important;
-  --n-ripple-color: rgba(32, 128, 240, 0.2) !important;
+  min-width: 104px;
+  box-shadow: 0 7px 18px rgba(24, 160, 88, 0.15);
 }
 
 .task-actions__command--retry {
@@ -1357,6 +1656,8 @@ onBeforeUnmount(() => {
 
 .task-actions__command--refresh {
   margin-left: 2px;
+  --n-width: 34px !important;
+  --n-padding: 0 !important;
 }
 
 .task-actions__linked-task {
@@ -1387,7 +1688,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 10px 16px;
+  padding: 10px 12px;
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.035);
   color: rgba(15, 23, 42, 0.66);
@@ -1429,6 +1730,19 @@ onBeforeUnmount(() => {
   min-height: 34px;
 }
 
+.task-override-modal__description {
+  margin: 0;
+  color: var(--n-text-color-2);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.task-override-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .task-actions__date-picker {
   width: 100%;
 }
@@ -1463,6 +1777,16 @@ onBeforeUnmount(() => {
   padding-top: 2px;
 }
 
+@media (max-width: 1024px) {
+  .task-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .task-workbench__aside {
+    position: static;
+  }
+}
+
 @media (max-width: 768px) {
   .task-view__actions {
     width: 100%;
@@ -1471,7 +1795,6 @@ onBeforeUnmount(() => {
   }
 
   .task-card__header {
-    flex-direction: column;
     align-items: flex-start;
   }
 
@@ -1482,8 +1805,20 @@ onBeforeUnmount(() => {
 
   .task-actions__command,
   .task-actions__linked-task {
-    flex: 1 1 150px;
+    flex: 0 1 auto;
     justify-content: center;
+  }
+
+  .task-prompt-card__controls {
+    align-items: flex-start;
+  }
+
+  .task-prompt-wrap {
+    height: min(240px, 36vh);
+  }
+
+  .task-prompt-wrap--full {
+    height: min(440px, 62vh);
   }
 
   .task-schedule-drawer__form .task-actions__date-picker {
@@ -1493,5 +1828,12 @@ onBeforeUnmount(() => {
   .task-schedule-drawer__actions :deep(.n-button) {
     flex: 1 1 140px;
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-execution-overview--running .execution-overview__pulse {
+    animation: none;
+  }
+
 }
 </style>
