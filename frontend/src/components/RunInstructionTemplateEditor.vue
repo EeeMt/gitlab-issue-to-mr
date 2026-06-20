@@ -248,6 +248,10 @@ function handlePreviewToggle(event: Event) {
   width: 100%;
 }
 
+.run-instruction-editor :deep(textarea) {
+  transition: height 0.25s ease;
+}
+
 .run-instruction-editor__toolbar {
   display: flex;
   flex-wrap: wrap;
