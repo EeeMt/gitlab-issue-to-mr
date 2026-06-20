@@ -4,6 +4,7 @@
       ref="inputRef"
       :value="modelValue"
       type="textarea"
+      :autosize="{ minRows: 7, maxRows: 18 }"
       :placeholder="t('runInstruction.templatePlaceholder')"
       @update:value="emit('update:modelValue', $event)"
     />
@@ -127,7 +128,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { NAlert, NButton, NIcon, NInput, NPopover, useThemeVars } from 'naive-ui'
 import {
   AddOutline,
@@ -167,39 +168,6 @@ const themeVars = useThemeVars()
 const inputRef = ref<InstanceType<typeof NInput> | null>(null)
 const variablePickerVisible = ref(false)
 const previewExpanded = ref(false)
-
-const autosizeMinRows = 7
-const autosizeMaxRows = 18
-let autosizeRowHeight = 20
-
-function getTextarea(): HTMLTextAreaElement | null {
-  return (inputRef.value?.$el as HTMLElement | undefined)?.querySelector('textarea') ?? null
-}
-
-function autosizeTextarea() {
-  const textarea = getTextarea()
-  if (!textarea) return
-  const lineHeight = autosizeRowHeight
-  const padding = parseFloat(getComputedStyle(textarea).paddingTop) + parseFloat(getComputedStyle(textarea).paddingBottom)
-  const minHeight = lineHeight * autosizeMinRows + padding
-  const maxHeight = lineHeight * autosizeMaxRows + padding
-  textarea.style.height = '0px'
-  const scrollHeight = textarea.scrollHeight
-  textarea.style.height = `${Math.max(minHeight, Math.min(scrollHeight, maxHeight))}px`
-}
-
-onMounted(() => {
-  const textarea = getTextarea()
-  if (textarea) {
-    const computed = getComputedStyle(textarea)
-    autosizeRowHeight = parseFloat(computed.lineHeight) || 20
-    autosizeTextarea()
-  }
-})
-
-watch(() => props.modelValue, () => {
-  void nextTick(autosizeTextarea)
-})
 const editorThemeStyle = computed(() => ({
   '--rie-surface': themeVars.value.cardColor,
   '--rie-popover': themeVars.value.popoverColor,
@@ -281,8 +249,6 @@ function handlePreviewToggle(event: Event) {
 }
 
 .run-instruction-editor :deep(textarea) {
-  resize: none;
-  overflow-y: auto;
   transition: height 0.25s ease;
 }
 
