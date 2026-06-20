@@ -111,19 +111,6 @@
                 </template>
               </n-form-item>
             </n-gi>
-            <n-gi>
-              <n-form-item :label="t('config.ciFailureBundleRetentionDays')" path="ci_failure_bundle_retention_days">
-                <n-input-number
-                  v-model:value="formValue.ci_failure_bundle_retention_days"
-                  :min="0"
-                  :max="365"
-                  class="config-form__input"
-                />
-                <template #feedback>
-                  {{ t('config.ciFailureBundleRetentionDaysHint') }}
-                </template>
-              </n-form-item>
-            </n-gi>
           </n-grid>
         </div>
 

@@ -89,3 +89,27 @@ def test_cleanup_expired_workspaces_keeps_recent_issue_dirs(tmp_path):
 
     assert removed == 0
     assert recent_issue.exists()
+
+
+def test_cleanup_expired_workspaces_removes_old_ci_failure_bundles(tmp_path):
+    old_bundle = tmp_path / "ci-failures" / "123"
+    old_bundle.mkdir(parents=True)
+    old_mtime = time.time() - (40 * 24 * 60 * 60)
+    os.utime(old_bundle, (old_mtime, old_mtime))
+
+    removed = cleanup_expired_workspaces(str(tmp_path), retention_days=30)
+
+    assert removed == 1
+    assert not old_bundle.exists()
+
+
+def test_cleanup_expired_workspaces_ignores_unrelated_directories(tmp_path):
+    unrelated = tmp_path / "cache" / "entry"
+    unrelated.mkdir(parents=True)
+    old_mtime = time.time() - (40 * 24 * 60 * 60)
+    os.utime(unrelated, (old_mtime, old_mtime))
+
+    removed = cleanup_expired_workspaces(str(tmp_path), retention_days=30)
+
+    assert removed == 0
+    assert unrelated.exists()

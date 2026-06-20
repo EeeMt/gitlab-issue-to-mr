@@ -12,6 +12,25 @@
         </template>
 
         <n-form :model="workerFormValue" label-placement="top" class="config-section-form">
+          <div class="config-form__section">
+            <div class="config-form__section-title">{{ t('config.workerWorkspaceCleanup') }}</div>
+            <n-grid :cols="isMobile ? 1 : 2" :x-gap="16" :y-gap="8">
+              <n-gi>
+                <n-form-item :label="t('config.workerWorkspaceRetentionDays')">
+                  <n-input-number
+                    v-model:value="workerFormValue.worker_workspace_retention_days"
+                    :min="0"
+                    :max="365"
+                    class="config-form__input"
+                  />
+                  <template #feedback>
+                    {{ t('config.workerWorkspaceRetentionDaysHint') }}
+                  </template>
+                </n-form-item>
+              </n-gi>
+            </n-grid>
+          </div>
+
           <div class="config-form__section config-collection-section">
             <div class="config-form__section-header">
               <div class="config-collection-heading">
@@ -307,6 +326,7 @@ import {
   NGi,
   NGrid,
   NInput,
+  NInputNumber,
   NSelect,
   NSpace,
   NSpin,
@@ -334,6 +354,7 @@ type MountItem = {
 type WorkerFormValue = {
   mounts: MountItem[]
   environment_variables: EnvironmentVariableFormItem[]
+  worker_workspace_retention_days: number
   worker_pre_script: string
   worker_post_script: string
   maven_cache_host_path: string
@@ -383,6 +404,7 @@ const environmentVariableTypeOptions = [
 const workerFormValue = ref<WorkerFormValue>({
   mounts: [],
   environment_variables: [],
+  worker_workspace_retention_days: 14,
   worker_pre_script: '',
   worker_post_script: '',
   maven_cache_host_path: '',
@@ -455,6 +477,7 @@ function mapRuntimeConfigToWorkerFormValue(runtime?: Partial<RuntimeConfig>): Wo
   return {
     mounts: parseMounts(runtime?.worker_volume_mounts ?? ''),
     environment_variables: parseEnvironmentVariables(runtime?.worker_environment_variables),
+    worker_workspace_retention_days: runtime?.worker_workspace_retention_days ?? 14,
     worker_pre_script: runtime?.worker_pre_script || '',
     worker_post_script: runtime?.worker_post_script || '',
     maven_cache_host_path: runtime?.maven_cache_host_path || '',
@@ -474,6 +497,7 @@ function cloneWorkerFormValue(value: WorkerFormValue): WorkerFormValue {
     environment_variables: value.environment_variables.map((environmentVariable) => ({
       ...environmentVariable
     })),
+    worker_workspace_retention_days: value.worker_workspace_retention_days,
     worker_pre_script: value.worker_pre_script,
     worker_post_script: value.worker_post_script,
     maven_cache_host_path: value.maven_cache_host_path,
@@ -526,6 +550,7 @@ function createEmptyWorkerFormValue(): WorkerFormValue {
   return {
     mounts: [],
     environment_variables: [],
+    worker_workspace_retention_days: 14,
     worker_pre_script: '',
     worker_post_script: '',
     maven_cache_host_path: '',
@@ -553,6 +578,7 @@ async function handleSaveWorker() {
         worker_environment_variables: serializeEnvironmentVariables(
           workerFormValue.value.environment_variables
         ),
+        worker_workspace_retention_days: workerFormValue.value.worker_workspace_retention_days,
         worker_pre_script: workerFormValue.value.worker_pre_script,
         worker_post_script: workerFormValue.value.worker_post_script,
         maven_cache_host_path: workerFormValue.value.maven_cache_host_path.trim(),

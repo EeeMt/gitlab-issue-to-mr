@@ -71,8 +71,7 @@ const mockConfig = {
 	    allow_schedule_overview_for_users: false,
 	    allow_analytics_for_users: false,
 	    allow_oidc_diagnostics_for_users: false,
-	    ci_auto_repair_max_attempts: 4,
-	    ci_failure_bundle_retention_days: 45
+	    ci_auto_repair_max_attempts: 4
 	  },
   auth: {
     oidc_enabled: true,
@@ -128,7 +127,6 @@ describe('useConfigForm', () => {
 	      expect(configForm.formValue.value.retry_delay).toBe(60)
 	      expect(configForm.formValue.value.alert_on_failure).toBe(false)
 	      expect(configForm.formValue.value.ci_auto_repair_max_attempts).toBe(2)
-	      expect(configForm.formValue.value.ci_failure_bundle_retention_days).toBe(30)
 	      expect(configForm.formValue.value.oidc_enabled).toBe(false)
       expect(configForm.formValue.value.gitlab_url).toBe('')
     })
@@ -171,7 +169,6 @@ describe('useConfigForm', () => {
 	      expect(configForm.formValue.value.retry_delay).toBe(120)
 	      expect(configForm.formValue.value.alert_on_failure).toBe(true)
 	      expect(configForm.formValue.value.ci_auto_repair_max_attempts).toBe(4)
-	      expect(configForm.formValue.value.ci_failure_bundle_retention_days).toBe(45)
     })
 
     it('should sync auth values from config', async () => {
@@ -343,8 +340,7 @@ describe('useConfigForm', () => {
 	          max_concurrency: 10,
 	          task_timeout: 3600,
 	          scheduler_interval: 10,
-	          ci_auto_repair_max_attempts: 4,
-	          ci_failure_bundle_retention_days: 45
+	          ci_auto_repair_max_attempts: 4
 	        })
 	      })
     })
@@ -383,8 +379,7 @@ describe('useConfigForm', () => {
 	        max_retries: 3,
 	        retry_delay: 120,
 	        alert_on_failure: true,
-	        ci_auto_repair_max_attempts: 4,
-	        ci_failure_bundle_retention_days: 45
+	        ci_auto_repair_max_attempts: 4
 	      }))
     })
 

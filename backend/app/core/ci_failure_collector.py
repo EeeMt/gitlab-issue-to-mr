@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 import re
-import shutil
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -716,24 +715,3 @@ async def start_ci_failure_collector(
                 pass
         else:
             await asyncio.sleep(interval_seconds)
-
-
-def cleanup_expired_ci_failure_bundles(root: str, *, retention_days: int) -> int:
-    """Remove old CI failure bundles from the workspace root."""
-    if not root or retention_days <= 0:
-        return 0
-    bundle_root = Path(root) / "ci-failures"
-    if not bundle_root.is_dir():
-        return 0
-    cutoff = utcnow().timestamp() - (retention_days * 24 * 60 * 60)
-    removed = 0
-    for path in bundle_root.iterdir():
-        if not path.is_dir():
-            continue
-        try:
-            if path.stat().st_mtime < cutoff:
-                shutil.rmtree(path)
-                removed += 1
-        except OSError:
-            logger.warning("Could not remove expired CI failure bundle: %s", path)
-    return removed

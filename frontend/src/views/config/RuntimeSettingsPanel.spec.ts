@@ -147,8 +147,7 @@ const mockConfigForm = {
 	    allow_oidc_diagnostics_for_users: false,
 	    slot_max_tasks: 0,
 	    slot_max_tasks_enforce: false,
-	    ci_auto_repair_max_attempts: 2,
-	    ci_failure_bundle_retention_days: 30
+	    ci_auto_repair_max_attempts: 2
 	  }),
   sectionSaving: {
     runtime: false,
@@ -244,6 +243,5 @@ describe('RuntimeSettingsPanel', () => {
 	    const text = wrapper.text()
 	    expect(text).toContain('config.ciAutoRepair')
 	    expect(text).toContain('config.ciAutoRepairMaxAttempts')
-	    expect(text).toContain('config.ciFailureBundleRetentionDays')
 	  })
 	})

@@ -592,12 +592,12 @@ export interface RuntimeConfig {
   worker_pre_script: string
   worker_post_script: string
   worker_environment_variables: WorkerEnvironmentVariable[]
+  worker_workspace_retention_days: number
   maven_cache_host_path: string
   maven_settings_host_path: string
   slot_max_tasks: number
   slot_max_tasks_enforce: boolean
   ci_auto_repair_max_attempts: number
-  ci_failure_bundle_retention_days: number
   announcement_enabled: boolean
   announcement_text: string
   announcement_level: string

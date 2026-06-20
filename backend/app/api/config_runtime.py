@@ -80,7 +80,6 @@ class RuntimeConfigSection(BaseModel):
     slot_max_tasks: int
     slot_max_tasks_enforce: bool
     ci_auto_repair_max_attempts: int
-    ci_failure_bundle_retention_days: int
     default_execute_run_instruction_template: str
     default_plan_run_instruction_template: str
     ci_auto_repair_run_instruction_template: str
@@ -123,7 +122,6 @@ class RuntimeConfigUpdate(BaseModel):
     slot_max_tasks: int | None = None
     slot_max_tasks_enforce: bool | None = None
     ci_auto_repair_max_attempts: int | None = None
-    ci_failure_bundle_retention_days: int | None = None
     default_execute_run_instruction_template: str | None = None
     default_plan_run_instruction_template: str | None = None
     ci_auto_repair_run_instruction_template: str | None = None
@@ -165,7 +163,6 @@ def _serialize_runtime_config(
         slot_max_tasks=settings.slot_max_tasks,
         slot_max_tasks_enforce=settings.slot_max_tasks_enforce,
         ci_auto_repair_max_attempts=settings.ci_auto_repair_max_attempts,
-        ci_failure_bundle_retention_days=settings.ci_failure_bundle_retention_days,
         default_execute_run_instruction_template=(
             settings.default_execute_run_instruction_template
         ),
@@ -316,7 +313,6 @@ def _validate_config_value(key: str, value: object) -> object:
     if key in {
         "worker_workspace_retention_days",
         "worker_failed_workspace_retention_days",
-        "ci_failure_bundle_retention_days",
     }:
         if not isinstance(value, int) or value < 0 or value > 365:
             raise HTTPException(

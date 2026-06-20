@@ -73,18 +73,37 @@ def cleanup_expired_workspaces(root: str, *, retention_days: int) -> int:
         return 0
 
     cutoff = time.time() - (retention_days * 24 * 60 * 60)
-    removed = 0
+    candidates: list[str] = []
 
+    # Issue workspaces use <root>/project-<id>/issue-<id>.
+    # Restrict the scan to that layout so unrelated directories under the
+    # configured root are never treated as disposable workspaces.
     for project_name in os.listdir(root):
+        if not project_name.startswith("project-"):
+            continue
         project_path = os.path.join(root, project_name)
         if not os.path.isdir(project_path):
             continue
         for issue_name in os.listdir(project_path):
-            issue_path = os.path.join(project_path, issue_name)
-            if not os.path.isdir(issue_path):
+            if not issue_name.startswith("issue-"):
                 continue
-            if _latest_tree_mtime(issue_path) < cutoff:
-                shutil.rmtree(issue_path)
-                removed += 1
+            issue_path = os.path.join(project_path, issue_name)
+            if os.path.isdir(issue_path):
+                candidates.append(issue_path)
+
+    # CI failure bundles share the workspace root and intentionally follow the
+    # same retention period as issue workspaces.
+    bundle_root = os.path.join(root, "ci-failures")
+    if os.path.isdir(bundle_root):
+        for run_name in os.listdir(bundle_root):
+            bundle_path = os.path.join(bundle_root, run_name)
+            if os.path.isdir(bundle_path):
+                candidates.append(bundle_path)
+
+    removed = 0
+    for path in candidates:
+        if _latest_tree_mtime(path) < cutoff:
+            shutil.rmtree(path)
+            removed += 1
 
     return removed

@@ -7,6 +7,7 @@ function createRuntimeConfig() {
   return {
     worker_volume_mounts:
       '[{"host_path":"/host/cache","container_path":"/container/cache","mode":"rw"}]',
+    worker_workspace_retention_days: 14,
     maven_cache_host_path: '/data/.m2/repository',
     maven_settings_host_path: '/data/.m2/settings.xml',
     worker_environment_variables: [
@@ -146,6 +147,23 @@ vi.mock('naive-ui', () => ({
           value: props.value,
           placeholder: props.placeholder,
           onInput: (event: Event) => emit('update:value', (event.target as HTMLInputElement).value)
+        })
+    }
+  },
+  NInputNumber: {
+    name: 'NInputNumber',
+    props: ['value', 'min', 'max'],
+    emits: ['update:value'],
+    setup(props: any, { emit }: any) {
+      return () =>
+        h('input', {
+          class: 'n-input-number',
+          type: 'number',
+          value: props.value,
+          min: props.min,
+          max: props.max,
+          onInput: (event: Event) =>
+            emit('update:value', Number((event.target as HTMLInputElement).value))
         })
     }
   },
@@ -310,6 +328,30 @@ describe('WorkerSettingsPanel', () => {
     })
   })
 
+  it('loads and saves workspace retention days', async () => {
+    const wrapper = mount(WorkerSettingsPanel, {
+      props: {
+        isMobile: false,
+        reloadKey: 0
+      }
+    })
+
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    expect(vm.workerFormValue.worker_workspace_retention_days).toBe(14)
+    expect(wrapper.text()).toContain('config.workerWorkspaceRetentionDays')
+
+    vm.workerFormValue.worker_workspace_retention_days = 30
+    await vm.handleSaveWorker()
+
+    expect(mockUpdateConfig).toHaveBeenCalledWith({
+      runtime: expect.objectContaining({
+        worker_workspace_retention_days: 30
+      })
+    })
+  })
+
   it('loads configured secret environment variables without exposing stored values', async () => {
     const wrapper = mount(WorkerSettingsPanel, {
       props: {
@@ -359,6 +401,7 @@ describe('WorkerSettingsPanel', () => {
     expect(mockUpdateConfig).toHaveBeenCalledWith({
       runtime: {
         worker_volume_mounts: '[{"host_path":"/host/cache","container_path":"/container/cache","mode":"rw"}]',
+        worker_workspace_retention_days: 14,
         worker_pre_script: 'echo pre',
         worker_post_script: 'echo post',
         maven_cache_host_path: '/data/.m2/repository',
@@ -524,6 +567,7 @@ describe('WorkerSettingsPanel', () => {
     expect(mockUpdateConfig).toHaveBeenCalledWith({
       runtime: {
         worker_volume_mounts: '[{"host_path":"/host/cache","container_path":"/container/cache","mode":"rw"}]',
+        worker_workspace_retention_days: 14,
         worker_pre_script: 'echo pre',
         worker_post_script: 'echo post',
         maven_cache_host_path: '/data/.m2/repository',

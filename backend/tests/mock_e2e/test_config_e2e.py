@@ -211,7 +211,10 @@ class TestGetRuntimeConfig:
             "worker_environment_variables",
             "worker_workspace_host_path", "worker_workspace_retention_days",
             "worker_failed_workspace_retention_days",
-            "ci_auto_repair_max_attempts", "ci_failure_bundle_retention_days",
+            "ci_auto_repair_max_attempts",
+            "default_execute_run_instruction_template",
+            "default_plan_run_instruction_template",
+            "ci_auto_repair_run_instruction_template",
             "announcement_enabled", "announcement_level", "announcement_text",
         }
         assert expected_keys == set(data.keys())
