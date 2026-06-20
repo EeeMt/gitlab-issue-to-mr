@@ -72,12 +72,14 @@
           </div>
         </div>
       </n-popover>
-      <n-button size="tiny" quaternary @click="emit('use-prompt-only')">
-        {{ t('runInstruction.usePromptOnly') }}
-      </n-button>
-      <n-button size="tiny" quaternary @click="emit('restore-default')">
-        {{ t('runInstruction.restoreDefault') }}
-      </n-button>
+      <div class="run-instruction-editor__actions">
+        <n-button size="tiny" quaternary @click="emit('use-prompt-only')">
+          {{ t('runInstruction.usePromptOnly') }}
+        </n-button>
+        <n-button size="tiny" quaternary @click="emit('restore-default')">
+          {{ t('runInstruction.restoreDefault') }}
+        </n-button>
+      </div>
     </div>
     <n-alert v-if="unknownPlaceholders.length" type="error" :bordered="false">
       {{ t('runInstruction.unknownPlaceholders', { names: unknownPlaceholders.join(', ') }) }}
@@ -252,6 +254,12 @@ function handlePreviewToggle(event: Event) {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.run-instruction-editor__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .run-instruction-editor__variables {
