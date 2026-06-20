@@ -1,6 +1,6 @@
 <template>
   <n-drawer v-model:show="localShow" :width="isMobile ? '100%' : 680" placement="right">
-    <n-drawer-content :title="t('taskView.rescheduleTask')" closable>
+    <n-drawer-content :title="t('taskView.rescheduleTask')" :native-scrollbar="false" closable>
       <div class="reschedule-drawer">
         <div v-if="task && !hideSummary" class="reschedule-drawer__summary">
           <div class="reschedule-drawer__summary-title">Task #{{ task.id }}</div>

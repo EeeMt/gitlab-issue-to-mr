@@ -6,7 +6,6 @@
         data-testid="issue-view-header"
         root-class="issue-view__hero"
         actions-class="issue-view__actions"
-        :subtitle="t('issue.detailSubtitle')"
       >
         <template #title>
           <h2 class="issue-view__title">#{{ issue.id }} {{ issue.title }}</h2>
@@ -14,9 +13,53 @@
             {{ t(`issue.status.${issue.status}`) }}
           </n-tag>
         </template>
+        <template #subtitle>
+          <div class="issue-view__context">
+            <a v-if="projectUrl" :href="projectUrl" target="_blank" rel="noopener noreferrer" class="app-link">
+              {{ projectName }}
+            </a>
+            <span v-else>{{ projectName }}</span>
+            <span aria-hidden="true">·</span>
+            <span>{{ issue.initiator_username || '—' }}</span>
+            <span aria-hidden="true">·</span>
+            <span>{{ t('issue.field.updatedAt') }} {{ formatCompactDateTime(issue.updated_at) }}</span>
+          </div>
+        </template>
         <template #actions>
           <div class="issue-actions issue-actions--header" data-testid="issue-actions">
             <div class="issue-actions__toolbar">
+              <n-tooltip
+                v-if="isOwner && issue.status !== 'closed' && issue.tasks?.length"
+                trigger="hover"
+                placement="top"
+                :content-style="issueDetailTooltipContentStyle"
+                :theme-overrides="issueDetailTooltipThemeOverrides"
+              >
+                <template #trigger>
+                  <n-button
+                    class="issue-actions__command issue-actions__command--primary"
+                    type="primary"
+                    strong
+                    data-testid="issue-toggle-create-task"
+                    @click="showCreateDrawer = true"
+                  >
+                    <template #icon><n-icon :component="AddOutline" /></template>
+                    {{ t('issue.appendTask') }}
+                  </n-button>
+                </template>
+                {{ t('issue.appendTaskHint') }}
+              </n-tooltip>
+              <n-button
+                v-else-if="isOwner && issue.status !== 'closed'"
+                class="issue-actions__command issue-actions__command--primary"
+                type="primary"
+                strong
+                data-testid="issue-toggle-create-task"
+                @click="showCreateDrawer = true"
+              >
+                <template #icon><n-icon :component="AddOutline" /></template>
+                {{ t('issue.createTask') }}
+              </n-button>
               <template v-if="isOwner">
                 <n-button
                   class="issue-actions__command issue-actions__command--danger"
@@ -31,20 +74,28 @@
                   <template #icon><n-icon :component="CloseCircleOutline" /></template>
                   {{ t('issue.close') }}
                 </n-button>
-                <n-tooltip v-if="issue.status === 'closed' && issue.branch_name && issue.branch_deleted" :title="t('issue.branchAlreadyDeleted')">
-                  <n-button
-                    class="issue-actions__command issue-actions__command--danger"
-                    data-testid="issue-delete-branch-button"
-                    type="error"
-                    secondary
-                    strong
-                    :disabled="deletingBranch || issue.branch_deleted"
-                    :loading="deletingBranch"
-                    @click="handleDeleteBranch"
-                  >
-                    <template #icon><n-icon :component="TrashOutline" /></template>
-                    {{ t('issue.deleteBranch') }}
-                  </n-button>
+                <n-tooltip
+                  v-if="issue.status === 'closed' && issue.branch_name && issue.branch_deleted"
+                  :title="t('issue.branchAlreadyDeleted')"
+                  :content-style="issueDetailTooltipContentStyle"
+                  :theme-overrides="issueDetailTooltipThemeOverrides"
+                >
+                  <template #trigger>
+                    <n-button
+                      class="issue-actions__command issue-actions__command--danger"
+                      data-testid="issue-delete-branch-button"
+                      type="error"
+                      secondary
+                      strong
+                      :disabled="deletingBranch || issue.branch_deleted"
+                      :loading="deletingBranch"
+                      @click="handleDeleteBranch"
+                    >
+                      <template #icon><n-icon :component="TrashOutline" /></template>
+                      {{ t('issue.deleteBranch') }}
+                    </n-button>
+                  </template>
+                  {{ t('issue.branchAlreadyDeleted') }}
                 </n-tooltip>
                 <n-popconfirm
                   v-else-if="issue.status === 'closed' && issue.branch_name"
@@ -94,432 +145,57 @@
         </template>
       </PageHeader>
 
-      <!-- Metadata + Description side by side -->
-      <n-grid :cols="issue.description ? (isMobile ? 1 : 2) : 1" :x-gap="16" :y-gap="16">
-        <n-gi>
-          <!-- Metadata -->
-          <n-card class="issue-card" :bordered="false" data-testid="issue-metadata-card">
-            <template #header>
-              <div class="issue-card__header">
-                <div class="issue-card__title">{{ t('issue.metadata') }}</div>
-              </div>
-            </template>
-            <div class="metadata-body">
-              <!-- Status -->
-              <div class="metadata-row">
-                <span class="metadata-label">
-                  <n-icon size="14" class="metadata-label-icon"><InformationCircleOutline /></n-icon>
-                  {{ t('common.status') }}
-                </span>
-                <span class="metadata-value">
-                  <n-tag :type="issueStatusColors[issue.status]" size="small" round>
-                    {{ t(`issue.status.${issue.status}`) }}
-                  </n-tag>
-                </span>
-              </div>
+      <div class="issue-workbench">
+        <main class="issue-workbench__main">
+          <IssueCurrentExecution
+            :task="highlightedTask"
+            :is-active="Boolean(activeTask)"
+            @open-task="openTask"
+          />
 
-              <!-- Closed Via -->
-              <div v-if="issue.status === 'closed' && issue.closed_via" class="metadata-row">
-                <span class="metadata-label">
-                  <n-icon size="14" class="metadata-label-icon"><InformationCircleOutline /></n-icon>
-                  {{ t('issue.closedViaLabel') }}
-                </span>
-                <span class="metadata-value">
-                  <n-tag size="small" round :type="issue.closed_via === 'webhook_mr_merged' ? 'info' : 'default'">
-                    {{ issue.closed_via === 'webhook_mr_merged' ? t('issue.closedViaWebhookMrMerged') : t('issue.closedViaManual') }}
-                  </n-tag>
-                </span>
-              </div>
-
-              <!-- Project -->
-              <div class="metadata-row">
-                <span class="metadata-label">
-                  <n-icon size="14" class="metadata-label-icon"><FolderOpenOutline /></n-icon>
-                  {{ t('issue.field.project') }}
-                </span>
-                <span class="metadata-value">
-                  <a v-if="projectUrl" :href="projectUrl" target="_blank" rel="noopener noreferrer" class="app-link">
-                    {{ projectName }}
-                  </a>
-                  <span v-else>{{ projectName }}</span>
-                </span>
-              </div>
-
-              <!-- Creator -->
-              <div class="metadata-row">
-                <span class="metadata-label">
-                  <n-icon size="14" class="metadata-label-icon"><PersonOutline /></n-icon>
-                  {{ t('issue.field.creator') }}
-                </span>
-                <span class="metadata-value">
-                  {{ issue.initiator_username || '-' }}
-                </span>
-              </div>
-
-              <!-- Branch flow -->
-              <div class="metadata-row">
-                <span class="metadata-label">
-                  <n-icon size="14" class="metadata-label-icon"><GitBranchOutline /></n-icon>
-                  {{ t('taskView.branchFlow') }}
-                </span>
-                <span class="metadata-value">
-                  <span class="branch-flow">
-                    <template v-if="issue.base_branch">
-                      <n-tooltip trigger="hover" placement="top">
-                        <template #trigger>
-                          <a v-if="issueBranchUrl(issue.base_branch)" :href="issueBranchUrl(issue.base_branch)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--base app-link">{{ issue.base_branch }}</a>
-                          <span v-else class="branch-item branch-item--base">{{ issue.base_branch }}</span>
-                        </template>
-                        {{ t('issue.field.baseBranch') }}
-                      </n-tooltip>
-                    </template>
-                    <span v-if="issue.base_branch && issue.branch_name" class="branch-arrow">➜</span>
-                    <template v-if="issue.branch_name">
-                      <n-tooltip trigger="hover" placement="top">
-                        <template #trigger>
-                          <a v-if="issueBranchUrl(issue.branch_name)" :href="issueBranchUrl(issue.branch_name)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--work app-link">{{ issue.branch_name }}</a>
-                          <span v-else class="branch-item branch-item--work">{{ issue.branch_name }}</span>
-                        </template>
-                        {{ t('createTask.branchFlowWorkBranch') }}
-                      </n-tooltip>
-                    </template>
-                    <span v-if="issue.branch_name && issue.target_branch" class="branch-arrow">➜</span>
-                    <template v-if="issue.target_branch">
-                      <n-tooltip trigger="hover" placement="top">
-                        <template #trigger>
-                          <a v-if="issueBranchUrl(issue.target_branch)" :href="issueBranchUrl(issue.target_branch)!" target="_blank" rel="noopener noreferrer" class="branch-item branch-item--target app-link">{{ issue.target_branch }}</a>
-                          <span v-else class="branch-item branch-item--target">{{ issue.target_branch }}</span>
-                        </template>
-                        {{ t('issue.field.targetBranch') }}
-                      </n-tooltip>
-                    </template>
-                    <span v-if="!issue.branch_name && !issue.base_branch && !issue.target_branch">-</span>
-                  </span>
-                </span>
-              </div>
-
-              <!-- Merge Request -->
-              <div class="metadata-row">
-                <span class="metadata-label">
-                  <n-icon size="14" class="metadata-label-icon"><GitPullRequest /></n-icon>
-                  {{ t('issue.field.mergeRequest') }}
-                </span>
-                <span class="metadata-value">
-                  <a
-                    v-if="issue.merge_request_url"
-                    :href="issue.merge_request_url"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="app-link"
-                  >
-                    !{{ issue.merge_request_iid }}
-                  </a>
-                  <span v-else class="metadata-muted">{{ t('issue.noMergeRequest') }}</span>
-                </span>
-              </div>
-
-              <!-- Branch policy -->
-              <div v-if="issue.branch_name || issue.branch_deleted" class="metadata-row" data-testid="issue-branch-policy-row">
-                <span class="metadata-label">
-                  <n-icon size="14" class="metadata-label-icon"><GitBranchOutline /></n-icon>
-                  {{ t('issue.deleteBranchOnClose') }}
-                </span>
-                <span class="metadata-value">
-                  <n-tag size="small" round data-testid="delete-branch-badge" v-if="issue.delete_branch_on_close">
-                    {{ t('issue.deleteBranchBadge') }}
-                  </n-tag>
-                  <n-tag size="small" round data-testid="keep-branch-badge" v-else>
-                    {{ t('issue.keepBranchBadge') }}
-                  </n-tag>
-
-                  <n-tag size="small" round data-testid="branch-deleted-badge" v-if="issue.branch_deleted">
-                    {{ t('issue.branchDeletedBadge') }}
-                  </n-tag>
-                </span>
-              </div>
-
-              <!-- Session ID -->
-              <div class="metadata-row">
-                <span class="metadata-label">
-                  <n-icon size="14" class="metadata-label-icon"><CodeOutline /></n-icon>
-                  {{ t('issue.field.sessionId') }}
-                </span>
-                <span class="metadata-value">
-                  <code v-if="issue.claude_session_id" class="issue-view__code">{{ issue.claude_session_id }}</code>
-                  <span v-else class="metadata-muted">-</span>
-                </span>
-              </div>
-
-              <!-- Changes -->
-              <div v-if="issue.totals && (issue.totals.total_changes > 0 || issue.totals.input_tokens > 0)" class="metadata-row">
-                <span class="metadata-label">
-                  <n-icon size="14" class="metadata-label-icon"><CodeOutline /></n-icon>
-                  {{ t('common.changes') }}
-                </span>
-                <span class="metadata-value">
-                  <span v-if="issue.totals.total_changes > 0">
-                    {{ issue.totals.total_changes }}
-                    <span class="metadata-secondary">
-                      (<span class="stat-add">+{{ issue.totals.additions }}</span> / <span class="stat-del">-{{ issue.totals.deletions }}</span>)
-                    </span>
-                  </span>
-                  <span v-else class="metadata-muted">—</span>
-                </span>
-              </div>
-
-              <!-- Tokens -->
-              <div v-if="issue.totals && (issue.totals.input_tokens > 0 || issue.totals.output_tokens > 0)" class="metadata-row">
-                <span class="metadata-label">
-                  <n-icon size="14" class="metadata-label-icon"><CodeOutline /></n-icon>
-                  {{ t('analytics.tokens') }}
-                </span>
-                <span class="metadata-value">
-                  {{ formatNumber(issue.totals.input_tokens + issue.totals.output_tokens) }}
-                  <span class="metadata-secondary">
-                    ({{ t('analytics.tokenInputLine', { value: formatNumber(issue.totals.input_tokens) }) }} /
-                    {{ t('analytics.tokenOutputLine', { value: formatNumber(issue.totals.output_tokens) }) }})
-                  </span>
-                </span>
-              </div>
-
-              <!-- Total task duration -->
-              <div v-if="issue.totals" class="metadata-row">
-                <span class="metadata-label">
-                  <n-icon size="14" class="metadata-label-icon"><TimeOutline /></n-icon>
-                  {{ t('issue.totalTaskDuration') }}
-                </span>
-                <span class="metadata-value">
-                  {{ formatDurationSec(issue.totals.duration_seconds) }}
-                </span>
-              </div>
-
-              <!-- Timeline -->
-              <div class="metadata-row">
-                <span class="metadata-label">
-                  <n-icon size="14" class="metadata-label-icon"><TimeOutline /></n-icon>
-                  {{ t('common.timeline') }}
-                </span>
-                <div class="time-axis">
-                  <div class="time-point">
-                    <span class="time-point__label">{{ t('common.created') }}</span>
-                    <span class="time-point__value">{{ formatCompactDateTime(issue.created_at) }}</span>
-                  </div>
-                  <div class="time-axis__sep">→</div>
-                  <div class="time-point">
-                    <span class="time-point__label">{{ t('issue.field.updatedAt') }}</span>
-                    <span class="time-point__value">{{ formatCompactDateTime(issue.updated_at) }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </n-card>
-        </n-gi>
-        <n-gi v-if="issue.description">
-          <!-- Description -->
           <n-card
-            class="issue-card"
+            v-if="issue.description"
+            class="issue-card issue-description-card"
             :bordered="false"
             data-testid="issue-description-card"
           >
             <template #header>
               <div class="issue-card__header">
-                <div class="issue-card__title">{{ t('issue.field.description') }}</div>
+                <div>
+                  <div class="issue-card__eyebrow">{{ t('issue.requirementContext') }}</div>
+                  <div class="issue-card__title">{{ t('issue.field.description') }}</div>
+                </div>
               </div>
             </template>
-            <div class="issue-view__description-wrap">
-              <n-scrollbar trigger="hover" style="position: absolute; top: 0; right: 0; bottom: 0; left: 0;">
-                <div class="issue-view__description markdown-content" v-html="renderedDescription"></div>
-              </n-scrollbar>
-            </div>
+            <div class="issue-view__description markdown-content" v-html="renderedDescription"></div>
           </n-card>
-        </n-gi>
-      </n-grid>
 
-      <!-- Task List + Create Task -->
-      <n-card class="issue-card" :bordered="false" data-testid="issue-tasks-card">
-        <template #header>
-          <div class="issue-card__header">
-            <div class="issue-card__title">
-              {{ t('issue.taskCount', { count: issue.tasks?.length ?? 0 }) }}
-            </div>
-            <n-tooltip
-              v-if="isOwner && issue.status !== 'closed' && issue.tasks?.length"
-              trigger="hover"
-              placement="top"
-              :style="{ maxWidth: '260px', fontSize: '12px' }"
-            >
-              <template #trigger>
-                <n-button
-                  size="small"
-                  type="primary"
-                  @click="showCreateDrawer = true"
-                  data-testid="issue-toggle-create-task"
-                >
-                  {{ t('issue.appendTask') }}
-                </n-button>
-              </template>
-              {{ t('issue.appendTaskHint') }}
-            </n-tooltip>
-            <n-button
-              v-else-if="isOwner && issue.status !== 'closed'"
-              size="small"
-              type="primary"
-              @click="showCreateDrawer = true"
-              data-testid="issue-toggle-create-task"
-            >
-              {{ t('issue.createTask') }}
-            </n-button>
-          </div>
-        </template>
-        <n-data-table
-          :columns="taskColumns"
-          :data="issue.tasks || []"
-          :row-key="(row: Task) => row.id"
-          :row-props="taskRowProps"
-          :bordered="false"
-        />
-      </n-card>
+          <IssueTaskPanel
+            :tasks="issue.tasks || []"
+            :columns="taskColumns"
+            :row-props="taskRowProps"
+          />
 
-      <n-card class="issue-card issue-card--ci-automation" :bordered="false" data-testid="issue-ci-failures-card">
-        <template #header>
-          <div class="issue-card__header">
-            <div class="issue-card__title">{{ t('issue.ciAutomation') }}</div>
-            <n-tag size="small" round :type="issue.ci_auto_repair_enabled ? 'success' : 'default'">
-              {{ issue.ci_auto_repair_enabled ? t('issue.ciAutoRepairOn') : t('issue.ciAutoRepairOff') }}
-            </n-tag>
-          </div>
-        </template>
+          <IssueCIAutomationPanel
+            :enabled="issue.ci_auto_repair_enabled"
+            :failures="ciFailures"
+            :loading="ciFailuresLoading"
+            :total="ciFailureTotal"
+            :repair-task-count="ciRepairTaskCount"
+            :root-cause-job-count="ciRootCauseJobCount"
+            :webhook-events-by-run="webhookEventsByRun"
+            @open-task="openTask"
+          />
+        </main>
 
-        <div v-if="ciFailuresLoading" class="issue-automation-empty">
-          {{ t('common.loading') }}
+        <div class="issue-workbench__aside">
+          <IssueOverviewSidebar
+            :issue="issue"
+            :project-name="projectName"
+            :project-url="projectUrl"
+          />
         </div>
-        <div v-else-if="ciFailures.length === 0" class="issue-automation-empty">
-          {{ t('issue.noCiAutomationEvents') }}
-        </div>
-        <div v-else class="issue-automation">
-          <div class="ci-automation-summary" aria-live="polite">
-            <div class="ci-automation-summary__item">
-              <span>{{ t('issue.ciFailuresDetected') }}</span>
-              <strong>{{ ciFailureTotal || ciFailures.length }}</strong>
-            </div>
-            <div class="ci-automation-summary__item">
-              <span>{{ t('issue.ciLatestStatus') }}</span>
-              <strong>{{ latestCiFailure ? ciRunStatusLabel(latestCiFailure.status) : '-' }}</strong>
-            </div>
-            <div class="ci-automation-summary__item">
-              <span>{{ t('issue.ciRepairTasks') }}</span>
-              <strong>{{ ciRepairTaskCount }}</strong>
-            </div>
-            <div class="ci-automation-summary__item">
-              <span>{{ t('issue.ciRootCauseJobs') }}</span>
-              <strong>{{ ciRootCauseJobCount }}</strong>
-            </div>
-          </div>
-
-          <n-scrollbar
-            class="issue-ci-automation-scrollbar"
-            trigger="hover"
-            content-style="padding-right: 10px;"
-          >
-            <div class="ci-run-list">
-              <article v-for="run in ciFailures" :key="run.id" class="ci-failure-run">
-                <div class="ci-failure-run__header">
-                  <div class="ci-failure-run__identity">
-                    <span class="ci-failure-run__time">{{ formatCompactDateTime(run.created_at) }}</span>
-                    <a
-                      v-if="run.pipeline_url"
-                      :href="run.pipeline_url"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="ci-failure-run__pipeline app-link"
-                    >
-                      {{ t('issue.pipelineLabel', { id: run.pipeline_id }) }}
-                    </a>
-                    <span v-else class="ci-failure-run__pipeline">
-                      {{ t('issue.pipelineLabel', { id: run.pipeline_id }) }}
-                    </span>
-                    <span class="ci-failure-run__ref">
-                      {{ run.pipeline_ref || run.source_branch || '-' }}
-                      <template v-if="run.pipeline_sha"> · {{ shortSha(run.pipeline_sha) }}</template>
-                    </span>
-                  </div>
-
-                  <div class="ci-failure-run__actions">
-                    <n-tag size="small" round :type="ciRunStatusTagType(run.status)">
-                      {{ ciRunStatusLabel(run.status) }}
-                    </n-tag>
-                    <n-tag v-if="run.ignored_reason" size="small" round>
-                      {{ ignoredReasonLabel(run.ignored_reason) }}
-                    </n-tag>
-                    <span class="ci-failure-run__attempts">
-                      {{ t('issue.ciCollectionAttempts', { count: run.collection_attempts }) }}
-                    </span>
-                    <n-button
-                      v-if="run.repair_task_id"
-                      size="tiny"
-                      text
-                      type="primary"
-                      @click="router.push({ name: 'TaskView', params: { id: run.repair_task_id } })"
-                    >
-                      {{ t('issue.viewRepairTask', { id: run.repair_task_id }) }}
-                    </n-button>
-                  </div>
-                </div>
-
-                <div class="ci-failure-run__body">
-                  <section class="ci-run-section">
-                    <div class="ci-run-section__title">{{ t('issue.ciFailedJobs') }}</div>
-                    <div v-if="run.jobs?.length" class="ci-job-list">
-                      <component
-                        :is="job.web_url ? 'a' : 'span'"
-                        v-for="job in sortedCiJobs(run)"
-                        :key="job.id"
-                        :href="job.web_url || undefined"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="ci-job-chip"
-                        :class="{
-                          'ci-job-chip--root': job.is_root_cause,
-                          'ci-job-chip--infra': job.is_root_cause && job.classification === 'infra',
-                        }"
-                      >
-                        <span class="ci-job-chip__name">{{ job.name }} · {{ job.classification }}</span>
-                        <span v-if="job.stage" class="ci-job-chip__meta">{{ job.stage }}</span>
-                      </component>
-                    </div>
-                    <div v-else class="ci-run-section__empty">{{ t('issue.ciNoFailedJobs') }}</div>
-                  </section>
-
-                  <section class="ci-run-section">
-                    <div class="ci-run-section__title">{{ t('issue.ciProcessingTimeline') }}</div>
-                    <div v-if="hasCiRunTimeline(run)" class="ci-run-timeline">
-                      <div v-if="webhookEventsByRun[run.id]" class="ci-run-timeline__item ci-failure-run__webhook-step">
-                        <span class="ci-run-timeline__time">{{ formatTimelineTime(webhookEventsByRun[run.id].created_at) }}</span>
-                        <span class="ci-run-timeline__step">{{ t('issue.ciWebhookReceived') }}</span>
-                        <span v-if="webhookEventsByRun[run.id].result_detail" class="ci-run-timeline__message">
-                          {{ webhookEventsByRun[run.id].result_detail }}
-                        </span>
-                      </div>
-                      <div v-for="log in run.logs ?? []" :key="log.id" class="ci-run-timeline__item">
-                        <span class="ci-run-timeline__time">{{ formatTimelineTime(log.created_at) }}</span>
-                        <span class="ci-run-timeline__step">{{ log.step }}</span>
-                        <n-tag size="tiny" round>{{ log.status }}</n-tag>
-                        <span v-if="log.message" class="ci-run-timeline__message">{{ log.message }}</span>
-                      </div>
-                    </div>
-                    <div v-else class="ci-run-section__empty">{{ t('issue.ciNoTimeline') }}</div>
-                  </section>
-                </div>
-
-                <div v-if="run.error_message" class="ci-run-error">
-                  <span>{{ t('issue.ciCollectorError') }}</span>
-                  <strong>{{ run.error_message }}</strong>
-                </div>
-              </article>
-            </div>
-          </n-scrollbar>
-        </div>
-      </n-card>
+      </div>
     </n-space>
 
     <!-- Close Modal -->
@@ -611,11 +287,17 @@
       placement="right"
       data-testid="issue-retry-task-drawer"
     >
-      <n-drawer-content :title="t('taskView.retryWithSchedule')" closable>
+      <n-drawer-content :title="t('taskView.retryWithSchedule')" :native-scrollbar="false" closable>
         <div class="retry-drawer">
           <div v-if="retryTargetTask" class="retry-drawer__summary">
             <div class="retry-drawer__summary-title">Task #{{ retryTargetTask.id }}</div>
-            <div class="retry-drawer__summary-prompt markdown-content" v-html="renderedRetryPrompt"></div>
+            <n-scrollbar
+              class="retry-drawer__summary-prompt"
+              trigger="hover"
+              content-style="padding-right: 8px;"
+            >
+              <div class="retry-drawer__summary-prompt-content markdown-content" v-html="renderedRetryPrompt"></div>
+            </n-scrollbar>
           </div>
 
           <n-form label-placement="top">
@@ -691,27 +373,25 @@
 import { ref, computed, h, onMounted, onUnmounted, reactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  NButton, NSpace, NCard, NTag, NGrid, NGi, NSpin,
-  NIcon, NDataTable, NInput, NDrawer, NDrawerContent,
-  NRadio, NRadioGroup, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NTooltip, NScrollbar,
+  NButton, NSpace, NCard, NTag, NSpin,
+  NIcon, NInput, NDrawer, NDrawerContent,
+  NRadio, NRadioGroup, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NScrollbar, NTooltip,
   NSwitch, useMessage,
   type DataTableColumns
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
+  AddOutline,
   CloseCircleOutline,
-  FolderOpenOutline,
-  GitBranchOutline,
-  GitPullRequest,
-  CodeOutline,
   CreateOutline,
-  TimeOutline,
-  InformationCircleOutline,
-  PersonOutline,
   RefreshOutline,
   TrashOutline,
 } from '@vicons/ionicons5'
 import HeatmapChart from '../components/HeatmapChart.vue'
+import IssueCIAutomationPanel from '../components/issue-detail/IssueCIAutomationPanel.vue'
+import IssueCurrentExecution from '../components/issue-detail/IssueCurrentExecution.vue'
+import IssueOverviewSidebar from '../components/issue-detail/IssueOverviewSidebar.vue'
+import IssueTaskPanel from '../components/issue-detail/IssueTaskPanel.vue'
 import TaskFormDrawer from '../components/TaskFormDrawer.vue'
 import RescheduleDrawer from '../components/RescheduleDrawer.vue'
 import {
@@ -721,11 +401,12 @@ import {
 } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
-import { formatDateTimeUtc8Compact, formatTimeUtc8, parseUtcDate } from '../utils/datetime'
-import { formatDurationMs, formatDurationSec } from '../utils/format'
+import { formatDateTimeUtc8Compact, parseUtcDate } from '../utils/datetime'
+import { formatDurationMs } from '../utils/format'
 import { extractSlotErrorMessage } from '../utils/slotError'
 import { authState, isAdmin } from '../auth'
 import { renderMarkdown } from '../components/task-process/taskProcessUtils'
+import { issueDetailTooltipContentStyle, issueDetailTooltipThemeOverrides } from '../components/issue-detail/tooltip'
 
 const route = useRoute()
 const router = useRouter()
@@ -787,7 +468,6 @@ const webhookEventsByRun = computed(() => {
   return map
 })
 
-const latestCiFailure = computed(() => ciFailures.value[0] ?? null)
 const ciRepairTaskCount = computed(() => {
   const tasks = issue.value?.tasks
   if (tasks?.length) {
@@ -804,6 +484,13 @@ const ciRootCauseJobCount = computed(() =>
 const renderedDescription = computed(() => renderMarkdown(issue.value?.description ?? ''))
 const renderedRetryPrompt = computed(() => renderMarkdown(retryTargetTask.value?.user_prompt ?? ''))
 
+const sortedTasks = computed(() => [...(issue.value?.tasks ?? [])].sort((a, b) => {
+  const timeDiff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  return timeDiff || b.id - a.id
+}))
+const activeTask = computed(() => sortedTasks.value.find(task => ['running', 'queued', 'pending'].includes(task.status)) ?? null)
+const highlightedTask = computed(() => activeTask.value ?? sortedTasks.value[0] ?? null)
+
 const projectName = computed(() => {
   if (!issue.value) return '-'
   const project = projects.value.find(p => p.id === issue.value!.project_id)
@@ -815,11 +502,6 @@ const projectUrl = computed(() => {
   const project = projects.value.find(p => p.id === issue.value!.project_id)
   return project?.web_url ?? null
 })
-
-function issueBranchUrl(branchName: string | null | undefined): string | null {
-  if (!branchName || !projectUrl.value) return null
-  return `${projectUrl.value}/-/tree/${branchName.split('/').map(encodeURIComponent).join('/')}`
-}
 
 // Create task form
 const showCreateDrawer = ref(false)
@@ -885,132 +567,155 @@ function taskRowProps(row: Task) {
 
 // --- Task Table Columns ---
 const taskColumns = computed<DataTableColumns<Task>>(() => {
-  const renderTaskStatus = (row: Task) =>
-    h(NTag, { type: taskStatusColors[row.status], size: 'small' }, () => t(`status.${row.status}`))
+  const statusColumn = {
+    title: t('common.status'),
+    key: 'status',
+    width: isMobile.value ? 76 : 84,
+    render: (row: Task) =>
+      h(NTag, { type: taskStatusColors[row.status], size: 'tiny', round: true }, () => t(`status.${row.status}`))
+  }
 
-  return [
-    {
-      title: 'ID',
-      key: 'id',
-      width: 60
-    },
-    {
-      title: t('common.status'),
-      key: 'status',
-      width: 130,
-      render: renderTaskStatus
-    },
-    {
-      title: t('issue.field.description'),
-      key: 'user_prompt',
-      ellipsis: {
-        tooltip: {
-          style: { maxWidth: '420px', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any
-      },
-      render: (row) => {
-        const prompt = row.user_prompt || ''
-        const display = prompt.length > 80 ? prompt.slice(0, 80) + '…' : prompt
-        const children = row.is_retry
-          ? [
-              h(NTag, { class: 'task-prompt-link__retry-badge', size: 'tiny', round: true }, () => t('common.retry')),
-              display
-            ]
-          : display
-        return h(
-          'a',
-          {
-            class: 'task-prompt-link',
-            onClick: (e: MouseEvent) => {
-              e.stopPropagation()
-              router.push({ name: 'TaskView', params: { id: row.id } })
-            }
-          },
-          children
-        )
-      }
-    },
-    {
-      title: t('dashboard.duration'),
-      key: 'duration',
-      width: 90,
-      render: (row) => formatTaskDuration(row)
-    },
-    {
-      title: t('dashboard.scheduled'),
-      key: 'scheduled_at',
-      width: 140,
-      render: (row) => formatCompactDateTime(row.scheduled_at)
-    },
-    {
-      title: t('common.created'),
-      key: 'created_at',
-      width: 140,
-      render: (row) => formatCompactDateTime(row.created_at)
-    },
-    {
-      title: '',
-      key: 'actions',
-      width: 120,
-      render: (row) => {
-        const retryTask = retriedTaskMap.value.get(row.id)
-        if (retryTask) {
-          return h('span', { style: 'font-size: 12px; color: var(--n-text-color-3)' }, [
-            t('issue.retriedAs'),
-            ' ',
-            h(
-              NButton,
-              {
-                text: true,
-                type: 'primary',
-                size: 'small',
-                onClick: (e: MouseEvent) => {
-                  e.stopPropagation()
-                  router.push({ name: 'TaskView', params: { id: retryTask.id } })
-                }
-              },
-              () => `Task #${retryTask.id}`
-            )
-          ])
+  const descriptionColumn = {
+    title: t('issue.field.description'),
+    key: 'user_prompt',
+    render: (row: Task) => {
+      const prompt = row.user_prompt || ''
+      const display = prompt.length > 80 ? prompt.slice(0, 80) + '…' : prompt
+      const children = [
+        h('span', { class: 'task-prompt-link__id' }, `#${row.id}`),
+        ...(row.is_retry
+          ? [h(NTag, { class: 'task-prompt-link__retry-badge', size: 'tiny', round: true }, () => t('common.retry'))]
+          : []),
+        h('span', { class: 'task-prompt-link__text' }, display)
+      ]
+      const trigger = h(
+        'a',
+        {
+          class: 'task-prompt-link',
+          onClick: (event: MouseEvent) => {
+            event.stopPropagation()
+            openTask(row.id)
+          }
+        },
+        children
+      )
+      return h(
+        NTooltip,
+        {
+          placement: 'top-start',
+          trigger: 'hover',
+          contentStyle: issueDetailTooltipContentStyle,
+          themeOverrides: issueDetailTooltipThemeOverrides
+        },
+        {
+          trigger: () => trigger,
+          default: () => h('div', { class: 'task-description-tooltip' }, prompt || '—')
         }
-        if (!canManageIssueTask(row)) return ''
-        if (canRescheduleIssueTask(row)) {
-          return h(
+      )
+    }
+  }
+
+  const durationColumn = {
+    title: t('dashboard.duration'),
+    key: 'duration',
+    width: 64,
+    render: (row: Task) => h('span', { class: 'task-table__time' }, formatTaskDuration(row))
+  }
+
+  const timeColumn = {
+    title: t('issue.executionTime'),
+    key: 'execution_time',
+    width: 112,
+    render: (row: Task) => h(
+      NTooltip,
+      {
+        placement: 'top',
+        trigger: 'hover',
+        contentStyle: issueDetailTooltipContentStyle,
+        themeOverrides: issueDetailTooltipThemeOverrides
+      },
+      {
+        trigger: () => h(
+          'span',
+          { class: 'task-table__time' },
+          formatCompactDateTime(row.scheduled_at || row.created_at)
+        ),
+        default: () => h('div', { class: 'task-time-tooltip' }, [
+          h('div', `${t('common.created')} · ${formatCompactDateTime(row.created_at)}`),
+          ...(row.scheduled_at
+            ? [h('div', `${t('dashboard.scheduled')} · ${formatCompactDateTime(row.scheduled_at)}`)]
+            : [])
+        ])
+      }
+    )
+  }
+
+  const actionsColumn = {
+    title: '',
+    key: 'actions',
+    width: isMobile.value ? 84 : 96,
+    render: (row: Task) => {
+      const retryTask = retriedTaskMap.value.get(row.id)
+      if (retryTask) {
+        return h('span', { style: 'font-size: 11px; color: var(--n-text-color-3)' }, [
+          t('issue.retriedAs'),
+          ' ',
+          h(
             NButton,
             {
-              size: 'small',
-              secondary: true,
-              strong: true,
-              round: true,
-              type: 'info',
-              onClick: (e: MouseEvent) => {
-                e.stopPropagation()
-                void openRescheduleDrawer(row)
+              text: true,
+              type: 'primary',
+              size: 'tiny',
+              onClick: (event: MouseEvent) => {
+                event.stopPropagation()
+                openTask(retryTask.id)
               }
             },
-            () => t('taskView.rescheduleTask')
+            () => `Task #${retryTask.id}`
           )
-        }
-        if (!['failed', 'cancelled'].includes(row.status)) return ''
+        ])
+      }
+      if (!canManageIssueTask(row)) return ''
+      if (canRescheduleIssueTask(row)) {
         return h(
           NButton,
           {
-            size: 'small',
+            size: 'tiny',
             secondary: true,
             strong: true,
             round: true,
-            type: 'default',
-            onClick: (e: MouseEvent) => {
-              e.stopPropagation()
-              void openRetryDrawer(row)
+            type: 'info',
+            onClick: (event: MouseEvent) => {
+              event.stopPropagation()
+              void openRescheduleDrawer(row)
             }
           },
-          () => t('issue.retryTask')
+          () => t('taskView.rescheduleTask')
         )
       }
+      if (!['failed', 'cancelled'].includes(row.status)) return ''
+      return h(
+        NButton,
+        {
+          size: 'tiny',
+          secondary: true,
+          strong: true,
+          round: true,
+          type: 'default',
+          onClick: (event: MouseEvent) => {
+            event.stopPropagation()
+            void openRetryDrawer(row)
+          }
+        },
+        () => t('issue.retryTask')
+      )
     }
-  ]
+  }
+
+  if (isMobile.value) {
+    return [statusColumn, descriptionColumn, actionsColumn]
+  }
+  return [statusColumn, descriptionColumn, durationColumn, timeColumn, actionsColumn]
 })
 
 // --- Helpers ---
@@ -1019,9 +724,8 @@ function formatCompactDateTime(value?: string | null): string {
   return formatDateTimeUtc8Compact(value)
 }
 
-function formatTimelineTime(value?: string | null): string {
-  if (!value) return '-'
-  return formatTimeUtc8(value)
+function openTask(taskId: number) {
+  router.push({ name: 'TaskView', params: { id: taskId } })
 }
 
 function formatTaskDuration(task: Pick<Task, 'started_at' | 'completed_at'>): string {
@@ -1035,40 +739,6 @@ function formatTaskDuration(task: Pick<Task, 'started_at' | 'completed_at'>): st
 function canRescheduleIssueTask(task: Pick<Task, 'status' | 'scheduled_at'>): boolean {
   if (task.status === 'queued') return true
   return task.status === 'pending' && !!task.scheduled_at
-}
-
-function formatNumber(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return '—'
-  return Math.round(value).toLocaleString()
-}
-
-function ciRunStatusLabel(status: string): string {
-  const key = `issue.ciFailureStatus.${status}`
-  return t(key)
-}
-
-function ciRunStatusTagType(status: string): 'default' | 'info' | 'warning' | 'success' | 'error' {
-  if (status === 'task_created') return 'success'
-  if (status === 'failed') return 'error'
-  if (status === 'ignored') return 'warning'
-  if (status === 'collecting' || status === 'collected') return 'info'
-  return 'default'
-}
-
-function ignoredReasonLabel(reason: string): string {
-  return t(`issue.ciIgnoredReason.${reason}`)
-}
-
-function sortedCiJobs(run: CIFailureRun) {
-  return [...(run.jobs ?? [])].sort((a, b) => Number(b.is_root_cause) - Number(a.is_root_cause))
-}
-
-function hasCiRunTimeline(run: CIFailureRun): boolean {
-  return Boolean(webhookEventsByRun.value[run.id] || run.logs?.length)
-}
-
-function shortSha(value: string): string {
-  return value.slice(0, 8)
 }
 
 function isScheduleDateDisabled(timestamp: number): boolean {
@@ -1308,6 +978,43 @@ onMounted(() => {
   max-width: var(--app-page-max-width);
 }
 
+.issue-view__context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  color: var(--app-page-subtitle-color, rgba(15, 23, 42, 0.58));
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.issue-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.issue-workbench__main {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.issue-workbench__main > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.issue-workbench__aside {
+  position: sticky;
+  top: 16px;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .issue-view__actions {
   display: inline-flex;
   align-items: center;
@@ -1342,6 +1049,11 @@ onMounted(() => {
   --n-font-weight: 400 !important;
   --n-border-radius: 10px !important;
   --n-ripple-color: rgba(37, 99, 235, 0.18) !important;
+}
+
+.issue-actions__command--primary {
+  min-width: 108px;
+  box-shadow: 0 7px 18px rgba(24, 160, 88, 0.16);
 }
 
 .issue-actions__command--neutral {
@@ -1393,48 +1105,58 @@ onMounted(() => {
 
 .issue-card {
   border-radius: var(--app-card-radius);
-  height: 100%;
-  display: flex;
-  flex-direction: column;
 }
 
-.issue-card :deep(.n-card-content) {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
+.issue-description-card {
+  border: 1px solid rgba(15, 23, 42, 0.065);
+}
+
+.metadata-muted {
+  color: var(--n-text-color-3);
+  font-size: 13px;
+}
+
+.issue-view :deep(.task-prompt-link) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
-}
-
-.issue-card--ci-automation {
-  min-height: 360px;
-  max-height: 744px;
-}
-
-.issue-card--ci-automation :deep(.n-card-content) {
-  min-height: 0;
-  overflow: hidden;
-}
-
-.issue-ci-automation-scrollbar {
-  flex: 1;
-  min-height: 0;
-  max-height: 516px;
-}
-
-.stat-add {
-  color: #18a058;
-  font-weight: 500;
-}
-
-.stat-del {
-  color: #d03050;
-  font-weight: 500;
-}
-
-.metadata-secondary {
+  color: var(--n-text-color);
+  cursor: pointer;
   font-size: 12px;
-  color: rgba(15, 23, 42, 0.45);
-  margin-left: 4px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue-view :deep(.task-prompt-link__retry-badge) {
+  flex: 0 0 auto;
+  --n-color: #eef2ff !important;
+  --n-border: 1px solid #c7d2fe !important;
+  --n-text-color: #4338ca !important;
+}
+
+.issue-view :deep(.task-prompt-link__id) {
+  flex: 0 0 auto;
+  color: var(--n-text-color-3);
+  font-family: var(--n-font-family-mono, 'SF Mono', monospace);
+  font-size: 10px;
+}
+
+.issue-view :deep(.task-prompt-link__text) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue-view :deep(.task-table__time) {
+  display: inline-block;
+  color: var(--n-text-color-2);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .issue-card__header {
@@ -1446,21 +1168,21 @@ onMounted(() => {
 
 .issue-card__title {
   font-size: 18px;
-  font-weight: 600;
+  font-weight: 650;
 }
 
-.issue-view__description-wrap {
-  background: rgba(15, 23, 42, 0.035);
-  border-radius: 8px;
-  overflow: hidden;
-  flex: 1;
-  position: relative;
-  min-height: 0;
+.issue-card__eyebrow {
+  margin-bottom: 3px;
+  color: var(--n-text-color-3);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
 }
 
 .issue-view__description {
-  padding: 12px 14px;
-  line-height: 1.6;
+  padding: 2px 0;
+  line-height: 1.72;
   color: rgba(15, 23, 42, 0.82);
 }
 .issue-view__description :deep(p) { margin: 0 0 0.6em; }
@@ -1490,11 +1212,11 @@ onMounted(() => {
 .issue-view__description :deep(pre.md-code-block) {
   margin: 0.5em 0; padding: 10px 12px;
   background: rgba(0,0,0,0.06); border-radius: 5px;
-  overflow-x: auto; font-family: var(--n-font-family-mono, monospace);
-  font-size: 0.85em; line-height: 1.55; white-space: pre;
+  overflow-wrap: anywhere; font-family: var(--n-font-family-mono, monospace);
+  font-size: 0.85em; line-height: 1.55; white-space: pre-wrap;
 }
 .issue-view__description :deep(pre.md-code-block code) { background: none; padding: 0; border-radius: 0; font-size: inherit; color: inherit; }
-.issue-view__description :deep(table) { width: 100%; border-collapse: collapse; margin: 0.6em 0; font-size: 0.9em; overflow-x: auto; display: block; }
+.issue-view__description :deep(table) { width: 100%; border-collapse: collapse; margin: 0.6em 0; font-size: 0.9em; table-layout: fixed; }
 .issue-view__description :deep(th),
 .issue-view__description :deep(td) { border: 1px solid rgba(128,128,128,0.25); padding: 5px 10px; text-align: left; }
 .issue-view__description :deep(th) { background: rgba(128,128,128,0.08); font-weight: 600; }
@@ -1557,28 +1279,29 @@ onMounted(() => {
 
 .retry-drawer__summary-prompt {
   max-height: 96px;
-  overflow-y: auto;
+}
+.retry-drawer__summary-prompt-content {
   word-break: break-word;
   font-size: 13px;
   line-height: 1.55;
   color: rgba(15, 23, 42, 0.72);
 }
-.retry-drawer__summary-prompt :deep(p) { margin: 0 0 0.5em; }
-.retry-drawer__summary-prompt :deep(p:last-child) { margin-bottom: 0; }
-.retry-drawer__summary-prompt :deep(ul),
-.retry-drawer__summary-prompt :deep(ol) { margin: 0.3em 0; padding-left: 1.4em; }
-.retry-drawer__summary-prompt :deep(li) { margin: 0.1em 0; }
-.retry-drawer__summary-prompt :deep(code) {
+.retry-drawer__summary-prompt-content :deep(p) { margin: 0 0 0.5em; }
+.retry-drawer__summary-prompt-content :deep(p:last-child) { margin-bottom: 0; }
+.retry-drawer__summary-prompt-content :deep(ul),
+.retry-drawer__summary-prompt-content :deep(ol) { margin: 0.3em 0; padding-left: 1.4em; }
+.retry-drawer__summary-prompt-content :deep(li) { margin: 0.1em 0; }
+.retry-drawer__summary-prompt-content :deep(code) {
   font-family: var(--n-font-family-mono, monospace);
   font-size: 0.88em; background: rgba(128,128,128,0.12);
   border-radius: 3px; padding: 0.1em 0.3em;
 }
-.retry-drawer__summary-prompt :deep(pre.md-code-block) {
+.retry-drawer__summary-prompt-content :deep(pre.md-code-block) {
   margin: 0.4em 0; padding: 8px 10px;
   background: rgba(0,0,0,0.06); border-radius: 4px;
-  overflow-x: auto; font-size: 0.82em; white-space: pre;
+  overflow-wrap: anywhere; font-size: 0.82em; white-space: pre-wrap;
 }
-.retry-drawer__summary-prompt :deep(pre.md-code-block code) { background: none; padding: 0; font-size: inherit; }
+.retry-drawer__summary-prompt-content :deep(pre.md-code-block code) { background: none; padding: 0; font-size: inherit; }
 
 .retry-drawer__schedule-preview {
   display: grid;
@@ -1597,62 +1320,6 @@ onMounted(() => {
   gap: 8px;
 }
 
-.metadata-body {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  column-gap: 12px;
-  row-gap: 14px;
-  align-items: center;
-}
-
-.metadata-row {
-  display: contents;
-}
-
-.metadata-label {
-  display: inline-flex;
-  align-items: center;
-  font-size: 13px;
-  color: var(--n-text-color-3, #999);
-  white-space: nowrap;
-}
-
-.metadata-row > :last-child {
-  min-width: 0;
-}
-
-.issue-view :deep(.task-prompt-link) {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--n-text-color);
-  cursor: pointer;
-  min-width: 0;
-}
-
-.issue-view :deep(.task-prompt-link__retry-badge) {
-  --n-color: #eef2ff !important;
-  --n-border: 1px solid #c7d2fe !important;
-  --n-text-color: #4338ca !important;
-  flex: 0 0 auto;
-}
-
-.metadata-label-icon {
-  vertical-align: middle;
-  margin-right: 3px;
-  opacity: 0.65;
-}
-
-.metadata-value {
-  min-width: 0;
-  font-size: 14px;
-  color: var(--n-text-color-1);
-  word-break: break-word;
-}
-
-.metadata-muted {
-  color: var(--n-text-color-3, #999);
-}
 
 :global(.issue-close-confirm-modal) {
   overflow: hidden;
@@ -1678,73 +1345,6 @@ onMounted(() => {
   word-break: break-word;
 }
 
-.branch-flow {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.branch-item {
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
-  background: rgba(128, 128, 128, 0.08);
-}
-
-.branch-item--base {
-  background: rgba(2, 132, 199, 0.08);
-  color: #0284c7;
-}
-
-.branch-item--work {
-  background: rgba(5, 150, 105, 0.08);
-  color: #059669;
-}
-
-.branch-item--target {
-  background: rgba(124, 58, 237, 0.08);
-  color: #7c3aed;
-}
-
-.branch-arrow {
-  color: var(--n-text-color-3, #999);
-  font-size: 12px;
-}
-
-.time-axis {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px 8px;
-  flex-wrap: wrap;
-}
-
-.time-axis__sep {
-  color: var(--n-text-color-3, #999);
-  margin-top: 2px;
-  flex-shrink: 0;
-}
-
-.time-point {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 0 0 auto;
-  min-width: 0;
-}
-
-.time-point__label {
-  font-size: 11px;
-  color: var(--n-text-color-3, #999);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.time-point__value {
-  font-size: 13px;
-  color: var(--n-text-color-2);
-}
 
 .app-link {
   color: var(--n-primary-color, #18a058);
@@ -1754,276 +1354,14 @@ onMounted(() => {
   text-decoration: underline;
 }
 
-.issue-automation {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 12px;
-  min-height: 0;
-}
+@media (max-width: 1100px) {
+  .issue-workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
 
-.issue-automation-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-  color: var(--n-text-color-3);
-  font-size: 13px;
-}
-
-.ci-automation-summary {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.ci-automation-summary__item {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-  padding: 9px 10px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 6px;
-  background: rgba(248, 250, 252, 0.72);
-}
-
-.ci-automation-summary__item span {
-  min-width: 0;
-  color: var(--n-text-color-3);
-  font-size: 12px;
-  line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ci-automation-summary__item strong {
-  min-width: 0;
-  color: rgba(15, 23, 42, 0.86);
-  font-size: 18px;
-  font-weight: 650;
-  line-height: 1.15;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ci-run-list {
-  display: grid;
-  gap: 10px;
-}
-
-.ci-failure-run {
-  display: grid;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.78);
-}
-
-.ci-failure-run__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.ci-failure-run__identity {
-  display: grid;
-  gap: 3px;
-  min-width: 180px;
-}
-
-.ci-failure-run__pipeline {
-  font-weight: 650;
-  line-height: 1.3;
-}
-
-.ci-failure-run__time,
-.ci-failure-run__ref,
-.ci-failure-run__attempts,
-.ci-run-timeline__time {
-  color: var(--n-text-color-3);
-  font-size: 12px;
-}
-
-.ci-failure-run__ref {
-  max-width: 440px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ci-failure-run__actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  flex: 1 1 260px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-
-.ci-failure-run__attempts {
-  line-height: 22px;
-  white-space: nowrap;
-}
-
-.ci-failure-run__body {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
-  gap: 12px;
-  align-items: start;
-}
-
-.ci-run-section {
-  display: grid;
-  gap: 7px;
-  min-width: 0;
-}
-
-.ci-run-section__title {
-  color: rgba(15, 23, 42, 0.68);
-  font-size: 12px;
-  font-weight: 650;
-  line-height: 1.2;
-}
-
-.ci-run-section__empty {
-  min-height: 30px;
-  padding: 7px 8px;
-  border-radius: 6px;
-  background: rgba(15, 23, 42, 0.025);
-  color: var(--n-text-color-3);
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-}
-
-.ci-job-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.ci-job-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: 100%;
-  padding: 4px 8px;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: 999px;
-  background: rgba(248, 250, 252, 0.86);
-  color: rgba(51, 65, 85, 0.9);
-  font-size: 12px;
-  line-height: 1.2;
-  text-decoration: none;
-}
-
-.ci-job-chip--root {
-  border-color: rgba(208, 48, 80, 0.26);
-  background: rgba(208, 48, 80, 0.06);
-  color: #9f1d38;
-}
-
-.ci-job-chip--infra {
-  border-color: rgba(240, 160, 32, 0.32);
-  background: rgba(240, 160, 32, 0.08);
-  color: #8a5a00;
-}
-
-.ci-job-chip__name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ci-job-chip__meta {
-  flex: 0 0 auto;
-  color: var(--n-text-color-3);
-}
-
-.ci-run-timeline {
-  display: grid;
-  gap: 5px;
-  padding: 7px 8px;
-  border-radius: 6px;
-  background: rgba(15, 23, 42, 0.025);
-}
-
-.ci-run-timeline__item {
-  display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) max-content;
-  align-items: center;
-  column-gap: 8px;
-  row-gap: 2px;
-  min-width: 0;
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.ci-run-timeline__time {
-  grid-column: 1;
-  align-self: start;
-  padding-top: 1px;
-  white-space: nowrap;
-}
-
-.ci-run-timeline__step {
-  grid-column: 2;
-  min-width: 0;
-  font-family: var(--n-font-family-mono, 'JetBrains Mono', monospace);
-  color: var(--n-text-color-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ci-run-timeline__item :deep(.n-tag) {
-  grid-column: 3;
-  justify-self: end;
-  max-width: 86px;
-}
-
-.ci-run-timeline__message {
-  grid-column: 2 / 4;
-  min-width: 0;
-  color: var(--n-text-color-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ci-failure-run__webhook-step {
-  padding-bottom: 6px;
-  border-bottom: 1px dashed rgba(148, 163, 184, 0.22);
-  margin-bottom: 3px;
-}
-
-.ci-run-error {
-  display: grid;
-  gap: 3px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: rgba(208, 48, 80, 0.06);
-  color: #9f1d38;
-  font-size: 12px;
-}
-
-.ci-run-error span {
-  font-weight: 650;
-}
-
-.ci-run-error strong {
-  min-width: 0;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  .issue-workbench__aside {
+    position: static;
+  }
 }
 
 @media (max-width: 768px) {
@@ -2045,22 +1383,6 @@ onMounted(() => {
   .issue-card__header {
     flex-direction: column;
     align-items: flex-start;
-  }
-
-  .issue-card--ci-automation {
-    max-height: none;
-  }
-
-  .issue-ci-automation-scrollbar {
-    max-height: 624px;
-  }
-
-  .ci-automation-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .ci-failure-run__body {
-    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

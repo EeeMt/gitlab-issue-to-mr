@@ -17,7 +17,7 @@
           </div>
         </div>
       </Transition>
-      <div class="template-drawer-layout__body">
+      <n-scrollbar class="template-drawer-layout__body" trigger="hover" content-style="padding: 8px 0;">
         <div v-if="activePromptTemplates.length > 0" class="template-tag-filter">
           <n-select
             :value="selectedTemplateTags"
@@ -56,13 +56,13 @@
           </div>
           <div class="prompt-template-dropdown__item-preview">{{ tmpl.content.substring(0, 80) }}...</div>
         </div>
-      </div>
+      </n-scrollbar>
     </div>
   </n-drawer>
 
   <!-- Schedule Heatmap Sub-Drawer (create mode only) -->
   <n-drawer v-if="mode === 'create'" v-model:show="showHeatmapDrawer" :width="isMobile ? '100%' : 580" placement="right">
-    <n-drawer-content :title="t('createTask.schedulePreviewTitle')" closable>
+    <n-drawer-content :title="t('createTask.schedulePreviewTitle')" :native-scrollbar="false" closable>
       <n-spin v-if="scheduledTasksLoading" :description="t('createTask.schedulePreviewLoading')" />
       <template v-else>
         <p style="margin-bottom: 12px; color: var(--n-text-color-3); font-size: 13px;">
@@ -189,7 +189,12 @@
             </div>
             <div v-if="taskMode === 'execute'" class="require-changes-row">
               <span class="prompt-label-require-text">{{ t('issue.requireChanges') }}</span>
-              <n-tooltip trigger="hover" placement="top" :style="{ maxWidth: '260px', fontSize: '12px' }">
+              <n-tooltip
+                trigger="hover"
+                placement="top"
+                :content-style="issueDetailTooltipContentStyle"
+                :theme-overrides="issueDetailTooltipThemeOverrides"
+              >
                 <template #trigger>
                   <n-icon :component="InformationCircleOutline" size="13" class="require-changes-info-icon" />
                 </template>
@@ -370,7 +375,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, useAttrs } from 'vue'
 import {
   NButton, NDrawer, NDrawerContent, NForm, NFormItem, NRadio, NRadioGroup,
-  NDatePicker, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon, NTag,
+  NDatePicker, NSelect, NAlert, NTooltip, NSwitch, NSpin, NIcon, NScrollbar, NTag,
   useMessage
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -403,6 +408,7 @@ import {
 } from '../utils/promptTemplates'
 import { extractSlotErrorMessage } from '../utils/slotError'
 import { formatUsageResetAt, isUsageLimitExceededDetail, type UsageLimitExceededDetail } from '../utils/usageLimits'
+import { issueDetailTooltipContentStyle, issueDetailTooltipThemeOverrides } from './issue-detail/tooltip'
 
 defineOptions({ inheritAttrs: false })
 
@@ -1293,8 +1299,7 @@ onUnmounted(() => {
 
 .template-drawer-layout__body {
   flex: 1;
-  overflow-y: auto;
-  padding: 8px 0;
+  min-height: 0;
 }
 
 .template-tag-filter {

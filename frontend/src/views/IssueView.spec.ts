@@ -4,6 +4,10 @@ import { h, ref, nextTick } from 'vue'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import IssueView from './IssueView.vue'
 import issueViewSource from './IssueView.vue?raw'
+import issueCiAutomationSource from '../components/issue-detail/IssueCIAutomationPanel.vue?raw'
+import issueTaskPanelSource from '../components/issue-detail/IssueTaskPanel.vue?raw'
+import rescheduleDrawerSource from '../components/RescheduleDrawer.vue?raw'
+import taskFormDrawerSource from '../components/TaskFormDrawer.vue?raw'
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks
@@ -22,7 +26,9 @@ const { mockApi, resetMockApi, mockMessage, mockDialog } = vi.hoisted(() => {
     getSlotCapacity: vi.fn<() => Promise<any>>(),
     getConfig: vi.fn<() => Promise<any>>(),
 	    getProjects: vi.fn<() => Promise<any[]>>(),
-	    getProviders: vi.fn<() => Promise<any[]>>(),
+    getProviders: vi.fn<() => Promise<any[]>>(),
+	    getRunInstructionTemplateDefaults: vi.fn<() => Promise<any>>(),
+	    previewRunInstructionTemplate: vi.fn<() => Promise<any>>(),
 	    getIssueCIFailures: vi.fn<() => Promise<any>>(),
 	    getCIFailureLogs: vi.fn<() => Promise<any>>(),
 	    getIssueWebhookEvents: vi.fn<() => Promise<any>>(),
@@ -76,6 +82,8 @@ vi.mock('../api', () => ({
 	  getConfig: mockApi.getConfig,
 	  getProjects: mockApi.getProjects,
 	  getProviders: mockApi.getProviders,
+	  getRunInstructionTemplateDefaults: mockApi.getRunInstructionTemplateDefaults,
+	  previewRunInstructionTemplate: mockApi.previewRunInstructionTemplate,
 	  getIssueCIFailures: mockApi.getIssueCIFailures,
 	  getCIFailureLogs: mockApi.getCIFailureLogs,
 	  getIssueWebhookEvents: mockApi.getIssueWebhookEvents,
@@ -358,7 +366,7 @@ vi.mock('naive-ui', () => ({
   // Simple NTooltip stub that renders both trigger and content slots
   NTooltip: {
     name: 'NTooltip',
-    props: ['title'],
+    props: ['title', 'contentStyle', 'themeOverrides', 'placement', 'trigger'],
     setup(props: any, { slots }: any) {
       return () => h('span', { class: 'n-tooltip', 'data-tooltip': props.title, 'data-testid': 'n-tooltip' }, [
         slots.trigger?.(),
@@ -366,8 +374,33 @@ vi.mock('naive-ui', () => ({
       ])
     }
   },
+  NPopover: {
+    name: 'NPopover',
+    props: ['show'],
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-popover' }, [
+        slots.trigger?.(),
+        slots.default?.(),
+      ])
+    },
+  },
   useMessage: () => mockMessage,
   useDialog: () => mockDialog,
+  useThemeVars: () => ref({
+    cardColor: '#fff',
+    popoverColor: '#fff',
+    actionColor: '#f5f5f5',
+    hoverColor: '#eee',
+    codeColor: '#111',
+    borderColor: '#ddd',
+    dividerColor: '#ddd',
+    textColor1: '#111',
+    textColor2: '#333',
+    textColor3: '#666',
+    primaryColor: '#18a058',
+    boxShadow2: 'none',
+    fontFamilyMono: 'monospace',
+  }),
   DataTableColumns: {},
   NScrollbar: {
     name: 'NScrollbar',
@@ -380,9 +413,11 @@ vi.mock('naive-ui', () => ({
 vi.mock('@vicons/ionicons5', () => {
   const icon = (name: string) => ({ name, render: () => null })
   return {
+    AddOutline: icon('AddOutline'),
     AddCircleOutline: icon('AddCircleOutline'),
     BulbOutline: icon('BulbOutline'),
     CalendarOutline: icon('CalendarOutline'),
+    ChevronDownOutline: icon('ChevronDownOutline'),
     CheckmarkCircleOutline: icon('CheckmarkCircleOutline'),
     CloseCircleOutline: icon('CloseCircleOutline'),
     CloseOutline: icon('CloseOutline'),
@@ -394,6 +429,7 @@ vi.mock('@vicons/ionicons5', () => {
     GitBranchOutline: icon('GitBranchOutline'),
     GitPullRequest: icon('GitPullRequest'),
     InformationCircleOutline: icon('InformationCircleOutline'),
+    OptionsOutline: icon('OptionsOutline'),
     PersonOutline: icon('PersonOutline'),
     RefreshOutline: icon('RefreshOutline'),
     TrashOutline: icon('TrashOutline'),
@@ -494,6 +530,15 @@ function setupDefaultMocks(issueOverrides: Record<string, any> = {}) {
 	  mockApi.getSlotCapacity.mockResolvedValue(null)
 	  mockApi.getConfig.mockResolvedValue({ runtime: { slot_max_tasks: 5, slot_max_tasks_enforce: false } })
 	  mockApi.getProviders.mockResolvedValue(mockProviders)
+	  mockApi.getRunInstructionTemplateDefaults.mockResolvedValue({
+	    execute: { content: 'Execute {{user_prompt}}', available_placeholders: ['user_prompt'] },
+	    plan: { content: 'Plan {{user_prompt}}', available_placeholders: ['user_prompt'] },
+	  })
+	  mockApi.previewRunInstructionTemplate.mockResolvedValue({
+	    rendered_prompt: 'Rendered prompt',
+	    used_placeholders: ['user_prompt'],
+	    unused_known_placeholders: [],
+	  })
 	  mockApi.getIssueCIFailures.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 })
 	  mockApi.getCIFailureLogs.mockResolvedValue({ items: [] })
 	  mockApi.getIssueWebhookEvents.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 })
@@ -550,46 +595,72 @@ describe('IssueView', () => {
       expect(text).toContain('Test Issue')
     })
 
-    it('renders metadata card with project, creator, branch flow, MR, session', async () => {
+    it('prioritizes an active task in the execution summary', async () => {
+      setupDefaultMocks({
+        tasks: [
+          { ...createMockIssue().tasks[0], id: 7, status: 'running', user_prompt: 'Active work' },
+          { ...createMockIssue().tasks[1], id: 8, status: 'completed', user_prompt: 'Newer completed work' },
+        ],
+      })
+      wrapper = await mountComponent()
+
+      const summary = wrapper.find('[data-testid="issue-current-execution"]')
+      expect(summary.text()).toContain('issue.currentExecution')
+      expect(summary.text()).toContain('Task #7')
+
+      await summary.find('.execution-card__body').trigger('click')
+      await flushPromises()
+      expect(router.currentRoute.value.name).toBe('TaskView')
+      expect(router.currentRoute.value.params.id).toBe('7')
+    })
+
+    it('renders delivery overview and basic issue information', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const text = wrapper.text()
-      expect(text).toContain('issue.metadata')
-      expect(text).toContain('common.status')
+      expect(text).toContain('issue.deliveryOverview')
+      expect(text).toContain('issue.basicInfo')
       expect(text).toContain('issue.field.project')
       expect(text).toContain('issue.field.creator')
       expect(text).toContain('testuser')
-      expect(text).toContain('taskView.branchFlow')
       expect(text).toContain('main')
       expect(text).toContain('codify/issue-1')
       expect(text).toContain('!42')
       expect(text).toContain('session-abc')
     })
 
-    it('aligns issue metadata values after the widest field label', () => {
-      expect(issueViewSource).toContain('grid-template-columns: max-content minmax(0, 1fr);')
-      expect(issueViewSource).toContain('display: contents;')
-      expect(issueViewSource).toContain(`.metadata-body {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  column-gap: 12px;
-  row-gap: 14px;
-  align-items: center;
-}`)
-      expect(issueViewSource).not.toContain(`.metadata-body {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  column-gap: 12px;
-  row-gap: 14px;
-  align-items: baseline;
-}`)
-      expect(issueViewSource).not.toContain('min-width: 90px;')
+    it('uses a responsive workbench with a sticky overview column', () => {
+      expect(issueViewSource).toContain('grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);')
+      expect(issueViewSource).toContain('.issue-workbench__aside {\n  position: sticky;')
+      expect(issueViewSource).toContain('.issue-workbench__main > * {\n  min-width: 0;\n  max-width: 100%;')
+      expect(issueViewSource).toContain('@media (max-width: 1100px)')
+      expect(issueViewSource).toContain('grid-template-columns: minmax(0, 1fr);')
+    })
+
+    it('avoids native nested scrollbars across the issue detail surface', () => {
+      const sources = [
+        issueViewSource,
+        issueCiAutomationSource,
+        issueTaskPanelSource,
+        taskFormDrawerSource,
+        rescheduleDrawerSource,
+      ].join('\n')
+
+      expect(issueTaskPanelSource).not.toContain('scroll-x')
+      expect(sources).not.toMatch(/overflow-[xy]:\s*auto/)
+      expect(issueViewSource).toContain('<n-scrollbar')
+      expect(issueCiAutomationSource).toContain('<n-scrollbar')
+      expect(taskFormDrawerSource).toContain('<n-scrollbar')
+      expect(taskFormDrawerSource).toContain(':native-scrollbar="false"')
+      expect(rescheduleDrawerSource).toContain(':native-scrollbar="false"')
     })
 
     it('displays description card when description exists', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
-      expect(wrapper.find('[data-testid="issue-description-card"]').exists()).toBe(true)
+      const description = wrapper.find('[data-testid="issue-description-card"]')
+      expect(description.exists()).toBe(true)
+      expect(description.find('.n-scrollbar').exists()).toBe(false)
       expect(wrapper.text()).toContain('Test description')
     })
 
@@ -909,6 +980,15 @@ describe('IssueView', () => {
       expect(sessionLabel.exists()).toBe(true)
     })
 
+    it('abbreviates a long session id and exposes the full value in a popover', async () => {
+      const sessionId = '019ef123-4567-7890-abcd-1234567890ef'
+      setupDefaultMocks({ claude_session_id: sessionId })
+      wrapper = await mountComponent()
+
+      expect(wrapper.find('[data-testid="issue-session-id-trigger"]').text()).toBe('019ef123…7890ef')
+      expect(wrapper.find('.session-id-tooltip__value').text()).toBe(sessionId)
+    })
+
     it('shows changes and tokens when totals exist', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
@@ -935,27 +1015,32 @@ describe('IssueView', () => {
       expect(wrapper.text()).toContain('1h 1m')
     })
 
-    it('shows timeline with created and updated dates', async () => {
+    it('shows created and updated dates in basic information', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
-      expect(wrapper.text()).toContain('common.timeline')
+      expect(wrapper.text()).toContain('common.created')
+      expect(wrapper.text()).toContain('issue.field.updatedAt')
       expect(wrapper.text()).toContain('formatted-2024-01-01T10:00:00Z')
     })
 
     it('shows branch flow with base → work → target', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
-      const branchItems = wrapper.findAll('.branch-item')
+      const branchItems = wrapper.findAll('.branch-node')
       expect(branchItems.length).toBeGreaterThanOrEqual(2)
+      expect(wrapper.findAll('.branch-tooltip__value').map(item => item.text())).toEqual([
+        'main',
+        'codify/issue-1',
+        'main',
+      ])
     })
 
     it('shows dash when no branches exist', async () => {
       setupDefaultMocks({ branch_name: null, base_branch: null, target_branch: null })
       wrapper = await mountComponent()
-      // The fallback dash span in branch flow
-      const branchFlow = wrapper.find('.branch-flow')
+      const branchFlow = wrapper.find('.branch-journey')
       expect(branchFlow.exists()).toBe(true)
-      expect(branchFlow.text()).toBe('-')
+      expect(branchFlow.text()).toBe('—')
     })
   })
 
@@ -1676,7 +1761,7 @@ describe('IssueView', () => {
       expect(vnode).toBeDefined()
       expect(vnode.type).toBeDefined()
       expect(vnode.props.type).toBe('success')
-      expect(vnode.props.size).toBe('small')
+      expect(vnode.props.size).toBe('tiny')
     })
 
     it('renders retry badge before prompt text in the description column', async () => {
@@ -1686,17 +1771,23 @@ describe('IssueView', () => {
       const columns = vm.taskColumns
       const descCol = columns.find((c: any) => c.key === 'user_prompt')
 
-      const vnode = descCol.render({ id: 2, user_prompt: 'Retry me', is_retry: true })
+      const tooltip = descCol.render({ id: 2, user_prompt: 'Retry me', is_retry: true })
+      const vnode = tooltip.children.trigger()
 
+      expect(tooltip.props.contentStyle.fontSize).toBe('12px')
+      expect(tooltip.props.themeOverrides).toMatchObject({ color: '#111827', textColor: '#fff' })
       expect(vnode.props.class).toBe('task-prompt-link')
-      expect(vnode.children).toHaveLength(2)
-      expect(vnode.children[0].props).toMatchObject({
+      expect(vnode.children).toHaveLength(3)
+      expect(vnode.children[0].props.class).toBe('task-prompt-link__id')
+      expect(vnode.children[0].children).toBe('#2')
+      expect(vnode.children[1].props).toMatchObject({
         class: 'task-prompt-link__retry-badge',
         size: 'tiny',
         round: true,
       })
-      expect(vnode.children[0].props.type).toBeUndefined()
-      expect(vnode.children[1]).toBe('Retry me')
+      expect(vnode.children[1].props.type).toBeUndefined()
+      expect(vnode.children[2].props.class).toBe('task-prompt-link__text')
+      expect(vnode.children[2].children).toBe('Retry me')
       expect(issueViewSource).toContain('.issue-view :deep(.task-prompt-link)')
       expect(issueViewSource).toContain('.issue-view :deep(.task-prompt-link__retry-badge)')
       expect(issueViewSource).toContain('--n-color: #eef2ff')
@@ -1712,10 +1803,11 @@ describe('IssueView', () => {
       expect(descCol).toBeDefined()
 
       const longPrompt = 'A'.repeat(100)
-      const vnode = descCol.render({ id: 1, user_prompt: longPrompt, is_retry: false })
+      const tooltip = descCol.render({ id: 1, user_prompt: longPrompt, is_retry: false })
+      const vnode = tooltip.children.trigger()
       // Should truncate to 80 chars + '…'
       expect(vnode).toBeDefined()
-      expect(vnode.children).toContain('A'.repeat(80) + '…')
+      expect(vnode.children.at(-1).children).toBe('A'.repeat(80) + '…')
     })
 
     it('renders description column without truncation for short text', async () => {
@@ -1726,8 +1818,27 @@ describe('IssueView', () => {
       const descCol = columns.find((c: any) => c.key === 'user_prompt')
 
       const shortPrompt = 'Fix a bug'
-      const vnode = descCol.render({ id: 1, user_prompt: shortPrompt, is_retry: false })
-      expect(vnode.children).toBe('Fix a bug')
+      const tooltip = descCol.render({ id: 1, user_prompt: shortPrompt, is_retry: false })
+      const vnode = tooltip.children.trigger()
+      expect(vnode.children.at(-1).children).toBe('Fix a bug')
+      expect(tooltip.children.default().children).toBe('Fix a bug')
+    })
+
+    it('keeps a compact column set without separate id or schedule columns', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+      const columns = (wrapper.vm as any).taskColumns
+
+      expect(columns.map((column: any) => column.key)).toEqual([
+        'status',
+        'user_prompt',
+        'duration',
+        'execution_time',
+        'actions',
+      ])
+      expect(columns.find((column: any) => column.key === 'status').width).toBe(84)
+      expect(columns.find((column: any) => column.key === 'execution_time').width).toBe(112)
+      expect(columns.find((column: any) => column.key === 'duration').width).toBe(64)
     })
 
     it('does not render a separate retry column', async () => {
@@ -1739,52 +1850,38 @@ describe('IssueView', () => {
       expect(retryCol).toBeUndefined()
     })
 
-    it('renders created_at column with formatted date', async () => {
+    it('renders created time as the primary execution time', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
       const columns = vm.taskColumns
-      const createdCol = columns.find((c: any) => c.key === 'created_at')
-      expect(createdCol).toBeDefined()
+      const timeCol = columns.find((c: any) => c.key === 'execution_time')
+      expect(timeCol).toBeDefined()
 
-      const result = createdCol.render({ created_at: '2024-01-01T10:00:00Z' })
-      expect(result).toBe('formatted-2024-01-01T10:00:00Z')
+      const result = timeCol.render({ created_at: '2024-01-01T10:00:00Z', scheduled_at: null })
+      expect(result.props.contentStyle.fontSize).toBe('12px')
+      expect(result.props.themeOverrides).toMatchObject({ color: '#111827', textColor: '#fff' })
+      const trigger = result.children.trigger()
+      expect(trigger.props.class).toBe('task-table__time')
+      expect(trigger.children).toBe('formatted-2024-01-01T10:00:00Z')
     })
 
-    it('renders created_at column with dash for null value', async () => {
+    it('prefers scheduled time and exposes both timestamps in its tooltip', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
       const vm = wrapper.vm as any
       const columns = vm.taskColumns
-      const createdCol = columns.find((c: any) => c.key === 'created_at')
+      const timeCol = columns.find((c: any) => c.key === 'execution_time')
 
-      const result = createdCol.render({ created_at: null })
-      expect(result).toBe('-')
-    })
-
-    it('renders scheduled_at column with formatted appointment time', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const scheduledCol = columns.find((c: any) => c.key === 'scheduled_at')
-      expect(scheduledCol).toBeDefined()
-      expect(scheduledCol.title).toBe('dashboard.scheduled')
-
-      const result = scheduledCol.render({ scheduled_at: '2024-01-03T09:30:00Z' })
-      expect(result).toBe('formatted-2024-01-03T09:30:00Z')
-    })
-
-    it('renders scheduled_at column with dash for unscheduled task', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-      const columns = vm.taskColumns
-      const scheduledCol = columns.find((c: any) => c.key === 'scheduled_at')
-      expect(scheduledCol).toBeDefined()
-
-      const result = scheduledCol.render({ scheduled_at: null })
-      expect(result).toBe('-')
+      const result = timeCol.render({
+        created_at: '2024-01-01T10:00:00Z',
+        scheduled_at: '2024-01-03T09:30:00Z',
+      })
+      expect(result.children.trigger().children).toBe('formatted-2024-01-03T09:30:00Z')
+      const tooltip = result.children.default()
+      expect(tooltip.children).toHaveLength(2)
+      expect(tooltip.children[0].children).toContain('formatted-2024-01-01T10:00:00Z')
+      expect(tooltip.children[1].children).toContain('formatted-2024-01-03T09:30:00Z')
     })
 
     it('renders duration column from task start and completion time', async () => {
@@ -1799,7 +1896,8 @@ describe('IssueView', () => {
         started_at: '2024-01-01T10:00:00Z',
         completed_at: '2024-01-01T10:05:00Z',
       })
-      expect(result).toBe('5m 0s')
+      expect(result.props.class).toBe('task-table__time')
+      expect(result.children).toBe('5m 0s')
     })
 
     it('renders duration column with dash when task has not started', async () => {
@@ -1810,7 +1908,7 @@ describe('IssueView', () => {
       const durationCol = columns.find((c: any) => c.key === 'duration')
       expect(durationCol).toBeDefined()
 
-      expect(durationCol.render({ started_at: null, completed_at: null })).toBe('—')
+      expect(durationCol.render({ started_at: null, completed_at: null }).children).toBe('—')
     })
 
     it('renders actions column with retry button for failed task when isOwner', async () => {
@@ -1897,7 +1995,8 @@ describe('IssueView', () => {
       const columns = vm.taskColumns
       const descCol = columns.find((c: any) => c.key === 'user_prompt')
 
-      const vnode = descCol.render({ id: 42, user_prompt: 'test' })
+      const tooltip = descCol.render({ id: 42, user_prompt: 'test' })
+      const vnode = tooltip.children.trigger()
       // Invoke the onClick handler
       const mockEvent = { stopPropagation: vi.fn() }
       vnode.props.onClick(mockEvent)
