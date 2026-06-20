@@ -21,48 +21,45 @@
 
       <!-- AI delivery summary (collapsed by default) -->
       <div v-if="selectedSummaryLog" ref="summaryCardRef" class="result-card result-card--summary-text">
-        <div class="summary-header-row">
-          <button
-            type="button"
-            class="result-card__title summary-header-button"
-            :class="{ 'summary-header-button--open': summaryExpanded }"
-            :disabled="summaryPayloadLoading"
-            :aria-expanded="summaryExpanded"
-            @click="toggleSummary"
-          >
-            <n-icon size="16" class="result-card__icon result-card__icon--summary"><ChatboxOutline /></n-icon>
-            <span class="summary-title-label">{{ t('taskView.aiDeliverySummary') }}</span>
-            <span v-if="summaryPreview && !summaryExpanded" class="summary-preview">{{ summaryPreview }}</span>
-            <span
-              class="summary-toggle"
-              :class="{ 'summary-toggle--active': summaryExpanded, 'summary-toggle--loading': summaryPayloadLoading }"
-            >
-              <span class="summary-toggle__label">
-                {{ summaryExpanded ? t('taskView.summaryCollapse') : t('taskView.summaryExpand') }}
-              </span>
-              <span v-if="summaryPayloadLoading" class="badge-spin-ring"></span>
-              <n-icon v-else size="11" class="badge-chevron" :class="{ 'badge-chevron--open': summaryExpanded }">
-                <ChevronForward />
-              </n-icon>
+        <button
+          type="button"
+          class="summary-trigger"
+          :class="{ 'summary-trigger--expanded': summaryExpanded }"
+          :disabled="summaryPayloadLoading"
+          :aria-expanded="summaryExpanded"
+          @click="toggleSummary"
+        >
+          <div class="summary-trigger__leading">
+            <div class="summary-trigger__icon-wrap">
+              <span v-if="summaryPayloadLoading" class="badge-spin-ring badge-spin-ring--accent"></span>
+              <n-icon v-else size="18" class="summary-trigger__icon"><ChatboxOutline /></n-icon>
+            </div>
+            <div class="summary-trigger__text">
+              <span class="summary-trigger__title">{{ t('taskView.aiDeliverySummary') }}</span>
+              <span v-if="summaryPreview && !summaryExpanded" class="summary-trigger__preview">{{ summaryPreview }}</span>
+            </div>
+          </div>
+          <div class="summary-trigger__actions">
+            <n-tooltip trigger="hover">
+              <template #trigger>
+                <span
+                  class="summary-trigger__action-btn"
+                  role="button"
+                  tabindex="0"
+                  :aria-label="t('taskView.summaryOpenLarge')"
+                  @click.stop="openSummaryViewer"
+                  @keydown.enter.stop="openSummaryViewer"
+                >
+                  <n-icon size="15"><ExpandOutline /></n-icon>
+                </span>
+              </template>
+              {{ t('taskView.summaryOpenLarge') }}
+            </n-tooltip>
+            <span class="summary-trigger__chevron" :class="{ 'summary-trigger__chevron--open': summaryExpanded }">
+              <n-icon size="14"><ChevronForward /></n-icon>
             </span>
-          </button>
-          <n-tooltip trigger="hover">
-            <template #trigger>
-              <n-button
-                class="summary-open-large-button"
-                size="small"
-                secondary
-                circle
-                :disabled="summaryPayloadLoading"
-                :aria-label="t('taskView.summaryOpenLarge')"
-                @click="openSummaryViewer"
-              >
-                <template #icon><n-icon :component="ExpandOutline" /></template>
-              </n-button>
-            </template>
-            {{ t('taskView.summaryOpenLarge') }}
-          </n-tooltip>
-        </div>
+          </div>
+        </button>
         <div class="summary-expand-track" :class="{ 'summary-expand-track--open': summaryExpanded }">
           <div class="summary-expand-body">
             <n-scrollbar
@@ -929,136 +926,148 @@ const hasChanges = computed(() =>
   overflow-anchor: none;
 }
 
-.result-card--summary-text .result-card__title {
-  min-height: 28px;
-  margin-bottom: 0;
-}
-
-.result-card__icon--summary {
-  color: #0284c7;
-}
-
-.summary-header-row {
+.summary-trigger {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.summary-header-button {
-  flex: 1 1 auto;
-  width: auto;
-  min-width: 0;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
   box-sizing: border-box;
-  padding: 2px 2px 2px 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
+  padding: 10px 12px;
+  border: 1px solid rgba(2, 132, 199, 0.14);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(2, 132, 199, 0.04) 0%, rgba(2, 132, 199, 0.02) 100%);
   font-family: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
 }
 
-.summary-open-large-button {
-  flex: 0 0 auto;
-  --n-height: 28px !important;
-  --n-width: 28px !important;
-  --n-padding: 0 !important;
-  --n-border-radius: 6px !important;
+.summary-trigger:hover {
+  border-color: rgba(2, 132, 199, 0.28);
+  background: linear-gradient(135deg, rgba(2, 132, 199, 0.07) 0%, rgba(2, 132, 199, 0.03) 100%);
+  box-shadow: 0 1px 4px rgba(2, 132, 199, 0.08);
 }
 
-.summary-header-button:hover {
-  background: rgba(2, 132, 199, 0.06);
-}
-
-.summary-header-button:focus-visible {
+.summary-trigger:focus-visible {
   outline: 2px solid rgba(2, 132, 199, 0.45);
   outline-offset: 2px;
 }
 
-.summary-header-button:disabled {
+.summary-trigger:disabled {
   cursor: wait;
-}
-
-.summary-header-button--open {
-  color: var(--n-text-color-1, #333);
-}
-
-.summary-title-label {
-  flex-shrink: 0;
-}
-
-.summary-preview {
-  flex: 1;
-  min-width: 0;
-  max-width: 100%;
-  font-size: 12px;
-  line-height: 22px;
-  font-weight: 400;
-  color: var(--n-text-color-3, #999);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-left: 4px;
-}
-
-.summary-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-width: 52px;
-  height: 24px;
-  padding: 0 8px;
-  margin-left: auto;
-  flex-shrink: 0;
-  background: rgba(2, 132, 199, 0.08);
-  border: 1px solid rgba(2, 132, 199, 0.22);
-  border-radius: 4px;
-  color: #0284c7;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-  font-family: inherit;
-}
-
-.summary-header-button:hover .summary-toggle {
-  background: rgba(2, 132, 199, 0.13);
-  border-color: rgba(2, 132, 199, 0.36);
-}
-
-.summary-toggle__label {
-  font-size: 12px;
-  line-height: 1;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.summary-toggle--active {
-  color: var(--n-text-color-2, #555);
-  border-color: rgba(128, 128, 128, 0.2);
-  background: rgba(128, 128, 128, 0.06);
-}
-
-.summary-toggle--loading {
   opacity: 0.72;
 }
 
-.badge-chevron {
-  transition: transform 0.15s ease;
+.summary-trigger--expanded {
+  border-color: rgba(2, 132, 199, 0.22);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom: 1px solid rgba(2, 132, 199, 0.08);
+  background: rgba(2, 132, 199, 0.04);
 }
 
-.badge-chevron--open {
+.summary-trigger__leading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.summary-trigger__icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  background: rgba(2, 132, 199, 0.1);
+  flex-shrink: 0;
+}
+
+.summary-trigger__icon {
+  color: #0284c7;
+}
+
+.summary-trigger__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.summary-trigger__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--n-text-color-1, #1a1a2e);
+  line-height: 1.35;
+}
+
+.summary-trigger__preview {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--n-text-color-3, #8a8f98);
+  line-height: 1.45;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-trigger__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.summary-trigger__action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--n-text-color-3, #8a8f98);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.summary-trigger__action-btn:hover {
+  background: rgba(2, 132, 199, 0.1);
+  color: #0284c7;
+}
+
+.summary-trigger__chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--n-text-color-3, #8a8f98);
+  transition: transform 0.2s ease, color 0.15s;
+}
+
+.summary-trigger__chevron--open {
   transform: rotate(90deg);
+  color: #0284c7;
 }
 
 .badge-spin-ring {
   display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  border: 1.5px solid currentColor;
-  border-top-color: transparent;
+  border: 2px solid rgba(2, 132, 199, 0.2);
+  border-top-color: #0284c7;
   animation: badge-rotate 0.7s linear infinite;
+}
+
+.badge-spin-ring--accent {
+  border-color: rgba(2, 132, 199, 0.2);
+  border-top-color: #0284c7;
 }
 
 @keyframes badge-rotate {
@@ -1069,11 +1078,17 @@ const hasChanges = computed(() =>
 .summary-expand-track {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 0.22s ease;
+  transition: grid-template-rows 0.25s ease;
+  border: 1px solid transparent;
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  margin-top: -1px;
 }
 
 .summary-expand-track--open {
   grid-template-rows: 1fr;
+  border-color: rgba(2, 132, 199, 0.14);
+  background: rgba(2, 132, 199, 0.02);
 }
 
 .summary-expand-body {
@@ -1082,21 +1097,18 @@ const hasChanges = computed(() =>
 }
 
 .summary-content-scrollbar {
-  margin-top: 10px;
   width: 100%;
   max-width: 100%;
-  border-radius: 6px;
+  border-radius: 0 0 7px 7px;
 }
 
 .summary-content {
   width: 100%;
   box-sizing: border-box;
-  padding: 10px 12px;
+  padding: 14px 16px;
   font-size: 13px;
-  line-height: 1.65;
+  line-height: 1.7;
   color: var(--n-text-color-2);
-  background: rgba(2, 132, 199, 0.04);
-  border-radius: 6px;
   overflow-wrap: break-word;
 }
 

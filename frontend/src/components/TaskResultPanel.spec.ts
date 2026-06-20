@@ -34,16 +34,15 @@ describe('TaskResultPanel', () => {
   })
 
   it('summary header exposes the full row as an expandable button', () => {
-    expect(taskResultPanelSource).toContain('class="result-card__title summary-header-button"')
+    expect(taskResultPanelSource).toContain('class="summary-trigger"')
     expect(taskResultPanelSource).toContain(':aria-expanded="summaryExpanded"')
-    expect(taskResultPanelSource).toContain('taskView.summaryExpand')
     expect(taskResultPanelSource).toContain('taskView.summaryCollapse')
   })
 
   it('opens the complete delivery summary in a large mixed-content viewer', () => {
-    expect(taskResultPanelSource).toContain('class="summary-open-large-button"')
+    expect(taskResultPanelSource).toContain('class="summary-trigger__action-btn"')
     expect(taskResultPanelSource).toContain(':aria-label="t(\'taskView.summaryOpenLarge\')"')
-    expect(taskResultPanelSource).toContain('@click="openSummaryViewer"')
+    expect(taskResultPanelSource).toContain('openSummaryViewer')
     expect(taskResultPanelSource).toContain('class="summary-content-modal"')
     expect(taskResultPanelSource).toContain('ref="summaryViewerContentRef"')
     expect(taskResultPanelSource).toContain('function hydrateSummaryViewerMermaid()')
@@ -55,7 +54,7 @@ describe('TaskResultPanel', () => {
     const collapseFooter = cssBlock('.summary-collapse-footer')
     const collapseButtonIcon = cssBlock('.summary-collapse-button__icon')
 
-    expect(taskResultPanelSource).toContain('v-if="summaryExpanded && !mermaidViewerVisible"')
+    expect(taskResultPanelSource).toContain('v-if="summaryExpanded && !mermaidViewerVisible && !summaryViewerVisible"')
     expect(taskResultPanelSource).toContain('class="summary-collapse-button"')
     expect(taskResultPanelSource).toContain('class="summary-collapse-footer"')
     expect(taskResultPanelSource).toContain(':style="summaryCollapseFloatStyle"')
@@ -78,13 +77,13 @@ describe('TaskResultPanel', () => {
   it('keeps the collapsed summary row from forcing horizontal overflow', () => {
     const resultBody = cssBlock('.result-body')
     const summaryCard = cssBlock('.result-card--summary-text')
-    const summaryHeaderButton = cssBlock('.summary-header-button')
-    const summaryPreview = cssBlock('.summary-preview')
+    const summaryTrigger = cssBlock('.summary-trigger')
+    const summaryPreview = cssBlock('.summary-trigger__preview')
 
     expect(resultBody).toContain('min-width: 0;')
     expect(summaryCard).toContain('min-width: 0;')
-    expect(summaryHeaderButton).toContain('min-width: 0;')
-    expect(summaryHeaderButton).toContain('box-sizing: border-box;')
+    expect(summaryTrigger).toContain('box-sizing: border-box;')
+    expect(summaryTrigger).toContain('width: 100%;')
     expect(summaryPreview).toContain('min-width: 0;')
     expect(summaryPreview).toContain('max-width: 100%;')
     expect(summaryPreview).toContain('text-overflow: ellipsis;')
