@@ -39,6 +39,7 @@ from app.core.issue_execution_locks import release_issue_execution_lock
 from app.core.projects import build_project_lookup, get_project_metadata
 from app.core.scheduling import resolve_scheduled_at
 from app.core.task_helpers import _serialize_task, maybe_update_issue_status
+from app.core.task_log_payloads import persist_raw_log_snapshot
 from app.core.task_prompt import (
     NORMAL_PLACEHOLDER_NAMES,
     PLACEHOLDER_NAMES,
@@ -1065,22 +1066,64 @@ async def cancel_task(
     task.status = TaskStatus.CANCELLED
     task.completed_at = utcnow()
     task.error_message = "Cancelled by user"
+    task.raw_logs_finalized_at = None
     await db.commit()
     await db.refresh(task)
 
-    await release_issue_execution_lock(db, issue_id=task.issue_id)
-    await db.commit()
-
-    # Kill and remove the running container (if any) to free the thread pool slot immediately
+    # Stop the container before reading console.log so the snapshot cannot grow
+    # after its cursor is persisted. Keep the container filesystem available
+    # until the final snapshot has been stored.
     settings = get_effective_settings()
     container_name = f"{settings.worker_container_prefix}-{task_id}-issue{task.issue_id}"
+    container = None
+    raw_console_log: bytes | None = None
     try:
         docker = get_docker_client()
         container = await asyncio.to_thread(docker.client.containers.get, container_name)
-        await asyncio.to_thread(container.remove, force=True)
-        logger.info(f"Removed container {container_name} for cancelled task {task_id}")
-    except Exception:
-        pass  # Container may not exist or already removed
+        try:
+            await asyncio.to_thread(container.stop, timeout=10)
+        except Exception as stop_error:
+            logger.warning(
+                "Graceful stop failed for cancelled task %s: %s; forcing container stop",
+                task_id,
+                stop_error,
+            )
+            await asyncio.to_thread(container.kill)
+        raw_console_log = await asyncio.to_thread(
+            docker.read_file_from_container,
+            container,
+            "/tmp/codify-runtime/console.log",
+        )
+    except Exception as container_error:
+        logger.warning(
+            "Could not finalize container logs for cancelled task %s: %s",
+            task_id,
+            container_error,
+        )
+
+    if raw_console_log is not None:
+        await persist_raw_log_snapshot(
+            db,
+            task_id=task_id,
+            content=raw_console_log,
+        )
+
+    task.raw_logs_finalized_at = utcnow()
+    await db.commit()
+
+    if container is not None:
+        try:
+            await asyncio.to_thread(container.remove, force=True)
+            logger.info(f"Removed container {container_name} for cancelled task {task_id}")
+        except Exception as remove_error:
+            logger.warning(
+                "Could not remove container for cancelled task %s: %s",
+                task_id,
+                remove_error,
+            )
+
+    await release_issue_execution_lock(db, issue_id=task.issue_id)
+    await db.commit()
 
     await notify_task_cancelled(task)
     logger.info(f"Task {task_id} cancelled via API")

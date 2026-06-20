@@ -134,6 +134,54 @@ class TestConsoleLogBackfill(unittest.IsolatedAsyncioTestCase):
             assert len(chunks) == 2
             assert text == console_content
 
+    async def test_persist_raw_log_snapshot_appends_only_missing_tail(self):
+        from sqlalchemy import select
+
+        from app.core.task_log_payloads import (
+            append_raw_log_chunk,
+            persist_raw_log_snapshot,
+        )
+        from app.models import TaskIngestCursor, TaskRawLogChunk
+
+        task_id = 46
+        existing = b"first line\n"
+        complete = existing + b"final line\n"
+        async with self.session_factory() as db:
+            await append_raw_log_chunk(
+                db,
+                task_id=task_id,
+                sequence_no=1,
+                text=existing.decode(),
+            )
+            db.add(
+                TaskIngestCursor(
+                    task_id=task_id,
+                    stream_name="console_log",
+                    last_offset=len(existing),
+                    last_sequence_no=1,
+                )
+            )
+            await db.commit()
+
+        async with self.session_factory() as db:
+            await persist_raw_log_snapshot(
+                db,
+                task_id=task_id,
+                content=complete,
+            )
+            await db.commit()
+
+        async with self.session_factory() as db:
+            result = await db.execute(
+                select(TaskRawLogChunk)
+                .where(TaskRawLogChunk.task_id == task_id)
+                .order_by(TaskRawLogChunk.sequence_no.asc())
+            )
+            chunks = result.scalars().all()
+
+        assert [chunk.sequence_no for chunk in chunks] == [1, 2]
+        assert b"".join(chunk.content for chunk in chunks) == complete
+
     async def test_backfill_commits_missing_console_chunk(self):
         from sqlalchemy import select
 

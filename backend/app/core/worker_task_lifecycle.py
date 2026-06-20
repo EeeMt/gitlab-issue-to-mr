@@ -219,6 +219,7 @@ async def reset_execution_state(worker, db: AsyncSession, task_id: int) -> int:
 async def mark_task_running_and_commit(db: AsyncSession, task: Task) -> None:
     task.status = TaskStatus.RUNNING
     task.started_at = utcnow()
+    task.raw_logs_finalized_at = None
     await db.commit()
 
 
@@ -631,6 +632,10 @@ async def monitor_container_run(
             await worker._finalize_archive(task_id=task.id, container=container, db=artifact_db)
             await worker._backfill_console_log_from_archive(task_id=task.id, db=artifact_db)
             await worker._backfill_event_jsonl_from_archive(task_id=task.id, db=artifact_db)
+            artifact_task = await artifact_db.get(Task, task.id)
+            if artifact_task is not None:
+                artifact_task.raw_logs_finalized_at = utcnow()
+                await artifact_db.commit()
 
     stop_event = asyncio.Event()
     poll_task = asyncio.create_task(_poll_artifacts(stop_event))

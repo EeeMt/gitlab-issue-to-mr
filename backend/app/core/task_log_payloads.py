@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.task_event_archive import get_or_create_cursor
 from app.models import TaskPayload, TaskRawLogChunk
 
 
@@ -48,3 +49,29 @@ async def append_raw_log_chunk(
     db.add(chunk)
     await db.flush()
     return chunk
+
+
+async def persist_raw_log_snapshot(
+    db: AsyncSession,
+    *,
+    task_id: int,
+    content: bytes,
+) -> None:
+    """Persist bytes missing from a stable, full console.log snapshot."""
+    cursor = await get_or_create_cursor(db, task_id=task_id, stream_name="console_log")
+    if cursor.last_offset >= len(content):
+        return
+
+    new_bytes = content[cursor.last_offset:]
+    text = new_bytes.decode("utf-8", errors="replace")
+    if not text:
+        return
+
+    await append_raw_log_chunk(
+        db,
+        task_id=task_id,
+        sequence_no=cursor.last_sequence_no + 1,
+        text=text,
+    )
+    cursor.last_offset = len(content)
+    cursor.last_sequence_no += 1

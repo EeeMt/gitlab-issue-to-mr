@@ -1,6 +1,7 @@
 """Container management API endpoints."""
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -14,14 +15,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.task_operations import get_task_with_access_check
 from app.config import get_settings
 from app.core.docker_client import get_docker_client
-from app.database import get_db
+from app.database import AsyncSessionLocal, get_db
 from app.dependencies.auth import (
     get_optional_current_user,
     require_authenticated_user,
     require_page_access,
 )
-from app.dependencies.project_access import ProjectAccessScope, require_project_access_scope
-from app.models import Issue, Task, TaskLog, TaskRawLogChunk, User
+from app.dependencies.project_access import (
+    ProjectAccessScope,
+    require_project_access,
+    require_project_access_scope,
+)
+from app.models import Issue, Task, TaskLog, TaskRawLogChunk, TaskStatus, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -223,6 +228,99 @@ async def get_container_logs(
     )
 
 
+@router.get("/tasks/{task_id}/raw-log-stream")
+async def stream_task_raw_logs(
+    task_id: int,
+    since_sequence_no: int = 0,
+    access_scope: ProjectAccessScope = Depends(require_project_access_scope),
+):
+    """Stream persisted raw console-log chunks in sequence order."""
+    async with AsyncSessionLocal() as init_db:
+        result = await init_db.execute(select(Task).where(Task.id == task_id))
+        task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task {task_id} not found",
+        )
+    require_project_access(task.project_id, access_scope)
+
+    terminal_statuses = {
+        TaskStatus.COMPLETED,
+        TaskStatus.FAILED,
+        TaskStatus.CANCELLED,
+    }
+
+    async def generate_raw_log_events():
+        cursor = max(since_sequence_no, 0)
+        batch_size = 100
+        idle_cycles = 0
+
+        while True:
+            async with AsyncSessionLocal() as poll_db:
+                chunk_result = await poll_db.execute(
+                    select(TaskRawLogChunk)
+                    .where(
+                        TaskRawLogChunk.task_id == task_id,
+                        TaskRawLogChunk.sequence_no > cursor,
+                    )
+                    .order_by(TaskRawLogChunk.sequence_no.asc())
+                    .limit(batch_size)
+                )
+                chunks = chunk_result.scalars().all()
+                current_status = None
+                raw_logs_finalized_at = None
+                if len(chunks) < batch_size:
+                    status_result = await poll_db.execute(
+                        select(Task.status, Task.raw_logs_finalized_at).where(Task.id == task_id)
+                    )
+                    status_row = status_result.one_or_none()
+                    if status_row is not None:
+                        current_status, raw_logs_finalized_at = status_row
+
+            if chunks:
+                payload = []
+                for chunk in chunks:
+                    cursor = chunk.sequence_no
+                    payload.append(
+                        {
+                            "sequence_no": chunk.sequence_no,
+                            "content": chunk.content.decode("utf-8", errors="replace"),
+                        }
+                    )
+                yield f"event: batch\ndata: {json.dumps(payload)}\n\n"
+                idle_cycles = 0
+                if len(chunks) == batch_size:
+                    continue
+            else:
+                idle_cycles += 1
+
+            terminal_logs_ready = (
+                current_status in terminal_statuses
+                and (
+                    current_status != TaskStatus.CANCELLED
+                    or raw_logs_finalized_at is not None
+                )
+            )
+            if terminal_logs_ready:
+                yield "event: done\ndata: {}\n\n"
+                break
+
+            if idle_cycles and idle_cycles % 10 == 0:
+                yield ": keepalive\n\n"
+            await asyncio.sleep(1.5)
+
+    return StreamingResponse(
+        generate_raw_log_events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/tasks/{task_id}/container-logs")
 async def get_task_container_logs(
     task_id: int,
@@ -241,16 +339,25 @@ async def get_task_container_logs(
     Returns:
         Container logs
     """
-    task = await get_task_with_access_check(task_id, db, access_scope, current_user)
+    task = await get_task_with_access_check(
+        task_id,
+        db,
+        access_scope,
+        current_user,
+        require_operator=False,
+    )
+
+    raw_logs_finalized = task.raw_logs_finalized_at is not None
 
     if not task.container_id:
         return {
             "container_id": None,
             "logs": "",
             "status": task.status,
+            "raw_logs_finalized": raw_logs_finalized,
         }
 
-    async def _fetch_db_chunks() -> str:
+    async def _fetch_db_chunks() -> tuple[str, int]:
         # New format: TaskRawLogChunk (written by the event archive system)
         chunk_result = await db.execute(
             select(TaskRawLogChunk)
@@ -259,7 +366,10 @@ async def get_task_container_logs(
         )
         new_chunks = chunk_result.scalars().all()
         if new_chunks:
-            return "".join(c.content.decode("utf-8", errors="replace") for c in new_chunks)
+            return (
+                "".join(c.content.decode("utf-8", errors="replace") for c in new_chunks),
+                new_chunks[-1].sequence_no,
+            )
 
         # Legacy fallback: TaskLog with log_type IS NULL (old tasks without event archive)
         log_result = await db.execute(
@@ -268,15 +378,17 @@ async def get_task_container_logs(
             .order_by(TaskLog.id.asc())
         )
         chunks = log_result.scalars().all()
-        return "".join(c.message or "" for c in chunks)
+        return "".join(c.message or "" for c in chunks), 0
 
     if source == "db":
-        logs = await _fetch_db_chunks()
+        logs, last_sequence_no = await _fetch_db_chunks()
         return {
             "container_id": task.container_id,
             "logs": _compact_raw_log_noise(logs),
             "status": task.status,
             "source": "db",
+            "last_sequence_no": last_sequence_no,
+            "raw_logs_finalized": raw_logs_finalized,
         }
 
     try:
@@ -289,20 +401,24 @@ async def get_task_container_logs(
             "container_status": container.status,
             "logs": _compact_raw_log_noise(logs),
             "status": task.status,
+            "raw_logs_finalized": raw_logs_finalized,
         }
     except Exception as e:
         # Container is gone (completed/removed) — fall back to DB-stored raw log chunks
-        logs = await _fetch_db_chunks()
+        logs, last_sequence_no = await _fetch_db_chunks()
         if logs:
             return {
                 "container_id": task.container_id,
                 "logs": _compact_raw_log_noise(logs),
                 "status": task.status,
                 "source": "db",
+                "last_sequence_no": last_sequence_no,
+                "raw_logs_finalized": raw_logs_finalized,
             }
         logger.warning(f"Container gone and no DB chunks for task {task_id}: {e}")
         return {
             "container_id": task.container_id,
             "logs": "",
             "status": task.status,
+            "raw_logs_finalized": raw_logs_finalized,
         }

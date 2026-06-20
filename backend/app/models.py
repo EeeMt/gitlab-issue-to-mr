@@ -238,6 +238,7 @@ class Task(Base):
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    raw_logs_finalized_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     issue: Mapped[Optional["Issue"]] = relationship("Issue", back_populates="tasks")

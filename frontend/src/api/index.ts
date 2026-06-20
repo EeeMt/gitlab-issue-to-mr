@@ -1198,9 +1198,12 @@ export function streamTaskLogs(
 
 export async function getTaskContainerLogs(id: number, source?: 'db' | 'auto'): Promise<{
   container_id: string | null
-  container_status: string
+  container_status?: string
   logs: string
   status: string
+  source?: 'db'
+  last_sequence_no?: number
+  raw_logs_finalized?: boolean
 }> {
   const params = source ? { source } : {}
   const response = await api.get(`/tasks/${id}/container-logs`, { params })

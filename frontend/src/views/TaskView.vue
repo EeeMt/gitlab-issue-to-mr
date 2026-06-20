@@ -415,7 +415,13 @@ const archiveMetadata = ref<{ archive_name: string; archive_size_bytes: number; 
 const archiveDownloadLoading = ref(false)
 let pollTimer: number | null = null
 let logEventSource: EventSource | null = null
-let logStreamContainerId: string | null = null
+let logStreamTaskId: number | null = null
+let rawLogSequenceNo = 0
+let rawLogStreamFinished = false
+let rawLogsFinalized = false
+let rawTabOpen = false
+let rawLogSnapshotRequest = 0
+let rawLogReconnectInFlight = false
 let structuredLogSse: EventSource | null = null
 // Buffer for logs arriving faster than one-per-tick (e.g. during fast-forward
 // catch-up).  Flushed as a single reactive update via queueMicrotask to avoid
@@ -594,17 +600,12 @@ async function refreshIssueTasks() {
   }
 }
 
-function trimLogBuffer(content: string): string {
-  const maxLogSize = 200_000
-  return content.length > maxLogSize ? content.slice(-maxLogSize) : content
-}
-
 function closeLogStream() {
   if (logEventSource) {
     logEventSource.close()
     logEventSource = null
   }
-  logStreamContainerId = null
+  logStreamTaskId = null
 }
 
 function closeStructuredLogStream() {
@@ -615,6 +616,11 @@ function closeStructuredLogStream() {
   // Discard any buffered logs that haven't been flushed yet.
   _pendingLogBuffer.length = 0
   _logFlushScheduled = false
+}
+
+function shouldStreamRawLogs(): boolean {
+  const status = task.value?.status
+  return isActiveTaskStatus(status) || (status === 'cancelled' && !rawLogsFinalized)
 }
 
 function connectStructuredLogStream() {
@@ -681,39 +687,112 @@ function connectLogStream() {
   if (typeof EventSource === 'undefined') return
 
   const containerId = task.value?.container_id
-  if (!containerId || !isActiveTaskStatus(task.value?.status)) {
+  if (!containerId || !shouldStreamRawLogs()) {
     closeLogStream()
     return
   }
 
-  if (logEventSource && logStreamContainerId === containerId) {
+  const currentTaskId = taskId.value
+  if (logEventSource && logStreamTaskId === currentTaskId) {
     return
   }
+  if (rawLogStreamFinished) return
 
-  const previousContainerId = logStreamContainerId
   closeLogStream()
-  // Only clear logs when connecting to a different container (not a reconnect to the same)
-  if (previousContainerId !== containerId) {
-    containerLogs.value = ''
-  }
-  containerLogsLoading.value = true
-  logStreamContainerId = containerId
-  let receivedFirstMessage = false
-  logEventSource = new EventSource(`/api/containers/${containerId}/logs`)
+  containerLogsLoading.value = !containerLogs.value
+  logStreamTaskId = currentTaskId
+  const source = new EventSource(
+    `/api/tasks/${currentTaskId}/raw-log-stream?since_sequence_no=${rawLogSequenceNo}`
+  )
+  logEventSource = source
 
-  logEventSource.onmessage = (event) => {
-    receivedFirstMessage = true
-    containerLogsLoading.value = false
-    const chunk = event.data.endsWith('\n') ? event.data : `${event.data}\n`
-    containerLogs.value = trimLogBuffer(containerLogs.value + chunk)
-  }
-
-  logEventSource.onerror = () => {
-    containerLogsLoading.value = false
-    const likelyAuthFailure = !receivedFirstMessage
-    if (likelyAuthFailure || !isActiveTaskStatus(task.value?.status) || task.value?.container_id !== logStreamContainerId) {
-      closeLogStream()
+  source.addEventListener('batch', (event) => {
+    if (logEventSource !== source || taskId.value !== currentTaskId) return
+    let chunks: Array<{ sequence_no: number; content: string }>
+    try {
+      chunks = JSON.parse((event as MessageEvent).data)
+    } catch {
+      if (logEventSource === source) closeLogStream()
+      containerLogsLoading.value = false
+      return
     }
+    let appended = ''
+    for (const chunk of chunks) {
+      if (chunk.sequence_no <= rawLogSequenceNo) continue
+      rawLogSequenceNo = chunk.sequence_no
+      appended += chunk.content
+    }
+    if (appended) containerLogs.value += appended
+    containerLogsLoading.value = false
+  })
+
+  source.addEventListener('done', () => {
+    if (logEventSource !== source) return
+    rawLogStreamFinished = true
+    rawLogsFinalized = true
+    closeLogStream()
+    containerLogsLoading.value = false
+    void fetchRawLogSnapshot()
+    void fetchTask()
+  })
+
+  source.onerror = () => {
+    if (logEventSource !== source) return
+    containerLogsLoading.value = false
+    // Close explicitly so the browser cannot reconnect with a stale cursor and
+    // replay already-rendered chunks. The task poll reconnects with the latest
+    // sequence number.
+    closeLogStream()
+  }
+}
+
+async function fetchRawLogSnapshot(showLoading = false): Promise<boolean> {
+  const requestId = ++rawLogSnapshotRequest
+  const requestedTaskId = taskId.value
+  if (showLoading) containerLogsLoading.value = true
+  try {
+    const result = await getTaskContainerLogs(requestedTaskId, 'db')
+    if (requestId === rawLogSnapshotRequest && requestedTaskId === taskId.value) {
+      containerLogs.value = result.logs
+      rawLogSequenceNo = result.last_sequence_no ?? 0
+      rawLogsFinalized = result.raw_logs_finalized ?? false
+      return true
+    }
+  } catch {
+    if (requestId === rawLogSnapshotRequest && requestedTaskId === taskId.value) {
+      if (showLoading || !containerLogs.value) {
+        containerLogs.value = t('taskView.failedToFetchContainerLogs')
+      }
+    }
+  } finally {
+    if (requestId === rawLogSnapshotRequest && showLoading) {
+      containerLogsLoading.value = false
+    }
+  }
+  return false
+}
+
+async function reconnectLogStream(showLoading = false) {
+  if (rawLogReconnectInFlight || rawLogStreamFinished) return
+  if (!rawTabOpen || !shouldStreamRawLogs()) return
+
+  rawLogReconnectInFlight = true
+  const requestedTaskId = taskId.value
+  closeLogStream()
+  try {
+    // Every connection starts from an authoritative full snapshot. The cursor
+    // returned with that snapshot then selects only newer persisted chunks.
+    const snapshotLoaded = await fetchRawLogSnapshot(showLoading)
+    if (
+      snapshotLoaded
+      && rawTabOpen
+      && requestedTaskId === taskId.value
+      && shouldStreamRawLogs()
+    ) {
+      connectLogStream()
+    }
+  } finally {
+    rawLogReconnectInFlight = false
   }
 }
 
@@ -727,6 +806,7 @@ async function fetchTask() {
 
     if (isActiveTaskStatus(previousStatus) && !isActiveTaskStatus(task.value.status)) {
       await fetchLogs()
+      if (rawTabOpen) await fetchRawLogSnapshot()
     }
 
     // Auto-retry detection: task restarted (non-active → active) while we were watching.
@@ -781,33 +861,19 @@ async function refreshTask() {
 }
 
 async function onRawTabOpen() {
+  rawTabOpen = true
   if (isActiveTaskStatus(task.value?.status)) {
-    // Fetch stored DB chunks first to show historical content, then connect live SSE
-    if (!containerLogs.value && task.value?.container_id) {
-      try {
-        const result = await getTaskContainerLogs(taskId.value, 'db')
-        if (result.logs) containerLogs.value = result.logs
-      } catch {
-        // Ignore — live SSE will fill content
-      }
-    }
-    connectLogStream()
+    await reconnectLogStream(true)
   } else {
     // For completed/failed/cancelled tasks, always read from DB (TaskRawLogChunk → TaskLog fallback)
-    containerLogsLoading.value = true
-    try {
-      const result = await getTaskContainerLogs(taskId.value, 'db')
-      containerLogs.value = result.logs
-    } catch (error) {
-      containerLogs.value = t('taskView.failedToFetchContainerLogs')
-    } finally {
-      containerLogsLoading.value = false
-    }
+    const snapshotLoaded = await fetchRawLogSnapshot(true)
+    if (snapshotLoaded && shouldStreamRawLogs()) connectLogStream()
   }
 }
 
 function onRawTabClose() {
-  // Close SSE when leaving raw tab to free the backend thread
+  rawTabOpen = false
+  // Close SSE when leaving raw tab to free the backend connection.
   closeLogStream()
 }
 
@@ -852,6 +918,10 @@ function resetLogsState() {
   logs.value = ''
   containerLogs.value = ''
   archiveMetadata.value = null
+  rawLogSequenceNo = 0
+  rawLogStreamFinished = false
+  rawLogsFinalized = false
+  rawLogSnapshotRequest++
   closeStructuredLogStream()
   closeLogStream()
 }
@@ -957,9 +1027,14 @@ onMounted(async () => {
     if (isActiveTaskStatus(task.value?.status)) {
       fetchTask()
       if (!structuredLogSse) connectStructuredLogStream() // reconnect if disconnected
+      if (rawTabOpen && !logEventSource) void reconnectLogStream()
     } else {
-      closeLogStream()
       closeStructuredLogStream()
+      if (rawTabOpen && shouldStreamRawLogs()) {
+        if (!logEventSource) void reconnectLogStream()
+      } else {
+        closeLogStream()
+      }
     }
   }, 5000)
 })

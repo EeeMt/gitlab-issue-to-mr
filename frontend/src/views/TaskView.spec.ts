@@ -108,9 +108,13 @@ vi.mock('@vueuse/core', () => ({
 }))
 
 // Mock EventSource - create once, reuse
+const mockEventSourceListeners: Record<string, ((event: any) => void) | undefined> = {}
 const mockEventSourceInstance = {
   onmessage: null as ((event: any) => void) | null,
   onerror: null as (() => void) | null,
+  addEventListener: vi.fn((type: string, handler: (event: any) => void) => {
+    mockEventSourceListeners[type] = handler
+  }),
   close: vi.fn()
 }
 vi.stubGlobal('EventSource', vi.fn(() => mockEventSourceInstance))
@@ -493,6 +497,8 @@ describe('TaskView', () => {
     Object.values(mockMessage).forEach(fn => fn.mockReset())
     mockEventSourceInstance.close.mockClear()
     mockEventSourceInstance.onerror = null
+    mockEventSourceInstance.addEventListener.mockClear()
+    Object.keys(mockEventSourceListeners).forEach(key => delete mockEventSourceListeners[key])
     ;(mockApi.streamTaskLogs as Mock).mockReturnValue(mockEventSourceInstance)
     // Reset auth state to defaults to prevent leaks between tests
     const { authState, isAdmin } = await import('../auth')
@@ -522,7 +528,8 @@ describe('TaskView', () => {
       container_id: 'container-123',
       container_status: 'running',
       logs: 'Container log content',
-      status: 'running'
+      status: 'running',
+      raw_logs_finalized: false
     })
     ;(mockApi.getScheduledTasks as Mock).mockResolvedValue([])
     ;(mockApi.getConfig as Mock).mockResolvedValue({ runtime: {} })
@@ -1007,20 +1014,6 @@ describe('TaskView', () => {
       expect(wrapper.find('.log-content').exists()).toBe(true)
     })
 
-    it('should trim large log buffers', async () => {
-      await mountComponent()
-
-      await vi.waitFor(() => {
-        return (mockApi.getTaskLogs as Mock).mock.calls.length > 0
-      })
-
-      // Access the trimLogBuffer function
-      const largeLog = 'x'.repeat(300_000)
-      const trimmed = wrapper.vm.trimLogBuffer(largeLog)
-
-      expect(trimmed.length).toBe(200_000)
-    })
-
     it('should display task logs for completed tasks', async () => {
       await mountComponent({ status: 'completed' })
 
@@ -1456,6 +1449,162 @@ describe('TaskView', () => {
   })
 
   describe('onRawTabOpen and onRawTabClose', () => {
+    it('should stream running-task raw logs from the first persisted chunk', async () => {
+      await mountComponent({ status: 'running', container_id: 'container-123' })
+      ;(mockApi.getTaskContainerLogs as Mock).mockResolvedValue({
+        container_id: 'container-123',
+        logs: 'first line\n',
+        status: 'running',
+        source: 'db',
+        last_sequence_no: 1,
+        raw_logs_finalized: false
+      })
+
+      await wrapper.vm.onRawTabOpen()
+
+      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledWith(1, 'db')
+      expect(EventSource).toHaveBeenCalledWith(
+        '/api/tasks/1/raw-log-stream?since_sequence_no=1'
+      )
+
+      mockEventSourceListeners.batch?.({
+        data: JSON.stringify([
+          { sequence_no: 2, content: 'latest line\n' }
+        ])
+      })
+      await nextTick()
+
+      expect(wrapper.vm.containerLogs).toBe('first line\nlatest line\n')
+    })
+
+    it('should ignore replayed raw-log chunks and reconnect from the latest sequence', async () => {
+      await mountComponent({ status: 'running', container_id: 'container-123' })
+      ;(mockApi.getTaskContainerLogs as Mock).mockResolvedValueOnce({
+        container_id: 'container-123',
+        logs: 'one\ntwo\n',
+        status: 'running',
+        source: 'db',
+        last_sequence_no: 2,
+        raw_logs_finalized: false
+      })
+      await wrapper.vm.onRawTabOpen()
+
+      mockEventSourceListeners.batch?.({
+        data: JSON.stringify([
+          { sequence_no: 2, content: 'two\n' },
+          { sequence_no: 3, content: 'three\n' }
+        ])
+      })
+
+      expect(wrapper.vm.containerLogs).toBe('one\ntwo\nthree\n')
+
+      ;(mockApi.getTaskContainerLogs as Mock).mockResolvedValueOnce({
+        container_id: 'container-123',
+        logs: 'one\ntwo\nthree\n',
+        status: 'running',
+        source: 'db',
+        last_sequence_no: 3,
+        raw_logs_finalized: false
+      })
+      mockEventSourceInstance.onerror?.()
+      await wrapper.vm.reconnectLogStream()
+
+      expect(mockApi.getTaskContainerLogs).toHaveBeenCalledTimes(2)
+      expect(wrapper.vm.containerLogs).toBe('one\ntwo\nthree\n')
+      expect(EventSource).toHaveBeenLastCalledWith(
+        '/api/tasks/1/raw-log-stream?since_sequence_no=3'
+      )
+    })
+
+    it('should keep raw logs larger than the former 200 KB limit', async () => {
+      await mountComponent({ status: 'running', container_id: 'container-123' })
+      const fullLog = 'x'.repeat(300_000)
+      ;(mockApi.getTaskContainerLogs as Mock).mockResolvedValue({
+        container_id: 'container-123',
+        logs: fullLog,
+        status: 'running',
+        source: 'db',
+        last_sequence_no: 1,
+        raw_logs_finalized: false
+      })
+      await wrapper.vm.onRawTabOpen()
+
+      expect(wrapper.vm.containerLogs).toHaveLength(300_000)
+    })
+
+    it('should replace streamed content with the final DB snapshot without duplication', async () => {
+      await mountComponent({ status: 'running', container_id: 'container-123' })
+      ;(mockApi.getTaskContainerLogs as Mock)
+        .mockResolvedValueOnce({
+          container_id: 'container-123',
+          logs: '',
+          status: 'running',
+          source: 'db',
+          last_sequence_no: 0,
+          raw_logs_finalized: false
+        })
+        .mockResolvedValueOnce({
+          container_id: 'container-123',
+          logs: 'one\ntwo\n',
+          status: 'completed',
+          source: 'db',
+          last_sequence_no: 2,
+          raw_logs_finalized: true
+        })
+      await wrapper.vm.onRawTabOpen()
+
+      mockEventSourceListeners.batch?.({
+        data: JSON.stringify([
+          { sequence_no: 1, content: 'one\n' },
+          { sequence_no: 2, content: 'two\n' }
+        ])
+      })
+      mockEventSourceListeners.done?.({ data: '{}' })
+      await flushPromises()
+
+      expect(wrapper.vm.containerLogs).toBe('one\ntwo\n')
+    })
+
+    it('should keep streaming a cancelled task until raw logs are finalized', async () => {
+      await mountComponent({ status: 'cancelled', container_id: 'container-123' })
+      ;(mockApi.getTaskContainerLogs as Mock).mockResolvedValue({
+        container_id: 'container-123',
+        logs: 'before cancel\n',
+        status: 'cancelled',
+        source: 'db',
+        last_sequence_no: 1,
+        raw_logs_finalized: false
+      })
+
+      await wrapper.vm.onRawTabOpen()
+
+      expect(EventSource).toHaveBeenCalledWith(
+        '/api/tasks/1/raw-log-stream?since_sequence_no=1'
+      )
+      mockEventSourceListeners.batch?.({
+        data: JSON.stringify([{ sequence_no: 2, content: 'final line\n' }])
+      })
+
+      expect(wrapper.vm.containerLogs).toBe('before cancel\nfinal line\n')
+    })
+
+    it('should not open a stream for a cancelled task whose raw logs are finalized', async () => {
+      await mountComponent({ status: 'cancelled', container_id: 'container-123' })
+      ;(mockApi.getTaskContainerLogs as Mock).mockResolvedValue({
+        container_id: 'container-123',
+        logs: 'complete log\n',
+        status: 'cancelled',
+        source: 'db',
+        last_sequence_no: 2,
+        raw_logs_finalized: true
+      })
+
+      await wrapper.vm.onRawTabOpen()
+
+      expect(wrapper.vm.containerLogs).toBe('complete log\n')
+      expect(EventSource).not.toHaveBeenCalled()
+    })
+
     it('should fetch container logs for completed tasks via onRawTabOpen using source=db', async () => {
       await mountComponent({ status: 'completed', container_id: 'container-123' })
 

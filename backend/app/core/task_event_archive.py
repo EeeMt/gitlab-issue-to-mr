@@ -45,10 +45,12 @@ async def get_or_create_cursor(
 ) -> TaskIngestCursor:
     """Get or create an ingest cursor for the given task and stream."""
     result = await db.execute(
-        _sa_select(TaskIngestCursor).where(
+        _sa_select(TaskIngestCursor)
+        .where(
             TaskIngestCursor.task_id == task_id,
             TaskIngestCursor.stream_name == stream_name,
         )
+        .with_for_update()
     )
     cursor = result.scalar_one_or_none()
     if cursor is None:

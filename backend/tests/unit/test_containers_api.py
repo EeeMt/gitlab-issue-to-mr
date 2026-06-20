@@ -738,6 +738,139 @@ class ContainerLogsSSEEndpointTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# persisted raw-log SSE: GET /api/tasks/{task_id}/raw-log-stream
+# ---------------------------------------------------------------------------
+
+
+class TaskRawLogStreamEndpointTests(unittest.TestCase):
+    """Tests for sequence-based raw-log streaming from persisted chunks."""
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+
+    @staticmethod
+    def _session_context(session):
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=session)
+        context.__aexit__ = AsyncMock(return_value=False)
+        return context
+
+    def test_streams_chunks_in_one_batch_then_done(self):
+        from app.models import TaskStatus
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        task = MagicMock(id=7, project_id=12)
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+        init_session = MagicMock()
+        init_session.execute = AsyncMock(return_value=task_result)
+
+        first_chunk = MagicMock(sequence_no=1, content=b"first line\n")
+        second_chunk = MagicMock(sequence_no=2, content=b"second line\n")
+        chunk_result = MagicMock()
+        chunk_result.scalars.return_value.all.return_value = [first_chunk, second_chunk]
+        status_result = MagicMock()
+        status_result.one_or_none.return_value = (TaskStatus.COMPLETED, None)
+        poll_session = MagicMock()
+        poll_session.execute = AsyncMock(side_effect=[chunk_result, status_result])
+
+        session_factory = MagicMock(
+            side_effect=[
+                self._session_context(init_session),
+                self._session_context(poll_session),
+            ]
+        )
+        with (
+            patch("app.api.containers.AsyncSessionLocal", session_factory),
+            patch("app.main.refresh_runtime_config_if_stale", new=AsyncMock()),
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/tasks/7/raw-log-stream?since_sequence_no=0")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("event: batch", response.text)
+        self.assertIn('"sequence_no": 1', response.text)
+        self.assertIn("first line\\n", response.text)
+        self.assertIn('"sequence_no": 2', response.text)
+        self.assertIn("event: done", response.text)
+
+    def test_cancelled_stream_waits_for_raw_log_finalization(self):
+        from datetime import datetime
+
+        from app.models import TaskStatus
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        task = MagicMock(id=8, project_id=12)
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+        init_session = MagicMock()
+        init_session.execute = AsyncMock(return_value=task_result)
+
+        empty_chunks = MagicMock()
+        empty_chunks.scalars.return_value.all.return_value = []
+        pending_status = MagicMock()
+        pending_status.one_or_none.return_value = (TaskStatus.CANCELLED, None)
+        pending_session = MagicMock()
+        pending_session.execute = AsyncMock(side_effect=[empty_chunks, pending_status])
+
+        final_chunk = MagicMock(sequence_no=1, content=b"final line\n")
+        final_chunks = MagicMock()
+        final_chunks.scalars.return_value.all.return_value = [final_chunk]
+        finalized_status = MagicMock()
+        finalized_status.one_or_none.return_value = (
+            TaskStatus.CANCELLED,
+            datetime(2026, 6, 20),
+        )
+        finalized_session = MagicMock()
+        finalized_session.execute = AsyncMock(side_effect=[final_chunks, finalized_status])
+
+        session_factory = MagicMock(
+            side_effect=[
+                self._session_context(init_session),
+                self._session_context(pending_session),
+                self._session_context(finalized_session),
+            ]
+        )
+        with (
+            patch("app.api.containers.AsyncSessionLocal", session_factory),
+            patch("app.api.containers.asyncio.sleep", new=AsyncMock()),
+            patch("app.main.refresh_runtime_config_if_stale", new=AsyncMock()),
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/tasks/8/raw-log-stream")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("final line\\n", response.text)
+        self.assertLess(response.text.index("event: batch"), response.text.index("event: done"))
+
+    def test_missing_task_returns_404(self):
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = None
+        init_session = MagicMock()
+        init_session.execute = AsyncMock(return_value=task_result)
+        session_factory = MagicMock(side_effect=[self._session_context(init_session)])
+
+        with (
+            patch("app.api.containers.AsyncSessionLocal", session_factory),
+            patch("app.main.refresh_runtime_config_if_stale", new=AsyncMock()),
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/tasks/999/raw-log-stream")
+
+        self.assertEqual(response.status_code, 404)
+
+
+# ---------------------------------------------------------------------------
 # source=db for task container logs
 # ---------------------------------------------------------------------------
 
@@ -747,6 +880,73 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
 
     def tearDown(self):
         app.dependency_overrides.clear()
+
+    def test_source_db_is_readable_without_task_operator_permission(self):
+        from app.dependencies.auth import get_optional_current_user
+        from app.models import TaskStatus
+
+        access_scope = ProjectAccessScope(is_unrestricted=False, accessible_projects=[{"id": 1}])
+        project_member = MagicMock(id=99, platform_role="user")
+        task = MagicMock(
+            id=1,
+            project_id=1,
+            container_id="abc123",
+            status=TaskStatus.RUNNING,
+            raw_logs_finalized_at=None,
+        )
+        empty_raw_chunks = MagicMock()
+        empty_raw_chunks.scalars.return_value.all.return_value = []
+        empty_legacy_logs = MagicMock()
+        empty_legacy_logs.scalars.return_value.all.return_value = []
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[empty_raw_chunks, empty_legacy_logs])
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[get_optional_current_user] = lambda: project_member
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        with patch(
+            "app.api.containers.get_task_with_access_check",
+            new=AsyncMock(return_value=task),
+        ) as access_check:
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/tasks/1/container-logs?source=db")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(access_check.await_args.kwargs["require_operator"])
+
+    def test_source_db_returns_snapshot_cursor_with_raw_chunks(self):
+        from app.models import TaskStatus
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+        task = MagicMock(id=1, container_id="abc123", status=TaskStatus.RUNNING)
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+
+        first_chunk = MagicMock(sequence_no=4, content=b"first\n")
+        second_chunk = MagicMock(sequence_no=5, content=b"second\n")
+        raw_chunk_result = MagicMock()
+        raw_chunk_result.scalars.return_value.all.return_value = [first_chunk, second_chunk]
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(side_effect=[task_result, raw_chunk_result])
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/api/tasks/1/container-logs?source=db")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["logs"], "first\nsecond\n")
+        self.assertEqual(response.json()["last_sequence_no"], 5)
 
     def test_source_db_returns_db_chunks_directly(self):
         """When source=db, should fetch logs from DB without trying Docker."""
@@ -789,6 +989,7 @@ class TaskContainerLogsSourceDbTests(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["container_id"], "abc123")
         self.assertEqual(data["source"], "db")
+        self.assertEqual(data["last_sequence_no"], 0)
         self.assertIn("log line from db", data["logs"])
 
     def test_source_db_returns_empty_when_no_chunks(self):
