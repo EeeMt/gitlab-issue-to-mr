@@ -266,17 +266,23 @@
                           @click="promptView = 'final'"
                         >{{ t('taskView.finalRunPrompt') }}</button>
                       </div>
-                      <n-button
-                        class="task-prompt-height-toggle"
-                        size="small"
-                        secondary
-                        @click="promptFullHeight = !promptFullHeight"
-                      >
-                        <template #icon>
-                          <n-icon :component="promptFullHeight ? ChevronUpOutline : ChevronDownOutline" />
+                      <n-tooltip trigger="hover">
+                        <template #trigger>
+                          <n-button
+                            class="task-prompt-height-toggle"
+                            size="small"
+                            secondary
+                            circle
+                            :aria-label="promptFullHeight ? t('taskView.halfHeight') : t('taskView.fullHeight')"
+                            @click="promptFullHeight = !promptFullHeight"
+                          >
+                            <template #icon>
+                              <n-icon :component="promptFullHeight ? ChevronUpOutline : ChevronDownOutline" />
+                            </template>
+                          </n-button>
                         </template>
                         {{ promptFullHeight ? t('taskView.halfHeight') : t('taskView.fullHeight') }}
-                      </n-button>
+                      </n-tooltip>
                     </div>
                   </div>
                 </template>
@@ -1556,8 +1562,7 @@ onBeforeUnmount(() => {
 .task-prompt-height-toggle {
   flex: 0 0 auto;
   --n-height: 28px !important;
-  --n-border-radius: 6px !important;
-  --n-font-size: 12px !important;
+  --n-width: 28px !important;
 }
 
 .task-actions {
