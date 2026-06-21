@@ -172,8 +172,12 @@
 
           <IssueTaskPanel
             :tasks="issue.tasks || []"
-            :columns="taskColumns"
-            :row-props="taskRowProps"
+            :retried-task-map="retriedTaskMap"
+            :can-manage-task="canManageIssueTask"
+            :can-reschedule-task="canRescheduleIssueTask"
+            @open-task="openTask"
+            @retry-task="openRetryDrawer"
+            @reschedule-task="openRescheduleDrawer"
           />
 
           <IssueCIAutomationPanel
@@ -370,19 +374,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, h, onMounted, onUnmounted, reactive, watch, type VNodeChild } from 'vue'
+import { ref, computed, onMounted, onUnmounted, reactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NSpace, NCard, NTag, NSpin,
   NIcon, NInput, NDrawer, NDrawerContent,
   NRadio, NRadioGroup, NForm, NFormItem, NDatePicker, NModal, NPopconfirm, NScrollbar, NTooltip,
-  NSwitch, useMessage,
-  type DataTableColumns
+  NSwitch, useMessage
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
   AddOutline,
-  CalendarOutline,
   CloseCircleOutline,
   CreateOutline,
   RefreshOutline,
@@ -402,8 +404,7 @@ import {
 } from '../api'
 import PageHeader from '../components/PageHeader.vue'
 import { useBreakpoints } from '../composables/useBreakpoints'
-import { formatDateTimeUtc8Compact, parseUtcDate } from '../utils/datetime'
-import { formatDurationMs } from '../utils/format'
+import { formatDateTimeUtc8Compact } from '../utils/datetime'
 import { extractSlotErrorMessage } from '../utils/slotError'
 import { authState, isAdmin } from '../auth'
 import { renderMarkdown } from '../components/task-process/taskProcessUtils'
@@ -543,15 +544,6 @@ const issueStatusColors: Record<string, 'default' | 'info' | 'warning' | 'succes
   closed: 'success'
 }
 
-const taskStatusColors: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error'> = {
-  pending: 'default',
-  queued: 'info',
-  running: 'warning',
-  completed: 'success',
-  failed: 'error',
-  cancelled: 'default'
-}
-
 // --- Retry lookup ---
 const retriedTaskMap = computed(() => {
   const map = new Map<number, Task>()
@@ -564,182 +556,6 @@ const retriedTaskMap = computed(() => {
   return map
 })
 
-// --- Task Table Row Props ---
-function taskRowProps(row: Task) {
-  return {
-    style: 'cursor: pointer',
-    onClick: () => router.push({ name: 'TaskView', params: { id: row.id } })
-  }
-}
-
-// --- Task Table Columns ---
-const taskColumns = computed<DataTableColumns<Task>>(() => {
-  return [
-    {
-      title: t('issue.executionHistory'),
-      key: 'task_record',
-      render: (row: Task) => renderTaskRecord(row),
-    },
-  ]
-})
-
-function renderStatusTag(row: Task): VNodeChild {
-  return h(
-    NTag,
-    { type: taskStatusColors[row.status], size: 'tiny', round: true },
-    () => t(`status.${row.status}`)
-  )
-}
-
-function renderTaskPrompt(row: Task): VNodeChild {
-  const prompt = row.user_prompt || ''
-  const display = prompt.length > 96 ? prompt.slice(0, 96) + '…' : prompt
-  const children = [
-    h('span', { class: 'task-prompt-link__id' }, `#${row.id}`),
-    ...(row.is_retry
-      ? [h(NTag, { class: 'task-prompt-link__retry-badge', size: 'tiny', round: true }, () => t('common.retry'))]
-      : []),
-    h('span', { class: 'task-prompt-link__text' }, display)
-  ]
-  const trigger = h(
-    'a',
-    {
-      class: 'task-prompt-link',
-      onClick: (event: MouseEvent) => {
-        event.stopPropagation()
-        openTask(row.id)
-      }
-    },
-    children
-  )
-  return h(
-    NTooltip,
-    {
-      placement: 'top-start',
-      trigger: 'hover',
-      contentStyle: issueDetailTooltipContentStyle,
-      themeOverrides: issueDetailTooltipThemeOverrides
-    },
-    {
-      trigger: () => trigger,
-      default: () => h('div', { class: 'task-description-tooltip' }, prompt || '—')
-    }
-  )
-}
-
-function renderTaskTime(row: Task): VNodeChild {
-  return h(
-    NTooltip,
-    {
-      placement: 'top',
-      trigger: 'hover',
-      contentStyle: issueDetailTooltipContentStyle,
-      themeOverrides: issueDetailTooltipThemeOverrides
-    },
-    {
-      trigger: () => h(
-        'span',
-        { class: 'task-table__time task-record__meta-value' },
-        formatCompactDateTime(row.scheduled_at || row.created_at)
-      ),
-      default: () => h('div', { class: 'task-time-tooltip' }, [
-        h('div', `${t('common.created')} · ${formatCompactDateTime(row.created_at)}`),
-        ...(row.scheduled_at
-          ? [h('div', `${t('dashboard.scheduled')} · ${formatCompactDateTime(row.scheduled_at)}`)]
-          : [])
-      ])
-    }
-  )
-}
-
-function renderTaskAction(row: Task): VNodeChild | null {
-  const retryTask = retriedTaskMap.value.get(row.id)
-  if (retryTask) {
-    return h('span', { class: 'task-record__retried-as' }, [
-      t('issue.retriedAs'),
-      ' ',
-      h(
-        NButton,
-        {
-          text: true,
-          type: 'primary',
-          size: 'tiny',
-          onClick: (event: MouseEvent) => {
-            event.stopPropagation()
-            openTask(retryTask.id)
-          }
-        },
-        () => `Task #${retryTask.id}`
-      )
-    ])
-  }
-  if (!canManageIssueTask(row)) return null
-  if (canRescheduleIssueTask(row)) {
-    return h(
-      NButton,
-      {
-        size: 'tiny',
-        secondary: true,
-        strong: true,
-        round: true,
-        type: 'info',
-        onClick: (event: MouseEvent) => {
-          event.stopPropagation()
-          void openRescheduleDrawer(row)
-        }
-      },
-      {
-        icon: () => h(NIcon, { component: CalendarOutline }),
-        default: () => t('taskView.rescheduleTask'),
-      }
-    )
-  }
-  if (!['failed', 'cancelled'].includes(row.status)) return null
-  return h(
-    NButton,
-    {
-      size: 'tiny',
-      secondary: true,
-      strong: true,
-      round: true,
-      type: 'default',
-      onClick: (event: MouseEvent) => {
-        event.stopPropagation()
-        void openRetryDrawer(row)
-      }
-    },
-    {
-      icon: () => h(NIcon, { component: RefreshOutline }),
-      default: () => t('issue.retryTask'),
-    }
-  )
-}
-
-function renderTaskRecord(row: Task): VNodeChild {
-  const action = renderTaskAction(row)
-  const timeLabel = row.scheduled_at ? t('dashboard.scheduled') : t('issue.executionCreatedAt')
-
-  return h('div', { class: 'task-record' }, [
-    h('div', { class: 'task-record__main' }, [
-      renderStatusTag(row),
-      renderTaskPrompt(row),
-    ]),
-    h('div', { class: 'task-record__details' }, [
-      h('div', { class: 'task-record__meta' }, [
-        h('span', { class: 'task-record__meta-item' }, [
-          h('span', { class: 'task-record__meta-label' }, timeLabel),
-          renderTaskTime(row),
-        ]),
-        h('span', { class: 'task-record__meta-item' }, [
-          h('span', { class: 'task-record__meta-label' }, t('dashboard.duration')),
-          h('span', { class: 'task-table__time task-record__meta-value' }, formatTaskDuration(row)),
-        ]),
-      ]),
-      action ? h('div', { class: 'task-record__actions' }, [action]) : null,
-    ]),
-  ])
-}
-
 // --- Helpers ---
 function formatCompactDateTime(value?: string | null): string {
   if (!value) return '-'
@@ -748,14 +564,6 @@ function formatCompactDateTime(value?: string | null): string {
 
 function openTask(taskId: number) {
   router.push({ name: 'TaskView', params: { id: taskId } })
-}
-
-function formatTaskDuration(task: Pick<Task, 'started_at' | 'completed_at'>): string {
-  if (!task.started_at) return '—'
-  const started = parseUtcDate(task.started_at).getTime()
-  const ended = task.completed_at ? parseUtcDate(task.completed_at).getTime() : Date.now()
-  if (!Number.isFinite(started) || !Number.isFinite(ended) || ended < started) return '—'
-  return formatDurationMs(ended - started)
 }
 
 function canRescheduleIssueTask(task: Pick<Task, 'status' | 'scheduled_at'>): boolean {
@@ -1138,135 +946,6 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.issue-view :deep(.task-record) {
-  display: grid;
-  gap: 7px;
-  min-width: 0;
-  max-width: 100%;
-  padding: 2px 0;
-}
-
-.issue-view :deep(.task-record__main) {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.issue-view :deep(.task-record__main > .n-tag) {
-  flex: 0 0 auto;
-}
-
-.issue-view :deep(.task-record__details) {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  min-width: 0;
-  max-width: 100%;
-  flex-wrap: wrap;
-}
-
-.issue-view :deep(.task-record__meta) {
-  display: flex;
-  align-items: center;
-  gap: 6px 12px;
-  min-width: 0;
-  max-width: 100%;
-  flex: 1 1 240px;
-  flex-wrap: wrap;
-}
-
-.issue-view :deep(.task-record__meta-item) {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.issue-view :deep(.task-record__meta-label) {
-  color: var(--n-text-color-3);
-  font-size: 11px;
-  line-height: 1.25;
-}
-
-.issue-view :deep(.task-record__meta-value) {
-  min-width: 0;
-}
-
-.issue-view :deep(.task-record__actions) {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  min-width: 0;
-  max-width: 100%;
-  flex: 0 1 auto;
-  margin-left: auto;
-}
-
-.issue-view :deep(.task-record__actions .n-button) {
-  max-width: 100%;
-}
-
-.issue-view :deep(.task-record__retried-as) {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  min-width: 0;
-  max-width: 100%;
-  color: var(--n-text-color-3);
-  font-size: 11px;
-  line-height: 1.35;
-}
-
-.issue-view :deep(.task-prompt-link) {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1 1 auto;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  color: var(--n-text-color);
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.issue-view :deep(.task-prompt-link__retry-badge) {
-  flex: 0 0 auto;
-  --n-color: #eef2ff !important;
-  --n-border: 1px solid #c7d2fe !important;
-  --n-text-color: #4338ca !important;
-}
-
-.issue-view :deep(.task-prompt-link__id) {
-  flex: 0 0 auto;
-  color: var(--n-text-color-3);
-  font-family: var(--n-font-family-mono, 'SF Mono', monospace);
-  font-size: 10px;
-}
-
-.issue-view :deep(.task-prompt-link__text) {
-  min-width: 0;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.issue-view :deep(.task-table__time) {
-  display: inline-block;
-  color: var(--n-text-color-2);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
 .issue-card__header {
   display: flex;
   justify-content: space-between;
@@ -1491,16 +1170,6 @@ onMounted(() => {
   .issue-card__header {
     flex-direction: column;
     align-items: flex-start;
-  }
-
-  .issue-view :deep(.task-record__details) {
-    align-items: flex-start;
-  }
-
-  .issue-view :deep(.task-record__actions) {
-    justify-content: flex-start;
-    width: 100%;
-    margin-left: 0;
   }
 }
 </style>

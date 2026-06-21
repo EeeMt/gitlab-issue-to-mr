@@ -6,6 +6,7 @@ import IssueView from './IssueView.vue'
 import issueViewSource from './IssueView.vue?raw'
 import issueCiAutomationSource from '../components/issue-detail/IssueCIAutomationPanel.vue?raw'
 import issueTaskPanelSource from '../components/issue-detail/IssueTaskPanel.vue?raw'
+import issueTaskRecordSource from '../components/issue-detail/IssueTaskRecord.vue?raw'
 import rescheduleDrawerSource from '../components/RescheduleDrawer.vue?raw'
 import taskFormDrawerSource from '../components/TaskFormDrawer.vue?raw'
 
@@ -415,6 +416,7 @@ vi.mock('@vicons/ionicons5', () => {
   return {
     AddOutline: icon('AddOutline'),
     AddCircleOutline: icon('AddCircleOutline'),
+    ArrowRedoOutline: icon('ArrowRedoOutline'),
     BulbOutline: icon('BulbOutline'),
     CalendarOutline: icon('CalendarOutline'),
     ChevronDownOutline: icon('ChevronDownOutline'),
@@ -703,13 +705,15 @@ describe('IssueView', () => {
       expect(wrapper.find('[data-testid="issue-description-card"]').exists()).toBe(false)
     })
 
-	    it('renders task table with task rows', async () => {
+	    it('renders execution history as a semantic task list', async () => {
 	      setupDefaultMocks()
 	      wrapper = await mountComponent()
 	      const taskCard = wrapper.find('[data-testid="issue-tasks-card"]')
 	      expect(taskCard.exists()).toBe(true)
-	      const rows = wrapper.findAll('.n-data-table-row')
+	      const rows = wrapper.findAll('.issue-task-panel__item')
 	      expect(rows).toHaveLength(2)
+	      expect(taskCard.find('ol[data-testid="issue-task-list"]').exists()).toBe(true)
+	      expect(taskCard.find('.n-data-table').exists()).toBe(false)
 	    })
 
 	    it('renders CI automation opt-in and empty state', async () => {
@@ -1632,20 +1636,20 @@ describe('IssueView', () => {
   })
 
   // =========================================================================
-  // Task table structure
+  // Task history list structure
   // =========================================================================
-  describe('task table', () => {
+  describe('task history list', () => {
     it('renders correct number of task rows', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
-      const rows = wrapper.findAll('.n-data-table-row')
+      const rows = wrapper.findAll('.issue-task-panel__item')
       expect(rows).toHaveLength(2)
     })
 
     it('renders with empty tasks array', async () => {
       setupDefaultMocks({ tasks: [] })
       wrapper = await mountComponent()
-      const rows = wrapper.findAll('.n-data-table-row')
+      const rows = wrapper.findAll('.issue-task-panel__item')
       expect(rows).toHaveLength(0)
     })
 
@@ -1664,7 +1668,7 @@ describe('IssueView', () => {
       ]
       setupDefaultMocks({ tasks })
       wrapper = await mountComponent()
-      const rows = wrapper.findAll('.n-data-table-row')
+      const rows = wrapper.findAll('.issue-task-panel__item')
       expect(rows).toHaveLength(2)
     })
 
@@ -1780,409 +1784,203 @@ describe('IssueView', () => {
   })
 
   // =========================================================================
-  // Task column render functions
+  // Execution history card
   // =========================================================================
-  describe('taskColumns render functions', () => {
-    function taskRecordColumn(vm: any) {
-      const column = vm.taskColumns.find((c: any) => c.key === 'task_record')
-      expect(column).toBeDefined()
-      return column
-    }
+  describe('execution history card', () => {
+    it('uses a semantic timeline list instead of a data table', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
 
-    function renderTaskRecord(vm: any, row: Record<string, any>) {
-      return taskRecordColumn(vm).render({
-        id: 1,
-        status: 'completed',
-        user_prompt: 'Fix a bug',
-        created_at: '2024-01-01T10:00:00Z',
-        scheduled_at: null,
-        started_at: null,
-        completed_at: null,
-        is_retry: false,
-        retry_source_task_id: null,
-        ...row,
+      expect(wrapper.find('[data-testid="issue-task-list"]').element.tagName).toBe('OL')
+      expect(wrapper.findAll('.issue-task-panel__item')).toHaveLength(2)
+      expect(wrapper.find('.n-data-table').exists()).toBe(false)
+      expect(issueTaskPanelSource).not.toContain('<n-data-table')
+      expect(issueTaskPanelSource).toContain('issue-task-panel__rail')
+      expect(issueTaskPanelSource).toContain('align-items: center')
+      expect(issueTaskPanelSource).not.toContain('margin-top: 16px')
+      expect(issueTaskPanelSource).toContain('prefers-reduced-motion: no-preference')
+    })
+
+    it('renders status, task identity, prompt, metadata, and detail affordance', async () => {
+      setupDefaultMocks()
+      wrapper = await mountComponent()
+
+      const record = wrapper.find('[data-testid="issue-task-record-1"]')
+      expect(record.classes()).toContain('task-history-record--completed')
+      expect(record.find('.task-history-record__status').text()).toBe('status.completed')
+      expect(record.find('.task-history-record__id').text()).toBe('#1')
+      expect(record.find('.task-history-record__status-dot').exists()).toBe(true)
+      expect(record.find('.task-history-record__prompt-row .task-history-record__id').exists()).toBe(false)
+      expect(record.find('.task-history-record__content > .task-history-record__id').exists()).toBe(true)
+      expect(record.find('.task-history-record__prompt').text()).toBe('Fix the login bug')
+      expect(record.find('.task-history-record__meta').text()).toContain('issue.executionCreatedAt')
+      expect(record.find('.task-history-record__details-button').text()).toContain('issue.executionViewDetails')
+      expect(issueTaskRecordSource).toContain('-webkit-line-clamp: 2')
+      expect(issueTaskRecordSource).toContain('@media (hover: hover) and (pointer: fine)')
+      expect(issueTaskRecordSource).toContain('white-space: nowrap')
+      expect(issueTaskRecordSource).toContain('flex-direction: column')
+      expect(issueTaskRecordSource).toContain('grid-template-columns: 74px minmax(0, 1fr)')
+      expect(issueTaskRecordSource).toContain('grid-template-columns: 190px minmax(90px, 1fr)')
+      expect(issueTaskRecordSource).toContain('width: 74px')
+      expect(issueTaskRecordSource).toContain('height: 24px')
+      expect(issueTaskRecordSource).toContain(':show-arrow="false"')
+      expect(issueTaskRecordSource).toContain('--n-height: 26px')
+      expect(issueTaskRecordSource).toContain('--n-border-radius: 7px')
+      expect(record.find('.task-history-record__controls').element.children[0].className)
+        .toContain('task-history-record__details-button')
+      expect(record.find('.task-history-record__controls').element.children[1].className)
+        .toBe('task-history-record__action-row')
+    })
+
+    it('truncates exceptionally long prompts while retaining the full tooltip content', async () => {
+      const prompt = 'A'.repeat(180)
+      setupDefaultMocks({
+        tasks: [{ ...createMockIssue().tasks[0], user_prompt: prompt }],
       })
-    }
-
-    function promptTooltip(record: any) {
-      return record.children[0].children[1]
-    }
-
-    function promptTrigger(record: any) {
-      return promptTooltip(record).children.trigger()
-    }
-
-    function actionVNode(record: any) {
-      return record.children[1].children[1]?.children?.[0] ?? null
-    }
-
-    it('renders execution history as a single responsive record column', async () => {
-      setupDefaultMocks()
       wrapper = await mountComponent()
 
-      const columns = (wrapper.vm as any).taskColumns
-      expect(columns.map((column: any) => column.key)).toEqual(['task_record'])
-      expect(columns[0].width).toBeUndefined()
-      expect(issueTaskPanelSource).toContain(':show-header="false"')
-      expect(issueTaskPanelSource).toContain(':single-line="false"')
-      expect(issueViewSource).toContain('.issue-view :deep(.task-record__details)')
-      expect(issueViewSource).toContain('.issue-view :deep(.task-record__actions)')
+      const record = wrapper.find('[data-testid="issue-task-record-1"]')
+      expect(record.find('.task-history-record__prompt').text()).toBe(prompt)
+      expect(record.find('.task-description-tooltip').text()).toBe(prompt)
     })
 
-    it('renders status, retry badge, and prompt text in the first line', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-      const record = renderTaskRecord(vm, {
-        id: 2,
-        status: 'completed',
-        user_prompt: 'Retry me',
-        is_retry: true,
+    it('shows scheduled time and completed duration in the metadata line', async () => {
+      setupDefaultMocks({
+        tasks: [{
+          ...createMockIssue().tasks[0],
+          scheduled_at: '2024-01-03T09:30:00Z',
+          started_at: '2024-01-03T10:00:00Z',
+          completed_at: '2024-01-03T10:05:00Z',
+        }],
       })
-      const status = record.children[0].children[0]
-      const tooltip = promptTooltip(record)
-      const vnode = promptTrigger(record)
+      wrapper = await mountComponent()
 
-      expect(record.props.class).toBe('task-record')
-      expect(status.props.type).toBe('success')
-      expect(status.props.size).toBe('tiny')
-      expect(tooltip.props.contentStyle.fontSize).toBe('12px')
-      expect(tooltip.props.themeOverrides).toMatchObject({ color: '#111827', textColor: '#fff' })
-      expect(vnode.props.class).toBe('task-prompt-link')
-      expect(vnode.children).toHaveLength(3)
-      expect(vnode.children[0].props.class).toBe('task-prompt-link__id')
-      expect(vnode.children[0].children).toBe('#2')
-      expect(vnode.children[1].props).toMatchObject({
-        class: 'task-prompt-link__retry-badge',
-        size: 'tiny',
-        round: true,
-      })
-      expect(vnode.children[1].props.type).toBeUndefined()
-      expect(vnode.children[2].props.class).toBe('task-prompt-link__text')
-      expect(vnode.children[2].children).toBe('Retry me')
-      expect(issueViewSource).toContain('.issue-view :deep(.task-prompt-link)')
-      expect(issueViewSource).toContain('.issue-view :deep(.task-prompt-link__retry-badge)')
-      expect(issueViewSource).toContain('--n-color: #eef2ff')
-      expect(issueViewSource).toContain('--n-text-color: #4338ca')
+      const metadata = wrapper.find('[data-testid="issue-task-record-1"] .task-history-record__meta')
+      expect(metadata.text()).toContain('dashboard.scheduled')
+      expect(metadata.text()).toContain('formatted-2024-01-03T09:30:00Z')
+      expect(metadata.text()).toContain('5m 0s')
     })
 
-    it('renders prompt text with truncation for long text', async () => {
+    it('opens a task from the full record click target', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()
-      const vm = wrapper.vm as any
 
-      const longPrompt = 'A'.repeat(120)
-      const record = renderTaskRecord(vm, { id: 1, user_prompt: longPrompt })
-      const vnode = promptTrigger(record)
-
-      expect(vnode).toBeDefined()
-      expect(vnode.children.at(-1).children).toBe('A'.repeat(96) + '…')
-    })
-
-    it('renders prompt text without truncation for short text', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      const shortPrompt = 'Fix a bug'
-      const record = renderTaskRecord(vm, { id: 1, user_prompt: shortPrompt })
-      const tooltip = promptTooltip(record)
-      const vnode = promptTrigger(record)
-
-      expect(vnode.children.at(-1).children).toBe('Fix a bug')
-      expect(tooltip.children.default().children).toBe('Fix a bug')
-    })
-
-    it('does not render separate status, retry, time, or action columns', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const columns = (wrapper.vm as any).taskColumns
-
-      expect(columns.find((c: any) => c.key === 'status')).toBeUndefined()
-      expect(columns.find((c: any) => c.key === 'is_retry')).toBeUndefined()
-      expect(columns.find((c: any) => c.key === 'execution_time')).toBeUndefined()
-      expect(columns.find((c: any) => c.key === 'actions')).toBeUndefined()
-    })
-
-    it('renders created time as the primary execution time in the detail line', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-      const record = renderTaskRecord(vm, { created_at: '2024-01-01T10:00:00Z', scheduled_at: null })
-      const timeItem = record.children[1].children[0].children[0]
-      const result = timeItem.children[1]
-
-      expect(timeItem.children[0].children).toBe('issue.executionCreatedAt')
-      expect(result.props.contentStyle.fontSize).toBe('12px')
-      expect(result.props.themeOverrides).toMatchObject({ color: '#111827', textColor: '#fff' })
-      const trigger = result.children.trigger()
-      expect(trigger.props.class).toBe('task-table__time task-record__meta-value')
-      expect(trigger.children).toBe('formatted-2024-01-01T10:00:00Z')
-    })
-
-    it('prefers scheduled time and exposes both timestamps in its tooltip', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-      const record = renderTaskRecord(vm, {
-        created_at: '2024-01-01T10:00:00Z',
-        scheduled_at: '2024-01-03T09:30:00Z',
-      })
-      const timeItem = record.children[1].children[0].children[0]
-      const result = timeItem.children[1]
-
-      expect(timeItem.children[0].children).toBe('dashboard.scheduled')
-      expect(result.children.trigger().children).toBe('formatted-2024-01-03T09:30:00Z')
-      const tooltip = result.children.default()
-      expect(tooltip.children).toHaveLength(2)
-      expect(tooltip.children[0].children).toContain('formatted-2024-01-01T10:00:00Z')
-      expect(tooltip.children[1].children).toContain('formatted-2024-01-03T09:30:00Z')
-    })
-
-    it('renders duration from task start and completion time', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-      const record = renderTaskRecord(vm, {
-        started_at: '2024-01-01T10:00:00Z',
-        completed_at: '2024-01-01T10:05:00Z',
-      })
-      const result = record.children[1].children[0].children[1].children[1]
-
-      expect(result.props.class).toBe('task-table__time task-record__meta-value')
-      expect(result.children).toBe('5m 0s')
-    })
-
-    it('renders duration with dash when task has not started', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-      const record = renderTaskRecord(vm, { started_at: null, completed_at: null })
-      const result = record.children[1].children[0].children[1].children[1]
-
-      expect(result.children).toBe('—')
-    })
-
-    it('renders retry action for failed task when isOwner', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-      const record = renderTaskRecord(vm, {
-        id: 99, status: 'failed', is_retry: false, retry_source_task_id: null,
-      })
-      const vnode = actionVNode(record)
-
-      expect(vnode).toBeDefined()
-      expect(vnode.type).toBeDefined()
-      expect(vnode.children.default()).toBe('issue.retryTask')
-      expect(vnode.children.icon().props.component.name).toBe('RefreshOutline')
-    })
-
-    it('renders no action for completed task', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-      const record = renderTaskRecord(vm, {
-        id: 1, status: 'completed', is_retry: false, retry_source_task_id: null,
-      })
-
-      expect(actionVNode(record)).toBeNull()
-    })
-
-    it('renders "retried as" link when retry task exists', async () => {
-      const tasks = [
-        {
-          id: 1, issue_id: 1, project_id: 1, user_prompt: 'Fix bug',
-          status: 'failed', priority: 1, is_retry: false, retry_source_task_id: null,
-          created_at: '2024-01-01T10:00:00Z', updated_at: '2024-01-01T10:00:00Z',
-          initiator_username: 'testuser',
-        },
-        {
-          id: 3, issue_id: 1, project_id: 1, user_prompt: 'Fix bug (retry)',
-          status: 'running', priority: 1, is_retry: true, retry_source_task_id: 1,
-          created_at: '2024-01-01T11:00:00Z', updated_at: '2024-01-01T11:00:00Z',
-          initiator_username: 'testuser',
-        },
-      ]
-      setupDefaultMocks({ tasks })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-      const record = renderTaskRecord(vm, tasks[0])
-      const vnode = actionVNode(record)
-
-      expect(vnode).toBeDefined()
-      expect(vnode.type).toBe('span')
-      expect(vnode.props.class).toBe('task-record__retried-as')
-    })
-
-    it('renders no action for failed task when not owner', async () => {
-      const { authState } = await import('../auth')
-      authState.oidcEnabled = true
-      authState.user = { id: 99 } as any
-      setupDefaultMocks({ initiator_user_id: 5 })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      const record = renderTaskRecord(vm, {
-        id: 99, status: 'failed', is_retry: false, retry_source_task_id: null,
-      })
-      expect(actionVNode(record)).toBeNull()
-
-      // Restore
-      authState.oidcEnabled = false
-      authState.user = null
-    })
-
-    it('prompt link onClick navigates to task', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-      const record = renderTaskRecord(vm, { id: 42, user_prompt: 'test' })
-      const vnode = promptTrigger(record)
-
-      const mockEvent = { stopPropagation: vi.fn() }
-      vnode.props.onClick(mockEvent)
+      await wrapper.find('[data-testid="issue-task-record-1"] .task-history-record__open').trigger('click')
       await flushPromises()
 
-      expect(mockEvent.stopPropagation).toHaveBeenCalled()
       expect(router.currentRoute.value.name).toBe('TaskView')
-      expect(router.currentRoute.value.params.id).toBe('42')
+      expect(router.currentRoute.value.params.id).toBe('1')
     })
 
-    it('retry action onClick opens retry drawer', async () => {
+    it('keeps retry as a visible action and opens the retry drawer', async () => {
       setupDefaultMocks()
-      mockApi.retryTask.mockResolvedValue(undefined)
       wrapper = await mountComponent()
-      const vm = wrapper.vm as any
 
-      const record = renderTaskRecord(vm, {
-        id: 7, status: 'failed', is_retry: false, retry_source_task_id: null,
-      })
-      const vnode = actionVNode(record)
-
-      const mockEvent = { stopPropagation: vi.fn() }
-      vnode.props.onClick(mockEvent)
+      const record = wrapper.find('[data-testid="issue-task-record-2"]')
+      const action = record.find('.task-history-record__actions .n-button')
+      expect(action.text()).toContain('issue.retryTask')
+      expect(action.find('.task-history-record__trailing-icon').attributes('data-icon'))
+        .toBe('ArrowRedoOutline')
+      await action.trigger('click')
       await flushPromises()
 
-      expect(mockEvent.stopPropagation).toHaveBeenCalled()
-      expect(mockApi.retryTask).not.toHaveBeenCalled()
-      expect(vm.showRetryDrawer).toBe(true)
-      expect(vm.retryTargetTask?.id).toBe(7)
+      expect((wrapper.vm as any).showRetryDrawer).toBe(true)
+      expect((wrapper.vm as any).retryTargetTask?.id).toBe(2)
     })
 
-    it('reschedule action opens reschedule drawer for pending scheduled task', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      const record = renderTaskRecord(vm, {
-        id: 8,
-        status: 'pending',
-        scheduled_at: '2024-01-01T12:00:00Z',
-        is_retry: false,
-        retry_source_task_id: null,
+    it('shows reschedule for queued tasks and opens the reschedule drawer', async () => {
+      setupDefaultMocks({
+        tasks: [{ ...createMockIssue().tasks[0], id: 8, status: 'queued' }],
       })
-      const vnode = actionVNode(record)
+      wrapper = await mountComponent()
 
-      expect(vnode.children.default()).toBe('taskView.rescheduleTask')
-      expect(vnode.children.icon().props.component.name).toBe('CalendarOutline')
-      const mockEvent = { stopPropagation: vi.fn() }
-      vnode.props.onClick(mockEvent)
+      const action = wrapper.find('[data-testid="issue-task-record-8"] .task-history-record__actions .n-button')
+      expect(action.text()).toContain('taskView.rescheduleTask')
+      expect(action.find('.task-history-record__trailing-icon').attributes('data-icon'))
+        .toBe('CalendarOutline')
+      await action.trigger('click')
       await flushPromises()
 
-      expect(mockEvent.stopPropagation).toHaveBeenCalled()
-      expect(vm.showRescheduleDrawer).toBe(true)
-      expect(vm.rescheduleTargetTask?.id).toBe(8)
+      expect((wrapper.vm as any).showRescheduleDrawer).toBe(true)
+      expect((wrapper.vm as any).rescheduleTargetTask?.id).toBe(8)
     })
 
-    it('renders reschedule action for task initiator even when issue is owned by another user', async () => {
-      const { authState } = await import('../auth')
-      authState.oidcEnabled = true
-      authState.user = { id: 99 } as any
-      setupDefaultMocks({ initiator_user_id: 5 })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      const record = renderTaskRecord(vm, {
-        id: 8,
-        status: 'pending',
-        scheduled_at: '2024-01-01T12:00:00Z',
-        is_retry: false,
-        retry_source_task_id: null,
-        initiator_user_id: 99,
-        initiator_gitlab_user_id: null,
-      })
-
-      expect(actionVNode(record)).not.toBeNull()
-
-      authState.oidcEnabled = false
-      authState.user = null
-    })
-
-    it('renders reschedule action for queued task', async () => {
-      setupDefaultMocks()
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      const record = renderTaskRecord(vm, {
+    it('links a failed source task to the task that retried it', async () => {
+      const source = {
+        ...createMockIssue().tasks[1],
+        id: 7,
+        user_prompt: 'Original attempt',
+      }
+      const retry = {
+        ...createMockIssue().tasks[0],
         id: 9,
-        status: 'queued',
-        scheduled_at: null,
-        is_retry: false,
-        retry_source_task_id: null,
-      })
-      const vnode = actionVNode(record)
-
-      expect(vnode).toBeDefined()
-      expect(vnode.type).toBeDefined()
-    })
-
-    it('does not render reschedule for unscheduled pending task', async () => {
-      setupDefaultMocks()
+        is_retry: true,
+        retry_source_task_id: 7,
+        user_prompt: 'Retry attempt',
+      }
+      setupDefaultMocks({ tasks: [source, retry] })
       wrapper = await mountComponent()
-      const vm = wrapper.vm as any
 
-      const record = renderTaskRecord(vm, {
-        id: 10,
-        status: 'pending',
-        scheduled_at: null,
-        is_retry: false,
-        retry_source_task_id: null,
-      })
-
-      expect(actionVNode(record)).toBeNull()
-    })
-
-    it('"retried as" button navigates to retry task', async () => {
-      const tasks = [
-        {
-          id: 1, issue_id: 1, project_id: 1, user_prompt: 'Fix bug',
-          status: 'failed', priority: 1, is_retry: false, retry_source_task_id: null,
-          created_at: '2024-01-01T10:00:00Z', updated_at: '2024-01-01T10:00:00Z',
-          initiator_username: 'testuser',
-        },
-        {
-          id: 5, issue_id: 1, project_id: 1, user_prompt: 'Fix bug (retry)',
-          status: 'completed', priority: 1, is_retry: true, retry_source_task_id: 1,
-          created_at: '2024-01-01T11:00:00Z', updated_at: '2024-01-01T11:00:00Z',
-          initiator_username: 'testuser',
-        },
-      ]
-      setupDefaultMocks({ tasks })
-      wrapper = await mountComponent()
-      const vm = wrapper.vm as any
-
-      const record = renderTaskRecord(vm, tasks[0])
-      const vnode = actionVNode(record)
-      // children[2] is the NButton vnode for "Task #5"
-      const btnVnode = vnode.children[2]
-      const mockEvent = { stopPropagation: vi.fn() }
-      btnVnode.props.onClick(mockEvent)
+      const link = wrapper.find('[data-testid="issue-task-record-7"] .task-history-record__retried-as .n-button')
+      expect(link.text()).toContain('Task #9')
+      await link.trigger('click')
       await flushPromises()
 
-      expect(mockEvent.stopPropagation).toHaveBeenCalled()
       expect(router.currentRoute.value.name).toBe('TaskView')
-      expect(router.currentRoute.value.params.id).toBe('5')
+      expect(router.currentRoute.value.params.id).toBe('9')
+    })
+
+    it('hides management actions when the current user cannot manage the task', async () => {
+      const { authState } = await import('../auth')
+      authState.oidcEnabled = true
+      authState.user = { id: 99 } as any
+      setupDefaultMocks({
+        initiator_user_id: 5,
+        tasks: [{
+          ...createMockIssue().tasks[1],
+          initiator_user_id: 5,
+          initiator_gitlab_user_id: null,
+        }],
+      })
+      wrapper = await mountComponent()
+
+      expect(wrapper.find('.task-history-record__actions').exists()).toBe(false)
+
+      authState.oidcEnabled = false
+      authState.user = null
+    })
+
+    it('hides reschedule for queued tasks the current user cannot manage', async () => {
+      const { authState } = await import('../auth')
+      authState.oidcEnabled = true
+      authState.user = { id: 99 } as any
+      setupDefaultMocks({
+        initiator_user_id: 5,
+        tasks: [{
+          ...createMockIssue().tasks[0],
+          id: 8,
+          status: 'queued',
+          initiator_user_id: 5,
+          initiator_gitlab_user_id: null,
+        }],
+      })
+      wrapper = await mountComponent()
+
+      expect(wrapper.find('[data-testid="issue-task-record-8"] .task-history-record__actions').exists())
+        .toBe(false)
+
+      authState.oidcEnabled = false
+      authState.user = null
+    })
+
+    it('renders a quiet empty state when the issue has no tasks', async () => {
+      setupDefaultMocks({ tasks: [], task_count: 0 })
+      wrapper = await mountComponent()
+
+      const empty = wrapper.find('.issue-task-panel__empty')
+      expect(empty.exists()).toBe(true)
+      expect(empty.text()).toContain('issue.noExecutionYet')
+      expect(empty.text()).toContain('issue.noExecutionHint')
     })
   })
 

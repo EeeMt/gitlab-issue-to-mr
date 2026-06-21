@@ -405,6 +405,7 @@ const zhCN = {
     executionTime: '时间',
     executionHistory: '执行记录',
     executionHistoryHint: '点击任意任务查看完整过程与交付结果',
+    executionViewDetails: '查看详情',
     requirementContext: '需求上下文',
     deliveryOverview: '交付概览',
     deliveryStatus: '代码交付',

@@ -407,6 +407,7 @@ const en = {
     executionTime: 'Time',
     executionHistory: 'Run History',
     executionHistoryHint: 'Select a task to inspect its full process and delivery result',
+    executionViewDetails: 'View details',
     requirementContext: 'Requirement Context',
     deliveryOverview: 'Delivery Overview',
     deliveryStatus: 'Code Delivery',
