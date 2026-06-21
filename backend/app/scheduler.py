@@ -123,10 +123,9 @@ class Scheduler:
 
             # Check issue mutex — prevents concurrent tasks on the same issue.
             # Tasks without issue_id are independent and skip the shared mutex.
-            if task.issue_id is not None:
-                if task.issue_id in self._running_issues:
-                    logger.debug(f"Issue {task.issue_id} already running, skipping")
-                    return
+            if task.issue_id in self._running_issues:
+                logger.debug(f"Issue {task.issue_id} already running, skipping")
+                return
 
             # Execute task
             await self._execute_task(db, task)
@@ -151,7 +150,7 @@ class Scheduler:
             )
             rows = result.fetchall()
             active_task_ids = {row[0] for row in rows}
-            active_issue_ids = {row[1] for row in rows if row[1] is not None}
+            active_issue_ids = {row[1] for row in rows}
 
             stale_tasks = self._running_tasks - active_task_ids
             for task_id in stale_tasks:
@@ -348,10 +347,9 @@ class Scheduler:
                     task.error_message = json.dumps(usage_limit_exceeded_detail(exc))
                     task.completed_at = utcnow()
                     await db.commit()
-                    if issue_id is not None:
-                        await release_issue_execution_lock(db, issue_id=issue_id)
-                        await db.commit()
-                        await maybe_update_issue_status(db, issue_id)
+                    await release_issue_execution_lock(db, issue_id=issue_id)
+                    await db.commit()
+                    await maybe_update_issue_status(db, issue_id)
                     return
 
             # Update status to RUNNING
@@ -362,12 +360,10 @@ class Scheduler:
             # Track in memory AFTER the DB commit so _reconcile_running_state
             # (which queries for RUNNING tasks) doesn't race with the update.
             self._running_tasks.add(task_id)
-            if issue_id is not None:
-                self._running_issues.add(issue_id)
+            self._running_issues.add(issue_id)
 
             # Any active task means the issue is currently in progress.
-            if issue_id is not None:
-                await self._transition_issue_to_in_progress(db, issue_id)
+            await self._transition_issue_to_in_progress(db, issue_id)
 
             # Execute via worker in a thread pool WITHOUT waiting
             asyncio.create_task(self._run_task_background(task_id))
@@ -386,8 +382,7 @@ class Scheduler:
 
             # Clean up tracking (may not have been added yet, discard is idempotent)
             self._running_tasks.discard(task_id)
-            if issue_id is not None:
-                self._running_issues.discard(issue_id)
+            self._running_issues.discard(issue_id)
 
     async def _transition_issue_to_in_progress(self, db: AsyncSession, issue_id: int) -> None:
         """Auto-transition issue OPEN/COMPLETED → IN_PROGRESS when a task starts running."""
@@ -441,7 +436,7 @@ class Scheduler:
                         select(Task).where(Task.id == task_id)
                     )
                     task = result.scalar_one_or_none()
-                    if task and task.issue_id is not None:
+                    if task:
                         # Guard: only release the DB lock and in-memory slot if WE still hold it.
                         # If _reconcile_running_state already cleared us and a replacement task
                         # re-acquired the lock for this issue, releasing here would corrupt the
@@ -518,8 +513,7 @@ class Scheduler:
                                 f"status={c_status}, issue_id={task.issue_id})"
                             )
                             self._running_tasks.add(task_id)
-                            if task.issue_id is not None:
-                                self._running_issues.add(task.issue_id)
+                            self._running_issues.add(task.issue_id)
                             resumed_task_ids.add(task_id)
                             asyncio.create_task(
                                 self._resume_task_background(task_id, container.name)
@@ -603,7 +597,7 @@ class Scheduler:
                         select(Task).where(Task.id == task_id)
                     )
                     task = result.scalar_one_or_none()
-                    if task and task.issue_id is not None:
+                    if task:
                         lock_result = await db.execute(
                             select(IssueExecutionLock).where(
                                 IssueExecutionLock.issue_id == task.issue_id

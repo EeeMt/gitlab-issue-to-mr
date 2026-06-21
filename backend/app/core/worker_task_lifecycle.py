@@ -180,8 +180,6 @@ async def load_resume_task_or_fail(db: AsyncSession, task_id: int) -> Task | Non
 
 
 async def load_issue_for_task(db: AsyncSession, task: Task) -> Issue | None:
-    if not task.issue_id:
-        return None
     return await db.get(Issue, task.issue_id)
 
 
@@ -270,7 +268,7 @@ async def prepare_execute_task_context(
         return None
 
     issue = await load_issue_for_task(db, task)
-    if task.issue_id and not issue:
+    if not issue:
         return {
             "handled": True,
             "result": await fail_missing_parent_issue(db, task),

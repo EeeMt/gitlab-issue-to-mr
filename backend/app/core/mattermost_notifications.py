@@ -344,18 +344,18 @@ def _build_attachment_fields(
         MATTERMOST_FIELD_PROJECT: ("项目", f"#{task.project_id}", True),
         MATTERMOST_FIELD_ISSUE: (
             "Issue",
-            f"#{task.issue_id}" if task.issue_id is not None else "-",
+            f"#{task.issue_id}",
             True,
         ),
         MATTERMOST_FIELD_MERGE_REQUEST: (
             "Merge Request",
-            (getattr(render_issue, "merge_request_url", None) or "-") if task.issue_id else "-",
+            (getattr(render_issue, "merge_request_url", None) or "-"),
             True,
         ),
         MATTERMOST_FIELD_INITIATOR: ("发起人", task.initiator_username or "-", True),
         MATTERMOST_FIELD_STATUS: ("状态", task.status.value, True),
-        MATTERMOST_FIELD_BRANCH: ("分支", (getattr(render_issue, "branch_name", None) or "-") if task.issue_id else "-", True),
-        MATTERMOST_FIELD_TARGET_BRANCH: ("目标分支", (getattr(render_issue, "target_branch", None) or "-") if task.issue_id else "-", True),
+        MATTERMOST_FIELD_BRANCH: ("分支", (getattr(render_issue, "branch_name", None) or "-"), True),
+        MATTERMOST_FIELD_TARGET_BRANCH: ("目标分支", (getattr(render_issue, "target_branch", None) or "-"), True),
         MATTERMOST_FIELD_SCHEDULED_AT: ("预约时间", _format_datetime(task.scheduled_at), False),
         MATTERMOST_FIELD_SCHEDULE_CHANGE: ("时间变更", schedule_change or "-", False),
         MATTERMOST_FIELD_ERROR: ("错误摘要", (task.error_message or "-")[:500], False),
@@ -394,8 +394,7 @@ def _build_card_markdown(
         f"- 状态: `{task.status.value}`",
     ]
 
-    if task.issue_id is not None:
-        lines.append(f"- Issue: `#{task.issue_id}`")
+    lines.append(f"- Issue: `#{task.issue_id}`")
     render_issue = _resolve_render_issue(task, issue)
     if render_issue and getattr(render_issue, "merge_request_iid", None) is not None:
         lines.append(f"- Merge Request: `!{render_issue.merge_request_iid}`")
@@ -464,16 +463,12 @@ async def notify_task_event(
                     "notify_task_event: task %s not found on reload; skipping notification", task_id_val
                 )
                 return
-            if task.issue_id is not None:
-                issue_result = await reload_session.execute(select(Issue).where(Issue.id == task.issue_id))
-                render_issue = issue_result.scalar_one_or_none()
-                if render_issue is not None:
-                    reload_session.expunge(render_issue)
-                reload_session.expunge(task)
-            else:
-                render_issue = None
-                reload_session.expunge(task)
-    elif task.issue_id is not None and "issue" in task_state.unloaded:
+            issue_result = await reload_session.execute(select(Issue).where(Issue.id == task.issue_id))
+            render_issue = issue_result.scalar_one_or_none()
+            if render_issue is not None:
+                reload_session.expunge(render_issue)
+            reload_session.expunge(task)
+    elif "issue" in task_state.unloaded:
         async with _Session() as session:
             issue_result = await session.execute(
                 select(Issue).where(Issue.id == task.issue_id)
@@ -481,10 +476,8 @@ async def notify_task_event(
             render_issue = issue_result.scalar_one_or_none()
             if render_issue is not None:
                 session.expunge(render_issue)
-    elif task.issue_id is not None:
-        render_issue = getattr(task, "issue", None)
     else:
-        render_issue = None
+        render_issue = getattr(task, "issue", None)
 
     async with _Session() as session:
         result = await session.execute(

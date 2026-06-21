@@ -165,8 +165,7 @@ async def cleanup_system_data(
     tasks = list(task_result.scalars().all())
     tasks_by_issue: dict[int, list[Task]] = {}
     for task in tasks:
-        if task.issue_id is not None:
-            tasks_by_issue.setdefault(task.issue_id, []).append(task)
+        tasks_by_issue.setdefault(task.issue_id, []).append(task)
 
     selected_issues: list[Issue] = []
     for issue in issues:

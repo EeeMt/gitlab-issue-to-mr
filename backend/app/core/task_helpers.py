@@ -52,7 +52,7 @@ def _serialize_task(
         "container_id": task.container_id,
         "container_name": (
             f"codify-{task.id}-issue{task.issue_id}"
-            if task.container_id and task.issue_id
+            if task.container_id
             else None
         ),
         "commit_sha": task.commit_sha,

@@ -732,14 +732,14 @@ function invalidateRunInstructionPreview() {
 }
 
 async function handleRunInstructionPreview() {
-  if (!props.issueId && !props.task?.issue_id) return
+  if (!props.issueId && !props.task) return
   if (!taskMode.value) return
   const requestGeneration = ++previewRequestGeneration
   previewLoading.value = true
   previewError.value = ''
   try {
     const result = await previewRunInstructionTemplate({
-      issue_id: props.issueId ?? props.task!.issue_id!,
+      issue_id: props.issueId ?? props.task!.issue_id,
       task_mode: taskMode.value,
       user_prompt: prompt.value.trim() || props.issueDescription || '',
       run_instruction_template: runInstructionTemplate.value,

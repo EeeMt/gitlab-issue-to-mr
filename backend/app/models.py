@@ -181,7 +181,7 @@ class Task(Base):
     # Retry tracking
     is_retry: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     retry_source_task_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("tasks.id"), nullable=True
+        Integer, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
     )
     trigger_source: Mapped[str] = mapped_column(
         String(32), default="manual", server_default=text("'manual'"), nullable=False, index=True

@@ -24,9 +24,6 @@ async def _maybe_await(value):
 
 async def acquire_issue_execution_lock(db: AsyncSession, task: Task) -> bool:
     """Acquire the issue-level execution lock for a task."""
-    if task.issue_id is None:
-        return True
-
     issue_id = task.issue_id
     task_id = task.id
     try:
@@ -53,12 +50,9 @@ async def acquire_issue_execution_lock(db: AsyncSession, task: Task) -> bool:
 async def release_issue_execution_lock(
     db: AsyncSession,
     *,
-    issue_id: int | None,
+    issue_id: int,
 ) -> None:
-    """Release the issue-level execution lock if the task has an issue."""
-    if issue_id is None:
-        return
-
+    """Release the issue-level execution lock."""
     await _maybe_await(
         db.execute(delete(IssueExecutionLock).where(IssueExecutionLock.issue_id == issue_id))
     )

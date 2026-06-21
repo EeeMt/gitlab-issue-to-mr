@@ -45,20 +45,6 @@ class IssueExecutionLockHelperTests(unittest.IsolatedAsyncioTestCase):
         db.execute.assert_awaited_once()
         db.flush.assert_awaited_once()
 
-    async def test_acquire_issue_execution_lock_returns_true_for_issue_less_task(self):
-        from app.core.issue_execution_locks import acquire_issue_execution_lock
-
-        db = MagicMock()
-        db.execute = AsyncMock()
-        db.flush = AsyncMock()
-        task = MagicMock(id=7, issue_id=None)
-
-        acquired = await acquire_issue_execution_lock(db, task)
-
-        self.assertTrue(acquired)
-        db.execute.assert_not_called()
-        db.flush.assert_not_called()
-
     async def test_acquire_issue_execution_lock_returns_false_on_integrity_error(self):
         from sqlalchemy.exc import IntegrityError
 
@@ -83,16 +69,6 @@ class IssueExecutionLockHelperTests(unittest.IsolatedAsyncioTestCase):
         await release_issue_execution_lock(db, issue_id=11)
 
         db.execute.assert_awaited_once()
-
-    async def test_release_issue_execution_lock_skips_none_issue(self):
-        from app.core.issue_execution_locks import release_issue_execution_lock
-
-        db = MagicMock()
-        db.execute = AsyncMock()
-
-        await release_issue_execution_lock(db, issue_id=None)
-
-        db.execute.assert_not_called()
 
     async def test_cleanup_inactive_issue_execution_locks_removes_terminal_task_locks(self):
         from app.core.issue_execution_locks import cleanup_inactive_issue_execution_locks

@@ -349,7 +349,7 @@
               </n-card>
 
               <TaskContinuationPanel
-                v-if="task && isTerminal && task.issue_id"
+                v-if="task && isTerminal"
                 :task="task"
                 :can-append-followup-task="canAppendFollowupTask"
                 @append-followup-task="showCreateDrawer = true"
@@ -460,7 +460,7 @@
   <TaskFormDrawer
     v-model:show="showCreateDrawer"
     mode="create"
-    :issue-id="task?.issue_id ?? undefined"
+    :issue-id="task?.issue_id"
     :issue-description="issueDescription"
     data-testid="task-view-create-task-drawer"
     @created="handleAppendTaskCreated"
@@ -716,12 +716,11 @@ const latestIssueTask = computed(() => {
 })
 
 const isLatestIssueTask = computed(() =>
-  !!task.value?.issue_id && latestIssueTask.value?.id === task.value.id
+  latestIssueTask.value?.id === task.value?.id
 )
 
 const canAppendFollowupTask = computed(() =>
-  !!task.value?.issue_id
-  && isTerminal.value
+  isTerminal.value
   && isLatestIssueTask.value
   && issueStatus.value !== 'closed'
   && canManageTask.value
@@ -748,7 +747,7 @@ async function checkActiveRetry() {
     return
   }
   try {
-    const issueId = task.value.issue_id ?? task.value.issue?.id
+    const issueId = task.value.issue_id
     if (issueId) {
       if (issueTasks.value.length > 0) {
         // Find the latest retry task for this task (any status)
@@ -768,7 +767,7 @@ async function checkActiveRetry() {
 }
 
 async function refreshIssueTasks() {
-  const issueId = task.value?.issue_id ?? task.value?.issue?.id
+  const issueId = task.value?.issue_id
   if (!issueId) {
     issueTasks.value = []
     issueDescription.value = undefined

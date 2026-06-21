@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import false, func, or_, select
+from sqlalchemy import false, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -220,7 +220,7 @@ async def list_tasks(
             query = query.where(Task.issue.has(Issue.merge_request_iid.is_not(None)))
         else:
             query = query.where(
-                or_(Task.issue_id.is_(None), Task.issue.has(Issue.merge_request_iid.is_(None)))
+                Task.issue.has(Issue.merge_request_iid.is_(None))
             )
 
     # Text search on user_prompt (min 2, max 200 chars)
@@ -850,11 +850,10 @@ async def get_task_stats(
 
     # Fall back to GitLab API if no database stats
     merge_request_iid = None
-    if task.issue_id:
-        issue_result = await db.execute(select(Issue).where(Issue.id == task.issue_id))
-        issue = issue_result.scalar_one_or_none()
-        if issue:
-            merge_request_iid = issue.merge_request_iid
+    issue_result = await db.execute(select(Issue).where(Issue.id == task.issue_id))
+    issue = issue_result.scalar_one_or_none()
+    if issue:
+        merge_request_iid = issue.merge_request_iid
 
     if not merge_request_iid:
         return {"additions": 0, "deletions": 0, "total": 0}
@@ -1016,7 +1015,7 @@ async def update_task(
         & {"user_prompt", "run_instruction_template", "task_mode", "require_changes"}
     )
     if render_context_changed:
-        issue = await db.get(Issue, task.issue_id) if task.issue_id is not None else None
+        issue = await db.get(Issue, task.issue_id)
         template = task.run_instruction_template
         if template is None:
             template = select_run_instruction_template(
@@ -1141,8 +1140,7 @@ async def cancel_task(
     logger.info(f"Task {task_id} cancelled via API")
 
     # Auto-update issue status if no active tasks remain
-    if task.issue_id:
-        await maybe_update_issue_status(db, task.issue_id)
+    await maybe_update_issue_status(db, task.issue_id)
 
     return {"status": "success", "message": f"Task {task_id} cancelled"}
 
@@ -1183,8 +1181,7 @@ async def override_task_status(
     await db.commit()
     await db.refresh(task)
 
-    if task.issue_id:
-        await maybe_update_issue_status(db, task.issue_id)
+    await maybe_update_issue_status(db, task.issue_id)
 
     logger.info(f"Task {task_id} status manually overridden to {new_status.value}")
     return {"status": "success", "message": f"Task {task_id} status overridden to {new_status.value}"}
@@ -1288,11 +1285,9 @@ async def retry_task(
     )
     db.add(new_task)
     await db.flush()
-    issue = None
-    if new_task.issue_id is not None:
-        issue = (
-            await db.execute(select(Issue).where(Issue.id == new_task.issue_id))
-        ).scalar_one_or_none()
+    issue = (
+        await db.execute(select(Issue).where(Issue.id == new_task.issue_id))
+    ).scalar_one_or_none()
     retry_template = select_run_instruction_template(
         get_effective_settings(),
         task_mode=new_task.task_mode,
@@ -1534,7 +1529,7 @@ async def get_task_workspace_status(
     access_scope: ProjectAccessScope = Depends(require_project_access_scope),
 ):
     task = await get_task_with_access_check(task_id, db, access_scope, current_user)
-    if task.issue is None and task.issue_id is not None:
+    if task.issue is None:
         task.issue = await db.get(Issue, task.issue_id)
 
     settings = get_effective_settings()
@@ -1565,7 +1560,7 @@ async def delete_task_workspace(
     task = await get_task_with_access_check(task_id, db, access_scope, current_user)
     if task.status == TaskStatus.RUNNING:
         raise HTTPException(status_code=400, detail="Cannot delete workspace while task is running")
-    if task.issue is None and task.issue_id is not None:
+    if task.issue is None:
         task.issue = await db.get(Issue, task.issue_id)
     if not task.issue:
         raise HTTPException(status_code=404, detail="Workspace not available for task without issue")
