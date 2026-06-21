@@ -614,6 +614,39 @@ describe('IssueView', () => {
       expect(router.currentRoute.value.params.id).toBe('7')
     })
 
+    it('prioritizes a running task over newer queued and pending tasks', async () => {
+      setupDefaultMocks({
+        tasks: [
+          {
+            ...createMockIssue().tasks[0],
+            id: 7,
+            status: 'running',
+            user_prompt: 'Running work',
+            created_at: '2026-06-20T10:00:00Z',
+          },
+          {
+            ...createMockIssue().tasks[0],
+            id: 8,
+            status: 'queued',
+            user_prompt: 'Queued work',
+            created_at: '2026-06-20T11:00:00Z',
+          },
+          {
+            ...createMockIssue().tasks[0],
+            id: 9,
+            status: 'pending',
+            user_prompt: 'Pending work',
+            created_at: '2026-06-20T12:00:00Z',
+          },
+        ],
+      })
+      wrapper = await mountComponent()
+
+      const summary = wrapper.find('[data-testid="issue-current-execution"]')
+      expect(summary.text()).toContain('Task #7')
+      expect(summary.text()).toContain('Running work')
+    })
+
     it('renders delivery overview and basic issue information', async () => {
       setupDefaultMocks()
       wrapper = await mountComponent()

@@ -756,6 +756,8 @@ class TaskRawLogStreamEndpointTests(unittest.TestCase):
         return context
 
     def test_streams_chunks_in_one_batch_then_done(self):
+        from datetime import datetime
+
         from app.models import TaskStatus
 
         access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
@@ -773,7 +775,10 @@ class TaskRawLogStreamEndpointTests(unittest.TestCase):
         chunk_result = MagicMock()
         chunk_result.scalars.return_value.all.return_value = [first_chunk, second_chunk]
         status_result = MagicMock()
-        status_result.one_or_none.return_value = (TaskStatus.COMPLETED, None)
+        status_result.one_or_none.return_value = (
+            TaskStatus.COMPLETED,
+            datetime(2026, 6, 20),
+        )
         poll_session = MagicMock()
         poll_session.execute = AsyncMock(side_effect=[chunk_result, status_result])
 
@@ -796,6 +801,58 @@ class TaskRawLogStreamEndpointTests(unittest.TestCase):
         self.assertIn("first line\\n", response.text)
         self.assertIn('"sequence_no": 2', response.text)
         self.assertIn("event: done", response.text)
+
+    def test_completed_stream_waits_for_raw_log_finalization(self):
+        from datetime import datetime
+
+        from app.models import TaskStatus
+
+        access_scope = ProjectAccessScope(is_unrestricted=True, accessible_projects=[])
+        app.dependency_overrides[require_authenticated_context] = _make_auth_override()
+        app.dependency_overrides[require_project_access_scope] = lambda: access_scope
+
+        task = MagicMock(id=9, project_id=12)
+        task_result = MagicMock()
+        task_result.scalar_one_or_none.return_value = task
+        init_session = MagicMock()
+        init_session.execute = AsyncMock(return_value=task_result)
+
+        empty_chunks = MagicMock()
+        empty_chunks.scalars.return_value.all.return_value = []
+        pending_status = MagicMock()
+        pending_status.one_or_none.return_value = (TaskStatus.COMPLETED, None)
+        pending_session = MagicMock()
+        pending_session.execute = AsyncMock(side_effect=[empty_chunks, pending_status])
+
+        final_chunk = MagicMock(sequence_no=1, content=b"final line\n")
+        final_chunks = MagicMock()
+        final_chunks.scalars.return_value.all.return_value = [final_chunk]
+        finalized_status = MagicMock()
+        finalized_status.one_or_none.return_value = (
+            TaskStatus.COMPLETED,
+            datetime(2026, 6, 20),
+        )
+        finalized_session = MagicMock()
+        finalized_session.execute = AsyncMock(side_effect=[final_chunks, finalized_status])
+
+        session_factory = MagicMock(
+            side_effect=[
+                self._session_context(init_session),
+                self._session_context(pending_session),
+                self._session_context(finalized_session),
+            ]
+        )
+        with (
+            patch("app.api.containers.AsyncSessionLocal", session_factory),
+            patch("app.api.containers.asyncio.sleep", new=AsyncMock()),
+            patch("app.main.refresh_runtime_config_if_stale", new=AsyncMock()),
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/tasks/9/raw-log-stream")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("final line\\n", response.text)
+        self.assertLess(response.text.index("event: batch"), response.text.index("event: done"))
 
     def test_cancelled_stream_waits_for_raw_log_finalization(self):
         from datetime import datetime

@@ -138,6 +138,12 @@ vi.mock('naive-ui', () => ({
       ])
     },
   },
+  NScrollbar: {
+    name: 'NScrollbar',
+    setup(_props: any, { slots }: any) {
+      return () => h('div', { class: 'n-scrollbar' }, slots.default?.())
+    },
+  },
   NForm: {
     name: 'NForm',
     props: ['labelPlacement'],

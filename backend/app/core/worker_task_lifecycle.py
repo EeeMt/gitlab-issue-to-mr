@@ -12,7 +12,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ci_failure_logs import append_ci_failure_log
-from app.core.task_log_payloads import create_payload
+from app.core.task_log_payloads import create_payload, persist_raw_log_snapshot
 from app.core.utcnow import utcnow
 from app.core.worker_environment_variables import (
     build_worker_environment_map,
@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 _CONTAINER_METADATA_PATH = "/tmp/codify-runtime/task-metadata.json"
 _CONTAINER_DELIVERY_SUMMARY_PATH = "/tmp/codify-runtime/delivery-summary.md"
 _CONTAINER_DELIVERY_SUMMARY_VALIDATION_PATH = "/tmp/codify-runtime/delivery-summary-validation.json"
+_CONTAINER_CONSOLE_LOG_PATH = "/tmp/codify-runtime/console.log"
 
 
 def _build_delivery_summary_preview(text: str, limit: int = 120) -> tuple[str, bool]:
@@ -625,17 +626,34 @@ async def monitor_container_run(
                 logger.debug(f"[Task {task.id}] artifact poll error{resume_prefix}: {exc}")
             await asyncio.sleep(2)
 
-    async def _flush_artifacts_once() -> None:
+    async def _finalize_raw_logs_once() -> None:
+        async with session_factory() as artifact_db:
+            raw_console_log = await asyncio.to_thread(
+                worker.docker.read_file_from_container,
+                container,
+                _CONTAINER_CONSOLE_LOG_PATH,
+            )
+            if not isinstance(raw_console_log, bytes):
+                raise RuntimeError(
+                    f"Could not read {_CONTAINER_CONSOLE_LOG_PATH} from task container"
+                )
+            await persist_raw_log_snapshot(
+                artifact_db,
+                task_id=task.id,
+                content=raw_console_log,
+            )
+            artifact_task = await artifact_db.get(Task, task.id)
+            if artifact_task is None:
+                raise RuntimeError(f"Task {task.id} disappeared during raw-log finalization")
+            artifact_task.raw_logs_finalized_at = utcnow()
+            await artifact_db.commit()
+
+    async def _flush_other_artifacts_once() -> None:
         async with session_factory() as artifact_db:
             await worker._tail_event_jsonl(task_id=task.id, container=container, db=artifact_db)
-            await worker._tail_console_log(task_id=task.id, container=container, db=artifact_db)
             await worker._finalize_archive(task_id=task.id, container=container, db=artifact_db)
             await worker._backfill_console_log_from_archive(task_id=task.id, db=artifact_db)
             await worker._backfill_event_jsonl_from_archive(task_id=task.id, db=artifact_db)
-            artifact_task = await artifact_db.get(Task, task.id)
-            if artifact_task is not None:
-                artifact_task.raw_logs_finalized_at = utcnow()
-                await artifact_db.commit()
 
     stop_event = asyncio.Event()
     poll_task = asyncio.create_task(_poll_artifacts(stop_event))
@@ -656,18 +674,39 @@ async def monitor_container_run(
         f"exit_code={exit_code}, timed_out={timed_out}, chunks={log_chunks_saved}"
     )
 
+    raw_logs_finalized = False
+    for attempt in range(1, 4):
+        try:
+            await _finalize_raw_logs_once()
+            raw_logs_finalized = True
+            break
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                f"[Task {task.id}] Post-exit raw-log finalization attempt "
+                f"{attempt}/3 failed{resume_prefix}: {exc}"
+            )
+            if attempt < 3:
+                await asyncio.sleep(1)
+
     try:
-        await _flush_artifacts_once()
+        await _flush_other_artifacts_once()
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"[Task {task.id}] Post-exit artifact finalization error{resume_prefix}: {exc}")
 
     await db.refresh(task)
+    raw_logs_finalized = raw_logs_finalized or task.raw_logs_finalized_at is not None
     if task.status == TaskStatus.CANCELLED:
-        logger.info(f"[Task {task.id}] Task was cancelled during execution; removing container")
-        try:
-            worker.docker.remove_container(container, force=True)
-        except Exception:
-            pass
+        if raw_logs_finalized:
+            logger.info(f"[Task {task.id}] Task was cancelled during execution; removing container")
+            try:
+                worker.docker.remove_container(container, force=True)
+            except Exception:
+                pass
+        else:
+            logger.error(
+                f"[Task {task.id}] Retaining cancelled task container because raw logs "
+                "were not finalized"
+            )
         return False
 
     if issue:
@@ -770,9 +809,14 @@ async def monitor_container_run(
     elif issue:
         logger.debug(f"[Task {task.id}] Skipping MR description update: no merge_request_iid on issue #{issue.id}")
 
-    try:
-        worker.docker.remove_container(container, force=True)
-    except Exception as e:
-        logger.warning(f"[Task {task.id}] Failed to remove container{resume_prefix}: {e}")
+    if raw_logs_finalized:
+        try:
+            worker.docker.remove_container(container, force=True)
+        except Exception as e:
+            logger.warning(f"[Task {task.id}] Failed to remove container{resume_prefix}: {e}")
+    else:
+        logger.error(
+            f"[Task {task.id}] Retaining task container because raw logs were not finalized"
+        )
 
     return exit_code == 0

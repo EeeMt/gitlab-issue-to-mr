@@ -1637,6 +1637,40 @@ describe('TaskView', () => {
       expect(EventSource).not.toHaveBeenCalled()
     })
 
+    it('should keep streaming a completed task until raw logs are finalized', async () => {
+      await mountComponent({ status: 'completed', container_id: 'container-123' })
+      ;(mockApi.getTaskContainerLogs as Mock).mockResolvedValue({
+        container_id: 'container-123',
+        logs: 'before finalization\n',
+        status: 'completed',
+        source: 'db',
+        last_sequence_no: 1,
+        raw_logs_finalized: false
+      })
+
+      await wrapper.vm.onRawTabOpen()
+
+      expect(EventSource).toHaveBeenCalledWith(
+        '/api/tasks/1/raw-log-stream?since_sequence_no=1'
+      )
+    })
+
+    it('should not stream a completed task whose raw logs are finalized', async () => {
+      await mountComponent({ status: 'completed', container_id: 'container-123' })
+      ;(mockApi.getTaskContainerLogs as Mock).mockResolvedValue({
+        container_id: 'container-123',
+        logs: 'complete log\n',
+        status: 'completed',
+        source: 'db',
+        last_sequence_no: 2,
+        raw_logs_finalized: true
+      })
+
+      await wrapper.vm.onRawTabOpen()
+
+      expect(EventSource).not.toHaveBeenCalled()
+    })
+
     it('should fetch container logs for completed tasks via onRawTabOpen using source=db', async () => {
       await mountComponent({ status: 'completed', container_id: 'container-123' })
 

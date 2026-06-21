@@ -63,6 +63,7 @@ def _make_serializable_task(task_status=TaskStatus.PENDING, task_id=1, project_i
     task.updated_at = now
     task.started_at = None
     task.completed_at = None
+    task.raw_logs_finalized_at = None
     return task
 
 
@@ -596,7 +597,7 @@ class CancelTaskDockerStopTests(unittest.TestCase):
         mock_container = MagicMock()
         mock_docker = MagicMock()
         mock_docker.client.containers.get.return_value = mock_container
-        mock_docker.read_file_from_container.return_value = None
+        mock_docker.read_file_from_container.return_value = b""
 
         client, app = _make_app_client_with_db(mock_db)
 
@@ -635,7 +636,7 @@ class CancelTaskDockerStopTests(unittest.TestCase):
         mock_container = MagicMock()
         mock_docker = MagicMock()
         mock_docker.client.containers.get.return_value = mock_container
-        mock_docker.read_file_from_container.return_value = None
+        mock_docker.read_file_from_container.return_value = b""
 
         client, app = _make_app_client_with_db(mock_db)
 
@@ -690,6 +691,41 @@ class CancelTaskDockerStopTests(unittest.TestCase):
         mock_container.stop.assert_called_once_with(timeout=10)
         mock_container.remove.assert_called_once_with(force=True)
         self.assertIsNotNone(task.raw_logs_finalized_at)
+
+    def test_cancel_task_retains_container_when_console_snapshot_fails(self):
+        """A failed console.log read must not be reported as finalized."""
+        task = _make_serializable_task(task_status=TaskStatus.RUNNING)
+        task.id = 44
+        task.project_id = 1
+        task.issue_id = 100
+        task.container_id = "container-44"
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = task
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        mock_container = MagicMock()
+        mock_docker = MagicMock()
+        mock_docker.client.containers.get.return_value = mock_container
+        mock_docker.read_file_from_container.return_value = None
+        client, app = _make_app_client_with_db(mock_db)
+
+        with patch("app.api.task_operations.notify_task_cancelled", new=AsyncMock()), \
+             patch("app.core.task_helpers._require_task_operator", return_value=None), \
+             patch("app.api.tasks.get_docker_client", return_value=mock_docker), \
+             patch("app.api.tasks.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+            mock_to_thread.side_effect = lambda fn, *args, **kwargs: fn(*args, **kwargs)
+            response = client.post("/api/tasks/44/cancel")
+
+        app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(task.raw_logs_finalized_at)
+        mock_container.stop.assert_called_once_with(timeout=10)
+        mock_container.remove.assert_not_called()
 
     def test_cancel_task_docker_failure_is_silently_caught(self):
         """Lines 505-506: Docker failure during cancel should be silently caught."""

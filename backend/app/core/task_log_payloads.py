@@ -58,6 +58,8 @@ async def persist_raw_log_snapshot(
     content: bytes,
 ) -> None:
     """Persist bytes missing from a stable, full console.log snapshot."""
+    if not content:
+        return
     cursor = await get_or_create_cursor(db, task_id=task_id, stream_name="console_log")
     if cursor.last_offset >= len(content):
         return

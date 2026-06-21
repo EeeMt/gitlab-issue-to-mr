@@ -489,7 +489,13 @@ const sortedTasks = computed(() => [...(issue.value?.tasks ?? [])].sort((a, b) =
   const timeDiff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   return timeDiff || b.id - a.id
 }))
-const activeTask = computed(() => sortedTasks.value.find(task => ['running', 'queued', 'pending'].includes(task.status)) ?? null)
+const activeTask = computed(() => {
+  for (const status of ['running', 'queued', 'pending']) {
+    const matchingTask = sortedTasks.value.find(task => task.status === status)
+    if (matchingTask) return matchingTask
+  }
+  return null
+})
 const highlightedTask = computed(() => activeTask.value ?? sortedTasks.value[0] ?? null)
 
 const projectName = computed(() => {

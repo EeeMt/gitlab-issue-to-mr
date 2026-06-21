@@ -1101,17 +1101,23 @@ async def cancel_task(
             container_error,
         )
 
+    raw_logs_finalized = container is None and task.container_id is None
     if raw_console_log is not None:
         await persist_raw_log_snapshot(
             db,
             task_id=task_id,
             content=raw_console_log,
         )
+        raw_logs_finalized = True
 
-    task.raw_logs_finalized_at = utcnow()
+    if not raw_logs_finalized:
+        await db.refresh(task, attribute_names=["raw_logs_finalized_at"])
+        raw_logs_finalized = task.raw_logs_finalized_at is not None
+    if raw_logs_finalized and task.raw_logs_finalized_at is None:
+        task.raw_logs_finalized_at = utcnow()
     await db.commit()
 
-    if container is not None:
+    if container is not None and raw_logs_finalized:
         try:
             await asyncio.to_thread(container.remove, force=True)
             logger.info(f"Removed container {container_name} for cancelled task {task_id}")
@@ -1121,6 +1127,12 @@ async def cancel_task(
                 task_id,
                 remove_error,
             )
+    elif container is not None:
+        logger.error(
+            "Retaining container %s for cancelled task %s because raw logs were not finalized",
+            container_name,
+            task_id,
+        )
 
     await release_issue_execution_lock(db, issue_id=task.issue_id)
     await db.commit()

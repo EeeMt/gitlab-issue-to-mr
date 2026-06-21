@@ -297,10 +297,7 @@ async def stream_task_raw_logs(
 
             terminal_logs_ready = (
                 current_status in terminal_statuses
-                and (
-                    current_status != TaskStatus.CANCELLED
-                    or raw_logs_finalized_at is not None
-                )
+                and raw_logs_finalized_at is not None
             )
             if terminal_logs_ready:
                 yield "event: done\ndata: {}\n\n"

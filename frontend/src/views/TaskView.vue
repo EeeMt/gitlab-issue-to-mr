@@ -807,7 +807,8 @@ function closeStructuredLogStream() {
 
 function shouldStreamRawLogs(): boolean {
   const status = task.value?.status
-  return isActiveTaskStatus(status) || (status === 'cancelled' && !rawLogsFinalized)
+  const isTerminalStatus = status === 'completed' || status === 'failed' || status === 'cancelled'
+  return isActiveTaskStatus(status) || (isTerminalStatus && !rawLogsFinalized)
 }
 
 function connectStructuredLogStream() {
